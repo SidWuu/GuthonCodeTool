@@ -1,0 +1,15 @@
+sync:
+  ACTIVE: products.demo-product
+  interval_seconds: 600
+  lookback_minutes: 10
+  readonly_source_dir: var/readonly-source
+  effective_source_dir: var/effective-source
+  work_copy_dir: var/work-copy
+  generated_doc_dir: var/knowledge
+  index_db: var/index/hub.db
+
+rules:
+  require_check_in_date: true
+  prefer_version_mac: true
+  skip_error_source: true
+  build_effective_after_sync: true

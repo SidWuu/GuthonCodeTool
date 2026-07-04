@@ -1,0 +1,9 @@
+var/
+config/*.yaml
+!config/*.example.yaml
+config/*.json
+!config/*.example.json
+__pycache__/
+*.pyc
+AGENTS.md
+TODO.md

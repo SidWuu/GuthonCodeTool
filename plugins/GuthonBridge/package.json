@@ -1,0 +1,10 @@
+{
+  "name": "guthon-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension + local bridge for Guthon low-code development tools.",
+  "scripts": {
+    "start:bridge": "node bridge/server.js",
+    "test": "node --test bridge/server.test.js"
+  }
+}

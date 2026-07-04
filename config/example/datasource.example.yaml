@@ -1,0 +1,18 @@
+datasource:
+  product-dev:
+    name: 示例产品开发库
+    type: mysql
+    host: ${GUSEN_PRODUCT_DB_HOST}
+    port: ${GUSEN_PRODUCT_DB_PORT}
+    database: ${GUSEN_PRODUCT_DB_NAME}
+    username: ${GUSEN_PRODUCT_DB_READONLY_USER}
+    password: ${GUSEN_PRODUCT_DB_READONLY_PASSWORD}
+
+  project-dev:
+    name: 示例项目开发库
+    type: mysql
+    host: ${GUSEN_PROJECT_DB_HOST}
+    port: ${GUSEN_PROJECT_DB_PORT}
+    database: ${GUSEN_PROJECT_DB_NAME}
+    username: ${GUSEN_PROJECT_DB_READONLY_USER}
+    password: ${GUSEN_PROJECT_DB_READONLY_PASSWORD}

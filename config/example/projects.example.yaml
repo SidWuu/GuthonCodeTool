@@ -1,0 +1,14 @@
+projects:
+  demo-project:
+    name: 示例项目
+    datasource: project-dev
+    product_id: demo-product
+    source_layer: PROJECT
+    include:
+      all: true
+    exclude:
+      page_alias_prefix: []
+      procedure_alias_prefix: []
+    extra_where:
+      page: ""
+      procedure: ""

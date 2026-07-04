@@ -1,0 +1,40 @@
+source_tables:
+  page:
+    enabled: true
+    source_table_name: PAGE_SOURCE_TABLE
+    id_field: PAGE_KEY_FIELD
+    alias_field: PAGE_ALIAS_FIELD
+    name_field: PAGE_NAME_FIELD
+    content_field: PAGE_CONTENT_FIELD
+    update_time_field: PAGE_UPDATE_TIME_FIELD
+    check_in_date_field: CHECK_IN_TIME_FIELD
+    check_out_user_id_field: CHECK_OUT_USER_ID_FIELD
+    check_out_date_field: CHECK_OUT_DATE_FIELD
+    version_mac_field: VERSION_FIELD
+    error_field: ERROR_FLAG_FIELD
+    error_message_field: ERROR_MESSAGE_FIELD
+    system_id_field: SYSTEM_ID_FIELD
+    module_table_name: MODULE_SOURCE_TABLE
+    module_join_field: MODULE_ID_FIELD
+    module_name_field: MODULE_NAME_FIELD
+
+  procedure:
+    enabled: true
+    procedure_table_name: PROCEDURE_TABLE
+    source_table_name: PROCEDURE_SCRIPT_TABLE
+    join_field: PROCEDURE_KEY_FIELD
+    id_field: PROCEDURE_KEY_FIELD
+    alias_field: PROCEDURE_ALIAS_FIELD
+    fun_id_field: FUNCTION_ID_FIELD
+    name_field: FUNCTION_NAME_FIELD
+    params_field: FUNCTION_PARAMS_FIELD
+    content_field: FUNCTION_SCRIPT_FIELD
+    update_time_field: FUNCTION_UPDATE_TIME_FIELD
+    check_in_date_field: CHECK_IN_TIME_FIELD
+    check_out_user_id_field: CHECK_OUT_USER_ID_FIELD
+    check_out_date_field: CHECK_OUT_DATE_FIELD
+    version_mac_field: VERSION_FIELD
+    error_field: ERROR_FLAG_FIELD
+    error_message_field: ERROR_MESSAGE_FIELD
+    procedure_name_field: PROCEDURE_NAME_FIELD
+    data_source_id_field: DATA_SOURCE_KEY_FIELD

@@ -1,0 +1,10 @@
+products:
+  demo-product:
+    name: 示例产品
+    datasource: product-dev
+    source_layer: PRODUCT
+    include:
+      all: true
+    exclude:
+      page_alias_prefix: []
+      procedure_alias_prefix: []

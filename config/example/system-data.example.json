@@ -1,0 +1,9 @@
+[
+  {
+    "SYSTEM_CODE": "demo.system",
+    "SYSTEM_ID": "SYS-DEMO-001",
+    "SYSTEM_ALIAS_ID": "demo.system",
+    "SYSTEM_NAME": "示例子系统",
+    "DATA_SOURCE_IDS": ["DEMO_DS"]
+  }
+]
