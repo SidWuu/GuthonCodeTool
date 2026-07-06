@@ -146,6 +146,55 @@ process.stdin.on("end", () => {
   }
 });
 
+test("exportTableSchema delegates data source and table filters to script", async () => {
+  const port = 17463;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-schema-command-"));
+  const schemaScript = path.join(tmp, "fake-schema.js");
+  fs.writeFileSync(
+    schemaScript,
+    `
+const args = process.argv.slice(2);
+if (!args.includes("--data-source-ids") || !args.includes("0015") || !args.includes("--table-ids") || !args.includes("RM_TEST")) {
+  process.stderr.write("bad args: " + args.join(" "));
+  process.exit(2);
+}
+process.stdout.write(JSON.stringify({ ok: true, exported_table_count: 1, outputDir: "/tmp/schema" }));
+`,
+    "utf8",
+  );
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_HUB_PYTHON: process.execPath,
+      GUTHON_TABLE_SCHEMA_SCRIPT: schemaScript
+    },
+    stdio: "ignore"
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/exportTableSchema`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        dataSourceId: "0015",
+        tableIds: ["RM_TEST"]
+      })
+    });
+    const data = await response.json();
+
+    assert.equal(response.status, 200, data.message);
+    assert.equal(data.ok, true);
+    assert.equal(data.exported_table_count, 1);
+  } finally {
+    server.kill();
+  }
+});
+
 test("bridge defaults hub python to repo venv when present", () => {
   const serverScript = fs.readFileSync(path.join(ROOT, "bridge", "server.js"), "utf8");
 
@@ -165,6 +214,10 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes("parseHubTarget"), false);
   assert.equal(script.includes("inspect-hub-source"), true);
   assert.equal(script.includes("function inspectCurrentHubSourceContext"), true);
+  assert.equal(script.includes("function inspectTableSchemaTarget"), true);
+  assert.equal(script.includes('mode === "table-schema"'), true);
+  assert.equal(script.includes('type: "export-table-schema"'), true);
+  assert.equal(script.includes('pullHubBtn.textContent = isTableSchema ? "拉取表结构" : "拉取源码表版本";'), true);
   assert.equal(runHubPullScript.includes("resolveCurrentTarget"), false);
 });
 
@@ -202,6 +255,22 @@ test("floating procedure button pulls hub source", () => {
   assert.equal(pullScript.includes('type: "pull-hub-source"'), true);
   assert.equal(pullScript.includes('type: "save-pull-result"'), false);
   assert.equal(pullScript.includes('runPageCommand("pullProcedure"'), true);
+});
+
+test("data table page exposes table schema export action", () => {
+  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const backgroundScript = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
+  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
+
+  assert.equal(contentScript.includes("拉取表结构"), true);
+  assert.equal(contentScript.includes("inspectTableSchemaTarget"), true);
+  assert.equal(contentScript.includes('type: "export-table-schema"'), true);
+  assert.equal(contentScript.includes("isDataTableRoute"), true);
+  assert.equal(contentScript.includes("positionTableSchemaRoot"), true);
+  assert.equal(contentScript.includes('root.style.right = "16px";'), true);
+  assert.equal(backgroundScript.includes("/exportTableSchema"), true);
+  assert.equal(pageBridge.includes("inspectTableSchemaTarget"), true);
+  assert.equal(pageBridge.includes("getSelectedTableIds"), true);
 });
 
 test("pull button floats over the current Guthon toolbar without changing toolbar layout", () => {
@@ -276,7 +345,9 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("textarea.select();"), true);
   assert.equal(contentScript.includes("window.__guthonBridgeLoaded"), false);
   assert.equal(contentScript.includes('message?.type !== "show-copy-overlay"'), true);
-  assert.equal(contentScript.includes("removeNode(COPY_ROOT_ID);\n      stopExtensionLoops();"), true);
+  assert.equal(contentScript.includes("removeNode(COPY_ROOT_ID);"), true);
+  assert.equal(contentScript.includes("removeNode(SCHEMA_ROOT_ID);"), true);
+  assert.equal(contentScript.includes("stopExtensionLoops();"), true);
 
   const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
   assert.equal(pageBridge.includes("collectModuleCopyText"), true);
@@ -314,7 +385,6 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("selectCompId"), true);
   assert.equal(pageBridge.includes("selectBox.codeType"), false);
   assert.equal(contentScript.includes("root.style.zIndex = toolbarZIndex"), true);
-  assert.equal(contentScript.includes("2147483646"), false);
 });
 
 test("floating pull waits for page bridge injection before posting commands", () => {
@@ -345,6 +415,16 @@ test("page bridge uses popup-compatible procedure search strategy", () => {
 
   assert.equal(pageBridge.includes("keyword: payload.funId"), true);
   assert.equal(pageBridge.includes("resolveProcedure(searchResult, payload.procedureKeyword, payload.funId)"), true);
+});
+
+test("page bridge does not mix stale fullName package with current function id", () => {
+  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
+  const popupScript = fs.readFileSync(path.join(ROOT, "extension", "popup.js"), "utf8");
+
+  assert.equal(pageBridge.includes("parsed.funId === funId"), true);
+  assert.equal(pageBridge.includes("selectedFunId === titleInfo.funId"), true);
+  assert.equal(popupScript.includes("parsed.funId === (candidateFunId || selectedFunId)"), true);
+  assert.equal(popupScript.includes("selectedFunId === titleInfo.funId"), true);
 });
 
 test("floating pull shows a visible diagnostic message", () => {

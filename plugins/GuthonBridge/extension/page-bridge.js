@@ -173,6 +173,46 @@
     return "";
   }
 
+  function extractTableId(text) {
+    const match = String(text || "").match(/\b[A-Z][A-Z0-9_]{2,}\b/);
+    return match ? match[0] : "";
+  }
+
+  function isSelectedTableElement(element) {
+    const className = String(element.className || "");
+    if (element.getAttribute("aria-selected") === "true" || /\b(active|current|selected|is-selected|is-active)\b/i.test(className)) {
+      return true;
+    }
+    const style = getComputedStyle(element);
+    return /rgb\(64,\s*158,\s*255\)|rgb\(30,\s*144,\s*255\)|rgb\(45,\s*140,\s*240\)/.test(style.backgroundColor);
+  }
+
+  function getSelectedTableIds() {
+    const ids = [];
+    Array.from(document.querySelectorAll("body *")).forEach((element) => {
+      if (!isVisible(element) || !isSelectedTableElement(element)) {
+        return;
+      }
+      const tableId = extractTableId(element.innerText || element.textContent || "");
+      if (tableId && !ids.includes(tableId)) {
+        ids.push(tableId);
+      }
+    });
+    return ids;
+  }
+
+  function inspectTableSchemaTarget() {
+    const dataSourceId = getDataSourceId();
+    if (!dataSourceId) {
+      throw new Error("当前数据表管理页面没有识别到数据源");
+    }
+    return {
+      dataSourceId,
+      tableIds: getSelectedTableIds(),
+      resolvedBy: "data-table-management"
+    };
+  }
+
   function putMapValue(map, key, value) {
     if (key !== undefined && key !== null && key !== "" && value !== undefined && value !== null && value !== "") {
       map.set(String(key), String(value));
@@ -614,7 +654,7 @@
       }
       const funId = String(fun?.funId || parsed.funId || selectedFunId || "").trim();
       const procedureKeyword =
-        parsed?.procedureKeyword ||
+        (parsed.funId === funId ? parsed.procedureKeyword : "") ||
         String(fun?.procedureName || fun?.className || "").trim();
       if (!procedureKeyword || !funId) {
         continue;
@@ -641,7 +681,7 @@
       };
     }
 
-    if (selectedFunId && titleInfo) {
+    if (selectedFunId && titleInfo && selectedFunId === titleInfo.funId) {
       return {
         procedureId: "",
         procedureName: titleInfo.procedureKeyword,
@@ -826,6 +866,7 @@
     inspectCurrentProcedure,
     pullProcedure,
     collectModuleCopyText,
+    inspectTableSchemaTarget,
     checkOutProcedure: disabledWriteCommand,
     pushProcedure: disabledWriteCommand
   };

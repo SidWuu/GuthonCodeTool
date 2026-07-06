@@ -1,6 +1,8 @@
 const statusEl = document.getElementById("status");
 const procedureEl = document.getElementById("procedureKeyword");
 const funIdEl = document.getElementById("funId");
+const procedureLabelEl = document.getElementById("procedureLabel");
+const funIdLabelEl = document.getElementById("funIdLabel");
 const outputDirEl = document.getElementById("outputDir");
 const pullPageBtn = document.getElementById("pullPageBtn");
 const pullHubBtn = document.getElementById("pullHubBtn");
@@ -11,6 +13,11 @@ function setStatus(message) {
 }
 
 function setResolvedTarget(target) {
+  if (target?.mode === "table-schema") {
+    procedureEl.value = target.dataSourceId || "";
+    funIdEl.value = Array.isArray(target.tableIds) && target.tableIds.length > 0 ? target.tableIds.join(", ") : "当前数据源全部表";
+    return;
+  }
   procedureEl.value = target?.procedureKeyword || "";
   funIdEl.value = target?.funId || "";
 }
@@ -45,11 +52,16 @@ function isProcedureUrl(url) {
 
 function setPopupMode(mode) {
   const isModule = mode === "module";
+  const isTableSchema = mode === "table-schema";
   document.querySelector(".title").textContent = "Guthon Bridge";
   procedureEl.closest("label").style.display = isModule ? "none" : "";
   funIdEl.closest("label").style.display = isModule ? "none" : "";
-  outputDirEl.closest("label").style.display = isModule ? "none" : "";
+  outputDirEl.closest("label").style.display = isModule || isTableSchema ? "none" : "";
+  procedureLabelEl.textContent = isTableSchema ? "数据源" : "包名";
+  funIdLabelEl.textContent = isTableSchema ? "数据表" : "函数名";
   pullPageBtn.textContent = isModule ? "打开复制模式" : "拉取页面当前源码";
+  pullPageBtn.style.display = isTableSchema ? "none" : "";
+  pullHubBtn.textContent = isTableSchema ? "拉取表结构" : "拉取源码表版本";
 }
 
 async function persistOutputDir(outputDir) {
@@ -280,6 +292,12 @@ async function runInMainWorld(tabId, command, payload) {
             continue;
           }
           const candidateFunId = String(fun?.funId || parsed.funId || "").trim();
+          const procedureKeyword =
+            (parsed.funId === (candidateFunId || selectedFunId) ? parsed.procedureKeyword : "") ||
+            String(fun?.procedureName || fun?.className || "").trim();
+          if (!procedureKeyword || !(candidateFunId || selectedFunId)) {
+            continue;
+          }
           if (
             selectedFunId &&
             candidateFunId &&
@@ -291,8 +309,8 @@ async function runInMainWorld(tabId, command, payload) {
           candidates.push({
             vm,
             procedureId: fun?.procedureId,
-            procedureName: parsed.procedureKeyword,
-            procedureKeyword: parsed.procedureKeyword,
+            procedureName: procedureKeyword,
+            procedureKeyword,
             fullName: parsed.fullName,
             funId: candidateFunId || selectedFunId,
             script: form.script || localFun?.funScript || "",
@@ -306,7 +324,7 @@ async function runInMainWorld(tabId, command, payload) {
           return candidates[0];
         }
 
-        if (selectedFunId && titleInfo) {
+        if (selectedFunId && titleInfo && selectedFunId === titleInfo.funId) {
           return {
             procedureId: "",
             procedureName: titleInfo.procedureKeyword,
@@ -393,6 +411,9 @@ async function runInMainWorld(tabId, command, payload) {
       }
 
       function inspectCurrentHubSourceContext() {
+        if (isDataTableManagementPage()) {
+          return inspectTableSchemaTarget();
+        }
         if (location.href.includes("/gdpaas/dev/modules")) {
           const pageCode = getCurrentPageCode();
           if (!pageCode) {
@@ -712,6 +733,92 @@ async function runInMainWorld(tabId, command, payload) {
         return found;
       }
 
+      function getAllVueInstances() {
+        const instances = [];
+        document.body.querySelectorAll("*").forEach((element) => {
+          const vm = getVueInstance(element);
+          if (vm) {
+            instances.push(vm);
+          }
+        });
+        return instances;
+      }
+
+      function isVisible(element) {
+        if (!element) {
+          return false;
+        }
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+      }
+
+      function isDataTableManagementPage() {
+        if (location.href.includes("/gdpaas/dev/table") || location.href.includes("/basesetup/table")) {
+          return true;
+        }
+        const activeNodes = Array.from(document.querySelectorAll('[aria-selected="true"], .is-active, .active'));
+        return activeNodes.some((node) => String(node.innerText || node.textContent || "").includes("数据表管理"));
+      }
+
+      function getDataSourceId() {
+        for (const vm of getAllVueInstances()) {
+          const dataSourceId =
+            vm?.$store?.state?.modeDev?.dataSourceId ||
+            vm?.dataSourceId ||
+            vm?.form?.dataSourceId ||
+            vm?.page?.dataSourceId;
+          if (dataSourceId) {
+            return String(dataSourceId);
+          }
+        }
+        return "";
+      }
+
+      function extractTableId(text) {
+        const match = String(text || "").match(/\b[A-Z][A-Z0-9_]{2,}\b/);
+        return match ? match[0] : "";
+      }
+
+      function isSelectedTableElement(element) {
+        const className = String(element.className || "");
+        if (element.getAttribute("aria-selected") === "true" || /\b(active|current|selected|is-selected|is-active)\b/i.test(className)) {
+          return true;
+        }
+        const style = getComputedStyle(element);
+        return /rgb\(64,\s*158,\s*255\)|rgb\(30,\s*144,\s*255\)|rgb\(45,\s*140,\s*240\)/.test(style.backgroundColor);
+      }
+
+      function getSelectedTableIds() {
+        const ids = [];
+        Array.from(document.querySelectorAll("body *")).forEach((element) => {
+          if (!isVisible(element) || !isSelectedTableElement(element)) {
+            return;
+          }
+          const tableId = extractTableId(element.innerText || element.textContent || "");
+          if (tableId && !ids.includes(tableId)) {
+            ids.push(tableId);
+          }
+        });
+        return ids;
+      }
+
+      function inspectTableSchemaTarget() {
+        const dataSourceId = getDataSourceId();
+        if (!dataSourceId) {
+          throw new Error("当前数据表管理页面没有识别到数据源");
+        }
+        const tableIds = getSelectedTableIds();
+        return {
+          mode: "table-schema",
+          dataSourceId,
+          tableIds,
+          procedureKeyword: dataSourceId,
+          funId: tableIds.length > 0 ? tableIds.join(", ") : "当前数据源全部表",
+          resolvedBy: "data-table-management"
+        };
+      }
+
       function resolveProcedure(searchResult, packageName, funId) {
         const matches = [];
         walk(searchResult, (obj) => {
@@ -920,9 +1027,15 @@ async function resolveHubSourceTarget() {
     pageId: result.data.pageId || "",
     procedureId: result.data.procedureId || "",
     procedureKeyword: result.data.procedureKeyword || result.data.procedureName || "",
-    funId: result.data.funId || ""
+    funId: result.data.funId || "",
+    dataSourceId: result.data.dataSourceId || "",
+    tableIds: Array.isArray(result.data.tableIds) ? result.data.tableIds : []
   };
-  if (target.mode === "page-source") {
+  if (target.mode === "table-schema") {
+    if (!target.dataSourceId) {
+      throw new Error("当前数据表管理页面没有识别到数据源");
+    }
+  } else if (target.mode === "page-source") {
     if (!target.pageId && !target.procedureKeyword) {
       throw new Error("当前模块开发页面没有识别到页面编码");
     }
@@ -1004,6 +1117,15 @@ async function openCopyMode() {
 
 async function runHubPull() {
   const target = await resolveHubSourceTarget();
+  if (target.mode === "table-schema") {
+    return chrome.runtime.sendMessage({
+      type: "export-table-schema",
+      payload: {
+        dataSourceId: target.dataSourceId,
+        tableIds: target.tableIds
+      }
+    });
+  }
   const payload = {
     sourceType: target.mode === "page-source" ? "page" : "procedure",
     sourceId: target.mode === "page-source" ? target.pageId || "" : target.procedureId || "",
@@ -1050,14 +1172,20 @@ pullHubBtn.addEventListener("click", async () => {
     if (!tab.url || !isSupportedGuthonUrl(tab.url)) {
       throw new Error("当前标签页不是 Guthon 开发平台页面");
     }
-    setStatus(`正在从源码表拉取...\n${tab.url}`);
+    const isTableSchema = pullHubBtn.textContent.includes("表结构");
+    setStatus(`${isTableSchema ? "正在拉取表结构" : "正在从源码表拉取"}...\n${tab.url}`);
     const result = await runHubPull();
     if (!result?.ok) {
-      throw new Error(result?.message || "Hub 拉取失败");
+      throw new Error(result?.message || (isTableSchema ? "表结构拉取失败" : "Hub 拉取失败"));
+    }
+    if (isTableSchema) {
+      setStatus(["表结构拉取成功", `输出目录: ${result.outputDir}`, `表数量: ${result.exported_table_count ?? ""}`].join("\n"));
+      return;
     }
     setStatus(["源码表拉取成功", `工作副本: ${result.workCopyPath}`].join("\n"));
   } catch (error) {
-    setStatus(`源码表拉取失败\n${error.message}`);
+    const isTableSchema = pullHubBtn.textContent.includes("表结构");
+    setStatus(`${isTableSchema ? "表结构拉取失败" : "源码表拉取失败"}\n${error.message}`);
   }
 });
 
@@ -1081,15 +1209,28 @@ async function initializePopup() {
   setPopupMode("procedure");
   setStatus(isProcedureUrl(tab.url) ? "正在识别当前打开的过程函数..." : "正在识别当前打开的 Guthon 对象...");
   try {
-    const target = await resolveCurrentTarget();
+    const target = await resolveHubSourceTarget();
+    setPopupMode(target.mode === "table-schema" ? "table-schema" : "procedure");
     setStatus(
       [
-        target.mode === "page-source" ? "已识别当前模块源码片段" : "已识别当前过程函数",
-        target.mode === "page-source" ? `页面: ${target.procedureKeyword}` : `包名: ${target.procedureKeyword}`,
-        target.mode === "page-source" ? `片段: ${target.funId}` : `函数名: ${target.funId}`
+        target.mode === "table-schema"
+          ? "已识别当前数据表管理页面"
+          : target.mode === "page-source"
+            ? "已识别当前模块源码片段"
+            : "已识别当前过程函数",
+        target.mode === "table-schema"
+          ? `数据源: ${target.dataSourceId}`
+          : target.mode === "page-source"
+            ? `页面: ${target.procedureKeyword}`
+            : `包名: ${target.procedureKeyword}`,
+        target.mode === "table-schema"
+          ? `数据表: ${target.tableIds.length > 0 ? target.tableIds.join(", ") : "当前数据源全部表"}`
+          : target.mode === "page-source"
+            ? `片段: ${target.funId}`
+            : `函数名: ${target.funId}`
       ].join("\n")
     );
-    pullPageBtn.disabled = false;
+    pullPageBtn.disabled = target.mode === "table-schema";
     pullHubBtn.disabled = false;
   } catch (error) {
     setResolvedTarget(null);

@@ -1,6 +1,7 @@
 const OUTPUT_DIR_STORAGE_KEY = "guthonBridgeOutputDir";
 const FLOATING_ROOT_ID = "guthon-bridge-floating-root";
 const COPY_ROOT_ID = "guthon-bridge-copy-root";
+const SCHEMA_ROOT_ID = "guthon-bridge-schema-root";
 const COPY_OVERLAY_ID = "guthon-bridge-copy-overlay";
 
 let gIntervalId = null;
@@ -186,6 +187,12 @@ function isProcedureRoute() {
 
 function isModuleRoute() {
   return location.hash.includes("/gdpaas/dev/modules");
+}
+
+function isDataTableRoute() {
+  const activeTab = Array.from(document.querySelectorAll(".el-tabs__item, .tabs-item, [role='tab']"))
+    .find((item) => isVisible(item) && /数据表管理/.test(item.innerText || item.textContent || ""));
+  return Boolean(activeTab) || (/table/i.test(location.hash) && /数据表管理/.test(document.body?.innerText || ""));
 }
 
 function findNativeToolbar(scope = document) {
@@ -394,6 +401,17 @@ function positionBridgeRoot(root, toolbar, ratio = 0.72) {
   return true;
 }
 
+function positionTableSchemaRoot(root) {
+  if (!root) {
+    return false;
+  }
+  root.style.left = "auto";
+  root.style.right = "16px";
+  root.style.top = "84px";
+  root.style.zIndex = "2147483646";
+  return true;
+}
+
 async function pullCurrentProcedure(root) {
   const button = root.querySelector("button");
   try {
@@ -461,6 +479,50 @@ async function pullCurrentProcedure(root) {
     setButtonTitle(root, message);
     setMessage(root, message, "error");
     setTimeout(() => setButtonText(root, "源码拉取"), 2200);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function exportCurrentTableSchema(root) {
+  const button = root.querySelector("button");
+  try {
+    button.disabled = true;
+    setButtonText(root, "拉取表结构");
+    setButtonTitle(root, "正在拉取表结构...");
+    setMessage(root, "正在拉取表结构...", "busy");
+
+    const bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
+    if (!bridgeHealth?.ok) {
+      throw new Error(`本地桥接服务不可用: ${bridgeHealth?.message || "unknown"}`);
+    }
+
+    const inspected = await runPageCommand("inspectTableSchemaTarget");
+    if (!inspected?.ok) {
+      throw new Error(`识别数据表失败: ${inspected?.message || "未识别到数据源"}`);
+    }
+
+    const result = await sendRuntimeMessage({
+      type: "export-table-schema",
+      payload: inspected.data
+    });
+    if (!result?.ok) {
+      throw new Error(result?.message || "表结构拉取失败");
+    }
+
+    button.textContent = "成功";
+    const selected = Array.isArray(inspected.data.tableIds) && inspected.data.tableIds.length > 0;
+    const detail = selected ? `已拉取选中表: ${inspected.data.tableIds.join(", ")}` : `已拉取数据源 ${inspected.data.dataSourceId} 全部表`;
+    setButtonTitle(root, `${detail}: ${result.outputDir}`);
+    setMessage(root, `${detail}: ${result.exported_table_count}`, "success");
+    setTimeout(() => setButtonText(root, "拉取表结构"), 1600);
+  } catch (error) {
+    console.error("Guthon Bridge table schema export failed", error);
+    button.textContent = "失败";
+    const message = error?.message || String(error);
+    setButtonTitle(root, message);
+    setMessage(root, message, "error");
+    setTimeout(() => setButtonText(root, "拉取表结构"), 2200);
   } finally {
     button.disabled = false;
   }
@@ -1091,11 +1153,34 @@ function installCopyModeButton() {
   positionBridgeRoot(root, toolbar);
 }
 
+function installTableSchemaButton() {
+  if (!isSupportedGuthonPage() || !isDataTableRoute()) {
+    removeNode(SCHEMA_ROOT_ID);
+    return;
+  }
+  ensureInlineStyles();
+  let root = document.getElementById(SCHEMA_ROOT_ID);
+  if (!root) {
+    root = document.createElement("div");
+    root.id = SCHEMA_ROOT_ID;
+    root.className = "guthon-bridge-inline";
+    const button = makeNativeButton("拉取表结构", "guthon-bridge-schema-button");
+    button.addEventListener("click", () => exportCurrentTableSchema(root));
+    root.appendChild(button);
+    const message = document.createElement("span");
+    message.className = "guthon-bridge-message";
+    root.appendChild(message);
+    document.body.appendChild(root);
+  }
+  positionTableSchemaRoot(root);
+}
+
 async function refreshToolbarButtons() {
   try {
     if (!isExtensionAlive()) {
       removeNode(FLOATING_ROOT_ID);
       removeNode(COPY_ROOT_ID);
+      removeNode(SCHEMA_ROOT_ID);
       stopExtensionLoops();
       return;
     }
@@ -1103,6 +1188,7 @@ async function refreshToolbarButtons() {
     if (!isSupportedGuthonPage()) {
       removeNode(FLOATING_ROOT_ID);
       removeNode(COPY_ROOT_ID);
+      removeNode(SCHEMA_ROOT_ID);
       return;
     }
 
@@ -1110,6 +1196,7 @@ async function refreshToolbarButtons() {
 
     if (isProcedureRoute()) {
       removeNode(COPY_ROOT_ID);
+      removeNode(SCHEMA_ROOT_ID);
       const inspected = await runPageCommand("inspectCurrentProcedure");
       if (inspected?.ok) {
         installProcedurePullButton();
@@ -1121,15 +1208,21 @@ async function refreshToolbarButtons() {
 
     removeNode(FLOATING_ROOT_ID);
     if (isModuleRoute()) {
+      removeNode(SCHEMA_ROOT_ID);
       installCopyModeButton();
+    } else if (isDataTableRoute()) {
+      removeNode(COPY_ROOT_ID);
+      installTableSchemaButton();
     } else {
       removeNode(COPY_ROOT_ID);
+      removeNode(SCHEMA_ROOT_ID);
     }
   } catch (error) {
     console.warn("Guthon Bridge refreshToolbarButtons error", error);
     if (!isExtensionAlive()) {
       removeNode(FLOATING_ROOT_ID);
       removeNode(COPY_ROOT_ID);
+      removeNode(SCHEMA_ROOT_ID);
       stopExtensionLoops();
     }
   }

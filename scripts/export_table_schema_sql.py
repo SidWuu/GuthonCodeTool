@@ -108,20 +108,38 @@ def normalize_data_source_ids(value):
     return [str(item).strip() for item in items if str(item).strip()]
 
 
-def fetch_rows(conn, table_name, data_source_ids):
+def normalize_table_ids(value):
+    if not value:
+        return []
+    if isinstance(value, str):
+        items = value.split(",")
+    else:
+        items = value
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
+def fetch_rows(conn, table_name, data_source_ids, table_ids=None):
     ids = normalize_data_source_ids(data_source_ids)
     placeholders = ", ".join(["%s"] * len(ids))
+    params = list(ids)
+    table_filter = ""
+    table_ids = normalize_table_ids(table_ids)
+    if table_ids and table_name in {"gd_tables", "gd_tables_field"}:
+        table_placeholders = ", ".join(["%s"] * len(table_ids))
+        table_filter = f" AND TABLE_ID IN ({table_placeholders})"
+        params.extend(table_ids)
     with conn.cursor() as cur:
-        cur.execute(f"SELECT * FROM {table_name} WHERE DATA_SOURCE_ID IN ({placeholders})", tuple(ids))
+        cur.execute(f"SELECT * FROM {table_name} WHERE DATA_SOURCE_ID IN ({placeholders}){table_filter}", tuple(params))
         return list(cur.fetchall())
 
 
-def export_table_schema(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, exported_at=None):
+def export_table_schema(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, table_ids=None, exported_at=None):
     output_dir = Path(output_dir)
     data_source_ids = normalize_data_source_ids(data_source_ids)
+    table_ids = normalize_table_ids(table_ids)
     exported_at = exported_at or dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    tables = fetch_rows(conn, "gd_tables", data_source_ids)
-    fields = fetch_rows(conn, "gd_tables_field", data_source_ids)
+    tables = fetch_rows(conn, "gd_tables", data_source_ids, table_ids)
+    fields = fetch_rows(conn, "gd_tables_field", data_source_ids, table_ids)
     systems = fetch_rows(conn, "gd_system", data_source_ids)
 
     system_by_data_source = {}
@@ -168,6 +186,7 @@ def export_table_schema(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=Non
         "exported_table_count": len(metadata),
         "exported_table_time": exported_at,
         "data_source_ids": data_source_ids,
+        "table_ids": table_ids,
         "exported_table_name": ",".join(name for name in exported_names if name),
     }
     summary_file = output_dir / "export_summary.json"
@@ -196,12 +215,14 @@ def main(argv=None):
     parser.add_argument("--datasource", default="product-dev")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to config sync.rules.table_schema_data_source_ids.")
+    parser.add_argument("--table-ids", help="Comma-separated TABLE_ID list. Omit to export all tables in selected data sources.")
     args = parser.parse_args(argv)
 
     data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else load_default_data_source_ids()
+    table_ids = normalize_table_ids(args.table_ids)
     with gusen_hub.db_connect(load_datasource(args.datasource)) as conn:
-        summary = export_table_schema(conn, Path(args.output_dir), data_source_ids=data_source_ids)
-    print(f"导出完成: {summary['exported_table_count']}/{summary['table_count']} -> {args.output_dir}")
+        summary = export_table_schema(conn, Path(args.output_dir), data_source_ids=data_source_ids, table_ids=table_ids)
+    print(json.dumps({"ok": True, **summary, "outputDir": args.output_dir}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

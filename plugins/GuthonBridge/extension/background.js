@@ -33,6 +33,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse(result);
     }
 
+    if (message.type === "export-table-schema") {
+      const result = await postJson("/exportTableSchema", message.payload);
+      return sendResponse(result);
+    }
+
     return sendResponse({ ok: false, message: "Unknown message type" });
   })().catch((error) => {
     sendResponse({

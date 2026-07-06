@@ -640,9 +640,9 @@ def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, ch
     meta.update({"change_key": change_key, "status": status})
     (base / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     scripts = []
-    if not content:
-        return base, status, scripts
     if row["source_table"] == PAGE_SOURCE_TYPE:
+        if not content:
+            return base, status, scripts
         (base / "raw.json").write_text(content, encoding="utf-8")
         scripts = parse_page_scripts(base, content)
     else:

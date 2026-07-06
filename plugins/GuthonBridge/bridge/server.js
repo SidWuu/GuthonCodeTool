@@ -11,6 +11,7 @@ const MANIFEST_PATH = path.join(BRIDGE_ROOT, "workspace", "manifest.json");
 const DEFAULT_HUB_PYTHON = path.join(ROOT, ".venv", "bin", "python");
 const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_PYTHON) ? DEFAULT_HUB_PYTHON : "python3");
 const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "scripts", "pull_source_to_work_copy.py");
+const TABLE_SCHEMA_SCRIPT = process.env.GUTHON_TABLE_SCHEMA_SCRIPT || path.join(ROOT, "scripts", "export_table_schema_sql.py");
 
 fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
 
@@ -109,6 +110,42 @@ function runHubPull(payload) {
   });
 }
 
+function runTableSchemaExport(payload) {
+  return new Promise((resolve, reject) => {
+    const args = [TABLE_SCHEMA_SCRIPT];
+    if (payload.dataSourceId) {
+      args.push("--data-source-ids", String(payload.dataSourceId));
+    }
+    if (Array.isArray(payload.tableIds) && payload.tableIds.length > 0) {
+      args.push("--table-ids", payload.tableIds.join(","));
+    }
+    const child = spawn(HUB_PYTHON, args, {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error((stderr || stdout || `Table schema command failed with exit code ${code}`).trim()));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout || "{}"));
+      } catch (error) {
+        reject(new Error(`Table schema command returned invalid JSON: ${error.message}`));
+      }
+    });
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     return sendJson(res, 200, { ok: true });
@@ -183,6 +220,16 @@ const server = http.createServer(async (req, res) => {
     try {
       const payload = await readBody(req);
       const result = await runHubPull(payload);
+      return sendJson(res, 200, result);
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, message: error.message });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/exportTableSchema") {
+    try {
+      const payload = await readBody(req);
+      const result = await runTableSchemaExport(payload);
       return sendJson(res, 200, result);
     } catch (error) {
       return sendJson(res, 500, { ok: false, message: error.message });
