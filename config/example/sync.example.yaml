@@ -17,8 +17,3 @@ rules:
   build_effective_after_sync: true
   table_schema_data_source_ids:
     - "0000"
-    - "0008"
-    - "0015"
-    - "0018"
-    - "0019"
-    - "0021"

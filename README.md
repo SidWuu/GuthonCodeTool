@@ -116,18 +116,13 @@ cp config/example/systems.example.yaml config/systems.yaml
 
 ```yaml
 sync:
-  ACTIVE: products.gdrm-product
+  ACTIVE: products.demo-product
 
 rules:
   allow_unchecked_check_out_user_ids:
-    - U000001012
+    - U00000XXXX
   table_schema_data_source_ids:
     - "0000"
-    - "0008"
-    - "0015"
-    - "0018"
-    - "0019"
-    - "0021"
 ```
 
 `allow_unchecked_check_out_user_ids` 控制哪些签出人的未签入源码允许被同步或拉取。
