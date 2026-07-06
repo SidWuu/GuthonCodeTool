@@ -1,0 +1,170 @@
+[
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.cast",
+    "body": "SQLTools.cast(field,type)",
+    "description": "强制类型转换"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.concat",
+    "body": "SQLTools.concat(str1,str2,args)",
+    "description": "字符串相加"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.dateAdd",
+    "body": "SQLTools.dateAdd(field,num)",
+    "description": "在当前日期上增加/减少对应的天数"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.dateAddMonth",
+    "body": "SQLTools.dateAddMonth(field,num)",
+    "description": "在当前日期上增加/减少对应的月数"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.dateAddYear",
+    "body": "SQLTools.dateAddYear(field,num)",
+    "description": "在当前日期上增加/减少对应的年数"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.dateIntervalDAY",
+    "body": "SQLTools.dateIntervalDAY(date1,date2)",
+    "description": "比较两个日期相差的天数"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.dateIntervalMONTH",
+    "body": "SQLTools.dateIntervalMONTH(date1,date2)",
+    "description": "比较两个日期相差的月数"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.getDate",
+    "body": "SQLTools.getDate()",
+    "description": "获取数据库服务器当前日期"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.groupConcat",
+    "body": "SQLTools.groupConcat(field)",
+    "description": "分组聚合函数 把多行`field`字段的值汇总为一个以` `分割的长字符串"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.instr",
+    "body": "SQLTools.instr(field,ch)",
+    "description": "从一个字符串`field`中查找另一个字符串`ch`在这个字符串中的位置 从1开始"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.isEmpty",
+    "body": "SQLTools.isEmpty(field)",
+    "description": "判断字段是否为空字符串"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.isNotEmpty",
+    "body": "SQLTools.isNotEmpty(field)",
+    "description": "判断字段是否为空字符串"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.isNull",
+    "body": "SQLTools.isNull(field,defaultValue)",
+    "description": "判断字段`field`是否为`null`若为`null`则返回`defaultValue\\"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.leftLike",
+    "body": "SQLTools.leftLike(field,data)",
+    "description": "添加leftLike查询条件"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.like",
+    "body": "SQLTools.like(field,data)",
+    "description": "添加like查询条件"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.rightLike",
+    "body": "SQLTools.rightLike(field,data)",
+    "description": "添加rightLike查询条件"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.rowNumber",
+    "body": "SQLTools.rowNumber(groupFields,orderFields)",
+    "description": "SELECT中使用获取行记录号"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.substr",
+    "body": "SQLTools.substr(field,start,length)",
+    "description": "从一个字符串`field`中的`start`位开始 截取一个指定长度的字符串 从1开始"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.toChar",
+    "body": "SQLTools.toChar(field,fmt)",
+    "description": "格式化日期成字符"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.toChar",
+    "body": "SQLTools.toChar(field)",
+    "description": "格式化数字成字符"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.toDate",
+    "body": "SQLTools.toDate(field,fmt)",
+    "description": "格式化成日期"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.top",
+    "body": "SQLTools.top(rownum)",
+    "description": "获取查询结果集的前`rownum`条数据 注意 必须跟在`select`关键字后面"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.trimTime",
+    "body": "SQLTools.trimTime(date)",
+    "description": "截断日期中的时间"
+  },
+  {
+    "language": "sql",
+    "group": "sql",
+    "prefix": "sql.UUID",
+    "body": "SQLTools.UUID()",
+    "description": "从数据库层产生UUID 一般36位长度的16进制字符串"
+  }
+]

@@ -1,0 +1,27 @@
+{
+  "defaults": {
+    "java": "java",
+    "javascript": "javascript",
+    "sql": "sql"
+  },
+  "routes": [
+    {
+      "in": "java",
+      "type": "sqltools",
+      "use": "sql",
+      "group": "sql"
+    },
+    {
+      "in": "java",
+      "type": "sql",
+      "use": "java",
+      "group": "sqlb"
+    },
+    {
+      "in": "java",
+      "type": "sqlh",
+      "use": "java",
+      "group": "sqlh"
+    }
+  ]
+}

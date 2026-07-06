@@ -1,0 +1,38 @@
+{
+  "name": "gushen-vscode-completion",
+  "displayName": "Gushen VS Code Completion",
+  "description": "Local VS Code completion provider for Gushen dialect APIs.",
+  "version": "0.1.0",
+  "publisher": "gushen-local",
+  "private": true,
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Snippets",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:java",
+    "onLanguage:javascript",
+    "onLanguage:sql"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Gushen Completion",
+      "properties": {
+        "gushenCompletion.rulesPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to a custom rules.json file. Empty means use the extension bundled rules.json."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build:data": "node scripts/build-data.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {}
+}

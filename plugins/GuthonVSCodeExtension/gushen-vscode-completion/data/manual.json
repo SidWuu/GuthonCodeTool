@@ -1,0 +1,146 @@
+{
+  "java": [
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "set",
+      "body": "#set($1);",
+      "description": "谷神后端脚本变量定义"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "if",
+      "body": [
+        "#if ($1)",
+        "    $2",
+        "#end"
+      ],
+      "description": "谷神后端脚本 if 判断"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "ifelse",
+      "body": [
+        "#if ($1)",
+        "    $2",
+        "#else",
+        "    $3",
+        "#end"
+      ],
+      "description": "谷神后端脚本 if/else 判断"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "foreach",
+      "body": [
+        "#foreach (\\$row in \\$list)",
+        "    $1",
+        "#end"
+      ],
+      "description": "谷神后端脚本 foreach 循环"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "while",
+      "body": [
+        "#while ($1)",
+        "    $2",
+        "#end"
+      ],
+      "description": "谷神后端脚本 while 循环"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "continue",
+      "body": "#continue;",
+      "description": "谷神后端脚本循环 continue"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "break",
+      "body": "#break;",
+      "description": "谷神后端脚本循环 break"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "tryCatchFinally",
+      "body": [
+        "#try",
+        "    $1",
+        "#catch (\\$e)",
+        "    \\$vs.exception.throwException($2);",
+        "#finally",
+        "    $3",
+        "#end"
+      ],
+      "description": "谷神后端脚本 try/catch/finally"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "function",
+      "body": [
+        "#function $1()",
+        "    $2",
+        "#end"
+      ],
+      "description": "谷神后端脚本函数定义"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "numP",
+      "body": "$vs.decimalTools.num_decimalP",
+      "description": "谷神后端格式化:数量"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "weightP",
+      "body": "$vs.decimalTools.weight_decimalP",
+      "description": "谷神后端格式化:重量"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "priceP",
+      "body": "$vs.decimalTools.price_decimalP",
+      "description": "谷神后端格式化:含税单价"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "expriceP",
+      "body": "$vs.decimalTools.exprice_decimalP",
+      "description": "谷神后端格式化:无税单价"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "moneyP",
+      "body": "$vs.decimalTools.money_decimalP",
+      "description": "谷神后端格式化:金额"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "taxrateP",
+      "body": "$vs.decimalTools.taxrate_decimalP",
+      "description": "谷神后端格式化:税率"
+    },
+    {
+      "language": "java",
+      "group": "syntax",
+      "prefix": "exrateP",
+      "body": "$vs.decimalTools.exrate_decimalP",
+      "description": "谷神后端格式化:汇率"
+    }
+  ]
+}
