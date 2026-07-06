@@ -339,6 +339,102 @@ ORDER BY {_field('s', cfg['update_time_field'])}, {_field('s', cfg['id_field'])}
 """
 
 
+def single_source_sql(table_cfg: dict, source_type: str, payload: dict):
+    if source_type == PAGE_SOURCE_TYPE:
+        cfg = _source_table_cfg(table_cfg, PAGE_SOURCE_TYPE)
+        module_table = cfg.get("module_table_name")
+        mk_name = "NULL"
+        join = ""
+        if module_table:
+            mk_name = _field("m", cfg["module_name_field"])
+            join = f"LEFT JOIN {_name(module_table)} m ON {_field('p', cfg['module_join_field'])} = {_field('m', cfg['module_join_field'])}"
+        filters = []
+        params = []
+        if payload.get("sourceId"):
+            filters.append(f"{_field('p', cfg['id_field'])} = %s")
+            params.append(payload["sourceId"])
+        elif payload.get("alias"):
+            filters.append(f"{_field('p', cfg['alias_field'])} = %s")
+            params.append(payload["alias"])
+        else:
+            raise SystemExit("page sourceId or alias is required")
+        return (
+            f"""
+SELECT
+    '{PAGE_SOURCE_TYPE}' AS source_table,
+    {_field('p', cfg['id_field'])} AS source_id,
+    {_field('p', cfg['alias_field'])} AS source_alias_id,
+    '' AS fun_id,
+    {_field('p', cfg['name_field'])} AS source_name,
+    {_field('p', cfg['content_field'])} AS source_content,
+    {_field('p', cfg['update_time_field'])} AS update_time,
+    {_field('p', cfg.get('check_out_user_id_field'))} AS check_out_user_id,
+    {_field('p', cfg.get('check_out_date_field'))} AS check_out_date,
+    {_field('p', cfg['check_in_date_field'])} AS check_in_date,
+    {_field('p', cfg.get('version_mac_field'))} AS version_mac,
+    {_field('p', cfg.get('error_field'))} AS is_error,
+    {_field('p', cfg.get('error_message_field'))} AS err_msg,
+    {_field('p', cfg['system_id_field'])} AS system_id,
+    {_field('p', cfg.get('module_join_field'))} AS mk_id,
+    {mk_name} AS mk_name
+FROM {_name(cfg['source_table_name'])} p
+{join}
+WHERE {_field('p', cfg['check_in_date_field'])} IS NOT NULL
+  AND ({_field('p', cfg.get('error_field'))} IS NULL OR {_field('p', cfg.get('error_field'))} <> '1')
+  AND {' AND '.join(filters)}
+ORDER BY {_field('p', cfg['update_time_field'])} DESC, {_field('p', cfg['id_field'])} DESC
+LIMIT 1
+""",
+            params,
+        )
+    if source_type == PROCEDURE_SOURCE_TYPE:
+        cfg = _source_table_cfg(table_cfg, PROCEDURE_SOURCE_TYPE)
+        filters = []
+        params = []
+        if payload.get("sourceId"):
+            filters.append(f"{_field('s', cfg['id_field'])} = %s")
+            params.append(payload["sourceId"])
+        elif payload.get("alias"):
+            filters.append(f"{_field('p', cfg['alias_field'])} = %s")
+            params.append(payload["alias"])
+        else:
+            raise SystemExit("procedure sourceId or alias is required")
+        if not payload.get("funId"):
+            raise SystemExit("procedure funId is required")
+        filters.append(f"{_field('s', cfg['fun_id_field'])} = %s")
+        params.append(payload["funId"])
+        return (
+            f"""
+SELECT
+    '{PROCEDURE_SOURCE_TYPE}' AS source_table,
+    {_field('s', cfg['id_field'])} AS source_id,
+    {_field('p', cfg['alias_field'])} AS source_alias_id,
+    {_field('s', cfg['fun_id_field'])} AS fun_id,
+    {_field('s', cfg['name_field'])} AS source_name,
+    {_field('s', cfg['content_field'])} AS source_content,
+    {_field('s', cfg['update_time_field'])} AS update_time,
+    {_field('s', cfg.get('check_out_user_id_field'))} AS check_out_user_id,
+    {_field('s', cfg.get('check_out_date_field'))} AS check_out_date,
+    {_field('s', cfg['check_in_date_field'])} AS check_in_date,
+    {_field('s', cfg.get('version_mac_field'))} AS version_mac,
+    {_field('s', cfg.get('error_field'))} AS is_error,
+    {_field('s', cfg.get('error_message_field'))} AS err_msg,
+    {_field('s', cfg.get('params_field'))} AS fun_params,
+    {_field('p', cfg.get('procedure_name_field'))} AS procedure_name,
+    {_field('p', cfg['data_source_id_field'])} AS data_source_id
+FROM {_name(cfg['procedure_table_name'])} p
+JOIN {_name(cfg['source_table_name'])} s ON {_field('p', cfg['join_field'])} = {_field('s', cfg['join_field'])}
+WHERE {_field('s', cfg['check_in_date_field'])} IS NOT NULL
+  AND ({_field('s', cfg.get('error_field'))} IS NULL OR {_field('s', cfg.get('error_field'))} <> '1')
+  AND {' AND '.join(filters)}
+ORDER BY {_field('s', cfg['update_time_field'])} DESC, {_field('s', cfg['id_field'])} DESC
+LIMIT 1
+""",
+            params,
+        )
+    raise SystemExit(f"Unsupported sourceType: {source_type}")
+
+
 def run_sync_once(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--init-only", action="store_true", help="create local sqlite schema and docs only")
@@ -780,6 +876,116 @@ def create_work_copy(args=None):
     (target / "source-meta.json").write_text(json.dumps(dict(row), ensure_ascii=False, indent=2), encoding="utf-8")
     (target / "diff.md").write_text("# 修改说明\n\n# Diff\n", encoding="utf-8")
     print(target)
+
+
+def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
+    if project_id:
+        build_effective(conn, cfg, [project_id])
+    found, owner = find_work_copy_source(
+        conn,
+        cfg,
+        product_id=product_id if not project_id else None,
+        project_id=project_id,
+        source_type=row["source_table"],
+        alias=_source_alias_id(row),
+        fun=row["fun_id"] or "",
+    )
+    source_path = found["local_path"] if not project_id else found["effective_local_path"]
+    target = VAR_DIR / "work-copy" / owner / _work_copy_source_relative_path(source_path, project_id)
+    shutil.copytree(ROOT / source_path, target, dirs_exist_ok=True)
+    (target / "source-meta.json").write_text(json.dumps(dict(found), ensure_ascii=False, indent=2), encoding="utf-8")
+    (target / "diff.md").write_text("# 修改说明\n\n# Diff\n", encoding="utf-8")
+    return target
+
+
+def _work_copy_source_relative_path(source_path, project_id):
+    path = Path(source_path)
+    if project_id:
+        return Path(*path.parts[4:])
+    return Path(*path.parts[3:])
+
+
+def pull_source_to_work_copy(payload: dict):
+    cfg = load_config()
+    layer, product_id, project_id, layer_cfg = resolve_pull_scope(cfg, payload)
+    conn = connect_index(ROOT / cfg["sync"]["sync"]["index_db"])
+    sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload)
+    ds = cfg["datasource"]["datasource"][layer_cfg["datasource"]]
+    with db_connect(ds) as remote:
+        with remote.cursor() as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+    if not row:
+        raise SystemExit("Source not found in source table")
+    if not _included(layer_cfg, row):
+        raise SystemExit("Source is outside configured include scope")
+    upsert_source(conn, row, layer, product_id, project_id, layer_cfg, cfg["_system_scope"])
+    conn.commit()
+    target = create_work_copy_from_row(conn, cfg, row, product_id, project_id)
+    conn.commit()
+    return {"ok": True, "workCopyPath": str(target), "source": {key: _str(row.get(key)) for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")}}
+
+
+def resolve_pull_scope(cfg: dict, payload: dict):
+    scope = payload.get("scope")
+    product_id = payload.get("productId") or ""
+    project_id = payload.get("projectId") or ""
+    if not scope:
+        _active, products, projects, _effective_project_ids = resolve_active(cfg)
+        if products:
+            product_id, layer_cfg = products[0]
+            return "PRODUCT", product_id, "", layer_cfg
+        if projects:
+            project_id, layer_cfg = projects[0]
+            return "PROJECT", layer_cfg["product_id"], project_id, layer_cfg
+    if scope == "product":
+        layer_cfg = (cfg["products"].get("products") or {}).get(product_id)
+        if not layer_cfg:
+            raise SystemExit(f"Unknown productId: {product_id}")
+        return "PRODUCT", product_id, "", layer_cfg
+    elif scope == "project":
+        layer_cfg = (cfg["projects"].get("projects") or {}).get(project_id)
+        if not layer_cfg:
+            raise SystemExit(f"Unknown projectId: {project_id}")
+        return "PROJECT", layer_cfg["product_id"], project_id, layer_cfg
+    else:
+        raise SystemExit("scope must be product or project")
+
+
+def pull_source_payload_from_args(scope, product_id, project_id, source_type, source_id, alias, fun):
+    if not scope:
+        if project_id:
+            scope = "project"
+        elif product_id:
+            scope = "product"
+    return {
+        "scope": scope,
+        "productId": product_id,
+        "projectId": project_id,
+        "sourceType": source_type,
+        "sourceId": source_id,
+        "alias": alias,
+        "funId": fun,
+    }
+
+
+def pull_source_to_work_copy_cli(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--json-stdin", action="store_true")
+    parser.add_argument("--scope", choices=["product", "project"])
+    parser.add_argument("--product-id")
+    parser.add_argument("--project-id")
+    parser.add_argument("--type", dest="source_type", choices=[PAGE_SOURCE_TYPE, PROCEDURE_SOURCE_TYPE])
+    parser.add_argument("--source-id")
+    parser.add_argument("--alias")
+    parser.add_argument("--fun")
+    parsed = parser.parse_args(args)
+    if parsed.json_stdin:
+        payload = json.loads(sys.stdin.read() or "{}")
+    else:
+        payload = pull_source_payload_from_args(parsed.scope, parsed.product_id, parsed.project_id, parsed.source_type, parsed.source_id, parsed.alias, parsed.fun)
+    result = pull_source_to_work_copy(payload)
+    print(json.dumps(result, ensure_ascii=False))
 
 
 def find_work_copy_source(conn, cfg, product_id, project_id, source_type, alias, fun):

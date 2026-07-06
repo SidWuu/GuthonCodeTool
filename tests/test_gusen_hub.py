@@ -116,6 +116,108 @@ class PageModulePathTest(unittest.TestCase):
         self.assertEqual("var/readonly-source/products/示例子系统/procedure/demo.proc/save", row["local_path"])
         self.assertEqual(Path("products/示例产品"), owner)
 
+    def test_pull_work_copy_preserves_source_tree_shape(self):
+        conn = gusen_hub.connect_index(Path(":memory:"))
+        conn.execute(
+            """
+            INSERT INTO gusen_source_record(
+                source_layer, product_id, project_id, source_table, source_id, source_alias_id, fun_id,
+                source_name, change_key, local_path, status, indexed_time
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "PRODUCT",
+                "demo-product",
+                "",
+                "procedure",
+                "PROC-001",
+                "demo.proc",
+                "save",
+                "保存",
+                "ck",
+                "var/readonly-source/products/示例子系统/procedure/demo.proc/save",
+                "OK",
+                "2026-07-04 09:00:00",
+            ),
+        )
+        cfg = {"products": {"products": {"demo-product": {"name": "示例产品"}}}}
+        row = {
+            "source_table": "procedure",
+            "source_alias_id": "demo.proc",
+            "fun_id": "save",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_root = gusen_hub.ROOT
+            old_var_dir = gusen_hub.VAR_DIR
+            gusen_hub.ROOT = Path(tmp)
+            gusen_hub.VAR_DIR = Path(tmp) / "var"
+            source_dir = Path(tmp) / "var/readonly-source/products/示例子系统/procedure/demo.proc/save"
+            source_dir.mkdir(parents=True)
+            (source_dir / "source.vm").write_text("#set($ok = true)", encoding="utf-8")
+            try:
+                target = gusen_hub.create_work_copy_from_row(conn, cfg, row, "demo-product", "")
+            finally:
+                gusen_hub.ROOT = old_root
+                gusen_hub.VAR_DIR = old_var_dir
+
+        self.assertEqual(
+            Path(tmp) / "var/work-copy/products/示例产品/示例子系统/procedure/demo.proc/save",
+            target,
+        )
+
+    def test_pull_work_copy_overwrites_existing_tree(self):
+        conn = gusen_hub.connect_index(Path(":memory:"))
+        conn.execute(
+            """
+            INSERT INTO gusen_source_record(
+                source_layer, product_id, project_id, source_table, source_id, source_alias_id, fun_id,
+                source_name, change_key, local_path, status, indexed_time
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "PRODUCT",
+                "demo-product",
+                "",
+                "procedure",
+                "PROC-001",
+                "demo.proc",
+                "save",
+                "保存",
+                "ck",
+                "var/readonly-source/products/示例子系统/procedure/demo.proc/save",
+                "OK",
+                "2026-07-04 09:00:00",
+            ),
+        )
+        cfg = {"products": {"products": {"demo-product": {"name": "示例产品"}}}}
+        row = {
+            "source_table": "procedure",
+            "source_alias_id": "demo.proc",
+            "fun_id": "save",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_root = gusen_hub.ROOT
+            old_var_dir = gusen_hub.VAR_DIR
+            gusen_hub.ROOT = Path(tmp)
+            gusen_hub.VAR_DIR = Path(tmp) / "var"
+            source_dir = Path(tmp) / "var/readonly-source/products/示例子系统/procedure/demo.proc/save"
+            source_dir.mkdir(parents=True)
+            (source_dir / "source.vm").write_text("#set($ok = true)", encoding="utf-8")
+            target = Path(tmp) / "var/work-copy/products/示例产品/示例子系统/procedure/demo.proc/save"
+            target.mkdir(parents=True)
+            (target / "source.vm").write_text("#set($edited = true)", encoding="utf-8")
+            try:
+                returned = gusen_hub.create_work_copy_from_row(conn, cfg, row, "demo-product", "")
+                content = (target / "source.vm").read_text(encoding="utf-8")
+            finally:
+                gusen_hub.ROOT = old_root
+                gusen_hub.VAR_DIR = old_var_dir
+
+        self.assertEqual(target, returned)
+        self.assertEqual("#set($ok = true)", content)
+
     def test_page_comp_script_is_extracted_as_vm(self):
         raw = '{"name":"deleteService","compScript":"#set($ok = true)"}'
         with tempfile.TemporaryDirectory() as tmp:
@@ -314,6 +416,74 @@ class PageModulePathTest(unittest.TestCase):
         indexed = conn.execute("SELECT source_alias_id FROM gusen_source_record").fetchone()
         self.assertTrue(changed)
         self.assertEqual("PG-001", indexed["source_alias_id"])
+
+    def test_single_page_sql_filters_by_source_id(self):
+        sql, params = gusen_hub.single_source_sql(
+            {
+                "source_tables": {
+                    "page": {
+                        "source_table_name": "PAGE_TABLE",
+                        "id_field": "ID_COL",
+                        "alias_field": "ALIAS_COL",
+                        "name_field": "NAME_COL",
+                        "content_field": "CONTENT_COL",
+                        "update_time_field": "UPDATED_COL",
+                        "check_in_date_field": "CHECK_IN_COL",
+                        "error_field": "ERROR_COL",
+                        "system_id_field": "SYSTEM_COL",
+                    }
+                }
+            },
+            "page",
+            {"sourceId": "PG-001"},
+        )
+
+        self.assertIn("p.ID_COL = %s", sql)
+        self.assertEqual(["PG-001"], params)
+
+    def test_single_procedure_sql_filters_by_alias_and_fun(self):
+        sql, params = gusen_hub.single_source_sql(
+            {
+                "source_tables": {
+                    "procedure": {
+                        "procedure_table_name": "PROC_TABLE",
+                        "source_table_name": "SCRIPT_TABLE",
+                        "join_field": "PROC_ID",
+                        "id_field": "SCRIPT_ID",
+                        "alias_field": "PROC_ALIAS",
+                        "fun_id_field": "FUN_ID",
+                        "name_field": "FUN_NAME",
+                        "content_field": "SCRIPT",
+                        "update_time_field": "UPDATED_COL",
+                        "check_in_date_field": "CHECK_IN_COL",
+                        "error_field": "ERROR_COL",
+                        "data_source_id_field": "DS_ID",
+                    }
+                }
+            },
+            "procedure",
+            {"alias": "demo.pkg", "funId": "save"},
+        )
+
+        self.assertIn("p.PROC_ALIAS = %s", sql)
+        self.assertIn("s.FUN_ID = %s", sql)
+        self.assertEqual(["demo.pkg", "save"], params)
+
+    def test_pull_source_scope_defaults_to_active_project(self):
+        cfg = {
+            "sync": {"sync": {"ACTIVE": "projects.demo-project"}},
+            "products": {"products": {"demo-product": {"name": "示例产品"}}},
+            "projects": {"projects": {"demo-project": {"name": "示例项目", "product_id": "demo-product"}}},
+        }
+        scope, product_id, project_id, layer_cfg = gusen_hub.resolve_pull_scope(
+            cfg,
+            {"sourceType": "page", "sourceId": "PG-001"},
+        )
+
+        self.assertEqual("PROJECT", scope)
+        self.assertEqual("demo-product", product_id)
+        self.assertEqual("demo-project", project_id)
+        self.assertEqual("示例项目", layer_cfg["name"])
 
 
 if __name__ == "__main__":

@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 AGENTS.md
 TODO.md
+.DS_Store

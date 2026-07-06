@@ -398,16 +398,9 @@ async function pullCurrentProcedure(root) {
   const button = root.querySelector("button");
   try {
     button.disabled = true;
-    setButtonText(root, "拉取");
-    setButtonTitle(root, "正在拉取...");
-    setMessage(root, "正在拉取...", "busy");
-
-    let outputDir;
-    try {
-      outputDir = await getOutputDir();
-    } catch (error) {
-      throw new Error(toErrorMessage("读取保存目录失败", error));
-    }
+    setButtonText(root, "源码拉取");
+    setButtonTitle(root, "正在从源码表拉取...");
+    setMessage(root, "正在从源码表拉取...", "busy");
 
     let bridgeHealth;
     try {
@@ -425,52 +418,35 @@ async function pullCurrentProcedure(root) {
     }
 
     const target = inspected.data;
-    const pulled = await runPageCommand("pullProcedure", {
-      procedureKeyword: target.procedureKeyword || target.procedureName,
-      funId: target.funId
-    });
-    if (!pulled?.ok) {
-      throw new Error(`读取平台代码失败: ${pulled?.message || "拉取失败"}`);
-    }
-
-    const objectKey = buildObjectKey(target);
-    let saveResult;
+    let pullResult;
     try {
-      saveResult = await sendRuntimeMessage({
-        type: "save-pull-result",
+      pullResult = await sendRuntimeMessage({
+        type: "pull-hub-source",
         payload: {
-          objectKey,
-          outputDir,
-          content: pulled.data.script,
-          metadata: {
-            extension: "java",
-            mode: "procedure",
-            procedureId: pulled.data.procedureId,
-            procedureName: pulled.data.procedureName || target.procedureKeyword,
-            funId: target.funId,
-            versionMac: pulled.data.versionMac || "",
-            flag: pulled.data.flag ?? 0
-          }
+          sourceType: "procedure",
+          sourceId: target.procedureId || "",
+          alias: target.procedureKeyword || target.procedureName || "",
+          funId: target.funId || ""
         }
       });
     } catch (error) {
-      throw new Error(toErrorMessage("保存本地文件失败", error));
+      throw new Error(toErrorMessage("源码表拉取失败", error));
     }
-    if (!saveResult?.ok) {
-      throw new Error(`保存本地文件失败: ${saveResult?.message || "本地保存失败"}`);
+    if (!pullResult?.ok) {
+      throw new Error(`源码表拉取失败: ${pullResult?.message || "拉取失败"}`);
     }
 
     button.textContent = "成功";
-    setButtonTitle(root, `拉取成功: ${saveResult.filePath}`);
-    setMessage(root, `成功: ${saveResult.filePath}`, "success");
-    setTimeout(() => setButtonText(root, "拉取"), 1600);
+    setButtonTitle(root, `源码拉取成功: ${pullResult.workCopyPath}`);
+    setMessage(root, `成功: ${pullResult.workCopyPath}`, "success");
+    setTimeout(() => setButtonText(root, "源码拉取"), 1600);
   } catch (error) {
     console.error("Guthon Bridge pull failed", error);
     button.textContent = "失败";
     const message = error?.message || String(error);
     setButtonTitle(root, message);
     setMessage(root, message, "error");
-    setTimeout(() => setButtonText(root, "拉取"), 2200);
+    setTimeout(() => setButtonText(root, "源码拉取"), 2200);
   } finally {
     button.disabled = false;
   }
@@ -496,7 +472,7 @@ function installProcedurePullButton() {
     root.id = FLOATING_ROOT_ID;
     root.className = "guthon-bridge-inline";
     root.innerHTML = `
-      <button type="button">拉取</button>
+      <button type="button">源码拉取</button>
       <div class="guthon-bridge-message" data-tone="idle"></div>
     `;
     const button = root.querySelector("button");

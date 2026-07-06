@@ -9,6 +9,8 @@ const ROOT = path.join(__dirname, "..");
 const MANIFEST_PATH = path.join(__dirname, "workspace", "manifest.json");
 const EXTENSION_MANIFEST_PATH = path.join(ROOT, "extension", "manifest.json");
 const CONTENT_SCRIPT_PATH = path.join(ROOT, "extension", "content.js");
+const POPUP_HTML_PATH = path.join(ROOT, "extension", "popup.html");
+const POPUP_SCRIPT_PATH = path.join(ROOT, "extension", "popup.js");
 
 function waitForHealth(port) {
   const url = `http://127.0.0.1:${port}/health`;
@@ -71,7 +73,7 @@ test("saveRemoteFile writes directly into the requested absolute output director
 
     const data = await response.json();
 
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 200, data.message);
     assert.equal(data.ok, true);
     assert.equal(data.filePath, path.join(outputDir, "doPreRequestScript.java"));
     assert.equal(fs.readFileSync(data.filePath, "utf8"), "function body");
@@ -84,6 +86,86 @@ test("saveRemoteFile writes directly into the requested absolute output director
       fs.writeFileSync(MANIFEST_PATH, originalManifest);
     }
   }
+});
+
+test("pullHubSource delegates structured payload to the configured hub command", async () => {
+  const port = 17462;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-hub-command-"));
+  const hubScript = path.join(tmp, "fake-hub.js");
+  const workCopyPath = path.join(tmp, "work-copy");
+  fs.writeFileSync(
+    hubScript,
+    `
+process.stdin.setEncoding("utf8");
+let raw = "";
+process.stdin.on("data", (chunk) => raw += chunk);
+process.stdin.on("end", () => {
+  const payload = JSON.parse(raw || "{}");
+  if (payload.sourceType !== "procedure" || payload.alias !== "demo.pkg" || payload.funId !== "save") {
+    process.stderr.write("bad payload");
+    process.exit(2);
+  }
+  process.stdout.write(JSON.stringify({ ok: true, workCopyPath: ${JSON.stringify(workCopyPath)} }));
+});
+`,
+    "utf8",
+  );
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_HUB_PYTHON: process.execPath,
+      GUTHON_HUB_PULL_SCRIPT: hubScript
+    },
+    stdio: "ignore"
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/pullHubSource`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        scope: "project",
+        projectId: "demo-project",
+        sourceType: "procedure",
+        alias: "demo.pkg",
+        funId: "save"
+      })
+    });
+    const data = await response.json();
+
+    assert.equal(response.status, 200, data.message);
+    assert.equal(data.ok, true);
+    assert.equal(data.workCopyPath, workCopyPath);
+  } finally {
+    server.kill();
+  }
+});
+
+test("bridge defaults hub python to repo venv when present", () => {
+  const serverScript = fs.readFileSync(path.join(ROOT, "bridge", "server.js"), "utf8");
+
+  assert.equal(serverScript.includes('path.join(ROOT, ".venv", "bin", "python")'), true);
+  assert.equal(serverScript.includes("fs.existsSync(DEFAULT_HUB_PYTHON)"), true);
+});
+
+test("popup exposes separate page and hub pull actions without hub target input", () => {
+  const html = fs.readFileSync(POPUP_HTML_PATH, "utf8");
+  const script = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
+  const runHubPullScript = script.slice(script.indexOf("async function runHubPull"), script.indexOf("pullPageBtn.addEventListener"));
+
+  assert.equal(html.includes("pullPageBtn"), true);
+  assert.equal(html.includes("pullHubBtn"), true);
+  assert.equal(html.includes("hubTarget"), false);
+  assert.equal(script.includes("pull-hub-source"), true);
+  assert.equal(script.includes("parseHubTarget"), false);
+  assert.equal(script.includes("inspect-hub-source"), true);
+  assert.equal(script.includes("function inspectCurrentHubSourceContext"), true);
+  assert.equal(runHubPullScript.includes("resolveCurrentTarget"), false);
 });
 
 test("extension manifest injects the floating pull button on Guthon pages", () => {
@@ -106,13 +188,20 @@ test("extension manifest injects the floating pull button on Guthon pages", () =
   ]);
 });
 
-test("floating pull button stays compact with pull text only", () => {
+test("floating procedure button pulls hub source", () => {
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const pullScript = contentScript.slice(
+    contentScript.indexOf("async function pullCurrentProcedure"),
+    contentScript.indexOf("function removeNode")
+  );
 
-  assert.equal(contentScript.includes("<button type=\"button\">拉取</button>"), true);
+  assert.equal(contentScript.includes("<button type=\"button\">源码拉取</button>"), true);
   assert.equal(contentScript.includes("拉取到本地</button>"), false);
   assert.equal(contentScript.includes('button.textContent = "成功";'), true);
   assert.equal(contentScript.includes('button.textContent = "失败";'), true);
+  assert.equal(pullScript.includes('type: "pull-hub-source"'), true);
+  assert.equal(pullScript.includes('type: "save-pull-result"'), false);
+  assert.equal(pullScript.includes("pullProcedure"), false);
 });
 
 test("pull button floats over the current Guthon toolbar without changing toolbar layout", () => {

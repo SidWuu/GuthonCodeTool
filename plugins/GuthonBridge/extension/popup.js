@@ -2,7 +2,8 @@ const statusEl = document.getElementById("status");
 const procedureEl = document.getElementById("procedureKeyword");
 const funIdEl = document.getElementById("funId");
 const outputDirEl = document.getElementById("outputDir");
-const pullBtn = document.getElementById("pullBtn");
+const pullPageBtn = document.getElementById("pullPageBtn");
+const pullHubBtn = document.getElementById("pullHubBtn");
 const OUTPUT_DIR_STORAGE_KEY = "guthonBridgeOutputDir";
 
 function setStatus(message) {
@@ -48,7 +49,7 @@ function setPopupMode(mode) {
   procedureEl.closest("label").style.display = isModule ? "none" : "";
   funIdEl.closest("label").style.display = isModule ? "none" : "";
   outputDirEl.closest("label").style.display = isModule ? "none" : "";
-  pullBtn.textContent = isModule ? "打开复制模式" : "拉取到本地";
+  pullPageBtn.textContent = isModule ? "打开复制模式" : "拉取页面当前源码";
 }
 
 async function persistOutputDir(outputDir) {
@@ -197,6 +198,29 @@ async function runInMainWorld(tabId, command, payload) {
           label,
           panel
         };
+      }
+
+      function getCurrentPageCode() {
+        const pane = Array.from(document.querySelectorAll('[role="tabpanel"][id^="pane-PG-"]')).find((node) => {
+          const rect = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+        });
+        if (pane) {
+          return pane.id.replace(/^pane-/, "");
+        }
+        const selected = document.querySelector('.el-tabs__item[aria-selected="true"][id^="tab-PG-"]');
+        if (selected?.id) {
+          return selected.id.replace(/^tab-/, "");
+        }
+        const params = new URLSearchParams(location.search);
+        return (
+          params.get("pageId") ||
+          params.get("sourceId") ||
+          params.get("id") ||
+          params.get("page_id") ||
+          ""
+        );
       }
 
       function getPageFunctionTitle() {
@@ -366,6 +390,26 @@ async function runInMainWorld(tabId, command, payload) {
 
         const candidateWithContent = candidates.find((item) => item.script);
         return candidateWithContent || candidates[0] || null;
+      }
+
+      function inspectCurrentHubSourceContext() {
+        if (location.href.includes("/gdpaas/dev/modules")) {
+          const pageCode = getCurrentPageCode();
+          if (!pageCode) {
+            throw new Error("当前模块开发页面没有识别到页面编码");
+          }
+          return {
+            mode: "page-source",
+            pageId: pageCode,
+            procedureId: pageCode,
+            procedureName: pageCode,
+            procedureKeyword: pageCode,
+            fullName: pageCode,
+            funId: "",
+            resolvedBy: "module-page-code"
+          };
+        }
+        return inspectCurrentProcedureContext();
       }
 
       function getMatchingEditorContexts() {
@@ -804,6 +848,19 @@ async function runInMainWorld(tabId, command, payload) {
         };
       }
 
+      if (command === "inspect-hub-source") {
+        const current = inspectCurrentHubSourceContext();
+        if (!current) {
+          throw new Error("当前页面没有识别到源码表查询条件");
+        }
+        const { vm, ...safeCurrent } = current;
+        void vm;
+        return {
+          ok: true,
+          data: safeCurrent
+        };
+      }
+
       return { ok: false, message: `Unsupported command: ${command}` };
         } catch (error) {
           return {
@@ -843,6 +900,33 @@ async function resolveCurrentTarget() {
     funId: result.data.funId || ""
   };
   if (!target.procedureKeyword || !target.funId) {
+    throw new Error("当前过程函数信息不完整");
+  }
+  setResolvedTarget(target);
+  return target;
+}
+
+async function resolveHubSourceTarget() {
+  const tab = await getActiveTab();
+  if (!tab.url || !isSupportedGuthonUrl(tab.url)) {
+    throw new Error("当前标签页不是 Guthon 开发平台页面，请先切到在线开发平台页面");
+  }
+  const result = await runInMainWorld(tab.id, "inspect-hub-source", {});
+  if (!result?.ok) {
+    throw new Error(result?.message || "未识别到源码表查询条件");
+  }
+  const target = {
+    mode: result.data.mode || "procedure",
+    pageId: result.data.pageId || "",
+    procedureId: result.data.procedureId || "",
+    procedureKeyword: result.data.procedureKeyword || result.data.procedureName || "",
+    funId: result.data.funId || ""
+  };
+  if (target.mode === "page-source") {
+    if (!target.pageId && !target.procedureKeyword) {
+      throw new Error("当前模块开发页面没有识别到页面编码");
+    }
+  } else if (!target.procedureKeyword || !target.funId) {
     throw new Error("当前过程函数信息不完整");
   }
   setResolvedTarget(target);
@@ -918,7 +1002,24 @@ async function openCopyMode() {
   return tab;
 }
 
-pullBtn.addEventListener("click", async () => {
+async function runHubPull() {
+  const target = await resolveHubSourceTarget();
+  const payload = {
+    sourceType: target.mode === "page-source" ? "page" : "procedure",
+    sourceId: target.mode === "page-source" ? target.pageId || "" : target.procedureId || "",
+    alias: target.procedureKeyword || "",
+    funId: target.mode === "page-source" ? "" : target.funId || ""
+  };
+  if (payload.sourceType === "page" && !payload.sourceId && !payload.alias) {
+    throw new Error("当前页面没有识别到页面源码表查询条件");
+  }
+  if (payload.sourceType === "procedure" && (!payload.alias || !payload.funId)) {
+    throw new Error("当前页面没有识别到过程函数源码表查询条件");
+  }
+  return chrome.runtime.sendMessage({ type: "pull-hub-source", payload });
+}
+
+pullPageBtn.addEventListener("click", async () => {
   try {
     const tab = await getActiveTab();
     if (isModuleUrl(tab.url)) {
@@ -943,11 +1044,29 @@ pullBtn.addEventListener("click", async () => {
   }
 });
 
+pullHubBtn.addEventListener("click", async () => {
+  try {
+    const tab = await getActiveTab();
+    if (!tab.url || !isSupportedGuthonUrl(tab.url)) {
+      throw new Error("当前标签页不是 Guthon 开发平台页面");
+    }
+    setStatus(`正在从源码表拉取...\n${tab.url}`);
+    const result = await runHubPull();
+    if (!result?.ok) {
+      throw new Error(result?.message || "Hub 拉取失败");
+    }
+    setStatus(["源码表拉取成功", `工作副本: ${result.workCopyPath}`].join("\n"));
+  } catch (error) {
+    setStatus(`源码表拉取失败\n${error.message}`);
+  }
+});
+
 outputDirEl.addEventListener("change", persistCurrentOutputDir);
 outputDirEl.addEventListener("blur", persistCurrentOutputDir);
 
 async function initializePopup() {
-  pullBtn.disabled = true;
+  pullPageBtn.disabled = true;
+  pullHubBtn.disabled = true;
   const stored = await chrome.storage?.local?.get?.(OUTPUT_DIR_STORAGE_KEY);
   outputDirEl.value =
     stored?.[OUTPUT_DIR_STORAGE_KEY] || localStorage.getItem(OUTPUT_DIR_STORAGE_KEY) || "";
@@ -955,7 +1074,8 @@ async function initializePopup() {
   if (tab.url && isSupportedGuthonUrl(tab.url) && isModuleUrl(tab.url)) {
     setPopupMode("module");
     setStatus("当前页面是模块开发，可打开复制模式");
-    pullBtn.disabled = false;
+    pullPageBtn.disabled = false;
+    pullHubBtn.disabled = false;
     return;
   }
   setPopupMode("procedure");
@@ -969,7 +1089,8 @@ async function initializePopup() {
         target.mode === "page-source" ? `片段: ${target.funId}` : `函数名: ${target.funId}`
       ].join("\n")
     );
-    pullBtn.disabled = false;
+    pullPageBtn.disabled = false;
+    pullHubBtn.disabled = false;
   } catch (error) {
     setResolvedTarget(null);
     setStatus(`识别失败\n${error.message}`);

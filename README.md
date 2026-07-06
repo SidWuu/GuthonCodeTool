@@ -53,9 +53,9 @@ GuthonCodeTool 是面向谷神低码开发平台的本地开发工具集。
 
 仓库内包含一个 Chrome 扩展和本地 HTTP 桥接服务：
 
-- 在谷神过程函数页面拉取当前函数脚本到本地。
+- 在谷神过程函数页面通过 `源码拉取` 按钮从源码表拉取并生成工作副本。
+- 可选调用 Hub，从源码表拉取已存入源码并生成 `var/work-copy`。
 - 在模块开发页面打开复制模式，查看并复制页面字段结构。
-- 后续会扩展为直接拉取模块开发页面内容和过程函数到工作副本目录。
 
 ## 目录
 
@@ -128,6 +128,18 @@ config/system-data.json
 .venv/bin/python scripts/create_work_copy.py --project <project_id> --type <source_type> --alias <alias> --fun <fun_id>
 ```
 
+从源码表拉取单个对象并生成工作副本：
+
+```bash
+.venv/bin/python scripts/pull_source_to_work_copy.py --type procedure --alias <procedure_alias> --fun <fun_id>
+```
+
+```bash
+.venv/bin/python scripts/pull_source_to_work_copy.py --type page --source-id <page_id>
+```
+
+未显式传 `--project-id` 或 `--product-id` 时，使用 `config/sync.yaml` 的 `sync.ACTIVE`。工作副本会按源码目录结构写入 `var/work-copy/{产品或项目}/{子系统}/...`。
+
 启动浏览器桥接服务：
 
 ```bash
@@ -141,7 +153,7 @@ npm run start:bridge
 
 ```bash
 .venv/bin/python -m unittest discover -s tests
-.venv/bin/python -m py_compile scripts/gusen_hub.py scripts/run_sync_once.py scripts/create_work_copy.py
+.venv/bin/python -m py_compile scripts/gusen_hub.py scripts/run_sync_once.py scripts/create_work_copy.py scripts/pull_source_to_work_copy.py
 ```
 
 浏览器扩展和本地 bridge：

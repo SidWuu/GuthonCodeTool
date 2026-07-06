@@ -1,11 +1,16 @@
 const http = require("http");
+const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
 const PORT = Number(process.env.GUTHON_BRIDGE_PORT || 17361);
-const ROOT = __dirname;
-const WORKSPACE_DIR = path.join(ROOT, "workspace", "procedures");
-const MANIFEST_PATH = path.join(ROOT, "workspace", "manifest.json");
+const ROOT = path.resolve(__dirname, "..", "..", "..");
+const BRIDGE_ROOT = __dirname;
+const WORKSPACE_DIR = path.join(BRIDGE_ROOT, "workspace", "procedures");
+const MANIFEST_PATH = path.join(BRIDGE_ROOT, "workspace", "manifest.json");
+const DEFAULT_HUB_PYTHON = path.join(ROOT, ".venv", "bin", "python");
+const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_PYTHON) ? DEFAULT_HUB_PYTHON : "python3");
+const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "scripts", "pull_source_to_work_copy.py");
 
 fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
 
@@ -74,6 +79,36 @@ function readBody(req) {
   });
 }
 
+function runHubPull(payload) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(HUB_PYTHON, [HUB_PULL_SCRIPT, "--json-stdin"], {
+      cwd: ROOT,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error((stderr || stdout || `Hub command failed with exit code ${code}`).trim()));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout || "{}"));
+      } catch (error) {
+        reject(new Error(`Hub command returned invalid JSON: ${error.message}`));
+      }
+    });
+    child.stdin.end(JSON.stringify(payload));
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     return sendJson(res, 200, { ok: true });
@@ -139,6 +174,16 @@ const server = http.createServer(async (req, res) => {
         content: fs.readFileSync(entry.filePath, "utf8"),
         metadata: entry.metadata || {}
       });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, message: error.message });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/pullHubSource") {
+    try {
+      const payload = await readBody(req);
+      const result = await runHubPull(payload);
+      return sendJson(res, 200, result);
     } catch (error) {
       return sendJson(res, 500, { ok: false, message: error.message });
     }
