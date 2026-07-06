@@ -222,7 +222,21 @@ def main(argv=None):
     table_ids = normalize_table_ids(args.table_ids)
     with gusen_hub.db_connect(load_datasource(args.datasource)) as conn:
         summary = export_table_schema(conn, Path(args.output_dir), data_source_ids=data_source_ids, table_ids=table_ids)
-    print(json.dumps({"ok": True, **summary, "outputDir": args.output_dir}, ensure_ascii=False))
+    result = {"ok": True, **summary, "outputDir": args.output_dir}
+    gusen_hub.append_pull_log(
+        "database",
+        "manual",
+        {
+            "dataSourceIds": data_source_ids,
+            "tableIds": table_ids,
+            "exported_table_count": summary.get("exported_table_count", 0),
+            "outputDir": args.output_dir,
+        },
+        payload={"datasource": args.datasource, "dataSourceIds": data_source_ids, "tableIds": table_ids},
+        result=result,
+        ok=True,
+    )
+    print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":

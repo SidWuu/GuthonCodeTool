@@ -12,6 +12,7 @@ const DEFAULT_HUB_PYTHON = path.join(ROOT, ".venv", "bin", "python");
 const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_PYTHON) ? DEFAULT_HUB_PYTHON : "python3");
 const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "scripts", "pull_source_to_work_copy.py");
 const TABLE_SCHEMA_SCRIPT = process.env.GUTHON_TABLE_SCHEMA_SCRIPT || path.join(ROOT, "scripts", "export_table_schema_sql.py");
+const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(ROOT, "var", "runtime", "logs", "pull-log.ndjson");
 
 fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
 
@@ -80,10 +81,46 @@ function readBody(req) {
   });
 }
 
+function appendPullLog({ pullType, trigger = "manual", summary = {}, payload = {}, result = {}, ok = true, message = "" }) {
+  fs.mkdirSync(path.dirname(PULL_LOG_PATH), { recursive: true });
+  const record = {
+    time: new Date().toISOString(),
+    trigger,
+    pullType,
+    ok: Boolean(ok),
+    summary,
+    payload,
+    result,
+    message
+  };
+  fs.appendFileSync(PULL_LOG_PATH, `${JSON.stringify(record)}\n`, "utf8");
+}
+
+function sourceSummary(payload, result = {}) {
+  return {
+    sourceType: payload.sourceType || "",
+    sourceId: payload.sourceId || "",
+    alias: payload.alias || "",
+    funId: payload.funId || "",
+    pulled: result.pulled ?? "",
+    workCopyPath: result.workCopyPath || ""
+  };
+}
+
+function tableSchemaSummary(payload, result = {}) {
+  return {
+    dataSourceId: payload.dataSourceId || "",
+    tableIds: Array.isArray(payload.tableIds) ? payload.tableIds : [],
+    exported_table_count: result.exported_table_count ?? "",
+    outputDir: result.outputDir || ""
+  };
+}
+
 function runHubPull(payload) {
   return new Promise((resolve, reject) => {
     const child = spawn(HUB_PYTHON, [HUB_PULL_SCRIPT, "--json-stdin"], {
       cwd: ROOT,
+      env: { ...process.env, GUTHON_SUPPRESS_PULL_LOG: "1" },
       stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "";
@@ -121,6 +158,7 @@ function runTableSchemaExport(payload) {
     }
     const child = spawn(HUB_PYTHON, args, {
       cwd: ROOT,
+      env: { ...process.env, GUTHON_SUPPRESS_PULL_LOG: "1" },
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -217,21 +255,51 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "POST" && req.url === "/pullHubSource") {
+    let payload = {};
     try {
-      const payload = await readBody(req);
+      payload = await readBody(req);
       const result = await runHubPull(payload);
+      appendPullLog({
+        pullType: "source",
+        summary: sourceSummary(payload, result),
+        payload,
+        result,
+        ok: result?.ok
+      });
       return sendJson(res, 200, result);
     } catch (error) {
+      appendPullLog({
+        pullType: "source",
+        summary: sourceSummary(payload),
+        payload,
+        ok: false,
+        message: error.message
+      });
       return sendJson(res, 500, { ok: false, message: error.message });
     }
   }
 
   if (req.method === "POST" && req.url === "/exportTableSchema") {
+    let payload = {};
     try {
-      const payload = await readBody(req);
+      payload = await readBody(req);
       const result = await runTableSchemaExport(payload);
+      appendPullLog({
+        pullType: "database",
+        summary: tableSchemaSummary(payload, result),
+        payload,
+        result,
+        ok: result?.ok
+      });
       return sendJson(res, 200, result);
     } catch (error) {
+      appendPullLog({
+        pullType: "database",
+        summary: tableSchemaSummary(payload),
+        payload,
+        ok: false,
+        message: error.message
+      });
       return sendJson(res, 500, { ok: false, message: error.message });
     }
   }

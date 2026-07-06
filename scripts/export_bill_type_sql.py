@@ -160,6 +160,18 @@ def main(argv=None):
     data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else load_default_data_source_ids()
     with gusen_hub.db_connect(load_datasource(args.datasource)) as conn:
         summary = export_bill_types(conn, Path(args.output_dir), data_source_ids=data_source_ids)
+    gusen_hub.append_pull_log(
+        "billtype",
+        "manual",
+        {
+            "dataSourceIds": data_source_ids,
+            "exported_bill_type_count": summary.get("exported_bill_type_count", 0),
+            "outputDir": args.output_dir,
+        },
+        payload={"datasource": args.datasource, "dataSourceIds": data_source_ids},
+        result={**summary, "outputDir": args.output_dir},
+        ok=True,
+    )
     print(
         "导出完成: "
         f"{summary['exported_bill_type_count']}/{summary['bill_type_count']} "

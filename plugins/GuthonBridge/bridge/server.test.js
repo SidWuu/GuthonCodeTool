@@ -93,6 +93,7 @@ test("pullHubSource delegates structured payload to the configured hub command",
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-hub-command-"));
   const hubScript = path.join(tmp, "fake-hub.js");
   const workCopyPath = path.join(tmp, "work-copy");
+  const logPath = path.join(tmp, "pull-log.ndjson");
   fs.writeFileSync(
     hubScript,
     `
@@ -116,7 +117,8 @@ process.stdin.on("end", () => {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
       GUTHON_HUB_PYTHON: process.execPath,
-      GUTHON_HUB_PULL_SCRIPT: hubScript
+      GUTHON_HUB_PULL_SCRIPT: hubScript,
+      GUTHON_PULL_LOG_PATH: logPath
     },
     stdio: "ignore"
   });
@@ -141,6 +143,18 @@ process.stdin.on("end", () => {
     assert.equal(response.status, 200, data.message);
     assert.equal(data.ok, true);
     assert.equal(data.workCopyPath, workCopyPath);
+    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
+    assert.equal(log.pullType, "source");
+    assert.equal(log.trigger, "manual");
+    assert.equal(log.ok, true);
+    assert.deepEqual(log.summary, {
+      sourceType: "procedure",
+      sourceId: "",
+      alias: "demo.pkg",
+      funId: "save",
+      pulled: "",
+      workCopyPath
+    });
   } finally {
     server.kill();
   }
@@ -150,6 +164,7 @@ test("exportTableSchema delegates data source and table filters to script", asyn
   const port = 17463;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-schema-command-"));
   const schemaScript = path.join(tmp, "fake-schema.js");
+  const logPath = path.join(tmp, "pull-log.ndjson");
   fs.writeFileSync(
     schemaScript,
     `
@@ -168,7 +183,8 @@ process.stdout.write(JSON.stringify({ ok: true, exported_table_count: 1, outputD
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
       GUTHON_HUB_PYTHON: process.execPath,
-      GUTHON_TABLE_SCHEMA_SCRIPT: schemaScript
+      GUTHON_TABLE_SCHEMA_SCRIPT: schemaScript,
+      GUTHON_PULL_LOG_PATH: logPath
     },
     stdio: "ignore"
   });
@@ -190,6 +206,16 @@ process.stdout.write(JSON.stringify({ ok: true, exported_table_count: 1, outputD
     assert.equal(response.status, 200, data.message);
     assert.equal(data.ok, true);
     assert.equal(data.exported_table_count, 1);
+    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
+    assert.equal(log.pullType, "database");
+    assert.equal(log.trigger, "manual");
+    assert.equal(log.ok, true);
+    assert.deepEqual(log.summary, {
+      dataSourceId: "0015",
+      tableIds: ["RM_TEST"],
+      exported_table_count: 1,
+      outputDir: "/tmp/schema"
+    });
   } finally {
     server.kill();
   }

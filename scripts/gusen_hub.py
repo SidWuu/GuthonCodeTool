@@ -29,6 +29,30 @@ def readonly_source_dir() -> Path:
     return source_dir() / "readonly"
 
 
+def pull_log_path() -> Path:
+    return Path(os.environ.get("GUTHON_PULL_LOG_PATH") or VAR_DIR / "runtime" / "logs" / "pull-log.ndjson")
+
+
+def append_pull_log(pull_type, trigger, summary, payload=None, result=None, ok=True, message="") -> Path:
+    path = pull_log_path()
+    if os.environ.get("GUTHON_SUPPRESS_PULL_LOG") == "1":
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "time": dt.datetime.now().isoformat(timespec="seconds"),
+        "trigger": trigger,
+        "pullType": pull_type,
+        "ok": bool(ok),
+        "summary": summary or {},
+        "payload": payload or {},
+        "result": result or {},
+        "message": message or "",
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return path
+
+
 def effective_source_dir() -> Path:
     return source_dir() / "effective"
 
@@ -497,6 +521,19 @@ def run_sync_once(args=None):
     )
     conn.commit()
     export_status(conn, stats)
+    append_pull_log(
+        "source",
+        "scheduled",
+        {
+            "active": active,
+            "candidates": stats.get("candidates", 0),
+            "changed": stats.get("changed", 0),
+            "failures": stats.get("failures", 0),
+        },
+        payload={"sync_from": sync_from},
+        result=stats,
+        ok=not stats.get("failures"),
+    )
 
 
 def resolve_active(cfg):
@@ -1052,6 +1089,21 @@ def pull_source_to_work_copy_cli(args=None):
     else:
         payload = pull_source_payload_from_args(parsed.scope, parsed.product_id, parsed.project_id, parsed.source_type, parsed.source_id, parsed.alias, parsed.fun)
     result = pull_source_to_work_copy(payload)
+    append_pull_log(
+        "source",
+        "manual",
+        {
+            "sourceType": payload.get("sourceType") or "",
+            "sourceId": payload.get("sourceId") or "",
+            "alias": payload.get("alias") or "",
+            "funId": payload.get("funId") or "",
+            "pulled": result.get("pulled", ""),
+            "workCopyPath": result.get("workCopyPath") or "",
+        },
+        payload=payload,
+        result=result,
+        ok=result.get("ok", False),
+    )
     print(json.dumps(result, ensure_ascii=False))
 
 
