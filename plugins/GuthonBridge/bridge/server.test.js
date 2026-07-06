@@ -201,7 +201,7 @@ test("floating procedure button pulls hub source", () => {
   assert.equal(contentScript.includes('button.textContent = "失败";'), true);
   assert.equal(pullScript.includes('type: "pull-hub-source"'), true);
   assert.equal(pullScript.includes('type: "save-pull-result"'), false);
-  assert.equal(pullScript.includes("pullProcedure"), false);
+  assert.equal(pullScript.includes('runPageCommand("pullProcedure"'), true);
 });
 
 test("pull button floats over the current Guthon toolbar without changing toolbar layout", () => {

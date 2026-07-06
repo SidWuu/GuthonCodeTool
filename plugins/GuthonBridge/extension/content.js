@@ -417,7 +417,21 @@ async function pullCurrentProcedure(root) {
       throw new Error(`识别当前函数失败: ${inspected?.message || "未识别到当前过程函数"}`);
     }
 
-    const target = inspected.data;
+    let target = inspected.data;
+    if (!target.procedureId) {
+      const resolved = await runPageCommand("pullProcedure", {
+        procedureKeyword: target.procedureKeyword || target.procedureName || "",
+        funId: target.funId || ""
+      });
+      if (resolved?.ok && resolved.data?.procedureId) {
+        target = {
+          ...target,
+          procedureId: resolved.data.procedureId,
+          procedureName: resolved.data.procedureName || target.procedureName,
+          procedureKeyword: resolved.data.procedureName || target.procedureKeyword
+        };
+      }
+    }
     let pullResult;
     try {
       pullResult = await sendRuntimeMessage({
