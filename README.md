@@ -54,7 +54,7 @@ GuthonCodeTool 是面向谷神低码开发平台的本地开发工具集。
 仓库内包含一个 Chrome 扩展和本地 HTTP 桥接服务：
 
 - 在谷神过程函数页面通过 `源码拉取` 按钮从源码表拉取并生成工作副本。
-- 可选调用 Hub，从源码表拉取已存入源码并生成 `var/work-copy`。
+- 可选调用 Hub，从源码表拉取已存入源码并生成 `var/source/workcopy`。
 - 在模块开发页面打开复制模式，查看并复制页面字段结构。
 
 ## 目录
@@ -73,11 +73,11 @@ var/                    本地生成物，不提交
 运行后会生成：
 
 ```text
-var/readonly-source/    已签入源码只读镜像
-var/effective-source/   项目最终生效源码
+var/source/readonly/    已签入源码只读镜像
+var/source/effective/   项目最终生效源码
 var/knowledge/          Markdown 索引
-var/work-copy/          临时修改副本
-var/index/              本地 SQLite 索引库
+var/source/workcopy/    临时修改副本
+var/runtime/index/      本地 SQLite 索引库
 ```
 
 这些目录只用于本机开发，不提交到仓库。
@@ -138,7 +138,7 @@ config/system-data.json
 .venv/bin/python scripts/pull_source_to_work_copy.py --type page --source-id <page_id>
 ```
 
-未显式传 `--project-id` 或 `--product-id` 时，使用 `config/sync.yaml` 的 `sync.ACTIVE`。工作副本会按源码目录结构写入 `var/work-copy/{产品或项目}/{子系统}/...`。
+未显式传 `--project-id` 或 `--product-id` 时，使用 `config/sync.yaml` 的 `sync.ACTIVE`。工作副本会按源码目录结构写入 `var/source/workcopy/{产品或项目}/{子系统}/...`。
 
 启动浏览器桥接服务：
 

@@ -30,7 +30,7 @@ class PageModulePathTest(unittest.TestCase):
                 "save",
                 "保存",
                 "ck",
-                "var/readonly-source/products/示例子系统/procedure/demo.proc/save",
+                "var/source/readonly/products/示例子系统/procedure/demo.proc/save",
                 "OK",
                 "2026-07-04 09:00:00",
             ),
@@ -96,7 +96,7 @@ class PageModulePathTest(unittest.TestCase):
                 "save",
                 "保存",
                 "ck",
-                "var/readonly-source/products/示例子系统/procedure/demo.proc/save",
+                "var/source/readonly/products/示例子系统/procedure/demo.proc/save",
                 "OK",
                 "2026-07-04 09:00:00",
             ),
@@ -113,7 +113,7 @@ class PageModulePathTest(unittest.TestCase):
             fun="save",
         )
 
-        self.assertEqual("var/readonly-source/products/示例子系统/procedure/demo.proc/save", row["local_path"])
+        self.assertEqual("var/source/readonly/products/示例子系统/procedure/demo.proc/save", row["local_path"])
         self.assertEqual(Path("products/示例产品"), owner)
 
     def test_pull_work_copy_preserves_source_tree_shape(self):
@@ -135,7 +135,7 @@ class PageModulePathTest(unittest.TestCase):
                 "save",
                 "保存",
                 "ck",
-                "var/readonly-source/products/示例子系统/procedure/demo.proc/save",
+                "var/source/readonly/products/示例子系统/procedure/demo.proc/save",
                 "OK",
                 "2026-07-04 09:00:00",
             ),
@@ -152,7 +152,7 @@ class PageModulePathTest(unittest.TestCase):
             old_var_dir = gusen_hub.VAR_DIR
             gusen_hub.ROOT = Path(tmp)
             gusen_hub.VAR_DIR = Path(tmp) / "var"
-            source_dir = Path(tmp) / "var/readonly-source/products/示例子系统/procedure/demo.proc/save"
+            source_dir = Path(tmp) / "var/source/readonly/products/示例子系统/procedure/demo.proc/save"
             source_dir.mkdir(parents=True)
             (source_dir / "source.vm").write_text("#set($ok = true)", encoding="utf-8")
             try:
@@ -162,7 +162,7 @@ class PageModulePathTest(unittest.TestCase):
                 gusen_hub.VAR_DIR = old_var_dir
 
         self.assertEqual(
-            Path(tmp) / "var/work-copy/products/示例产品/示例子系统/procedure/demo.proc/save",
+            Path(tmp) / "var/source/workcopy/products/示例产品/示例子系统/procedure/demo.proc/save",
             target,
         )
 
@@ -185,7 +185,7 @@ class PageModulePathTest(unittest.TestCase):
                 "save",
                 "保存",
                 "ck",
-                "var/readonly-source/products/示例子系统/procedure/demo.proc/save",
+                "var/source/readonly/products/示例子系统/procedure/demo.proc/save",
                 "OK",
                 "2026-07-04 09:00:00",
             ),
@@ -202,10 +202,10 @@ class PageModulePathTest(unittest.TestCase):
             old_var_dir = gusen_hub.VAR_DIR
             gusen_hub.ROOT = Path(tmp)
             gusen_hub.VAR_DIR = Path(tmp) / "var"
-            source_dir = Path(tmp) / "var/readonly-source/products/示例子系统/procedure/demo.proc/save"
+            source_dir = Path(tmp) / "var/source/readonly/products/示例子系统/procedure/demo.proc/save"
             source_dir.mkdir(parents=True)
             (source_dir / "source.vm").write_text("#set($ok = true)", encoding="utf-8")
-            target = Path(tmp) / "var/work-copy/products/示例产品/示例子系统/procedure/demo.proc/save"
+            target = Path(tmp) / "var/source/workcopy/products/示例产品/示例子系统/procedure/demo.proc/save"
             target.mkdir(parents=True)
             (target / "source.vm").write_text("#set($edited = true)", encoding="utf-8")
             try:
@@ -277,9 +277,9 @@ class PageModulePathTest(unittest.TestCase):
                     },
                     "CHECK_IN:2026-07-03",
                 )
-                link = Path(tmp) / "readonly-source/products/示例子系统B/procedure"
+                link = Path(tmp) / "source/readonly/products/示例子系统B/procedure"
                 self.assertEqual(
-                    Path("readonly-source/products/示例子系统A/procedure/demo.shared/save"),
+                    Path("source/readonly/products/示例子系统A/procedure/demo.shared/save"),
                     local_path.relative_to(Path(tmp)),
                 )
                 self.assertTrue(link.is_symlink())
@@ -376,7 +376,7 @@ class PageModulePathTest(unittest.TestCase):
                 gusen_hub.VAR_DIR = old_var_dir
 
         self.assertEqual(
-            Path("readonly-source/products/示例子系统/page/示例模块/示例页面 P001"),
+            Path("source/readonly/products/示例子系统/page/示例模块/示例页面 P001"),
             local_path.relative_to(Path(tmp)),
         )
 

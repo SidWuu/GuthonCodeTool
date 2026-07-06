@@ -2,11 +2,11 @@ sync:
   ACTIVE: products.demo-product
   interval_seconds: 600
   lookback_minutes: 10
-  readonly_source_dir: var/readonly-source
-  effective_source_dir: var/effective-source
-  work_copy_dir: var/work-copy
+  readonly_source_dir: var/source/readonly
+  effective_source_dir: var/source/effective
+  work_copy_dir: var/source/workcopy
   generated_doc_dir: var/knowledge
-  index_db: var/index/hub.db
+  index_db: var/runtime/index/hub.db
 
 rules:
   require_check_in_date: true

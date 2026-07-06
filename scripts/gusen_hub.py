@@ -21,6 +21,22 @@ PAGE_SOURCE_TYPE = "page"
 PROCEDURE_SOURCE_TYPE = "procedure"
 
 
+def source_dir() -> Path:
+    return VAR_DIR / "source"
+
+
+def readonly_source_dir() -> Path:
+    return source_dir() / "readonly"
+
+
+def effective_source_dir() -> Path:
+    return source_dir() / "effective"
+
+
+def work_copy_dir() -> Path:
+    return source_dir() / "workcopy"
+
+
 def load_yaml(path: Path):
     text = _expand_env(path.read_text(encoding="utf-8"))
     try:
@@ -586,9 +602,9 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
 def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, change_key):
     system_name = _system_name(row, system_scope)
     if layer == "PRODUCT":
-        layer_root = VAR_DIR / "readonly-source" / "products"
+        layer_root = readonly_source_dir() / "products"
     else:
-        layer_root = VAR_DIR / "readonly-source" / "project" / path_part(layer_cfg.get("name") or project_id)
+        layer_root = readonly_source_dir() / "project" / path_part(layer_cfg.get("name") or project_id)
     root = layer_root / path_part(system_name)
     if row["source_table"] == PAGE_SOURCE_TYPE:
         module_name = row.get("mk_name") or row.get("mk_id") or "未归属模块"
@@ -736,7 +752,7 @@ def build_effective(conn, cfg, project_ids=None):
             if key not in chosen or row["source_layer"] == "PROJECT":
                 chosen[key] = row
         conn.execute("DELETE FROM gusen_effective_source WHERE project_id=?", (project_id,))
-        effective_root = VAR_DIR / "effective-source" / "project" / path_part(project_name)
+        effective_root = effective_source_dir() / "project" / path_part(project_name)
         if effective_root.exists():
             shutil.rmtree(effective_root)
         for key, row in chosen.items():
@@ -744,9 +760,9 @@ def build_effective(conn, cfg, project_ids=None):
             if not local_path.exists():
                 continue
             if row["source_layer"] == "PRODUCT":
-                source_root = VAR_DIR / "readonly-source" / "products"
+                source_root = readonly_source_dir() / "products"
             else:
-                source_root = VAR_DIR / "readonly-source" / "project" / path_part(project_name)
+                source_root = readonly_source_dir() / "project" / path_part(project_name)
             target = effective_root / local_path.relative_to(source_root)
             shutil.copytree(local_path, target)
             product = _find_source(conn, product_id, "", key)
@@ -871,7 +887,7 @@ def create_work_copy(args=None):
     row, owner = find_work_copy_source(conn, cfg, parsed.product, parsed.project, parsed.type, parsed.alias, parsed.fun)
     source_path = row["local_path"] if parsed.product else row["effective_local_path"]
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = VAR_DIR / "work-copy" / owner / f"{stamp}-{path_part(parsed.alias if not parsed.fun else parsed.fun)}"
+    target = work_copy_dir() / owner / f"{stamp}-{path_part(parsed.alias if not parsed.fun else parsed.fun)}"
     shutil.copytree(ROOT / source_path, target)
     (target / "source-meta.json").write_text(json.dumps(dict(row), ensure_ascii=False, indent=2), encoding="utf-8")
     (target / "diff.md").write_text("# 修改说明\n\n# Diff\n", encoding="utf-8")
@@ -891,7 +907,7 @@ def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
         fun=row["fun_id"] or "",
     )
     source_path = found["local_path"] if not project_id else found["effective_local_path"]
-    target = VAR_DIR / "work-copy" / owner / _work_copy_source_relative_path(source_path, project_id)
+    target = work_copy_dir() / owner / _work_copy_source_relative_path(source_path, project_id)
     shutil.copytree(ROOT / source_path, target, dirs_exist_ok=True)
     (target / "source-meta.json").write_text(json.dumps(dict(found), ensure_ascii=False, indent=2), encoding="utf-8")
     (target / "diff.md").write_text("# 修改说明\n\n# Diff\n", encoding="utf-8")
@@ -901,8 +917,18 @@ def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
 def _work_copy_source_relative_path(source_path, project_id):
     path = Path(source_path)
     if project_id:
-        return Path(*path.parts[4:])
-    return Path(*path.parts[3:])
+        rel = _path_after_marker(path, ("source", "effective", "project"))
+        return Path(*rel.parts[1:])
+    return _path_after_marker(path, ("source", "readonly", "products"))
+
+
+def _path_after_marker(path: Path, marker: tuple[str, ...]) -> Path:
+    parts = path.parts
+    size = len(marker)
+    for index in range(len(parts) - size + 1):
+        if parts[index : index + size] == marker:
+            return Path(*parts[index + size :])
+    raise ValueError(f"Path is not under {'/'.join(marker)}: {path}")
 
 
 def pull_source_to_work_copy(payload: dict):
