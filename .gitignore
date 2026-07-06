@@ -8,3 +8,5 @@ __pycache__/
 AGENTS.md
 TODO.md
 .DS_Store
+temp/
+tests/

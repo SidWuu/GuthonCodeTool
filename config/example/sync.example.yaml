@@ -10,6 +10,15 @@ sync:
 
 rules:
   require_check_in_date: true
+  allow_unchecked_check_out_user_ids:
+    - U00000XXXX
   prefer_version_mac: true
   skip_error_source: true
   build_effective_after_sync: true
+  table_schema_data_source_ids:
+    - "0000"
+    - "0008"
+    - "0015"
+    - "0018"
+    - "0019"
+    - "0021"

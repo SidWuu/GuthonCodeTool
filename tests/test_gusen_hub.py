@@ -227,6 +227,17 @@ class PageModulePathTest(unittest.TestCase):
         self.assertEqual("compScript", scripts[0][0])
         self.assertEqual("deleteService.compScript.vm", scripts[0][1].name)
 
+    def test_empty_page_comp_script_is_extracted_as_empty_vm(self):
+        raw = '{"name":"emptyService","compScript":"","onClickScript":""}'
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts = gusen_hub.parse_page_scripts(Path(tmp), raw)
+            content = scripts[0][1].read_text(encoding="utf-8")
+
+        self.assertEqual(1, len(scripts))
+        self.assertEqual("compScript", scripts[0][0])
+        self.assertEqual("emptyService.compScript.vm", scripts[0][1].name)
+        self.assertEqual("", content)
+
     def test_duplicate_data_source_uses_first_configured_system_name(self):
         old_config_dir = gusen_hub.CONFIG_DIR
         with tempfile.TemporaryDirectory() as tmp:
@@ -346,6 +357,86 @@ class PageModulePathTest(unittest.TestCase):
         self.assertIn("FROM PAGE_TABLE p", sql)
         self.assertIn("LEFT JOIN MODULE_TABLE m", sql)
         self.assertIn("m.MODULE_NAME_COL AS mk_name", sql)
+
+    def test_page_sql_allows_configured_unchecked_checkout_user(self):
+        sql = gusen_hub.page_sql(
+            {
+                "source_tables": {
+                    "page": {
+                        "source_table_name": "PAGE_TABLE",
+                        "id_field": "ID_COL",
+                        "alias_field": "ALIAS_COL",
+                        "name_field": "NAME_COL",
+                        "content_field": "CONTENT_COL",
+                        "update_time_field": "UPDATED_COL",
+                        "check_in_date_field": "CHECK_IN_COL",
+                        "check_out_user_id_field": "CHECKOUT_USER_COL",
+                        "error_field": "ERROR_COL",
+                        "system_id_field": "SYSTEM_COL",
+                    }
+                }
+            },
+            {"allow_unchecked_check_out_user_ids": ["U000001012"]},
+        )
+
+        self.assertIn("(p.CHECK_IN_COL IS NOT NULL OR p.CHECKOUT_USER_COL IN ('U000001012'))", sql)
+
+    def test_single_procedure_sql_allows_configured_unchecked_checkout_user(self):
+        sql, params = gusen_hub.single_source_sql(
+            {
+                "source_tables": {
+                    "procedure": {
+                        "procedure_table_name": "PROC_TABLE",
+                        "source_table_name": "SCRIPT_TABLE",
+                        "join_field": "PROC_ID",
+                        "id_field": "SCRIPT_ID",
+                        "alias_field": "PROC_ALIAS",
+                        "fun_id_field": "FUN_ID",
+                        "name_field": "FUN_NAME",
+                        "content_field": "SCRIPT",
+                        "update_time_field": "UPDATED_COL",
+                        "check_in_date_field": "CHECK_IN_COL",
+                        "check_out_user_id_field": "CHECKOUT_USER_COL",
+                        "error_field": "ERROR_COL",
+                        "data_source_id_field": "DS_ID",
+                    }
+                }
+            },
+            "procedure",
+            {"alias": "demo.pkg", "funId": "save"},
+            {"allow_unchecked_check_out_user_ids": ["U000001012"]},
+        )
+
+        self.assertIn("(s.CHECK_IN_COL IS NOT NULL OR s.CHECKOUT_USER_COL IN ('U000001012'))", sql)
+        self.assertEqual(["demo.pkg", "save"], params)
+
+    def test_module_page_sql_filters_by_mk_id_and_system_id(self):
+        sql, params = gusen_hub.module_page_sql(
+            {
+                "source_tables": {
+                    "page": {
+                        "source_table_name": "PAGE_TABLE",
+                        "id_field": "ID_COL",
+                        "alias_field": "ALIAS_COL",
+                        "name_field": "NAME_COL",
+                        "content_field": "CONTENT_COL",
+                        "update_time_field": "UPDATED_COL",
+                        "check_in_date_field": "CHECK_IN_COL",
+                        "check_out_user_id_field": "CHECKOUT_USER_COL",
+                        "error_field": "ERROR_COL",
+                        "system_id_field": "SYSTEM_COL",
+                        "module_join_field": "MK_ID_COL",
+                    }
+                }
+            },
+            {"mk_id": "MK-001", "system_id": "SYS-001"},
+            {"allow_unchecked_check_out_user_ids": ["U000001012"]},
+        )
+
+        self.assertIn("p.MK_ID_COL = %s", sql)
+        self.assertIn("p.SYSTEM_COL = %s", sql)
+        self.assertIn("(p.CHECK_IN_COL IS NOT NULL OR p.CHECKOUT_USER_COL IN ('U000001012'))", sql)
+        self.assertEqual(["MK-001", "SYS-001"], params)
 
     def test_page_source_path_includes_module_name(self):
         row = {

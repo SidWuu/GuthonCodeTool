@@ -289,7 +289,21 @@ def db_connect(ds: dict):
     )
 
 
-def page_sql(table_cfg: dict):
+def _source_available_sql(alias: str, cfg: dict, rules: dict | None):
+    check_in = f"{_field(alias, cfg['check_in_date_field'])} IS NOT NULL"
+    users = (rules or {}).get("allow_unchecked_check_out_user_ids") or []
+    check_out_field = cfg.get("check_out_user_id_field")
+    if not users or not check_out_field:
+        return check_in
+    quoted = ", ".join(_sql_quote(str(user)) for user in users)
+    return f"({check_in} OR {_field(alias, check_out_field)} IN ({quoted}))"
+
+
+def _sql_quote(value: str):
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _page_select(table_cfg: dict):
     cfg = _source_table_cfg(table_cfg, PAGE_SOURCE_TYPE)
     module_table = cfg.get("module_table_name")
     mk_name = "NULL"
@@ -297,7 +311,7 @@ def page_sql(table_cfg: dict):
     if module_table:
         mk_name = _field("m", cfg["module_name_field"])
         join = f"LEFT JOIN {_name(module_table)} m ON {_field('p', cfg['module_join_field'])} = {_field('m', cfg['module_join_field'])}"
-    return f"""
+    return cfg, f"""
 SELECT
     '{PAGE_SOURCE_TYPE}' AS source_table,
     {_field('p', cfg['id_field'])} AS source_id,
@@ -317,7 +331,14 @@ SELECT
     {mk_name} AS mk_name
 FROM {_name(cfg['source_table_name'])} p
 {join}
-WHERE {_field('p', cfg['check_in_date_field'])} IS NOT NULL
+"""
+
+
+def page_sql(table_cfg: dict, rules: dict | None = None):
+    cfg, select = _page_select(table_cfg)
+    return f"""
+{select}
+WHERE {_source_available_sql('p', cfg, rules)}
   AND ({_field('p', cfg.get('error_field'))} IS NULL OR {_field('p', cfg.get('error_field'))} <> '1')
   AND ({_field('p', cfg['update_time_field'])} >= %s OR {_field('p', cfg['check_in_date_field'])} >= %s)
   {{system_filter}}
@@ -325,7 +346,7 @@ ORDER BY {_field('p', cfg['update_time_field'])}, {_field('p', cfg['id_field'])}
 """
 
 
-def proc_sql(table_cfg: dict):
+def proc_sql(table_cfg: dict, rules: dict | None = None):
     cfg = _source_table_cfg(table_cfg, PROCEDURE_SOURCE_TYPE)
     return f"""
 SELECT
@@ -347,7 +368,7 @@ SELECT
     {_field('p', cfg['data_source_id_field'])} AS data_source_id
 FROM {_name(cfg['procedure_table_name'])} p
 JOIN {_name(cfg['source_table_name'])} s ON {_field('p', cfg['join_field'])} = {_field('s', cfg['join_field'])}
-WHERE {_field('s', cfg['check_in_date_field'])} IS NOT NULL
+WHERE {_source_available_sql('s', cfg, rules)}
   AND ({_field('s', cfg.get('error_field'))} IS NULL OR {_field('s', cfg.get('error_field'))} <> '1')
   AND ({_field('s', cfg['update_time_field'])} >= %s OR {_field('s', cfg['check_in_date_field'])} >= %s)
   {{data_source_filter}}
@@ -355,15 +376,30 @@ ORDER BY {_field('s', cfg['update_time_field'])}, {_field('s', cfg['id_field'])}
 """
 
 
-def single_source_sql(table_cfg: dict, source_type: str, payload: dict):
+def module_page_sql(table_cfg: dict, row: dict, rules: dict | None = None):
+    cfg, select = _page_select(table_cfg)
+    if not cfg.get("module_join_field"):
+        raise SystemExit("page module_join_field is required for module pull")
+    filters = [f"{_field('p', cfg['module_join_field'])} = %s"]
+    params = [row["mk_id"]]
+    if row.get("system_id"):
+        filters.append(f"{_field('p', cfg['system_id_field'])} = %s")
+        params.append(row["system_id"])
+    return (
+        f"""
+{select}
+WHERE {_source_available_sql('p', cfg, rules)}
+  AND ({_field('p', cfg.get('error_field'))} IS NULL OR {_field('p', cfg.get('error_field'))} <> '1')
+  AND {' AND '.join(filters)}
+ORDER BY {_field('p', cfg['update_time_field'])} DESC, {_field('p', cfg['id_field'])} DESC
+""",
+        params,
+    )
+
+
+def single_source_sql(table_cfg: dict, source_type: str, payload: dict, rules: dict | None = None):
     if source_type == PAGE_SOURCE_TYPE:
-        cfg = _source_table_cfg(table_cfg, PAGE_SOURCE_TYPE)
-        module_table = cfg.get("module_table_name")
-        mk_name = "NULL"
-        join = ""
-        if module_table:
-            mk_name = _field("m", cfg["module_name_field"])
-            join = f"LEFT JOIN {_name(module_table)} m ON {_field('p', cfg['module_join_field'])} = {_field('m', cfg['module_join_field'])}"
+        cfg, select = _page_select(table_cfg)
         filters = []
         params = []
         if payload.get("sourceId"):
@@ -376,26 +412,8 @@ def single_source_sql(table_cfg: dict, source_type: str, payload: dict):
             raise SystemExit("page sourceId or alias is required")
         return (
             f"""
-SELECT
-    '{PAGE_SOURCE_TYPE}' AS source_table,
-    {_field('p', cfg['id_field'])} AS source_id,
-    {_field('p', cfg['alias_field'])} AS source_alias_id,
-    '' AS fun_id,
-    {_field('p', cfg['name_field'])} AS source_name,
-    {_field('p', cfg['content_field'])} AS source_content,
-    {_field('p', cfg['update_time_field'])} AS update_time,
-    {_field('p', cfg.get('check_out_user_id_field'))} AS check_out_user_id,
-    {_field('p', cfg.get('check_out_date_field'))} AS check_out_date,
-    {_field('p', cfg['check_in_date_field'])} AS check_in_date,
-    {_field('p', cfg.get('version_mac_field'))} AS version_mac,
-    {_field('p', cfg.get('error_field'))} AS is_error,
-    {_field('p', cfg.get('error_message_field'))} AS err_msg,
-    {_field('p', cfg['system_id_field'])} AS system_id,
-    {_field('p', cfg.get('module_join_field'))} AS mk_id,
-    {mk_name} AS mk_name
-FROM {_name(cfg['source_table_name'])} p
-{join}
-WHERE {_field('p', cfg['check_in_date_field'])} IS NOT NULL
+{select}
+WHERE {_source_available_sql('p', cfg, rules)}
   AND ({_field('p', cfg.get('error_field'))} IS NULL OR {_field('p', cfg.get('error_field'))} <> '1')
   AND {' AND '.join(filters)}
 ORDER BY {_field('p', cfg['update_time_field'])} DESC, {_field('p', cfg['id_field'])} DESC
@@ -440,7 +458,7 @@ SELECT
     {_field('p', cfg['data_source_id_field'])} AS data_source_id
 FROM {_name(cfg['procedure_table_name'])} p
 JOIN {_name(cfg['source_table_name'])} s ON {_field('p', cfg['join_field'])} = {_field('s', cfg['join_field'])}
-WHERE {_field('s', cfg['check_in_date_field'])} IS NOT NULL
+WHERE {_source_available_sql('s', cfg, rules)}
   AND ({_field('s', cfg.get('error_field'))} IS NULL OR {_field('s', cfg.get('error_field'))} <> '1')
   AND {' AND '.join(filters)}
 ORDER BY {_field('s', cfg['update_time_field'])} DESC, {_field('s', cfg['id_field'])} DESC
@@ -502,8 +520,9 @@ def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, 
     ds_name = layer_cfg["datasource"]
     ds = cfg["datasource"]["datasource"][ds_name]
     table_cfg = cfg["source_tables"]
-    page_query, page_params = _scoped_sql(page_sql(table_cfg), cfg["_system_scope"], "system", table_cfg)
-    proc_query, proc_params = _scoped_sql(proc_sql(table_cfg), cfg["_system_scope"], "data_source", table_cfg)
+    rules = cfg["sync"].get("rules") or {}
+    page_query, page_params = _scoped_sql(page_sql(table_cfg, rules), cfg["_system_scope"], "system", table_cfg)
+    proc_query, proc_params = _scoped_sql(proc_sql(table_cfg, rules), cfg["_system_scope"], "data_source", table_cfg)
     with db_connect(ds) as remote:
         with remote.cursor() as cur:
             for sql, extra_params in ((page_query, page_params), (proc_query, proc_params)):
@@ -674,7 +693,7 @@ def _walk_scripts(value, path=None):
         label = str(value.get("aliasName") or value.get("name") or value.get("id") or "")
         next_path = path + ([label] if label else [])
         for key, child in value.items():
-            if key in SCRIPT_KEYS and isinstance(child, str) and child.strip():
+            if key in SCRIPT_KEYS and isinstance(child, str) and (child.strip() or key == "compScript"):
                 yield next_path, key, child
             else:
                 yield from _walk_scripts(child, next_path)
@@ -934,22 +953,44 @@ def _path_after_marker(path: Path, marker: tuple[str, ...]) -> Path:
 def pull_source_to_work_copy(payload: dict):
     cfg = load_config()
     layer, product_id, project_id, layer_cfg = resolve_pull_scope(cfg, payload)
+    rules = cfg["sync"].get("rules") or {}
     conn = connect_index(ROOT / cfg["sync"]["sync"]["index_db"])
-    sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload)
+    sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload, rules)
     ds = cfg["datasource"]["datasource"][layer_cfg["datasource"]]
     with db_connect(ds) as remote:
         with remote.cursor() as cur:
             cur.execute(sql, params)
             row = cur.fetchone()
+            rows = [row] if row else []
+            if row and payload["sourceType"] == PAGE_SOURCE_TYPE and row.get("mk_id"):
+                module_sql, module_params = module_page_sql(cfg["source_tables"], row, rules)
+                cur.execute(module_sql, module_params)
+                rows = cur.fetchall()
     if not row:
-        raise SystemExit("Source not found in source table")
-    if not _included(layer_cfg, row):
+        allowed = ", ".join(rules.get("allow_unchecked_check_out_user_ids") or []) or "none"
+        raise SystemExit(
+            "Source not found or filtered. "
+            f"type={payload.get('sourceType')}, sourceId={payload.get('sourceId') or ''}, "
+            f"alias={payload.get('alias') or ''}, funId={payload.get('funId') or ''}. "
+            f"Allowed source must be checked in or checked out by configured users: {allowed}."
+        )
+    rows = [candidate for candidate in rows if _included(layer_cfg, candidate)]
+    if not rows:
         raise SystemExit("Source is outside configured include scope")
-    upsert_source(conn, row, layer, product_id, project_id, layer_cfg, cfg["_system_scope"])
+    targets = []
+    for candidate in rows:
+        upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"])
     conn.commit()
-    target = create_work_copy_from_row(conn, cfg, row, product_id, project_id)
+    for candidate in rows:
+        targets.append(create_work_copy_from_row(conn, cfg, candidate, product_id, project_id))
     conn.commit()
-    return {"ok": True, "workCopyPath": str(target), "source": {key: _str(row.get(key)) for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")}}
+    work_copy_path = os.path.commonpath([str(target) for target in targets])
+    return {
+        "ok": True,
+        "workCopyPath": work_copy_path,
+        "pulled": len(targets),
+        "source": {key: _str(row.get(key)) for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},
+    }
 
 
 def resolve_pull_scope(cfg: dict, payload: dict):
