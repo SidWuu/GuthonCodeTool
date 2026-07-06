@@ -1,144 +1,193 @@
 # GuthonCodeTool
 
-GuthonCodeTool 是面向谷神低码开发平台的本地开发工具集。
+GuthonCodeTool 是面向谷神低代码开发平台的本地开发工具集。它负责把平台源码、数据库结构、单据类型和页面辅助信息整理到本地，方便检索、分析和辅助开发。
 
-它的目标是把平台中的源码、页面结构和调用关系整理到本地，方便检索、分析和辅助开发。仓库只保存工具代码、配置模板和说明文档，不保存业务源码、数据库凭据或本地运行数据。
+根仓库只保存工具代码、配置模板和说明文档；源码、表结构、运行索引等本机私有内容放在 `var/`，并由 `var/` 自己的私有 Git 仓库管理。
 
 ## 功能
 
-### 源码同步
+### 源码 Hub
 
-- 从谷神开发平台数据库只读同步已签入源码。
-- 支持产品层源码和项目层源码。
-- 支持按当前开发对象同步，避免每次拉取全部产品和项目。
-- 支持按子系统过滤页面和过程函数。
-- 支持增量同步和全量同步。
+- 从谷神源码表拉取页面和过程函数源码。
+- 支持产品层、项目层和项目 effective 源码视图。
+- 支持 `sync.ACTIVE` 只处理当前产品或项目。
+- 支持按子系统和数据源过滤。
+- 支持已签入源码，也支持配置指定签出人的未签入源码。
+- 手动源码表拉取会强制重写本地 readonly，确保解析规则变化后重新生成文件。
 
-### 本地源码组织
+### 页面源码
 
-- 页面按子系统、模块、页面名称组织目录。
-- 过程函数按子系统、过程别名、函数名组织目录。
-- 多个子系统共用同一个数据源时，过程函数只保存一份，其余子系统目录通过链接指向同一份源码。
-- 空源码会保留元数据，不生成空脚本文件。
+- 页面按 `{子系统}/page/{模块}/{页面名 页面ID}` 组织。
+- 页面原始 JSON 保存为 `raw.json`。
+- 页面脚本、SQL、服务组件脚本拆到 `scripts/`。
+- 服务组件 `compScript` 即使为空，也会生成空的 `compScript.vm`。
+- 拉取 PAGE 时会先定位目标页，再按同 `MK_ID + SYSTEM_ID` 拉取同菜单下所有页面。
 
-### 脚本拆分
+### 过程函数源码
 
-- 页面原始 JSON 会保留。
-- 页面中的前端脚本、后端脚本和 SQL 会拆分为独立文件。
-- 服务组件脚本会拆分为可直接阅读的脚本文件。
-- 过程函数会保存为独立脚本文件。
+- 过程函数按 `{子系统}/procedure/{过程别名}/{函数名}` 组织。
+- 过程函数源码保存为 `source.vm`。
+- 多个子系统共用同一个数据源时，过程函数只保存一份，其余子系统目录用链接指向同一份源码。
 
-### 索引生成
+### 工作副本
+
+- 从 readonly 或 effective 源码生成 `var/source/workcopy`。
+- 工作副本保留 `source-meta.json` 和 `diff.md`。
+- 工具不自动回写平台，修改结果由人工复制回谷神平台保存、提交、签入。
+
+### 索引和知识
 
 - 生成产品源码索引。
 - 生成项目 effective 源码索引。
 - 生成静态调用索引。
-- 记录低置信动态调用点，供人工继续判断。
-- 索引用 Markdown 输出，方便 Codex 和人工阅读。
+- 记录低置信动态调用点。
+- Markdown 索引输出到 `var/knowledge`，便于人工和 AI 助手阅读。
 
-### Effective 源码视图
+### 数据库结构
 
-- 项目源码优先于产品源码。
-- 项目没有覆盖时使用产品源码兜底。
-- 生成项目最终生效源码目录，方便按项目维度分析。
+- `scripts/export_table_schema_sql.py` 直接通过 SQL 查询 `gd_tables`、`gd_tables_field`、`gd_system`。
+- 只查询 `config/sync.yaml` 中 `rules.table_schema_data_source_ids` 配置的数据源。
+- 输出精简后的表结构 JSON 到 `var/database/schema`。
 
-### 工作副本
+### 单据类型
 
-- 可从产品源码生成工作副本。
-- 可从项目 effective 源码生成工作副本。
-- 也支持手动复制源码或通过浏览器扩展拉取到工作副本目录。
-- 工具不自动回写平台，修改结果由人工复制回谷神平台保存、提交、签入。
+- `scripts/export_bill_type_sql.py` 直接通过 SQL 查询 `gd_bill_type`、`gd_system`。
+- 只查询 `rules.table_schema_data_source_ids` 配置的数据源。
+- 输出精简后的单据类型 JSON 到 `var/database/billtype`。
 
 ### Guthon Bridge
 
-仓库内包含一个 Chrome 扩展和本地 HTTP 桥接服务：
+仓库内包含 Chrome 扩展和本地 HTTP 桥接服务：
 
-- 在谷神过程函数页面通过 `源码拉取` 按钮从源码表拉取并生成工作副本。
-- 可选调用 Hub，从源码表拉取已存入源码并生成 `var/source/workcopy`。
-- 在模块开发页面打开复制模式，查看并复制页面字段结构。
+- 过程函数页右侧悬浮按钮可从源码表拉取当前函数并生成工作副本。
+- Chrome 扩展弹窗可拉取过程函数或 PAGE 源码表版本。
+- 模块开发页可打开复制模式，查看并复制页面字段结构。
+- 本地 bridge 默认监听 `127.0.0.1:17361`。
 
 ## 目录
 
 ```text
 config/                 本地配置模板和配置说明
 plugins/GuthonBridge/   Chrome 扩展和本地桥接服务
-scripts/                源码同步、索引和工作副本脚本
-tests/                  同步工具测试
-var/                    本地生成物，不提交
+scripts/                源码、表结构、单据类型脚本
+tests/                  Python 脚本测试
+var/                    本地私有数据和源码仓库，根仓库忽略
 开发文档.md              源码 Hub 当前实现口径
 ```
 
-## 本地生成物
+`scripts/temp/` 存放旧工具脚本，仅作迁移参考，不作为新功能入口。
 
-运行后会生成：
+## var 目录
+
+`var/` 是本机私有工作区，根仓库不跟踪。查看源码、表结构或运行结果差异时进入 `var/`：
+
+```bash
+cd var
+git status
+git diff
+```
+
+常用结构：
 
 ```text
-var/source/readonly/    已签入源码只读镜像
+var/source/readonly/    从源码表导出的只读镜像
 var/source/effective/   项目最终生效源码
+var/source/workcopy/    开发工作副本
+var/database/schema/    表结构 JSON
+var/database/billtype/  单据类型 JSON
 var/knowledge/          Markdown 索引
-var/source/workcopy/    临时修改副本
 var/runtime/index/      本地 SQLite 索引库
 ```
 
-这些目录只用于本机开发，不提交到仓库。
-
 ## 配置
 
-配置模板位于：
+复制模板后填写本地配置：
 
-```text
-config/example/
+```bash
+cp config/example/datasource.example.yaml config/datasource.yaml
+cp config/example/products.example.yaml config/products.yaml
+cp config/example/projects.example.yaml config/projects.yaml
+cp config/example/source-tables.example.yaml config/source-tables.yaml
+cp config/example/sync.example.yaml config/sync.yaml
+cp config/example/systems.example.yaml config/systems.yaml
 ```
 
-需要本地复制并填写：
+关键配置：
 
-```text
-config/datasource.yaml
-config/products.yaml
-config/projects.yaml
-config/source-tables.yaml
-config/sync.yaml
-config/systems.yaml
-config/system-data.json
+```yaml
+sync:
+  ACTIVE: products.gdrm-product
+
+rules:
+  allow_unchecked_check_out_user_ids:
+    - U000001012
+  table_schema_data_source_ids:
+    - "0000"
+    - "0008"
+    - "0015"
+    - "0018"
+    - "0019"
+    - "0021"
 ```
 
-本地配置和系统数据默认不提交。
+`allow_unchecked_check_out_user_ids` 控制哪些签出人的未签入源码允许被同步或拉取。
 
-## 使用方式
+`table_schema_data_source_ids` 同时控制表结构和单据类型 SQL 导出的数据源范围。
 
-初始化索引库：
+## 使用
+
+初始化源码索引库：
 
 ```bash
 .venv/bin/python scripts/run_sync_once.py --init-only
 ```
 
-按当前配置同步：
+按当前 `sync.ACTIVE` 同步源码：
 
 ```bash
 .venv/bin/python scripts/run_sync_once.py
 ```
 
-生成工作副本：
+从已有源码索引生成工作副本：
 
 ```bash
-.venv/bin/python scripts/create_work_copy.py --product <product_id> --type <source_type> --alias <alias> --fun <fun_id>
+.venv/bin/python scripts/create_work_copy.py --product <product_id> --type procedure --alias <procedure_alias> --fun <fun_id>
+.venv/bin/python scripts/create_work_copy.py --project <project_id> --type page --alias <page_alias>
 ```
 
-```bash
-.venv/bin/python scripts/create_work_copy.py --project <project_id> --type <source_type> --alias <alias> --fun <fun_id>
-```
-
-从源码表拉取单个对象并生成工作副本：
+从源码表直接拉取并生成工作副本：
 
 ```bash
 .venv/bin/python scripts/pull_source_to_work_copy.py --type procedure --alias <procedure_alias> --fun <fun_id>
+.venv/bin/python scripts/pull_source_to_work_copy.py --type page --source-id <page_id>
+.venv/bin/python scripts/pull_source_to_work_copy.py --type page --alias <page_alias>
 ```
+
+未显式传 `--project-id` 或 `--product-id` 时，使用 `config/sync.yaml` 的 `sync.ACTIVE`。
+
+导出表结构：
 
 ```bash
-.venv/bin/python scripts/pull_source_to_work_copy.py --type page --source-id <page_id>
+.venv/bin/python scripts/export_table_schema_sql.py
 ```
 
-未显式传 `--project-id` 或 `--product-id` 时，使用 `config/sync.yaml` 的 `sync.ACTIVE`。工作副本会按源码目录结构写入 `var/source/workcopy/{产品或项目}/{子系统}/...`。
+临时覆盖数据源范围：
+
+```bash
+.venv/bin/python scripts/export_table_schema_sql.py --data-source-ids 0015,0018
+```
+
+导出单据类型：
+
+```bash
+.venv/bin/python scripts/export_bill_type_sql.py
+```
+
+临时覆盖数据源范围：
+
+```bash
+.venv/bin/python scripts/export_bill_type_sql.py --data-source-ids 0015,0008
+```
 
 启动浏览器桥接服务：
 
@@ -147,13 +196,66 @@ cd plugins/GuthonBridge
 npm run start:bridge
 ```
 
+## 输出格式
+
+页面源码目录常见文件：
+
+```text
+meta.json
+raw.json
+scripts/*.js
+scripts/*.sql
+scripts/*.vm
+README.md
+```
+
+过程函数目录常见文件：
+
+```text
+meta.json
+source.vm
+README.md
+```
+
+表结构 JSON 保留常用字段：
+
+```text
+tableId, tableName, dataSourceId, systemName, systemAliasId,
+cacheType, cacheKey, cacheDataField, fields
+```
+
+字段 JSON 保留常用字段：
+
+```text
+fieldId, fieldName, dataType, dataLength, dataPrecision,
+isPrimary, isCanNull, isIncrement, defaultValue, fieldRemark,
+dataAuthField, isCipher, orderNo
+```
+
+单据类型 JSON 保留常用字段：
+
+```text
+billTypeCode, billTypeName, tableId, tablePkids, status,
+billCodeMode, billCodeMark, billSeqLength, startCode, stepNum,
+billDateType, billCheck, billCheckMode, billCheckPrint, billClose,
+billPrintNum, isProduct, billTypeRemark, fields
+```
+
+空值字段会被省略。
+
 ## 验证
 
-同步工具：
+Python 脚本：
 
 ```bash
-.venv/bin/python -m unittest discover -s tests
-.venv/bin/python -m py_compile scripts/gusen_hub.py scripts/run_sync_once.py scripts/create_work_copy.py scripts/pull_source_to_work_copy.py
+python3 -m unittest discover -s tests
+python3 -m py_compile \
+  scripts/gusen_hub.py \
+  scripts/run_sync_once.py \
+  scripts/create_work_copy.py \
+  scripts/pull_source_to_work_copy.py \
+  scripts/export_table_schema_sql.py \
+  scripts/export_bill_type_sql.py
 ```
 
 浏览器扩展和本地 bridge：
@@ -172,4 +274,5 @@ node --check extension/background.js
 
 - [config/README.md](config/README.md)
 - [plugins/GuthonBridge/README.md](plugins/GuthonBridge/README.md)
+- [var/README.md](var/README.md)
 - [开发文档.md](开发文档.md)

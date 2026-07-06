@@ -563,7 +563,7 @@ def _included(layer_cfg, row):
     return any((row["source_alias_id"] or "").startswith(prefix) for prefix in prefixes)
 
 
-def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_scope):
+def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_scope, force=False):
     change_key = _change_key(row)
     source_alias_id = _source_alias_id(row)
     existing = conn.execute(
@@ -573,7 +573,7 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
         """,
         (layer, product_id, project_id, row["source_table"], row["source_id"], row["fun_id"] or ""),
     ).fetchone()
-    if existing and existing["change_key"] == change_key:
+    if existing and existing["change_key"] == change_key and not force:
         return False
     local_path, status, scripts = write_source(row, layer, product_id, project_id, layer_cfg, system_scope, change_key)
     indexed_time = _now()
@@ -979,7 +979,7 @@ def pull_source_to_work_copy(payload: dict):
         raise SystemExit("Source is outside configured include scope")
     targets = []
     for candidate in rows:
-        upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"])
+        upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"], force=True)
     conn.commit()
     for candidate in rows:
         targets.append(create_work_copy_from_row(conn, cfg, candidate, product_id, project_id))
