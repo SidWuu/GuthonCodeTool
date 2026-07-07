@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import json
 import re
+import sys
 from pathlib import Path
 
 import gusen_hub
@@ -141,6 +142,15 @@ def export_table_schema(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=Non
     tables = fetch_rows(conn, "gd_tables", data_source_ids, table_ids)
     fields = fetch_rows(conn, "gd_tables_field", data_source_ids, table_ids)
     systems = fetch_rows(conn, "gd_system", data_source_ids)
+    if table_ids:
+        found_ids = {str(table.get("TABLE_ID") or "") for table in tables}
+        missing_ids = [table_id for table_id in table_ids if table_id not in found_ids]
+        if missing_ids:
+            raise ValueError(
+                "Table schema not found. "
+                f"data_source_ids={','.join(data_source_ids)}, "
+                f"missing_table_ids={','.join(missing_ids)}"
+            )
 
     system_by_data_source = {}
     for system in systems:
@@ -220,8 +230,12 @@ def main(argv=None):
 
     data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else load_default_data_source_ids()
     table_ids = normalize_table_ids(args.table_ids)
-    with gusen_hub.db_connect(load_datasource(args.datasource)) as conn:
-        summary = export_table_schema(conn, Path(args.output_dir), data_source_ids=data_source_ids, table_ids=table_ids)
+    try:
+        with gusen_hub.db_connect(load_datasource(args.datasource)) as conn:
+            summary = export_table_schema(conn, Path(args.output_dir), data_source_ids=data_source_ids, table_ids=table_ids)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     result = {"ok": True, **summary, "outputDir": args.output_dir}
     gusen_hub.append_pull_log(
         "database",
@@ -240,4 +254,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

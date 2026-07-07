@@ -783,6 +783,10 @@ async function runInMainWorld(tabId, command, payload) {
       }
 
       function getDataSourceId() {
+        const selectedValue = getLabeledSelectValue("数据源");
+        if (/^\d{4}$/.test(selectedValue)) {
+          return selectedValue;
+        }
         for (const vm of getAllVueInstances()) {
           const dataSourceId =
             vm?.$store?.state?.modeDev?.dataSourceId ||
@@ -791,6 +795,20 @@ async function runInMainWorld(tabId, command, payload) {
             vm?.page?.dataSourceId;
           if (dataSourceId) {
             return String(dataSourceId);
+          }
+        }
+        return "";
+      }
+
+      function getLabeledSelectValue(labelText) {
+        const labels = Array.from(document.querySelectorAll(".el-form-item__label,label,span,div")).filter((item) => isVisible(item) && String(item.innerText || item.textContent || "").trim() === labelText);
+        for (const label of labels) {
+          const scope = label.closest(".el-form-item") || label.parentElement;
+          const select = scope?.querySelector(".el-select");
+          const vm = getVueInstance(select);
+          const value = pickFirst(vm, ["value", "modelValue", "selected", "currentValue"]);
+          if (value !== undefined) {
+            return String(value);
           }
         }
         return "";

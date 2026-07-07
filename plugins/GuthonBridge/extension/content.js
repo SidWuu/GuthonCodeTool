@@ -4,7 +4,6 @@ const COPY_ROOT_ID = "guthon-bridge-copy-root";
 const SCHEMA_ROOT_ID = "guthon-bridge-schema-root";
 const BILLTYPE_ROOT_ID = "guthon-bridge-billtype-root";
 const COPY_OVERLAY_ID = "guthon-bridge-copy-overlay";
-const FLOATING_POSITION_KEY = "guthonBridgeFloatingPosition";
 
 let gIntervalId = null;
 let gTreeScrollListenerInstalled = false;
@@ -158,15 +157,22 @@ function setButtonText(root, text) {
   root.querySelector("button").textContent = text;
 }
 
+function setButtonTextNode(button, text) {
+  button.textContent = text;
+}
+
 function setMessage(root, message, tone = "idle") {
   const messageEl = root.querySelector(".guthon-bridge-message");
+  if (!messageEl) {
+    return;
+  }
   messageEl.textContent = message;
   messageEl.dataset.tone = tone;
   if (message) {
     clearTimeout(root.__guthonMessageTimer);
     root.__guthonMessageTimer = setTimeout(() => {
       messageEl.textContent = "";
-    }, tone === "error" ? 8000 : 2400);
+    }, 10000);
   }
 }
 
@@ -239,23 +245,69 @@ function ensureInlineStyles() {
     .guthon-bridge-inline {
       position: fixed;
       display: flex;
-      align-items: center;
+      flex-direction: column;
+      align-items: flex-end;
       gap: 6px;
+      width: max-content;
+      min-width: 108px;
+      padding: 0;
       pointer-events: auto;
-      cursor: move;
       user-select: none;
     }
+    .guthon-bridge-inline button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 108px;
+      min-width: 108px;
+      height: 32px;
+      margin: 0;
+      padding: 7px 10px;
+      border: 1px solid #409eff;
+      border-radius: 3px;
+      background: #409eff;
+      box-shadow: none;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 1;
+      text-align: center;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .guthon-bridge-inline button + button {
+      margin-left: 0;
+    }
+    .guthon-bridge-inline button span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    .guthon-bridge-inline button:hover,
+    .guthon-bridge-inline button:focus {
+      color: #fff;
+      background: #337ecc;
+      border-color: #337ecc;
+    }
     .guthon-bridge-message {
-      max-width: 320px;
+      position: absolute;
+      left: 0;
+      bottom: calc(100% + 8px);
+      box-sizing: border-box;
+      width: 140px;
+      max-width: calc(100vw - 40px);
       color: #606266;
       font-size: 12px;
       background: rgba(255, 255, 255, 0.92);
       border: 1px solid #ebeef5;
       border-radius: 3px;
       padding: 2px 6px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      word-break: break-all;
+      white-space: normal;
+      pointer-events: auto;
+      user-select: text;
     }
     .guthon-bridge-message:empty {
       display: none;
@@ -416,89 +468,20 @@ function positionFloatingRoot(root, row = 0) {
   if (!root) {
     return false;
   }
-  const saved = readFloatingPosition();
-  const left = saved?.left ?? 34;
-  const top = (saved?.top ?? Math.max(80, window.innerHeight - 360)) + row * 40;
-  root.style.left = "auto";
+  void row;
+  root.style.left = "20px";
   root.style.right = "auto";
-  root.style.left = `${Math.max(8, Math.min(window.innerWidth - 120, left))}px`;
-  root.style.top = `${Math.max(8, Math.min(window.innerHeight - 44, top))}px`;
+  root.style.top = "auto";
+  root.style.bottom = "260px";
   root.style.zIndex = "2147483646";
-  installFloatingDrag(root);
   return true;
 }
 
-function readFloatingPosition() {
-  try {
-    return JSON.parse(localStorage.getItem(FLOATING_POSITION_KEY) || "null");
-  } catch {
-    return null;
-  }
-}
-
-function saveFloatingPosition(left, top) {
-  localStorage.setItem(FLOATING_POSITION_KEY, JSON.stringify({ left: Math.round(left), top: Math.round(top) }));
-}
-
-function installFloatingDrag(root) {
-  if (root.__guthonDragInstalled) {
-    return;
-  }
-  root.__guthonDragInstalled = true;
-  root.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) {
-      return;
-    }
-    const rect = root.getBoundingClientRect();
-    const state = {
-      startX: event.clientX,
-      startY: event.clientY,
-      left: rect.left,
-      top: rect.top,
-      moved: false
-    };
-    root.setPointerCapture?.(event.pointerId);
-    const move = (moveEvent) => {
-      const dx = moveEvent.clientX - state.startX;
-      const dy = moveEvent.clientY - state.startY;
-      if (Math.abs(dx) + Math.abs(dy) > 3) {
-        state.moved = true;
-      }
-      const left = Math.max(8, Math.min(window.innerWidth - root.offsetWidth - 8, state.left + dx));
-      const top = Math.max(8, Math.min(window.innerHeight - root.offsetHeight - 8, state.top + dy));
-      root.style.left = `${Math.round(left)}px`;
-      root.style.top = `${Math.round(top)}px`;
-      saveFloatingPosition(left, top);
-    };
-    const up = () => {
-      root.removeEventListener("pointermove", move);
-      root.removeEventListener("pointerup", up);
-      root.removeEventListener("pointercancel", up);
-      if (state.moved) {
-        root.__guthonSuppressClick = true;
-        setTimeout(() => {
-          root.__guthonSuppressClick = false;
-        }, 0);
-      }
-    };
-    root.addEventListener("pointermove", move);
-    root.addEventListener("pointerup", up);
-    root.addEventListener("pointercancel", up);
-  });
-  root.addEventListener("click", (event) => {
-    if (root.__guthonSuppressClick) {
-      event.stopPropagation();
-      event.preventDefault();
-    }
-  }, true);
-}
-
-async function pullCurrentProcedure(root) {
-  const button = root.querySelector("button");
+async function pullCurrentProcedure(root, button = root.querySelector("button")) {
   try {
     button.disabled = true;
-    setButtonText(root, "源码拉取");
-    setButtonTitle(root, "正在从源码表拉取...");
+    setButtonTextNode(button, "源码拉取");
+    button.title = "正在从源码表拉取...";
     setMessage(root, "正在从源码表拉取...", "busy");
 
     let bridgeHealth;
@@ -511,9 +494,9 @@ async function pullCurrentProcedure(root) {
       throw new Error(`本地桥接服务不可用: ${bridgeHealth?.message || "unknown"}`);
     }
 
-    const inspected = await runPageCommand("inspectCurrentProcedure");
+    const inspected = await runPageCommand(isModuleRoute() ? "inspectCurrentPageSource" : "inspectCurrentProcedure");
     if (!inspected?.ok) {
-      throw new Error(`识别当前函数失败: ${inspected?.message || "未识别到当前过程函数"}`);
+      throw new Error(`${isModuleRoute() ? "识别当前页面失败" : "识别当前函数失败"}: ${inspected?.message || (isModuleRoute() ? "未识别到当前页面" : "未识别到当前过程函数")}`);
     }
 
     let target = inspected.data;
@@ -536,10 +519,10 @@ async function pullCurrentProcedure(root) {
       pullResult = await sendRuntimeMessage({
         type: "pull-hub-source",
         payload: {
-          sourceType: "procedure",
-          sourceId: target.procedureId || "",
+          sourceType: target.mode === "page-source" ? "page" : "procedure",
+          sourceId: target.mode === "page-source" ? target.pageId || "" : target.procedureId || "",
           alias: target.procedureKeyword || target.procedureName || "",
-          funId: target.funId || ""
+          funId: target.mode === "page-source" ? "" : target.funId || ""
         }
       });
     } catch (error) {
@@ -550,16 +533,16 @@ async function pullCurrentProcedure(root) {
     }
 
     button.textContent = "成功";
-    setButtonTitle(root, `源码拉取成功: ${pullResult.workCopyPath}`);
+    button.title = `源码拉取成功: ${pullResult.workCopyPath}`;
     setMessage(root, `成功: ${pullResult.workCopyPath}`, "success");
-    setTimeout(() => setButtonText(root, "源码拉取"), 1600);
+    setTimeout(() => setButtonTextNode(button, "源码拉取"), 1600);
   } catch (error) {
     console.error("Guthon Bridge pull failed", error);
     button.textContent = "失败";
     const message = error?.message || String(error);
-    setButtonTitle(root, message);
+    button.title = message;
     setMessage(root, message, "error");
-    setTimeout(() => setButtonText(root, "源码拉取"), 2200);
+    setTimeout(() => setButtonTextNode(button, "源码拉取"), 2200);
   } finally {
     button.disabled = false;
   }
@@ -668,23 +651,41 @@ function installProcedurePullButton() {
 
   ensureInlineStyles();
   let root = document.getElementById(FLOATING_ROOT_ID);
+  const mode = isModuleRoute() ? "module" : "procedure";
+  if (root && root.dataset.mode !== mode) {
+    root.remove();
+    root = null;
+  }
   if (!root) {
     root = document.createElement("div");
     root.id = FLOATING_ROOT_ID;
     root.className = "guthon-bridge-inline";
-    root.innerHTML = `
-      <button type="button">源码拉取</button>
-      <div class="guthon-bridge-message" data-tone="idle"></div>
-    `;
-    const button = root.querySelector("button");
-    button.className = "el-button el-button--default el-button--mini is-plain guthon-bridge-inline-button";
+    root.dataset.mode = mode;
+    const sourceButton = makeNativeButton("源码拉取", "guthon-bridge-inline-button guthon-bridge-source-button");
+    if (mode === "module") {
+      const copyButton = makeNativeButton("复制模式", "guthon-bridge-copy-button");
+      copyButton.addEventListener("click", async () => {
+        try {
+          await showCopyOverlay();
+        } catch (error) {
+          setButtonTitle(root, error?.message || String(error));
+          setMessage(root, error?.message || String(error), "error");
+        }
+      });
+      root.appendChild(copyButton);
+    }
+    root.appendChild(sourceButton);
+    const message = document.createElement("div");
+    message.className = "guthon-bridge-message";
+    message.dataset.tone = "idle";
+    root.appendChild(message);
 
-    button.addEventListener("click", () => {
-      pullCurrentProcedure(root);
+    sourceButton.addEventListener("click", () => {
+      pullCurrentProcedure(root, sourceButton);
     });
     document.body.appendChild(root);
   }
-  positionBridgeRoot(root, null, 0.72, 1);
+  positionBridgeRoot(root);
 }
 
 function scrollCurrentTreeNode() {
@@ -1260,25 +1261,8 @@ function installCopyModeButton() {
   if (!isSupportedGuthonPage() || !isModuleRoute()) {
     return;
   }
-  ensureInlineStyles();
-  let root = document.getElementById(COPY_ROOT_ID);
-  if (!root) {
-    root = document.createElement("div");
-    root.id = COPY_ROOT_ID;
-    root.className = "guthon-bridge-inline";
-    const button = makeNativeButton("复制模式", "guthon-bridge-copy-button");
-    button.addEventListener("click", async () => {
-      try {
-        await showCopyOverlay();
-      } catch (error) {
-        setButtonTitle(root, error?.message || String(error));
-        setMessage(root, error?.message || String(error), "error");
-      }
-    });
-    root.appendChild(button);
-    document.body.appendChild(root);
-  }
-  positionBridgeRoot(root);
+  removeNode(COPY_ROOT_ID);
+  installProcedurePullButton();
 }
 
 function installTableSchemaButton() {

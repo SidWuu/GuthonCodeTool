@@ -307,6 +307,7 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes("function inspectCurrentHubSourceContext"), true);
   assert.equal(script.includes("function inspectTableSchemaTarget"), true);
   assert.equal(script.includes("function getDataSourceName"), true);
+  assert.equal(script.includes("function getLabeledSelectValue"), true);
   assert.equal(script.includes("[A-Z][A-Z0-9]+_[A-Z0-9_]"), true);
   assert.equal(script.includes('mode === "table-schema"'), true);
   assert.equal(script.includes('mode === "billtype"'), true);
@@ -345,7 +346,7 @@ test("floating procedure button pulls hub source", () => {
     contentScript.indexOf("function removeNode")
   );
 
-  assert.equal(contentScript.includes("<button type=\"button\">源码拉取</button>"), true);
+  assert.equal(contentScript.includes('makeNativeButton("源码拉取"'), true);
   assert.equal(contentScript.includes("拉取到本地</button>"), false);
   assert.equal(contentScript.includes('button.textContent = "成功";'), true);
   assert.equal(contentScript.includes('button.textContent = "失败";'), true);
@@ -364,10 +365,11 @@ test("data table page exposes table schema export action", () => {
   assert.equal(contentScript.includes('type: "export-table-schema"'), true);
   assert.equal(contentScript.includes("isDataTableRoute"), true);
   assert.equal(contentScript.includes("positionFloatingRoot"), true);
-  assert.equal(contentScript.includes("installFloatingDrag"), true);
-  assert.equal(contentScript.includes("guthonBridgeFloatingPosition"), true);
+  assert.equal(contentScript.includes('root.style.left = "20px"'), true);
+  assert.equal(contentScript.includes('root.style.bottom = "260px"'), true);
   assert.equal(backgroundScript.includes("/exportTableSchema"), true);
   assert.equal(pageBridge.includes("inspectTableSchemaTarget"), true);
+  assert.equal(pageBridge.includes("getLabeledSelectValue"), true);
   assert.equal(pageBridge.includes("getSelectedTableIds"), true);
 });
 
@@ -405,8 +407,20 @@ test("copy mode button and overlay are available on module page editors", () => 
   );
 
   assert.equal(contentScript.includes("复制模式"), true);
-  assert.equal(contentScript.includes("installProcedurePullButton();\n      installCopyModeButton();"), true);
-  assert.equal(contentScript.includes("positionBridgeRoot(root, null, 0.72, 1);"), true);
+  assert.equal(contentScript.includes("root.dataset.mode = mode;"), true);
+  assert.equal(contentScript.includes('makeNativeButton("复制模式"'), true);
+  assert.equal(contentScript.includes("flex-direction: column"), true);
+  assert.equal(contentScript.includes("display: inline-flex"), true);
+  assert.equal(contentScript.includes("min-width: 108px"), true);
+  assert.equal(contentScript.includes("background: #409eff"), true);
+  assert.equal(contentScript.includes("bottom: calc(100% + 8px)"), true);
+  assert.equal(contentScript.includes("user-select: text"), true);
+  assert.equal(contentScript.includes("width: 140px"), true);
+  assert.equal(contentScript.includes("word-break: break-all"), true);
+  assert.equal(contentScript.includes("installFloatingDrag"), false);
+  assert.equal(contentScript.includes("pullCurrentProcedure(root, sourceButton)"), true);
+  assert.equal(contentScript.includes('isModuleRoute() ? "inspectCurrentPageSource" : "inspectCurrentProcedure"'), true);
+  assert.equal(contentScript.includes('sourceType: target.mode === "page-source" ? "page" : "procedure"'), true);
   assert.equal(contentScript.includes('runPageCommand("collectModuleCopyText")'), true);
   assert.equal(contentScript.includes("collectModulePageFields"), true);
   assert.equal(contentScript.includes("guthon-bridge-copy-overlay"), true);
@@ -457,11 +471,14 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("textarea.select();"), true);
   assert.equal(contentScript.includes("window.__guthonBridgeLoaded"), false);
   assert.equal(contentScript.includes('message?.type !== "show-copy-overlay"'), true);
+  assert.equal(contentScript.includes("removeNode(COPY_ROOT_ID);\n  installProcedurePullButton();"), true);
   assert.equal(contentScript.includes("removeNode(COPY_ROOT_ID);"), true);
   assert.equal(contentScript.includes("removeNode(SCHEMA_ROOT_ID);"), true);
   assert.equal(contentScript.includes("stopExtensionLoops();"), true);
 
   const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
+  assert.equal(pageBridge.includes("function inspectCurrentPageSource"), true);
+  assert.equal(pageBridge.includes('mode: "page-source"'), true);
   assert.equal(pageBridge.includes("collectModuleCopyText"), true);
   assert.equal(pageBridge.includes(".el-table"), true);
   assert.equal(pageBridge.includes("function collectControlGroups"), true);
@@ -544,5 +561,6 @@ test("floating pull shows a visible diagnostic message", () => {
 
   assert.equal(contentScript.includes("guthon-bridge-message"), true);
   assert.equal(contentScript.includes("setMessage(root,"), true);
+  assert.equal(contentScript.includes("}, 10000);"), true);
   assert.equal(contentScript.includes("console.error(\"Guthon Bridge pull failed\""), true);
 });
