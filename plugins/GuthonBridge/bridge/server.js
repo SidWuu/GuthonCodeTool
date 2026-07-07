@@ -12,6 +12,7 @@ const DEFAULT_HUB_PYTHON = path.join(ROOT, ".venv", "bin", "python");
 const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_PYTHON) ? DEFAULT_HUB_PYTHON : "python3");
 const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "scripts", "pull_source_to_work_copy.py");
 const TABLE_SCHEMA_SCRIPT = process.env.GUTHON_TABLE_SCHEMA_SCRIPT || path.join(ROOT, "scripts", "export_table_schema_sql.py");
+const BILL_TYPE_SCRIPT = process.env.GUTHON_BILL_TYPE_SCRIPT || path.join(ROOT, "scripts", "export_bill_type_sql.py");
 const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(ROOT, "var", "runtime", "logs", "pull-log.ndjson");
 
 fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
@@ -116,6 +117,15 @@ function tableSchemaSummary(payload, result = {}) {
   };
 }
 
+function billTypeSummary(payload, result = {}) {
+  return {
+    dataSourceIds: Array.isArray(payload.dataSourceIds) ? payload.dataSourceIds : [],
+    billTypeCodes: Array.isArray(payload.billTypeCodes) ? payload.billTypeCodes : [],
+    exported_bill_type_count: result.exported_bill_type_count ?? "",
+    outputDir: result.outputDir || ""
+  };
+}
+
 function runHubPull(payload) {
   return new Promise((resolve, reject) => {
     const child = spawn(HUB_PYTHON, [HUB_PULL_SCRIPT, "--json-stdin"], {
@@ -179,6 +189,43 @@ function runTableSchemaExport(payload) {
         resolve(JSON.parse(stdout || "{}"));
       } catch (error) {
         reject(new Error(`Table schema command returned invalid JSON: ${error.message}`));
+      }
+    });
+  });
+}
+
+function runBillTypeExport(payload) {
+  return new Promise((resolve, reject) => {
+    const args = [BILL_TYPE_SCRIPT];
+    if (Array.isArray(payload.dataSourceIds) && payload.dataSourceIds.length > 0) {
+      args.push("--data-source-ids", payload.dataSourceIds.join(","));
+    }
+    if (Array.isArray(payload.billTypeCodes) && payload.billTypeCodes.length > 0) {
+      args.push("--bill-type-codes", payload.billTypeCodes.join(","));
+    }
+    const child = spawn(HUB_PYTHON, args, {
+      cwd: ROOT,
+      env: { ...process.env, GUTHON_SUPPRESS_PULL_LOG: "1" },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error((stderr || stdout || `Bill type command failed with exit code ${code}`).trim()));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout || "{}"));
+      } catch (error) {
+        reject(new Error(`Bill type command returned invalid JSON: ${error.message}`));
       }
     });
   });
@@ -296,6 +343,31 @@ const server = http.createServer(async (req, res) => {
       appendPullLog({
         pullType: "database",
         summary: tableSchemaSummary(payload),
+        payload,
+        ok: false,
+        message: error.message
+      });
+      return sendJson(res, 500, { ok: false, message: error.message });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/exportBillType") {
+    let payload = {};
+    try {
+      payload = await readBody(req);
+      const result = await runBillTypeExport(payload);
+      appendPullLog({
+        pullType: "billtype",
+        summary: billTypeSummary(payload, result),
+        payload,
+        result,
+        ok: result?.ok
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      appendPullLog({
+        pullType: "billtype",
+        summary: billTypeSummary(payload),
         payload,
         ok: false,
         message: error.message

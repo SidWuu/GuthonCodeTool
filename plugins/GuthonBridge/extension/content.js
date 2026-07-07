@@ -2,7 +2,9 @@ const OUTPUT_DIR_STORAGE_KEY = "guthonBridgeOutputDir";
 const FLOATING_ROOT_ID = "guthon-bridge-floating-root";
 const COPY_ROOT_ID = "guthon-bridge-copy-root";
 const SCHEMA_ROOT_ID = "guthon-bridge-schema-root";
+const BILLTYPE_ROOT_ID = "guthon-bridge-billtype-root";
 const COPY_OVERLAY_ID = "guthon-bridge-copy-overlay";
+const FLOATING_POSITION_KEY = "guthonBridgeFloatingPosition";
 
 let gIntervalId = null;
 let gTreeScrollListenerInstalled = false;
@@ -191,8 +193,18 @@ function isModuleRoute() {
 
 function isDataTableRoute() {
   const activeTab = Array.from(document.querySelectorAll(".el-tabs__item, .tabs-item, [role='tab']"))
-    .find((item) => isVisible(item) && /数据表管理/.test(item.innerText || item.textContent || ""));
+    .find((item) => isVisible(item) && isActiveTab(item) && /数据表管理/.test(item.innerText || item.textContent || ""));
   return Boolean(activeTab) || (/table/i.test(location.hash) && /数据表管理/.test(document.body?.innerText || ""));
+}
+
+function isActiveTab(item) {
+  const className = String(item.className || "");
+  return item.getAttribute("aria-selected") === "true" || /\b(active|is-active|selected|is-selected)\b/i.test(className);
+}
+
+function isBillTypeRoute() {
+  return Array.from(document.querySelectorAll(".el-tabs__item, .tabs-item, [role='tab']"))
+    .some((item) => isVisible(item) && isActiveTab(item) && /^单据类型/.test(String(item.innerText || item.textContent || "").trim()));
 }
 
 function findNativeToolbar(scope = document) {
@@ -230,6 +242,8 @@ function ensureInlineStyles() {
       align-items: center;
       gap: 6px;
       pointer-events: auto;
+      cursor: move;
+      user-select: none;
     }
     .guthon-bridge-message {
       max-width: 320px;
@@ -242,6 +256,9 @@ function ensureInlineStyles() {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .guthon-bridge-message:empty {
+      display: none;
     }
     .guthon-bridge-message[data-tone="error"] {
       color: #f56c6c;
@@ -382,34 +399,98 @@ function ensureInlineStyles() {
   document.documentElement.appendChild(style);
 }
 
-function positionBridgeRoot(root, toolbar, ratio = 0.72) {
-  if (!root || !toolbar || !isVisible(toolbar)) {
-    return false;
-  }
-  const rect = toolbar.getBoundingClientRect();
-  const rootRect = root.getBoundingClientRect();
-  const width = rootRect.width || 86;
-  const left = Math.min(
-    window.innerWidth - width - 12,
-    Math.max(12, rect.left + rect.width * ratio)
-  );
-  const top = Math.max(8, rect.top + (rect.height - (rootRect.height || 32)) / 2);
-  const toolbarZIndex = getComputedStyle(toolbar).zIndex;
-  root.style.left = `${Math.round(left)}px`;
-  root.style.top = `${Math.round(top)}px`;
-  root.style.zIndex = toolbarZIndex === "auto" ? "" : toolbarZIndex;
-  return true;
-}
-
-function positionTableSchemaRoot(root) {
+function positionBridgeRoot(root, toolbar, ratio = 0.72, row = 0) {
   if (!root) {
     return false;
   }
+  void toolbar;
+  void ratio;
+  return positionFloatingRoot(root, row);
+}
+
+function positionTableSchemaRoot(root) {
+  return positionFloatingRoot(root);
+}
+
+function positionFloatingRoot(root, row = 0) {
+  if (!root) {
+    return false;
+  }
+  const saved = readFloatingPosition();
+  const left = saved?.left ?? 34;
+  const top = (saved?.top ?? Math.max(80, window.innerHeight - 360)) + row * 40;
   root.style.left = "auto";
-  root.style.right = "16px";
-  root.style.top = "84px";
+  root.style.right = "auto";
+  root.style.left = `${Math.max(8, Math.min(window.innerWidth - 120, left))}px`;
+  root.style.top = `${Math.max(8, Math.min(window.innerHeight - 44, top))}px`;
   root.style.zIndex = "2147483646";
+  installFloatingDrag(root);
   return true;
+}
+
+function readFloatingPosition() {
+  try {
+    return JSON.parse(localStorage.getItem(FLOATING_POSITION_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function saveFloatingPosition(left, top) {
+  localStorage.setItem(FLOATING_POSITION_KEY, JSON.stringify({ left: Math.round(left), top: Math.round(top) }));
+}
+
+function installFloatingDrag(root) {
+  if (root.__guthonDragInstalled) {
+    return;
+  }
+  root.__guthonDragInstalled = true;
+  root.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+    const rect = root.getBoundingClientRect();
+    const state = {
+      startX: event.clientX,
+      startY: event.clientY,
+      left: rect.left,
+      top: rect.top,
+      moved: false
+    };
+    root.setPointerCapture?.(event.pointerId);
+    const move = (moveEvent) => {
+      const dx = moveEvent.clientX - state.startX;
+      const dy = moveEvent.clientY - state.startY;
+      if (Math.abs(dx) + Math.abs(dy) > 3) {
+        state.moved = true;
+      }
+      const left = Math.max(8, Math.min(window.innerWidth - root.offsetWidth - 8, state.left + dx));
+      const top = Math.max(8, Math.min(window.innerHeight - root.offsetHeight - 8, state.top + dy));
+      root.style.left = `${Math.round(left)}px`;
+      root.style.top = `${Math.round(top)}px`;
+      saveFloatingPosition(left, top);
+    };
+    const up = () => {
+      root.removeEventListener("pointermove", move);
+      root.removeEventListener("pointerup", up);
+      root.removeEventListener("pointercancel", up);
+      if (state.moved) {
+        root.__guthonSuppressClick = true;
+        setTimeout(() => {
+          root.__guthonSuppressClick = false;
+        }, 0);
+      }
+    };
+    root.addEventListener("pointermove", move);
+    root.addEventListener("pointerup", up);
+    root.addEventListener("pointercancel", up);
+  });
+  root.addEventListener("click", (event) => {
+    if (root.__guthonSuppressClick) {
+      event.stopPropagation();
+      event.preventDefault();
+    }
+  }, true);
 }
 
 async function pullCurrentProcedure(root) {
@@ -528,19 +609,63 @@ async function exportCurrentTableSchema(root) {
   }
 }
 
+async function exportCurrentBillType(root) {
+  const button = root.querySelector("button");
+  try {
+    button.disabled = true;
+    setButtonText(root, "拉取单据类型");
+    setButtonTitle(root, "正在拉取单据类型...");
+    setMessage(root, "正在拉取单据类型...", "busy");
+
+    const bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
+    if (!bridgeHealth?.ok) {
+      throw new Error(`本地桥接服务不可用: ${bridgeHealth?.message || "unknown"}`);
+    }
+
+    const inspected = await runPageCommand("inspectBillTypeTarget");
+    if (!inspected?.ok) {
+      throw new Error(`识别单据类型失败: ${inspected?.message || "未识别到数据源"}`);
+    }
+
+    const result = await sendRuntimeMessage({
+      type: "export-bill-type",
+      payload: {
+        dataSourceIds: [inspected.data.dataSourceId],
+        billTypeCodes: inspected.data.billTypeCodes || []
+      }
+    });
+    if (!result?.ok) {
+      throw new Error(result?.message || "单据类型拉取失败");
+    }
+
+    button.textContent = "成功";
+    const selected = Array.isArray(inspected.data.billTypeCodes) && inspected.data.billTypeCodes.length > 0;
+    const source = [inspected.data.dataSourceId, inspected.data.dataSourceName].filter(Boolean).join(" ");
+    const detail = selected ? `已拉取选中单据类型: ${inspected.data.billTypeCodes.join(", ")}` : `已拉取数据源 ${source} 全部单据类型`;
+    setButtonTitle(root, `${detail}: ${result.outputDir}`);
+    setMessage(root, `${detail}: ${result.exported_bill_type_count}`, "success");
+    setTimeout(() => setButtonText(root, "拉取单据类型"), 1600);
+  } catch (error) {
+    console.error("Guthon Bridge bill type export failed", error);
+    button.textContent = "失败";
+    const message = error?.message || String(error);
+    setButtonTitle(root, message);
+    setMessage(root, message, "error");
+    setTimeout(() => setButtonText(root, "拉取单据类型"), 2200);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function removeNode(id) {
   document.getElementById(id)?.remove();
 }
 
 function installProcedurePullButton() {
-  if (!isSupportedGuthonPage() || !isProcedureRoute()) {
+  if (!isSupportedGuthonPage() || (!isProcedureRoute() && !isModuleRoute())) {
     return;
   }
 
-  const toolbar = findCurrentPageToolbar();
-  if (!toolbar) {
-    return;
-  }
   ensureInlineStyles();
   let root = document.getElementById(FLOATING_ROOT_ID);
   if (!root) {
@@ -559,7 +684,7 @@ function installProcedurePullButton() {
     });
     document.body.appendChild(root);
   }
-  positionBridgeRoot(root, toolbar);
+  positionBridgeRoot(root, null, 0.72, 1);
 }
 
 function scrollCurrentTreeNode() {
@@ -1135,10 +1260,6 @@ function installCopyModeButton() {
   if (!isSupportedGuthonPage() || !isModuleRoute()) {
     return;
   }
-  const toolbar = findCurrentPageToolbar();
-  if (!toolbar) {
-    return;
-  }
   ensureInlineStyles();
   let root = document.getElementById(COPY_ROOT_ID);
   if (!root) {
@@ -1146,11 +1267,18 @@ function installCopyModeButton() {
     root.id = COPY_ROOT_ID;
     root.className = "guthon-bridge-inline";
     const button = makeNativeButton("复制模式", "guthon-bridge-copy-button");
-    button.addEventListener("click", showCopyOverlay);
+    button.addEventListener("click", async () => {
+      try {
+        await showCopyOverlay();
+      } catch (error) {
+        setButtonTitle(root, error?.message || String(error));
+        setMessage(root, error?.message || String(error), "error");
+      }
+    });
     root.appendChild(button);
     document.body.appendChild(root);
   }
-  positionBridgeRoot(root, toolbar);
+  positionBridgeRoot(root);
 }
 
 function installTableSchemaButton() {
@@ -1175,12 +1303,35 @@ function installTableSchemaButton() {
   positionTableSchemaRoot(root);
 }
 
+function installBillTypeButton() {
+  if (!isSupportedGuthonPage() || !isBillTypeRoute()) {
+    removeNode(BILLTYPE_ROOT_ID);
+    return;
+  }
+  ensureInlineStyles();
+  let root = document.getElementById(BILLTYPE_ROOT_ID);
+  if (!root) {
+    root = document.createElement("div");
+    root.id = BILLTYPE_ROOT_ID;
+    root.className = "guthon-bridge-inline";
+    const button = makeNativeButton("拉取单据类型", "guthon-bridge-billtype-button");
+    button.addEventListener("click", () => exportCurrentBillType(root));
+    root.appendChild(button);
+    const message = document.createElement("span");
+    message.className = "guthon-bridge-message";
+    root.appendChild(message);
+    document.body.appendChild(root);
+  }
+  positionTableSchemaRoot(root);
+}
+
 async function refreshToolbarButtons() {
   try {
     if (!isExtensionAlive()) {
       removeNode(FLOATING_ROOT_ID);
       removeNode(COPY_ROOT_ID);
       removeNode(SCHEMA_ROOT_ID);
+      removeNode(BILLTYPE_ROOT_ID);
       stopExtensionLoops();
       return;
     }
@@ -1189,6 +1340,7 @@ async function refreshToolbarButtons() {
       removeNode(FLOATING_ROOT_ID);
       removeNode(COPY_ROOT_ID);
       removeNode(SCHEMA_ROOT_ID);
+      removeNode(BILLTYPE_ROOT_ID);
       return;
     }
 
@@ -1197,6 +1349,7 @@ async function refreshToolbarButtons() {
     if (isProcedureRoute()) {
       removeNode(COPY_ROOT_ID);
       removeNode(SCHEMA_ROOT_ID);
+      removeNode(BILLTYPE_ROOT_ID);
       const inspected = await runPageCommand("inspectCurrentProcedure");
       if (inspected?.ok) {
         installProcedurePullButton();
@@ -1206,16 +1359,26 @@ async function refreshToolbarButtons() {
       return;
     }
 
-    removeNode(FLOATING_ROOT_ID);
     if (isModuleRoute()) {
       removeNode(SCHEMA_ROOT_ID);
+      removeNode(BILLTYPE_ROOT_ID);
+      installProcedurePullButton();
       installCopyModeButton();
     } else if (isDataTableRoute()) {
+      removeNode(FLOATING_ROOT_ID);
       removeNode(COPY_ROOT_ID);
+      removeNode(BILLTYPE_ROOT_ID);
       installTableSchemaButton();
-    } else {
+    } else if (isBillTypeRoute()) {
+      removeNode(FLOATING_ROOT_ID);
       removeNode(COPY_ROOT_ID);
       removeNode(SCHEMA_ROOT_ID);
+      installBillTypeButton();
+    } else {
+      removeNode(FLOATING_ROOT_ID);
+      removeNode(COPY_ROOT_ID);
+      removeNode(SCHEMA_ROOT_ID);
+      removeNode(BILLTYPE_ROOT_ID);
     }
   } catch (error) {
     console.warn("Guthon Bridge refreshToolbarButtons error", error);
@@ -1223,6 +1386,7 @@ async function refreshToolbarButtons() {
       removeNode(FLOATING_ROOT_ID);
       removeNode(COPY_ROOT_ID);
       removeNode(SCHEMA_ROOT_ID);
+      removeNode(BILLTYPE_ROOT_ID);
       stopExtensionLoops();
     }
   }

@@ -221,6 +221,71 @@ process.stdout.write(JSON.stringify({ ok: true, exported_table_count: 1, outputD
   }
 });
 
+test("exportBillType delegates to script and writes pull log", async () => {
+  const port = 17464;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-billtype-command-"));
+  const billTypeScript = path.join(tmp, "fake-billtype.js");
+  const logPath = path.join(tmp, "pull-log.ndjson");
+  fs.writeFileSync(
+    billTypeScript,
+    `
+const args = process.argv.slice(2);
+if (!args.includes("--data-source-ids") || !args.includes("0015,0008")) {
+  process.stderr.write("bad args: " + args.join(" "));
+  process.exit(2);
+}
+if (!args.includes("--bill-type-codes") || !args.includes("BT_A,BT_B")) {
+  process.stderr.write("bad bill type args: " + args.join(" "));
+  process.exit(2);
+}
+process.stdout.write(JSON.stringify({ ok: true, exported_bill_type_count: 3, outputDir: "/tmp/billtype" }));
+`,
+    "utf8",
+  );
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_HUB_PYTHON: process.execPath,
+      GUTHON_BILL_TYPE_SCRIPT: billTypeScript,
+      GUTHON_PULL_LOG_PATH: logPath
+    },
+    stdio: "ignore"
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/exportBillType`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        dataSourceIds: ["0015", "0008"],
+        billTypeCodes: ["BT_A", "BT_B"]
+      })
+    });
+    const data = await response.json();
+
+    assert.equal(response.status, 200, data.message);
+    assert.equal(data.ok, true);
+    assert.equal(data.exported_bill_type_count, 3);
+    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
+    assert.equal(log.pullType, "billtype");
+    assert.equal(log.trigger, "manual");
+    assert.equal(log.ok, true);
+    assert.deepEqual(log.summary, {
+      dataSourceIds: ["0015", "0008"],
+      billTypeCodes: ["BT_A", "BT_B"],
+      exported_bill_type_count: 3,
+      outputDir: "/tmp/billtype"
+    });
+  } finally {
+    server.kill();
+  }
+});
+
 test("bridge defaults hub python to repo venv when present", () => {
   const serverScript = fs.readFileSync(path.join(ROOT, "bridge", "server.js"), "utf8");
 
@@ -241,10 +306,16 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes("inspect-hub-source"), true);
   assert.equal(script.includes("function inspectCurrentHubSourceContext"), true);
   assert.equal(script.includes("function inspectTableSchemaTarget"), true);
+  assert.equal(script.includes("function getDataSourceName"), true);
+  assert.equal(script.includes("[A-Z][A-Z0-9]+_[A-Z0-9_]"), true);
   assert.equal(script.includes('mode === "table-schema"'), true);
+  assert.equal(script.includes('mode === "billtype"'), true);
   assert.equal(script.includes('type: "export-table-schema"'), true);
-  assert.equal(script.includes('pullHubBtn.textContent = isTableSchema ? "拉取表结构" : "拉取源码表版本";'), true);
+  assert.equal(script.includes('type: "export-bill-type"'), true);
+  assert.equal(script.includes("拉取单据类型"), true);
   assert.equal(runHubPullScript.includes("resolveCurrentTarget"), false);
+  assert.equal(html.includes("closeBtn"), true);
+  assert.equal(script.includes("window.close()"), true);
 });
 
 test("extension manifest injects the floating pull button on Guthon pages", () => {
@@ -292,11 +363,24 @@ test("data table page exposes table schema export action", () => {
   assert.equal(contentScript.includes("inspectTableSchemaTarget"), true);
   assert.equal(contentScript.includes('type: "export-table-schema"'), true);
   assert.equal(contentScript.includes("isDataTableRoute"), true);
-  assert.equal(contentScript.includes("positionTableSchemaRoot"), true);
-  assert.equal(contentScript.includes('root.style.right = "16px";'), true);
+  assert.equal(contentScript.includes("positionFloatingRoot"), true);
+  assert.equal(contentScript.includes("installFloatingDrag"), true);
+  assert.equal(contentScript.includes("guthonBridgeFloatingPosition"), true);
   assert.equal(backgroundScript.includes("/exportTableSchema"), true);
   assert.equal(pageBridge.includes("inspectTableSchemaTarget"), true);
   assert.equal(pageBridge.includes("getSelectedTableIds"), true);
+});
+
+test("bill type tab exposes bill type export action", () => {
+  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const backgroundScript = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
+
+  assert.equal(contentScript.includes("拉取单据类型"), true);
+  assert.equal(contentScript.includes("isBillTypeRoute"), true);
+  assert.equal(contentScript.includes("inspectBillTypeTarget"), true);
+  assert.equal(contentScript.includes('type: "export-bill-type"'), true);
+  assert.equal(contentScript.includes("billTypeCodes"), true);
+  assert.equal(backgroundScript.includes("/exportBillType"), true);
 });
 
 test("pull button floats over the current Guthon toolbar without changing toolbar layout", () => {
@@ -321,6 +405,8 @@ test("copy mode button and overlay are available on module page editors", () => 
   );
 
   assert.equal(contentScript.includes("复制模式"), true);
+  assert.equal(contentScript.includes("installProcedurePullButton();\n      installCopyModeButton();"), true);
+  assert.equal(contentScript.includes("positionBridgeRoot(root, null, 0.72, 1);"), true);
   assert.equal(contentScript.includes('runPageCommand("collectModuleCopyText")'), true);
   assert.equal(contentScript.includes("collectModulePageFields"), true);
   assert.equal(contentScript.includes("guthon-bridge-copy-overlay"), true);
@@ -410,7 +496,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("/develop/uicomp/getCompNames.htm"), true);
   assert.equal(pageBridge.includes("selectCompId"), true);
   assert.equal(pageBridge.includes("selectBox.codeType"), false);
-  assert.equal(contentScript.includes("root.style.zIndex = toolbarZIndex"), true);
+  assert.equal(contentScript.includes("root.style.zIndex = \"2147483646\""), true);
 });
 
 test("floating pull waits for page bridge injection before posting commands", () => {

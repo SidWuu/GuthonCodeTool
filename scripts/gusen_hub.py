@@ -705,6 +705,10 @@ SCRIPT_KEYS = {
 }
 
 
+def _is_script_key(key):
+    return key in SCRIPT_KEYS or str(key).endswith("Script")
+
+
 def parse_page_scripts(base: Path, raw: str):
     try:
         data = json.loads(raw)
@@ -730,7 +734,7 @@ def _walk_scripts(value, path=None):
         label = str(value.get("aliasName") or value.get("name") or value.get("id") or "")
         next_path = path + ([label] if label else [])
         for key, child in value.items():
-            if key in SCRIPT_KEYS and isinstance(child, str) and (child.strip() or key == "compScript"):
+            if _is_script_key(key) and isinstance(child, str) and (child.strip() or key == "compScript"):
                 yield next_path, key, child
             else:
                 yield from _walk_scripts(child, next_path)

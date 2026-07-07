@@ -173,8 +173,36 @@
     return "";
   }
 
+  function getLabeledInputValue(labelText) {
+    const labels = Array.from(document.querySelectorAll(".el-form-item__label,label,span,div")).filter((item) => isVisible(item) && String(item.innerText || item.textContent || "").trim() === labelText);
+    for (const label of labels) {
+      const scope = label.closest(".el-form-item") || label.parentElement;
+      const input = scope?.querySelector("input");
+      const value = String(input?.value || "").trim();
+      if (value) {
+        return value;
+      }
+    }
+    return "";
+  }
+
+  function getDataSourceName() {
+    const inputValue = getLabeledInputValue("数据源");
+    const dataSourceId = getDataSourceId();
+    if (inputValue && inputValue !== dataSourceId && !/请选择/.test(inputValue)) {
+      return inputValue;
+    }
+    const pageText = String(document.body?.innerText || "");
+    const sourceMatch = dataSourceId ? pageText.match(new RegExp("\\b" + dataSourceId + "\\b\\s*[—-]\\s*([^\\n\\r]+)")) : null;
+    if (sourceMatch) {
+      return sourceMatch[1].trim();
+    }
+    const pageMatch = pageText.match(/数据源\s+([^\s]+)\s+(?:表名|类型编码|名称|审核通道|说明)/);
+    return pageMatch ? pageMatch[1] : "";
+  }
+
   function extractTableId(text) {
-    const match = String(text || "").match(/\b[A-Z][A-Z0-9_]{2,}\b/);
+    const match = String(text || "").match(/\b[A-Z][A-Z0-9]+_[A-Z0-9_]+\b/);
     return match ? match[0] : "";
   }
 
@@ -201,6 +229,26 @@
     return ids;
   }
 
+  function extractBillTypeCode(text) {
+    const match = String(text || "").match(/\bBT[A-Z0-9_]*\b/);
+    return match ? match[0] : "";
+  }
+
+  function getSelectedBillTypeCodes() {
+    const codes = [];
+    Array.from(document.querySelectorAll("body *")).forEach((element) => {
+      if (!isVisible(element) || !isSelectedTableElement(element)) {
+        return;
+      }
+      const row = element.closest("tr");
+      const code = extractBillTypeCode(row?.innerText || row?.textContent || element.innerText || element.textContent || "");
+      if (code && !codes.includes(code)) {
+        codes.push(code);
+      }
+    });
+    return codes;
+  }
+
   function inspectTableSchemaTarget() {
     const dataSourceId = getDataSourceId();
     if (!dataSourceId) {
@@ -208,8 +256,22 @@
     }
     return {
       dataSourceId,
+      dataSourceName: getDataSourceName(),
       tableIds: getSelectedTableIds(),
       resolvedBy: "data-table-management"
+    };
+  }
+
+  function inspectBillTypeTarget() {
+    const dataSourceId = getDataSourceId();
+    if (!dataSourceId) {
+      throw new Error("当前单据类型页签没有识别到数据源");
+    }
+    return {
+      dataSourceId,
+      dataSourceName: getDataSourceName(),
+      billTypeCodes: getSelectedBillTypeCodes(),
+      resolvedBy: "bill-type-tab"
     };
   }
 
@@ -867,6 +929,7 @@
     pullProcedure,
     collectModuleCopyText,
     inspectTableSchemaTarget,
+    inspectBillTypeTarget,
     checkOutProcedure: disabledWriteCommand,
     pushProcedure: disabledWriteCommand
   };

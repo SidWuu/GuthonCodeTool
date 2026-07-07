@@ -16,6 +16,12 @@
         display: grid;
         gap: 10px;
       }
+      .head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
       .title {
         font-size: 16px;
         font-weight: 700;
@@ -51,6 +57,16 @@
         color: white;
         background: #0f766e;
       }
+      #closeBtn {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border-radius: 50%;
+        color: #475569;
+        background: #e2e8f0;
+        font-size: 18px;
+        line-height: 28px;
+      }
       #status {
         white-space: pre-wrap;
         word-break: break-all;
@@ -67,7 +83,10 @@
   </head>
   <body>
     <div class="wrap">
-      <div class="title">Guthon Bridge</div>
+      <div class="head">
+        <div class="title">Guthon Bridge</div>
+        <button id="closeBtn" title="关闭" type="button">×</button>
+      </div>
 
       <label>
         <span id="procedureLabel">包名</span>

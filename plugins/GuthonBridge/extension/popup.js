@@ -6,6 +6,7 @@ const funIdLabelEl = document.getElementById("funIdLabel");
 const outputDirEl = document.getElementById("outputDir");
 const pullPageBtn = document.getElementById("pullPageBtn");
 const pullHubBtn = document.getElementById("pullHubBtn");
+const closeBtn = document.getElementById("closeBtn");
 const OUTPUT_DIR_STORAGE_KEY = "guthonBridgeOutputDir";
 
 function setStatus(message) {
@@ -14,8 +15,13 @@ function setStatus(message) {
 
 function setResolvedTarget(target) {
   if (target?.mode === "table-schema") {
-    procedureEl.value = target.dataSourceId || "";
+    procedureEl.value = [target.dataSourceId, target.dataSourceName].filter(Boolean).join(" ");
     funIdEl.value = Array.isArray(target.tableIds) && target.tableIds.length > 0 ? target.tableIds.join(", ") : "当前数据源全部表";
+    return;
+  }
+  if (target?.mode === "billtype") {
+    procedureEl.value = [target.dataSourceId, target.dataSourceName].filter(Boolean).join(" ");
+    funIdEl.value = Array.isArray(target.billTypeCodes) && target.billTypeCodes.length > 0 ? target.billTypeCodes.join(", ") : "当前数据源全部单据类型";
     return;
   }
   procedureEl.value = target?.procedureKeyword || "";
@@ -53,15 +59,16 @@ function isProcedureUrl(url) {
 function setPopupMode(mode) {
   const isModule = mode === "module";
   const isTableSchema = mode === "table-schema";
+  const isBillType = mode === "billtype";
   document.querySelector(".title").textContent = "Guthon Bridge";
   procedureEl.closest("label").style.display = isModule ? "none" : "";
   funIdEl.closest("label").style.display = isModule ? "none" : "";
-  outputDirEl.closest("label").style.display = isModule || isTableSchema ? "none" : "";
-  procedureLabelEl.textContent = isTableSchema ? "数据源" : "包名";
-  funIdLabelEl.textContent = isTableSchema ? "数据表" : "函数名";
+  outputDirEl.closest("label").style.display = isModule || isTableSchema || isBillType ? "none" : "";
+  procedureLabelEl.textContent = isTableSchema || isBillType ? "数据源" : "包名";
+  funIdLabelEl.textContent = isTableSchema ? "数据表" : isBillType ? "单据类型" : "函数名";
   pullPageBtn.textContent = isModule ? "打开复制模式" : "拉取页面当前源码";
-  pullPageBtn.style.display = isTableSchema ? "none" : "";
-  pullHubBtn.textContent = isTableSchema ? "拉取表结构" : "拉取源码表版本";
+  pullPageBtn.style.display = isTableSchema || isBillType ? "none" : "";
+  pullHubBtn.textContent = isTableSchema ? "拉取表结构" : isBillType ? "拉取单据类型" : "拉取源码表版本";
 }
 
 async function persistOutputDir(outputDir) {
@@ -411,6 +418,9 @@ async function runInMainWorld(tabId, command, payload) {
       }
 
       function inspectCurrentHubSourceContext() {
+        if (isBillTypePage()) {
+          return inspectBillTypeTarget();
+        }
         if (isDataTableManagementPage()) {
           return inspectTableSchemaTarget();
         }
@@ -761,6 +771,17 @@ async function runInMainWorld(tabId, command, payload) {
         return activeNodes.some((node) => String(node.innerText || node.textContent || "").includes("数据表管理"));
       }
 
+      function getActiveText(pattern) {
+        const activeNodes = Array.from(document.querySelectorAll('[aria-selected="true"], .is-active, .active')).filter(isVisible);
+        const node = activeNodes.find((item) => pattern.test(String(item.innerText || item.textContent || "")));
+        return String(node?.innerText || node?.textContent || "").trim();
+      }
+
+      function isBillTypePage() {
+        const activeNodes = Array.from(document.querySelectorAll('[aria-selected="true"], .is-active, .active'));
+        return activeNodes.some((node) => /^单据类型/.test(String(node.innerText || node.textContent || "").trim()));
+      }
+
       function getDataSourceId() {
         for (const vm of getAllVueInstances()) {
           const dataSourceId =
@@ -775,8 +796,36 @@ async function runInMainWorld(tabId, command, payload) {
         return "";
       }
 
+      function getDataSourceName() {
+        const inputValue = getLabeledInputValue("数据源");
+        const dataSourceId = getDataSourceId();
+        if (inputValue && inputValue !== dataSourceId && !/请选择/.test(inputValue)) {
+          return inputValue;
+        }
+        const pageText = String(document.body?.innerText || "");
+        const sourceMatch = dataSourceId ? pageText.match(new RegExp("\\b" + dataSourceId + "\\b\\s*[—-]\\s*([^\\n\\r]+)")) : null;
+        if (sourceMatch) {
+          return sourceMatch[1].trim();
+        }
+        const pageMatch = pageText.match(/数据源\s+([^\s]+)\s+(?:表名|类型编码|名称|审核通道|说明)/);
+        return pageMatch ? pageMatch[1] : "";
+      }
+
+      function getLabeledInputValue(labelText) {
+        const labels = Array.from(document.querySelectorAll(".el-form-item__label,label,span,div")).filter((item) => isVisible(item) && String(item.innerText || item.textContent || "").trim() === labelText);
+        for (const label of labels) {
+          const scope = label.closest(".el-form-item") || label.parentElement;
+          const input = scope?.querySelector("input");
+          const value = String(input?.value || "").trim();
+          if (value) {
+            return value;
+          }
+        }
+        return "";
+      }
+
       function extractTableId(text) {
-        const match = String(text || "").match(/\b[A-Z][A-Z0-9_]{2,}\b/);
+        const match = String(text || "").match(/\b[A-Z][A-Z0-9]+_[A-Z0-9_]+\b/);
         return match ? match[0] : "";
       }
 
@@ -803,19 +852,59 @@ async function runInMainWorld(tabId, command, payload) {
         return ids;
       }
 
+      function extractBillTypeCode(text) {
+        const match = String(text || "").match(/\bBT[A-Z0-9_]*\b/);
+        return match ? match[0] : "";
+      }
+
+      function getSelectedBillTypeCodes() {
+        const codes = [];
+        Array.from(document.querySelectorAll("body *")).forEach((element) => {
+          if (!isVisible(element) || !isSelectedTableElement(element)) {
+            return;
+          }
+          const row = element.closest("tr");
+          const code = extractBillTypeCode(row?.innerText || row?.textContent || element.innerText || element.textContent || "");
+          if (code && !codes.includes(code)) {
+            codes.push(code);
+          }
+        });
+        return codes;
+      }
+
       function inspectTableSchemaTarget() {
         const dataSourceId = getDataSourceId();
         if (!dataSourceId) {
           throw new Error("当前数据表管理页面没有识别到数据源");
         }
+        const dataSourceName = getDataSourceName();
         const tableIds = getSelectedTableIds();
         return {
           mode: "table-schema",
           dataSourceId,
+          dataSourceName,
           tableIds,
-          procedureKeyword: dataSourceId,
+          procedureKeyword: [dataSourceId, dataSourceName].filter(Boolean).join(" "),
           funId: tableIds.length > 0 ? tableIds.join(", ") : "当前数据源全部表",
           resolvedBy: "data-table-management"
+        };
+      }
+
+      function inspectBillTypeTarget() {
+        const dataSourceId = getDataSourceId();
+        if (!dataSourceId) {
+          throw new Error("当前单据类型页签没有识别到数据源");
+        }
+        const dataSourceName = getDataSourceName();
+        const billTypeCodes = getSelectedBillTypeCodes();
+        return {
+          mode: "billtype",
+          dataSourceId,
+          dataSourceName,
+          billTypeCodes,
+          procedureKeyword: [dataSourceId, dataSourceName].filter(Boolean).join(" "),
+          funId: billTypeCodes.length > 0 ? billTypeCodes.join(", ") : "当前数据源全部单据类型",
+          resolvedBy: "bill-type-tab"
         };
       }
 
@@ -1029,9 +1118,15 @@ async function resolveHubSourceTarget() {
     procedureKeyword: result.data.procedureKeyword || result.data.procedureName || "",
     funId: result.data.funId || "",
     dataSourceId: result.data.dataSourceId || "",
-    tableIds: Array.isArray(result.data.tableIds) ? result.data.tableIds : []
+    dataSourceName: result.data.dataSourceName || "",
+    tableIds: Array.isArray(result.data.tableIds) ? result.data.tableIds : [],
+    billTypeCodes: Array.isArray(result.data.billTypeCodes) ? result.data.billTypeCodes : []
   };
-  if (target.mode === "table-schema") {
+  if (target.mode === "billtype") {
+    if (!target.dataSourceId) {
+      throw new Error("当前单据类型页签没有识别到数据源");
+    }
+  } else if (target.mode === "table-schema") {
     if (!target.dataSourceId) {
       throw new Error("当前数据表管理页面没有识别到数据源");
     }
@@ -1117,6 +1212,15 @@ async function openCopyMode() {
 
 async function runHubPull() {
   const target = await resolveHubSourceTarget();
+  if (target.mode === "billtype") {
+    return chrome.runtime.sendMessage({
+      type: "export-bill-type",
+      payload: {
+        dataSourceIds: [target.dataSourceId],
+        billTypeCodes: target.billTypeCodes
+      }
+    });
+  }
   if (target.mode === "table-schema") {
     return chrome.runtime.sendMessage({
       type: "export-table-schema",
@@ -1173,10 +1277,15 @@ pullHubBtn.addEventListener("click", async () => {
       throw new Error("当前标签页不是 Guthon 开发平台页面");
     }
     const isTableSchema = pullHubBtn.textContent.includes("表结构");
-    setStatus(`${isTableSchema ? "正在拉取表结构" : "正在从源码表拉取"}...\n${tab.url}`);
+    const isBillType = pullHubBtn.textContent.includes("单据类型");
+    setStatus(`${isBillType ? "正在拉取单据类型" : isTableSchema ? "正在拉取表结构" : "正在从源码表拉取"}...\n${tab.url}`);
     const result = await runHubPull();
     if (!result?.ok) {
-      throw new Error(result?.message || (isTableSchema ? "表结构拉取失败" : "Hub 拉取失败"));
+      throw new Error(result?.message || (isBillType ? "单据类型拉取失败" : isTableSchema ? "表结构拉取失败" : "Hub 拉取失败"));
+    }
+    if (isBillType) {
+      setStatus(["单据类型拉取成功", `输出目录: ${result.outputDir}`, `数量: ${result.exported_bill_type_count ?? ""}`].join("\n"));
+      return;
     }
     if (isTableSchema) {
       setStatus(["表结构拉取成功", `输出目录: ${result.outputDir}`, `表数量: ${result.exported_table_count ?? ""}`].join("\n"));
@@ -1185,12 +1294,14 @@ pullHubBtn.addEventListener("click", async () => {
     setStatus(["源码表拉取成功", `工作副本: ${result.workCopyPath}`].join("\n"));
   } catch (error) {
     const isTableSchema = pullHubBtn.textContent.includes("表结构");
-    setStatus(`${isTableSchema ? "表结构拉取失败" : "源码表拉取失败"}\n${error.message}`);
+    const isBillType = pullHubBtn.textContent.includes("单据类型");
+    setStatus(`${isBillType ? "单据类型拉取失败" : isTableSchema ? "表结构拉取失败" : "源码表拉取失败"}\n${error.message}`);
   }
 });
 
 outputDirEl.addEventListener("change", persistCurrentOutputDir);
 outputDirEl.addEventListener("blur", persistCurrentOutputDir);
+closeBtn.addEventListener("click", () => window.close());
 
 async function initializePopup() {
   pullPageBtn.disabled = true;
@@ -1210,27 +1321,33 @@ async function initializePopup() {
   setStatus(isProcedureUrl(tab.url) ? "正在识别当前打开的过程函数..." : "正在识别当前打开的 Guthon 对象...");
   try {
     const target = await resolveHubSourceTarget();
-    setPopupMode(target.mode === "table-schema" ? "table-schema" : "procedure");
+    setPopupMode(target.mode === "table-schema" ? "table-schema" : target.mode === "billtype" ? "billtype" : "procedure");
     setStatus(
       [
-        target.mode === "table-schema"
+        target.mode === "billtype"
+          ? "已识别当前单据类型页签"
+          : target.mode === "table-schema"
           ? "已识别当前数据表管理页面"
           : target.mode === "page-source"
             ? "已识别当前模块源码片段"
             : "已识别当前过程函数",
-        target.mode === "table-schema"
-          ? `数据源: ${target.dataSourceId}`
+        target.mode === "billtype"
+          ? `数据源: ${[target.dataSourceId, target.dataSourceName].filter(Boolean).join(" ")}`
+          : target.mode === "table-schema"
+          ? `数据源: ${[target.dataSourceId, target.dataSourceName].filter(Boolean).join(" ")}`
           : target.mode === "page-source"
             ? `页面: ${target.procedureKeyword}`
             : `包名: ${target.procedureKeyword}`,
-        target.mode === "table-schema"
+        target.mode === "billtype"
+          ? `单据类型: ${target.billTypeCodes.length > 0 ? target.billTypeCodes.join(", ") : "当前数据源全部单据类型"}`
+          : target.mode === "table-schema"
           ? `数据表: ${target.tableIds.length > 0 ? target.tableIds.join(", ") : "当前数据源全部表"}`
           : target.mode === "page-source"
             ? `片段: ${target.funId}`
             : `函数名: ${target.funId}`
       ].join("\n")
     );
-    pullPageBtn.disabled = target.mode === "table-schema";
+    pullPageBtn.disabled = target.mode === "table-schema" || target.mode === "billtype";
     pullHubBtn.disabled = false;
   } catch (error) {
     setResolvedTarget(null);

@@ -38,6 +38,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse(result);
     }
 
+    if (message.type === "export-bill-type") {
+      const result = await postJson("/exportBillType", message.payload || {});
+      return sendResponse(result);
+    }
+
     return sendResponse({ ok: false, message: "Unknown message type" });
   })().catch((error) => {
     sendResponse({

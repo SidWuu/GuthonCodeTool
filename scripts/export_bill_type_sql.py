@@ -49,11 +49,25 @@ def output_file_name(data_source_id, system_name):
     return f"{sanitize_name(data_source_id)} {sanitize_name(system_name)}.json"
 
 
-def fetch_rows(conn, table_name, data_source_ids):
+def normalize_bill_type_codes(value):
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = value.split(",")
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def fetch_rows(conn, table_name, data_source_ids, bill_type_codes=None):
     ids = normalize_data_source_ids(data_source_ids)
+    codes = normalize_bill_type_codes(bill_type_codes)
     placeholders = ", ".join(["%s"] * len(ids))
+    params = list(ids)
+    sql = f"SELECT * FROM {table_name} WHERE DATA_SOURCE_ID IN ({placeholders})"
+    if codes and table_name == "gd_bill_type":
+        sql += f" AND BILL_TYPE_CODE IN ({', '.join(['%s'] * len(codes))})"
+        params.extend(codes)
     with conn.cursor() as cur:
-        cur.execute(f"SELECT * FROM {table_name} WHERE DATA_SOURCE_ID IN ({placeholders})", tuple(ids))
+        cur.execute(sql, tuple(params))
         return list(cur.fetchall())
 
 
@@ -83,10 +97,11 @@ def bill_type_json(row):
     )
 
 
-def export_bill_types(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None):
+def export_bill_types(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, bill_type_codes=None):
     output_dir = Path(output_dir)
     data_source_ids = normalize_data_source_ids(data_source_ids or DEFAULT_DATA_SOURCE_IDS)
-    bill_types = fetch_rows(conn, "gd_bill_type", data_source_ids)
+    bill_type_codes = normalize_bill_type_codes(bill_type_codes)
+    bill_types = fetch_rows(conn, "gd_bill_type", data_source_ids, bill_type_codes=bill_type_codes)
     systems = fetch_rows(conn, "gd_system", data_source_ids)
 
     system_by_data_source = {}
@@ -129,6 +144,7 @@ def export_bill_types(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None)
         "exported_data_source_count": len(grouped),
         "exported_bill_type_count": exported_count,
         "data_source_ids": data_source_ids,
+        "bill_type_codes": bill_type_codes,
     }
 
 
@@ -155,28 +171,28 @@ def main(argv=None):
     parser.add_argument("--datasource", default="product-dev")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to config sync.rules.table_schema_data_source_ids.")
+    parser.add_argument("--bill-type-codes", help="Comma-separated BILL_TYPE_CODE list. Defaults to all bill types in selected data sources.")
     args = parser.parse_args(argv)
 
     data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else load_default_data_source_ids()
+    bill_type_codes = normalize_bill_type_codes(args.bill_type_codes)
     with gusen_hub.db_connect(load_datasource(args.datasource)) as conn:
-        summary = export_bill_types(conn, Path(args.output_dir), data_source_ids=data_source_ids)
+        summary = export_bill_types(conn, Path(args.output_dir), data_source_ids=data_source_ids, bill_type_codes=bill_type_codes)
+    result = {"ok": True, **summary, "outputDir": args.output_dir}
     gusen_hub.append_pull_log(
         "billtype",
         "manual",
         {
             "dataSourceIds": data_source_ids,
+            "billTypeCodes": bill_type_codes,
             "exported_bill_type_count": summary.get("exported_bill_type_count", 0),
             "outputDir": args.output_dir,
         },
-        payload={"datasource": args.datasource, "dataSourceIds": data_source_ids},
-        result={**summary, "outputDir": args.output_dir},
+        payload={"datasource": args.datasource, "dataSourceIds": data_source_ids, "billTypeCodes": bill_type_codes},
+        result=result,
         ok=True,
     )
-    print(
-        "导出完成: "
-        f"{summary['exported_bill_type_count']}/{summary['bill_type_count']} "
-        f"({summary['exported_data_source_count']} 个数据源) -> {args.output_dir}"
-    )
+    print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":
