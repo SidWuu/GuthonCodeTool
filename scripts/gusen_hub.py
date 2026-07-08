@@ -39,7 +39,7 @@ def append_pull_log(pull_type, trigger, summary, payload=None, result=None, ok=T
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {
-        "time": dt.datetime.now().isoformat(timespec="seconds"),
+        "time": dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
         "trigger": trigger,
         "pullType": pull_type,
         "ok": bool(ok),
