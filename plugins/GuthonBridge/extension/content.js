@@ -434,6 +434,10 @@ function ensureInlineStyles() {
       white-space: nowrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
+    #${COPY_OVERLAY_ID} .guthon-bridge-cell-value.guthon-bridge-cell-selected {
+      background: rgba(64, 158, 255, 0.32);
+      outline: 1px solid rgba(64, 158, 255, 0.6);
+    }
     #${COPY_OVERLAY_ID} .guthon-bridge-copy-text {
       box-sizing: border-box;
       width: 100%;
@@ -786,6 +790,37 @@ function mergeFieldInfo(base, extra) {
   };
 }
 
+function collectHiddenFieldIds(root) {
+  const hiddenFields = new Set();
+  const selector = ".input-hide-area, .hide-field-list";
+  const areas = (root.matches?.(selector) ? [root] : []).concat(Array.from(root.querySelectorAll(selector)));
+  areas.forEach((area) => {
+    Array.from(area.querySelectorAll("*")).forEach((node) => {
+      const ownText = Array.from(node.childNodes)
+        .filter((child) => child.nodeType === Node.TEXT_NODE)
+        .map((child) => child.textContent)
+        .join(" ");
+      const text = [
+        node.getAttribute?.("data-field"),
+        node.getAttribute?.("data-field-id"),
+        node.getAttribute?.("prop"),
+        node.getAttribute?.("title"),
+        ownText
+      ].filter(Boolean).join(" ");
+      const normalized = String(text).replace(/\s+/g, " ").trim();
+      if (normalized) {
+        hiddenFields.add(normalized);
+      }
+      normalized.match(/[A-Za-z0-9_]{2,}/g)?.forEach((token) => hiddenFields.add(token));
+    });
+  });
+  return hiddenFields;
+}
+
+function isDomHiddenField(info, hiddenFields) {
+  return Array.from(hiddenFields).some((value) => value === info.field || value === info.label || value.includes(info.field) || value.includes(info.label));
+}
+
 function makeFieldInfo(obj, extra = {}) {
   const field = readFirst(obj, ["fieldId", "field", "prop", "property", "columnName", "colName", "name", "id"]);
   const label = readFirst(obj, ["label", "title", "disName", "displayName", "name"]);
@@ -797,7 +832,9 @@ function makeFieldInfo(obj, extra = {}) {
       ? true
       : readFirst(obj, ["required", "isRequired", "mustInput", "notNull", "isMust", "must", "require"]);
   const hiddenValue = obj?.visible === false ? true : readFirst(obj, ["hidden", "isHidden", "hide", "isHide"]);
-  return {
+  const configuredHidden =
+    isTruthy(hiddenValue) || (hiddenValue !== undefined && hiddenValue !== "" && isFalsy(hiddenValue));
+  const info = {
     field,
     label,
     type: readFirst(obj, ["type", "colType", "displayMode", "controlType"]),
@@ -811,16 +848,20 @@ function makeFieldInfo(obj, extra = {}) {
     sum: isTruthy(readFirst(obj, ["isSum", "sum", "summary", "isSummary", "total", "isTotal"])),
     align: readFirst(obj, ["align", "dataAlign", "textAlign", "headerAlign"]),
     required: isTruthy(requiredValue),
-    hidden: extra.hidden || isTruthy(hiddenValue) || (hiddenValue !== undefined && hiddenValue !== "" && isFalsy(hiddenValue)),
+    hidden: extra.hidden ? isDomHiddenField({ field, label }, extra.hiddenFields || new Set()) : configuredHidden,
     index: 0
   };
+  return info;
 }
 
-function collectControlFields(root, options = {}) {
+function collectControlFields(root, options = {}, hiddenFields = collectHiddenFieldIds(root)) {
   const fields = [];
   const selector = "[data-control-name], .input-box, .data-table, .data-table-control, .detail-table, .el-table";
   const controls = (root.matches?.(selector) ? [root] : []).concat(Array.from(root.querySelectorAll(selector)));
   controls.forEach((element) => {
+    if (!isVisible(element)) {
+      return;
+    }
     if (options.excludeTabPages && element.closest('[role="tabpanel"][id^="pane-tabPage"]')) {
       return;
     }
@@ -835,7 +876,10 @@ function collectControlFields(root, options = {}) {
           return;
         }
         items.forEach((item) => {
-          const info = makeFieldInfo(item, { hidden });
+          const info = makeFieldInfo(item, { hidden, hiddenFields });
+          if (info && hidden && !isDomHiddenField(info, hiddenFields)) {
+            return;
+          }
           if (info) {
             fields.push(info);
           }
@@ -846,7 +890,7 @@ function collectControlFields(root, options = {}) {
   return fields;
 }
 
-function collectConfigFields(root) {
+function collectConfigFields(root, hiddenFields = collectHiddenFieldIds(root)) {
   const fields = [];
   const seen = new WeakSet();
 
@@ -861,7 +905,7 @@ function collectConfigFields(root) {
       return;
     }
 
-    const info = makeFieldInfo(value);
+    const info = makeFieldInfo(value, { hiddenFields });
     if (info) {
       fields.push(info);
     }
@@ -877,6 +921,9 @@ function collectConfigFields(root) {
   }
 
   Array.from(root.querySelectorAll("*")).forEach((element) => {
+    if (!isVisible(element)) {
+      return;
+    }
     const vm = getVueInstance(element);
     if (vm) {
       visit(vm, 0);
@@ -955,8 +1002,9 @@ function readElementName(element) {
 }
 
 function collectGroupFields(root, options = {}) {
-  const controlFields = collectControlFields(root, options);
-  const configFields = collectConfigFields(root);
+  const hiddenFields = collectHiddenFieldIds(root);
+  const controlFields = collectControlFields(root, options, hiddenFields);
+  const configFields = collectConfigFields(root, hiddenFields);
   const domFields = collectDomFields(root);
   const metaByField = new Map(configFields.filter(hasFieldMeta).map((field) => [field.field, field]));
   const fields = (controlFields.length ? controlFields : configFields.length ? configFields : domFields)
@@ -1047,6 +1095,84 @@ function selectNodeText(node) {
   const selection = window.getSelection();
   selection.removeAllRanges();
   selection.addRange(range);
+}
+
+function clearCellSelection(overlay) {
+  overlay.querySelectorAll(".guthon-bridge-cell-selected").forEach((node) => {
+    node.classList.remove("guthon-bridge-cell-selected");
+  });
+}
+
+function paintCellSelection(overlay, table, columnIndex, startRowIndex, endRowIndex) {
+  clearCellSelection(overlay);
+  const rows = Array.from(table.tBodies[0]?.rows || []);
+  const from = Math.min(startRowIndex, endRowIndex);
+  const to = Math.max(startRowIndex, endRowIndex);
+  rows.slice(from, to + 1).forEach((row) => {
+    row.cells[columnIndex]?.querySelector(".guthon-bridge-cell-value")?.classList.add("guthon-bridge-cell-selected");
+  });
+}
+
+function copySelectedCells(overlay, event) {
+  const text = Array.from(overlay.querySelectorAll(".guthon-bridge-cell-selected"))
+    .map((node) => String(node.innerText || node.textContent || ""))
+    .join("\n");
+  if (!text) {
+    return;
+  }
+  event.clipboardData.setData("text/plain", text);
+  event.preventDefault();
+}
+
+function installCellSelection(overlay) {
+  let drag = null;
+
+  function getCell(target) {
+    const valueNode = target.closest?.(".guthon-bridge-cell-value");
+    const cell = valueNode?.closest("td");
+    const table = cell?.closest(".guthon-bridge-field-table");
+    if (!cell || !table) {
+      return null;
+    }
+    return { cell, table, rows: Array.from(table.tBodies[0]?.rows || []) };
+  }
+
+  overlay.addEventListener("mousedown", (event) => {
+    const hit = getCell(event.target);
+    if (!hit || event.button !== 0) {
+      return;
+    }
+    const rowIndex = hit.rows.indexOf(hit.cell.parentElement);
+    if (rowIndex < 0) {
+      return;
+    }
+    drag = { table: hit.table, columnIndex: hit.cell.cellIndex, startRowIndex: rowIndex };
+    paintCellSelection(overlay, drag.table, drag.columnIndex, drag.startRowIndex, rowIndex);
+    window.getSelection()?.removeAllRanges();
+    overlay.focus({ preventScroll: true });
+    document.addEventListener("mouseup", stopDrag, { once: true });
+    event.preventDefault();
+  });
+
+  overlay.addEventListener("mouseover", (event) => {
+    if (!drag) {
+      return;
+    }
+    const hit = getCell(event.target);
+    if (!hit || hit.table !== drag.table) {
+      return;
+    }
+    const rowIndex = hit.rows.indexOf(hit.cell.parentElement);
+    if (rowIndex >= 0) {
+      paintCellSelection(overlay, drag.table, drag.columnIndex, drag.startRowIndex, rowIndex);
+    }
+  });
+
+  function stopDrag() {
+    drag = null;
+  }
+
+  overlay.addEventListener("copy", (event) => copySelectedCells(overlay, event));
 }
 
 function escapeHtml(value) {
@@ -1204,6 +1330,7 @@ async function showCopyOverlay() {
   ensureInlineStyles();
   const overlay = document.createElement("div");
   overlay.id = COPY_OVERLAY_ID;
+  overlay.tabIndex = -1;
   overlay.innerHTML = `
     <div class="guthon-bridge-copy-panel">
       <div class="guthon-bridge-copy-head">
@@ -1228,6 +1355,7 @@ async function showCopyOverlay() {
   });
   overlay.querySelector(".guthon-bridge-copy-close").addEventListener("click", () => removeNode(COPY_OVERLAY_ID));
   installCopyOverlayInteractions(overlay);
+  installCellSelection(overlay);
   overlay.addEventListener("click", (event) => {
     if (event.target === overlay) {
       removeNode(COPY_OVERLAY_ID);

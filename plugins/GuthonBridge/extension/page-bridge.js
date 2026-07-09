@@ -371,6 +371,37 @@
     return value === false || value === 0 || value === "0" || value === "false" || value === "N" || value === "no";
   }
 
+  function collectHiddenFieldIds(root) {
+    const hiddenFields = new Set();
+    const selector = ".input-hide-area, .hide-field-list";
+    const areas = (root.matches?.(selector) ? [root] : []).concat(Array.from(root.querySelectorAll(selector)));
+    areas.forEach((area) => {
+      Array.from(area.querySelectorAll("*")).forEach((node) => {
+        const ownText = Array.from(node.childNodes)
+          .filter((child) => child.nodeType === Node.TEXT_NODE)
+          .map((child) => child.textContent)
+          .join(" ");
+        const text = [
+          node.getAttribute?.("data-field"),
+          node.getAttribute?.("data-field-id"),
+          node.getAttribute?.("prop"),
+          node.getAttribute?.("title"),
+          ownText
+        ].filter(Boolean).join(" ");
+        const normalized = String(text).replace(/\s+/g, " ").trim();
+        if (normalized) {
+          hiddenFields.add(normalized);
+        }
+        normalized.match(/[A-Za-z0-9_]{2,}/g)?.forEach((token) => hiddenFields.add(token));
+      });
+    });
+    return hiddenFields;
+  }
+
+  function isDomHiddenField(info, hiddenFields) {
+    return Array.from(hiddenFields).some((value) => value === info.field || value === info.label || value.includes(info.field) || value.includes(info.label));
+  }
+
   function makeFieldInfo(obj, maps = { templateMap: new Map(), selectMap: new Map() }, extra = {}) {
     const field = readFirst(obj, ["fieldId", "field", "prop", "property", "columnName", "colName", "name", "id"]);
     const label = readFirst(obj, ["label", "title", "disName", "displayName", "name"]);
@@ -382,7 +413,9 @@
         ? true
         : pickFirst(obj, ["required", "isRequired", "mustInput", "notNull", "isMust", "must", "require"]);
     const hiddenValue = pickFirst(obj, ["hidden", "isHidden", "hide", "isHide", "visible"]);
-    return {
+    const configuredHidden =
+      isTruthy(hiddenValue) || (hiddenValue !== undefined && hiddenValue !== "" && isFalsy(hiddenValue));
+    const info = {
       field,
       label,
       type: readFirst(obj, ["type", "colType", "displayMode", "controlType"]),
@@ -396,16 +429,20 @@
       sum: isTruthy(pickFirst(obj, ["isSum", "sum", "summary", "isSummary", "total", "isTotal"])),
       align: readFirst(obj, ["align", "dataAlign", "textAlign", "headerAlign"]),
       required: requiredValue === "nullable" ? false : isTruthy(requiredValue),
-      hidden: extra.hidden || isTruthy(hiddenValue) || (hiddenValue !== undefined && hiddenValue !== "" && isFalsy(hiddenValue)),
+      hidden: extra.hidden ? isDomHiddenField({ field, label }, extra.hiddenFields || new Set()) : configuredHidden,
       index: 0
     };
+    return info;
   }
 
-  function collectControlFields(root, options = {}, maps) {
+  function collectControlFields(root, options = {}, maps, hiddenFields = collectHiddenFieldIds(root)) {
     const fields = [];
     const selector = "[data-control-name], .input-box, .data-table, .data-table-control, .detail-table, .el-table";
     const controls = (root.matches?.(selector) ? [root] : []).concat(Array.from(root.querySelectorAll(selector)));
     controls.forEach((element) => {
+      if (!isVisible(element)) {
+        return;
+      }
       if (options.excludeTabPages && element.closest('[role="tabpanel"][id^="pane-tabPage"]')) {
         return;
       }
@@ -420,7 +457,10 @@
             return;
           }
           items.forEach((item) => {
-            const info = makeFieldInfo(item, maps, { hidden });
+            const info = makeFieldInfo(item, maps, { hidden, hiddenFields });
+            if (info && hidden && !isDomHiddenField(info, hiddenFields)) {
+              return;
+            }
             if (info) {
               fields.push(info);
             }
@@ -510,6 +550,9 @@
     const groups = [];
     const candidates = (root.matches?.(selector) ? [root] : []).concat(Array.from(root.querySelectorAll(selector)));
     candidates.forEach((element, index) => {
+      if (!isVisible(element)) {
+        return;
+      }
       const groupElement = element.matches(".input-box, .data-table, .data-table-control, .detail-table, .el-table")
         ? element
         : element.closest("[data-control-name]") || element;
@@ -523,7 +566,7 @@
       if (!isControlGroup(controlName, element)) {
         return;
       }
-      const fields = dedupeFields(collectControlFields(groupElement, {}, maps));
+      const fields = dedupeFields(collectControlFields(groupElement, {}, maps, collectHiddenFieldIds(groupElement)));
       if (fields.length) {
         const key = `${controlName}|${fields.map((field) => field.field).join(",")}`;
         if (seen.has(key)) {

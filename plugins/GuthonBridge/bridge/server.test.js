@@ -459,6 +459,9 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("renderTableCell(field.valueField)"), true);
   assert.equal(contentScript.includes("renderTableCell(field.otherFill)"), true);
   assert.equal(contentScript.includes("renderTableCell(field.queryParams)"), true);
+  assert.equal(contentScript.includes("guthon-bridge-cell-selected"), true);
+  assert.equal(contentScript.includes("installCellSelection"), true);
+  assert.equal(contentScript.includes("copySelectedCells"), true);
   const queryParamsIndex = contentScript.indexOf("renderTableCell(field.queryParams)");
   const requiredIndex = contentScript.indexOf('renderTableCell(field.required ? "是" : "否")');
   const sumIndex = contentScript.indexOf('renderTableCell(field.sum ? "是" : "否")');
@@ -481,6 +484,13 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes('mode: "page-source"'), true);
   assert.equal(pageBridge.includes("collectModuleCopyText"), true);
   assert.equal(pageBridge.includes(".el-table"), true);
+  assert.equal(pageBridge.includes("collectHiddenFieldIds"), true);
+  assert.equal(pageBridge.includes(".input-hide-area, .hide-field-list"), true);
+  assert.equal(pageBridge.includes("vm.hideFields"), true);
+  assert.equal(pageBridge.includes('pickFirst(obj, ["hidden", "isHidden", "hide", "isHide", "visible"])'), true);
+  assert.equal(pageBridge.includes("isDomHiddenField(info, hiddenFields)"), true);
+  assert.equal(pageBridge.includes("value.includes(info.label)"), true);
+  assert.equal(pageBridge.includes("collectHiddenFieldIds(groupElement)"), true);
   assert.equal(pageBridge.includes("function collectControlGroups"), true);
   assert.equal(pageBridge.includes('root.matches?.(selector) ? [root] : []'), true);
   assert.equal(pageBridge.includes('[role="tabpanel"][id^="pane-PG-"]'), true);
@@ -499,6 +509,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("const fieldKey = group.fields.map((field) => field.field).join(\",\");"), true);
   assert.equal(pageBridge.includes("`${controlName}|${index}`"), false);
   assert.equal(pageBridge.includes('"[data-control-name], .input-box'), true);
+  assert.equal(pageBridge.includes("if (!isVisible(element))"), true);
   assert.equal(pageBridge.includes("主表 inputForm"), false);
   assert.equal(pageBridge.includes("detailTable"), false);
   assert.equal(pageBridge.includes("normalizeGroups"), true);
