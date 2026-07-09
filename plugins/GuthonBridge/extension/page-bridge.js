@@ -440,7 +440,7 @@
     const selector = "[data-control-name], .input-box, .data-table, .data-table-control, .detail-table, .el-table";
     const controls = (root.matches?.(selector) ? [root] : []).concat(Array.from(root.querySelectorAll(selector)));
     controls.forEach((element) => {
-      if (!isVisible(element)) {
+      if (!options.includeHiddenControls && !isVisible(element)) {
         return;
       }
       if (options.excludeTabPages && element.closest('[role="tabpanel"][id^="pane-tabPage"]')) {
@@ -548,9 +548,10 @@
     const selector = "[data-control-name], .input-box, .data-table, .data-table-control, .detail-table, .el-table";
     const seen = new Set();
     const groups = [];
+    const rootHiddenFields = collectHiddenFieldIds(root);
     const candidates = (root.matches?.(selector) ? [root] : []).concat(Array.from(root.querySelectorAll(selector)));
     candidates.forEach((element, index) => {
-      if (!isVisible(element)) {
+      if (!options.includeHiddenControls && !isVisible(element)) {
         return;
       }
       const groupElement = element.matches(".input-box, .data-table, .data-table-control, .detail-table, .el-table")
@@ -566,7 +567,8 @@
       if (!isControlGroup(controlName, element)) {
         return;
       }
-      const fields = dedupeFields(collectControlFields(groupElement, {}, maps, collectHiddenFieldIds(groupElement)));
+      const groupHiddenFields = collectHiddenFieldIds(groupElement);
+      const fields = dedupeFields(collectControlFields(groupElement, { includeHiddenControls: options.includeHiddenControls }, maps, groupHiddenFields.size ? groupHiddenFields : rootHiddenFields));
       if (fields.length) {
         const key = `${controlName}|${fields.map((field) => field.field).join(",")}`;
         if (seen.has(key)) {
@@ -676,7 +678,7 @@
     }
 
     Array.from((activeWorkContext || activePane || document).querySelectorAll('[role="tabpanel"][id^="pane-tabPage"]')).forEach((pane, index) => {
-      const paneGroups = collectControlGroups(pane, {}, maps);
+      const paneGroups = collectControlGroups(pane, { includeHiddenControls: true }, maps);
       paneGroups.forEach((group) => {
         groups.push({
           title: getControlTitle(getTabPageLabel(pane, index), pane, group.controlName),
@@ -684,7 +686,7 @@
         });
       });
       if (!paneGroups.length) {
-        const fields = dedupeFields(collectControlFields(pane, {}, maps));
+        const fields = dedupeFields(collectControlFields(pane, { includeHiddenControls: true }, maps));
         if (fields.length) {
           groups.push({
             title: getTabPageLabel(pane, index),
@@ -1002,7 +1004,12 @@
     throw new Error("本插件已屏蔽签出和回推功能");
   }
 
+  function pingPageBridge() {
+    return { ready: window.__guthonPageBridgeReady };
+  }
+
   const handlers = {
+    pingPageBridge,
     inspectCurrentProcedure,
     pullProcedure,
     collectModuleCopyText,

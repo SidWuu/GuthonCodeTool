@@ -49,6 +49,32 @@ async function ensurePageBridge() {
   if (!runtime?.getURL) {
     throw new Error("extension context invalid");
   }
+  const ready = await new Promise((resolve) => {
+    const requestId = `guthon-ready-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const timer = setTimeout(() => {
+      window.removeEventListener("message", onMessage);
+      resolve(false);
+    }, 300);
+
+    function onMessage(event) {
+      if (event.source !== window) {
+        return;
+      }
+      const data = event.data;
+      if (!data || data.source !== "guthon-page-bridge" || data.requestId !== requestId) {
+        return;
+      }
+      clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+      resolve(Boolean(data.ok));
+    }
+
+    window.addEventListener("message", onMessage);
+    window.postMessage({ source: "guthon-extension", requestId, command: "pingPageBridge", payload: {} }, "*");
+  });
+  if (ready) {
+    return;
+  }
   await new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = `${runtime.getURL("page-bridge.js")}?v=20260630b`;
@@ -859,7 +885,7 @@ function collectControlFields(root, options = {}, hiddenFields = collectHiddenFi
   const selector = "[data-control-name], .input-box, .data-table, .data-table-control, .detail-table, .el-table";
   const controls = (root.matches?.(selector) ? [root] : []).concat(Array.from(root.querySelectorAll(selector)));
   controls.forEach((element) => {
-    if (!isVisible(element)) {
+    if (!options.includeHiddenControls && !isVisible(element)) {
       return;
     }
     if (options.excludeTabPages && element.closest('[role="tabpanel"][id^="pane-tabPage"]')) {
@@ -890,7 +916,7 @@ function collectControlFields(root, options = {}, hiddenFields = collectHiddenFi
   return fields;
 }
 
-function collectConfigFields(root, hiddenFields = collectHiddenFieldIds(root)) {
+function collectConfigFields(root, hiddenFields = collectHiddenFieldIds(root), options = {}) {
   const fields = [];
   const seen = new WeakSet();
 
@@ -921,7 +947,7 @@ function collectConfigFields(root, hiddenFields = collectHiddenFieldIds(root)) {
   }
 
   Array.from(root.querySelectorAll("*")).forEach((element) => {
-    if (!isVisible(element)) {
+    if (!options.includeHiddenControls && !isVisible(element)) {
       return;
     }
     const vm = getVueInstance(element);
@@ -1004,7 +1030,7 @@ function readElementName(element) {
 function collectGroupFields(root, options = {}) {
   const hiddenFields = collectHiddenFieldIds(root);
   const controlFields = collectControlFields(root, options, hiddenFields);
-  const configFields = collectConfigFields(root, hiddenFields);
+  const configFields = collectConfigFields(root, hiddenFields, options);
   const domFields = collectDomFields(root);
   const metaByField = new Map(configFields.filter(hasFieldMeta).map((field) => [field.field, field]));
   const fields = (controlFields.length ? controlFields : configFields.length ? configFields : domFields)
@@ -1040,7 +1066,7 @@ function collectModulePageFields() {
     const label = tabId ? String(document.getElementById(tabId)?.innerText || "").trim() : "";
     groups.push({
       title: label || readElementName(pane) || `tabPage${index}`,
-      fields: collectGroupFields(pane)
+      fields: collectGroupFields(pane, { includeHiddenControls: true })
     });
   });
 

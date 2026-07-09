@@ -436,6 +436,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("guthon-bridge-copy-text"), true);
   assert.equal(contentScript.includes("guthon-bridge-field-table"), true);
   assert.equal(contentScript.includes("guthon-bridge-cell-value"), true);
+  assert.equal(contentScript.includes("pingPageBridge"), true);
   assert.equal(contentScript.includes("guthon-bridge-copy-minimize"), true);
   assert.equal(contentScript.includes('data-minimized="true"'), true);
   assert.equal(contentScript.includes('minimizeButton.textContent = minimized ? "展开" : "缩小";'), true);
@@ -491,6 +492,8 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("isDomHiddenField(info, hiddenFields)"), true);
   assert.equal(pageBridge.includes("value.includes(info.label)"), true);
   assert.equal(pageBridge.includes("collectHiddenFieldIds(groupElement)"), true);
+  assert.equal(pageBridge.includes("includeHiddenControls"), true);
+  assert.equal(pageBridge.includes("collectHiddenFieldIds(root)"), true);
   assert.equal(pageBridge.includes("function collectControlGroups"), true);
   assert.equal(pageBridge.includes('root.matches?.(selector) ? [root] : []'), true);
   assert.equal(pageBridge.includes('[role="tabpanel"][id^="pane-PG-"]'), true);
@@ -509,7 +512,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("const fieldKey = group.fields.map((field) => field.field).join(\",\");"), true);
   assert.equal(pageBridge.includes("`${controlName}|${index}`"), false);
   assert.equal(pageBridge.includes('"[data-control-name], .input-box'), true);
-  assert.equal(pageBridge.includes("if (!isVisible(element))"), true);
+  assert.equal(pageBridge.includes("!options.includeHiddenControls && !isVisible(element)"), true);
   assert.equal(pageBridge.includes("主表 inputForm"), false);
   assert.equal(pageBridge.includes("detailTable"), false);
   assert.equal(pageBridge.includes("normalizeGroups"), true);
