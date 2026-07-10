@@ -1116,8 +1116,9 @@ def pull_source_to_work_copy(payload: dict):
     if not rows:
         raise SystemExit("Source is outside configured include scope")
     targets = []
+    changed = False
     for candidate in rows:
-        upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"])
+        changed = upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"]) or changed
     conn.commit()
     for candidate in rows:
         targets.append(create_work_copy_from_row(conn, cfg, candidate, product_id, project_id))
@@ -1125,6 +1126,8 @@ def pull_source_to_work_copy(payload: dict):
     work_copy_path = os.path.commonpath([str(target) for target in targets])
     return {
         "ok": True,
+        "changed": changed,
+        "message": "拉取成功" if changed else "拉取成功, 无变更",
         "workCopyPath": work_copy_path,
         "pulled": len(targets),
         "source": {key: _str(row.get(key)) for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},

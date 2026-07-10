@@ -103,6 +103,7 @@ function sourceSummary(payload, result = {}) {
     sourceId: payload.sourceId || "",
     alias: payload.alias || "",
     funId: payload.funId || "",
+    changed: result.changed ?? "",
     pulled: result.pulled ?? "",
     workCopyPath: result.workCopyPath || ""
   };

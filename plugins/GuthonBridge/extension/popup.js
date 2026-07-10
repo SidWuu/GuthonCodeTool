@@ -1309,7 +1309,7 @@ pullHubBtn.addEventListener("click", async () => {
       setStatus(["表结构拉取成功", `输出目录: ${result.outputDir}`, `表数量: ${result.exported_table_count ?? ""}`].join("\n"));
       return;
     }
-    setStatus(["源码表拉取成功", `工作副本: ${result.workCopyPath}`].join("\n"));
+    setStatus([result.message || "源码表拉取成功", `工作副本: ${result.workCopyPath}`].join("\n"));
   } catch (error) {
     const isTableSchema = pullHubBtn.textContent.includes("表结构");
     const isBillType = pullHubBtn.textContent.includes("单据类型");
