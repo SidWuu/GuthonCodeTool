@@ -293,6 +293,71 @@ def connect_index(index_db: Path) -> sqlite3.Connection:
     return conn
 
 
+def find_source_candidates(conn, product_id, keyword, limit=10):
+    limit = max(1, min(int(limit), 10))
+    query = f"%{keyword.strip()}%"
+    return conn.execute(
+        """
+        SELECT source_layer, project_id, source_table, source_id, source_alias_id, fun_id, source_name, local_path, status
+        FROM gusen_source_record
+        WHERE product_id=?
+          AND (source_id LIKE ? OR source_alias_id LIKE ? OR source_name LIKE ?)
+        ORDER BY source_name, source_alias_id, fun_id
+        LIMIT ?
+        """,
+        (product_id, query, query, query, limit),
+    ).fetchall()
+
+
+def query_source_context(conn, product_id, source_id, fun_id="", limit=20):
+    limit = max(1, min(int(limit), 20))
+    source = conn.execute(
+        """
+        SELECT * FROM gusen_source_record
+        WHERE product_id=? AND source_id=? AND fun_id=?
+        ORDER BY source_layer, project_id
+        LIMIT 1
+        """,
+        (product_id, source_id, fun_id),
+    ).fetchone()
+    if not source:
+        raise ValueError(f"Source not found: product={product_id}, sourceId={source_id}, funId={fun_id}")
+    identity = (source["source_layer"], source["product_id"], source["project_id"], source["source_table"], source["source_id"], source["fun_id"])
+    outgoing = conn.execute(
+        """
+        SELECT source_table, source_id, source_alias_id, fun_id, script_type, json_path, line_no,
+               target_alias_id, target_fun_id, invoke_type, confidence
+        FROM gusen_invoke_call
+        WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
+        ORDER BY line_no
+        LIMIT ?
+        """,
+        (*identity, limit),
+    ).fetchall()
+    incoming = conn.execute(
+        """
+        SELECT source_layer, source_table, source_id, source_alias_id, fun_id, script_type, json_path, line_no,
+               invoke_type, confidence
+        FROM gusen_invoke_call
+        WHERE product_id=? AND target_alias_id=? AND target_fun_id=?
+        ORDER BY source_layer, source_alias_id, fun_id, line_no
+        LIMIT ?
+        """,
+        (product_id, source["source_alias_id"], source["fun_id"], limit),
+    ).fetchall()
+    dynamic = conn.execute(
+        """
+        SELECT script_type, json_path, line_no, invoke_expr, reason, confidence
+        FROM gusen_dynamic_call
+        WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
+        ORDER BY line_no
+        LIMIT ?
+        """,
+        (*identity, limit),
+    ).fetchall()
+    return {"source": source, "outgoing": outgoing, "incoming": incoming, "dynamic": dynamic}
+
+
 def db_connect(ds: dict):
     if ds.get("type", "mysql") != "mysql":
         raise SystemExit(f"Only mysql datasource is implemented now: {ds.get('name')}")
@@ -501,7 +566,9 @@ def run_sync_once(args=None):
     sync = cfg["sync"]["sync"]
     conn = connect_index(ROOT / sync["index_db"])
     if parsed.init_only:
-        export_status(conn, {"mode": "init-only", "changed": 0, "candidates": 0, "failures": 0})
+        active, _products, _projects, _effective_project_ids = resolve_active(cfg)
+        export_status(conn, {"mode": "init-only", "active": active, "changed": 0, "candidates": 0, "failures": 0})
+        export_knowledge_readme(conn, sync["index_db"], active)
         return
 
     lookback = int(sync.get("lookback_minutes", 10))
@@ -521,6 +588,7 @@ def run_sync_once(args=None):
     )
     conn.commit()
     export_status(conn, stats)
+    export_knowledge_readme(conn, sync["index_db"], active)
     append_pull_log(
         "source",
         "scheduled",
@@ -933,6 +1001,35 @@ def export_status(conn, stats):
     (out / "source-sync-status.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def export_knowledge_readme(conn, index_db, active):
+    out = VAR_DIR / "knowledge"
+    out.mkdir(parents=True, exist_ok=True)
+    source_count = conn.execute("SELECT COUNT(*) FROM gusen_source_record").fetchone()[0]
+    call_count = conn.execute("SELECT COUNT(*) FROM gusen_invoke_call").fetchone()[0]
+    dynamic_count = conn.execute("SELECT COUNT(*) FROM gusen_dynamic_call").fetchone()[0]
+    lines = [
+        "# 谷神源码知识入口",
+        "",
+        f"- 当前索引：`{index_db}`",
+        f"- 当前范围：`{active}`",
+        f"- 源码对象数：{source_count}",
+        f"- 静态调用数：{call_count}",
+        f"- 动态调用点数：{dynamic_count}",
+        "",
+        "AI 开发先查询 SQLite 局部上下文，不读取全量 Markdown 索引：",
+        "",
+        "```bash",
+        "python scripts/query_hub_context.py find <关键字>",
+        "python scripts/query_hub_context.py context --source-id <ID> --fun <函数名>",
+        "```",
+        "",
+        "`products/*/source-index.md`、`invoke-index.md` 和 `dynamic-invoke-points.md` 仅供人工全量浏览。",
+    ]
+    path = out / "README.md"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
 def create_work_copy(args=None):
     parser = argparse.ArgumentParser()
     scope = parser.add_mutually_exclusive_group(required=True)
@@ -1020,7 +1117,7 @@ def pull_source_to_work_copy(payload: dict):
         raise SystemExit("Source is outside configured include scope")
     targets = []
     for candidate in rows:
-        upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"], force=True)
+        upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"])
     conn.commit()
     for candidate in rows:
         targets.append(create_work_copy_from_row(conn, cfg, candidate, product_id, project_id))
