@@ -5,7 +5,7 @@
 ## 目录结构
 
 ```text
-谷神代码补全vscode扩展/
+plugins/GuthonVSCodeExtension/
   README.md                  给同事看的安装、使用、维护说明
   gushen-vscode-completion/  VS Code 扩展源码和打包产物
 ```
@@ -37,11 +37,10 @@
 
 ## 安装方式
 
-如果已经有打包好的 `.vsix` 文件，直接安装：
+从 [GuthonCodeTool Releases](https://github.com/SidWuu/GuthonCodeTool/releases) 下载 `gushen-vscode-completion-0.1.0.vsix` 后安装：
 
 ```bash
-cd /Users/moon/Work/Workspace/Codex/gusen/tools/谷神代码补全vscode扩展/gushen-vscode-completion
-code --install-extension gushen-vscode-completion-0.1.0.vsix --force
+code --install-extension /path/to/gushen-vscode-completion-0.1.0.vsix --force
 ```
 
 安装后在 VS Code 中执行：
@@ -59,7 +58,7 @@ Shell Command: Install 'code' command in PATH
 也可以在 VS Code 扩展面板右上角菜单中选择 `Install from VSIX...`，然后选择：
 
 ```text
-gushen-vscode-completion/gushen-vscode-completion-0.1.0.vsix
+下载的 gushen-vscode-completion-0.1.0.vsix 文件
 ```
 
 ## 重新打包
@@ -67,7 +66,7 @@ gushen-vscode-completion/gushen-vscode-completion-0.1.0.vsix
 扩展源码在 `gushen-vscode-completion/` 子目录。修改扩展代码、规则或补全数据后，重新打包并安装：
 
 ```bash
-cd /Users/moon/Work/Workspace/Codex/gusen/tools/谷神代码补全vscode扩展/gushen-vscode-completion
+cd plugins/GuthonVSCodeExtension/gushen-vscode-completion
 vsce package
 code --install-extension gushen-vscode-completion-0.1.0.vsix --force
 ```
@@ -134,23 +133,17 @@ gushen-vscode-completion/data/manual.json
 
 ## 更新 API 补全数据
 
-API 补全数据来自：
-
-```text
-gusen/AI帮助文档/谷神方言API/javascript.md
-gusen/AI帮助文档/谷神方言API/java.md
-gusen/AI帮助文档/谷神方言API/sql.md
-```
-
-当这三个 Markdown 文档更新后，在扩展目录执行：
+当 API 文档更新后，在扩展目录执行：
 
 ```bash
-cd /Users/moon/Work/Workspace/Codex/gusen/tools/谷神代码补全vscode扩展/gushen-vscode-completion
-npm run build:data
+cd plugins/GuthonVSCodeExtension/gushen-vscode-completion
+npm run build:data -- /path/to/api-docs
 npm test
 vsce package
 code --install-extension gushen-vscode-completion-0.1.0.vsix --force
 ```
+
+`/path/to/api-docs` 目录需要包含 `java.md`、`javascript.md` 和 `sql.md`。
 
 `npm run build:data` 会重新生成：
 
