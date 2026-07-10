@@ -4,6 +4,7 @@ const COPY_ROOT_ID = "guthon-bridge-copy-root";
 const SCHEMA_ROOT_ID = "guthon-bridge-schema-root";
 const BILLTYPE_ROOT_ID = "guthon-bridge-billtype-root";
 const COPY_OVERLAY_ID = "guthon-bridge-copy-overlay";
+const FIELDS_MOVER_OVERLAY_ID = "guthon-bridge-fields-mover-overlay";
 
 let gIntervalId = null;
 let gTreeScrollListenerInstalled = false;
@@ -53,7 +54,7 @@ async function ensurePageBridge() {
     const requestId = `guthon-ready-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const timer = setTimeout(() => {
       window.removeEventListener("message", onMessage);
-      resolve(false);
+      resolve({ ready: false, fieldsMover: false });
     }, 300);
 
     function onMessage(event) {
@@ -66,29 +67,27 @@ async function ensurePageBridge() {
       }
       clearTimeout(timer);
       window.removeEventListener("message", onMessage);
-      resolve(Boolean(data.ok));
+      resolve({ ready: Boolean(data.ok), fieldsMover: Boolean(data.data?.fieldsMover) });
     }
 
     window.addEventListener("message", onMessage);
     window.postMessage({ source: "guthon-extension", requestId, command: "pingPageBridge", payload: {} }, "*");
   });
-  if (ready) {
+  if (ready.ready && ready.fieldsMover) {
     return;
   }
-  await new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = `${runtime.getURL("page-bridge.js")}?v=20260630b`;
-    script.dataset.source = "guthon-bridge";
-    script.onload = () => {
-      script.remove();
-      resolve();
-    };
-    script.onerror = () => {
-      script.remove();
-      reject(new Error("页面桥接脚本加载失败"));
-    };
-    (document.head || document.documentElement).appendChild(script);
-  });
+  async function injectPageScript(name) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = `${runtime.getURL(name)}?v=20260710a`;
+      script.dataset.source = "guthon-bridge";
+      script.onload = () => { script.remove(); resolve(); };
+      script.onerror = () => { script.remove(); reject(new Error("页面桥接脚本加载失败")); };
+      (document.head || document.documentElement).appendChild(script);
+    });
+  }
+  await injectPageScript("fields-mover-core.js");
+  await injectPageScript("page-bridge.js");
 }
 
 async function runPageCommand(command, payload = {}) {
@@ -304,6 +303,18 @@ function ensureInlineStyles() {
     .guthon-bridge-inline button + button {
       margin-left: 0;
     }
+    .guthon-bridge-fields-mover-group {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+    }
+    .guthon-bridge-fields-mover-group > span {
+      width: 108px;
+      color: #c0c4cc;
+      font-size: 12px;
+      text-align: center;
+    }
     .guthon-bridge-inline button span {
       display: inline-flex;
       align-items: center;
@@ -344,6 +355,45 @@ function ensureInlineStyles() {
     .guthon-bridge-message[data-tone="success"] {
       color: #67c23a;
     }
+    #${FIELDS_MOVER_OVERLAY_ID} {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483647;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      box-sizing: border-box;
+      background: rgba(15, 23, 42, 0.42);
+    }
+    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-panel {
+      width: min(560px, 100%);
+      max-height: calc(100vh - 48px);
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border: 1px solid #dcdfe6;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+    }
+    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-head,
+    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 14px;
+    }
+    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-head { border-bottom: 1px solid #ebeef5; }
+    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-list { overflow: auto; padding: 8px 14px; }
+    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-item {
+      display: flex;
+      gap: 8px;
+      padding: 7px 0;
+      border-bottom: 1px solid #f2f6fc;
+      color: #303133;
+      font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-meta { color: #909399; font-size: 12px; }
+    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-actions { justify-content: flex-end; border-top: 1px solid #ebeef5; }
     #${COPY_OVERLAY_ID} {
       position: absolute;
       inset: 0;
@@ -692,6 +742,7 @@ function installProcedurePullButton() {
     root.className = "guthon-bridge-inline";
     root.dataset.mode = mode;
     const sourceButton = makeNativeButton("源码拉取", "guthon-bridge-inline-button guthon-bridge-source-button");
+    root.appendChild(sourceButton);
     if (mode === "module") {
       const copyButton = makeNativeButton("复制模式", "guthon-bridge-copy-button");
       copyButton.addEventListener("click", async () => {
@@ -703,8 +754,28 @@ function installProcedurePullButton() {
         }
       });
       root.appendChild(copyButton);
+      const fieldsMover = document.createElement("div");
+      fieldsMover.className = "guthon-bridge-fields-mover-group";
+      fieldsMover.innerHTML = "<span>字段平移</span>";
+      const copyFieldsButton = makeNativeButton("复制字段", "guthon-bridge-copy-fields-button");
+      const pasteFieldsButton = makeNativeButton("粘贴字段", "guthon-bridge-paste-fields-button");
+      copyFieldsButton.addEventListener("click", async () => {
+        try {
+          await showFieldsMoverOverlay(root);
+        } catch (error) {
+          setMessage(root, error?.message || String(error), "error");
+        }
+      });
+      pasteFieldsButton.addEventListener("click", async () => {
+        try {
+          await pasteCopiedFields(root);
+        } catch (error) {
+          setMessage(root, error?.message || String(error), "error");
+        }
+      });
+      fieldsMover.append(copyFieldsButton, pasteFieldsButton);
+      root.appendChild(fieldsMover);
     }
-    root.appendChild(sourceButton);
     const message = document.createElement("div");
     message.className = "guthon-bridge-message";
     message.dataset.tone = "idle";
@@ -753,6 +824,51 @@ function getVueInstance(element) {
     return null;
   }
   return element.__vue__ || element.__vueParentComponent?.proxy || null;
+}
+
+async function showFieldsMoverOverlay(root) {
+  if (!isModuleRoute()) {
+    throw new Error("字段平移只支持模块开发页面");
+  }
+  const source = await runPageCommand("readFieldsMoverSource");
+  if (!source?.ok) {
+    throw new Error(source?.message || "读取当前组件字段失败");
+  }
+  const fields = source.data || [];
+  removeNode(FIELDS_MOVER_OVERLAY_ID);
+  const overlay = document.createElement("div");
+  overlay.id = FIELDS_MOVER_OVERLAY_ID;
+  overlay.innerHTML = `
+    <div class="guthon-bridge-fields-mover-panel">
+      <div class="guthon-bridge-fields-mover-head"><strong>复制字段</strong><button type="button" class="guthon-bridge-fields-mover-close">关闭</button></div>
+      <div class="guthon-bridge-fields-mover-list">${fields.map((field) => `<label class="guthon-bridge-fields-mover-item"><input type="checkbox" data-index="${field.index}" /><span>${escapeHtml(field.label)} <span class="guthon-bridge-fields-mover-meta">${escapeHtml(field.fieldId || "无 fieldId")}</span></span></label>`).join("") || "当前组件没有字段"}</div>
+      <div class="guthon-bridge-fields-mover-actions"><button type="button" class="guthon-bridge-fields-mover-select-all">全选字段</button><button type="button" class="guthon-bridge-fields-mover-cancel">取消</button><button type="button" class="guthon-bridge-fields-mover-copy">复制</button></div>
+    </div>`;
+  const close = () => removeNode(FIELDS_MOVER_OVERLAY_ID);
+  overlay.querySelector(".guthon-bridge-fields-mover-close").addEventListener("click", close);
+  overlay.querySelector(".guthon-bridge-fields-mover-cancel").addEventListener("click", close);
+  overlay.querySelector(".guthon-bridge-fields-mover-select-all").addEventListener("click", () => {
+    overlay.querySelectorAll("input[data-index]").forEach((item) => { item.checked = true; });
+  });
+  overlay.querySelector(".guthon-bridge-fields-mover-copy").addEventListener("click", async () => {
+    const indexes = Array.from(overlay.querySelectorAll("input[data-index]:checked")).map((item) => Number(item.dataset.index));
+    const copied = await runPageCommand("copyFieldsMoverSource", { indexes });
+    if (!copied?.ok) {
+      setMessage(root, copied?.message || "复制字段失败", "error");
+      return;
+    }
+    setMessage(root, `已复制 ${copied.data.copied} 个字段`, "success");
+    close();
+  });
+  document.body.appendChild(overlay);
+}
+
+async function pasteCopiedFields(root) {
+  const pasted = await runPageCommand("pasteFieldsMoverSource");
+  if (!pasted?.ok) {
+    throw new Error(pasted?.message || "粘贴字段失败");
+  }
+  setMessage(root, `已粘贴 ${pasted.data.pasted} 个，跳过重复 ${pasted.data.duplicate} 个，无效 ${pasted.data.invalid} 个`, "success");
 }
 
 function readFirst(obj, keys) {

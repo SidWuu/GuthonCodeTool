@@ -5,6 +5,6 @@
   "description": "Chrome extension + local bridge for Guthon low-code development tools.",
   "scripts": {
     "start:bridge": "node bridge/server.js",
-    "test": "node --test bridge/server.test.js"
+    "test": "node --test bridge/server.test.js extension/fields-mover-core.test.js"
   }
 }

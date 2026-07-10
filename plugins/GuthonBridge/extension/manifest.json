@@ -45,9 +45,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": [
-        "page-bridge.js"
-      ],
+      "resources": ["fields-mover-core.js", "page-bridge.js"],
       "matches": [
         "http://*/*"
       ]

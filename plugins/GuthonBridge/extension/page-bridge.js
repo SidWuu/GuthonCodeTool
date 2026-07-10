@@ -92,6 +92,48 @@
     return element.__vue__ || element.__vueParentComponent?.proxy || null;
   }
 
+  let copiedFields = null;
+
+  function findFieldsMoverContext() {
+    const selected = Array.from(document.querySelectorAll(".base-control-box.row-box.selected"));
+    if (selected.length !== 1) {
+      throw new Error(selected.length ? "请只选中一个组件" : "请先选中组件");
+    }
+    for (const [selector, fieldsKey] of [[".input-box", "fields"], [".coust-table", "columns"]]) {
+      const host = selected[0].querySelector(selector);
+      const vue = host && [host, ...host.querySelectorAll("*")]
+        .map(getVueInstance)
+        .find((item) => Array.isArray(item?.[fieldsKey]));
+      if (vue) return { fields: vue[fieldsKey] };
+    }
+    throw new Error("当前组件不支持字段平移");
+  }
+
+  function getFieldsMoverLabel(field, index) {
+    return field?.label || field?.name || field?.title || field?.fieldName || field?.fieldId || `字段 ${index + 1}`;
+  }
+
+  function readFieldsMoverSource() {
+    return findFieldsMoverContext().fields.map((field, index) => ({ index, label: getFieldsMoverLabel(field, index), fieldId: field?.fieldId || "" }));
+  }
+
+  function copyFieldsMoverSource(payload) {
+    const fields = findFieldsMoverContext().fields;
+    const indexes = Array.isArray(payload?.indexes) ? payload.indexes : [];
+    const chosen = indexes.map(Number).filter((index) => Number.isInteger(index) && fields[index]);
+    if (!chosen.length) throw new Error("请至少选择一个字段");
+    copiedFields = window.GuthonFieldsMoverCore.cloneFields(chosen.map((index) => fields[index]));
+    return { copied: copiedFields.length };
+  }
+
+  function pasteFieldsMoverSource() {
+    if (!copiedFields?.length) throw new Error("没有已复制的字段");
+    const fields = findFieldsMoverContext().fields;
+    const result = window.GuthonFieldsMoverCore.planAppendFields(fields, window.GuthonFieldsMoverCore.cloneFields(copiedFields));
+    fields.push(...result.toAppend);
+    return { pasted: result.toAppend.length, duplicate: result.skippedDuplicate.length, invalid: result.skippedInvalid.length };
+  }
+
   function getAllVueInstances() {
     const instances = [];
     const scopeRoot =
@@ -1005,7 +1047,7 @@
   }
 
   function pingPageBridge() {
-    return { ready: window.__guthonPageBridgeReady };
+    return { ready: window.__guthonPageBridgeReady, fieldsMover: Boolean(window.GuthonFieldsMoverCore) };
   }
 
   const handlers = {
@@ -1013,6 +1055,9 @@
     inspectCurrentProcedure,
     pullProcedure,
     collectModuleCopyText,
+    readFieldsMoverSource,
+    copyFieldsMoverSource,
+    pasteFieldsMoverSource,
     inspectCurrentPageSource,
     inspectTableSchemaTarget,
     inspectBillTypeTarget,

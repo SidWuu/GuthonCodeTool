@@ -333,7 +333,7 @@ test("extension manifest injects the floating pull button on Guthon pages", () =
   ]);
   assert.deepEqual(manifest.web_accessible_resources, [
     {
-      resources: ["page-bridge.js"],
+      resources: ["fields-mover-core.js", "page-bridge.js"],
       matches: ["http://*/*"]
     }
   ]);
@@ -407,6 +407,18 @@ test("copy mode button and overlay are available on module page editors", () => 
   );
 
   assert.equal(contentScript.includes("复制模式"), true);
+  assert.equal(contentScript.includes("字段平移"), true);
+  assert.equal(contentScript.includes("复制字段"), true);
+  assert.equal(contentScript.includes("粘贴字段"), true);
+  assert.equal(contentScript.includes("全选字段"), true);
+  assert.equal(contentScript.includes("guthon-bridge-fields-mover-select-all"), true);
+  assert.equal(contentScript.includes("item.checked = true"), true);
+  assert.equal(contentScript.includes("showFieldsMoverOverlay"), true);
+  assert.equal(contentScript.includes("pasteCopiedFields"), true);
+  assert.equal(contentScript.includes('runPageCommand("readFieldsMoverSource")'), true);
+  assert.equal(contentScript.includes('runPageCommand("copyFieldsMoverSource"'), true);
+  assert.equal(contentScript.includes('runPageCommand("pasteFieldsMoverSource")'), true);
+  assert.equal(contentScript.indexOf("root.appendChild(sourceButton);") < contentScript.indexOf("root.appendChild(copyButton);"), true);
   assert.equal(contentScript.includes("root.dataset.mode = mode;"), true);
   assert.equal(contentScript.includes('makeNativeButton("复制模式"'), true);
   assert.equal(contentScript.includes("flex-direction: column"), true);
@@ -538,7 +550,8 @@ test("floating pull waits for page bridge injection before posting commands", ()
   assert.equal(contentScript.includes("async function ensurePageBridge"), true);
   assert.equal(contentScript.includes("try {\n    await ensurePageBridge();"), true);
   assert.equal(contentScript.includes("return { ok: false, message: error?.message || String(error) };"), true);
-  assert.equal(contentScript.includes("runtime.getURL(\"page-bridge.js\")"), true);
+  assert.equal(contentScript.includes('injectPageScript("fields-mover-core.js")'), true);
+  assert.equal(contentScript.includes('injectPageScript("page-bridge.js")'), true);
 });
 
 test("popup waits for storage.local output directory persistence", () => {
