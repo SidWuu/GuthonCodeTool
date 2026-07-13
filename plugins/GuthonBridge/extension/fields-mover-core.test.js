@@ -18,3 +18,9 @@ test("cloneFields keeps nested source fields unchanged", () => {
   copy[0].nested.width = 240;
   assert.equal(fields[0].nested.width, 120);
 });
+
+test("cloneFields clears product field markers for project paste", () => {
+  const copy = core.cloneFields([{ fieldId: "A", isProduct: 1 }, { fieldId: "B", isProduct: 0 }]);
+
+  assert.deepEqual(copy, [{ fieldId: "A", isProduct: 0 }, { fieldId: "B", isProduct: 0 }]);
+});

@@ -10,7 +10,11 @@
   }
 
   function cloneFields(fields) {
-    return cloneValue(fields);
+    const copy = cloneValue(fields);
+    copy.forEach((field) => {
+      if (field && "isProduct" in field) field.isProduct = 0;
+    });
+    return copy;
   }
 
   function planAppendFields(targetFields, copiedFields) {
