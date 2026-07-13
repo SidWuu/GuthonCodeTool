@@ -396,10 +396,20 @@ def _page_select(table_cfg: dict):
     cfg = _source_table_cfg(table_cfg, PAGE_SOURCE_TYPE)
     module_table = cfg.get("module_table_name")
     mk_name = "NULL"
+    mk_order_no = "NULL"
+    model_id = "NULL"
+    model_name = "NULL"
+    model_order_no = "NULL"
     join = ""
     if module_table:
         mk_name = _field("m", cfg["module_name_field"])
         join = f"LEFT JOIN {_name(module_table)} m ON {_field('p', cfg['module_join_field'])} = {_field('m', cfg['module_join_field'])}"
+        mk_order_no = _field("m", cfg.get("module_order_field"))
+        model_id = _field("m", cfg.get("module_model_field"))
+        if cfg.get("model_table_name") and cfg.get("module_model_field") and cfg.get("model_id_field"):
+            join += f"\nLEFT JOIN {_name(cfg['model_table_name'])} md ON {model_id} = {_field('md', cfg['model_id_field'])}"
+            model_name = _field("md", cfg.get("model_name_field"))
+            model_order_no = _field("md", cfg.get("model_order_field"))
     return cfg, f"""
 SELECT
     '{PAGE_SOURCE_TYPE}' AS source_table,
@@ -417,7 +427,11 @@ SELECT
     {_field('p', cfg.get('error_message_field'))} AS err_msg,
     {_field('p', cfg['system_id_field'])} AS system_id,
     {_field('p', cfg.get('module_join_field'))} AS mk_id,
-    {mk_name} AS mk_name
+    {mk_name} AS mk_name,
+    {mk_order_no} AS mk_order_no,
+    {model_id} AS model_id,
+    {model_name} AS model_name,
+    {model_order_no} AS model_order_no
 FROM {_name(cfg['source_table_name'])} p
 {join}
 """
@@ -730,8 +744,11 @@ def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, ch
         layer_root = readonly_source_dir() / "project" / path_part(layer_cfg.get("name") or project_id)
     root = layer_root / path_part(system_name)
     if row["source_table"] == PAGE_SOURCE_TYPE:
+        model_name = row.get("model_name") or row.get("model_id") or "未归属模型"
         module_name = row.get("mk_name") or row.get("mk_id") or "未归属模块"
-        base = root / "page" / path_part(module_name) / path_part(f"{row.get('source_name') or row['source_alias_id']} {row['source_id']}")
+        model_dir = path_part(f"{order_part(row.get('model_order_no'))}_{model_name}")
+        module_dir = path_part(f"{order_part(row.get('mk_order_no'))}_{module_name}")
+        base = root / "page" / model_dir / module_dir / path_part(f"{row.get('source_name') or row['source_alias_id']} {row['source_id']}")
     else:
         base = root / "procedure" / path_part(row["source_alias_id"]) / path_part(row["fun_id"])
         _link_shared_procedure_dirs(layer_root, system_name, row, system_scope)
@@ -1356,6 +1373,13 @@ def safe(value):
 
 def path_part(value):
     return re.sub(r'[\\\\/:*?"<>|]+', "_", str(value or "未命名")).strip() or "未命名"
+
+
+def order_part(value):
+    try:
+        return f"{int(value):03d}"
+    except (TypeError, ValueError):
+        return "999"
 
 
 def _str(value):
