@@ -1,3 +1,4 @@
+# 产品源码同步范围模板。
 products:
   demo-product:
     name: 示例产品

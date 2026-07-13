@@ -1,3 +1,4 @@
+# PAGE 和过程函数源码表字段映射模板。
 source_tables:
   page:
     enabled: true
@@ -23,6 +24,7 @@ source_tables:
     model_id_field: MODEL_ID_FIELD
     model_name_field: MODEL_NAME_FIELD
     model_order_field: MODEL_ORDER_FIELD
+    model_parent_field: MODEL_PARENT_ID_FIELD
 
   procedure:
     enabled: true

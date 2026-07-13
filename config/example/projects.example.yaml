@@ -1,3 +1,4 @@
+# 项目源码同步范围模板。
 projects:
   demo-project:
     name: 示例项目

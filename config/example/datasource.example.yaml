@@ -1,3 +1,4 @@
+# 数据库连接模板；真实凭据通过环境变量提供。
 datasource:
   product-dev:
     name: 示例产品开发库

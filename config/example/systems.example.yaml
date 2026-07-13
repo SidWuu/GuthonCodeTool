@@ -1,3 +1,4 @@
+# 子系统同步白名单模板。
 systems:
   data_file: system-data.json
   include:

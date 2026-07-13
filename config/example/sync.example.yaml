@@ -1,3 +1,4 @@
+# 同步对象、周期和本地目录模板。
 sync:
   ACTIVE: products.demo-product
   interval_seconds: 600

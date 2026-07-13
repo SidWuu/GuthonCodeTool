@@ -437,6 +437,62 @@ FROM {_name(cfg['source_table_name'])} p
 """
 
 
+def page_inventory_sql(table_cfg: dict):
+    cfg = _source_table_cfg(table_cfg, PAGE_SOURCE_TYPE)
+    return f"""
+SELECT
+    '{PAGE_SOURCE_TYPE}' AS source_table,
+    {_field('p', cfg['id_field'])} AS source_id,
+    {_field('p', cfg['alias_field'])} AS source_alias_id
+FROM {_name(cfg['source_table_name'])} p
+WHERE 1=1
+  {{system_filter}}
+"""
+
+
+def _build_model_paths(rows):
+    nodes = {
+        _str(row.get("model_id")): {
+            "model_id": _str(row.get("model_id")),
+            "model_name": _str(row.get("model_name")),
+            "model_order_no": row.get("model_order_no"),
+            "parent_model_id": _str(row.get("parent_model_id")),
+        }
+        for row in rows
+        if row.get("model_id")
+    }
+    paths = {}
+    for model_id in nodes:
+        path = []
+        current = model_id
+        seen = set()
+        while current and current in nodes and current not in seen:
+            seen.add(current)
+            path.append(nodes[current])
+            current = nodes[current]["parent_model_id"]
+        paths[model_id] = list(reversed(path))
+    return paths
+
+
+def load_model_paths(remote, table_cfg: dict):
+    cfg = _source_table_cfg(table_cfg, PAGE_SOURCE_TYPE)
+    required = ("model_table_name", "model_id_field", "model_name_field", "model_parent_field")
+    if not all(cfg.get(key) for key in required):
+        return {}
+    with remote.cursor() as cur:
+        cur.execute(
+            f"""
+SELECT
+    {_field('md', cfg['model_id_field'])} AS model_id,
+    {_field('md', cfg['model_name_field'])} AS model_name,
+    {_field('md', cfg.get('model_order_field'))} AS model_order_no,
+    {_field('md', cfg['model_parent_field'])} AS parent_model_id
+FROM {_name(cfg['model_table_name'])} md
+"""
+        )
+        return _build_model_paths(cur.fetchall())
+
+
 def page_sql(table_cfg: dict, rules: dict | None = None):
     cfg, select = _page_select(table_cfg)
     return f"""
@@ -588,7 +644,7 @@ def run_sync_once(args=None):
     lookback = int(sync.get("lookback_minutes", 10))
     sync_from = _sync_from(conn, lookback)
     active, products, projects, effective_project_ids = resolve_active(cfg)
-    stats = {"mode": "sync", "active": active, "sync_from": sync_from, "candidates": 0, "changed": 0, "failures": 0}
+    stats = {"mode": "sync", "active": active, "sync_from": sync_from, "candidates": 0, "changed": 0, "deleted": 0, "failures": 0}
     for product_id, product in products:
         stats = _sync_layer(conn, cfg, product, "PRODUCT", product_id, "", sync_from, stats)
     for project_id, project in projects:
@@ -609,6 +665,7 @@ def run_sync_once(args=None):
             "active": active,
             "candidates": stats.get("candidates", 0),
             "changed": stats.get("changed", 0),
+            "deleted": stats.get("deleted", 0),
             "failures": stats.get("failures", 0),
         },
         payload={"sync_from": sync_from},
@@ -640,8 +697,10 @@ def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, 
     table_cfg = cfg["source_tables"]
     rules = cfg["sync"].get("rules") or {}
     page_query, page_params = _scoped_sql(page_sql(table_cfg, rules), cfg["_system_scope"], "system", table_cfg)
+    inventory_query, inventory_params = _scoped_sql(page_inventory_sql(table_cfg), cfg["_system_scope"], "system", table_cfg)
     proc_query, proc_params = _scoped_sql(proc_sql(table_cfg, rules), cfg["_system_scope"], "data_source", table_cfg)
     with db_connect(ds) as remote:
+        model_paths = load_model_paths(remote, table_cfg)
         with remote.cursor() as cur:
             for sql, extra_params in ((page_query, page_params), (proc_query, proc_params)):
                 cur.execute(sql, (sync_from, sync_from, *extra_params))
@@ -649,8 +708,13 @@ def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, 
                     stats["candidates"] += 1
                     if not _included(layer_cfg, row):
                         continue
+                    if row["source_table"] == PAGE_SOURCE_TYPE:
+                        row["model_path"] = model_paths.get(_str(row.get("model_id")))
                     if upsert_source(conn, row, layer, product_id, project_id, layer_cfg, cfg["_system_scope"]):
                         stats["changed"] += 1
+            cur.execute(inventory_query, inventory_params)
+            current_page_ids = {row["source_id"] for row in cur.fetchall() if _included(layer_cfg, row)}
+        stats["deleted"] = stats.get("deleted", 0) + reconcile_deleted_pages(conn, layer, product_id, project_id, current_page_ids)
     conn.commit()
     return stats
 
@@ -686,14 +750,21 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
     source_alias_id = _source_alias_id(row)
     existing = conn.execute(
         """
-        SELECT change_key FROM gusen_source_record
+        SELECT change_key, local_path FROM gusen_source_record
         WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
         """,
         (layer, product_id, project_id, row["source_table"], row["source_id"], row["fun_id"] or ""),
     ).fetchone()
+    desired_path = source_base(row, layer, product_id, project_id, layer_cfg, system_scope)
     if existing and existing["change_key"] == change_key and not force:
-        return False
+        indexed_path = ROOT / existing["local_path"] if existing["local_path"] else None
+        if indexed_path == desired_path and desired_path.exists():
+            return False
     local_path, status, scripts = write_source(row, layer, product_id, project_id, layer_cfg, system_scope, change_key)
+    if existing and existing["local_path"]:
+        old_path = ROOT / existing["local_path"]
+        if old_path != local_path:
+            remove_source_path(old_path)
     indexed_time = _now()
     conn.execute(
         """
@@ -736,7 +807,52 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
     return True
 
 
-def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, change_key):
+def remove_source_path(path: Path):
+    root = readonly_source_dir().resolve()
+    target = path.resolve()
+    if target == root or root not in target.parents:
+        raise ValueError(f"Refusing to remove path outside readonly source: {path}")
+    if target.exists():
+        shutil.rmtree(target)
+    page_root = next((parent for parent in target.parents if parent.name == "page"), None)
+    parent = target.parent
+    while page_root and parent != page_root:
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+        parent = parent.parent
+
+
+def reconcile_deleted_pages(conn, layer, product_id, project_id, current_page_ids):
+    rows = conn.execute(
+        """
+        SELECT source_id, local_path FROM gusen_source_record
+        WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=?
+        """,
+        (layer, product_id, project_id, PAGE_SOURCE_TYPE),
+    ).fetchall()
+    stale = [row for row in rows if row["source_id"] not in current_page_ids]
+    for row in stale:
+        if row["local_path"]:
+            remove_source_path(ROOT / row["local_path"])
+        identity = (layer, product_id, project_id, PAGE_SOURCE_TYPE, row["source_id"], "")
+        conn.execute(
+            "DELETE FROM gusen_invoke_call WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
+            identity,
+        )
+        conn.execute(
+            "DELETE FROM gusen_dynamic_call WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
+            identity,
+        )
+        conn.execute(
+            "DELETE FROM gusen_source_record WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
+            identity,
+        )
+    return len(stale)
+
+
+def source_base(row, layer, product_id, project_id, layer_cfg, system_scope):
     system_name = _system_name(row, system_scope)
     if layer == "PRODUCT":
         layer_root = readonly_source_dir() / "products"
@@ -744,20 +860,34 @@ def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, ch
         layer_root = readonly_source_dir() / "project" / path_part(layer_cfg.get("name") or project_id)
     root = layer_root / path_part(system_name)
     if row["source_table"] == PAGE_SOURCE_TYPE:
-        model_name = row.get("model_name") or row.get("model_id") or "未归属模型"
         module_name = row.get("mk_name") or row.get("mk_id") or "未归属模块"
-        model_dir = path_part(f"{order_part(row.get('model_order_no'))}_{model_name}")
         module_dir = path_part(f"{order_part(row.get('mk_order_no'))}_{module_name}")
-        base = root / "page" / model_dir / module_dir / path_part(f"{row.get('source_name') or row['source_alias_id']} {row['source_id']}")
+        model_path = row.get("model_path") or [
+            {
+                "model_name": row.get("model_name") or row.get("model_id") or "未归属模型",
+                "model_order_no": row.get("model_order_no"),
+            }
+        ]
+        base = root / "page"
+        for model in model_path:
+            base /= path_part(f"{order_part(model.get('model_order_no'))}_{model.get('model_name') or model.get('model_id') or '未归属模型'}")
+        return base / module_dir / path_part(f"{row.get('source_name') or row['source_alias_id']} {row['source_id']}")
     else:
-        base = root / "procedure" / path_part(row["source_alias_id"]) / path_part(row["fun_id"])
+        return root / "procedure" / path_part(row["source_alias_id"]) / path_part(row["fun_id"])
+
+
+def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, change_key):
+    base = source_base(row, layer, product_id, project_id, layer_cfg, system_scope)
+    if row["source_table"] != PAGE_SOURCE_TYPE:
+        system_name = _system_name(row, system_scope)
+        layer_root = readonly_source_dir() / "products" if layer == "PRODUCT" else readonly_source_dir() / "project" / path_part(layer_cfg.get("name") or project_id)
         _link_shared_procedure_dirs(layer_root, system_name, row, system_scope)
     if base.exists():
         shutil.rmtree(base)
     base.mkdir(parents=True, exist_ok=True)
     content = row.get("source_content") or ""
     status = "OK" if content else "EMPTY_CONTENT"
-    meta = {key: _str(value) for key, value in row.items() if key != "source_content"}
+    meta = {key: _str(value) for key, value in row.items() if key not in ("source_content", "model_path")}
     meta.update({"change_key": change_key, "status": status})
     (base / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     scripts = []
@@ -1111,10 +1241,13 @@ def pull_source_to_work_copy(payload: dict):
     sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload, rules)
     ds = cfg["datasource"]["datasource"][layer_cfg["datasource"]]
     with db_connect(ds) as remote:
+        model_paths = load_model_paths(remote, cfg["source_tables"]) if payload["sourceType"] == PAGE_SOURCE_TYPE else {}
         with remote.cursor() as cur:
             cur.execute(sql, params)
             row = cur.fetchone()
             rows = [row] if row else []
+    if row and row["source_table"] == PAGE_SOURCE_TYPE:
+        row["model_path"] = model_paths.get(_str(row.get("model_id")))
     if not row:
         if project_id:
             found, _owner = find_work_copy_source(

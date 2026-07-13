@@ -82,10 +82,21 @@ function readBody(req) {
   });
 }
 
-function appendPullLog({ pullType, trigger = "manual", summary = {}, payload = {}, result = {}, ok = true, message = "" }) {
-  fs.mkdirSync(path.dirname(PULL_LOG_PATH), { recursive: true });
-  const record = {
-    time: new Date().toISOString(),
+function pullLogRecord({ pullType, trigger = "manual", summary = {}, payload = {}, result = {}, ok = true, message = "" }, now = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(now).map(({ type, value }) => [type, value])
+  );
+  return {
+    time: `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`,
     trigger,
     pullType,
     ok: Boolean(ok),
@@ -94,6 +105,11 @@ function appendPullLog({ pullType, trigger = "manual", summary = {}, payload = {
     result,
     message
   };
+}
+
+function appendPullLog(options) {
+  fs.mkdirSync(path.dirname(PULL_LOG_PATH), { recursive: true });
+  const record = pullLogRecord(options);
   fs.appendFileSync(PULL_LOG_PATH, `${JSON.stringify(record)}\n`, "utf8");
 }
 

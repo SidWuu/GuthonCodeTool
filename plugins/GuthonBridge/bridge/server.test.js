@@ -147,6 +147,7 @@ process.stdin.on("end", () => {
     assert.equal(log.pullType, "source");
     assert.equal(log.trigger, "manual");
     assert.equal(log.ok, true);
+    assert.match(log.time, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     assert.deepEqual(log.summary, {
       sourceType: "procedure",
       sourceId: "",
