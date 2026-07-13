@@ -11,6 +11,7 @@ const EXTENSION_MANIFEST_PATH = path.join(ROOT, "extension", "manifest.json");
 const CONTENT_SCRIPT_PATH = path.join(ROOT, "extension", "content.js");
 const POPUP_HTML_PATH = path.join(ROOT, "extension", "popup.html");
 const POPUP_SCRIPT_PATH = path.join(ROOT, "extension", "popup.js");
+const HOST_CONFIG_PATH = path.join(ROOT, "extension", "host-config.js");
 
 function waitForHealth(port) {
   const url = `http://127.0.0.1:${port}/health`;
@@ -106,7 +107,14 @@ process.stdin.on("end", () => {
     process.stderr.write("bad payload");
     process.exit(2);
   }
-  process.stdout.write(JSON.stringify({ ok: true, workCopyPath: ${JSON.stringify(workCopyPath)} }));
+  process.stdout.write(JSON.stringify({
+    ok: true,
+    changed: false,
+    workCopyPath: ${JSON.stringify(workCopyPath)},
+    workCopyStatus: "LOCAL_CHANGED",
+    workCopyAction: "PRESERVED",
+    localChanged: true
+  }));
 });
 `,
     "utf8",
@@ -153,9 +161,12 @@ process.stdin.on("end", () => {
       sourceId: "",
       alias: "demo.pkg",
       funId: "save",
-      changed: "",
+      changed: false,
       pulled: "",
-      workCopyPath
+      workCopyPath,
+      workCopyStatus: "LOCAL_CHANGED",
+      workCopyAction: "PRESERVED",
+      localChanged: true
     });
   } finally {
     server.kill();
@@ -326,19 +337,43 @@ test("extension manifest injects the floating pull button on Guthon pages", () =
 
   assert.deepEqual(manifest.permissions.includes("storage"), true);
   assert.deepEqual(manifest.host_permissions.includes("http://*/*"), true);
+  assert.deepEqual(manifest.host_permissions.includes("https://*/*"), true);
   assert.deepEqual(manifest.content_scripts, [
     {
-      matches: ["http://*/*"],
-      js: ["content.js"],
+      matches: ["http://*/*", "https://*/*"],
+      js: ["host-config.js", "content.js"],
       run_at: "document_idle"
     }
   ]);
   assert.deepEqual(manifest.web_accessible_resources, [
     {
       resources: ["fields-mover-core.js", "page-bridge.js"],
-      matches: ["http://*/*"]
+      matches: ["http://*/*", "https://*/*"]
     }
   ]);
+});
+
+test("configured IP ranges and domain suffixes control Guthon URLs", () => {
+  delete require.cache[require.resolve(HOST_CONFIG_PATH)];
+  const hosts = require(HOST_CONFIG_PATH);
+  const popupHtml = fs.readFileSync(POPUP_HTML_PATH, "utf8");
+  const popupScript = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
+  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const rules = {
+    protocols: ["http:", "https:"],
+    ipRanges: ["192.0.2.0/24"],
+    domainSuffixes: ["dev.example.com"],
+    pathPrefixes: ["/guthon/"]
+  };
+
+  assert.equal(hosts.isAllowed("http://192.0.2.4/guthon/home", rules), true);
+  assert.equal(hosts.isAllowed("http://192.0.3.4/guthon/home", rules), false);
+  assert.equal(hosts.isAllowed("https://team.dev.example.com/guthon/home", rules), true);
+  assert.equal(hosts.isAllowed("https://dev.example.com/other", rules), false);
+  assert.equal(hosts.isAllowed("https://notdev.example.com/guthon/home", rules), false);
+  assert.equal(popupHtml.indexOf("host-config.js") < popupHtml.indexOf("popup.js"), true);
+  assert.equal(popupScript.includes("GuthonBridgeHost?.isAllowed"), true);
+  assert.equal(contentScript.includes("GuthonBridgeHost?.isAllowed"), true);
 });
 
 test("floating procedure button pulls hub source", () => {

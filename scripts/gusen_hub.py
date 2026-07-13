@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import difflib
+import hashlib
 import json
 import os
 import re
@@ -19,6 +21,11 @@ CONFIG_DIR = ROOT / "config"
 VAR_DIR = ROOT / "var"
 PAGE_SOURCE_TYPE = "page"
 PROCEDURE_SOURCE_TYPE = "procedure"
+WORK_COPY_BASELINE_DIR = ".guthon-baseline"
+WORK_COPY_META_FILE = "source-meta.json"
+WORK_COPY_DIFF_FILE = "diff.md"
+WORK_COPY_DELIVERY_FILE = "delivery.md"
+WORK_COPY_MANAGED_FILES = {WORK_COPY_META_FILE, WORK_COPY_DIFF_FILE, WORK_COPY_DELIVERY_FILE}
 
 
 def source_dir() -> Path:
@@ -515,6 +522,7 @@ SELECT
     {_field('s', cfg['fun_id_field'])} AS fun_id,
     {_field('s', cfg['name_field'])} AS source_name,
     {_field('s', cfg['content_field'])} AS source_content,
+    {_field('s', cfg.get('product_content_field'))} AS product_source_content,
     {_field('s', cfg['update_time_field'])} AS update_time,
     {_field('s', cfg.get('check_out_user_id_field'))} AS check_out_user_id,
     {_field('s', cfg.get('check_out_date_field'))} AS check_out_date,
@@ -605,6 +613,7 @@ SELECT
     {_field('s', cfg['fun_id_field'])} AS fun_id,
     {_field('s', cfg['name_field'])} AS source_name,
     {_field('s', cfg['content_field'])} AS source_content,
+    {_field('s', cfg.get('product_content_field'))} AS product_source_content,
     {_field('s', cfg['update_time_field'])} AS update_time,
     {_field('s', cfg.get('check_out_user_id_field'))} AS check_out_user_id,
     {_field('s', cfg.get('check_out_date_field'))} AS check_out_date,
@@ -885,9 +894,13 @@ def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, ch
     if base.exists():
         shutil.rmtree(base)
     base.mkdir(parents=True, exist_ok=True)
-    content = row.get("source_content") or ""
+    content = _resolve_inherited_script(row.get("source_content") or "", row.get("product_source_content") or "")
     status = "OK" if content else "EMPTY_CONTENT"
-    meta = {key: _str(value) for key, value in row.items() if key not in ("source_content", "model_path")}
+    meta = {
+        key: _str(value)
+        for key, value in row.items()
+        if key not in ("source_content", "product_source_content", "model_path")
+    }
     meta.update({"change_key": change_key, "status": status})
     (base / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     scripts = []
@@ -905,6 +918,7 @@ def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, ch
 
 
 SCRIPT_KEYS = {
+    "script",
     "beforeSaveScript",
     "afterSaveScript",
     "onClickScript",
@@ -920,7 +934,17 @@ SCRIPT_KEYS = {
 
 
 def _is_script_key(key):
-    return key in SCRIPT_KEYS or str(key).endswith("Script")
+    return key != "superScript" and (key in SCRIPT_KEYS or str(key).endswith("Script"))
+
+
+INHERIT_MARKER = re.compile(r"(?m)^[ \t]*@inherit\(\);[ \t]*\r?$")
+
+
+def _resolve_inherited_script(script, inherited):
+    if not inherited or not INHERIT_MARKER.search(script):
+        return script
+    resolved = inherited.rstrip("\r\n")
+    return INHERIT_MARKER.sub(lambda _match: resolved, script)
 
 
 def parse_page_scripts(base: Path, raw: str):
@@ -934,7 +958,7 @@ def parse_page_scripts(base: Path, raw: str):
     out_dir.mkdir(exist_ok=True)
     scripts = []
     for path, key, value in _walk_scripts(data):
-        ext = "sql" if key == "sql" else ("vm" if "SaveScript" in key or key in {"doMethodScript", "compScript"} else "js")
+        ext = "sql" if key == "sql" else ("vm" if "SaveScript" in key or key in {"script", "doMethodScript", "compScript"} else "js")
         name = path_part(".".join(path[-2:] + [key])) if path else path_part(key)
         script_path = out_dir / f"{name}.{ext}"
         script_path.write_text(value, encoding="utf-8")
@@ -949,7 +973,8 @@ def _walk_scripts(value, path=None):
         next_path = path + ([label] if label else [])
         for key, child in value.items():
             if _is_script_key(key) and isinstance(child, str) and (child.strip() or key == "compScript"):
-                yield next_path, key, child
+                inherited = value.get("superScript") if key == "script" else ""
+                yield next_path, key, _resolve_inherited_script(child, inherited if isinstance(inherited, str) else "")
             else:
                 yield from _walk_scripts(child, next_path)
     elif isinstance(value, list):
@@ -1015,52 +1040,48 @@ def build_effective(conn, cfg, project_ids=None):
         rows = conn.execute(
             """
             SELECT * FROM gusen_source_record
-            WHERE product_id=? AND (source_layer='PRODUCT' OR (source_layer='PROJECT' AND project_id=?))
-            ORDER BY source_layer
+            WHERE source_layer='PROJECT' AND product_id=? AND project_id=?
+            ORDER BY source_table, source_alias_id, fun_id
             """,
             (product_id, project_id),
         ).fetchall()
-        chosen = {}
-        for row in rows:
-            key = (row["source_table"], row["source_alias_id"], row["fun_id"])
-            if key not in chosen or row["source_layer"] == "PROJECT":
-                chosen[key] = row
         conn.execute("DELETE FROM gusen_effective_source WHERE project_id=?", (project_id,))
         effective_root = effective_source_dir() / "project" / path_part(project_name)
         if effective_root.exists():
             shutil.rmtree(effective_root)
-        for key, row in chosen.items():
+        source_root = readonly_source_dir() / "project" / path_part(project_name)
+        for row in rows:
             local_path = ROOT / row["local_path"]
             if not local_path.exists():
                 continue
-            if row["source_layer"] == "PRODUCT":
-                source_root = readonly_source_dir() / "products"
-            else:
-                source_root = readonly_source_dir() / "project" / path_part(project_name)
             target = effective_root / local_path.relative_to(source_root)
             shutil.copytree(local_path, target)
-            product = _find_source(conn, product_id, "", key)
-            project_row = _find_source(conn, product_id, project_id, key)
             conn.execute(
                 """
                 INSERT OR REPLACE INTO gusen_effective_source(project_id, product_id, source_table, source_alias_id, fun_id, effective_layer, effective_source_id, effective_local_path, product_source_id, product_change_key, product_local_path, project_source_id, project_change_key, project_local_path, is_override, status, build_time)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
-                (project_id, product_id, row["source_table"], row["source_alias_id"], row["fun_id"], row["source_layer"], row["source_id"], str(target.relative_to(ROOT)), product["source_id"] if product else None, product["change_key"] if product else None, product["local_path"] if product else None, project_row["source_id"] if project_row else None, project_row["change_key"] if project_row else None, project_row["local_path"] if project_row else None, 1 if product and project_row else 0, row["status"], now),
+                (
+                    project_id,
+                    product_id,
+                    row["source_table"],
+                    row["source_alias_id"],
+                    row["fun_id"],
+                    "PROJECT",
+                    row["source_id"],
+                    str(target.relative_to(ROOT)),
+                    None,
+                    None,
+                    None,
+                    row["source_id"],
+                    row["change_key"],
+                    row["local_path"],
+                    0,
+                    row["status"],
+                    now,
+                ),
             )
         conn.commit()
-
-
-def _find_source(conn, product_id, project_id, key):
-    source_table, alias, fun_id = key
-    layer = "PROJECT" if project_id else "PRODUCT"
-    return conn.execute(
-        """
-        SELECT * FROM gusen_source_record
-        WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
-        """,
-        (layer, product_id, project_id, source_table, alias, fun_id),
-    ).fetchone()
 
 
 def export_product_docs(conn, product_id):
@@ -1114,7 +1135,7 @@ def export_project_docs(conn, project_id):
     out = VAR_DIR / "knowledge" / "projects" / project_id
     out.mkdir(parents=True, exist_ok=True)
     rows = conn.execute("SELECT * FROM gusen_effective_source WHERE project_id=? ORDER BY source_table, source_alias_id, fun_id", (project_id,)).fetchall()
-    _write_table(out / "effective-source-index.md", "项目 Effective 源码索引", ["类型", "别名", "函数", "生效层", "覆盖产品", "本地路径"], [[r["source_table"], r["source_alias_id"], r["fun_id"], r["effective_layer"], "是" if r["is_override"] else "否", r["effective_local_path"]] for r in rows])
+    _write_table(out / "effective-source-index.md", "项目源码索引", ["类型", "别名", "函数", "来源", "本地路径"], [[r["source_table"], r["source_alias_id"], r["fun_id"], r["effective_layer"], r["effective_local_path"]] for r in rows])
     calls = []
     for row in rows:
         calls.extend(
@@ -1175,6 +1196,428 @@ def export_knowledge_readme(conn, index_db, active):
     return path
 
 
+def _row_value(row, key, default=""):
+    if row is None:
+        return default
+    if isinstance(row, dict):
+        return row.get(key, default)
+    return row[key] if key in row.keys() else default
+
+
+def _work_copy_change_key(row, project_id=""):
+    if project_id:
+        key = "project_change_key" if _row_value(row, "effective_layer") == "PROJECT" else "product_change_key"
+        return _str(_row_value(row, key))
+    return _str(_row_value(row, "change_key"))
+
+
+def _tree_files(root: Path, exclude_work_copy_files=False):
+    if not root or not root.exists():
+        return {}
+    files = {}
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root)
+        if exclude_work_copy_files and (rel.parts[0] == WORK_COPY_BASELINE_DIR or rel.as_posix() in WORK_COPY_MANAGED_FILES):
+            continue
+        files[rel.as_posix()] = path
+    return files
+
+
+def _tree_digest(root: Path, exclude_work_copy_files=False):
+    digest = hashlib.sha256()
+    for rel, path in sorted(_tree_files(root, exclude_work_copy_files).items()):
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _tree_changes(before: Path, after: Path, after_is_work_copy=False):
+    before_files = _tree_files(before)
+    after_files = _tree_files(after, after_is_work_copy)
+    changes = []
+    for rel in sorted(set(before_files) | set(after_files)):
+        if rel not in before_files:
+            status = "A"
+        elif rel not in after_files:
+            status = "D"
+        elif before_files[rel].read_bytes() != after_files[rel].read_bytes():
+            status = "M"
+        else:
+            continue
+        changes.append({"status": status, "path": rel})
+    return changes
+
+
+def _work_copy_metadata(target: Path):
+    path = target / WORK_COPY_META_FILE
+    if not path.exists():
+        raise SystemExit(f"工作副本缺少 {WORK_COPY_META_FILE}: {target}")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"工作副本元数据无效: {path}: {exc}") from exc
+
+
+def _display_path(path: Path):
+    try:
+        return str(path.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _write_work_copy_metadata(target: Path, row, source_path: Path, change_key: str, mode: str):
+    old = {}
+    meta_path = target / WORK_COPY_META_FILE
+    if meta_path.exists():
+        try:
+            old = json.loads(meta_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            old = {}
+    old_work_copy = old.get("_workcopy") or {}
+    metadata = dict(row)
+    metadata["_workcopy"] = {
+        "format": 1,
+        "mode": mode,
+        "createdAt": old_work_copy.get("createdAt") or _now(),
+        "updatedAt": _now(),
+        "sourcePath": _display_path(source_path),
+        "baselineChangeKey": change_key,
+        "baselineDigest": _tree_digest(target / WORK_COPY_BASELINE_DIR),
+    }
+    meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _copy_work_copy_baseline(source_path: Path, target: Path):
+    baseline = target / WORK_COPY_BASELINE_DIR
+    if baseline.exists():
+        shutil.rmtree(baseline)
+    shutil.copytree(source_path, baseline)
+
+
+def _replace_work_copy_source(source_path: Path, target: Path):
+    for child in target.iterdir():
+        if child.name in WORK_COPY_MANAGED_FILES or child.name == WORK_COPY_BASELINE_DIR:
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    shutil.copytree(source_path, target, dirs_exist_ok=True)
+
+
+def _manual_diff_notes(target: Path):
+    path = target / WORK_COPY_DIFF_FILE
+    if not path.exists():
+        return ""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0].strip() != "# 修改说明":
+        return ""
+    notes = []
+    for line in lines[1:]:
+        if line.startswith("# "):
+            break
+        notes.append(line)
+    return "\n".join(notes).strip()
+
+
+def _json_path_changes(before, after, path="$", output=None, limit=200):
+    output = [] if output is None else output
+    if len(output) >= limit:
+        return output
+    if isinstance(before, dict) and isinstance(after, dict):
+        for key in sorted(set(before) | set(after)):
+            child = f"{path}.{key}"
+            if key not in before:
+                output.append(f"A {child}")
+            elif key not in after:
+                output.append(f"D {child}")
+            else:
+                _json_path_changes(before[key], after[key], child, output, limit)
+            if len(output) >= limit:
+                break
+    elif isinstance(before, list) and isinstance(after, list):
+        if len(before) != len(after):
+            output.append(f"M {path}.length ({len(before)} -> {len(after)})")
+        for index, (left, right) in enumerate(zip(before, after)):
+            _json_path_changes(left, right, f"{path}[{index}]", output, limit)
+            if len(output) >= limit:
+                break
+    elif before != after:
+        output.append(f"M {path}")
+    return output
+
+
+def _render_file_diff(before: Path, after: Path, rel: str):
+    if rel == "raw.json" and (not before.exists() or not after.exists()):
+        return ["JSON 文件新增。" if after.exists() else "JSON 文件删除。"]
+    if rel == "raw.json" and before.exists() and after.exists():
+        try:
+            changes = _json_path_changes(
+                json.loads(before.read_text(encoding="utf-8")),
+                json.loads(after.read_text(encoding="utf-8")),
+            )
+            lines = ["JSON 路径变化：", ""] + [f"    {line}" for line in changes]
+            if len(changes) == 200:
+                lines.append("    ... 仅展示前 200 个路径")
+            return lines
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            pass
+    try:
+        before_lines = before.read_text(encoding="utf-8").splitlines() if before.exists() else []
+        after_lines = after.read_text(encoding="utf-8").splitlines() if after.exists() else []
+    except UnicodeDecodeError:
+        return ["二进制文件发生变化。"]
+    diff = list(
+        difflib.unified_diff(
+            before_lines,
+            after_lines,
+            fromfile=f"baseline/{rel}",
+            tofile=f"workcopy/{rel}",
+            lineterm="",
+        )
+    )
+    # ponytail: reports cap each file at 400 lines; inspect the source file directly when a larger diff matters.
+    rendered = [f"    {line}" for line in diff[:400]]
+    if len(diff) > 400:
+        rendered.append(f"    ... 已省略 {len(diff) - 400} 行")
+    return rendered or ["文件内容发生变化。"]
+
+
+def _work_copy_state(target: Path, upstream_path: Path | None, upstream_change_key=""):
+    metadata = _work_copy_metadata(target)
+    work_copy = metadata.get("_workcopy") or {}
+    baseline = target / WORK_COPY_BASELINE_DIR
+    if not baseline.exists():
+        raise SystemExit(f"旧版工作副本没有基线，拒绝覆盖: {target}")
+    baseline_digest = _str(work_copy.get("baselineDigest"))
+    if baseline_digest and baseline_digest != _tree_digest(baseline):
+        raise SystemExit(f"工作副本基线已被修改，拒绝继续: {baseline}")
+    local_changes = _tree_changes(baseline, target, after_is_work_copy=True)
+    upstream_missing = not upstream_path or not upstream_path.exists()
+    upstream_changes = [] if upstream_missing else _tree_changes(baseline, upstream_path)
+    baseline_change_key = _str(work_copy.get("baselineChangeKey"))
+    upstream_changed = upstream_missing or bool(upstream_changes) or bool(
+        upstream_change_key and upstream_change_key != baseline_change_key
+    )
+    if upstream_missing:
+        state = "UPSTREAM_MISSING"
+    elif local_changes and upstream_changed:
+        state = "CONFLICT"
+    elif local_changes:
+        state = "LOCAL_CHANGED"
+    elif upstream_changed:
+        state = "UPSTREAM_CHANGED"
+    else:
+        state = "CLEAN"
+    return {
+        "path": str(target),
+        "state": state,
+        "localChanged": bool(local_changes),
+        "upstreamChanged": upstream_changed,
+        "upstreamMissing": upstream_missing,
+        "baselineChangeKey": baseline_change_key,
+        "upstreamChangeKey": upstream_change_key,
+        "localChanges": local_changes,
+        "upstreamChanges": upstream_changes,
+    }
+
+
+def _write_work_copy_diff(target: Path, status: dict, notes=""):
+    labels = {
+        "CLEAN": "无变化",
+        "LOCAL_CHANGED": "仅本地有修改",
+        "UPSTREAM_CHANGED": "仅上游有变化",
+        "CONFLICT": "本地与上游均有变化",
+        "UPSTREAM_MISSING": "上游源码不存在",
+    }
+    lines = [
+        "# 修改说明",
+        "",
+        notes,
+        "",
+        "# Workcopy 状态",
+        "",
+        f"- 状态：`{status['state']}`（{labels[status['state']]}）",
+        f"- 基线版本：`{status['baselineChangeKey'] or '-'}`",
+        f"- 上游版本：`{status['upstreamChangeKey'] or '-'}`",
+        f"- 本地变更文件：{len(status['localChanges'])}",
+        f"- 上游变更文件：{len(status['upstreamChanges'])}",
+        "",
+        "# 本地文件汇总",
+        "",
+    ]
+    if status["localChanges"]:
+        lines.extend(f"- `{change['status']}` `{change['path']}`" for change in status["localChanges"])
+    else:
+        lines.append("- 无")
+    lines.extend(["", "# 上游文件汇总", ""])
+    if status["upstreamChanges"]:
+        lines.extend(f"- `{change['status']}` `{change['path']}`" for change in status["upstreamChanges"])
+    else:
+        lines.append("- 无")
+    lines.extend(["", "# Diff", ""])
+    baseline = target / WORK_COPY_BASELINE_DIR
+    for change in status["localChanges"]:
+        rel = change["path"]
+        lines.extend([f"## {change['status']} `{rel}`", ""])
+        lines.extend(_render_file_diff(baseline / rel, target / rel, rel))
+        lines.append("")
+    if not status["localChanges"]:
+        lines.append("无本地源码差异。")
+    (target / WORK_COPY_DIFF_FILE).write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _write_work_copy_delivery(target: Path, status: dict):
+    lines = [
+        "# Workcopy 交付清单",
+        "",
+        f"- 状态：`{status['state']}`",
+        f"- 基线版本：`{status['baselineChangeKey'] or '-'}`",
+        f"- 上游版本：`{status['upstreamChangeKey'] or '-'}`",
+        "",
+    ]
+    if status["state"] in {"CONFLICT", "UPSTREAM_MISSING"}:
+        lines.extend(["> 当前状态不可直接交付，请先处理上游变化。", ""])
+    lines.extend(["## 需要回写或复核的文件", ""])
+    if status["localChanges"]:
+        lines.extend(f"- [ ] `{change['status']}` `{change['path']}`" for change in status["localChanges"])
+    else:
+        lines.append("- 无本地修改")
+    lines.extend(
+        [
+            "",
+            "## 交付检查",
+            "",
+            "- [ ] 已查看 `diff.md`",
+            "- [ ] 已在谷神开发平台完成手工回写",
+            "- [ ] 已重新拉取并确认上游版本",
+        ]
+    )
+    path = target / WORK_COPY_DELIVERY_FILE
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _initialize_work_copy(source_path: Path, target: Path, row, change_key: str, mode: str):
+    shutil.copytree(source_path, target)
+    _copy_work_copy_baseline(source_path, target)
+    _write_work_copy_metadata(target, row, source_path, change_key, mode)
+    status = _work_copy_state(target, source_path, change_key)
+    status["action"] = "CREATED"
+    _write_work_copy_diff(target, status)
+    return status
+
+
+def _prepare_work_copy(source_path: Path, target: Path, row, change_key: str, mode="mirror"):
+    if not target.exists():
+        return _initialize_work_copy(source_path, target, row, change_key, mode)
+    baseline = target / WORK_COPY_BASELINE_DIR
+    if not baseline.exists():
+        if _tree_changes(source_path, target, after_is_work_copy=True):
+            raise SystemExit(f"旧版工作副本没有基线且存在修改，拒绝覆盖: {target}")
+        _copy_work_copy_baseline(source_path, target)
+        _write_work_copy_metadata(target, row, source_path, change_key, mode)
+    notes = _manual_diff_notes(target)
+    status = _work_copy_state(target, source_path, change_key)
+    if status["localChanged"]:
+        status["action"] = "CONFLICT" if status["upstreamChanged"] else "PRESERVED"
+        _write_work_copy_diff(target, status, notes)
+        if status["upstreamChanged"]:
+            raise SystemExit(
+                f"工作副本与上游均有变化，已拒绝覆盖: {target}\n"
+                f"查看差异: {target / WORK_COPY_DIFF_FILE}"
+            )
+        return status
+    if status["upstreamChanged"]:
+        _replace_work_copy_source(source_path, target)
+        _copy_work_copy_baseline(source_path, target)
+        _write_work_copy_metadata(target, row, source_path, change_key, mode)
+        status = _work_copy_state(target, source_path, change_key)
+        status["action"] = "UPDATED"
+    else:
+        status["action"] = "UNCHANGED"
+    _write_work_copy_diff(target, status, notes)
+    return status
+
+
+def _current_work_copy_source(metadata: dict):
+    cfg = load_config()
+    conn = connect_index(ROOT / cfg["sync"]["sync"]["index_db"])
+    source_type = metadata.get("source_table") or ""
+    alias = metadata.get("source_alias_id") or ""
+    fun = metadata.get("fun_id") or ""
+    project_id = metadata.get("project_id") or ""
+    if project_id:
+        row = conn.execute(
+            """
+            SELECT * FROM gusen_effective_source
+            WHERE project_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
+            """,
+            (project_id, source_type, alias, fun),
+        ).fetchone()
+        if not row:
+            return None, None, ""
+        path = ROOT / row["effective_local_path"]
+        return row, path, _work_copy_change_key(row, project_id)
+    row = conn.execute(
+        """
+        SELECT * FROM gusen_source_record
+        WHERE source_layer='PRODUCT' AND product_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
+        """,
+        (metadata.get("product_id") or "", source_type, alias, fun),
+    ).fetchone()
+    if not row:
+        return None, None, ""
+    path = ROOT / row["local_path"]
+    return row, path, _work_copy_change_key(row)
+
+
+def inspect_work_copy(path):
+    target = Path(path).expanduser()
+    target = target if target.is_absolute() else ROOT / target
+    target = target.resolve()
+    root = work_copy_dir().resolve()
+    if target != root and root not in target.parents:
+        raise SystemExit(f"路径不在 workcopy 目录下: {target}")
+    while target != root and not (target / WORK_COPY_META_FILE).exists():
+        target = target.parent
+    if not (target / WORK_COPY_META_FILE).exists():
+        raise SystemExit(f"未找到工作副本元数据: {path}")
+    metadata = _work_copy_metadata(target)
+    _row, source_path, change_key = _current_work_copy_source(metadata)
+    return target, _work_copy_state(target, source_path, change_key)
+
+
+def work_copy_cli(args=None):
+    parser = argparse.ArgumentParser(description="检查和打包 Guthon workcopy")
+    parser.add_argument("command", choices=["status", "diff", "package"])
+    parser.add_argument("path")
+    parser.add_argument("--json", action="store_true")
+    parsed = parser.parse_args(args)
+    target, status = inspect_work_copy(parsed.path)
+    output = None
+    if parsed.command in {"diff", "package"}:
+        _write_work_copy_diff(target, status, _manual_diff_notes(target))
+        output = target / WORK_COPY_DIFF_FILE
+    if parsed.command == "package":
+        output = _write_work_copy_delivery(target, status)
+    result = {**status, "output": str(output) if output else ""}
+    if parsed.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    print(f"状态: {status['state']}")
+    print(f"本地变更: {len(status['localChanges'])}")
+    print(f"上游变更: {len(status['upstreamChanges'])}")
+    print(f"基线版本: {status['baselineChangeKey'] or '-'}")
+    print(f"上游版本: {status['upstreamChangeKey'] or '-'}")
+    if output:
+        print(f"输出: {output}")
+
+
 def create_work_copy(args=None):
     parser = argparse.ArgumentParser()
     scope = parser.add_mutually_exclusive_group(required=True)
@@ -1187,12 +1630,10 @@ def create_work_copy(args=None):
     cfg = load_config()
     conn = connect_index(ROOT / cfg["sync"]["sync"]["index_db"])
     row, owner = find_work_copy_source(conn, cfg, parsed.product, parsed.project, parsed.type, parsed.alias, parsed.fun)
-    source_path = row["local_path"] if parsed.product else row["effective_local_path"]
+    source_path = ROOT / (row["local_path"] if parsed.product else row["effective_local_path"])
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     target = work_copy_dir() / owner / f"{stamp}-{path_part(parsed.alias if not parsed.fun else parsed.fun)}"
-    shutil.copytree(ROOT / source_path, target)
-    (target / "source-meta.json").write_text(json.dumps(dict(row), ensure_ascii=False, indent=2), encoding="utf-8")
-    (target / "diff.md").write_text("# 修改说明\n\n# Diff\n", encoding="utf-8")
+    _initialize_work_copy(source_path, target, row, _work_copy_change_key(row, parsed.project or ""), "snapshot")
     print(target)
 
 
@@ -1208,12 +1649,10 @@ def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
         alias=_source_alias_id(row),
         fun=row["fun_id"] or "",
     )
-    source_path = found["local_path"] if not project_id else found["effective_local_path"]
-    target = work_copy_dir() / owner / _work_copy_source_relative_path(source_path, project_id)
-    shutil.copytree(ROOT / source_path, target, dirs_exist_ok=True)
-    (target / "source-meta.json").write_text(json.dumps(dict(found), ensure_ascii=False, indent=2), encoding="utf-8")
-    (target / "diff.md").write_text("# 修改说明\n\n# Diff\n", encoding="utf-8")
-    return target
+    source_rel = found["local_path"] if not project_id else found["effective_local_path"]
+    source_path = ROOT / source_rel
+    target = work_copy_dir() / owner / _work_copy_source_relative_path(source_rel, project_id)
+    return _prepare_work_copy(source_path, target, found, _work_copy_change_key(found, project_id))
 
 
 def _work_copy_source_relative_path(source_path, project_id):
@@ -1253,12 +1692,15 @@ def pull_source_to_work_copy(payload: dict):
             found, _owner = find_work_copy_source(
                 conn, cfg, None, project_id, payload["sourceType"], payload.get("alias") or payload.get("sourceId") or "", payload.get("funId") or ""
             )
-            target = create_work_copy_from_row(conn, cfg, found, product_id, project_id)
+            work_result = create_work_copy_from_row(conn, cfg, found, product_id, project_id)
             return {
                 "ok": True,
                 "changed": False,
-                "message": "拉取成功, 无变更",
-                "workCopyPath": str(target),
+                "message": "拉取成功, 已保留本地修改" if work_result["localChanged"] else "拉取成功, 无变更",
+                "workCopyPath": work_result["path"],
+                "workCopyStatus": work_result["state"],
+                "workCopyAction": work_result["action"],
+                "localChanged": work_result["localChanged"],
                 "pulled": 1,
                 "source": {key: _str(found[key]) if key in found.keys() else "" for key in ("source_table", "effective_source_id", "source_alias_id", "fun_id", "source_name")},
             }
@@ -1272,21 +1714,25 @@ def pull_source_to_work_copy(payload: dict):
     rows = [candidate for candidate in rows if _included(layer_cfg, candidate)]
     if not rows:
         raise SystemExit("Source is outside configured include scope")
-    targets = []
+    work_results = []
     changed = False
     for candidate in rows:
         changed = upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"], force=bool(payload.get("force"))) or changed
     conn.commit()
     for candidate in rows:
-        targets.append(create_work_copy_from_row(conn, cfg, candidate, product_id, project_id))
+        work_results.append(create_work_copy_from_row(conn, cfg, candidate, product_id, project_id))
     conn.commit()
-    work_copy_path = os.path.commonpath([str(target) for target in targets])
+    work_copy_path = os.path.commonpath([result["path"] for result in work_results])
+    local_changed = any(result["localChanged"] for result in work_results)
     return {
         "ok": True,
         "changed": changed,
-        "message": "拉取成功" if changed else "拉取成功, 无变更",
+        "message": "拉取成功, 已保留本地修改" if local_changed else "拉取成功" if changed else "拉取成功, 无变更",
         "workCopyPath": work_copy_path,
-        "pulled": len(targets),
+        "workCopyStatus": work_results[0]["state"] if len(work_results) == 1 else "MULTIPLE",
+        "workCopyAction": work_results[0]["action"] if len(work_results) == 1 else "MULTIPLE",
+        "localChanged": local_changed,
+        "pulled": len(work_results),
         "source": {key: _str(row.get(key)) for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},
     }
 
@@ -1360,8 +1806,12 @@ def pull_source_to_work_copy_cli(args=None):
             "sourceId": payload.get("sourceId") or "",
             "alias": payload.get("alias") or "",
             "funId": payload.get("funId") or "",
+            "changed": result.get("changed", ""),
             "pulled": result.get("pulled", ""),
             "workCopyPath": result.get("workCopyPath") or "",
+            "workCopyStatus": result.get("workCopyStatus") or "",
+            "workCopyAction": result.get("workCopyAction") or "",
+            "localChanged": result.get("localChanged", ""),
         },
         payload=payload,
         result=result,

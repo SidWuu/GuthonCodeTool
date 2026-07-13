@@ -11,6 +11,7 @@
   ],
   "host_permissions": [
     "http://*/*",
+    "https://*/*",
     "http://127.0.0.1:17361/*"
   ],
   "background": {
@@ -35,9 +36,11 @@
   "content_scripts": [
     {
       "matches": [
-        "http://*/*"
+        "http://*/*",
+        "https://*/*"
       ],
       "js": [
+        "host-config.js",
         "content.js"
       ],
       "run_at": "document_idle"
@@ -47,7 +50,8 @@
     {
       "resources": ["fields-mover-core.js", "page-bridge.js"],
       "matches": [
-        "http://*/*"
+        "http://*/*",
+        "https://*/*"
       ]
     }
   ]

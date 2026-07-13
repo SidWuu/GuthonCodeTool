@@ -1,4 +1,4 @@
-# PAGE 和过程函数源码表字段映射模板。
+# PAGE 和过程函数源码表字段映射模板，product_content_field 用于项目继承标记。
 source_tables:
   page:
     enabled: true
@@ -37,6 +37,7 @@ source_tables:
     name_field: FUNCTION_NAME_FIELD
     params_field: FUNCTION_PARAMS_FIELD
     content_field: FUNCTION_SCRIPT_FIELD
+    product_content_field: PRODUCT_FUNCTION_SCRIPT_FIELD
     update_time_field: FUNCTION_UPDATE_TIME_FIELD
     check_in_date_field: CHECK_IN_TIME_FIELD
     check_out_user_id_field: CHECK_OUT_USER_ID_FIELD

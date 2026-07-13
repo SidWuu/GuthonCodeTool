@@ -38,11 +38,7 @@ function stopExtensionLoops() {
 }
 
 function isSupportedGuthonPage() {
-  return (
-    location.protocol === "http:" &&
-    /^192\.168\.\d{1,3}\.\d{1,3}$/.test(location.hostname) &&
-    location.pathname.startsWith("/guthon/")
-  );
+  return Boolean(globalThis.GuthonBridgeHost?.isAllowed(location.href));
 }
 
 async function ensurePageBridge() {
@@ -614,8 +610,9 @@ async function pullCurrentProcedure(root, button = root.querySelector("button"),
     }
 
     button.textContent = "成功";
-    button.title = `源码拉取成功: ${pullResult.workCopyPath}`;
-    setMessage(root, `成功: ${pullResult.workCopyPath}`, "success");
+    const successMessage = pullResult.message || "源码拉取成功";
+    button.title = `${successMessage}: ${pullResult.workCopyPath}`;
+    setMessage(root, `${successMessage}: ${pullResult.workCopyPath}`, "success");
     setTimeout(() => setButtonTextNode(button, "源码拉取"), 1600);
   } catch (error) {
     console.error("Guthon Bridge pull failed", error);

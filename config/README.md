@@ -46,6 +46,8 @@ systems:
 
 页面源码除页面和模块字段外，还需配置模块排序、模型关联、模型名称、模型排序和父模型字段。PAGE 目录按完整模型父子链分组，并使用三位模型/模块序号自然排序；手动拉取会自动迁移路径和清理旧目录。
 
+过程函数的 `content_field` 配置项目脚本字段，`product_content_field` 配置继承标记对应的产品快照脚本字段。PAGE 后台脚本的产品快照直接读取 JSON 中与 `script` 同级的 `superScript`。
+
 ## sync.yaml
 
 `sync.ACTIVE` 控制当前开发对象，全量拉取和定时拉取都只同步 ACTIVE 指向的源码：
@@ -62,7 +64,7 @@ sync:
   ACTIVE: projects.demo-project
 ```
 
-`products.<id>` 来自 `products.yaml`，只拉取该产品源码；`projects.<id>` 来自 `projects.yaml`，只拉取该项目源码，并只重建该项目 effective 目录。
+`products.<id>` 来自 `products.yaml`，只拉取并比较该产品源码；`projects.<id>` 来自 `projects.yaml`，只拉取并比较该项目自己的源码，再以该项目快照重建 effective 目录。项目 effective 不使用当前产品源码兜底。
 
 如果拿到的是平台导出的 `gd_system_*.json`，先整理为 `system-data.json` 的数组格式，保留这些字段即可：
 

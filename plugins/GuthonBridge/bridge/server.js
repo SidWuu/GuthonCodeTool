@@ -121,7 +121,10 @@ function sourceSummary(payload, result = {}) {
     funId: payload.funId || "",
     changed: result.changed ?? "",
     pulled: result.pulled ?? "",
-    workCopyPath: result.workCopyPath || ""
+    workCopyPath: result.workCopyPath || "",
+    workCopyStatus: result.workCopyStatus || "",
+    workCopyAction: result.workCopyAction || "",
+    localChanged: result.localChanged ?? ""
   };
 }
 

@@ -39,16 +39,7 @@ function buildObjectKey(target) {
 }
 
 function isSupportedGuthonUrl(url) {
-  try {
-    const parsed = new URL(url);
-    return (
-      parsed.protocol === "http:" &&
-      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(parsed.hostname) &&
-      parsed.pathname.startsWith("/guthon/")
-    );
-  } catch {
-    return false;
-  }
+  return Boolean(globalThis.GuthonBridgeHost?.isAllowed(url));
 }
 
 function isModuleUrl(url) {
