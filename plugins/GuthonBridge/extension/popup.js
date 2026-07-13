@@ -6,6 +6,9 @@ const funIdLabelEl = document.getElementById("funIdLabel");
 const outputDirEl = document.getElementById("outputDir");
 const pullPageBtn = document.getElementById("pullPageBtn");
 const pullHubBtn = document.getElementById("pullHubBtn");
+const copyFieldsBtn = document.getElementById("copyFieldsBtn");
+const pasteFieldsBtn = document.getElementById("pasteFieldsBtn");
+const forceRefreshBtn = document.getElementById("forceRefreshBtn");
 const closeBtn = document.getElementById("closeBtn");
 const OUTPUT_DIR_STORAGE_KEY = "guthonBridgeOutputDir";
 
@@ -60,6 +63,7 @@ function setPopupMode(mode) {
   const isModule = mode === "module";
   const isTableSchema = mode === "table-schema";
   const isBillType = mode === "billtype";
+  const canPullSource = !isTableSchema && !isBillType;
   document.querySelector(".title").textContent = "Guthon Bridge";
   procedureEl.closest("label").style.display = isModule ? "none" : "";
   funIdEl.closest("label").style.display = isModule ? "none" : "";
@@ -69,6 +73,9 @@ function setPopupMode(mode) {
   pullPageBtn.textContent = isModule ? "打开复制模式" : "拉取页面当前源码";
   pullPageBtn.style.display = isTableSchema || isBillType ? "none" : "";
   pullHubBtn.textContent = isTableSchema ? "拉取表结构" : isBillType ? "拉取单据类型" : "拉取源码表版本";
+  copyFieldsBtn.style.display = isModule ? "" : "none";
+  pasteFieldsBtn.style.display = isModule ? "" : "none";
+  forceRefreshBtn.style.display = canPullSource ? "" : "none";
 }
 
 async function persistOutputDir(outputDir) {
@@ -1228,7 +1235,19 @@ async function openCopyMode() {
   return tab;
 }
 
-async function runHubPull() {
+async function runFieldsMover(type) {
+  const tab = await getActiveTab();
+  if (!tab.url || !isSupportedGuthonUrl(tab.url) || !isModuleUrl(tab.url)) {
+    throw new Error("当前标签页不是模块开发页面");
+  }
+  const response = await chrome.tabs.sendMessage(tab.id, { type });
+  if (!response?.ok) {
+    throw new Error(response?.message || "字段平移失败，请刷新谷神页面后重试");
+  }
+  return response.data;
+}
+
+async function runHubPull(force = false) {
   const target = await resolveHubSourceTarget();
   if (target.mode === "billtype") {
     return chrome.runtime.sendMessage({
@@ -1252,7 +1271,8 @@ async function runHubPull() {
     sourceType: target.mode === "page-source" ? "page" : "procedure",
     sourceId: target.mode === "page-source" ? target.pageId || "" : target.procedureId || "",
     alias: target.procedureKeyword || "",
-    funId: target.mode === "page-source" ? "" : target.funId || ""
+    funId: target.mode === "page-source" ? "" : target.funId || "",
+    force
   };
   if (payload.sourceType === "page" && !payload.sourceId && !payload.alias) {
     throw new Error("当前页面没有识别到页面源码表查询条件");
@@ -1317,6 +1337,37 @@ pullHubBtn.addEventListener("click", async () => {
   }
 });
 
+copyFieldsBtn.addEventListener("click", async () => {
+  try {
+    await runFieldsMover("show-fields-mover");
+    setStatus("请选择需要复制的字段");
+  } catch (error) {
+    setStatus(`复制字段失败\n${error.message}`);
+  }
+});
+
+pasteFieldsBtn.addEventListener("click", async () => {
+  try {
+    const result = await runFieldsMover("paste-fields-mover");
+    setStatus(`已粘贴 ${result.pasted} 个，跳过重复 ${result.duplicate} 个，无效 ${result.invalid} 个`);
+  } catch (error) {
+    setStatus(`粘贴字段失败\n${error.message}`);
+  }
+});
+
+forceRefreshBtn.addEventListener("click", async () => {
+  try {
+    setStatus("正在强制刷新源码表版本...");
+    const result = await runHubPull(true);
+    if (!result?.ok) {
+      throw new Error(result?.message || "强制刷新失败");
+    }
+    setStatus([result.message || "强制刷新成功", `工作副本: ${result.workCopyPath}`].join("\n"));
+  } catch (error) {
+    setStatus(`强制刷新失败\n${error.message}`);
+  }
+});
+
 outputDirEl.addEventListener("change", persistCurrentOutputDir);
 outputDirEl.addEventListener("blur", persistCurrentOutputDir);
 closeBtn.addEventListener("click", () => window.close());
@@ -1324,15 +1375,21 @@ closeBtn.addEventListener("click", () => window.close());
 async function initializePopup() {
   pullPageBtn.disabled = true;
   pullHubBtn.disabled = true;
+  copyFieldsBtn.disabled = true;
+  pasteFieldsBtn.disabled = true;
+  forceRefreshBtn.disabled = true;
   const stored = await chrome.storage?.local?.get?.(OUTPUT_DIR_STORAGE_KEY);
   outputDirEl.value =
     stored?.[OUTPUT_DIR_STORAGE_KEY] || localStorage.getItem(OUTPUT_DIR_STORAGE_KEY) || "";
   const tab = await getActiveTab();
   if (tab.url && isSupportedGuthonUrl(tab.url) && isModuleUrl(tab.url)) {
     setPopupMode("module");
-    setStatus("当前页面是模块开发，可打开复制模式");
+    setStatus("当前页面是模块开发");
     pullPageBtn.disabled = false;
     pullHubBtn.disabled = false;
+    copyFieldsBtn.disabled = false;
+    pasteFieldsBtn.disabled = false;
+    forceRefreshBtn.disabled = false;
     return;
   }
   setPopupMode("procedure");
@@ -1367,6 +1424,7 @@ async function initializePopup() {
     );
     pullPageBtn.disabled = target.mode === "table-schema" || target.mode === "billtype";
     pullHubBtn.disabled = false;
+    forceRefreshBtn.disabled = target.mode === "table-schema" || target.mode === "billtype";
   } catch (error) {
     setResolvedTarget(null);
     setStatus(`识别失败\n${error.message}`);

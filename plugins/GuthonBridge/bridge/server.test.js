@@ -152,6 +152,7 @@ process.stdin.on("end", () => {
       sourceId: "",
       alias: "demo.pkg",
       funId: "save",
+      changed: "",
       pulled: "",
       workCopyPath
     });
@@ -407,6 +408,11 @@ test("copy mode button and overlay are available on module page editors", () => 
   );
 
   assert.equal(contentScript.includes("复制模式"), true);
+  assert.equal(contentScript.includes("复制局部上下文"), true);
+  assert.equal(contentScript.includes("navigator.clipboard.writeText"), true);
+  assert.equal(contentScript.includes("pullCurrentProcedure(root, refreshButton, true)"), false);
+  const pullScript = contentScript.slice(contentScript.indexOf("async function pullCurrentProcedure"), contentScript.indexOf("function removeNode"));
+  assert.equal(pullScript.includes("module_page_sql"), false);
   assert.equal(contentScript.includes("字段平移"), true);
   assert.equal(contentScript.includes("复制字段"), true);
   assert.equal(contentScript.includes("粘贴字段"), true);
@@ -486,7 +492,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(renderCopyDataScript.includes("textarea.focus();"), false);
   assert.equal(contentScript.includes("textarea.select();"), true);
   assert.equal(contentScript.includes("window.__guthonBridgeLoaded"), false);
-  assert.equal(contentScript.includes('message?.type !== "show-copy-overlay"'), true);
+  assert.equal(contentScript.includes('message?.type === "show-copy-overlay"'), true);
   assert.equal(contentScript.includes("removeNode(COPY_ROOT_ID);\n  installProcedurePullButton();"), true);
   assert.equal(contentScript.includes("removeNode(COPY_ROOT_ID);"), true);
   assert.equal(contentScript.includes("removeNode(SCHEMA_ROOT_ID);"), true);
@@ -556,6 +562,8 @@ test("floating pull waits for page bridge injection before posting commands", ()
 
 test("popup waits for storage.local output directory persistence", () => {
   const popupScript = fs.readFileSync(path.join(ROOT, "extension", "popup.js"), "utf8");
+  const popupHtml = fs.readFileSync(path.join(ROOT, "extension", "popup.html"), "utf8");
+  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
 
   assert.equal(popupScript.includes("function isModuleUrl"), true);
   assert.equal(popupScript.includes("打开复制模式"), true);
@@ -564,6 +572,23 @@ test("popup waits for storage.local output directory persistence", () => {
   assert.equal(popupScript.includes("await persistOutputDir(outputDir);"), true);
   assert.equal(popupScript.includes('outputDirEl.addEventListener("change", persistCurrentOutputDir);'), true);
   assert.equal(popupScript.includes('outputDirEl.addEventListener("blur", persistCurrentOutputDir);'), true);
+  assert.equal(popupHtml.includes('id="copyFieldsBtn"'), true);
+  assert.equal(popupHtml.includes('id="pasteFieldsBtn"'), true);
+  assert.equal(popupHtml.includes('id="forceRefreshBtn"'), true);
+  assert.equal(popupHtml.includes("background: #409eff"), true);
+  assert.equal(popupHtml.includes(".action-force"), true);
+  assert.equal(popupHtml.includes("grid-template-columns: 3fr 1fr"), true);
+  assert.equal(popupHtml.includes("border: 0;"), true);
+  assert.equal(popupScript.includes('runFieldsMover("show-fields-mover")'), true);
+  assert.equal(popupScript.includes('runFieldsMover("paste-fields-mover")'), true);
+  assert.equal(popupScript.includes("runHubPull(true)"), true);
+  assert.equal(popupScript.includes('forceRefreshBtn.style.display = canPullSource ? "" : "none"'), true);
+  assert.equal(popupScript.includes('setStatus("当前页面是模块开发")'), true);
+  assert.equal(popupScript.includes('copyFieldsBtn.style.display = isModule ? "" : "none"'), true);
+  assert.equal(popupScript.includes('pasteFieldsBtn.style.display = isModule ? "" : "none"'), true);
+  assert.equal(contentScript.includes('message?.type === "show-fields-mover"'), true);
+  assert.equal(contentScript.includes('message?.type === "paste-fields-mover"'), true);
+  assert.equal(contentScript.includes('makeNativeButton("强制刷新"'), false);
 });
 
 test("page bridge uses popup-compatible procedure search strategy", () => {

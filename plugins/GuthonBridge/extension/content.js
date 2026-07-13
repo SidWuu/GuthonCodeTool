@@ -557,7 +557,7 @@ function positionFloatingRoot(root, row = 0) {
   return true;
 }
 
-async function pullCurrentProcedure(root, button = root.querySelector("button")) {
+async function pullCurrentProcedure(root, button = root.querySelector("button"), force = false) {
   try {
     button.disabled = true;
     setButtonTextNode(button, "源码拉取");
@@ -602,7 +602,8 @@ async function pullCurrentProcedure(root, button = root.querySelector("button"))
           sourceType: target.mode === "page-source" ? "page" : "procedure",
           sourceId: target.mode === "page-source" ? target.pageId || "" : target.procedureId || "",
           alias: target.procedureKeyword || target.procedureName || "",
-          funId: target.mode === "page-source" ? "" : target.funId || ""
+          funId: target.mode === "page-source" ? "" : target.funId || "",
+          force
         }
       });
     } catch (error) {
@@ -869,6 +870,7 @@ async function pasteCopiedFields(root) {
     throw new Error(pasted?.message || "粘贴字段失败");
   }
   setMessage(root, `已粘贴 ${pasted.data.pasted} 个，跳过重复 ${pasted.data.duplicate} 个，无效 ${pasted.data.invalid} 个`, "success");
+  return pasted.data;
 }
 
 function readFirst(obj, keys) {
@@ -1266,6 +1268,10 @@ function copySelectedCells(overlay, event) {
   event.preventDefault();
 }
 
+async function copyLocalContext(overlay) {
+  await navigator.clipboard.writeText(overlay.querySelector(".guthon-bridge-copy-text").value);
+}
+
 function installCellSelection(overlay) {
   let drag = null;
 
@@ -1478,6 +1484,7 @@ async function showCopyOverlay() {
       <div class="guthon-bridge-copy-head">
         <strong>复制模式</strong>
         <div class="guthon-bridge-copy-actions">
+          <button type="button" class="el-button el-button--default el-button--mini is-plain guthon-bridge-copy-context">复制局部上下文</button>
           <button type="button" class="el-button el-button--default el-button--mini is-plain guthon-bridge-copy-minimize">缩小</button>
           <button type="button" class="el-button el-button--default el-button--mini is-plain guthon-bridge-copy-close">关闭</button>
         </div>
@@ -1490,6 +1497,7 @@ async function showCopyOverlay() {
   `;
   const panel = overlay.querySelector(".guthon-bridge-copy-panel");
   const minimizeButton = overlay.querySelector(".guthon-bridge-copy-minimize");
+  overlay.querySelector(".guthon-bridge-copy-context").addEventListener("click", () => copyLocalContext(overlay));
   minimizeButton.addEventListener("click", () => {
     const minimized = panel.dataset.minimized !== "true";
     panel.dataset.minimized = String(minimized);
@@ -1647,11 +1655,19 @@ async function refreshToolbarButtons() {
 }
 
 getRuntime()?.onMessage?.addListener((message, sender, sendResponse) => {
-  if (message?.type !== "show-copy-overlay") {
+  const root = document.getElementById(FLOATING_ROOT_ID) || document.body;
+  const action = message?.type === "show-copy-overlay"
+    ? () => showCopyOverlay()
+    : message?.type === "show-fields-mover"
+      ? () => showFieldsMoverOverlay(root)
+      : message?.type === "paste-fields-mover"
+        ? () => pasteCopiedFields(root)
+        : null;
+  if (!action) {
     return false;
   }
-  showCopyOverlay()
-    .then(() => sendResponse({ ok: true }))
+  action()
+    .then((data) => sendResponse({ ok: true, data }))
     .catch((error) => sendResponse({ ok: false, message: error?.message || String(error) }));
   return true;
 });

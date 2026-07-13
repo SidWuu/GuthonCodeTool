@@ -577,7 +577,6 @@ def run_sync_once(args=None):
     stats = {"mode": "sync", "active": active, "sync_from": sync_from, "candidates": 0, "changed": 0, "failures": 0}
     for product_id, product in products:
         stats = _sync_layer(conn, cfg, product, "PRODUCT", product_id, "", sync_from, stats)
-        export_product_docs(conn, product_id)
     for project_id, project in projects:
         stats = _sync_layer(conn, cfg, project, "PROJECT", project["product_id"], project_id, sync_from, stats)
     if effective_project_ids:
@@ -903,7 +902,6 @@ def build_effective(conn, cfg, project_ids=None):
                 (project_id, product_id, row["source_table"], row["source_alias_id"], row["fun_id"], row["source_layer"], row["source_id"], str(target.relative_to(ROOT)), product["source_id"] if product else None, product["change_key"] if product else None, product["local_path"] if product else None, project_row["source_id"] if project_row else None, project_row["change_key"] if project_row else None, project_row["local_path"] if project_row else None, 1 if product and project_row else 0, row["status"], now),
             )
         conn.commit()
-        export_project_docs(conn, project_id)
 
 
 def _find_source(conn, product_id, project_id, key):
@@ -1100,11 +1098,20 @@ def pull_source_to_work_copy(payload: dict):
             cur.execute(sql, params)
             row = cur.fetchone()
             rows = [row] if row else []
-            if row and payload["sourceType"] == PAGE_SOURCE_TYPE and row.get("mk_id"):
-                module_sql, module_params = module_page_sql(cfg["source_tables"], row, rules)
-                cur.execute(module_sql, module_params)
-                rows = cur.fetchall()
     if not row:
+        if project_id:
+            found, _owner = find_work_copy_source(
+                conn, cfg, None, project_id, payload["sourceType"], payload.get("alias") or payload.get("sourceId") or "", payload.get("funId") or ""
+            )
+            target = create_work_copy_from_row(conn, cfg, found, product_id, project_id)
+            return {
+                "ok": True,
+                "changed": False,
+                "message": "拉取成功, 无变更",
+                "workCopyPath": str(target),
+                "pulled": 1,
+                "source": {key: _str(found[key]) if key in found.keys() else "" for key in ("source_table", "effective_source_id", "source_alias_id", "fun_id", "source_name")},
+            }
         allowed = ", ".join(rules.get("allow_unchecked_check_out_user_ids") or []) or "none"
         raise SystemExit(
             "Source not found or filtered. "
@@ -1118,7 +1125,7 @@ def pull_source_to_work_copy(payload: dict):
     targets = []
     changed = False
     for candidate in rows:
-        changed = upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"]) or changed
+        changed = upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"], force=bool(payload.get("force"))) or changed
     conn.commit()
     for candidate in rows:
         targets.append(create_work_copy_from_row(conn, cfg, candidate, product_id, project_id))
@@ -1160,7 +1167,7 @@ def resolve_pull_scope(cfg: dict, payload: dict):
         raise SystemExit("scope must be product or project")
 
 
-def pull_source_payload_from_args(scope, product_id, project_id, source_type, source_id, alias, fun):
+def pull_source_payload_from_args(scope, product_id, project_id, source_type, source_id, alias, fun, force=False):
     if not scope:
         if project_id:
             scope = "project"
@@ -1174,6 +1181,7 @@ def pull_source_payload_from_args(scope, product_id, project_id, source_type, so
         "sourceId": source_id,
         "alias": alias,
         "funId": fun,
+        "force": force,
     }
 
 
@@ -1187,11 +1195,12 @@ def pull_source_to_work_copy_cli(args=None):
     parser.add_argument("--source-id")
     parser.add_argument("--alias")
     parser.add_argument("--fun")
+    parser.add_argument("--force", action="store_true")
     parsed = parser.parse_args(args)
     if parsed.json_stdin:
         payload = json.loads(sys.stdin.read() or "{}")
     else:
-        payload = pull_source_payload_from_args(parsed.scope, parsed.product_id, parsed.project_id, parsed.source_type, parsed.source_id, parsed.alias, parsed.fun)
+        payload = pull_source_payload_from_args(parsed.scope, parsed.product_id, parsed.project_id, parsed.source_type, parsed.source_id, parsed.alias, parsed.fun, parsed.force)
     result = pull_source_to_work_copy(payload)
     append_pull_log(
         "source",
@@ -1227,9 +1236,10 @@ def find_work_copy_source(conn, cfg, product_id, project_id, source_type, alias,
     row = conn.execute(
         """
         SELECT * FROM gusen_effective_source
-        WHERE project_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
+        WHERE project_id=? AND source_table=? AND fun_id=?
+          AND (source_alias_id=? OR effective_source_id=?)
         """,
-        (project_id, source_type, alias, fun),
+        (project_id, source_type, fun, alias, alias),
     ).fetchone()
     if not row:
         raise SystemExit("Effective source not found. Run sync first.")
