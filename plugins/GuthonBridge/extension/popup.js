@@ -76,6 +76,7 @@ function setPopupMode(mode) {
   copyFieldsBtn.style.display = isModule ? "" : "none";
   pasteFieldsBtn.style.display = isModule ? "" : "none";
   forceRefreshBtn.style.display = canPullSource ? "" : "none";
+  pullHubBtn.parentElement.classList.toggle("full-width", !canPullSource);
 }
 
 async function persistOutputDir(outputDir) {

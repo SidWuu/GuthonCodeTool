@@ -578,11 +578,13 @@ test("popup waits for storage.local output directory persistence", () => {
   assert.equal(popupHtml.includes("background: #409eff"), true);
   assert.equal(popupHtml.includes(".action-force"), true);
   assert.equal(popupHtml.includes("grid-template-columns: 3fr 1fr"), true);
+  assert.equal(popupHtml.includes(".source-actions.full-width"), true);
   assert.equal(popupHtml.includes("border: 0;"), true);
   assert.equal(popupScript.includes('runFieldsMover("show-fields-mover")'), true);
   assert.equal(popupScript.includes('runFieldsMover("paste-fields-mover")'), true);
   assert.equal(popupScript.includes("runHubPull(true)"), true);
   assert.equal(popupScript.includes('forceRefreshBtn.style.display = canPullSource ? "" : "none"'), true);
+  assert.equal(popupScript.includes('pullHubBtn.parentElement.classList.toggle("full-width", !canPullSource)'), true);
   assert.equal(popupScript.includes('setStatus("当前页面是模块开发")'), true);
   assert.equal(popupScript.includes('copyFieldsBtn.style.display = isModule ? "" : "none"'), true);
   assert.equal(popupScript.includes('pasteFieldsBtn.style.display = isModule ? "" : "none"'), true);
