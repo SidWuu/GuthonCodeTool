@@ -548,7 +548,7 @@ function positionFloatingRoot(root, row = 0) {
   root.style.left = "20px";
   root.style.right = "auto";
   root.style.top = "auto";
-  root.style.bottom = "260px";
+  root.style.bottom = "150px";
   root.style.zIndex = "2147483646";
   return true;
 }

@@ -403,7 +403,7 @@ test("data table page exposes table schema export action", () => {
   assert.equal(contentScript.includes("isDataTableRoute"), true);
   assert.equal(contentScript.includes("positionFloatingRoot"), true);
   assert.equal(contentScript.includes('root.style.left = "20px"'), true);
-  assert.equal(contentScript.includes('root.style.bottom = "260px"'), true);
+  assert.equal(contentScript.includes('root.style.bottom = "150px"'), true);
   assert.equal(backgroundScript.includes("/exportTableSchema"), true);
   assert.equal(pageBridge.includes("inspectTableSchemaTarget"), true);
   assert.equal(pageBridge.includes("getLabeledSelectValue"), true);
