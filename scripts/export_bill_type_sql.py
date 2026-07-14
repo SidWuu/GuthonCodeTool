@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 import gusen_hub
-from export_table_schema_sql import DEFAULT_DATA_SOURCE_IDS, normalize_data_source_ids
+from export_table_schema_sql import normalize_data_source_ids, resolve_data_source_ids
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,7 +99,9 @@ def bill_type_json(row):
 
 def export_bill_types(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, bill_type_codes=None):
     output_dir = Path(output_dir)
-    data_source_ids = normalize_data_source_ids(data_source_ids or DEFAULT_DATA_SOURCE_IDS)
+    data_source_ids = normalize_data_source_ids(data_source_ids)
+    if not data_source_ids:
+        raise ValueError("data_source_ids is required")
     bill_type_codes = normalize_bill_type_codes(bill_type_codes)
     bill_types = fetch_rows(conn, "gd_bill_type", data_source_ids, bill_type_codes=bill_type_codes)
     systems = fetch_rows(conn, "gd_system", data_source_ids)
@@ -157,24 +159,19 @@ def load_datasource(name=None):
     return gusen_hub.resolve_datasource(cfg, name)
 
 
-def load_default_data_source_ids():
-    cfg = load_config()
-    rules = cfg["sync"].get("rules") or {}
-    return normalize_data_source_ids(rules.get("table_schema_data_source_ids"))
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Export Gushen bill types directly from SQL.")
     parser.add_argument("--datasource", help="Datasource override. Defaults to the product or project selected by sync.ACTIVE.")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
-    parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to config sync.rules.table_schema_data_source_ids.")
+    parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to IDs resolved from config/sync.yaml systems.include.system_aliases.")
     parser.add_argument("--bill-type-codes", help="Comma-separated BILL_TYPE_CODE list. Defaults to all bill types in selected data sources.")
     args = parser.parse_args(argv)
 
-    data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else load_default_data_source_ids()
+    requested_data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else []
     bill_type_codes = normalize_bill_type_codes(args.bill_type_codes)
     datasource_name, datasource = load_datasource(args.datasource)
     with gusen_hub.db_connect(datasource) as conn:
+        data_source_ids = resolve_data_source_ids(conn, datasource_name, requested_data_source_ids)
         summary = export_bill_types(conn, Path(args.output_dir), data_source_ids=data_source_ids, bill_type_codes=bill_type_codes)
     result = {"ok": True, **summary, "outputDir": args.output_dir}
     gusen_hub.append_pull_log(

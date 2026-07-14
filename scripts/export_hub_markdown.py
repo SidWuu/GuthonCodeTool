@@ -4,7 +4,7 @@ import gusen_hub
 
 def main():
     cfg = gusen_hub.load_config()
-    _active, products, projects, effective = gusen_hub.resolve_active(cfg)
+    _active, products, projects = gusen_hub.resolve_active(cfg)
     conn = gusen_hub.connect_index(gusen_hub.ROOT / cfg["sync"]["sync"]["index_db"])
     try:
         for product_id, _product in products:

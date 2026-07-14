@@ -1,13 +1,18 @@
-# 同步对象、周期和本地目录模板。
+# 同步对象、子系统别名、周期和本地目录模板。
 sync:
   ACTIVE: products.demo-product
   interval_seconds: 600
   lookback_minutes: 10
   readonly_source_dir: var/source/readonly
-  effective_source_dir: var/source/effective
   work_copy_dir: var/source/workcopy
   generated_doc_dir: var/knowledge
   index_db: var/runtime/index/hub.db
+
+systems:
+  include:
+    # 只维护别名；系统和数据源信息从各自数据库查询并自动缓存。
+    system_aliases:
+      - demo.system
 
 rules:
   require_check_in_date: true
@@ -15,6 +20,3 @@ rules:
     - U00000XXXX
   prefer_version_mac: true
   skip_error_source: true
-  build_effective_after_sync: true
-  table_schema_data_source_ids:
-    - "0000"

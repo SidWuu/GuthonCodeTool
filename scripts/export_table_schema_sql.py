@@ -15,7 +15,6 @@ import gusen_hub
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = ROOT / "var" / "database" / "schema"
-DEFAULT_DATA_SOURCE_IDS = ["0000", "0008", "0015", "0018", "0019", "0021"]
 
 
 def sanitize_name(value):
@@ -101,7 +100,7 @@ def system_folder_name(data_source_id, system_name):
 
 def normalize_data_source_ids(value):
     if value is None:
-        return list(DEFAULT_DATA_SOURCE_IDS)
+        return []
     if isinstance(value, str):
         items = value.split(",")
     else:
@@ -137,6 +136,8 @@ def fetch_rows(conn, table_name, data_source_ids, table_ids=None):
 def export_table_schema(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, table_ids=None, exported_at=None):
     output_dir = Path(output_dir)
     data_source_ids = normalize_data_source_ids(data_source_ids)
+    if not data_source_ids:
+        raise ValueError("data_source_ids is required")
     table_ids = normalize_table_ids(table_ids)
     exported_at = exported_at or dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     tables = fetch_rows(conn, "gd_tables", data_source_ids, table_ids)
@@ -211,25 +212,30 @@ def load_datasource(name=None):
     return gusen_hub.resolve_datasource(cfg, name)
 
 
-def load_default_data_source_ids():
+def resolve_data_source_ids(conn, datasource_name, requested=None):
     cfg = gusen_hub.load_config()
-    rules = cfg["sync"].get("rules") or {}
-    return normalize_data_source_ids(rules.get("table_schema_data_source_ids"))
+    allowed = gusen_hub.resolve_system_scope(conn, cfg, datasource_name).get("data_source_ids") or []
+    requested_ids = normalize_data_source_ids(requested) if requested else []
+    outside = [data_source_id for data_source_id in requested_ids if data_source_id not in allowed]
+    if outside:
+        raise SystemExit(f"Data source IDs are outside configured system_aliases: {','.join(outside)}")
+    return requested_ids or allowed
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Export Gushen table schemas directly from SQL.")
     parser.add_argument("--datasource", help="Datasource override. Defaults to the product or project selected by sync.ACTIVE.")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
-    parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to config sync.rules.table_schema_data_source_ids.")
+    parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to IDs resolved from config/sync.yaml systems.include.system_aliases.")
     parser.add_argument("--table-ids", help="Comma-separated TABLE_ID list. Omit to export all tables in selected data sources.")
     args = parser.parse_args(argv)
 
-    data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else load_default_data_source_ids()
+    requested_data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else []
     table_ids = normalize_table_ids(args.table_ids)
     datasource_name, datasource = load_datasource(args.datasource)
     try:
         with gusen_hub.db_connect(datasource) as conn:
+            data_source_ids = resolve_data_source_ids(conn, datasource_name, requested_data_source_ids)
             summary = export_table_schema(conn, Path(args.output_dir), data_source_ids=data_source_ids, table_ids=table_ids)
     except ValueError as error:
         print(str(error), file=sys.stderr)

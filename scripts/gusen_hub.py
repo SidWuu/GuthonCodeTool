@@ -60,10 +60,6 @@ def append_pull_log(pull_type, trigger, summary, payload=None, result=None, ok=T
     return path
 
 
-def effective_source_dir() -> Path:
-    return source_dir() / "effective"
-
-
 def work_copy_dir() -> Path:
     return source_dir() / "workcopy"
 
@@ -151,36 +147,31 @@ def load_config():
             + "\nCopy config/example/*.example.yaml to config/*.yaml and fill them first."
         )
     config = {key: load_yaml(CONFIG_DIR / filename) for key, filename in files.items()}
-    systems_file = CONFIG_DIR / "systems.yaml"
-    config["systems"] = load_yaml(systems_file) if systems_file.exists() else {}
-    config["_system_scope"] = load_system_scope(config["systems"])
+    config["systems"] = config["sync"].get("systems") or {}
     return config
 
 
-def load_system_scope(config: dict):
-    systems = config.get("systems") or {}
-    data_file = systems.get("data_file")
-    selected = [str(item) for item in (systems.get("include") or {}).get("system_codes", [])]
-    if not data_file or not selected:
+def system_aliases(config: dict):
+    return list(dict.fromkeys(str(item).strip() for item in (config.get("systems", {}).get("include") or {}).get("system_aliases", []) if str(item).strip()))
+
+
+def _build_system_scope(records, selected):
+    if not selected:
         return {"system_ids": [], "data_source_ids": []}
     selected_order = {code: index for index, code in enumerate(selected)}
-    data_path = CONFIG_DIR / data_file
-    if not data_path.exists():
-        raise SystemExit(f"Missing system data json: {data_path}")
-    records = _flatten_records(json.loads(data_path.read_text(encoding="utf-8")))
     system_ids = set()
     data_source_ids = set()
     system_name_by_id = {}
     data_source_names = {}
     for record in records:
-        code_values = _values(record, "SYSTEM_CODE", "SYSTEM_ID", "SYSTEM_ALIAS_ID", "SYS_CODE", "systemCode", "systemId")
-        matched = [code for code in selected if code in code_values]
+        alias_values = _values(record, "SYSTEM_ALIAS_ID", "systemAliasId")
+        matched = [alias for alias in selected if alias in alias_values]
         if not matched:
             continue
         order = min(selected_order[code] for code in matched)
         ids = _values(record, "SYSTEM_ID", "systemId", "id")
         data_ids = _values(record, "DATA_SOURCE_ID", "DATA_SOURCE_IDS", "dataSourceId", "dataSourceIds")
-        name = next(iter(_values(record, "SYSTEM_NAME", "systemName", "name")), "") or next(iter(code_values), "")
+        name = next(iter(_values(record, "SYSTEM_NAME", "systemName", "name")), "") or next(iter(alias_values), "")
         system_ids.update(ids)
         data_source_ids.update(data_ids)
         for system_id in ids:
@@ -203,6 +194,44 @@ def load_system_scope(config: dict):
         "system_name_by_data_source_id": system_name_by_data_source_id,
         "system_link_names_by_data_source_id": system_link_names_by_data_source_id,
     }
+
+
+def resolve_system_scope(conn, config: dict, datasource_name: str):
+    selected = system_aliases(config)
+    if not selected:
+        return {"system_ids": [], "data_source_ids": []}
+    cache_path = CONFIG_DIR / "system-data.json"
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        cache = {}
+    if not isinstance(cache, dict) or not isinstance(cache.get("datasources"), dict):
+        cache = {"datasources": {}}
+    entry = cache["datasources"].get(datasource_name) or {}
+    records = entry.get("systems") if entry.get("system_aliases") == selected else None
+    if not records:
+        placeholders = ", ".join(["%s"] * len(selected))
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT SYSTEM_ID, SYSTEM_NAME, SYSTEM_ALIAS_ID, DATA_SOURCE_ID FROM gd_system WHERE SYSTEM_ALIAS_ID IN ({placeholders})",
+                tuple(selected),
+            )
+            records = [
+                {key: _str(row.get(key)) for key in ("SYSTEM_ID", "SYSTEM_NAME", "SYSTEM_ALIAS_ID", "DATA_SOURCE_ID")}
+                for row in cur.fetchall()
+            ]
+        if not records:
+            raise SystemExit("No gd_system rows match systems.include.system_aliases in config/sync.yaml")
+        cache["datasources"][datasource_name] = {"system_aliases": selected, "systems": records}
+        cache["generated_at"] = _now()
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.tmp")
+        temp_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temp_path.replace(cache_path)
+    scope = _build_system_scope(records, selected)
+    if not scope.get("system_ids") or not scope.get("data_source_ids"):
+        raise SystemExit(f"Invalid system cache for datasource: {datasource_name}")
+    return scope
 
 
 def connect_index(index_db: Path) -> sqlite3.Connection:
@@ -271,32 +300,15 @@ def connect_index(index_db: Path) -> sqlite3.Connection:
             update_time TEXT,
             indexed_time TEXT
         );
-        CREATE TABLE IF NOT EXISTS gusen_effective_source (
-            project_id TEXT NOT NULL,
-            product_id TEXT NOT NULL,
-            source_table TEXT NOT NULL,
-            source_alias_id TEXT NOT NULL,
-            fun_id TEXT NOT NULL DEFAULT '',
-            effective_layer TEXT NOT NULL,
-            effective_source_id TEXT NOT NULL,
-            effective_local_path TEXT NOT NULL,
-            product_source_id TEXT,
-            product_change_key TEXT,
-            product_local_path TEXT,
-            project_source_id TEXT,
-            project_change_key TEXT,
-            project_local_path TEXT,
-            is_override INTEGER NOT NULL DEFAULT 0,
-            status TEXT NOT NULL,
-            build_time TEXT NOT NULL,
-            PRIMARY KEY (project_id, source_table, source_alias_id, fun_id)
-        );
         CREATE TABLE IF NOT EXISTS gusen_sync_state (
             state_key TEXT PRIMARY KEY,
             state_value TEXT
         );
         """
     )
+    conn.execute("DROP TABLE IF EXISTS gusen_effective_source")
+    conn.execute("DELETE FROM gusen_sync_state WHERE state_key='last_success_time'")
+    conn.commit()
     return conn
 
 
@@ -645,24 +657,23 @@ def run_sync_once(args=None):
     sync = cfg["sync"]["sync"]
     conn = connect_index(ROOT / sync["index_db"])
     if parsed.init_only:
-        active, _products, _projects, _effective_project_ids = resolve_active(cfg)
+        active, _products, _projects = resolve_active(cfg)
         export_status(conn, {"mode": "init-only", "active": active, "changed": 0, "candidates": 0, "failures": 0})
         export_knowledge_readme(conn, sync["index_db"], active)
         return
 
     lookback = int(sync.get("lookback_minutes", 10))
-    sync_from = _sync_from(conn, lookback)
-    active, products, projects, effective_project_ids = resolve_active(cfg)
+    active, products, projects = resolve_active(cfg)
+    state_key = f"last_success_time:{active}"
+    sync_from = _sync_from(conn, lookback, state_key)
     stats = {"mode": "sync", "active": active, "sync_from": sync_from, "candidates": 0, "changed": 0, "deleted": 0, "failures": 0}
     for product_id, product in products:
         stats = _sync_layer(conn, cfg, product, "PRODUCT", product_id, "", sync_from, stats)
     for project_id, project in projects:
         stats = _sync_layer(conn, cfg, project, "PROJECT", project["product_id"], project_id, sync_from, stats)
-    if effective_project_ids:
-        build_effective(conn, cfg, effective_project_ids)
     conn.execute(
-        "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES('last_success_time', ?)",
-        (_now(),),
+        "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+        (state_key, _now()),
     )
     conn.commit()
     export_status(conn, stats)
@@ -692,17 +703,17 @@ def resolve_active(cfg):
     if kind == "products":
         product = (cfg["products"].get("products") or {}).get(item_id)
         if product:
-            return active, [(item_id, product)], [], []
+            return active, [(item_id, product)], []
     if kind == "projects":
         project = (cfg["projects"].get("projects") or {}).get(item_id)
         if project:
-            return active, [], [(item_id, project)], [item_id]
+            return active, [], [(item_id, project)]
     raise SystemExit(f"Invalid sync.ACTIVE: {active}")
 
 
 def resolve_datasource(cfg, name=None):
     if not name:
-        _active, products, projects, _effective_project_ids = resolve_active(cfg)
+        _active, products, projects = resolve_active(cfg)
         _item_id, item = (products or projects)[0]
         name = item.get("datasource")
     datasource = (cfg["datasource"].get("datasource") or {}).get(name)
@@ -716,10 +727,11 @@ def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, 
     ds = cfg["datasource"]["datasource"][ds_name]
     table_cfg = cfg["source_tables"]
     rules = cfg["sync"].get("rules") or {}
-    page_query, page_params = _scoped_sql(page_sql(table_cfg, rules), cfg["_system_scope"], "system", table_cfg)
-    inventory_query, inventory_params = _scoped_sql(page_inventory_sql(table_cfg), cfg["_system_scope"], "system", table_cfg)
-    proc_query, proc_params = _scoped_sql(proc_sql(table_cfg, rules), cfg["_system_scope"], "data_source", table_cfg)
     with db_connect(ds) as remote:
+        system_scope = resolve_system_scope(remote, cfg, ds_name)
+        page_query, page_params = _scoped_sql(page_sql(table_cfg, rules), system_scope, "system", table_cfg)
+        inventory_query, inventory_params = _scoped_sql(page_inventory_sql(table_cfg), system_scope, "system", table_cfg)
+        proc_query, proc_params = _scoped_sql(proc_sql(table_cfg, rules), system_scope, "data_source", table_cfg)
         model_paths = load_model_paths(remote, table_cfg)
         with remote.cursor() as cur:
             for sql, extra_params in ((page_query, page_params), (proc_query, proc_params)):
@@ -730,7 +742,7 @@ def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, 
                         continue
                     if row["source_table"] == PAGE_SOURCE_TYPE:
                         row["model_path"] = model_paths.get(_str(row.get("model_id")))
-                    if upsert_source(conn, row, layer, product_id, project_id, layer_cfg, cfg["_system_scope"]):
+                    if upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_scope):
                         stats["changed"] += 1
             cur.execute(inventory_query, inventory_params)
             current_page_ids = {row["source_id"] for row in cur.fetchall() if _included(layer_cfg, row)}
@@ -1039,62 +1051,6 @@ def _insert_call(conn, row, layer, product_id, project_id, script_type, script_p
     )
 
 
-def build_effective(conn, cfg, project_ids=None):
-    now = _now()
-    projects = cfg["projects"].get("projects") or {}
-    selected = set(project_ids or projects)
-    for project_id, project in projects.items():
-        if project_id not in selected:
-            continue
-        product_id = project["product_id"]
-        project_name = project.get("name") or project_id
-        rows = conn.execute(
-            """
-            SELECT * FROM gusen_source_record
-            WHERE source_layer='PROJECT' AND product_id=? AND project_id=?
-            ORDER BY source_table, source_alias_id, fun_id
-            """,
-            (product_id, project_id),
-        ).fetchall()
-        conn.execute("DELETE FROM gusen_effective_source WHERE project_id=?", (project_id,))
-        effective_root = effective_source_dir() / "project" / path_part(project_name)
-        if effective_root.exists():
-            shutil.rmtree(effective_root)
-        source_root = readonly_source_dir() / "project" / path_part(project_name)
-        for row in rows:
-            local_path = ROOT / row["local_path"]
-            if not local_path.exists():
-                continue
-            target = effective_root / local_path.relative_to(source_root)
-            shutil.copytree(local_path, target)
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO gusen_effective_source(project_id, product_id, source_table, source_alias_id, fun_id, effective_layer, effective_source_id, effective_local_path, product_source_id, product_change_key, product_local_path, project_source_id, project_change_key, project_local_path, is_override, status, build_time)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    project_id,
-                    product_id,
-                    row["source_table"],
-                    row["source_alias_id"],
-                    row["fun_id"],
-                    "PROJECT",
-                    row["source_id"],
-                    str(target.relative_to(ROOT)),
-                    None,
-                    None,
-                    None,
-                    row["source_id"],
-                    row["change_key"],
-                    row["local_path"],
-                    0,
-                    row["status"],
-                    now,
-                ),
-            )
-        conn.commit()
-
-
 def export_product_docs(conn, product_id):
     out = VAR_DIR / "knowledge" / "products" / product_id
     out.mkdir(parents=True, exist_ok=True)
@@ -1145,8 +1101,12 @@ def export_product_docs(conn, product_id):
 def export_project_docs(conn, project_id):
     out = VAR_DIR / "knowledge" / "projects" / project_id
     out.mkdir(parents=True, exist_ok=True)
-    rows = conn.execute("SELECT * FROM gusen_effective_source WHERE project_id=? ORDER BY source_table, source_alias_id, fun_id", (project_id,)).fetchall()
-    _write_table(out / "effective-source-index.md", "项目源码索引", ["类型", "别名", "函数", "来源", "本地路径"], [[r["source_table"], r["source_alias_id"], r["fun_id"], r["effective_layer"], r["effective_local_path"]] for r in rows])
+    (out / "effective-source-index.md").unlink(missing_ok=True)
+    rows = conn.execute(
+        "SELECT * FROM gusen_source_record WHERE source_layer='PROJECT' AND project_id=? ORDER BY source_table, source_alias_id, fun_id",
+        (project_id,),
+    ).fetchall()
+    _write_table(out / "source-index.md", "项目源码索引", ["类型", "别名", "函数", "本地路径"], [[r["source_table"], r["source_alias_id"], r["fun_id"], r["local_path"]] for r in rows])
     calls = []
     for row in rows:
         calls.extend(
@@ -1157,16 +1117,16 @@ def export_project_docs(conn, project_id):
                 ORDER BY source_alias_id, fun_id, line_no
                 """,
                 (
-                    row["effective_layer"],
+                    "PROJECT",
                     row["product_id"],
-                    project_id if row["effective_layer"] == "PROJECT" else "",
+                    project_id,
                     row["source_table"],
-                    row["effective_source_id"],
+                    row["source_id"],
                     row["fun_id"],
                 ),
             ).fetchall()
         )
-    _write_table(out / "invoke-index.md", "项目 Effective 调用索引", ["来源层", "来源类型", "来源别名", "来源函数", "脚本位置", "行号", "调用类型", "目标别名", "目标函数", "置信度"], [[c["source_layer"], c["source_table"], c["source_alias_id"], c["fun_id"], c["script_type"], c["line_no"], c["invoke_type"], c["target_alias_id"], c["target_fun_id"], c["confidence"]] for c in calls])
+    _write_table(out / "invoke-index.md", "项目调用索引", ["来源层", "来源类型", "来源别名", "来源函数", "脚本位置", "行号", "调用类型", "目标别名", "目标函数", "置信度"], [[c["source_layer"], c["source_table"], c["source_alias_id"], c["fun_id"], c["script_type"], c["line_no"], c["invoke_type"], c["target_alias_id"], c["target_fun_id"], c["confidence"]] for c in calls])
 
 
 def export_status(conn, stats):
@@ -1200,7 +1160,7 @@ def export_knowledge_readme(conn, index_db, active):
         "python scripts/query_hub_context.py context --source-id <ID> --fun <函数名>",
         "```",
         "",
-        "`products/*/source-index.md`、`invoke-index.md` 和 `dynamic-invoke-points.md` 仅供人工全量浏览。",
+        "全量 Markdown 仅在显式运行 `scripts/export_hub_markdown.py` 时生成；默认使用上述 SQLite 局部查询。",
     ]
     path = out / "README.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1215,10 +1175,7 @@ def _row_value(row, key, default=""):
     return row[key] if key in row.keys() else default
 
 
-def _work_copy_change_key(row, project_id=""):
-    if project_id:
-        key = "project_change_key" if _row_value(row, "effective_layer") == "PROJECT" else "product_change_key"
-        return _str(_row_value(row, key))
+def _work_copy_change_key(row):
     return _str(_row_value(row, "change_key"))
 
 
@@ -1565,15 +1522,15 @@ def _current_work_copy_source(metadata: dict):
     if project_id:
         row = conn.execute(
             """
-            SELECT * FROM gusen_effective_source
-            WHERE project_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
+            SELECT * FROM gusen_source_record
+            WHERE source_layer='PROJECT' AND project_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
             """,
             (project_id, source_type, alias, fun),
         ).fetchone()
         if not row:
             return None, None, ""
-        path = ROOT / row["effective_local_path"]
-        return row, path, _work_copy_change_key(row, project_id)
+        path = ROOT / row["local_path"]
+        return row, path, _work_copy_change_key(row)
     row = conn.execute(
         """
         SELECT * FROM gusen_source_record
@@ -1641,16 +1598,14 @@ def create_work_copy(args=None):
     cfg = load_config()
     conn = connect_index(ROOT / cfg["sync"]["sync"]["index_db"])
     row, owner = find_work_copy_source(conn, cfg, parsed.product, parsed.project, parsed.type, parsed.alias, parsed.fun)
-    source_path = ROOT / (row["local_path"] if parsed.product else row["effective_local_path"])
+    source_path = ROOT / row["local_path"]
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     target = work_copy_dir() / owner / f"{stamp}-{path_part(parsed.alias if not parsed.fun else parsed.fun)}"
-    _initialize_work_copy(source_path, target, row, _work_copy_change_key(row, parsed.project or ""), "snapshot")
+    _initialize_work_copy(source_path, target, row, _work_copy_change_key(row), "snapshot")
     print(target)
 
 
 def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
-    if project_id:
-        build_effective(conn, cfg, [project_id])
     found, owner = find_work_copy_source(
         conn,
         cfg,
@@ -1660,16 +1615,16 @@ def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
         alias=_source_alias_id(row),
         fun=row["fun_id"] or "",
     )
-    source_rel = found["local_path"] if not project_id else found["effective_local_path"]
+    source_rel = found["local_path"]
     source_path = ROOT / source_rel
     target = work_copy_dir() / owner / _work_copy_source_relative_path(source_rel, project_id)
-    return _prepare_work_copy(source_path, target, found, _work_copy_change_key(found, project_id))
+    return _prepare_work_copy(source_path, target, found, _work_copy_change_key(found))
 
 
 def _work_copy_source_relative_path(source_path, project_id):
     path = Path(source_path)
     if project_id:
-        rel = _path_after_marker(path, ("source", "effective", "project"))
+        rel = _path_after_marker(path, ("source", "readonly", "project"))
         return Path(*rel.parts[1:])
     return _path_after_marker(path, ("source", "readonly", "products"))
 
@@ -1689,8 +1644,10 @@ def pull_source_to_work_copy(payload: dict):
     rules = cfg["sync"].get("rules") or {}
     conn = connect_index(ROOT / cfg["sync"]["sync"]["index_db"])
     sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload, rules)
-    ds = cfg["datasource"]["datasource"][layer_cfg["datasource"]]
+    ds_name = layer_cfg["datasource"]
+    ds = cfg["datasource"]["datasource"][ds_name]
     with db_connect(ds) as remote:
+        system_scope = resolve_system_scope(remote, cfg, ds_name)
         model_paths = load_model_paths(remote, cfg["source_tables"]) if payload["sourceType"] == PAGE_SOURCE_TYPE else {}
         with remote.cursor() as cur:
             cur.execute(sql, params)
@@ -1713,7 +1670,7 @@ def pull_source_to_work_copy(payload: dict):
                 "workCopyAction": work_result["action"],
                 "localChanged": work_result["localChanged"],
                 "pulled": 1,
-                "source": {key: _str(found[key]) if key in found.keys() else "" for key in ("source_table", "effective_source_id", "source_alias_id", "fun_id", "source_name")},
+                "source": {key: _str(found[key]) if key in found.keys() else "" for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},
             }
         allowed = ", ".join(rules.get("allow_unchecked_check_out_user_ids") or []) or "none"
         raise SystemExit(
@@ -1728,7 +1685,7 @@ def pull_source_to_work_copy(payload: dict):
     work_results = []
     changed = False
     for candidate in rows:
-        changed = upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, cfg["_system_scope"], force=bool(payload.get("force"))) or changed
+        changed = upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, system_scope, force=bool(payload.get("force"))) or changed
     conn.commit()
     for candidate in rows:
         work_results.append(create_work_copy_from_row(conn, cfg, candidate, product_id, project_id))
@@ -1753,7 +1710,7 @@ def resolve_pull_scope(cfg: dict, payload: dict):
     product_id = payload.get("productId") or ""
     project_id = payload.get("projectId") or ""
     if not scope:
-        _active, products, projects, _effective_project_ids = resolve_active(cfg)
+        _active, products, projects = resolve_active(cfg)
         if products:
             product_id, layer_cfg = products[0]
             return "PRODUCT", product_id, "", layer_cfg
@@ -1846,14 +1803,15 @@ def find_work_copy_source(conn, cfg, product_id, project_id, source_type, alias,
         return row, Path("products") / path_part(product_name)
     row = conn.execute(
         """
-        SELECT * FROM gusen_effective_source
-        WHERE project_id=? AND source_table=? AND fun_id=?
-          AND (source_alias_id=? OR effective_source_id=?)
+        SELECT * FROM gusen_source_record
+        WHERE source_layer='PROJECT'
+          AND project_id=? AND source_table=? AND fun_id=?
+          AND (source_alias_id=? OR source_id=?)
         """,
         (project_id, source_type, fun, alias, alias),
     ).fetchone()
     if not row:
-        raise SystemExit("Effective source not found. Run sync first.")
+        raise SystemExit("Project source not found. Run sync first.")
     project_name = (cfg["projects"].get("projects") or {}).get(project_id, {}).get("name") or project_id
     return row, Path(path_part(project_name))
 
@@ -1865,8 +1823,8 @@ def _write_table(path, title, headers, rows):
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _sync_from(conn, lookback):
-    raw = conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='last_success_time'").fetchone()
+def _sync_from(conn, lookback, state_key):
+    raw = conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key=?", (state_key,)).fetchone()
     if not raw:
         return "1970-01-01 00:00:00"
     parsed = dt.datetime.fromisoformat(raw["state_value"])

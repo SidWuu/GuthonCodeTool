@@ -123,7 +123,7 @@ class WorkCopyTest(unittest.TestCase):
 
         self.assertIn("s.PRODUCT_FUNCTION_SCRIPT_FIELD AS product_source_content", proc_sql(table_config))
 
-    def test_project_effective_uses_only_project_snapshot(self):
+    def test_project_work_copy_uses_project_readonly_snapshot(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             old_root, old_var = gusen_hub.ROOT, gusen_hub.VAR_DIR
@@ -147,15 +147,11 @@ class WorkCopyTest(unittest.TestCase):
             conn.execute(insert, ("PROJECT", "product-a", "project-a", "procedure", "PROJECT-ID", "demo.proc", "save", "项目", "VERSION:project", str(project_path.relative_to(root)), "OK", "now"))
             cfg = {"projects": {"projects": {"project-a": {"name": "项目A", "product_id": "product-a"}}}}
 
-            gusen_hub.build_effective(conn, cfg, ["project-a"])
+            row, owner = gusen_hub.find_work_copy_source(conn, cfg, None, "project-a", "procedure", "demo.proc", "save")
 
-            rows = conn.execute("SELECT * FROM gusen_effective_source").fetchall()
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["effective_source_id"], "PROJECT-ID")
-            self.assertIsNone(rows[0]["product_source_id"])
-            self.assertEqual(rows[0]["project_change_key"], "VERSION:project")
-            effective = root / rows[0]["effective_local_path"] / "source.vm"
-            self.assertEqual(effective.read_text(encoding="utf-8"), "project snapshot\n")
+            self.assertEqual(row["source_id"], "PROJECT-ID")
+            self.assertEqual(owner, Path("项目A"))
+            self.assertEqual((root / row["local_path"] / "source.vm").read_text(encoding="utf-8"), "project snapshot\n")
 
 
 if __name__ == "__main__":

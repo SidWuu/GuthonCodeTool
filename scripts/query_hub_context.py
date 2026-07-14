@@ -21,7 +21,7 @@ def main(args=None):
     context.add_argument("--limit", type=int, default=20)
     parsed = parser.parse_args(args)
     cfg = gusen_hub.load_config()
-    _active, products, projects, _effective = gusen_hub.resolve_active(cfg)
+    _active, products, projects = gusen_hub.resolve_active(cfg)
     if products:
         product_id = products[0][0]
     else:

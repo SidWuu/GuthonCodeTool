@@ -1,6 +1,1 @@
-# 子系统同步白名单模板。
-systems:
-  data_file: system-data.json
-  include:
-    system_codes:
-      - DEMO_SYSTEM
+# 配置已迁移到 sync.example.yaml 的 systems 段；本文件不再读取。

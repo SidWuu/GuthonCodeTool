@@ -1,6 +1,6 @@
 # 配置说明
 
-YAML 配置文件首行说明各自用途；`system-data.json` 及其示例必须保持标准 JSON，因此不写注释。
+YAML 配置文件首行说明各自用途；`system-data.json` 是工具自动生成的缓存。
 
 复制模板后再填写真实配置：
 
@@ -10,10 +10,9 @@ cp config/example/products.example.yaml config/products.yaml
 cp config/example/projects.example.yaml config/projects.yaml
 cp config/example/source-tables.example.yaml config/source-tables.yaml
 cp config/example/sync.example.yaml config/sync.yaml
-cp config/example/systems.example.yaml config/systems.yaml
 ```
 
-`datasource.yaml`、`systems.yaml` 和 `system-data.json` 不提交。
+`datasource.yaml` 和 `system-data.json` 不提交。
 
 ## datasource.yaml
 
@@ -24,23 +23,25 @@ product-dev   -> PRODUCT
 project-dev   -> PROJECT
 ```
 
-## systems.yaml
+## sync.yaml 中的 systems
 
-用于限制只同步指定子系统源码。`system-data.json` 放在 `config/` 同目录。
+用于限制只同步指定子系统源码。
 
 ```yaml
 systems:
-  data_file: system-data.json
   include:
-    system_codes:
-      - DEMO_SYSTEM
+    # 只配置别名；系统和数据源信息不需要人工维护
+    system_aliases:
+      - demo.system
 ```
 
 页面源码按 `source-tables.yaml` 中配置的页面子系统字段过滤。
 
-过程函数如果 `system-data.json` 能解析到数据源 ID，会按 `source-tables.yaml` 中配置的数据源字段过滤；否则不额外过滤过程函数。
+过程函数按 `source-tables.yaml` 中配置的数据源字段过滤。
 
-如果多个子系统共用同一个数据源 ID，过程函数只存一份。根目录使用 `systems.yaml` 中第一个匹配子系统的名称，后续重复子系统的 `procedure` 目录会链接到第一个目录。
+源码、表结构和单据类型拉取会在各自 datasource 的 `gd_system` 中按别名反查系统与数据源 ID。每个 datasource 只在首次使用或别名变化时查询，结果写入 `config/system-data.json`；删除该文件可强制重建缓存。
+
+如果多个子系统共用同一个数据源 ID，过程函数只存一份。根目录使用 `system_aliases` 中第一个匹配子系统的名称，后续重复子系统的 `procedure` 目录会链接到第一个目录。
 
 ## source-tables.yaml
 
@@ -64,18 +65,4 @@ sync:
   ACTIVE: projects.demo-project
 ```
 
-`products.<id>` 来自 `products.yaml`，只拉取并比较该产品源码；`projects.<id>` 来自 `projects.yaml`，只拉取并比较该项目自己的源码，再以该项目快照重建 effective 目录。项目 effective 不使用当前产品源码兜底。
-
-如果拿到的是平台导出的 `gd_system_*.json`，先整理为 `system-data.json` 的数组格式，保留这些字段即可：
-
-```json
-[
-  {
-    "SYSTEM_CODE": "demo.system",
-    "SYSTEM_ID": "SYS-DEMO-001",
-    "SYSTEM_ALIAS_ID": "demo.system",
-    "SYSTEM_NAME": "示例子系统",
-    "DATA_SOURCE_IDS": ["DEMO_DS"]
-  }
-]
-```
+`products.<id>` 来自 `products.yaml`，只拉取并比较该产品源码；`projects.<id>` 来自 `projects.yaml`，只拉取并比较该项目自己的 readonly 源码。产品和项目的增量游标按 `ACTIVE` 分别保存，首次切换到一个对象时执行全量同步。
