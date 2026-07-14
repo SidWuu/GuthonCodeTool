@@ -152,12 +152,9 @@ def load_config():
     return gusen_hub.load_config()
 
 
-def load_datasource(name):
+def load_datasource(name=None):
     cfg = load_config()
-    datasource = (cfg["datasource"].get("datasource") or {}).get(name)
-    if not datasource:
-        raise SystemExit(f"Unknown datasource: {name}")
-    return datasource
+    return gusen_hub.resolve_datasource(cfg, name)
 
 
 def load_default_data_source_ids():
@@ -168,7 +165,7 @@ def load_default_data_source_ids():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Export Gushen bill types directly from SQL.")
-    parser.add_argument("--datasource", default="product-dev")
+    parser.add_argument("--datasource", help="Datasource override. Defaults to the product or project selected by sync.ACTIVE.")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to config sync.rules.table_schema_data_source_ids.")
     parser.add_argument("--bill-type-codes", help="Comma-separated BILL_TYPE_CODE list. Defaults to all bill types in selected data sources.")
@@ -176,7 +173,8 @@ def main(argv=None):
 
     data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else load_default_data_source_ids()
     bill_type_codes = normalize_bill_type_codes(args.bill_type_codes)
-    with gusen_hub.db_connect(load_datasource(args.datasource)) as conn:
+    datasource_name, datasource = load_datasource(args.datasource)
+    with gusen_hub.db_connect(datasource) as conn:
         summary = export_bill_types(conn, Path(args.output_dir), data_source_ids=data_source_ids, bill_type_codes=bill_type_codes)
     result = {"ok": True, **summary, "outputDir": args.output_dir}
     gusen_hub.append_pull_log(
@@ -188,7 +186,7 @@ def main(argv=None):
             "exported_bill_type_count": summary.get("exported_bill_type_count", 0),
             "outputDir": args.output_dir,
         },
-        payload={"datasource": args.datasource, "dataSourceIds": data_source_ids, "billTypeCodes": bill_type_codes},
+        payload={"datasource": datasource_name, "dataSourceIds": data_source_ids, "billTypeCodes": bill_type_codes},
         result=result,
         ok=True,
     )

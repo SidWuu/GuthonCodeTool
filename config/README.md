@@ -50,7 +50,7 @@ systems:
 
 ## sync.yaml
 
-`sync.ACTIVE` 控制当前开发对象，全量拉取和定时拉取都只同步 ACTIVE 指向的源码：
+`sync.ACTIVE` 控制当前开发对象：全量拉取和定时拉取只同步 ACTIVE 指向的源码，表结构和单据类型也默认连接该产品或项目配置的 `datasource`：
 
 ```yaml
 sync:

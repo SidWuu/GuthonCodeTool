@@ -206,12 +206,9 @@ def export_table_schema(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=Non
     return summary
 
 
-def load_datasource(name):
+def load_datasource(name=None):
     cfg = gusen_hub.load_config()
-    datasource = (cfg["datasource"].get("datasource") or {}).get(name)
-    if not datasource:
-        raise SystemExit(f"Unknown datasource: {name}")
-    return datasource
+    return gusen_hub.resolve_datasource(cfg, name)
 
 
 def load_default_data_source_ids():
@@ -222,7 +219,7 @@ def load_default_data_source_ids():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Export Gushen table schemas directly from SQL.")
-    parser.add_argument("--datasource", default="product-dev")
+    parser.add_argument("--datasource", help="Datasource override. Defaults to the product or project selected by sync.ACTIVE.")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to config sync.rules.table_schema_data_source_ids.")
     parser.add_argument("--table-ids", help="Comma-separated TABLE_ID list. Omit to export all tables in selected data sources.")
@@ -230,8 +227,9 @@ def main(argv=None):
 
     data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else load_default_data_source_ids()
     table_ids = normalize_table_ids(args.table_ids)
+    datasource_name, datasource = load_datasource(args.datasource)
     try:
-        with gusen_hub.db_connect(load_datasource(args.datasource)) as conn:
+        with gusen_hub.db_connect(datasource) as conn:
             summary = export_table_schema(conn, Path(args.output_dir), data_source_ids=data_source_ids, table_ids=table_ids)
     except ValueError as error:
         print(str(error), file=sys.stderr)
@@ -246,7 +244,7 @@ def main(argv=None):
             "exported_table_count": summary.get("exported_table_count", 0),
             "outputDir": args.output_dir,
         },
-        payload={"datasource": args.datasource, "dataSourceIds": data_source_ids, "tableIds": table_ids},
+        payload={"datasource": datasource_name, "dataSourceIds": data_source_ids, "tableIds": table_ids},
         result=result,
         ok=True,
     )

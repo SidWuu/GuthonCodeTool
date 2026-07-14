@@ -700,6 +700,17 @@ def resolve_active(cfg):
     raise SystemExit(f"Invalid sync.ACTIVE: {active}")
 
 
+def resolve_datasource(cfg, name=None):
+    if not name:
+        _active, products, projects, _effective_project_ids = resolve_active(cfg)
+        _item_id, item = (products or projects)[0]
+        name = item.get("datasource")
+    datasource = (cfg["datasource"].get("datasource") or {}).get(name)
+    if not datasource:
+        raise SystemExit(f"Unknown datasource: {name}")
+    return name, datasource
+
+
 def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, stats):
     ds_name = layer_cfg["datasource"]
     ds = cfg["datasource"]["datasource"][ds_name]
