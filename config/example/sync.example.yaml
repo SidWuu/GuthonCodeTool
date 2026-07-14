@@ -6,7 +6,8 @@ sync:
   readonly_source_dir: var/source/readonly
   work_copy_dir: var/source/workcopy
   generated_doc_dir: var/knowledge
-  index_db: var/runtime/index/hub.db
+  # 每个 ACTIVE 自动使用 index_dir/{products|projects}/<id>.db。
+  index_dir: var/runtime/index
 
 systems:
   include:

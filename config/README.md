@@ -65,4 +65,4 @@ sync:
   ACTIVE: projects.demo-project
 ```
 
-`products.<id>` 来自 `products.yaml`，只拉取并比较该产品源码；`projects.<id>` 来自 `projects.yaml`，只拉取并比较该项目自己的 readonly 源码。产品和项目的增量游标按 `ACTIVE` 分别保存，首次切换到一个对象时执行全量同步。
+`products.<id>` 来自 `products.yaml`，只拉取并比较该产品源码；`projects.<id>` 来自 `projects.yaml`，只拉取并比较该项目自己的 readonly 源码。每个 ACTIVE 的索引分别保存到 `sync.index_dir/{products|projects}/<id>.db`，源码查询和工作副本读取不会跨库；首次切换到一个对象时执行全量同步。

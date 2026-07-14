@@ -655,11 +655,13 @@ def run_sync_once(args=None):
     parsed = parser.parse_args(args)
     cfg = load_config()
     sync = cfg["sync"]["sync"]
-    conn = connect_index(ROOT / sync["index_db"])
+    index_path = active_index_path(cfg)
+    index_name = str(index_path.relative_to(ROOT))
+    conn = connect_index(index_path)
     if parsed.init_only:
         active, _products, _projects = resolve_active(cfg)
         export_status(conn, {"mode": "init-only", "active": active, "changed": 0, "candidates": 0, "failures": 0})
-        export_knowledge_readme(conn, sync["index_db"], active)
+        export_knowledge_readme(conn, index_name, active)
         return
 
     lookback = int(sync.get("lookback_minutes", 10))
@@ -677,7 +679,7 @@ def run_sync_once(args=None):
     )
     conn.commit()
     export_status(conn, stats)
-    export_knowledge_readme(conn, sync["index_db"], active)
+    export_knowledge_readme(conn, index_name, active)
     append_pull_log(
         "source",
         "scheduled",
@@ -709,6 +711,15 @@ def resolve_active(cfg):
         if project:
             return active, [], [(item_id, project)]
     raise SystemExit(f"Invalid sync.ACTIVE: {active}")
+
+
+def active_index_path(cfg):
+    active, _products, _projects = resolve_active(cfg)
+    kind, _, item_id = active.partition(".")
+    index_dir = cfg["sync"]["sync"].get("index_dir")
+    if not index_dir:
+        raise SystemExit("Missing sync.index_dir.")
+    return ROOT / index_dir / kind / f"{path_part(item_id)}.db"
 
 
 def resolve_datasource(cfg, name=None):
@@ -887,7 +898,7 @@ def reconcile_deleted_pages(conn, layer, product_id, project_id, current_page_id
 def source_base(row, layer, product_id, project_id, layer_cfg, system_scope):
     system_name = _system_name(row, system_scope)
     if layer == "PRODUCT":
-        layer_root = readonly_source_dir() / "products"
+        layer_root = readonly_source_dir() / "products" / path_part(product_id)
     else:
         layer_root = readonly_source_dir() / "project" / path_part(layer_cfg.get("name") or project_id)
     root = layer_root / path_part(system_name)
@@ -912,7 +923,7 @@ def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, ch
     base = source_base(row, layer, product_id, project_id, layer_cfg, system_scope)
     if row["source_table"] != PAGE_SOURCE_TYPE:
         system_name = _system_name(row, system_scope)
-        layer_root = readonly_source_dir() / "products" if layer == "PRODUCT" else readonly_source_dir() / "project" / path_part(layer_cfg.get("name") or project_id)
+        layer_root = readonly_source_dir() / "products" / path_part(product_id) if layer == "PRODUCT" else readonly_source_dir() / "project" / path_part(layer_cfg.get("name") or project_id)
         _link_shared_procedure_dirs(layer_root, system_name, row, system_scope)
     if base.exists():
         shutil.rmtree(base)
@@ -1514,7 +1525,7 @@ def _prepare_work_copy(source_path: Path, target: Path, row, change_key: str, mo
 
 def _current_work_copy_source(metadata: dict):
     cfg = load_config()
-    conn = connect_index(ROOT / cfg["sync"]["sync"]["index_db"])
+    conn = connect_index(active_index_path(cfg))
     source_type = metadata.get("source_table") or ""
     alias = metadata.get("source_alias_id") or ""
     fun = metadata.get("fun_id") or ""
@@ -1596,8 +1607,12 @@ def create_work_copy(args=None):
     parser.add_argument("--fun", default="")
     parsed = parser.parse_args(args)
     cfg = load_config()
-    conn = connect_index(ROOT / cfg["sync"]["sync"]["index_db"])
-    row, owner = find_work_copy_source(conn, cfg, parsed.product, parsed.project, parsed.type, parsed.alias, parsed.fun)
+    layer, product_id, project_id, _layer_cfg = resolve_pull_scope(
+        cfg,
+        {"scope": "product" if parsed.product else "project", "productId": parsed.product, "projectId": parsed.project},
+    )
+    conn = connect_index(active_index_path(cfg))
+    row, owner = find_work_copy_source(conn, cfg, product_id if layer == "PRODUCT" else None, project_id or None, parsed.type, parsed.alias, parsed.fun)
     source_path = ROOT / row["local_path"]
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     target = work_copy_dir() / owner / f"{stamp}-{path_part(parsed.alias if not parsed.fun else parsed.fun)}"
@@ -1617,16 +1632,17 @@ def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
     )
     source_rel = found["local_path"]
     source_path = ROOT / source_rel
-    target = work_copy_dir() / owner / _work_copy_source_relative_path(source_rel, project_id)
+    target = work_copy_dir() / owner / _work_copy_source_relative_path(source_rel, product_id, project_id)
     return _prepare_work_copy(source_path, target, found, _work_copy_change_key(found))
 
 
-def _work_copy_source_relative_path(source_path, project_id):
+def _work_copy_source_relative_path(source_path, product_id, project_id):
     path = Path(source_path)
-    if project_id:
-        rel = _path_after_marker(path, ("source", "readonly", "project"))
+    marker = ("source", "readonly", "project") if project_id else ("source", "readonly", "products")
+    rel = _path_after_marker(path, marker)
+    if project_id or (rel.parts and rel.parts[0] == path_part(product_id)):
         return Path(*rel.parts[1:])
-    return _path_after_marker(path, ("source", "readonly", "products"))
+    return rel
 
 
 def _path_after_marker(path: Path, marker: tuple[str, ...]) -> Path:
@@ -1642,7 +1658,7 @@ def pull_source_to_work_copy(payload: dict):
     cfg = load_config()
     layer, product_id, project_id, layer_cfg = resolve_pull_scope(cfg, payload)
     rules = cfg["sync"].get("rules") or {}
-    conn = connect_index(ROOT / cfg["sync"]["sync"]["index_db"])
+    conn = connect_index(active_index_path(cfg))
     sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload, rules)
     ds_name = layer_cfg["datasource"]
     ds = cfg["datasource"]["datasource"][ds_name]
@@ -1709,26 +1725,16 @@ def resolve_pull_scope(cfg: dict, payload: dict):
     scope = payload.get("scope")
     product_id = payload.get("productId") or ""
     project_id = payload.get("projectId") or ""
-    if not scope:
-        _active, products, projects = resolve_active(cfg)
-        if products:
-            product_id, layer_cfg = products[0]
-            return "PRODUCT", product_id, "", layer_cfg
-        if projects:
-            project_id, layer_cfg = projects[0]
-            return "PROJECT", layer_cfg["product_id"], project_id, layer_cfg
-    if scope == "product":
-        layer_cfg = (cfg["products"].get("products") or {}).get(product_id)
-        if not layer_cfg:
-            raise SystemExit(f"Unknown productId: {product_id}")
-        return "PRODUCT", product_id, "", layer_cfg
-    elif scope == "project":
-        layer_cfg = (cfg["projects"].get("projects") or {}).get(project_id)
-        if not layer_cfg:
-            raise SystemExit(f"Unknown projectId: {project_id}")
-        return "PROJECT", layer_cfg["product_id"], project_id, layer_cfg
-    else:
-        raise SystemExit("scope must be product or project")
+    active, products, projects = resolve_active(cfg)
+    if products:
+        active_product_id, layer_cfg = products[0]
+        if scope and (scope != "product" or product_id != active_product_id):
+            raise SystemExit(f"Requested source scope does not match sync.ACTIVE: {active}")
+        return "PRODUCT", active_product_id, "", layer_cfg
+    active_project_id, layer_cfg = projects[0]
+    if scope and (scope != "project" or project_id != active_project_id):
+        raise SystemExit(f"Requested source scope does not match sync.ACTIVE: {active}")
+    return "PROJECT", layer_cfg["product_id"], active_project_id, layer_cfg
 
 
 def pull_source_payload_from_args(scope, product_id, project_id, source_type, source_id, alias, fun, force=False):

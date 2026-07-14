@@ -26,7 +26,7 @@ def main(args=None):
         product_id = products[0][0]
     else:
         product_id = projects[0][1]["product_id"]
-    conn = gusen_hub.connect_index(gusen_hub.ROOT / cfg["sync"]["sync"]["index_db"])
+    conn = gusen_hub.connect_index(gusen_hub.active_index_path(cfg))
     try:
         if parsed.command == "find":
             result = {"productId": product_id, "candidates": _rows(gusen_hub.find_source_candidates(conn, product_id, parsed.keyword, parsed.limit))}
