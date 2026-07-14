@@ -971,11 +971,12 @@ def _is_script_key(key):
     return key != "superScript" and (key in SCRIPT_KEYS or str(key).endswith("Script"))
 
 
-INHERIT_MARKER = re.compile(r"(?m)^[ \t]*@inherit\(\);[ \t]*\r?$")
+INHERIT_MARKER = re.compile(r"(?m)^[ \t]*(?:return[ \t]+)?@?inherit\(\);[ \t]*\r?$")
+EVENT_SUPERS = {"serviceEvents": "superServiceEvents", "pageEvents": "superPageEvents"}
 
 
 def _resolve_inherited_script(script, inherited):
-    if not inherited or not INHERIT_MARKER.search(script):
+    if not INHERIT_MARKER.search(script):
         return script
     resolved = inherited.rstrip("\r\n")
     return INHERIT_MARKER.sub(lambda _match: resolved, script)
@@ -1000,20 +1001,27 @@ def parse_page_scripts(base: Path, raw: str):
     return scripts
 
 
-def _walk_scripts(value, path=None):
+def _walk_scripts(value, path=None, inherited_scripts=None):
     path = path or []
     if isinstance(value, dict):
         label = str(value.get("aliasName") or value.get("name") or value.get("id") or "")
         next_path = path + ([label] if label else [])
         for key, child in value.items():
             if _is_script_key(key) and isinstance(child, str) and (child.strip() or key == "compScript"):
-                inherited = value.get("superScript") if key == "script" else ""
-                yield next_path, key, _resolve_inherited_script(child, inherited if isinstance(inherited, str) else "")
+                inherited = (inherited_scripts or {}).get(key, "")
+                if key == "script":
+                    inherited = value.get("superScript", "")
+                resolved = _resolve_inherited_script(child, inherited if isinstance(inherited, str) else "")
+                if resolved.strip() or (key == "compScript" and not child.strip()):
+                    yield next_path, key, resolved
+            elif key in EVENT_SUPERS.values():
+                continue
             else:
-                yield from _walk_scripts(child, next_path)
+                inherited = value.get(EVENT_SUPERS.get(key, ""), {})
+                yield from _walk_scripts(child, next_path, inherited if isinstance(inherited, dict) else None)
     elif isinstance(value, list):
         for child in value:
-            yield from _walk_scripts(child, path)
+            yield from _walk_scripts(child, path, inherited_scripts)
 
 
 CALL_PATTERNS = [
@@ -1229,6 +1237,20 @@ def _tree_changes(before: Path, after: Path, after_is_work_copy=False):
             continue
         changes.append({"status": status, "path": rel})
     return changes
+
+
+def _local_changes_are_upstream(target: Path, upstream: Path, changes: list[dict]):
+    upstream_files = _tree_files(upstream)
+    local_files = _tree_files(target, exclude_work_copy_files=True)
+    return all(
+        (change["path"] not in local_files and change["path"] not in upstream_files)
+        or (
+            change["path"] in local_files
+            and change["path"] in upstream_files
+            and local_files[change["path"]].read_bytes() == upstream_files[change["path"]].read_bytes()
+        )
+        for change in changes
+    )
 
 
 def _work_copy_metadata(target: Path):
@@ -1502,6 +1524,10 @@ def _prepare_work_copy(source_path: Path, target: Path, row, change_key: str, mo
         _write_work_copy_metadata(target, row, source_path, change_key, mode)
     notes = _manual_diff_notes(target)
     status = _work_copy_state(target, source_path, change_key)
+    if status["localChanged"] and status["upstreamChanged"] and _local_changes_are_upstream(
+        target, source_path, status["localChanges"]
+    ):
+        status["localChanged"] = False
     if status["localChanged"]:
         status["action"] = "CONFLICT" if status["upstreamChanged"] else "PRESERVED"
         _write_work_copy_diff(target, status, notes)

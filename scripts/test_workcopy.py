@@ -68,6 +68,20 @@ class WorkCopyTest(unittest.TestCase):
         self.assertEqual((target / "source.vm").read_text(encoding="utf-8"), "upstream\n")
         self.assertEqual((target / WORK_COPY_BASELINE_DIR / "source.vm").read_text(encoding="utf-8"), "upstream\n")
 
+    def test_saved_local_changes_refresh_changed_upstream_version(self):
+        temp, source, target = self.make_paths()
+        self.addCleanup(temp.cleanup)
+        _initialize_work_copy(source, target, ROW, "VERSION:1", "mirror")
+        (target / "source.vm").write_text("saved\n", encoding="utf-8")
+        (source / "source.vm").write_text("saved\n", encoding="utf-8")
+        (source / "raw.json").write_text('{"versionMac":"VERSION:2"}\n', encoding="utf-8")
+
+        status = _prepare_work_copy(source, target, {**ROW, "change_key": "VERSION:2"}, "VERSION:2")
+
+        self.assertEqual(status["action"], "UPDATED")
+        self.assertEqual(status["state"], "CLEAN")
+        self.assertEqual((target / WORK_COPY_BASELINE_DIR / "source.vm").read_text(encoding="utf-8"), "saved\n")
+
     def test_local_json_change_generates_path_diff(self):
         temp, source, target = self.make_paths()
         self.addCleanup(temp.cleanup)
@@ -111,11 +125,39 @@ class WorkCopyTest(unittest.TestCase):
             self.assertEqual(scripts[0][2], "before\nproduct\\path\nreturn true;\nafter")
             self.assertEqual(scripts[0][1].suffix, ".vm")
 
+    def test_missing_inherited_page_event_does_not_generate_script(self):
+        with tempfile.TemporaryDirectory() as temp:
+            raw = json.dumps(
+                {
+                    "button": {
+                        "aliasName": "saveBtn",
+                        "serviceEvents": {
+                            "beforeSaveScript": "@inherit();\n",
+                            "afterSaveScript": "@inherit();\n",
+                        },
+                        "superServiceEvents": {"afterSaveScript": "productAfterSave();\n"},
+                        "pageEvents": {
+                            "onClickScript": "inherit();\n",
+                            "formaterScript": "return inherit();\n",
+                        },
+                        "superPageEvents": {"formaterScript": "return productValue;\n"},
+                    }
+                }
+            )
+
+            scripts = parse_page_scripts(Path(temp), raw)
+
+            self.assertEqual(
+                [(key, value) for key, _path, value in scripts],
+                [("afterSaveScript", "productAfterSave();\n"), ("formaterScript", "return productValue;\n")],
+            )
+
     def test_procedure_inherit_marker_uses_product_script(self):
         self.assertEqual(
             _resolve_inherited_script("@inherit();\n", "product\\script\n"),
             "product\\script\n",
         )
+        self.assertEqual(_resolve_inherited_script("@inherit();\n", ""), "\n")
         self.assertEqual(_resolve_inherited_script("// @inherit();\n", "product\n"), "// @inherit();\n")
 
     def test_procedure_sql_reads_configured_product_script(self):
