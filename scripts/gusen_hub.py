@@ -1695,8 +1695,13 @@ def pull_source_to_work_copy(payload: dict):
             cur.execute(sql, params)
             row = cur.fetchone()
             rows = [row] if row else []
-    if row and row["source_table"] == PAGE_SOURCE_TYPE:
-        row["model_path"] = model_paths.get(_str(row.get("model_id")))
+            if row and row["source_table"] == PAGE_SOURCE_TYPE and row.get("mk_id"):
+                module_sql, module_params = module_page_sql(cfg["source_tables"], row, rules)
+                cur.execute(module_sql, module_params)
+                rows = cur.fetchall()
+    for candidate in rows:
+        if candidate["source_table"] == PAGE_SOURCE_TYPE:
+            candidate["model_path"] = model_paths.get(_str(candidate.get("model_id")))
     if not row:
         if project_id:
             found, _owner = find_work_copy_source(

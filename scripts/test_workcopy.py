@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -164,6 +165,38 @@ class WorkCopyTest(unittest.TestCase):
         table_config = gusen_hub.load_yaml(gusen_hub.ROOT / "config/example/source-tables.example.yaml")
 
         self.assertIn("s.PRODUCT_FUNCTION_SCRIPT_FIELD AS product_source_content", proc_sql(table_config))
+
+    def test_manual_page_pull_fetches_every_page_in_module(self):
+        current = {"source_table": "page", "source_id": "PG-001", "source_alias_id": "demo.main", "fun_id": "", "source_name": "主页面", "mk_id": "MK-001", "model_id": "MD-001"}
+        sibling = {**current, "source_id": "PG-002", "source_alias_id": "demo.edit", "source_name": "编辑页面"}
+        cursor = MagicMock()
+        cursor.fetchone.return_value = current
+        cursor.fetchall.return_value = [current, sibling]
+        remote = MagicMock()
+        remote.cursor.return_value.__enter__.return_value = cursor
+        remote_context = MagicMock()
+        remote_context.__enter__.return_value = remote
+        work_result = {"path": "/tmp/module/page", "state": "CLEAN", "action": "UPDATED", "localChanged": False}
+        cfg = {"sync": {"rules": {}}, "source_tables": {}, "datasource": {"datasource": {"demo": {}}}}
+
+        with patch.multiple(
+            gusen_hub,
+            load_config=MagicMock(return_value=cfg),
+            resolve_pull_scope=MagicMock(return_value=("PRODUCT", "demo-product", "", {"datasource": "demo", "include": {"all": True}})),
+            active_index_path=MagicMock(return_value=Path(":memory:")),
+            connect_index=MagicMock(return_value=MagicMock()),
+            single_source_sql=MagicMock(return_value=("single", ["PG-001"])),
+            module_page_sql=MagicMock(return_value=("module", ["MK-001"])),
+            db_connect=MagicMock(return_value=remote_context),
+            resolve_system_scope=MagicMock(return_value={}),
+            load_model_paths=MagicMock(return_value={"MD-001": []}),
+            upsert_source=MagicMock(return_value=True),
+            create_work_copy_from_row=MagicMock(return_value=work_result),
+        ):
+            result = gusen_hub.pull_source_to_work_copy({"sourceType": "page", "sourceId": "PG-001"})
+
+        self.assertEqual(2, result["pulled"])
+        self.assertEqual(["single", "module"], [call.args[0] for call in cursor.execute.call_args_list])
 
     def test_project_work_copy_uses_project_readonly_snapshot(self):
         with tempfile.TemporaryDirectory() as temp:
