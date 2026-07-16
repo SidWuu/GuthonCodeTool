@@ -1276,8 +1276,10 @@ async function runHubPull(force = false) {
 }
 
 pullPageBtn.addEventListener("click", async () => {
+  let pageUrl = "";
   try {
     const tab = await getActiveTab();
+    pageUrl = tab.url || "";
     if (isModuleUrl(tab.url)) {
       setStatus(`正在打开复制模式...\n${tab.url}`);
       await openCopyMode();
@@ -1296,6 +1298,18 @@ pullPageBtn.addEventListener("click", async () => {
       ].join("\n")
     );
   } catch (error) {
+    try {
+      await chrome.runtime.sendMessage({
+        type: "log-pull-failure",
+        payload: {
+          pullType: "page-source",
+          summary: { url: pageUrl },
+          message: error?.message || String(error)
+        }
+      });
+    } catch {
+      // Bridge 不可用时无法写入本地日志，保留原错误提示。
+    }
     setStatus(`拉取失败\n${error.message}`);
   }
 });

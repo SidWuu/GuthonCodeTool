@@ -90,6 +90,44 @@ test("saveRemoteFile writes directly into the requested absolute output director
   }
 });
 
+test("logPullFailure records the page pull failure reason", async () => {
+  const port = 17465;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-page-pull-failure-"));
+  const logPath = path.join(tmp, "pull-log.ndjson");
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_PULL_LOG_PATH: logPath
+    },
+    stdio: "ignore"
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/logPullFailure`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pullType: "page-source",
+        summary: { url: "http://guthon.example/#/gdpaas/dev/procedure_develop" },
+        message: "读取函数内容失败"
+      })
+    });
+    const data = await response.json();
+    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
+
+    assert.equal(response.status, 200, data.message);
+    assert.equal(log.pullType, "page-source");
+    assert.equal(log.ok, false);
+    assert.equal(log.message, "读取函数内容失败");
+    assert.equal(log.summary.url, "http://guthon.example/#/gdpaas/dev/procedure_develop");
+  } finally {
+    server.kill();
+  }
+});
+
 test("pullHubSource delegates structured payload to the configured hub command", async () => {
   const port = 17462;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-hub-command-"));
@@ -310,6 +348,7 @@ test("bridge defaults hub python to repo venv when present", () => {
 test("popup exposes separate page and hub pull actions without hub target input", () => {
   const html = fs.readFileSync(POPUP_HTML_PATH, "utf8");
   const script = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
+  const background = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
   const runHubPullScript = script.slice(script.indexOf("async function runHubPull"), script.indexOf("pullPageBtn.addEventListener"));
 
   assert.equal(html.includes("pullPageBtn"), true);
@@ -327,6 +366,8 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes('mode === "billtype"'), true);
   assert.equal(script.includes('type: "export-table-schema"'), true);
   assert.equal(script.includes('type: "export-bill-type"'), true);
+  assert.equal(script.includes('type: "log-pull-failure"'), true);
+  assert.equal(background.includes('postJson("/logPullFailure"'), true);
   assert.equal(script.includes("拉取单据类型"), true);
   assert.equal(runHubPullScript.includes("resolveCurrentTarget"), false);
   assert.equal(html.includes("closeBtn"), true);

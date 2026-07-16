@@ -28,6 +28,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse(result);
     }
 
+    if (message.type === "log-pull-failure") {
+      const result = await postJson("/logPullFailure", message.payload || {});
+      return sendResponse(result);
+    }
+
     if (message.type === "pull-hub-source") {
       const result = await postJson("/pullHubSource", message.payload);
       return sendResponse(result);

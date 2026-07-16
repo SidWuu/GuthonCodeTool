@@ -321,6 +321,23 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (req.method === "POST" && req.url === "/logPullFailure") {
+    try {
+      const payload = await readBody(req);
+      appendPullLog({
+        pullType: payload.pullType || "page-source",
+        trigger: payload.trigger || "manual",
+        summary: payload.summary || {},
+        payload: payload.payload || {},
+        ok: false,
+        message: payload.message || "页面源码拉取失败"
+      });
+      return sendJson(res, 200, { ok: true });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, message: error.message });
+    }
+  }
+
   if (req.method === "POST" && req.url === "/pullHubSource") {
     let payload = {};
     try {
