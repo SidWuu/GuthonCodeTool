@@ -108,6 +108,27 @@ class WorkCopyTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             _prepare_work_copy(source, target, ROW, "VERSION:1")
 
+    def test_create_work_copy_uses_source_mirror_path(self):
+        conn = MagicMock()
+        cfg = {"sync": {"ACTIVE": "demo"}}
+        result = {"path": "/tmp/workcopy/风险管理/procedure/demo.proc/save"}
+        create_mock = MagicMock(return_value=result)
+        with patch.multiple(
+            gusen_hub,
+            load_config=MagicMock(return_value=cfg),
+            resolve_pull_scope=MagicMock(return_value=("PRODUCT", "demo", "", {})),
+            active_index_path=MagicMock(return_value=Path(":memory:")),
+            connect_index=MagicMock(return_value=conn),
+            find_work_copy_source=MagicMock(return_value=(ROW, Path("期现产品"))),
+            create_work_copy_from_row=create_mock,
+        ), patch("builtins.print") as print_mock:
+            gusen_hub.create_work_copy(
+                ["--product", "demo", "--type", "procedure", "--alias", "demo.proc", "--fun", "save"]
+            )
+
+        create_mock.assert_called_once_with(conn, cfg, ROW, "demo", "")
+        print_mock.assert_called_once_with(result["path"])
+
     def test_inherited_page_backend_script_uses_super_script(self):
         with tempfile.TemporaryDirectory() as temp:
             raw = json.dumps(

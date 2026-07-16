@@ -1638,12 +1638,9 @@ def create_work_copy(args=None):
         {"scope": "product" if parsed.product else "project", "productId": parsed.product, "projectId": parsed.project},
     )
     conn = connect_index(active_index_path(cfg))
-    row, owner = find_work_copy_source(conn, cfg, product_id if layer == "PRODUCT" else None, project_id or None, parsed.type, parsed.alias, parsed.fun)
-    source_path = ROOT / row["local_path"]
-    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = work_copy_dir() / owner / f"{stamp}-{path_part(parsed.alias if not parsed.fun else parsed.fun)}"
-    _initialize_work_copy(source_path, target, row, _work_copy_change_key(row), "snapshot")
-    print(target)
+    row, _owner = find_work_copy_source(conn, cfg, product_id if layer == "PRODUCT" else None, project_id or None, parsed.type, parsed.alias, parsed.fun)
+    result = create_work_copy_from_row(conn, cfg, row, product_id, project_id)
+    print(result["path"])
 
 
 def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
@@ -1907,7 +1904,7 @@ def _change_key(row):
 
 
 def _source_alias_id(row):
-    return _str(row.get("source_alias_id")) or _str(row.get("source_id"))
+    return _str(_row_value(row, "source_alias_id")) or _str(_row_value(row, "source_id"))
 
 
 def _link_shared_procedure_dirs(layer_root, system_name, row, scope):
