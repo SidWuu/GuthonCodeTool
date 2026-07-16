@@ -4,6 +4,7 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 const test = require("node:test");
+const vm = require("node:vm");
 
 const ROOT = path.join(__dirname, "..");
 const MANIFEST_PATH = path.join(__dirname, "workspace", "manifest.json");
@@ -634,6 +635,79 @@ test("page bridge uses popup-compatible procedure search strategy", () => {
 
   assert.equal(pageBridge.includes("keyword: payload.funId"), true);
   assert.equal(pageBridge.includes("resolveProcedure(searchResult, payload.procedureKeyword, payload.funId)"), true);
+});
+
+test("page bridge resolves and opens Ctrl-click procedure targets", async () => {
+  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
+  const window = {
+    addEventListener() {},
+    removeEventListener() {},
+    postMessage() {}
+  };
+  const context = {
+    window,
+    document: {
+      querySelectorAll: () => [],
+      createElement: () => ({ remove() {} }),
+      head: { appendChild() {} },
+      addEventListener() {},
+      removeEventListener() {}
+    },
+    console,
+    URLSearchParams,
+    setInterval: () => 1,
+    clearInterval() {},
+    setTimeout,
+    clearTimeout
+  };
+  vm.runInNewContext(pageBridge, context);
+  const resolve = window.GuthonProcedureNavigation.resolveProcedureTarget;
+  const invoke = '$vs.proc.invoke("com.golden.demo.common", "saveForecast", $params);';
+  const binding = "#set($proc=$vs.proc.find('com.golden.demo.back'))\n$proc.updateBacknum($map);";
+
+  assert.deepEqual(
+    { ...resolve(invoke, invoke.indexOf("saveForecast")) },
+    { procedureKeyword: "com.golden.demo.common", funId: "saveForecast" }
+  );
+  assert.deepEqual(
+    { ...resolve(binding, binding.indexOf("updateBacknum")) },
+    { procedureKeyword: "com.golden.demo.back", funId: "updateBacknum" }
+  );
+  assert.equal(resolve("$vs.proc.invoke($package, $method, $params);", 25), null);
+  let treeNode = null;
+  let located = null;
+  const developVm = {
+    dataSourceId: "",
+    openTabs: [],
+    getScriptTreeNode: () => treeNode,
+    parseProcFunInfo: (_procedure, fun) => ({ id: `PR-1@${fun.funId}`, data: fun }),
+    handleNodeClick(node) {
+      this.openTabs.push(node);
+    },
+    loadProcTree(callback) {
+      treeNode = { id: "PR-1@saveForecast", data: { procedureId: "PR-1", funId: "saveForecast" } };
+      callback();
+    },
+    toLocation(node) {
+      located = node;
+    },
+    $refs: { tree: { $el: { querySelector: () => null } } }
+  };
+  await window.GuthonProcedureNavigation.openProcedureInVm(developVm, {
+    dataSourceId: "0015",
+    procedureId: "PR-1",
+    procedureName: "com.golden.demo.common",
+    funId: "saveForecast",
+    fun: { funId: "saveForecast" }
+  });
+  assert.equal(developVm.openTabs[0].id, "PR-1@saveForecast");
+  assert.equal(located.id, "PR-1@saveForecast");
+  assert.equal(pageBridge.includes('document.addEventListener("contextmenu", onContextMenu, true)'), true);
+  assert.equal(pageBridge.includes("editor.onMouseMove?.("), true);
+  assert.equal(pageBridge.includes("color:#409eff!important;cursor:pointer!important"), true);
+  assert.equal(pageBridge.includes("developVm.handleNodeClick(openNode)"), true);
+  assert.equal(pageBridge.includes("developVm.loadProcTree(() =>"), true);
+  assert.equal(pageBridge.includes("developVm.toLocation?.(treeNode)"), true);
 });
 
 test("page bridge does not mix stale fullName package with current function id", () => {

@@ -75,7 +75,7 @@ async function ensurePageBridge() {
   async function injectPageScript(name) {
     await new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `${runtime.getURL(name)}?v=20260710a`;
+      script.src = `${runtime.getURL(name)}?v=20260716f`;
       script.dataset.source = "guthon-bridge";
       script.onload = () => { script.remove(); resolve(); };
       script.onerror = () => { script.remove(); reject(new Error("页面桥接脚本加载失败")); };
@@ -1619,6 +1619,7 @@ async function refreshToolbarButtons() {
     }
 
     if (isModuleRoute()) {
+      await ensurePageBridge();
       removeNode(SCHEMA_ROOT_ID);
       removeNode(BILLTYPE_ROOT_ID);
       installProcedurePullButton();

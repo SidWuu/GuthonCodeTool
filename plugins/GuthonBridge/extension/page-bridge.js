@@ -92,6 +92,214 @@
     return element.__vue__ || element.__vueParentComponent?.proxy || null;
   }
 
+  function resolveProcedureTarget(source, offset) {
+    if (typeof source !== "string" || !Number.isInteger(offset)) {
+      return null;
+    }
+    const invoke = /\$vs\.proc\.invoke\s*\(\s*(['"])([^'"]+)\1\s*,\s*(['"])([A-Za-z_]\w*)\3/g;
+    for (const match of source.matchAll(invoke)) {
+      const methodStart = match.index + match[0].lastIndexOf(match[4]);
+      if (offset >= methodStart && offset <= methodStart + match[4].length) {
+        return { procedureKeyword: match[2], funId: match[4] };
+      }
+    }
+
+    const before = source.slice(0, offset);
+    const call = before.match(/\$([A-Za-z_]\w*)\.\s*$/);
+    if (!call) {
+      return null;
+    }
+    const word = source.slice(offset).match(/^[A-Za-z_]\w*/)?.[0];
+    if (!word) {
+      return null;
+    }
+    const variable = call[1];
+    const binding = new RegExp(
+      `#set\\s*\\(\\s*\\$${variable}\\s*=\\s*\\$vs\\.proc\\.find\\s*\\(\\s*(['"])([^'"]+)\\1`,
+      "g"
+    );
+    let procedureKeyword = "";
+    for (const match of before.matchAll(binding)) {
+      procedureKeyword = match[2];
+    }
+    return procedureKeyword ? { procedureKeyword, funId: word } : null;
+  }
+
+  function getProcedureTargetAtPosition(editor, position) {
+    const model = editor.getModel?.();
+    const word = model?.getWordAtPosition?.(position);
+    if (!model || !word) {
+      return null;
+    }
+    const offset = model.getOffsetAt({ lineNumber: position.lineNumber, column: word.startColumn });
+    const target = resolveProcedureTarget(model.getValue(), offset);
+    return target ? { target, word, lineNumber: position.lineNumber } : null;
+  }
+
+  function findProcedureDevelopVm() {
+    return Array.from(document.querySelectorAll("*")).map(getVueInstance).find(
+      (vm) => vm?.$options?.name === "gdpaas_dev_procedure_develop" && typeof vm.onOpenPage === "function"
+    );
+  }
+
+  function findVueRouter() {
+    return Array.from(document.querySelectorAll("*")).map(getVueInstance).find((vm) => vm?.$router)?.$router;
+  }
+
+  async function openProcedureInVm(developVm, target) {
+    const tabId = `${target.procedureId}@${target.funId}`;
+    developVm.dataSourceId = target.dataSourceId;
+    let treeNode = developVm.getScriptTreeNode?.(target.procedureId, target.funId);
+    const openNode = treeNode || developVm.parseProcFunInfo?.(
+      { procedureId: target.procedureId, procedureAliasId: target.procedureName },
+      { ...target.fun, procedureId: target.procedureId, funId: target.funId }
+    );
+    if (!openNode) {
+      throw new Error(`无法构造过程函数节点: ${target.procedureName}.${target.funId}`);
+    }
+    developVm.handleNodeClick(openNode);
+    if (!developVm.openTabs?.some((tab) => tab.id === tabId)) {
+      throw new Error(`打开过程函数失败: ${target.procedureName}.${target.funId}`);
+    }
+    if (!treeNode) {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("过程树加载超时")), 8000);
+        developVm.loadProcTree(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      treeNode = developVm.getScriptTreeNode?.(target.procedureId, target.funId);
+    }
+    if (!treeNode) {
+      throw new Error(`过程树中未找到函数: ${target.procedureName}.${target.funId}`);
+    }
+    developVm.toLocation?.(treeNode);
+    setTimeout(() => {
+      developVm.$refs?.tree?.$el?.querySelector(".el-tree-node.is-current")?.scrollIntoView?.({ block: "center", inline: "nearest" });
+    });
+  }
+
+  async function openProcedureTarget(target) {
+    let developVm = findProcedureDevelopVm();
+    if (!developVm) {
+      const router = findVueRouter();
+      if (!router) {
+        throw new Error("未找到谷神页面路由");
+      }
+      try {
+        await router.push({ name: "gdpaas_dev_procedure_develop" });
+      } catch (error) {
+        if (!/redundant|duplicated/i.test(error?.message || "")) {
+          throw error;
+        }
+      }
+      const deadline = Date.now() + 8000;
+      while (!developVm && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        developVm = findProcedureDevelopVm();
+      }
+    }
+    if (!developVm) {
+      throw new Error("过程函数页面加载超时");
+    }
+    await openProcedureInVm(developVm, target);
+  }
+
+  async function navigateToProcedure(target) {
+    const searchResult = await postForm("/develop/procedure/admin/search.htm", { keyword: target.funId });
+    if (searchResult.code && searchResult.code !== 0) {
+      throw new Error(searchResult.message || "搜索过程函数失败");
+    }
+    const procedure = resolveProcedure(searchResult, target.procedureKeyword, target.funId, true);
+    if (!procedure.dataSourceId) {
+      throw new Error(`未解析到过程函数数据源: ${target.procedureKeyword}.${target.funId}`);
+    }
+    await openProcedureTarget({ ...procedure, funId: target.funId });
+  }
+
+  const navigationEditors = new WeakSet();
+  const navigationDisposables = [];
+  const navigationDecorations = new Map();
+  let navigationBusy = false;
+  let suppressContextMenuUntil = 0;
+
+  function setProcedureLink(editor, hit) {
+    if (!editor?.deltaDecorations) {
+      return;
+    }
+    const decorations = hit ? [{
+      range: {
+        startLineNumber: hit.lineNumber,
+        startColumn: hit.word.startColumn,
+        endLineNumber: hit.lineNumber,
+        endColumn: hit.word.endColumn
+      },
+      options: { inlineClassName: "guthon-procedure-link" }
+    }] : [];
+    navigationDecorations.set(editor, editor.deltaDecorations(navigationDecorations.get(editor) || [], decorations));
+  }
+
+  function clearProcedureLinks() {
+    navigationDecorations.forEach((_decorations, editor) => setProcedureLink(editor, null));
+  }
+
+  function onNavigationKeyUp(event) {
+    if (event.key === "Control") {
+      clearProcedureLinks();
+    }
+  }
+
+  function onContextMenu(event) {
+    if (Date.now() > suppressContextMenuUntil) {
+      return;
+    }
+    suppressContextMenuUntil = 0;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  function installProcedureNavigation() {
+    Array.from(document.querySelectorAll(".script-editor")).forEach((element) => {
+      const vm = getVueInstance(element);
+      const editor = vm?.editor || vm?.$refs?.editor?.editor;
+      if (!editor?.onMouseDown || navigationEditors.has(editor)) {
+        return;
+      }
+      navigationEditors.add(editor);
+      navigationDisposables.push(editor.onMouseMove?.((event) => {
+        const browserEvent = event.event?.browserEvent;
+        const hit = browserEvent?.ctrlKey && event.target?.position
+          ? getProcedureTargetAtPosition(editor, event.target.position)
+          : null;
+        setProcedureLink(editor, hit);
+      }));
+      navigationDisposables.push(editor.onMouseLeave?.(() => setProcedureLink(editor, null)));
+      navigationDisposables.push(editor.onMouseDown(async (event) => {
+        const browserEvent = event.event?.browserEvent;
+        const position = event.target?.position;
+        if (!browserEvent?.ctrlKey || browserEvent.button !== 0 || !position || navigationBusy) {
+          return;
+        }
+        const hit = getProcedureTargetAtPosition(editor, position);
+        if (!hit) {
+          return;
+        }
+        browserEvent.preventDefault();
+        browserEvent.stopPropagation();
+        suppressContextMenuUntil = Date.now() + 500;
+        navigationBusy = true;
+        try {
+          await navigateToProcedure(hit.target);
+        } catch {
+          // 跳转结果由平台页面本身体现，不占用源码拉取提示区域。
+        } finally {
+          navigationBusy = false;
+        }
+      }));
+    });
+  }
+
   let copiedFields = null;
 
   function findFieldsMoverContext() {
@@ -939,17 +1147,23 @@
     return null;
   }
 
-  function resolveProcedure(searchResult, procedureKeyword, funId) {
+  function resolveProcedure(searchResult, procedureKeyword, funId, strict = false) {
     const matches = collectMatches(searchResult, funId);
     const packageLower = String(procedureKeyword || "").toLowerCase();
-    const chosen =
-      matches.find((item) => {
-        const joined = Object.values(item)
-          .filter((value) => typeof value === "string")
-          .join(" ")
-          .toLowerCase();
-        return joined.includes(packageLower);
-      }) || matches[0];
+    const exactFun = matches.find((item) => {
+      const joined = Object.values(item)
+        .filter((value) => typeof value === "string")
+        .join(" ")
+        .toLowerCase();
+      return String(item.funId || "").toLowerCase() === String(funId || "").toLowerCase()
+        && joined.includes(packageLower);
+    });
+    const exact = exactFun || matches.find((item) => Object.values(item)
+      .filter((value) => typeof value === "string")
+      .join(" ")
+      .toLowerCase()
+      .includes(packageLower));
+    const chosen = exact || (!strict && matches[0]);
     if (!chosen) {
       throw new Error(`未找到过程函数: ${procedureKeyword}.${funId}`);
     }
@@ -959,9 +1173,12 @@
     }
     return {
       procedureId,
+      dataSourceId: pickFirst(chosen, ["dataSourceId", "datasourceId", "data_source_id"]),
+      fun: chosen,
       procedureName:
         pickFirst(chosen, [
           "procedureName",
+          "procedureAliasId",
           "fullName",
           "className",
           "procName",
@@ -1114,8 +1331,26 @@
   };
 
   window.addEventListener("message", onMessage);
+  document.addEventListener("contextmenu", onContextMenu, true);
+  document.addEventListener("keyup", onNavigationKeyUp);
+  const navigationStyle = document.createElement("style");
+  navigationStyle.textContent = ".guthon-procedure-link{color:#409eff!important;cursor:pointer!important}";
+  (document.head || document.documentElement).appendChild(navigationStyle);
+  const navigationApi = { resolveProcedureTarget, openProcedureInVm };
+  window.GuthonProcedureNavigation = navigationApi;
+  installProcedureNavigation();
+  const navigationInterval = setInterval(installProcedureNavigation, 1000);
   window.__guthonPageBridgeCleanup = function () {
     window.removeEventListener("message", onMessage);
+    document.removeEventListener("contextmenu", onContextMenu, true);
+    document.removeEventListener("keyup", onNavigationKeyUp);
+    clearInterval(navigationInterval);
+    clearProcedureLinks();
+    navigationDisposables.forEach((disposable) => disposable?.dispose?.());
+    navigationStyle.remove();
+    if (window.GuthonProcedureNavigation === navigationApi) {
+      delete window.GuthonProcedureNavigation;
+    }
   };
-  window.__guthonPageBridgeReady = "20260630b";
+  window.__guthonPageBridgeReady = "20260716f";
 })();
