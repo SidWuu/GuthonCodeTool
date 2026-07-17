@@ -25,7 +25,6 @@ runtime/     配置、日志、缓存、临时文件
 
 ```text
 source/readonly/    从源码表导出的只读镜像，作为上游基线
-source/effective/   项目最终生效源码，由产品源码叠加项目源码后生成
 source/workcopy/    开发工作副本，改源码优先看这里
 ```
 
@@ -35,7 +34,6 @@ source/workcopy/    开发工作副本，改源码优先看这里
 source/readonly/products/{子系统}/page/{模型序号}_{模型}/{模块序号}_{模块}/{页面名 页面ID}/
 source/readonly/products/{子系统}/procedure/{过程别名}/{函数名}/
 source/readonly/project/{项目名}/{子系统}/...
-source/effective/project/{项目名}/{子系统}/...
 source/workcopy/products/{产品名}/{子系统}/page|procedure/...
 source/workcopy/projects/{项目名}/{子系统}/page|procedure/...
 ```
@@ -91,7 +89,6 @@ knowledge/README.md
 knowledge/products/{product_id}/source-index.md
 knowledge/products/{product_id}/invoke-index.md
 knowledge/products/{product_id}/dynamic-invoke-points.md
-knowledge/projects/{project_id}/effective-source-index.md
 knowledge/projects/{project_id}/invoke-index.md
 ```
 
@@ -115,16 +112,16 @@ runtime/cache/         缓存
 ## AI 助手处理顺序
 
 1. 先读 `AGENTS.md` 和 `docs/` 下的相关规则。
-2. 先读 `knowledge/README.md`，再查询 `runtime/index/hub.db` 的局部上下文。
+2. 先查询 `runtime/index/` 的对应DB局部上下文。
 3. 看开发副本时进入 `source/workcopy/`。
 4. 看上游基线时进入 `source/readonly/`。
-5. 判断项目实际生效源码时进入 `source/effective/`。
-6. 涉及本机私有工具时进入 `tools/`。
-7. 涉及数据库结构时进入 `database/`，不要假设这里有业务数据。
-8. 涉及源码差异时在 `var/` 仓库运行 `git status` 和 `git diff`。
+5. 涉及本机私有工具时进入 `tools/`。
+6. 涉及数据库结构时进入 `database/`，不要假设这里有业务数据。
+7. 涉及源码差异时在 `var/` 仓库运行 `git status` 和 `git diff`。
 
 ## 注意
 
 - 根仓库的 `git status` 看不到 `var/` 内差异，这是预期行为。
 - Git 不跟踪空目录；只有目录变化但没有文件变化时不会显示差异。
 - `var` 仓库默认不配置 remote；如需远端，只能配置私有仓库。
+- 源码 `vm` 模板没有高亮时，需要设置为 `java`类型。以 VSCode 为例 `"files.associations": {"*.vm": "java"}`
