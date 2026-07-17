@@ -368,6 +368,10 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes('type: "export-bill-type"'), true);
   assert.equal(script.includes('type: "log-pull-failure"'), true);
   assert.equal(background.includes('postJson("/logPullFailure"'), true);
+  assert.equal(background.includes('chrome.runtime.onInstalled.addListener'), true);
+  assert.equal(background.includes('files: ["fields-mover-core.js", "page-bridge.js"]'), true);
+  assert.equal(background.includes('files: ["host-config.js", "content.js"]'), true);
+  assert.equal(background.includes('world: "MAIN"'), true);
   assert.equal(script.includes("拉取单据类型"), true);
   assert.equal(runHubPullScript.includes("resolveCurrentTarget"), false);
   assert.equal(html.includes("closeBtn"), true);
@@ -571,9 +575,16 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("textarea.select();"), true);
   assert.equal(contentScript.includes("window.__guthonBridgeLoaded"), false);
   assert.equal(contentScript.includes('message?.type === "show-copy-overlay"'), true);
-  assert.equal(contentScript.includes("removeNode(COPY_ROOT_ID);\n  installProcedurePullButton();"), true);
-  assert.equal(contentScript.includes("removeNode(COPY_ROOT_ID);"), true);
-  assert.equal(contentScript.includes("removeNode(SCHEMA_ROOT_ID);"), true);
+  assert.equal(contentScript.includes("function installSourcePullButton"), true);
+  assert.equal(contentScript.includes("guthon-bridge-module-only"), true);
+  assert.equal(contentScript.includes("SCHEMA_ROOT_ID"), false);
+  assert.equal(contentScript.includes("BILLTYPE_ROOT_ID"), false);
+  assert.equal(contentScript.includes('style.dataset.version = "20260717h"'), true);
+  assert.equal(contentScript.includes("visibility: hidden"), true);
+  assert.equal(contentScript.includes("root.dataset.positioned"), false);
+  assert.equal(contentScript.includes('root.dataset.sharedButtons = "true"'), true);
+  assert.equal(contentScript.includes("exportCurrentTableSchema(root, sourceButton)"), true);
+  assert.equal(contentScript.includes("exportCurrentBillType(root, sourceButton)"), true);
   assert.equal(contentScript.includes("stopExtensionLoops();"), true);
 
   const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
@@ -761,9 +772,21 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   let restoredText = "saved";
   let dialogReset = false;
   let editorOpened = false;
+  let dragStart;
+  let closeBar;
   const bar = {
-    addEventListener: (_event, handler) => { restore = handler; },
+    style: {},
+    addEventListener: (event, handler) => {
+      if (event === "dblclick") restore = handler;
+      if (event === "mousedown") dragStart = handler;
+    },
+    appendChild() {},
+    getBoundingClientRect: () => ({ left: 100, top: 12, width: 300, height: 36 }),
     remove() {}
+  };
+  const closeButton = {
+    addEventListener: (_event, handler) => { closeBar = handler; },
+    setAttribute() {}
   };
   const owner = {
     script: { id: "save", scriptItem: { name: "beforeSave" } },
@@ -794,7 +817,7 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
       layout: () => { editorLayout = true; }
     } }
   };
-  context.document.createElement = () => bar;
+  context.document.createElement = (tag) => tag === "button" ? closeButton : bar;
   context.document.body = { appendChild() {} };
   context.document.querySelectorAll = (selector) => {
     if (selector === ".v-modal" || selector === ".guthon-minimized-script-mask") return [dialogMask];
@@ -804,9 +827,13 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
       { __vue__: owner }
     ];
   };
+  window.innerWidth = 1200;
+  window.innerHeight = 800;
   window.GuthonProcedureNavigation.minimizeScriptEditor(editorElement);
   assert.equal(classes.has("guthon-minimized-script-editor"), true);
   assert.equal(maskClasses.has("guthon-minimized-script-mask"), true);
+  dragStart({ button: 0, target: { closest: () => null }, clientX: 120, clientY: 20, preventDefault() {} });
+  assert.equal(bar.style.transform, "none");
   await restore({ preventDefault() {}, stopPropagation() {} });
   await new Promise((resolve) => setTimeout(resolve));
   assert.equal(routedBack, true);
@@ -816,6 +843,47 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   assert.equal(editorLayout, true);
   assert.equal(dialogReset, true);
   assert.equal(editorOpened, true);
+  let buttonEditorOpened = false;
+  let buttonEditorClosed = false;
+  let buttonRestoredText = "button-saved";
+  const buttonClasses = new Set();
+  const buttonSetup = {
+    $options: { name: "gd-button-setup" },
+    $refs: { editor: {
+      isDialogShow: false,
+      show: () => { buttonEditorOpened = true; },
+      close: () => { buttonEditorClosed = true; }
+    } }
+  };
+  const buttonWrapper = {
+    isConnected: true,
+    classList: { add: (name) => buttonClasses.add(name), remove: (name) => buttonClasses.delete(name) },
+    querySelectorAll: () => [{
+      offsetWidth: 1,
+      __vue__: { editor: {
+        getValue: () => buttonRestoredText,
+        setValue: (value) => { buttonRestoredText = value; },
+        layout() {}
+      } }
+    }],
+    __vue__: buttonSetup
+  };
+  window.GuthonProcedureNavigation.minimizeScriptEditor({
+    __vue__: { editor: { getValue: () => "button-unsaved" } },
+    closest: () => buttonWrapper
+  });
+  assert.equal(buttonClasses.has("guthon-minimized-script-editor"), true);
+  await restore({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(buttonEditorOpened, true);
+  assert.equal(buttonRestoredText, "button-unsaved");
+  assert.equal(buttonClasses.size, 0);
+  window.GuthonProcedureNavigation.minimizeScriptEditor({
+    __vue__: { editor: { getValue: () => "button-unsaved" } },
+    closest: () => buttonWrapper
+  });
+  closeBar({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(buttonEditorClosed, true);
+  assert.equal(buttonClasses.size, 0);
   assert.equal(pageBridge.includes('document.addEventListener("contextmenu", onContextMenu, true)'), true);
   assert.equal(pageBridge.includes("editor.onMouseMove?.("), true);
   assert.equal(pageBridge.includes("color:#409eff!important;cursor:pointer!important"), true);

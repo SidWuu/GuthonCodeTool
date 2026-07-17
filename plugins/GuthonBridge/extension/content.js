@@ -1,8 +1,5 @@
 const OUTPUT_DIR_STORAGE_KEY = "guthonBridgeOutputDir";
 const FLOATING_ROOT_ID = "guthon-bridge-floating-root";
-const COPY_ROOT_ID = "guthon-bridge-copy-root";
-const SCHEMA_ROOT_ID = "guthon-bridge-schema-root";
-const BILLTYPE_ROOT_ID = "guthon-bridge-billtype-root";
 const COPY_OVERLAY_ID = "guthon-bridge-copy-overlay";
 const FIELDS_MOVER_OVERLAY_ID = "guthon-bridge-fields-mover-overlay";
 
@@ -75,7 +72,7 @@ async function ensurePageBridge() {
   async function injectPageScript(name) {
     await new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `${runtime.getURL(name)}?v=20260717e`;
+      script.src = `${runtime.getURL(name)}?v=20260717g`;
       script.dataset.source = "guthon-bridge";
       script.onload = () => { script.remove(); resolve(); };
       script.onerror = () => { script.remove(); reject(new Error("页面桥接脚本加载失败")); };
@@ -257,11 +254,14 @@ function makeNativeButton(text, className) {
 }
 
 function ensureInlineStyles() {
-  if (document.getElementById("guthon-bridge-inline-style")) {
+  const existing = document.getElementById("guthon-bridge-inline-style");
+  if (existing?.dataset.version === "20260717h") {
     return;
   }
+  existing?.remove();
   const style = document.createElement("style");
   style.id = "guthon-bridge-inline-style";
+  style.dataset.version = "20260717h";
   style.textContent = `
     .guthon-bridge-inline {
       position: fixed;
@@ -272,7 +272,7 @@ function ensureInlineStyles() {
       width: max-content;
       min-width: 108px;
       padding: 0;
-      pointer-events: auto;
+      pointer-events: none;
       user-select: none;
     }
     .guthon-bridge-inline button {
@@ -295,6 +295,7 @@ function ensureInlineStyles() {
       text-align: center;
       text-decoration: none;
       cursor: pointer;
+      pointer-events: auto;
     }
     .guthon-bridge-inline button + button {
       margin-left: 0;
@@ -304,6 +305,10 @@ function ensureInlineStyles() {
       flex-direction: column;
       align-items: flex-end;
       gap: 6px;
+    }
+    .guthon-bridge-inline:not([data-mode="module"]) .guthon-bridge-module-only {
+      visibility: hidden;
+      pointer-events: none;
     }
     .guthon-bridge-fields-mover-group > span {
       width: 108px;
@@ -536,10 +541,6 @@ function positionBridgeRoot(root, toolbar, ratio = 0.72, row = 0) {
   return positionFloatingRoot(root, row);
 }
 
-function positionTableSchemaRoot(root) {
-  return positionFloatingRoot(root);
-}
-
 function positionFloatingRoot(root, row = 0) {
   if (!root) {
     return false;
@@ -626,11 +627,10 @@ async function pullCurrentProcedure(root, button = root.querySelector("button"),
   }
 }
 
-async function exportCurrentTableSchema(root) {
-  const button = root.querySelector("button");
+async function exportCurrentTableSchema(root, button = root.querySelector("button")) {
   try {
     button.disabled = true;
-    setButtonText(root, "拉取表结构");
+    setButtonText(root, "源码拉取");
     setButtonTitle(root, "正在拉取表结构...");
     setMessage(root, "正在拉取表结构...", "busy");
 
@@ -657,24 +657,23 @@ async function exportCurrentTableSchema(root) {
     const detail = selected ? `已拉取选中表: ${inspected.data.tableIds.join(", ")}` : `已拉取数据源 ${inspected.data.dataSourceId} 全部表`;
     setButtonTitle(root, `${detail}: ${result.outputDir}`);
     setMessage(root, `${detail}: ${result.exported_table_count}`, "success");
-    setTimeout(() => setButtonText(root, "拉取表结构"), 1600);
+    setTimeout(() => setButtonText(root, "源码拉取"), 1600);
   } catch (error) {
     console.error("Guthon Bridge table schema export failed", error);
     button.textContent = "失败";
     const message = error?.message || String(error);
     setButtonTitle(root, message);
     setMessage(root, message, "error");
-    setTimeout(() => setButtonText(root, "拉取表结构"), 2200);
+    setTimeout(() => setButtonText(root, "源码拉取"), 2200);
   } finally {
     button.disabled = false;
   }
 }
 
-async function exportCurrentBillType(root) {
-  const button = root.querySelector("button");
+async function exportCurrentBillType(root, button = root.querySelector("button")) {
   try {
     button.disabled = true;
-    setButtonText(root, "拉取单据类型");
+    setButtonText(root, "源码拉取");
     setButtonTitle(root, "正在拉取单据类型...");
     setMessage(root, "正在拉取单据类型...", "busy");
 
@@ -705,14 +704,14 @@ async function exportCurrentBillType(root) {
     const detail = selected ? `已拉取选中单据类型: ${inspected.data.billTypeCodes.join(", ")}` : `已拉取数据源 ${source} 全部单据类型`;
     setButtonTitle(root, `${detail}: ${result.outputDir}`);
     setMessage(root, `${detail}: ${result.exported_bill_type_count}`, "success");
-    setTimeout(() => setButtonText(root, "拉取单据类型"), 1600);
+    setTimeout(() => setButtonText(root, "源码拉取"), 1600);
   } catch (error) {
     console.error("Guthon Bridge bill type export failed", error);
     button.textContent = "失败";
     const message = error?.message || String(error);
     setButtonTitle(root, message);
     setMessage(root, message, "error");
-    setTimeout(() => setButtonText(root, "拉取单据类型"), 2200);
+    setTimeout(() => setButtonText(root, "源码拉取"), 2200);
   } finally {
     button.disabled = false;
   }
@@ -722,68 +721,72 @@ function removeNode(id) {
   document.getElementById(id)?.remove();
 }
 
-function installProcedurePullButton() {
-  if (!isSupportedGuthonPage() || (!isProcedureRoute() && !isModuleRoute())) {
+function installSourcePullButton() {
+  if (!isSupportedGuthonPage() || (!isProcedureRoute() && !isModuleRoute() && !isDataTableRoute() && !isBillTypeRoute())) {
     return;
   }
 
   ensureInlineStyles();
   let root = document.getElementById(FLOATING_ROOT_ID);
-  const mode = isModuleRoute() ? "module" : "procedure";
-  if (root && root.dataset.mode !== mode) {
+  if (root && root.dataset.sharedButtons !== "true") {
     root.remove();
     root = null;
   }
+  document.getElementById("guthon-bridge-schema-root")?.remove();
+  document.getElementById("guthon-bridge-billtype-root")?.remove();
+  const mode = isModuleRoute() ? "module" : isProcedureRoute() ? "procedure" : isDataTableRoute() ? "table" : "billtype";
   if (!root) {
     root = document.createElement("div");
     root.id = FLOATING_ROOT_ID;
     root.className = "guthon-bridge-inline";
     root.dataset.mode = mode;
+    root.dataset.sharedButtons = "true";
     const sourceButton = makeNativeButton("源码拉取", "guthon-bridge-inline-button guthon-bridge-source-button");
     root.appendChild(sourceButton);
-    if (mode === "module") {
-      const copyButton = makeNativeButton("复制模式", "guthon-bridge-copy-button");
-      copyButton.addEventListener("click", async () => {
-        try {
-          await showCopyOverlay();
-        } catch (error) {
-          setButtonTitle(root, error?.message || String(error));
-          setMessage(root, error?.message || String(error), "error");
-        }
-      });
-      root.appendChild(copyButton);
-      const fieldsMover = document.createElement("div");
-      fieldsMover.className = "guthon-bridge-fields-mover-group";
-      fieldsMover.innerHTML = "<span>字段平移</span>";
-      const copyFieldsButton = makeNativeButton("复制字段", "guthon-bridge-copy-fields-button");
-      const pasteFieldsButton = makeNativeButton("粘贴字段", "guthon-bridge-paste-fields-button");
-      copyFieldsButton.addEventListener("click", async () => {
-        try {
-          await showFieldsMoverOverlay(root);
-        } catch (error) {
-          setMessage(root, error?.message || String(error), "error");
-        }
-      });
-      pasteFieldsButton.addEventListener("click", async () => {
-        try {
-          await pasteCopiedFields(root);
-        } catch (error) {
-          setMessage(root, error?.message || String(error), "error");
-        }
-      });
-      fieldsMover.append(copyFieldsButton, pasteFieldsButton);
-      root.appendChild(fieldsMover);
-    }
+    const copyButton = makeNativeButton("复制模式", "guthon-bridge-copy-button guthon-bridge-module-only");
+    copyButton.addEventListener("click", async () => {
+      try {
+        await showCopyOverlay();
+      } catch (error) {
+        setButtonTitle(root, error?.message || String(error));
+        setMessage(root, error?.message || String(error), "error");
+      }
+    });
+    root.appendChild(copyButton);
+    const fieldsMover = document.createElement("div");
+    fieldsMover.className = "guthon-bridge-fields-mover-group guthon-bridge-module-only";
+    fieldsMover.innerHTML = "<span>字段平移</span>";
+    const copyFieldsButton = makeNativeButton("复制字段", "guthon-bridge-copy-fields-button");
+    const pasteFieldsButton = makeNativeButton("粘贴字段", "guthon-bridge-paste-fields-button");
+    copyFieldsButton.addEventListener("click", async () => {
+      try {
+        await showFieldsMoverOverlay(root);
+      } catch (error) {
+        setMessage(root, error?.message || String(error), "error");
+      }
+    });
+    pasteFieldsButton.addEventListener("click", async () => {
+      try {
+        await pasteCopiedFields(root);
+      } catch (error) {
+        setMessage(root, error?.message || String(error), "error");
+      }
+    });
+    fieldsMover.append(copyFieldsButton, pasteFieldsButton);
+    root.appendChild(fieldsMover);
     const message = document.createElement("div");
     message.className = "guthon-bridge-message";
     message.dataset.tone = "idle";
     root.appendChild(message);
 
     sourceButton.addEventListener("click", () => {
-      pullCurrentProcedure(root, sourceButton);
+      if (isDataTableRoute()) exportCurrentTableSchema(root, sourceButton);
+      else if (isBillTypeRoute()) exportCurrentBillType(root, sourceButton);
+      else pullCurrentProcedure(root, sourceButton);
     });
     document.body.appendChild(root);
   }
+  root.dataset.mode = mode;
   positionBridgeRoot(root);
 }
 
@@ -1532,121 +1535,33 @@ async function showCopyOverlay() {
   }
 }
 
-function installCopyModeButton() {
-  if (!isSupportedGuthonPage() || !isModuleRoute()) {
-    return;
-  }
-  removeNode(COPY_ROOT_ID);
-  installProcedurePullButton();
-}
-
-function installTableSchemaButton() {
-  if (!isSupportedGuthonPage() || !isDataTableRoute()) {
-    removeNode(SCHEMA_ROOT_ID);
-    return;
-  }
-  ensureInlineStyles();
-  let root = document.getElementById(SCHEMA_ROOT_ID);
-  if (!root) {
-    root = document.createElement("div");
-    root.id = SCHEMA_ROOT_ID;
-    root.className = "guthon-bridge-inline";
-    const button = makeNativeButton("拉取表结构", "guthon-bridge-schema-button");
-    button.addEventListener("click", () => exportCurrentTableSchema(root));
-    root.appendChild(button);
-    const message = document.createElement("span");
-    message.className = "guthon-bridge-message";
-    root.appendChild(message);
-    document.body.appendChild(root);
-  }
-  positionTableSchemaRoot(root);
-}
-
-function installBillTypeButton() {
-  if (!isSupportedGuthonPage() || !isBillTypeRoute()) {
-    removeNode(BILLTYPE_ROOT_ID);
-    return;
-  }
-  ensureInlineStyles();
-  let root = document.getElementById(BILLTYPE_ROOT_ID);
-  if (!root) {
-    root = document.createElement("div");
-    root.id = BILLTYPE_ROOT_ID;
-    root.className = "guthon-bridge-inline";
-    const button = makeNativeButton("拉取单据类型", "guthon-bridge-billtype-button");
-    button.addEventListener("click", () => exportCurrentBillType(root));
-    root.appendChild(button);
-    const message = document.createElement("span");
-    message.className = "guthon-bridge-message";
-    root.appendChild(message);
-    document.body.appendChild(root);
-  }
-  positionTableSchemaRoot(root);
-}
-
 async function refreshToolbarButtons() {
   try {
     if (!isExtensionAlive()) {
       removeNode(FLOATING_ROOT_ID);
-      removeNode(COPY_ROOT_ID);
-      removeNode(SCHEMA_ROOT_ID);
-      removeNode(BILLTYPE_ROOT_ID);
       stopExtensionLoops();
       return;
     }
 
     if (!isSupportedGuthonPage()) {
       removeNode(FLOATING_ROOT_ID);
-      removeNode(COPY_ROOT_ID);
-      removeNode(SCHEMA_ROOT_ID);
-      removeNode(BILLTYPE_ROOT_ID);
       return;
     }
 
     installTreeAutoScroll();
 
-    if (isProcedureRoute()) {
-      removeNode(COPY_ROOT_ID);
-      removeNode(SCHEMA_ROOT_ID);
-      removeNode(BILLTYPE_ROOT_ID);
-      const inspected = await runPageCommand("inspectCurrentProcedure");
-      if (inspected?.ok) {
-        installProcedurePullButton();
-      } else {
-        removeNode(FLOATING_ROOT_ID);
-      }
-      return;
-    }
-
     if (isModuleRoute()) {
       await ensurePageBridge();
-      removeNode(SCHEMA_ROOT_ID);
-      removeNode(BILLTYPE_ROOT_ID);
-      installProcedurePullButton();
-      installCopyModeButton();
-    } else if (isDataTableRoute()) {
-      removeNode(FLOATING_ROOT_ID);
-      removeNode(COPY_ROOT_ID);
-      removeNode(BILLTYPE_ROOT_ID);
-      installTableSchemaButton();
-    } else if (isBillTypeRoute()) {
-      removeNode(FLOATING_ROOT_ID);
-      removeNode(COPY_ROOT_ID);
-      removeNode(SCHEMA_ROOT_ID);
-      installBillTypeButton();
+    }
+    if (isModuleRoute() || isProcedureRoute() || isDataTableRoute() || isBillTypeRoute()) {
+      installSourcePullButton();
     } else {
       removeNode(FLOATING_ROOT_ID);
-      removeNode(COPY_ROOT_ID);
-      removeNode(SCHEMA_ROOT_ID);
-      removeNode(BILLTYPE_ROOT_ID);
     }
   } catch (error) {
     console.warn("Guthon Bridge refreshToolbarButtons error", error);
     if (!isExtensionAlive()) {
       removeNode(FLOATING_ROOT_ID);
-      removeNode(COPY_ROOT_ID);
-      removeNode(SCHEMA_ROOT_ID);
-      removeNode(BILLTYPE_ROOT_ID);
       stopExtensionLoops();
     }
   }

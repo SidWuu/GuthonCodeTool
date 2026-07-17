@@ -264,14 +264,22 @@
     }
     const editorVm = getVueInstance(element);
     const editor = editorVm?.editor || editorVm?.$refs?.editor?.editor;
-    let owner = getVueInstance(wrapper);
-    while (owner && typeof owner.showScriptEditPage !== "function") {
-      owner = owner.$parent;
+    let component = getVueInstance(wrapper);
+    let owner;
+    let buttonSetup;
+    while (component) {
+      if (!owner && typeof component.showScriptEditPage === "function") {
+        owner = component;
+      }
+      if (!buttonSetup && component.$options?.name === "gd-button-setup") {
+        buttonSetup = component;
+      }
+      component = component.$parent;
     }
     const scriptKey = owner?.script
       ? `${owner.script.id}:${owner.script.scriptItem?.name}`
       : "";
-    if (!editor?.getValue || !scriptKey) {
+    if (!editor?.getValue || (!scriptKey && !buttonSetup)) {
       return;
     }
     const mask = Array.from(document.querySelectorAll(".v-modal")).find(
@@ -279,8 +287,26 @@
     );
     const bar = document.createElement("div");
     bar.className = "guthon-minimized-script-bar";
-    bar.textContent = "代码编辑（双击返回模块开发）";
+    bar.textContent = "双击返回模块开发编辑器";
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "guthon-minimized-script-close";
+    closeButton.title = "关闭编辑器";
+    closeButton.setAttribute("aria-label", "关闭编辑器");
+    closeButton.textContent = "×";
+    bar.appendChild(closeButton);
+    const sourceDialog = buttonSetup?.$refs?.editor || owner?.$refs?.scriptEditPage?.$refs?.editor;
+    const finish = () => {
+      Array.from(document.querySelectorAll(".guthon-minimized-script-mask"))
+        .forEach((item) => item.classList.remove("guthon-minimized-script-mask"));
+      wrapper.classList.remove("guthon-minimized-script-editor");
+      bar.remove();
+      minimizedScriptEditor = null;
+    };
     const restore = async (event) => {
+      if (event?.target?.closest?.("button")) {
+        return;
+      }
       event?.preventDefault?.();
       event?.stopPropagation?.();
       const router = findVueRouter();
@@ -296,34 +322,49 @@
       }
       const deadline = Date.now() + 8000;
       let opener;
-      while (!opener && Date.now() < deadline) {
-        opener = Array.from(document.querySelectorAll("*")).map(getVueInstance).find((vm) =>
-          typeof vm?.showScriptEditPage === "function"
-          && vm.script
-          && `${vm.script.id}:${vm.script.scriptItem?.name}` === scriptKey
-        );
-        if (!opener) {
+      if (buttonSetup) {
+        while (!wrapper.isConnected && Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
+        wrapper.classList.remove("guthon-minimized-script-editor");
+      } else {
+        while (!opener && Date.now() < deadline) {
+          opener = Array.from(document.querySelectorAll("*")).map(getVueInstance).find((vm) =>
+            typeof vm?.showScriptEditPage === "function"
+            && vm.script
+            && `${vm.script.id}:${vm.script.scriptItem?.name}` === scriptKey
+          );
+          if (!opener) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        }
+        if (!opener) {
+          return;
+        }
       }
-      if (!opener) {
-        return;
-      }
-      const inputDialog = opener.$refs?.scriptEditPage?.$refs?.editor;
+      const inputDialog = buttonSetup?.$refs?.editor || opener.$refs?.scriptEditPage?.$refs?.editor;
       if (inputDialog?.isDialogShow) {
         inputDialog.isDialogShow = false;
         await new Promise((resolve) => {
-          if (typeof opener.$nextTick === "function") {
-            opener.$nextTick(resolve);
+          const vm = buttonSetup || opener;
+          if (typeof vm.$nextTick === "function") {
+            vm.$nextTick(resolve);
           } else {
             setTimeout(resolve);
           }
         });
       }
-      opener.showScriptEditPage();
+      if (buttonSetup) {
+        inputDialog?.show?.();
+      } else {
+        opener.showScriptEditPage();
+      }
       let restoredEditor;
       while (!restoredEditor && Date.now() < deadline) {
-        const restoredElement = Array.from(document.querySelectorAll(".el-dialog__wrapper .script-editor")).find(
+        const restoredElements = buttonSetup
+          ? wrapper.querySelectorAll(".script-editor")
+          : document.querySelectorAll(".el-dialog__wrapper .script-editor");
+        const restoredElement = Array.from(restoredElements).find(
           (item) => item.offsetWidth || item.offsetHeight || item.getClientRects?.().length
         );
         const vm = getVueInstance(restoredElement);
@@ -339,12 +380,36 @@
         restoredEditor.setValue(minimizedScriptEditor.text);
       }
       restoredEditor.layout?.();
-      Array.from(document.querySelectorAll(".guthon-minimized-script-mask"))
-        .forEach((item) => item.classList.remove("guthon-minimized-script-mask"));
-      wrapper.classList.remove("guthon-minimized-script-editor");
-      bar.remove();
-      minimizedScriptEditor = null;
+      finish();
     };
+    closeButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      sourceDialog?.close?.();
+      finish();
+    });
+    bar.addEventListener("mousedown", (event) => {
+      if (event.button !== 0 || event.target.closest("button")) {
+        return;
+      }
+      const rect = bar.getBoundingClientRect();
+      const offsetX = event.clientX - rect.left;
+      const offsetY = event.clientY - rect.top;
+      bar.style.left = `${rect.left}px`;
+      bar.style.top = `${rect.top}px`;
+      bar.style.transform = "none";
+      const move = (moveEvent) => {
+        bar.style.left = `${Math.max(8, Math.min(window.innerWidth - rect.width - 8, moveEvent.clientX - offsetX))}px`;
+        bar.style.top = `${Math.max(8, Math.min(window.innerHeight - rect.height - 8, moveEvent.clientY - offsetY))}px`;
+      };
+      const stop = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", stop);
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", stop);
+      event.preventDefault();
+    });
     wrapper.classList.add("guthon-minimized-script-editor");
     mask?.classList.add("guthon-minimized-script-mask");
     bar.addEventListener("dblclick", restore);
@@ -1446,7 +1511,9 @@
     .guthon-procedure-link{color:#409eff!important;cursor:pointer!important}
     .guthon-minimized-script-mask{display:none!important}
     .guthon-minimized-script-editor{display:none!important}
-    .guthon-minimized-script-bar{position:fixed;top:12px;left:50%;width:min(760px,calc(100vw - 32px));height:44px;transform:translateX(-50%);box-sizing:border-box;padding:11px 18px;border:1px solid #409eff;border-radius:4px;background:#fff;color:#409eff;text-align:center;font-size:16px;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,.25);z-index:3000}
+    .guthon-minimized-script-bar{position:fixed;top:12px;left:50%;display:flex;align-items:center;gap:10px;width:auto;max-width:calc(100vw - 32px);height:36px;transform:translateX(-50%);box-sizing:border-box;padding:6px 7px 6px 14px;border:1px solid #409eff;border-radius:4px;background:#fff;color:#409eff;white-space:nowrap;font-size:14px;cursor:move;box-shadow:0 2px 12px rgba(0,0,0,.25);z-index:3000}
+    .guthon-minimized-script-close{width:22px;height:22px;padding:0;border:0;border-radius:3px;background:transparent;color:#909399;font-size:20px;line-height:20px;cursor:pointer}
+    .guthon-minimized-script-close:hover{background:#f2f6fc;color:#f56c6c}
   `;
   (document.head || document.documentElement).appendChild(navigationStyle);
   const navigationApi = {
@@ -1471,5 +1538,5 @@
       delete window.GuthonProcedureNavigation;
     }
   };
-  window.__guthonPageBridgeReady = "20260717e";
+  window.__guthonPageBridgeReady = "20260717g";
 })();

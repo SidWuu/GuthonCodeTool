@@ -1,5 +1,23 @@
 const BRIDGE_BASE = "http://127.0.0.1:17361";
 
+importScripts("host-config.js");
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.tabs.query({}, (tabs) => {
+    tabs.filter((tab) => tab.id && GuthonBridgeHost.isAllowed(tab.url)).forEach((tab) => {
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["fields-mover-core.js", "page-bridge.js"],
+        world: "MAIN"
+      }).catch(() => {});
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["host-config.js", "content.js"]
+      }).catch(() => {});
+    });
+  });
+});
+
 async function postJson(path, payload) {
   const response = await fetch(`${BRIDGE_BASE}${path}`, {
     method: "POST",
