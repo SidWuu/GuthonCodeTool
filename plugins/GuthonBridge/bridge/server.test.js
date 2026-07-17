@@ -678,7 +678,7 @@ test("page bridge uses popup-compatible procedure search strategy", () => {
   assert.equal(pageBridge.includes("resolveProcedure(searchResult, payload.procedureKeyword, payload.funId)"), true);
 });
 
-test("page bridge resolves and opens Ctrl-click procedure targets", async () => {
+test("page bridge resolves and opens native-modifier procedure targets", async () => {
   const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
   const window = {
     addEventListener() {},
@@ -703,6 +703,7 @@ test("page bridge resolves and opens Ctrl-click procedure targets", async () => 
   };
   vm.runInNewContext(pageBridge, context);
   const resolve = window.GuthonProcedureNavigation.resolveProcedureTarget;
+  const isModifier = window.GuthonProcedureNavigation.isProcedureNavigationModifier;
   const invoke = '$vs.proc.invoke("com.golden.demo.common", "saveForecast", $params);';
   const binding = "#set($proc=$vs.proc.find('com.golden.demo.back'))\n$proc.updateBacknum($map);";
 
@@ -715,6 +716,11 @@ test("page bridge resolves and opens Ctrl-click procedure targets", async () => 
     { procedureKeyword: "com.golden.demo.back", funId: "updateBacknum" }
   );
   assert.equal(resolve("$vs.proc.invoke($package, $method, $params);", 25), null);
+  window.navigator = { platform: "MacIntel" };
+  assert.equal(isModifier({ metaKey: true }), true);
+  assert.equal(isModifier({ ctrlKey: true }), false);
+  window.navigator = { platform: "Win32" };
+  assert.equal(isModifier({ ctrlKey: true }), true);
   let treeNode = null;
   let located = null;
   const developVm = {
@@ -743,6 +749,73 @@ test("page bridge resolves and opens Ctrl-click procedure targets", async () => 
   });
   assert.equal(developVm.openTabs[0].id, "PR-1@saveForecast");
   assert.equal(located.id, "PR-1@saveForecast");
+  assert.equal(located.dataSourceId, "0015");
+  const liveDevelopVm = { $options: { name: "gdpaas_dev_procedure_develop" }, onOpenPage() {} };
+  context.document.querySelectorAll = () => [{ __vue__: { _vnode: { componentInstance: liveDevelopVm } } }];
+  assert.equal(window.GuthonProcedureNavigation.findProcedureDevelopVm(), liveDevelopVm);
+  const classes = new Set();
+  const maskClasses = new Set();
+  let restore;
+  let routedBack = false;
+  let editorLayout = false;
+  let restoredText = "saved";
+  let dialogReset = false;
+  let editorOpened = false;
+  const bar = {
+    addEventListener: (_event, handler) => { restore = handler; },
+    remove() {}
+  };
+  const owner = {
+    script: { id: "save", scriptItem: { name: "beforeSave" } },
+    $refs: { scriptEditPage: { $refs: { editor: { isDialogShow: true } } } },
+    $nextTick(callback) { callback(); },
+    showScriptEditPage() {
+      dialogReset = this.$refs.scriptEditPage.$refs.editor.isDialogShow === false;
+      editorOpened = true;
+    }
+  };
+  const dialogWrapper = {
+    classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name) },
+    __vue__: { $parent: owner }
+  };
+  const dialogMask = {
+    offsetWidth: 1,
+    classList: { add: (name) => maskClasses.add(name), remove: (name) => maskClasses.delete(name) }
+  };
+  const editorElement = {
+    __vue__: { editor: { getValue: () => "unsaved" } },
+    closest: () => dialogWrapper
+  };
+  const restoredElement = {
+    offsetWidth: 1,
+    __vue__: { editor: {
+      getValue: () => restoredText,
+      setValue: (value) => { restoredText = value; },
+      layout: () => { editorLayout = true; }
+    } }
+  };
+  context.document.createElement = () => bar;
+  context.document.body = { appendChild() {} };
+  context.document.querySelectorAll = (selector) => {
+    if (selector === ".v-modal" || selector === ".guthon-minimized-script-mask") return [dialogMask];
+    if (selector === ".el-dialog__wrapper .script-editor") return [restoredElement];
+    return [
+      { __vue__: { $router: { push: async () => { routedBack = true; } } } },
+      { __vue__: owner }
+    ];
+  };
+  window.GuthonProcedureNavigation.minimizeScriptEditor(editorElement);
+  assert.equal(classes.has("guthon-minimized-script-editor"), true);
+  assert.equal(maskClasses.has("guthon-minimized-script-mask"), true);
+  await restore({ preventDefault() {}, stopPropagation() {} });
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.equal(routedBack, true);
+  assert.equal(classes.size, 0);
+  assert.equal(maskClasses.size, 0);
+  assert.equal(restoredText, "unsaved");
+  assert.equal(editorLayout, true);
+  assert.equal(dialogReset, true);
+  assert.equal(editorOpened, true);
   assert.equal(pageBridge.includes('document.addEventListener("contextmenu", onContextMenu, true)'), true);
   assert.equal(pageBridge.includes("editor.onMouseMove?.("), true);
   assert.equal(pageBridge.includes("color:#409eff!important;cursor:pointer!important"), true);

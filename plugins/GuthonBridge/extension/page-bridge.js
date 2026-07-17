@@ -137,7 +137,10 @@
   }
 
   function findProcedureDevelopVm() {
-    return Array.from(document.querySelectorAll("*")).map(getVueInstance).find(
+    return Array.from(document.querySelectorAll("*")).flatMap((element) => {
+      const vm = getVueInstance(element);
+      return [vm, vm?._vnode?.componentInstance];
+    }).find(
       (vm) => vm?.$options?.name === "gdpaas_dev_procedure_develop" && typeof vm.onOpenPage === "function"
     );
   }
@@ -174,6 +177,7 @@
     if (!treeNode) {
       throw new Error(`过程树中未找到函数: ${target.procedureName}.${target.funId}`);
     }
+    treeNode.dataSourceId = target.dataSourceId;
     developVm.toLocation?.(treeNode);
     setTimeout(() => {
       developVm.$refs?.tree?.$el?.querySelector(".el-tree-node.is-current")?.scrollIntoView?.({ block: "center", inline: "nearest" });
@@ -182,6 +186,7 @@
 
   async function openProcedureTarget(target) {
     let developVm = findProcedureDevelopVm();
+    const routed = !developVm;
     if (!developVm) {
       const router = findVueRouter();
       if (!router) {
@@ -195,18 +200,18 @@
         }
       }
       const deadline = Date.now() + 8000;
-      while (!developVm && Date.now() < deadline) {
+      while ((!developVm || !developVm.datasources?.length) && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 100));
         developVm = findProcedureDevelopVm();
       }
     }
-    if (!developVm) {
+    if (!developVm || (routed && !developVm.datasources?.length)) {
       throw new Error("过程函数页面加载超时");
     }
     await openProcedureInVm(developVm, target);
   }
 
-  async function navigateToProcedure(target) {
+  async function navigateToProcedure(target, editorElement) {
     const searchResult = await postForm("/develop/procedure/admin/search.htm", { keyword: target.funId });
     if (searchResult.code && searchResult.code !== 0) {
       throw new Error(searchResult.message || "搜索过程函数失败");
@@ -215,6 +220,7 @@
     if (!procedure.dataSourceId) {
       throw new Error(`未解析到过程函数数据源: ${target.procedureKeyword}.${target.funId}`);
     }
+    minimizeScriptEditor(editorElement);
     await openProcedureTarget({ ...procedure, funId: target.funId });
   }
 
@@ -222,6 +228,7 @@
   const navigationDisposables = [];
   const navigationDecorations = new Map();
   let navigationBusy = false;
+  let minimizedScriptEditor = null;
   let suppressContextMenuUntil = 0;
 
   function setProcedureLink(editor, hit) {
@@ -244,8 +251,109 @@
     navigationDecorations.forEach((_decorations, editor) => setProcedureLink(editor, null));
   }
 
+  function isProcedureNavigationModifier(event) {
+    return Boolean(/Mac|iPhone|iPad|iPod/.test(window.navigator?.platform || "")
+      ? event?.metaKey
+      : event?.ctrlKey);
+  }
+
+  function minimizeScriptEditor(element) {
+    const wrapper = element?.closest?.(".el-dialog__wrapper");
+    if (!wrapper || minimizedScriptEditor?.wrapper === wrapper) {
+      return;
+    }
+    const editorVm = getVueInstance(element);
+    const editor = editorVm?.editor || editorVm?.$refs?.editor?.editor;
+    let owner = getVueInstance(wrapper);
+    while (owner && typeof owner.showScriptEditPage !== "function") {
+      owner = owner.$parent;
+    }
+    const scriptKey = owner?.script
+      ? `${owner.script.id}:${owner.script.scriptItem?.name}`
+      : "";
+    if (!editor?.getValue || !scriptKey) {
+      return;
+    }
+    const mask = Array.from(document.querySelectorAll(".v-modal")).find(
+      (item) => item.offsetWidth || item.offsetHeight || item.getClientRects?.().length
+    );
+    const bar = document.createElement("div");
+    bar.className = "guthon-minimized-script-bar";
+    bar.textContent = "代码编辑（双击返回模块开发）";
+    const restore = async (event) => {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      const router = findVueRouter();
+      if (!router) {
+        return;
+      }
+      try {
+        await router.push({ name: "gdpaas_dev_modules" });
+      } catch (error) {
+        if (!/redundant|duplicated/i.test(error?.message || "")) {
+          return;
+        }
+      }
+      const deadline = Date.now() + 8000;
+      let opener;
+      while (!opener && Date.now() < deadline) {
+        opener = Array.from(document.querySelectorAll("*")).map(getVueInstance).find((vm) =>
+          typeof vm?.showScriptEditPage === "function"
+          && vm.script
+          && `${vm.script.id}:${vm.script.scriptItem?.name}` === scriptKey
+        );
+        if (!opener) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      if (!opener) {
+        return;
+      }
+      const inputDialog = opener.$refs?.scriptEditPage?.$refs?.editor;
+      if (inputDialog?.isDialogShow) {
+        inputDialog.isDialogShow = false;
+        await new Promise((resolve) => {
+          if (typeof opener.$nextTick === "function") {
+            opener.$nextTick(resolve);
+          } else {
+            setTimeout(resolve);
+          }
+        });
+      }
+      opener.showScriptEditPage();
+      let restoredEditor;
+      while (!restoredEditor && Date.now() < deadline) {
+        const restoredElement = Array.from(document.querySelectorAll(".el-dialog__wrapper .script-editor")).find(
+          (item) => item.offsetWidth || item.offsetHeight || item.getClientRects?.().length
+        );
+        const vm = getVueInstance(restoredElement);
+        restoredEditor = vm?.editor || vm?.$refs?.editor?.editor;
+        if (!restoredEditor) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      if (!restoredEditor) {
+        return;
+      }
+      if (restoredEditor.getValue() !== minimizedScriptEditor.text) {
+        restoredEditor.setValue(minimizedScriptEditor.text);
+      }
+      restoredEditor.layout?.();
+      Array.from(document.querySelectorAll(".guthon-minimized-script-mask"))
+        .forEach((item) => item.classList.remove("guthon-minimized-script-mask"));
+      wrapper.classList.remove("guthon-minimized-script-editor");
+      bar.remove();
+      minimizedScriptEditor = null;
+    };
+    wrapper.classList.add("guthon-minimized-script-editor");
+    mask?.classList.add("guthon-minimized-script-mask");
+    bar.addEventListener("dblclick", restore);
+    document.body.appendChild(bar);
+    minimizedScriptEditor = { wrapper, mask, bar, restore, scriptKey, text: editor.getValue() };
+  }
+
   function onNavigationKeyUp(event) {
-    if (event.key === "Control") {
+    if (event.key === "Control" || event.key === "Meta") {
       clearProcedureLinks();
     }
   }
@@ -269,7 +377,7 @@
       navigationEditors.add(editor);
       navigationDisposables.push(editor.onMouseMove?.((event) => {
         const browserEvent = event.event?.browserEvent;
-        const hit = browserEvent?.ctrlKey && event.target?.position
+        const hit = isProcedureNavigationModifier(browserEvent) && event.target?.position
           ? getProcedureTargetAtPosition(editor, event.target.position)
           : null;
         setProcedureLink(editor, hit);
@@ -278,7 +386,7 @@
       navigationDisposables.push(editor.onMouseDown(async (event) => {
         const browserEvent = event.event?.browserEvent;
         const position = event.target?.position;
-        if (!browserEvent?.ctrlKey || browserEvent.button !== 0 || !position || navigationBusy) {
+        if (!isProcedureNavigationModifier(browserEvent) || browserEvent.button !== 0 || !position || navigationBusy) {
           return;
         }
         const hit = getProcedureTargetAtPosition(editor, position);
@@ -290,7 +398,7 @@
         suppressContextMenuUntil = Date.now() + 500;
         navigationBusy = true;
         try {
-          await navigateToProcedure(hit.target);
+          await navigateToProcedure(hit.target, element);
         } catch {
           // 跳转结果由平台页面本身体现，不占用源码拉取提示区域。
         } finally {
@@ -1334,9 +1442,20 @@
   document.addEventListener("contextmenu", onContextMenu, true);
   document.addEventListener("keyup", onNavigationKeyUp);
   const navigationStyle = document.createElement("style");
-  navigationStyle.textContent = ".guthon-procedure-link{color:#409eff!important;cursor:pointer!important}";
+  navigationStyle.textContent = `
+    .guthon-procedure-link{color:#409eff!important;cursor:pointer!important}
+    .guthon-minimized-script-mask{display:none!important}
+    .guthon-minimized-script-editor{display:none!important}
+    .guthon-minimized-script-bar{position:fixed;top:12px;left:50%;width:min(760px,calc(100vw - 32px));height:44px;transform:translateX(-50%);box-sizing:border-box;padding:11px 18px;border:1px solid #409eff;border-radius:4px;background:#fff;color:#409eff;text-align:center;font-size:16px;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,.25);z-index:3000}
+  `;
   (document.head || document.documentElement).appendChild(navigationStyle);
-  const navigationApi = { resolveProcedureTarget, openProcedureInVm };
+  const navigationApi = {
+    resolveProcedureTarget,
+    findProcedureDevelopVm,
+    isProcedureNavigationModifier,
+    minimizeScriptEditor,
+    openProcedureInVm
+  };
   window.GuthonProcedureNavigation = navigationApi;
   installProcedureNavigation();
   const navigationInterval = setInterval(installProcedureNavigation, 1000);
@@ -1352,5 +1471,5 @@
       delete window.GuthonProcedureNavigation;
     }
   };
-  window.__guthonPageBridgeReady = "20260716f";
+  window.__guthonPageBridgeReady = "20260717e";
 })();
