@@ -1,7 +1,7 @@
 {
   "name": "gushen-vscode-completion",
   "displayName": "Gushen VS Code Completion",
-  "description": "Local VS Code completion provider for Gushen dialect APIs.",
+  "description": "Local VS Code completions and hover documentation for Gushen dialect APIs.",
   "version": "0.1.0",
   "publisher": "gushen-local",
   "private": true,

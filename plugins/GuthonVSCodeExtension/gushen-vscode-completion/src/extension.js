@@ -3,6 +3,7 @@ const path = require('node:path');
 const vscode = require('vscode');
 const {
   filterItems,
+  findHoverItems,
   getCurrentWord,
   itemBodyToSnippet,
   itemDocumentation,
@@ -88,6 +89,26 @@ function createDefinitionProvider() {
   };
 }
 
+function createHoverProvider(context) {
+  const data = loadData(context);
+
+  return {
+    provideHover(document, position) {
+      const range = document.getWordRangeAtPosition(
+        position,
+        /[$A-Za-z_][\w$]*(?:\.[A-Za-z_]\w*)+/
+      );
+      if (!range) return undefined;
+
+      const items = findHoverItems(data, document.languageId, document.getText(range));
+      if (!items.length) return undefined;
+
+      const documentation = [...new Set(items.map(itemDocumentation))].join('\n\n---\n\n');
+      return new vscode.Hover(new vscode.MarkdownString(documentation), range);
+    },
+  };
+}
+
 function activate(context) {
   const provider = createProvider(context);
   const selector = createDocumentSelector(SUPPORTED_LANGUAGES, SUPPORTED_SCHEMES);
@@ -101,8 +122,12 @@ function activate(context) {
     createDocumentSelector(['java'], SUPPORTED_SCHEMES),
     createDefinitionProvider()
   );
+  const hoverDisposable = vscode.languages.registerHoverProvider(
+    selector,
+    createHoverProvider(context)
+  );
 
-  context.subscriptions.push(disposable, definitionDisposable);
+  context.subscriptions.push(disposable, definitionDisposable, hoverDisposable);
 }
 
 function deactivate() {}
@@ -110,6 +135,7 @@ function deactivate() {}
 module.exports = {
   activate,
   createDefinitionProvider,
+  createHoverProvider,
   createProvider,
   deactivate,
 };

@@ -4,6 +4,7 @@ const manualData = require('../data/manual.json');
 
 const {
   resolveRoute,
+  findHoverItems,
   filterItems,
   itemBodyToSnippet,
   itemDocumentation,
@@ -349,4 +350,12 @@ test('builds documentation from body followed by description', () => {
     }),
     '```gushen\n#if ($1)\n    $2\n#end\n```\n\n谷神后端脚本 if 判断'
   );
+});
+
+test('finds API overloads for hover documentation in the current language', () => {
+  assert.deepEqual(
+    findHoverItems(data, 'java', '$vs.proc.callMainPageFind').map((item) => item.description),
+    ['调用主页面报表查询接口查询数据']
+  );
+  assert.deepEqual(findHoverItems(data, 'sql', '$vs.proc.callMainPageFind'), []);
 });

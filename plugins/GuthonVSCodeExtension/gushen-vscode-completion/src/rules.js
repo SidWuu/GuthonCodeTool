@@ -79,6 +79,10 @@ function bodyCallPath(body) {
   return open === -1 ? text : text.slice(0, open);
 }
 
+function findHoverItems(data, languageId, api) {
+  return (data[languageId] || []).filter((item) => bodyCallPath(item.body) === api);
+}
+
 function segmentMatchRank(value, typed) {
   const text = normalizeKey(value);
   const segments = splitSegments(value);
@@ -331,6 +335,7 @@ function itemSortText(item, route, currentWord) {
 
 module.exports = {
   filterItems,
+  findHoverItems,
   getCurrentWord,
   itemBodyToSnippet,
   itemDocumentation,
