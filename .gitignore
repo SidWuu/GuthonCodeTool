@@ -1,4 +1,5 @@
-var/
+var/*
+!var/README.md
 config/*.yaml
 !config/*.example.yaml
 config/*.json

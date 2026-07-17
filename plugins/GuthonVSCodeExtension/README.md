@@ -1,16 +1,8 @@
-# 谷神代码补全 VS Code 扩展
+# 谷神 VS Code 扩展
 
-本目录用于存放谷神方言代码补全的 VS Code 本地扩展。扩展不依赖 IntelliCode，也不调用 Copilot，补全数据随扩展离线提供。
+本目录用于存放谷神方言 VS Code 本地扩展，目前支持代码补全和本地过程函数源码快捷跳转。扩展不依赖 IntelliCode，也不调用 Copilot，补全数据随扩展离线提供。
 
-## 目录结构
-
-```text
-plugins/GuthonVSCodeExtension/
-  README.md                  给同事看的安装、使用、维护说明
-  gushen-vscode-completion/  VS Code 扩展源码和打包产物
-```
-
-## 已支持的补全
+## 代码补全
 
 - 默认按当前文件类型补全：
   - Java 文件使用 `java` API 数据。
@@ -34,6 +26,19 @@ plugins/GuthonVSCodeExtension/
   - 左侧候选列表显示补全前缀和简短说明。
   - 右侧说明面板显示补全 body，然后换行显示完整 description。
 - 支持已保存文件和未保存临时文件。临时文件需要手动把语言模式切到 `Java`、`JavaScript` 或 `SQL`。
+
+## 本地源码快捷跳转
+
+使用 VS Code 打开包含本地谷神源码的工作区后，可以从 Java 后端脚本中的以下过程函数调用跳转到对应源码：
+
+```java
+$vs.proc.invoke("过程别名", "函数名", $参数)
+
+#set($proc = $vs.proc.find("过程别名"))
+$proc.函数名($参数)
+```
+
+将光标放在函数名上，通过 `Cmd+Click`（macOS）、`Ctrl+Click`（Windows/Linux）或 `F12` 执行“转到定义”。目前仅支持过程别名和函数名为固定字符串的调用。
 
 ## 安装方式
 
