@@ -82,7 +82,6 @@ plugins/GuthonBridge/   Chrome 扩展和本地桥接服务
 scripts/                源码、表结构、单据类型脚本
 tests/                  Python 脚本测试
 var/                    本地私有数据和源码仓库，根仓库忽略
-开发文档.md              源码 Hub 当前实现口径
 ```
 
 `scripts/temp/` 存放旧工具脚本，仅作迁移参考，不作为新功能入口。
@@ -318,4 +317,3 @@ node --check extension/background.js
 - [config/README.md](config/README.md)
 - [plugins/GuthonBridge/README.md](plugins/GuthonBridge/README.md)
 - [var/README.md](var/README.md)
-- [开发文档.md](开发文档.md)
