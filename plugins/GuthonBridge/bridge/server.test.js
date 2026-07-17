@@ -647,6 +647,7 @@ test("floating pull waits for page bridge injection before posting commands", ()
   assert.equal(contentScript.includes("return { ok: false, message: error?.message || String(error) };"), true);
   assert.equal(contentScript.includes('injectPageScript("fields-mover-core.js")'), true);
   assert.equal(contentScript.includes('injectPageScript("page-bridge.js")'), true);
+  assert.equal(contentScript.includes("if (isModuleRoute() || isProcedureRoute())"), true);
 });
 
 test("popup waits for storage.local output directory persistence", () => {
@@ -687,6 +688,7 @@ test("page bridge uses popup-compatible procedure search strategy", () => {
 
   assert.equal(pageBridge.includes("keyword: payload.funId"), true);
   assert.equal(pageBridge.includes("resolveProcedure(searchResult, payload.procedureKeyword, payload.funId)"), true);
+  assert.equal(pageBridge.includes("[vm?.editor || vm?.$refs?.editor?.editor, vm?.viewer].filter(Boolean)"), true);
 });
 
 test("page bridge resolves and opens native-modifier procedure targets", async () => {
@@ -714,6 +716,7 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   };
   vm.runInNewContext(pageBridge, context);
   const resolve = window.GuthonProcedureNavigation.resolveProcedureTarget;
+  const resolveLocal = window.GuthonProcedureNavigation.resolveLocalFunctionTarget;
   const isModifier = window.GuthonProcedureNavigation.isProcedureNavigationModifier;
   const invoke = '$vs.proc.invoke("com.golden.demo.common", "saveForecast", $params);';
   const binding = "#set($proc=$vs.proc.find('com.golden.demo.back'))\n$proc.updateBacknum($map);";
@@ -727,6 +730,12 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
     { procedureKeyword: "com.golden.demo.back", funId: "updateBacknum" }
   );
   assert.equal(resolve("$vs.proc.invoke($package, $method, $params);", 25), null);
+  const local = "@insertBankrollTmp($form);\n\n#function insertBankrollTmp($form)\n#end";
+  assert.deepEqual(
+    { ...resolveLocal(local, local.indexOf("insertBankrollTmp")) },
+    { funId: "insertBankrollTmp", lineNumber: 3 }
+  );
+  assert.equal(resolveLocal("insertBankrollTmp($form);", 0), null);
   window.navigator = { platform: "MacIntel" };
   assert.equal(isModifier({ metaKey: true }), true);
   assert.equal(isModifier({ ctrlKey: true }), false);

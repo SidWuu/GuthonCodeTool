@@ -72,7 +72,7 @@ async function ensurePageBridge() {
   async function injectPageScript(name) {
     await new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `${runtime.getURL(name)}?v=20260717g`;
+      script.src = `${runtime.getURL(name)}?v=20260717i`;
       script.dataset.source = "guthon-bridge";
       script.onload = () => { script.remove(); resolve(); };
       script.onerror = () => { script.remove(); reject(new Error("页面桥接脚本加载失败")); };
@@ -1550,7 +1550,7 @@ async function refreshToolbarButtons() {
 
     installTreeAutoScroll();
 
-    if (isModuleRoute()) {
+    if (isModuleRoute() || isProcedureRoute()) {
       await ensurePageBridge();
     }
     if (isModuleRoute() || isProcedureRoute() || isDataTableRoute() || isBillTypeRoute()) {

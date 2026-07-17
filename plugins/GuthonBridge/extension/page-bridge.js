@@ -125,6 +125,18 @@
     return procedureKeyword ? { procedureKeyword, funId: word } : null;
   }
 
+  function resolveLocalFunctionTarget(source, offset) {
+    if (typeof source !== "string" || !Number.isInteger(offset) || source[offset - 1] !== "@") {
+      return null;
+    }
+    const funId = source.slice(offset).match(/^[A-Za-z_]\w*/)?.[0];
+    const definition = funId && new RegExp(`^[\\t ]*#function\\s+${funId}\\s*\\(`, "m").exec(source);
+    return definition ? {
+      funId,
+      lineNumber: source.slice(0, definition.index).split(/\r?\n/).length
+    } : null;
+  }
+
   function getProcedureTargetAtPosition(editor, position) {
     const model = editor.getModel?.();
     const word = model?.getWordAtPosition?.(position);
@@ -132,6 +144,10 @@
       return null;
     }
     const offset = model.getOffsetAt({ lineNumber: position.lineNumber, column: word.startColumn });
+    const local = resolveLocalFunctionTarget(model.getValue(), offset);
+    if (local) {
+      return { local, word, lineNumber: position.lineNumber };
+    }
     const target = resolveProcedureTarget(model.getValue(), offset);
     return target ? { target, word, lineNumber: position.lineNumber } : null;
   }
@@ -435,41 +451,48 @@
   function installProcedureNavigation() {
     Array.from(document.querySelectorAll(".script-editor")).forEach((element) => {
       const vm = getVueInstance(element);
-      const editor = vm?.editor || vm?.$refs?.editor?.editor;
-      if (!editor?.onMouseDown || navigationEditors.has(editor)) {
-        return;
-      }
-      navigationEditors.add(editor);
-      navigationDisposables.push(editor.onMouseMove?.((event) => {
-        const browserEvent = event.event?.browserEvent;
-        const hit = isProcedureNavigationModifier(browserEvent) && event.target?.position
-          ? getProcedureTargetAtPosition(editor, event.target.position)
-          : null;
-        setProcedureLink(editor, hit);
-      }));
-      navigationDisposables.push(editor.onMouseLeave?.(() => setProcedureLink(editor, null)));
-      navigationDisposables.push(editor.onMouseDown(async (event) => {
-        const browserEvent = event.event?.browserEvent;
-        const position = event.target?.position;
-        if (!isProcedureNavigationModifier(browserEvent) || browserEvent.button !== 0 || !position || navigationBusy) {
+      [vm?.editor || vm?.$refs?.editor?.editor, vm?.viewer].filter(Boolean).forEach((editor) => {
+        if (!editor?.onMouseDown || navigationEditors.has(editor)) {
           return;
         }
-        const hit = getProcedureTargetAtPosition(editor, position);
-        if (!hit) {
-          return;
-        }
-        browserEvent.preventDefault();
-        browserEvent.stopPropagation();
-        suppressContextMenuUntil = Date.now() + 500;
-        navigationBusy = true;
-        try {
-          await navigateToProcedure(hit.target, element);
-        } catch {
-          // 跳转结果由平台页面本身体现，不占用源码拉取提示区域。
-        } finally {
-          navigationBusy = false;
-        }
-      }));
+        navigationEditors.add(editor);
+        navigationDisposables.push(editor.onMouseMove?.((event) => {
+          const browserEvent = event.event?.browserEvent;
+          const hit = isProcedureNavigationModifier(browserEvent) && event.target?.position
+            ? getProcedureTargetAtPosition(editor, event.target.position)
+            : null;
+          setProcedureLink(editor, hit);
+        }));
+        navigationDisposables.push(editor.onMouseLeave?.(() => setProcedureLink(editor, null)));
+        navigationDisposables.push(editor.onMouseDown(async (event) => {
+          const browserEvent = event.event?.browserEvent;
+          const position = event.target?.position;
+          if (!isProcedureNavigationModifier(browserEvent) || browserEvent.button !== 0 || !position || navigationBusy) {
+            return;
+          }
+          const hit = getProcedureTargetAtPosition(editor, position);
+          if (!hit) {
+            return;
+          }
+          browserEvent.preventDefault();
+          browserEvent.stopPropagation();
+          suppressContextMenuUntil = Date.now() + 500;
+          navigationBusy = true;
+          try {
+            if (hit.local) {
+              editor.setPosition?.({ lineNumber: hit.local.lineNumber, column: 1 });
+              editor.revealLineInCenter?.(hit.local.lineNumber);
+              editor.focus?.();
+            } else {
+              await navigateToProcedure(hit.target, element);
+            }
+          } catch {
+            // 跳转结果由平台页面本身体现，不占用源码拉取提示区域。
+          } finally {
+            navigationBusy = false;
+          }
+        }));
+      });
     });
   }
 
@@ -1518,6 +1541,7 @@
   (document.head || document.documentElement).appendChild(navigationStyle);
   const navigationApi = {
     resolveProcedureTarget,
+    resolveLocalFunctionTarget,
     findProcedureDevelopVm,
     isProcedureNavigationModifier,
     minimizeScriptEditor,
@@ -1538,5 +1562,5 @@
       delete window.GuthonProcedureNavigation;
     }
   };
-  window.__guthonPageBridgeReady = "20260717g";
+  window.__guthonPageBridgeReady = "20260717i";
 })();
