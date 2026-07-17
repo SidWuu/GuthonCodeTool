@@ -13,6 +13,7 @@ const {
   resolveRoute,
 } = require('./rules');
 const { createDocumentSelector } = require('./selector');
+const { procedureTargetAt, selectDefinitionPaths } = require('./definition');
 
 const SUPPORTED_LANGUAGES = ['java', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled'];
@@ -73,6 +74,20 @@ function createProvider(context) {
   };
 }
 
+function createDefinitionProvider() {
+  return {
+    async provideDefinition(document, position) {
+      const target = procedureTargetAt(document.getText(), document.offsetAt(position));
+      if (!target) return undefined;
+      const pattern = `**/procedure/${target.alias}/${target.fun}/source.vm`;
+      const uris = await vscode.workspace.findFiles(pattern, '**/.guthon-baseline/**');
+      const selected = new Set(selectDefinitionPaths(uris.map((uri) => uri.fsPath), document.uri.fsPath));
+      return uris.filter((uri) => selected.has(uri.fsPath))
+        .map((uri) => new vscode.Location(uri, new vscode.Position(0, 0)));
+    },
+  };
+}
+
 function activate(context) {
   const provider = createProvider(context);
   const selector = createDocumentSelector(SUPPORTED_LANGUAGES, SUPPORTED_SCHEMES);
@@ -82,14 +97,19 @@ function activate(context) {
     '.',
     '$'
   );
+  const definitionDisposable = vscode.languages.registerDefinitionProvider(
+    createDocumentSelector(['java'], SUPPORTED_SCHEMES),
+    createDefinitionProvider()
+  );
 
-  context.subscriptions.push(disposable);
+  context.subscriptions.push(disposable, definitionDisposable);
 }
 
 function deactivate() {}
 
 module.exports = {
   activate,
+  createDefinitionProvider,
   createProvider,
   deactivate,
 };

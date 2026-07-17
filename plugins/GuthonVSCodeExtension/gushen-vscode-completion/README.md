@@ -16,6 +16,7 @@ This extension provides offline snippets and API completions for Gushen Java ser
   - Suggestion row shows the prefix and a short description.
   - Detail panel shows the snippet body and full description.
 - Works for saved files and untitled files when the language mode is `Java`, `JavaScript`, or `SQL`.
+- Opens local procedure sources from `$vs.proc.invoke(...)` and `$proc.*` calls with Go to Definition (`Cmd+Click` on macOS, `Ctrl+Click` on Windows/Linux, or `F12`).
 
 ## Configuration
 
