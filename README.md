@@ -155,6 +155,15 @@ rules:
 .venv/bin/python scripts/run_sync_once.py
 ```
 
+手动删除当前 ACTIVE 的 `var/source/readonly` 源码后，需要先删除对应同步游标，再重新全量同步。
+
+```bash
+sqlite3 var/runtime/index/products/demo-product.db "DELETE FROM gusen_sync_state WHERE state_key='last_success_time:products.demo-product';"
+.venv/bin/python scripts/run_sync_once.py
+```
+
+切换 ACTIVE 后，索引路径和 `last_success_time:<ACTIVE>` 必须同时改为对应产品或项目。
+
 从已有源码索引生成工作副本：
 
 ```bash

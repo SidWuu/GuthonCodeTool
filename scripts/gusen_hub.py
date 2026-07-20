@@ -992,8 +992,13 @@ def parse_page_scripts(base: Path, raw: str):
     out_dir = base / "scripts"
     out_dir.mkdir(exist_ok=True)
     scripts = []
-    for path, key, value in _walk_scripts(data):
-        ext = "sql" if key == "sql" else ("vm" if "SaveScript" in key or key in {"script", "doMethodScript", "compScript"} else "js")
+    for path, key, value, event_type in _walk_scripts(data):
+        if key == "sql":
+            ext = "sql"
+        elif event_type:
+            ext = "vm" if event_type == "serviceEvents" else "js"
+        else:
+            ext = "vm" if "SaveScript" in key or key in {"script", "doMethodScript", "compScript"} else "js"
         name = path_part(".".join(path[-2:] + [key])) if path else path_part(key)
         script_path = out_dir / f"{name}.{ext}"
         script_path.write_text(value, encoding="utf-8")
@@ -1001,7 +1006,7 @@ def parse_page_scripts(base: Path, raw: str):
     return scripts
 
 
-def _walk_scripts(value, path=None, inherited_scripts=None):
+def _walk_scripts(value, path=None, inherited_scripts=None, event_type=None):
     path = path or []
     if isinstance(value, dict):
         label = str(value.get("aliasName") or value.get("name") or value.get("id") or "")
@@ -1013,15 +1018,20 @@ def _walk_scripts(value, path=None, inherited_scripts=None):
                     inherited = value.get("superScript", "")
                 resolved = _resolve_inherited_script(child, inherited if isinstance(inherited, str) else "")
                 if resolved.strip() or (key == "compScript" and not child.strip()):
-                    yield next_path, key, resolved
+                    yield next_path, key, resolved, event_type
             elif key in EVENT_SUPERS.values():
                 continue
             else:
                 inherited = value.get(EVENT_SUPERS.get(key, ""), {})
-                yield from _walk_scripts(child, next_path, inherited if isinstance(inherited, dict) else None)
+                yield from _walk_scripts(
+                    child,
+                    next_path,
+                    inherited if isinstance(inherited, dict) else None,
+                    key if key in EVENT_SUPERS else event_type,
+                )
     elif isinstance(value, list):
         for child in value:
-            yield from _walk_scripts(child, path, inherited_scripts)
+            yield from _walk_scripts(child, path, inherited_scripts, event_type)
 
 
 CALL_PATTERNS = [

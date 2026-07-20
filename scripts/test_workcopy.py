@@ -174,6 +174,28 @@ class WorkCopyTest(unittest.TestCase):
                 [("afterSaveScript", "productAfterSave();\n"), ("formaterScript", "return productValue;\n")],
             )
 
+    def test_page_script_extension_uses_event_layer_without_breaking_inheritance(self):
+        with tempfile.TemporaryDirectory() as temp:
+            raw = json.dumps(
+                {
+                    "button": {
+                        "serviceEvents": {"beforeQueryScript": "@inherit();\n"},
+                        "superServiceEvents": {"beforeQueryScript": "$vs.log.info('product');\n"},
+                        "pageEvents": {"afterSaveScript": "self.refresh();\n"},
+                    }
+                }
+            )
+
+            scripts = parse_page_scripts(Path(temp), raw)
+
+            self.assertEqual(
+                [(key, path.suffix, value) for key, path, value in scripts],
+                [
+                    ("beforeQueryScript", ".vm", "$vs.log.info('product');\n"),
+                    ("afterSaveScript", ".js", "self.refresh();\n"),
+                ],
+            )
+
     def test_procedure_inherit_marker_uses_product_script(self):
         self.assertEqual(
             _resolve_inherited_script("@inherit();\n", "product\\script\n"),
