@@ -60,21 +60,21 @@
     "group": "gu",
     "prefix": "gu.closeTabWin",
     "body": "gUtil.closeTabWin(pageId,isForceClose,succfun)",
-    "description": "关闭指定的子页面 或主页面"
+    "description": "关闭指定的子页面（或主页面）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.confirm",
     "body": "gUtil.confirm(msg,okfun,cancelfun,title,morebnts)",
-    "description": "产生并显示一个选择 确定、取消 对话框"
+    "description": "产生并显示一个选择（确定、取消）对话框"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.copy",
     "body": "gUtil.copy(source,target)",
-    "description": "复制 合并 对象属性"
+    "description": "复制（合并）对象属性"
   },
   {
     "language": "javascript",
@@ -123,14 +123,14 @@
     "group": "gu",
     "prefix": "gu.downloadWebFile",
     "body": "gUtil.downloadWebFile(path,disName)",
-    "description": "从文件服务器上下载一个公有文件 注意 私有文件无法用此方法下载"
+    "description": "从文件服务器上下载一个公有文件（注意，私有文件无法用此方法下载)"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.downloadWebFile",
     "body": "gUtil.downloadWebFile(path)",
-    "description": "从文件服务器上下载一个公有文件 注意 私有文件无法用此方法下载"
+    "description": "从文件服务器上下载一个公有文件（注意，私有文件无法用此方法下载)"
   },
   {
     "language": "javascript",
@@ -144,14 +144,14 @@
     "group": "gu",
     "prefix": "gu.equals",
     "body": "gUtil.equals(a,b)",
-    "description": "判断两个值是否相同 区分大小写"
+    "description": "判断两个值是否相同（区分大小写）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.equalsIgnoreCase",
     "body": "gUtil.equalsIgnoreCase(a,b)",
-    "description": "判断两个值是否相同 不区分大小写"
+    "description": "判断两个值是否相同（不区分大小写）"
   },
   {
     "language": "javascript",
@@ -193,7 +193,7 @@
     "group": "gu",
     "prefix": "gu.getMonthDays",
     "body": "gUtil.getMonthDays(date)",
-    "description": "获取一个日期月份的天数 如 `gUtil.getMonthDays \"2020-02-13\" `返回29"
+    "description": "获取一个日期月份的天数，如：`gUtil.getMonthDays(\"2020-02-13\")`返回29"
   },
   {
     "language": "javascript",
@@ -212,6 +212,13 @@
   {
     "language": "javascript",
     "group": "gu",
+    "prefix": "gu.getMonthRange",
+    "body": "gUtil.getMonthRange(date)",
+    "description": "获取给定日期的前一月（1号 到 月末最后一天）"
+  },
+  {
+    "language": "javascript",
+    "group": "gu",
     "prefix": "gu.getPinYinCode",
     "body": "gUtil.getPinYinCode(str)",
     "description": "获取拼音"
@@ -221,7 +228,7 @@
     "group": "gu",
     "prefix": "gu.getServerData",
     "body": "gUtil.getServerData(compId,args)",
-    "description": "请求服务组件 同步调用 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` var params={code \"0000\"} var data=null try { data=gUtil.getServerData \"com.golden.jsCompId\" params } catch errmsg {// 服务器异常或者网络异常 gUtil.error errmsg return } console.log data ``\\"
+    "description": "请求服务组件（同步调用） **用 法**： ``` var params={code:\"0000\"}; var data=null; try { data=gUtil.getServerData(\"com.golden.jsCompId\",params); } catch(errmsg) {// 服务器异常或者网络异常 gUtil.error(errmsg); return; } console.log(data); ``"
   },
   {
     "language": "javascript",
@@ -242,14 +249,14 @@
     "group": "gu",
     "prefix": "gu.getSystemVarValue",
     "body": "gUtil.getSystemVarValue(systemId,varId,defValue)",
-    "description": "获取应用参数配置值 若为窗口JS代码 请调用快捷方法 $vm.getSystemVarValue"
+    "description": "获取应用参数配置值，若为窗口JS代码，请调用快捷方法： $vm.getSystemVarValue()"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.getSystemVarValue",
     "body": "gUtil.getSystemVarValue(systemId,varId)",
-    "description": "获取应用参数配置值 若为窗口JS代码 请调用快捷方法 $vm.getSystemVarValue"
+    "description": "获取应用参数配置值，若为窗口JS代码，请调用快捷方法： $vm.getSystemVarValue()"
   },
   {
     "language": "javascript",
@@ -270,28 +277,28 @@
     "group": "gu",
     "prefix": "gu.getUserAuths",
     "body": "gUtil.getUserAuths(mkId,auths,callback,pageId)",
-    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限 异步"
+    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限（异步）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.getUserAuths",
     "body": "gUtil.getUserAuths(mkId,auths,callback)",
-    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限 异步"
+    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限（异步）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.getUserAuthsSynch",
     "body": "gUtil.getUserAuthsSynch(mkId,auths,pageId)",
-    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限 同步"
+    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限（同步）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.getUserAuthsSynch",
     "body": "gUtil.getUserAuthsSynch(mkId,auths)",
-    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限 同步"
+    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限（同步）"
   },
   {
     "language": "javascript",
@@ -310,16 +317,30 @@
   {
     "language": "javascript",
     "group": "gu",
+    "prefix": "gu.getWeekRange",
+    "body": "gUtil.getWeekRange(date)",
+    "description": "获取给定日期的前一周（周一 至 周日）的起止日期"
+  },
+  {
+    "language": "javascript",
+    "group": "gu",
+    "prefix": "gu.getYearRange",
+    "body": "gUtil.getYearRange(date)",
+    "description": "获取给定日期的前一年（1月1号 到 年末最后一天）"
+  },
+  {
+    "language": "javascript",
+    "group": "gu",
     "prefix": "gu.GUID",
     "body": "gUtil.GUID()",
-    "description": "产生全球唯一码 `GUID\\"
+    "description": "产生全球唯一码（`GUID`）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.ifNull",
     "body": "gUtil.ifNull(obj,defaultValue)",
-    "description": "判断对象是否为空 若为空 则返回默认值 若非空则返回对象原值"
+    "description": "判断对象是否为空，若为空，则返回默认值；若非空则返回对象原值"
   },
   {
     "language": "javascript",
@@ -382,7 +403,7 @@
     "group": "gu",
     "prefix": "gu.isMobile",
     "body": "gUtil.isMobile()",
-    "description": "返回当前运行环境是否移动端 H5"
+    "description": "返回当前运行环境是否移动端(H5)"
   },
   {
     "language": "javascript",
@@ -438,14 +459,14 @@
     "group": "gu",
     "prefix": "gu.loadScript",
     "body": "gUtil.loadScript(url,callback,error)",
-    "description": "动态加载JS文件 一般在系统脚本中使用 不要在模块窗口中使用 容易导致重复加载"
+    "description": "动态加载JS文件（一般在系统脚本中使用，不要在模块窗口中使用，容易导致重复加载)"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.loadStyle",
     "body": "gUtil.loadStyle(url)",
-    "description": "动态加载CSS文件 一般在系统脚本中使用 不要在模块窗口中使用 容易导致重复加载"
+    "description": "动态加载CSS文件（一般在系统脚本中使用，不要在模块窗口中使用，容易导致重复加载)"
   },
   {
     "language": "javascript",
@@ -487,7 +508,7 @@
     "group": "gu",
     "prefix": "gu.openMultipleSubWin",
     "body": "gUtil.openMultipleSubWin(winId,pageId,params,openType,isClone,title)",
-    "description": "动态打开子页面 支持子页面多开"
+    "description": "动态打开子页面（支持子页面多开）"
   },
   {
     "language": "javascript",
@@ -495,6 +516,13 @@
     "prefix": "gu.openSideWin",
     "body": "gUtil.openSideWin(sideWinPageId,params,openType,callback,isBackDrop,title,isAppendToBody)",
     "description": "动态打对话框页面"
+  },
+  {
+    "language": "javascript",
+    "group": "gu",
+    "prefix": "gu.openSubWin",
+    "body": "gUtil.openSubWin(pageId,params,openType,isClone,title,callback,mkId)",
+    "description": "动态打开子页面"
   },
   {
     "language": "javascript",
@@ -515,21 +543,21 @@
     "group": "gu",
     "prefix": "gu.openWorkflowAuditWin",
     "body": "gUtil.openWorkflowAuditWin(billNo,billTypeCode,callback)",
-    "description": "打开谷神内置的审批窗口 侧边窗模式"
+    "description": "打开谷神内置的审批窗口（侧边窗模式）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.openWorkflowDesignWin",
     "body": "gUtil.openWorkflowDesignWin()",
-    "description": "打开审批流设计器 需要当前登录用户为管理员权限"
+    "description": "打开审批流设计器（需要当前登录用户为管理员权限）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.openWorkflowEntrustWin",
     "body": "gUtil.openWorkflowEntrustWin()",
-    "description": "打开审批委托 指派 窗口"
+    "description": "打开审批委托（指派）窗口"
   },
   {
     "language": "javascript",
@@ -550,14 +578,14 @@
     "group": "gu",
     "prefix": "gu.openWorkflowViewWin",
     "body": "gUtil.openWorkflowViewWin(billNo,billTypeCode)",
-    "description": "打开谷神内置的审批窗口 侧边窗模式 仅查看 无审核"
+    "description": "打开谷神内置的审批窗口（侧边窗模式，仅查看，无审核）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.playAudio",
     "body": "gUtil.playAudio(text)",
-    "description": "将文字转成语音并播放 需要启用华为AI"
+    "description": "将文字转成语音并播放（需要启用华为AI)"
   },
   {
     "language": "javascript",
@@ -578,7 +606,7 @@
     "group": "gu",
     "prefix": "gu.randomInt",
     "body": "gUtil.randomInt(max)",
-    "description": "返回[0 max]之间的整数"
+    "description": "返回[0,max]之间的整数"
   },
   {
     "language": "javascript",
@@ -592,28 +620,28 @@
     "group": "gu",
     "prefix": "gu.request",
     "body": "gUtil.request(compId,args,succfun,errfun,isDisShowLoadPage)",
-    "description": "请求服务组件 异步调用"
+    "description": "请求服务组件（异步调用）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.resetDialogHeight",
     "body": "gUtil.resetDialogHeight(pageId,height)",
-    "description": "重新计算对话框 及其内控件 的高度"
+    "description": "重新计算对话框（及其内控件）的高度"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.resetDialogHeight",
     "body": "gUtil.resetDialogHeight(pageId)",
-    "description": "重新计算对话框 及其内控件 的高度"
+    "description": "重新计算对话框（及其内控件）的高度"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.saveTempBill",
     "body": "gUtil.saveTempBill(page,compScriptId,extconfig,beforeSaveCheck,onBeforeSave,succCallback,errCallback)",
-    "description": "保存当前编辑页面 新增状态 为单据草稿"
+    "description": "保存当前编辑页面（新增状态)为单据草稿"
   },
   {
     "language": "javascript",
@@ -634,7 +662,7 @@
     "group": "gu",
     "prefix": "gu.showLoading",
     "body": "gUtil.showLoading(msg)",
-    "description": "显示加载动画 需要调用关闭方法关闭加载动画"
+    "description": "显示加载动画（需要调用关闭方法关闭加载动画）"
   },
   {
     "language": "javascript",
@@ -676,21 +704,21 @@
     "group": "gu",
     "prefix": "gu.trim",
     "body": "gUtil.trim(str)",
-    "description": "去掉给定字符串左右两边的不可见字符 空格、换行、回车、TAB等"
+    "description": "去掉给定字符串左右两边的不可见字符（空格、换行、回车、TAB等）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.trimLeft",
     "body": "gUtil.trimLeft(str)",
-    "description": "去掉给定字符串左边的不可见字符 空格、换行、回车、TAB等"
+    "description": "去掉给定字符串左边的不可见字符（空格、换行、回车、TAB等）"
   },
   {
     "language": "javascript",
     "group": "gu",
     "prefix": "gu.trimRight",
     "body": "gUtil.trimRight(str)",
-    "description": "去掉给定字符串右边的不可见字符 空格、换行、回车、TAB等"
+    "description": "去掉给定字符串右边的不可见字符（空格、换行、回车、TAB等）"
   },
   {
     "language": "javascript",
@@ -718,63 +746,63 @@
     "group": "self",
     "prefix": "self.button",
     "body": "self.button(bntAliasName)",
-    "description": "获取`button`操作对象"
+    "description": "获取`button`操作对象。"
   },
   {
     "language": "javascript",
     "group": "self",
     "prefix": "self.getIsChange",
     "body": "self.getIsChange()",
-    "description": "返回当前页面是否被修改"
+    "description": "返回当前页面是否被修改。"
   },
   {
     "language": "javascript",
     "group": "self",
     "prefix": "self.menuId",
     "body": "self.menuId",
-    "description": ""
+    "description": "页面打开菜单编码"
   },
   {
     "language": "javascript",
     "group": "self",
     "prefix": "self.openArgs",
     "body": "self.openArgs",
-    "description": ""
+    "description": "打开窗口时`args`参数"
   },
   {
     "language": "javascript",
     "group": "self",
     "prefix": "self.openType",
     "body": "self.openType",
-    "description": ""
+    "description": "打开窗口时`openType`参数"
   },
   {
     "language": "javascript",
     "group": "self",
     "prefix": "self.orgMenuId",
     "body": "self.orgMenuId",
-    "description": ""
+    "description": "页面所属菜单编码"
   },
   {
     "language": "javascript",
     "group": "self",
     "prefix": "self.pageId",
     "body": "self.pageId",
-    "description": ""
+    "description": "页面（html元素）ID，如：PG_C7BF_B6AB_52AC4ED6"
   },
   {
     "language": "javascript",
     "group": "self",
     "prefix": "self.parentPage",
     "body": "self.parentPage",
-    "description": ""
+    "description": "父级页面引用"
   },
   {
     "language": "javascript",
     "group": "self",
     "prefix": "self.systemId",
     "body": "self.systemId",
-    "description": ""
+    "description": "页面所属系统编码"
   },
   {
     "language": "javascript",
@@ -851,77 +879,77 @@
     "group": "vm",
     "prefix": "vm.closeDialog",
     "body": "$vm.closeDialog()",
-    "description": "关闭当前对话框窗口 注意 只能在弹窗和选窗中使用"
+    "description": "关闭当前对话框窗口（注意：只能在弹窗和选窗中使用）"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.closeSideWin",
     "body": "$vm.closeSideWin()",
-    "description": "关闭当前侧边框 注意 只能在侧边框中使用"
+    "description": "关闭当前侧边框（注意：只能在侧边框中使用）"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.dialogCallback",
     "body": "$vm.dialogCallback(data)",
-    "description": "弹窗 或选窗 返回数据给调用方页面 注意 本方法会触发dialog的关闭事件 若不需要关闭请调用`$vm.dialogCallbackWithNoClose\\"
+    "description": "弹窗（或选窗）返回数据给调用方页面（注意：本方法会触发dialog的关闭事件，若不需要关闭请调用`$vm.dialogCallbackWithNoClose`）"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.dialogCallbackWithNoClose",
     "body": "$vm.dialogCallbackWithNoClose(data)",
-    "description": "弹窗 或选窗 返回数据给调用方页面"
+    "description": "弹窗（或选窗）返回数据给调用方页面"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.emit",
     "body": "$vm.emit(type,data)",
-    "description": "元组件窗口触发事件调用父窗口方法 注意 本方法只能在元组件件内使用"
+    "description": "元组件窗口触发事件调用父窗口方法（注意：本方法只能在元组件件内使用）"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.export",
     "body": "$vm.export(callback,fileName,title)",
-    "description": "导出Excel文件"
+    "description": "导出Excel文件。"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.getSystemVarValue",
     "body": "$vm.getSystemVarValue(varId,defValue)",
-    "description": "获取应用参数配置值 本方法只可用于窗口JS脚本 非窗口 如 系统脚本 请调用 `gUtil.getSystemVarValue \\"
+    "description": "获取应用参数配置值，本方法只可用于窗口JS脚本，非窗口（如：系统脚本)，请调用 `gUtil.getSystemVarValue()"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.getSystemVarValue",
     "body": "$vm.getSystemVarValue(varId)",
-    "description": "获取应用参数配置值 本方法只可用于窗口JS脚本 非窗口 如 系统脚本 请调用 `gUtil.getSystemVarValue \\"
+    "description": "获取应用参数配置值，本方法只可用于窗口JS脚本，非窗口（如：系统脚本)，请调用 `gUtil.getSystemVarValue()"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.getUserAuths",
     "body": "$vm.getUserAuths(auths,callback)",
-    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限 异步"
+    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限（异步）"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.getUserAuthsSynch",
     "body": "$vm.getUserAuthsSynch(auths)",
-    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限 同步"
+    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限（同步）"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.maxDialog",
     "body": "$vm.maxDialog(isMax)",
-    "description": "最大化/最小化当前对话框窗口"
+    "description": "最大化/最小化当前对话框窗口。"
   },
   {
     "language": "javascript",
@@ -956,7 +984,7 @@
     "group": "vm",
     "prefix": "vm.remove",
     "body": "$vm.remove(editPageId,mainTable,delWhere,callback,isSilent)",
-    "description": "物理删除数据方法 不建议使用 推荐使用‘服务组件’来删除数据"
+    "description": "物理删除数据方法（不建议使用，推荐使用‘服务组件’来删除数据）"
   },
   {
     "language": "javascript",
@@ -970,14 +998,14 @@
     "group": "vm",
     "prefix": "vm.selPageAddRow",
     "body": "$vm.selPageAddRow(sourceTable,targetTable,row,samecols)",
-    "description": "将记录从`可选`添加到`已选` 注意 仅选窗支持本方法"
+    "description": "将记录从`可选`添加到`已选`；注意：仅选窗支持本方法。"
   },
   {
     "language": "javascript",
     "group": "vm",
     "prefix": "vm.selPageAddRow",
     "body": "$vm.selPageAddRow(sourceTable,targetTable,row)",
-    "description": "将记录从`可选`添加到`已选` 注意 仅选窗支持本方法"
+    "description": "将记录从`可选`添加到`已选`；注意：仅选窗支持本方法。"
   },
   {
     "language": "javascript",
@@ -989,23 +1017,9 @@
   {
     "language": "javascript",
     "group": "mt",
-    "prefix": "mt.isVisable",
-    "body": "MainTable.isVisable()",
-    "description": "查询当前控件是否隐藏状态"
-  },
-  {
-    "language": "javascript",
-    "group": "mt",
-    "prefix": "mt.setVisable",
-    "body": "MainTable.setVisable(isShow)",
-    "description": "显示/隐藏控件"
-  },
-  {
-    "language": "javascript",
-    "group": "mt",
     "prefix": "mt.addCell",
     "body": "MainTable.addCell(params)",
-    "description": "动态添加表格列"
+    "description": "动态添加表格列。"
   },
   {
     "language": "javascript",
@@ -1033,21 +1047,21 @@
     "group": "mt",
     "prefix": "mt.addOnChangeHook",
     "body": "MainTable.addOnChangeHook(remark)",
-    "description": "添加一个标记以阻止保存 $vm.save 除非标记移除后才会继续保持动作"
+    "description": "添加一个标记以阻止保存($vm.save)，除非标记移除后才会继续保持动作。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.andFilter",
     "body": "MainTable.andFilter(colName,value)",
-    "description": "添加设置过滤 保留原先的过滤"
+    "description": "添加设置过滤（保留原先的过滤）。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.andSort",
     "body": "MainTable.andSort(fieldId,order)",
-    "description": "追加排序字段"
+    "description": "追加排序字段。"
   },
   {
     "language": "javascript",
@@ -1061,7 +1075,7 @@
     "group": "mt",
     "prefix": "mt.BILL_BATCH",
     "body": "MainTable.BILL_BATCH",
-    "description": ""
+    "description": "表格唯一字段ID，$billBatch$"
   },
   {
     "language": "javascript",
@@ -1110,14 +1124,14 @@
     "group": "mt",
     "prefix": "mt.clearFilter",
     "body": "MainTable.clearFilter()",
-    "description": "清除表格所有过滤条件"
+    "description": "清除表格所有过滤条件。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.clearSort",
     "body": "MainTable.clearSort()",
-    "description": "清除所有排序 还原成默认"
+    "description": "清除所有排序，还原成默认。"
   },
   {
     "language": "javascript",
@@ -1138,7 +1152,7 @@
     "group": "mt",
     "prefix": "mt.deleteRow",
     "body": "MainTable.deleteRow(row)",
-    "description": "删除指定行 注意 本方法为静默删除方法 不会提示用户确认是否删除"
+    "description": "删除指定行（注意，本方法为静默删除方法，不会提示用户确认是否删除）"
   },
   {
     "language": "javascript",
@@ -1152,98 +1166,98 @@
     "group": "mt",
     "prefix": "mt.disabledOptButton",
     "body": "MainTable.disabledOptButton(rowIndex,bntAliasName,isNotRefresh)",
-    "description": "禁用操作列中的按钮"
+    "description": "禁用操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.disabledOptButton",
     "body": "MainTable.disabledOptButton(rowIndex,bntAliasName)",
-    "description": "禁用操作列中的按钮"
+    "description": "禁用操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.enabledOptButton",
     "body": "MainTable.enabledOptButton(rowIndex,bntAliasName,isNotRefresh)",
-    "description": "启用操作列中的按钮"
+    "description": "启用操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.enabledOptButton",
     "body": "MainTable.enabledOptButton(rowIndex,bntAliasName)",
-    "description": "启用操作列中的按钮"
+    "description": "启用操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.exportDataAsExcel",
     "body": "MainTable.exportDataAsExcel(sheetName,fileName)",
-    "description": "导出当前页面数据为excel"
+    "description": "导出当前页面数据为excel。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.find",
     "body": "MainTable.find(data)",
-    "description": "返回复核条件的记录 多条返回"
+    "description": "返回复核条件的记录（多条返回）"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.findHtmlDocument",
     "body": "MainTable.findHtmlDocument(qstr)",
-    "description": "返回控件内自定义HTML的JQuery元素"
+    "description": "返回控件内自定义HTML的JQuery元素。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getAllColumns",
     "body": "MainTable.getAllColumns()",
-    "description": "获取所有列 含隐藏列 若用户移动了列 则给出的也是移动后的列"
+    "description": "获取所有列（含隐藏列，若用户移动了列，则给出的也是移动后的列）。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getAllDisColumns",
     "body": "MainTable.getAllDisColumns()",
-    "description": "获取所有列 不含隐藏列 若用户移动了列 则给出的也是移动后的列"
+    "description": "获取所有列（不含隐藏列，若用户移动了列，则给出的也是移动后的列）。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getData",
     "body": "MainTable.getData()",
-    "description": "获取表格所有数据 含过滤后未显示的数据"
+    "description": "获取表格所有数据（含过滤后未显示的数据）"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getDeleteRows",
     "body": "MainTable.getDeleteRows()",
-    "description": "返回被页面删除的记录 表格保存后 删除记录将被清空"
+    "description": "返回被页面删除的记录（表格保存后，删除记录将被清空）"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getDisplayRowData",
     "body": "MainTable.getDisplayRowData(rowIndex)",
-    "description": "获取指定行 显示行 数据"
+    "description": "获取指定行(显示行)数据"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getFilterData",
     "body": "MainTable.getFilterData()",
-    "description": "获取表格所有显示数据 不含过滤后不显示的数据"
+    "description": "获取表格所有显示数据（不含过滤后不显示的数据）"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getHeaderTitle",
     "body": "MainTable.getHeaderTitle(fieldId)",
-    "description": "获取列的显示标题"
+    "description": "获取列的显示标题。"
   },
   {
     "language": "javascript",
@@ -1257,63 +1271,63 @@
     "group": "mt",
     "prefix": "mt.getRowByIndex",
     "body": "MainTable.getRowByIndex(rowIndex)",
-    "description": "获取数据所在行位置 从0开始"
+    "description": "获取数据所在行位置（从0开始）"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getRowCount",
     "body": "MainTable.getRowCount()",
-    "description": "获取表格记录总行数"
+    "description": "获取表格记录总行数。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getRowDataIndex",
     "body": "MainTable.getRowDataIndex(row)",
-    "description": "获取数据所在行数据位置 从0开始 用于数据操作类"
+    "description": "获取数据所在行数据位置（从0开始），用于数据操作类"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getRowDataIndexByBillBatch",
     "body": "MainTable.getRowDataIndexByBillBatch(billBatch)",
-    "description": "获取数据所在行数据位置 从0开始 用于数据操作类"
+    "description": "获取数据所在行数据位置（从0开始），用于数据操作类"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getRowGUID",
     "body": "MainTable.getRowGUID(rowIndex)",
-    "description": "根据行号获取行的GUID"
+    "description": "根据行号获取行的GUID。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getRowIndex",
     "body": "MainTable.getRowIndex(row)",
-    "description": "获取数据所在行显示位置 从0开始 用于UI操作类"
+    "description": "获取数据所在行显示位置（从0开始），用于UI操作类"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getRowIndexByBillBatch",
     "body": "MainTable.getRowIndexByBillBatch(billBatch)",
-    "description": "获取数据所在行显示位置 从0开始 用于UI操作类"
+    "description": "获取数据所在行显示位置（从0开始），用于UI操作类"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getSelectRows",
     "body": "MainTable.getSelectRows()",
-    "description": "获取选择行 多选"
+    "description": "获取选择行（多选）"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.getSumFieldValue",
     "body": "MainTable.getSumFieldValue(fieldId)",
-    "description": "获取表格合计值"
+    "description": "获取表格合计值。"
   },
   {
     "language": "javascript",
@@ -1327,70 +1341,105 @@
     "group": "mt",
     "prefix": "mt.hideAllButtonsExcept",
     "body": "MainTable.hideAllButtonsExcept(arrayfunction)",
-    "description": "隐藏所有操作按钮 权限隐藏和单据内的子按钮不会影响"
+    "description": "隐藏所有操作按钮（权限隐藏和单据内的子按钮不会影响）。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.hideOptButton",
     "body": "MainTable.hideOptButton(rowIndex,bntAliasName,isNotRefresh)",
-    "description": "隐藏操作列中的按钮"
+    "description": "隐藏操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.hideOptButton",
     "body": "MainTable.hideOptButton(rowIndex,bntAliasName)",
-    "description": "隐藏操作列中的按钮"
+    "description": "隐藏操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.isFieldVisible",
     "body": "MainTable.isFieldVisible(fieldId)",
-    "description": "获取指定列是否在表格中存在且可视 没有被隐藏"
+    "description": "获取指定列是否在表格中存在且可视（没有被隐藏）。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.isHaveColumn",
     "body": "MainTable.isHaveColumn(fieldId)",
-    "description": "获取指定列是否在表格中存在"
+    "description": "获取指定列是否在表格中存在。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.isSingleSelect",
     "body": "MainTable.isSingleSelect()",
-    "description": "返回当前表格是多选还是单选模式"
+    "description": "返回当前表格是多选还是单选模式。"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
+    "prefix": "mt.isVisable",
+    "body": "MainTable.isVisable()",
+    "description": "查询当前控件是否隐藏状态。"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
+    "prefix": "mt.load",
+    "body": "MainTable.load()",
+    "description": "主表格查询数据（查询条件取自查询条件框）"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.moveFieldAfter",
     "body": "MainTable.moveFieldAfter(fieldId,targetFieldId)",
-    "description": "移动字段到目标字段后面"
+    "description": "移动字段到目标字段后面。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.moveFieldBefore",
     "body": "MainTable.moveFieldBefore(fieldId,targetFieldId)",
-    "description": "移动字段到目标字段前面"
+    "description": "移动字段到目标字段前面。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.moveFieldFirst",
     "body": "MainTable.moveFieldFirst(fieldId)",
-    "description": "移动字段到首位"
+    "description": "移动字段到首位。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.moveFieldLast",
     "body": "MainTable.moveFieldLast(fieldId)",
-    "description": "移动字段到最后"
+    "description": "移动字段到最后。"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
+    "prefix": "mt.openColumnEdit",
+    "body": "MainTable.openColumnEdit(fieldId,isOpen)",
+    "description": "开启/关闭字段编辑属性（一般用于报表表格字段强行开启编辑功能）。"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
+    "prefix": "mt.reDrawCell",
+    "body": "MainTable.reDrawCell(fieldId,rowIndex)",
+    "description": "刷新数据列显示"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
+    "prefix": "mt.reDrawRow",
+    "body": "MainTable.reDrawRow(row)",
+    "description": "刷新数据行显示"
   },
   {
     "language": "javascript",
@@ -1404,21 +1453,28 @@
     "group": "mt",
     "prefix": "mt.reDrawRowNumCell",
     "body": "MainTable.reDrawRowNumCell()",
-    "description": "强制刷新行号列的行号数字"
+    "description": "强制刷新行号列的行号数字。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.reflushFilter",
     "body": "MainTable.reflushFilter()",
-    "description": "刷新过滤"
+    "description": "刷新过滤。"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
+    "prefix": "mt.refreshUI",
+    "body": "MainTable.refreshUI(timeout)",
+    "description": "延迟刷新表格UI"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.removeCell",
     "body": "MainTable.removeCell(fieldId)",
-    "description": "删除表格列"
+    "description": "删除表格列。"
   },
   {
     "language": "javascript",
@@ -1439,7 +1495,7 @@
     "group": "mt",
     "prefix": "mt.removeOnChangeHook",
     "body": "MainTable.removeOnChangeHook(guid)",
-    "description": "移除标记 移除后才会继续保持动作"
+    "description": "移除标记，移除后才会继续保持动作。"
   },
   {
     "language": "javascript",
@@ -1460,14 +1516,14 @@
     "group": "mt",
     "prefix": "mt.scrollCellToVisual",
     "body": "MainTable.scrollCellToVisual(fieldId)",
-    "description": "滚动指定列到可视区"
+    "description": "滚动指定列到可视区。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.scrollRowToVisual",
     "body": "MainTable.scrollRowToVisual(row)",
-    "description": "滚动指定行到可视区"
+    "description": "滚动指定行到可视区。"
   },
   {
     "language": "javascript",
@@ -1502,35 +1558,56 @@
     "group": "mt",
     "prefix": "mt.setDataValue",
     "body": "MainTable.setDataValue(rowIndex,fieldName,value)",
-    "description": "设置表格`rowIndex`行 `fieldName`列的数据"
+    "description": "设置表格`rowIndex`行，`fieldName`列的数据，本方法会触发被设置自动的onchange事件（若有）；警告：本方法会刷新表格UI，严禁大批量调用本方法，容易导致浏览器死机"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.setFieldWidth",
     "body": "MainTable.setFieldWidth(fieldId,width)",
-    "description": "动态添加表格列"
+    "description": "动态添加表格列。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.setFilter",
     "body": "MainTable.setFilter(colName,value)",
-    "description": "设置过滤 自动清除原先的过滤"
+    "description": "设置过滤（自动清除原先的过滤）。"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
+    "prefix": "mt.setGroupSubTotal",
+    "body": "MainTable.setGroupSubTotal(fields,reLoadImmediate)",
+    "description": "开启表格分组小计功能。"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
+    "prefix": "mt.setGroupSubTotal",
+    "body": "MainTable.setGroupSubTotal(fields)",
+    "description": "开启表格分组小计功能。"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
+    "prefix": "mt.setGroupSumTotal",
+    "body": "MainTable.setGroupSumTotal(fields,reLoadImmediate)",
+    "description": "开启表格汇总合计功能。"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
+    "prefix": "mt.setGroupSumTotal",
+    "body": "MainTable.setGroupSumTotal(fields)",
+    "description": "开启表格汇总合计功能。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.setHeaderTitle",
     "body": "MainTable.setHeaderTitle(fieldId,name)",
-    "description": "设置列标题"
-  },
-  {
-    "language": "javascript",
-    "group": "mt",
-    "prefix": "mt.setRowData",
-    "body": "MainTable.setRowData(rows,isNotFilter)",
-    "description": "设置表格数据行"
+    "description": "设置列标题。"
   },
   {
     "language": "javascript",
@@ -1558,21 +1635,21 @@
     "group": "mt",
     "prefix": "mt.setSingleSelect",
     "body": "MainTable.setSingleSelect(isSingle)",
-    "description": "设置表格为单选或者多选模式"
+    "description": "设置表格为单选或者多选模式。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.setSort",
     "body": "MainTable.setSort(fieldId,order)",
-    "description": "开始排序 清除上次排序"
+    "description": "开始排序（清除上次排序）。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.setSumFieldValue",
     "body": "MainTable.setSumFieldValue(fieldId,value)",
-    "description": "设置表格合计值"
+    "description": "设置表格合计值。"
   },
   {
     "language": "javascript",
@@ -1584,30 +1661,37 @@
   {
     "language": "javascript",
     "group": "mt",
+    "prefix": "mt.setVisable",
+    "body": "MainTable.setVisable(isShow)",
+    "description": "显示/隐藏控件。"
+  },
+  {
+    "language": "javascript",
+    "group": "mt",
     "prefix": "mt.showAllButtonsExcept",
     "body": "MainTable.showAllButtonsExcept(arrayfunction)",
-    "description": "显示所有操作按钮 权限隐藏和单据内的子按钮不会影响"
+    "description": "显示所有操作按钮（权限隐藏和单据内的子按钮不会影响）。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.showOptButton",
     "body": "MainTable.showOptButton(rowIndex,bntAliasName,isNotRefresh)",
-    "description": "显示操作列中的按钮"
+    "description": "显示操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.showOptButton",
     "body": "MainTable.showOptButton(rowIndex,bntAliasName)",
-    "description": "显示操作列中的按钮"
+    "description": "显示操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.stopEdit",
     "body": "MainTable.stopEdit()",
-    "description": "关闭表格编辑功能 解决某些情况下无法获取最后一个表格编辑列最新内容的问题"
+    "description": "关闭表格编辑功能（解决某些情况下无法获取最后一个表格编辑列最新内容的问题)。"
   },
   {
     "language": "javascript",
@@ -1628,91 +1712,42 @@
     "group": "mt",
     "prefix": "mt.UPDATE_CHANGE_FLAG",
     "body": "MainTable.UPDATE_CHANGE_FLAG",
-    "description": ""
+    "description": "表格修改字段ID，_CHANGED_"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.UPDATE_FLAG",
     "body": "MainTable.UPDATE_FLAG",
-    "description": ""
+    "description": "表格修改字段ID，_OPT_TYPE_"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.update",
     "body": "MainTable.update(row,rowIndex,isNotFilter)",
-    "description": "更新表格行记录数据"
+    "description": "更新表格行记录数据，注意本方法不会触发字段的onchange事件，警告：本方法会刷新表格UI，严禁大批量调用本方法，容易导致浏览器死机，可以使用 `refreshUI` 方法代替本方法"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.update",
     "body": "MainTable.update(row,rowIndex)",
-    "description": "更新表格行记录数据"
+    "description": "更新表格行记录数据，注意本方法不会触发字段的onchange事件，警告：本方法会刷新表格UI，严禁大批量调用本方法，容易导致浏览器死机，可以使用 `refreshUI` 方法代替本方法"
   },
   {
     "language": "javascript",
     "group": "mt",
     "prefix": "mt.updateCell",
     "body": "MainTable.updateCell(params)",
-    "description": "动态修改表格列参数"
-  },
-  {
-    "language": "javascript",
-    "group": "mt",
-    "prefix": "mt.load",
-    "body": "MainTable.load()",
-    "description": "主表格查询数据 查询条件取自查询条件框"
-  },
-  {
-    "language": "javascript",
-    "group": "mt",
-    "prefix": "mt.setGroupSubTotal",
-    "body": "MainTable.setGroupSubTotal(fields,reLoadImmediate)",
-    "description": "开启表格分组小计功能"
-  },
-  {
-    "language": "javascript",
-    "group": "mt",
-    "prefix": "mt.setGroupSubTotal",
-    "body": "MainTable.setGroupSubTotal(fields)",
-    "description": "开启表格分组小计功能"
-  },
-  {
-    "language": "javascript",
-    "group": "mt",
-    "prefix": "mt.setGroupSumTotal",
-    "body": "MainTable.setGroupSumTotal(fields,reLoadImmediate)",
-    "description": "开启表格汇总合计功能"
-  },
-  {
-    "language": "javascript",
-    "group": "mt",
-    "prefix": "mt.setGroupSumTotal",
-    "body": "MainTable.setGroupSumTotal(fields)",
-    "description": "开启表格汇总合计功能"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.isVisable",
-    "body": "ItemTable.isVisable()",
-    "description": "查询当前控件是否隐藏状态"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.setVisable",
-    "body": "ItemTable.setVisable(isShow)",
-    "description": "显示/隐藏控件"
+    "description": "动态修改表格列参数。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.addCell",
     "body": "ItemTable.addCell(params)",
-    "description": "动态添加表格列"
+    "description": "动态添加表格列。"
   },
   {
     "language": "javascript",
@@ -1740,21 +1775,21 @@
     "group": "it",
     "prefix": "it.addOnChangeHook",
     "body": "ItemTable.addOnChangeHook(remark)",
-    "description": "添加一个标记以阻止保存 $vm.save 除非标记移除后才会继续保持动作"
+    "description": "添加一个标记以阻止保存($vm.save)，除非标记移除后才会继续保持动作。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.andFilter",
     "body": "ItemTable.andFilter(colName,value)",
-    "description": "添加设置过滤 保留原先的过滤"
+    "description": "添加设置过滤（保留原先的过滤）。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.andSort",
     "body": "ItemTable.andSort(fieldId,order)",
-    "description": "追加排序字段"
+    "description": "追加排序字段。"
   },
   {
     "language": "javascript",
@@ -1768,7 +1803,7 @@
     "group": "it",
     "prefix": "it.BILL_BATCH",
     "body": "ItemTable.BILL_BATCH",
-    "description": ""
+    "description": "表格唯一字段ID，$billBatch$"
   },
   {
     "language": "javascript",
@@ -1815,16 +1850,23 @@
   {
     "language": "javascript",
     "group": "it",
+    "prefix": "it.clearFieldDropDown",
+    "body": "ItemTable.clearFieldDropDown(fieldId)",
+    "description": "去除一个下拉字段的下拉状态，变为正常的文本字段。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
     "prefix": "it.clearFilter",
     "body": "ItemTable.clearFilter()",
-    "description": "清除表格所有过滤条件"
+    "description": "清除表格所有过滤条件。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.clearSort",
     "body": "ItemTable.clearSort()",
-    "description": "清除所有排序 还原成默认"
+    "description": "清除所有排序，还原成默认。"
   },
   {
     "language": "javascript",
@@ -1843,9 +1885,16 @@
   {
     "language": "javascript",
     "group": "it",
+    "prefix": "it.createFieldDropDwon",
+    "body": "ItemTable.createFieldDropDwon(fieldId,compId,codeType,params,onSelect,list,ownerSystemId)",
+    "description": "将一个文本字段设置为下拉字段。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
     "prefix": "it.deleteRow",
     "body": "ItemTable.deleteRow(row)",
-    "description": "删除指定行 注意 本方法为静默删除方法 不会提示用户确认是否删除"
+    "description": "删除指定行（注意，本方法为静默删除方法，不会提示用户确认是否删除）"
   },
   {
     "language": "javascript",
@@ -1857,100 +1906,114 @@
   {
     "language": "javascript",
     "group": "it",
+    "prefix": "it.disabledEdit",
+    "body": "ItemTable.disabledEdit(isDisabled)",
+    "description": "禁止表格编辑（包括按钮）。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
     "prefix": "it.disabledOptButton",
     "body": "ItemTable.disabledOptButton(rowIndex,bntAliasName,isNotRefresh)",
-    "description": "禁用操作列中的按钮"
+    "description": "禁用操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.disabledOptButton",
     "body": "ItemTable.disabledOptButton(rowIndex,bntAliasName)",
-    "description": "禁用操作列中的按钮"
+    "description": "禁用操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.enabledOptButton",
     "body": "ItemTable.enabledOptButton(rowIndex,bntAliasName,isNotRefresh)",
-    "description": "启用操作列中的按钮"
+    "description": "启用操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.enabledOptButton",
     "body": "ItemTable.enabledOptButton(rowIndex,bntAliasName)",
-    "description": "启用操作列中的按钮"
+    "description": "启用操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.exportDataAsExcel",
     "body": "ItemTable.exportDataAsExcel(sheetName,fileName)",
-    "description": "导出当前页面数据为excel"
+    "description": "导出当前页面数据为excel。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.find",
     "body": "ItemTable.find(data)",
-    "description": "返回复核条件的记录 多条返回"
+    "description": "返回复核条件的记录（多条返回）"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.findHtmlDocument",
     "body": "ItemTable.findHtmlDocument(qstr)",
-    "description": "返回控件内自定义HTML的JQuery元素"
+    "description": "返回控件内自定义HTML的JQuery元素。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getAllColumns",
     "body": "ItemTable.getAllColumns()",
-    "description": "获取所有列 含隐藏列 若用户移动了列 则给出的也是移动后的列"
+    "description": "获取所有列（含隐藏列，若用户移动了列，则给出的也是移动后的列）。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getAllDisColumns",
     "body": "ItemTable.getAllDisColumns()",
-    "description": "获取所有列 不含隐藏列 若用户移动了列 则给出的也是移动后的列"
+    "description": "获取所有列（不含隐藏列，若用户移动了列，则给出的也是移动后的列）。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getData",
     "body": "ItemTable.getData()",
-    "description": "获取表格所有数据 含过滤后未显示的数据"
+    "description": "获取表格所有数据（含过滤后未显示的数据）"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getDeleteRows",
     "body": "ItemTable.getDeleteRows()",
-    "description": "返回被页面删除的记录 表格保存后 删除记录将被清空"
+    "description": "返回被页面删除的记录（表格保存后，删除记录将被清空）"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getDisplayRowData",
     "body": "ItemTable.getDisplayRowData(rowIndex)",
-    "description": "获取指定行 显示行 数据"
+    "description": "获取指定行(显示行)数据"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.getEditable",
+    "body": "ItemTable.getEditable(guid,fieldId)",
+    "description": "获取表格单元格是否允许编辑。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getFilterData",
     "body": "ItemTable.getFilterData()",
-    "description": "获取表格所有显示数据 不含过滤后不显示的数据"
+    "description": "获取表格所有显示数据（不含过滤后不显示的数据）"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getHeaderTitle",
     "body": "ItemTable.getHeaderTitle(fieldId)",
-    "description": "获取列的显示标题"
+    "description": "获取列的显示标题。"
   },
   {
     "language": "javascript",
@@ -1964,63 +2027,63 @@
     "group": "it",
     "prefix": "it.getRowByIndex",
     "body": "ItemTable.getRowByIndex(rowIndex)",
-    "description": "获取数据所在行位置 从0开始"
+    "description": "获取数据所在行位置（从0开始）"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getRowCount",
     "body": "ItemTable.getRowCount()",
-    "description": "获取表格记录总行数"
+    "description": "获取表格记录总行数。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getRowDataIndex",
     "body": "ItemTable.getRowDataIndex(row)",
-    "description": "获取数据所在行数据位置 从0开始 用于数据操作类"
+    "description": "获取数据所在行数据位置（从0开始），用于数据操作类"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getRowDataIndexByBillBatch",
     "body": "ItemTable.getRowDataIndexByBillBatch(billBatch)",
-    "description": "获取数据所在行数据位置 从0开始 用于数据操作类"
+    "description": "获取数据所在行数据位置（从0开始），用于数据操作类"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getRowGUID",
     "body": "ItemTable.getRowGUID(rowIndex)",
-    "description": "根据行号获取行的GUID"
+    "description": "根据行号获取行的GUID。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getRowIndex",
     "body": "ItemTable.getRowIndex(row)",
-    "description": "获取数据所在行显示位置 从0开始 用于UI操作类"
+    "description": "获取数据所在行显示位置（从0开始），用于UI操作类"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getRowIndexByBillBatch",
     "body": "ItemTable.getRowIndexByBillBatch(billBatch)",
-    "description": "获取数据所在行显示位置 从0开始 用于UI操作类"
+    "description": "获取数据所在行显示位置（从0开始），用于UI操作类"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getSelectRows",
     "body": "ItemTable.getSelectRows()",
-    "description": "获取选择行 多选"
+    "description": "获取选择行（多选）"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.getSumFieldValue",
     "body": "ItemTable.getSumFieldValue(fieldId)",
-    "description": "获取表格合计值"
+    "description": "获取表格合计值。"
   },
   {
     "language": "javascript",
@@ -2034,70 +2097,119 @@
     "group": "it",
     "prefix": "it.hideAllButtonsExcept",
     "body": "ItemTable.hideAllButtonsExcept(arrayfunction)",
-    "description": "隐藏所有操作按钮 权限隐藏和单据内的子按钮不会影响"
+    "description": "隐藏所有操作按钮（权限隐藏和单据内的子按钮不会影响）。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.hideOptButton",
     "body": "ItemTable.hideOptButton(rowIndex,bntAliasName,isNotRefresh)",
-    "description": "隐藏操作列中的按钮"
+    "description": "隐藏操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.hideOptButton",
     "body": "ItemTable.hideOptButton(rowIndex,bntAliasName)",
-    "description": "隐藏操作列中的按钮"
+    "description": "隐藏操作列中的按钮。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.isFieldMustInput",
+    "body": "ItemTable.isFieldMustInput(fieldId)",
+    "description": "获取字段是否必填。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.isFieldVisible",
     "body": "ItemTable.isFieldVisible(fieldId)",
-    "description": "获取指定列是否在表格中存在且可视 没有被隐藏"
+    "description": "获取指定列是否在表格中存在且可视（没有被隐藏）。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.isHaveColumn",
     "body": "ItemTable.isHaveColumn(fieldId)",
-    "description": "获取指定列是否在表格中存在"
+    "description": "获取指定列是否在表格中存在。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.isSingleSelect",
     "body": "ItemTable.isSingleSelect()",
-    "description": "返回当前表格是多选还是单选模式"
+    "description": "返回当前表格是多选还是单选模式。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.isVisable",
+    "body": "ItemTable.isVisable()",
+    "description": "查询当前控件是否隐藏状态。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.load",
+    "body": "ItemTable.load(params)",
+    "description": "子表格查询数据（查询条件必须）"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.moveFieldAfter",
     "body": "ItemTable.moveFieldAfter(fieldId,targetFieldId)",
-    "description": "移动字段到目标字段后面"
+    "description": "移动字段到目标字段后面。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.moveFieldBefore",
     "body": "ItemTable.moveFieldBefore(fieldId,targetFieldId)",
-    "description": "移动字段到目标字段前面"
+    "description": "移动字段到目标字段前面。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.moveFieldFirst",
     "body": "ItemTable.moveFieldFirst(fieldId)",
-    "description": "移动字段到首位"
+    "description": "移动字段到首位。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.moveFieldLast",
     "body": "ItemTable.moveFieldLast(fieldId)",
-    "description": "移动字段到最后"
+    "description": "移动字段到最后。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.reBindSelect",
+    "body": "ItemTable.reBindSelect(rowIndex,fieldId,params,compId,codeType,list)",
+    "description": "重新绑定下拉选择组件的查询条件，用于级联查询。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.reBindSelect",
+    "body": "ItemTable.reBindSelect(rowIndex,fieldId,params)",
+    "description": "重新绑定下拉选择组件的查询条件，用于级联查询。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.reDrawCell",
+    "body": "ItemTable.reDrawCell(fieldId,rowIndex)",
+    "description": "刷新数据列显示"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.reDrawRow",
+    "body": "ItemTable.reDrawRow(row)",
+    "description": "刷新数据行显示"
   },
   {
     "language": "javascript",
@@ -2111,21 +2223,28 @@
     "group": "it",
     "prefix": "it.reDrawRowNumCell",
     "body": "ItemTable.reDrawRowNumCell()",
-    "description": "强制刷新行号列的行号数字"
+    "description": "强制刷新行号列的行号数字。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.reflushFilter",
     "body": "ItemTable.reflushFilter()",
-    "description": "刷新过滤"
+    "description": "刷新过滤。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.refreshUI",
+    "body": "ItemTable.refreshUI(timeout)",
+    "description": "延迟刷新表格UI"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.removeCell",
     "body": "ItemTable.removeCell(fieldId)",
-    "description": "删除表格列"
+    "description": "删除表格列。"
   },
   {
     "language": "javascript",
@@ -2146,7 +2265,7 @@
     "group": "it",
     "prefix": "it.removeOnChangeHook",
     "body": "ItemTable.removeOnChangeHook(guid)",
-    "description": "移除标记 移除后才会继续保持动作"
+    "description": "移除标记，移除后才会继续保持动作。"
   },
   {
     "language": "javascript",
@@ -2167,14 +2286,14 @@
     "group": "it",
     "prefix": "it.scrollCellToVisual",
     "body": "ItemTable.scrollCellToVisual(fieldId)",
-    "description": "滚动指定列到可视区"
+    "description": "滚动指定列到可视区。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.scrollRowToVisual",
     "body": "ItemTable.scrollRowToVisual(row)",
-    "description": "滚动指定行到可视区"
+    "description": "滚动指定行到可视区。"
   },
   {
     "language": "javascript",
@@ -2209,35 +2328,49 @@
     "group": "it",
     "prefix": "it.setDataValue",
     "body": "ItemTable.setDataValue(rowIndex,fieldName,value)",
-    "description": "设置表格`rowIndex`行 `fieldName`列的数据"
+    "description": "设置表格`rowIndex`行，`fieldName`列的数据，本方法会触发被设置自动的onchange事件（若有）；警告：本方法会刷新表格UI，严禁大批量调用本方法，容易导致浏览器死机"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.setDisableEdit",
+    "body": "ItemTable.setDisableEdit(rowIndex,fieldId,canEdit,isNotRefresh)",
+    "description": "设置表格单元格是否允许编辑。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.setDisableEdit",
+    "body": "ItemTable.setDisableEdit(rowIndex,fieldId,canEdit)",
+    "description": "设置表格单元格是否允许编辑。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
+    "prefix": "it.setFieldMustInput",
+    "body": "ItemTable.setFieldMustInput(fieldId,isMustInput)",
+    "description": "设置/取消字段必填属性（必须是设计为非必输字段才可)。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.setFieldWidth",
     "body": "ItemTable.setFieldWidth(fieldId,width)",
-    "description": "动态添加表格列"
+    "description": "动态添加表格列。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.setFilter",
     "body": "ItemTable.setFilter(colName,value)",
-    "description": "设置过滤 自动清除原先的过滤"
+    "description": "设置过滤（自动清除原先的过滤）。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.setHeaderTitle",
     "body": "ItemTable.setHeaderTitle(fieldId,name)",
-    "description": "设置列标题"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.setRowData",
-    "body": "ItemTable.setRowData(rows,isNotFilter)",
-    "description": "设置表格数据行"
+    "description": "设置列标题。"
   },
   {
     "language": "javascript",
@@ -2263,23 +2396,30 @@
   {
     "language": "javascript",
     "group": "it",
+    "prefix": "it.setSelectDropdownDatas",
+    "body": "ItemTable.setSelectDropdownDatas(rowIndex,fieldId,list)",
+    "description": "动态设置下拉选择组件的下拉数据。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
     "prefix": "it.setSingleSelect",
     "body": "ItemTable.setSingleSelect(isSingle)",
-    "description": "设置表格为单选或者多选模式"
+    "description": "设置表格为单选或者多选模式。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.setSort",
     "body": "ItemTable.setSort(fieldId,order)",
-    "description": "开始排序 清除上次排序"
+    "description": "开始排序（清除上次排序）。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.setSumFieldValue",
     "body": "ItemTable.setSumFieldValue(fieldId,value)",
-    "description": "设置表格合计值"
+    "description": "设置表格合计值。"
   },
   {
     "language": "javascript",
@@ -2291,30 +2431,37 @@
   {
     "language": "javascript",
     "group": "it",
+    "prefix": "it.setVisable",
+    "body": "ItemTable.setVisable(isShow)",
+    "description": "显示/隐藏控件。"
+  },
+  {
+    "language": "javascript",
+    "group": "it",
     "prefix": "it.showAllButtonsExcept",
     "body": "ItemTable.showAllButtonsExcept(arrayfunction)",
-    "description": "显示所有操作按钮 权限隐藏和单据内的子按钮不会影响"
+    "description": "显示所有操作按钮（权限隐藏和单据内的子按钮不会影响）。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.showOptButton",
     "body": "ItemTable.showOptButton(rowIndex,bntAliasName,isNotRefresh)",
-    "description": "显示操作列中的按钮"
+    "description": "显示操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.showOptButton",
     "body": "ItemTable.showOptButton(rowIndex,bntAliasName)",
-    "description": "显示操作列中的按钮"
+    "description": "显示操作列中的按钮。"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.stopEdit",
     "body": "ItemTable.stopEdit()",
-    "description": "关闭表格编辑功能 解决某些情况下无法获取最后一个表格编辑列最新内容的问题"
+    "description": "关闭表格编辑功能（解决某些情况下无法获取最后一个表格编辑列最新内容的问题)。"
   },
   {
     "language": "javascript",
@@ -2335,434 +2482,343 @@
     "group": "it",
     "prefix": "it.UPDATE_CHANGE_FLAG",
     "body": "ItemTable.UPDATE_CHANGE_FLAG",
-    "description": ""
+    "description": "表格修改字段ID，_CHANGED_"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.UPDATE_FLAG",
     "body": "ItemTable.UPDATE_FLAG",
-    "description": ""
+    "description": "表格修改字段ID，_OPT_TYPE_"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.update",
     "body": "ItemTable.update(row,rowIndex,isNotFilter)",
-    "description": "更新表格行记录数据"
+    "description": "更新表格行记录数据，注意本方法不会触发字段的onchange事件，警告：本方法会刷新表格UI，严禁大批量调用本方法，容易导致浏览器死机，可以使用 `refreshUI` 方法代替本方法"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.update",
     "body": "ItemTable.update(row,rowIndex)",
-    "description": "更新表格行记录数据"
+    "description": "更新表格行记录数据，注意本方法不会触发字段的onchange事件，警告：本方法会刷新表格UI，严禁大批量调用本方法，容易导致浏览器死机，可以使用 `refreshUI` 方法代替本方法"
   },
   {
     "language": "javascript",
     "group": "it",
     "prefix": "it.updateCell",
     "body": "ItemTable.updateCell(params)",
-    "description": "动态修改表格列参数"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.clearFieldDropDown",
-    "body": "ItemTable.clearFieldDropDown(fieldId)",
-    "description": "去除一个下拉字段的下拉状态 变为正常的文本字段"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.createFieldDropDwon",
-    "body": "ItemTable.createFieldDropDwon(fieldId,compId,codeType,params,onSelect,list,ownerSystemId)",
-    "description": "将一个文本字段设置为下拉字段"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.disabledEdit",
-    "body": "ItemTable.disabledEdit(isDisabled)",
-    "description": "禁止表格编辑 包括按钮"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.getEditable",
-    "body": "ItemTable.getEditable(guid,fieldId)",
-    "description": "获取表格单元格是否允许编辑"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.isFieldMustInput",
-    "body": "ItemTable.isFieldMustInput(fieldId)",
-    "description": "获取字段是否必填"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.load",
-    "body": "ItemTable.load(params)",
-    "description": "子表格查询数据 查询条件必须"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.reBindSelect",
-    "body": "ItemTable.reBindSelect(rowIndex,fieldId,params,compId,codeType,list)",
-    "description": "重新绑定下拉选择组件的查询条件 用于级联查询"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.reBindSelect",
-    "body": "ItemTable.reBindSelect(rowIndex,fieldId,params)",
-    "description": "重新绑定下拉选择组件的查询条件 用于级联查询"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.setDisableEdit",
-    "body": "ItemTable.setDisableEdit(rowIndex,fieldId,canEdit,isNotRefresh)",
-    "description": "设置表格单元格是否允许编辑"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.setDisableEdit",
-    "body": "ItemTable.setDisableEdit(rowIndex,fieldId,canEdit)",
-    "description": "设置表格单元格是否允许编辑"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.setFieldMustInput",
-    "body": "ItemTable.setFieldMustInput(fieldId,isMustInput)",
-    "description": "设置/取消字段必填属性 必须是设计为非必输字段才可"
-  },
-  {
-    "language": "javascript",
-    "group": "it",
-    "prefix": "it.setSelectDropdownDatas",
-    "body": "ItemTable.setSelectDropdownDatas(rowIndex,fieldId,list)",
-    "description": "动态设置下拉选择组件的下拉数据"
-  },
-  {
-    "language": "javascript",
-    "group": "form",
-    "prefix": "form.isVisable",
-    "body": "InputForm.isVisable()",
-    "description": "查询当前控件是否隐藏状态"
-  },
-  {
-    "language": "javascript",
-    "group": "form",
-    "prefix": "form.setVisable",
-    "body": "InputForm.setVisable(isShow)",
-    "description": "显示/隐藏控件"
+    "description": "动态修改表格列参数。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.addFieldAfter",
     "body": "InputForm.addFieldAfter(name,label,targetField,opt)",
-    "description": "添加新字段 注意 为查询条件增加新字段时 要求必须为主表格存在的字段 否则查询不生效 opt参数结构如下 opt { type 'text' // 字段类型 默认 text 可选 text select date datetime radio checkbox label datesearch numsearch width 1 // 字段宽度 格 可选 1 - 9 每格 230px labelWidth null // 标签宽度 数字 px maxLength null // 最大文本长度 type = text 有效 format null // 显示格式 如 yyyy-MM-dd or # ##0.00 validator null // 验证 如 dec2 num 验证规则若需要 自己去查询下 placeholder null // 占位符 readonly false // 是否只读 hide false // 默认隐藏 select { // 下拉选择配置 compId '' // 必须 根据不同类型填值 codeType = 1 ? 数据字典编码 如 CD-D996-6B5D-73CC1F61 or 数据字典中文名称 如 用户类型 codeType = 2 ? 下拉组件编码 如 CP-27EA-EB83-965B494E codeType '1' or '2' // 必须 类型 1 - 数据字典 2 - 下拉组件 forceSelection true // 是否强制下拉 params {} // 额外查询条件 codeType=2有效 如 {CODE_TYPE 1} onSelect function item {} // 选择事件 codeFieldId '' // 可选 反射值字段 list [] // 静态下拉 如 [{code '010' name 'xxx'} {code '011' name 'xxx'}] ownerSystemId // 下拉组件 codeType=2 无效 数据字典可选 若存在跨服务 如 主数据的数据字典 业务系统引用 则必须填值 填的是数据字典所在的系统编码 如 主数据系统编码 } radio [ // type = radio 必须 {name '' code ''} {name '' code ''} ] checkbox [ // type = checkbox 必须 {name '' code ''} {name '' code ''} ] search { // 查询条件配置 查询模式下 type=text下有效 isLike true // 是否默认查询 isDisAdvSearch false // 是否禁用高级查询 isDefaultLike true // 默认查询情况下 是否默认模糊 } }"
+    "description": "添加新字段（注意：为查询条件增加新字段时，要求必须为主表格存在的字段，否则查询不生效）。opt参数结构如下： opt { type : 'text', // 字段类型，默认 text, 可选： text,select,date,datetime,radio,checkbox,label,datesearch,numsearch width: 1 , // 字段宽度（格），可选 1 - 9 每格 230px labelWidth: null, // 标签宽度（数字，px） maxLength: null, // 最大文本长度(type = text 有效) format: null, // 显示格式，如： yyyy-MM-dd or #,##0.00 validator: null, // 验证，如： dec2;num; （验证规则若需要，自己去查询下） placeholder: null, // 占位符 readonly: false, // 是否只读 hide: false, // 默认隐藏 select: { // 下拉选择配置 compId: '', // 必须，根据不同类型填值 codeType = 1 ? 数据字典编码（如：CD-D996-6B5D-73CC1F61） or 数据字典中文名称（如：用户类型）; codeType = 2 ? 下拉组件编码（如：CP-27EA-EB83-965B494E） codeType: '1' or '2', // 必须，类型： 1 - 数据字典 2 - 下拉组件 forceSelection: true, // 是否强制下拉 params: {}, // 额外查询条件（codeType=2有效），如： {CODE_TYPE:1} onSelect:function(item){}, // 选择事件 codeFieldId: '', // 可选，反射值字段 list:[], // 静态下拉，如：[{code:'010',name:'xxx'},{code:'011',name:'xxx'}] ownerSystemId, // 下拉组件（codeType=2）无效，数据字典可选，若存在跨服务（如：主数据的数据字典，业务系统引用，则必须填值，填的是数据字典所在的系统编码，如：主数据系统编码） }, radio: [ // type = radio 必须 {name:'',code:''}, {name:'',code:''} ], checkbox: [ // type = checkbox 必须 {name:'',code:''}, {name:'',code:''} ], search: { // 查询条件配置（查询模式下，type=text下有效） isLike: true, // 是否默认查询 isDisAdvSearch: false, // 是否禁用高级查询 isDefaultLike: true // 默认查询情况下，是否默认模糊 } }"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.addFieldBefore",
     "body": "InputForm.addFieldBefore(name,label,targetField,opt)",
-    "description": "添加新字段 注意 为查询条件增加新字段时 要求必须为主表格存在的字段 否则查询不生效 opt参数结构同inputform.addFieldAfter的opt参数"
+    "description": "添加新字段（注意：为查询条件增加新字段时，要求必须为主表格存在的字段，否则查询不生效）。opt参数结构同inputform.addFieldAfter的opt参数"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.addFieldFirst",
     "body": "InputForm.addFieldFirst(name,label,opt)",
-    "description": "添加新字段 注意 为查询条件增加新字段时 要求必须为主表格存在的字段 否则查询不生效 opt参数结构同inputform.addFieldAfter的opt参数"
+    "description": "添加新字段（注意：为查询条件增加新字段时，要求必须为主表格存在的字段，否则查询不生效）。opt参数结构同inputform.addFieldAfter的opt参数"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.addFieldLast",
     "body": "InputForm.addFieldLast(name,label,opt)",
-    "description": "添加新字段 注意 为查询条件增加新字段时 要求必须为主表格存在的字段 否则查询不生效 opt参数结构同inputform.addFieldAfter的opt参数"
+    "description": "添加新字段（注意：为查询条件增加新字段时，要求必须为主表格存在的字段，否则查询不生效）。opt参数结构同inputform.addFieldAfter的opt参数"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.addFieldValidator",
     "body": "InputForm.addFieldValidator(fieldId,valid)",
-    "description": "添加字段验证规则"
+    "description": "添加字段验证规则。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.addOnChangeHook",
     "body": "InputForm.addOnChangeHook(remark)",
-    "description": "添加一个标记以阻止保存 $vm.save 除非标记移除后才会继续保持动作"
+    "description": "添加一个标记以阻止保存($vm.save)，除非标记移除后才会继续保持动作。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.checkbox",
     "body": "InputForm.checkbox(fieldName)",
-    "description": "获取`checkbox`字段操作对象"
+    "description": "获取`checkbox`字段操作对象。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.clearAreaField",
     "body": "InputForm.clearAreaField(fieldId)",
-    "description": "清理地区控件选择数据"
+    "description": "清理地区控件选择数据。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.clearFieldDropDown",
     "body": "InputForm.clearFieldDropDown(name)",
-    "description": "去除一个下拉字段的下拉状态 变为正常的文本字段"
+    "description": "去除一个下拉字段的下拉状态，变为正常的文本字段。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.clearFieldValidator",
     "body": "InputForm.clearFieldValidator(fieldId)",
-    "description": "清除字段验证规则"
+    "description": "清除字段验证规则。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.createFieldDropDwon",
     "body": "InputForm.createFieldDropDwon(name,compId,codeType,params,onSelect,list,ownerSystemId)",
-    "description": "将一个文本字段设置为下拉字段"
+    "description": "将一个文本字段设置为下拉字段。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.disabled",
     "body": "InputForm.disabled(fieldName,isDisabled)",
-    "description": "禁用/启用输入框或查询框指定字段"
+    "description": "禁用/启用输入框或查询框指定字段。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.disabledEdit",
     "body": "InputForm.disabledEdit(isDisabled)",
-    "description": "禁用/启用输入框中所有字段 含按钮"
+    "description": "禁用/启用输入框中所有字段（含按钮）。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.findHtmlDocument",
     "body": "InputForm.findHtmlDocument(qstr)",
-    "description": "返回控件内自定义HTML的JQuery元素"
+    "description": "返回控件内自定义HTML的JQuery元素。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.foldbox",
     "body": "InputForm.foldbox(foldAliasName)",
-    "description": "获取折叠线框操作对象"
+    "description": "获取折叠线框操作对象。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.get",
     "body": "InputForm.get(fieldName)",
-    "description": "获取输入框或查询框字段值"
+    "description": "获取输入框或查询框字段值。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.getData",
     "body": "InputForm.getData()",
-    "description": "获取form的对象序列化 同`serializeObject \\"
+    "description": "获取form的对象序列化。同`serializeObject()"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.getFieldWidth",
     "body": "InputForm.getFieldWidth(name)",
-    "description": "获取字段宽度"
+    "description": "获取字段宽度。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.getTitle",
     "body": "InputForm.getTitle(fieldId)",
-    "description": "获取字段标题文字"
+    "description": "获取字段标题文字。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.hide",
     "body": "InputForm.hide(fieldName,isDisabled)",
-    "description": "隐藏输入框或查询框字段"
+    "description": "隐藏输入框或查询框字段。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.hideAllButtonsExcept",
     "body": "InputForm.hideAllButtonsExcept(arrayfunction)",
-    "description": "隐藏所有操作按钮 权限隐藏和单据内的子按钮不会影响"
+    "description": "隐藏所有操作按钮（权限隐藏和单据内的子按钮不会影响）。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.isFieldMustInput",
     "body": "InputForm.isFieldMustInput(name)",
-    "description": "获取字段是否必填"
+    "description": "获取字段是否必填。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.isHaveField",
     "body": "InputForm.isHaveField(name)",
-    "description": "判断字段是否存在"
+    "description": "判断字段是否存在。"
+  },
+  {
+    "language": "javascript",
+    "group": "form",
+    "prefix": "form.isVisable",
+    "body": "InputForm.isVisable()",
+    "description": "查询当前控件是否隐藏状态。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.load",
     "body": "InputForm.load(params)",
-    "description": "加载数据"
+    "description": "加载数据。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.moveFieldAfter",
     "body": "InputForm.moveFieldAfter(fieldId,targetFieldId)",
-    "description": "移动字段到目标字段后面"
+    "description": "移动字段到目标字段后面。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.moveFieldBefore",
     "body": "InputForm.moveFieldBefore(fieldId,targetFieldId)",
-    "description": "移动字段到目标字段前面"
+    "description": "移动字段到目标字段前面。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.moveFieldFirst",
     "body": "InputForm.moveFieldFirst(fieldId)",
-    "description": "移动字段到首位"
+    "description": "移动字段到首位。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.moveFieldLast",
     "body": "InputForm.moveFieldLast(fieldId)",
-    "description": "移动字段到最后"
+    "description": "移动字段到最后。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.radio",
     "body": "InputForm.radio(fieldName)",
-    "description": "获取`radio`字段操作对象"
+    "description": "获取`radio`字段操作对象。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.reBindSelect",
     "body": "InputForm.reBindSelect(fieldName,params)",
-    "description": "重新绑定下拉选择组件的查询条件 用于级联查询"
+    "description": "重新绑定下拉选择组件的查询条件，用于级联查询。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.removeField",
     "body": "InputForm.removeField(name,isForce)",
-    "description": "删除字段"
+    "description": "删除字段。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.removeField",
     "body": "InputForm.removeField(name)",
-    "description": "删除自定义字段"
+    "description": "删除自定义字段。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.removeFieldValidator",
     "body": "InputForm.removeFieldValidator(fieldId,valid)",
-    "description": "删除字段验证规则"
+    "description": "删除字段验证规则。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.removeOnChangeHook",
     "body": "InputForm.removeOnChangeHook(guid)",
-    "description": "移除标记 移除后才会继续保持动作"
+    "description": "移除标记，移除后才会继续保持动作。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.reset",
     "body": "InputForm.reset()",
-    "description": "清空输入框或查询框所有字段的值"
+    "description": "清空输入框或查询框所有字段的值。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.richEditor",
     "body": "InputForm.richEditor(fieldName)",
-    "description": "获取`RichEditor`富文本编辑器字段操作对象"
+    "description": "获取`RichEditor`富文本编辑器字段操作对象。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.serializeObject",
     "body": "InputForm.serializeObject()",
-    "description": "获取form的对象序列化 同`getData \\"
+    "description": "获取form的对象序列化。同`getData()"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.set",
     "body": "InputForm.set(fieldName,value,disTriggerChange,isSetSelectValue)",
-    "description": "禁用/启用输入框或查询框指定字段"
+    "description": "禁用/启用输入框或查询框指定字段。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.setAdvancedSearchValue",
     "body": "InputForm.setAdvancedSearchValue(fieldId,data)",
-    "description": "设置字段高级查询条件"
+    "description": "设置字段高级查询条件。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.setAreaSelect",
     "body": "InputForm.setAreaSelect(fieldId,dqCode1,dqCode2,dqCode3,dqCode4)",
-    "description": "设置地区控件选择数据"
+    "description": "设置地区控件选择数据。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.setEditValue",
     "body": "InputForm.setEditValue(params)",
-    "description": "初始化输入框或查询框字段值"
+    "description": "初始化输入框或查询框字段值。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.setFieldMustInput",
     "body": "InputForm.setFieldMustInput(name,isMustInput)",
-    "description": "设置/取消字段必填属性 必须是设计为非必输字段才可"
+    "description": "设置/取消字段必填属性（必须是设计为非必输字段才可)。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.setFieldWidth",
     "body": "InputForm.setFieldWidth(name,width)",
-    "description": "设置字段宽度"
+    "description": "设置字段宽度。"
   },
   {
     "language": "javascript",
@@ -2776,154 +2832,161 @@
     "group": "form",
     "prefix": "form.setSelectDropdownDatas",
     "body": "InputForm.setSelectDropdownDatas(fieldName,list)",
-    "description": "动态设置下拉选择组件的下拉数据"
+    "description": "动态设置下拉选择组件的下拉数据。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.setSelectValue",
     "body": "InputForm.setSelectValue(fieldId,value)",
-    "description": "设置下拉类型的字段值 然后通过值查找显示名称 并赋值到字段"
+    "description": "设置下拉类型的字段值，然后通过值查找显示名称，并赋值到字段。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.setTitle",
     "body": "InputForm.setTitle(fieldId,title)",
-    "description": "设置字段标题"
+    "description": "设置字段标题。"
+  },
+  {
+    "language": "javascript",
+    "group": "form",
+    "prefix": "form.setVisable",
+    "body": "InputForm.setVisable(isShow)",
+    "description": "显示/隐藏控件。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.showAllButtonsExcept",
     "body": "InputForm.showAllButtonsExcept(arrayfunction)",
-    "description": "显示所有操作按钮 权限隐藏和单据内的子按钮不会影响"
+    "description": "显示所有操作按钮（权限隐藏和单据内的子按钮不会影响）。"
   },
   {
     "language": "javascript",
     "group": "form",
     "prefix": "form.valid",
     "body": "InputForm.valid(parentTabPageCtrlName)",
-    "description": "触发Form验证"
+    "description": "触发Form验证。"
   },
   {
     "language": "javascript",
     "group": "radio",
     "prefix": "radio.check",
     "body": "InputForm.radio.check(value)",
-    "description": "选择指定值的`radio`选项"
+    "description": "选择指定值的`radio`选项。"
   },
   {
     "language": "javascript",
     "group": "radio",
     "prefix": "radio.disabled",
     "body": "InputForm.radio.disabled(value,isDisabled)",
-    "description": "禁用指定值的`radio`选项"
+    "description": "禁用指定值的`radio`选项。"
   },
   {
     "language": "javascript",
     "group": "radio",
     "prefix": "radio.disabledAll",
     "body": "InputForm.radio.disabledAll(isDisabled)",
-    "description": "禁用指定`radio`的所有选项"
+    "description": "禁用指定`radio`的所有选项。"
   },
   {
     "language": "javascript",
     "group": "radio",
     "prefix": "radio.hide",
     "body": "InputForm.radio.hide(value)",
-    "description": "隐藏指定值的`radio`选项"
+    "description": "隐藏指定值的`radio`选项。"
   },
   {
     "language": "javascript",
     "group": "radio",
     "prefix": "radio.hideAllRadioItem",
     "body": "InputForm.radio.hideAllRadioItem(otherValue)",
-    "description": "批量隐藏除指定值`otherValue`外的其他`radio`选项"
+    "description": "批量隐藏除指定值`otherValue`外的其他`radio`选项。"
   },
   {
     "language": "javascript",
     "group": "radio",
     "prefix": "radio.isCheck",
     "body": "InputForm.radio.isCheck(value)",
-    "description": "判断指定值的`radio`选项是否被选择"
+    "description": "判断指定值的`radio`选项是否被选择。"
   },
   {
     "language": "javascript",
     "group": "radio",
     "prefix": "radio.show",
     "body": "InputForm.radio.show(value)",
-    "description": "显示指定值的`radio`选项"
+    "description": "显示指定值的`radio`选项。"
   },
   {
     "language": "javascript",
     "group": "check",
     "prefix": "check.check",
     "body": "InputForm.checkbox.check(value)",
-    "description": "选择指定值的`checkbox`选项"
+    "description": "选择指定值的`checkbox`选项。"
   },
   {
     "language": "javascript",
     "group": "check",
     "prefix": "check.checkAll",
     "body": "InputForm.checkbox.checkAll(otherValue)",
-    "description": "选择除指定值`otherValue`外的其他所有`checkbox`选项"
+    "description": "选择除指定值`otherValue`外的其他所有`checkbox`选项。"
   },
   {
     "language": "javascript",
     "group": "check",
     "prefix": "check.disabled",
     "body": "InputForm.checkbox.disabled(value,isDisabled)",
-    "description": "禁用指定值的`checkbox`选项"
+    "description": "禁用指定值的`checkbox`选项。"
   },
   {
     "language": "javascript",
     "group": "check",
     "prefix": "check.disabledAll",
     "body": "InputForm.checkbox.disabledAll(isDisabled)",
-    "description": "禁用指定`checkbox`的所有选项"
+    "description": "禁用指定`checkbox`的所有选项。"
   },
   {
     "language": "javascript",
     "group": "check",
     "prefix": "check.hide",
     "body": "InputForm.checkbox.hide(value)",
-    "description": "隐藏指定值的`checkbox`选项"
+    "description": "隐藏指定值的`checkbox`选项。"
   },
   {
     "language": "javascript",
     "group": "check",
     "prefix": "check.hideAllCheckBox",
     "body": "InputForm.checkbox.hideAllCheckBox(otherValue)",
-    "description": "批量隐藏除指定值`otherValue`外的其他`checkbox`选项"
+    "description": "批量隐藏除指定值`otherValue`外的其他`checkbox`选项。"
   },
   {
     "language": "javascript",
     "group": "check",
     "prefix": "check.isCheck",
     "body": "InputForm.checkbox.isCheck(value)",
-    "description": "判断指定值的`checkbox`选项是否被选择"
+    "description": "判断指定值的`checkbox`选项是否被选择。"
   },
   {
     "language": "javascript",
     "group": "check",
     "prefix": "check.show",
     "body": "InputForm.checkbox.show(value)",
-    "description": "显示指定值的`checkbox`选项"
+    "description": "显示指定值的`checkbox`选项。"
   },
   {
     "language": "javascript",
     "group": "check",
     "prefix": "check.unCheck",
     "body": "InputForm.checkbox.unCheck(value)",
-    "description": "弃选指定值的`checkbox`选项"
+    "description": "弃选指定值的`checkbox`选项。"
   },
   {
     "language": "javascript",
     "group": "check",
     "prefix": "check.unCheckAll",
     "body": "InputForm.checkbox.unCheckAll(otherValue)",
-    "description": "弃选除指定值`otherValue`外的其他所有`checkbox`选项"
+    "description": "弃选除指定值`otherValue`外的其他所有`checkbox`选项。"
   },
   {
     "language": "javascript",
@@ -2937,7 +3000,7 @@
     "group": "rich",
     "prefix": "rich.clear",
     "body": "InputForm.richEditor.clear()",
-    "description": "清除编辑器数据"
+    "description": "清除编辑器数据。"
   },
   {
     "language": "javascript",
@@ -2965,7 +3028,7 @@
     "group": "rich",
     "prefix": "rich.getEditor",
     "body": "InputForm.richEditor.getEditor()",
-    "description": "获取原生编辑器对象"
+    "description": "获取原生编辑器对象。"
   },
   {
     "language": "javascript",
@@ -3028,7 +3091,7 @@
     "group": "rich",
     "prefix": "rich.setContent",
     "body": "InputForm.richEditor.setContent(str)",
-    "description": "设置 覆盖 内容"
+    "description": "设置（覆盖）内容"
   },
   {
     "language": "javascript",
@@ -3096,20 +3159,6 @@
   {
     "language": "javascript",
     "group": "tab",
-    "prefix": "tab.isVisable",
-    "body": "Tab.isVisable()",
-    "description": "查询当前控件是否隐藏状态"
-  },
-  {
-    "language": "javascript",
-    "group": "tab",
-    "prefix": "tab.setVisable",
-    "body": "Tab.setVisable(isShow)",
-    "description": "显示/隐藏控件"
-  },
-  {
-    "language": "javascript",
-    "group": "tab",
     "prefix": "tab.addBadge",
     "body": "Tab.addBadge(text,style)",
     "description": "在TabPage右上角显示角标"
@@ -3126,14 +3175,14 @@
     "group": "tab",
     "prefix": "tab.disabled",
     "body": "Tab.disabled()",
-    "description": ""
+    "description": "禁用当前Tab页"
   },
   {
     "language": "javascript",
     "group": "tab",
     "prefix": "tab.enabled",
     "body": "Tab.enabled()",
-    "description": ""
+    "description": "启用当前Tab页"
   },
   {
     "language": "javascript",
@@ -3147,21 +3196,28 @@
     "group": "tab",
     "prefix": "tab.hide",
     "body": "Tab.hide()",
-    "description": ""
+    "description": "隐藏当前Tab页"
   },
   {
     "language": "javascript",
     "group": "tab",
     "prefix": "tab.isShow",
     "body": "Tab.isShow()",
-    "description": "返回当前tab是否处于显示状态"
+    "description": "返回当前tab是否处于显示状态。"
   },
   {
     "language": "javascript",
     "group": "tab",
     "prefix": "tab.isVisable",
     "body": "Tab.isVisable()",
-    "description": "返回当前tab是否处于可视状态"
+    "description": "查询当前控件是否隐藏状态。"
+  },
+  {
+    "language": "javascript",
+    "group": "tab",
+    "prefix": "tab.isVisable",
+    "body": "Tab.isVisable()",
+    "description": "返回当前tab是否处于可视状态。"
   },
   {
     "language": "javascript",
@@ -3173,30 +3229,23 @@
   {
     "language": "javascript",
     "group": "tab",
+    "prefix": "tab.setVisable",
+    "body": "Tab.setVisable(isShow)",
+    "description": "显示/隐藏控件。"
+  },
+  {
+    "language": "javascript",
+    "group": "tab",
     "prefix": "tab.show",
     "body": "Tab.show()",
-    "description": ""
+    "description": "切换到当前Tab页"
   },
   {
     "language": "javascript",
     "group": "tab",
     "prefix": "tab.visable",
     "body": "Tab.visable()",
-    "description": ""
-  },
-  {
-    "language": "javascript",
-    "group": "tree",
-    "prefix": "tree.isVisable",
-    "body": "Tree.isVisable()",
-    "description": "查询当前控件是否隐藏状态"
-  },
-  {
-    "language": "javascript",
-    "group": "tree",
-    "prefix": "tree.setVisable",
-    "body": "Tree.setVisable(isShow)",
-    "description": "显示/隐藏控件"
+    "description": "显示当前Tab页"
   },
   {
     "language": "javascript",
@@ -3224,14 +3273,21 @@
     "group": "tree",
     "prefix": "tree.getCheckedNodes",
     "body": "Tree.getCheckedNodes()",
-    "description": "获取所有选择的节点 多选"
+    "description": "获取所有选择的节点（多选）"
   },
   {
     "language": "javascript",
     "group": "tree",
     "prefix": "tree.getCurNode",
     "body": "Tree.getCurNode()",
-    "description": "获取树当前点击的节点数据 单选"
+    "description": "获取树当前点击的节点数据（单选）"
+  },
+  {
+    "language": "javascript",
+    "group": "tree",
+    "prefix": "tree.isVisable",
+    "body": "Tree.isVisable()",
+    "description": "查询当前控件是否隐藏状态。"
   },
   {
     "language": "javascript",
@@ -3257,6 +3313,13 @@
   {
     "language": "javascript",
     "group": "tree",
+    "prefix": "tree.setVisable",
+    "body": "Tree.setVisable(isShow)",
+    "description": "显示/隐藏控件。"
+  },
+  {
+    "language": "javascript",
+    "group": "tree",
     "prefix": "tree.updateNode",
     "body": "Tree.updateNode(node)",
     "description": "更新树节点"
@@ -3264,37 +3327,30 @@
   {
     "language": "javascript",
     "group": "html",
+    "prefix": "html.findHtmlDocument",
+    "body": "Html.findHtmlDocument(qstr)",
+    "description": "返回控件内自定义HTML的JQuery元素。"
+  },
+  {
+    "language": "javascript",
+    "group": "html",
     "prefix": "html.isVisable",
     "body": "Html.isVisable()",
-    "description": "查询当前控件是否隐藏状态"
+    "description": "查询当前控件是否隐藏状态。"
   },
   {
     "language": "javascript",
     "group": "html",
     "prefix": "html.setVisable",
     "body": "Html.setVisable(isShow)",
-    "description": "显示/隐藏控件"
-  },
-  {
-    "language": "javascript",
-    "group": "html",
-    "prefix": "html.findHtmlDocument",
-    "body": "Html.findHtmlDocument(qstr)",
-    "description": "返回控件内自定义HTML的JQuery元素"
+    "description": "显示/隐藏控件。"
   },
   {
     "language": "javascript",
     "group": "report",
     "prefix": "report.isVisable",
     "body": "Report.isVisable()",
-    "description": "查询当前控件是否隐藏状态"
-  },
-  {
-    "language": "javascript",
-    "group": "report",
-    "prefix": "report.setVisable",
-    "body": "Report.setVisable(isShow)",
-    "description": "显示/隐藏控件"
+    "description": "查询当前控件是否隐藏状态。"
   },
   {
     "language": "javascript",
@@ -3316,5 +3372,12 @@
     "prefix": "report.setReportId",
     "body": "Report.setReportId(reportId)",
     "description": "替换报表模版"
+  },
+  {
+    "language": "javascript",
+    "group": "report",
+    "prefix": "report.setVisable",
+    "body": "Report.setVisable(isShow)",
+    "description": "显示/隐藏控件。"
   }
 ]

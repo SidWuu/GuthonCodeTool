@@ -143,11 +143,17 @@ rules:
 
 ## 使用
 
+### 1. 初始化源码索引
+
 初始化源码索引库：
 
 ```bash
 .venv/bin/python scripts/run_sync_once.py --init-only
 ```
+
+首次使用时先执行初始化。
+
+### 2. 同步源码
 
 按当前 `sync.ACTIVE` 同步源码：
 
@@ -155,14 +161,7 @@ rules:
 .venv/bin/python scripts/run_sync_once.py
 ```
 
-手动删除当前 ACTIVE 的 `var/source/readonly` 源码后，需要先删除对应同步游标，再重新全量同步。
-
-```bash
-sqlite3 var/runtime/index/products/demo-product.db "DELETE FROM gusen_sync_state WHERE state_key='last_success_time:products.demo-product';"
-.venv/bin/python scripts/run_sync_once.py
-```
-
-切换 ACTIVE 后，索引路径和 `last_success_time:<ACTIVE>` 必须同时改为对应产品或项目。
+### 3. 拉取源码并创建工作副本
 
 从已有源码索引生成工作副本：
 
@@ -181,6 +180,8 @@ sqlite3 var/runtime/index/products/demo-product.db "DELETE FROM gusen_sync_state
 
 手动拉取使用 `config/sync.yaml` 的 `sync.ACTIVE`；显式传入的项目或产品必须与 ACTIVE 一致。
 
+### 4. 检查与交付工作副本
+
 检查工作副本、刷新差异和生成交付清单：
 
 ```bash
@@ -190,6 +191,8 @@ sqlite3 var/runtime/index/products/demo-product.db "DELETE FROM gusen_sync_state
 ```
 
 状态包括 `CLEAN`、`LOCAL_CHANGED`、`UPSTREAM_CHANGED`、`CONFLICT` 和 `UPSTREAM_MISSING`。本地修改未被新上游包含时才进入 `CONFLICT`，手动拉取会保留工作副本并返回失败提示。
+
+### 5. 导出平台元数据
 
 导出表结构：
 
@@ -215,12 +218,40 @@ sqlite3 var/runtime/index/products/demo-product.db "DELETE FROM gusen_sync_state
 .venv/bin/python scripts/export_bill_type_sql.py --data-source-ids 0015,0008
 ```
 
+### 6. 同步谷神 API 文档与补全数据
+
+从谷神开发平台保存 `app.<hash>.js` 后：
+
+1. 将 bundle 放入 `docs/private/guthon-api/<版本>/`。
+2. 在 `config/sync.yaml` 的 `guthon_api` 中配置 `active_version` 和对应的 `bundle_files` 路径。
+3. 先检查，再执行同步：
+
+```bash
+node scripts/sync_guthon_api.mjs --check
+node scripts/sync_guthon_api.mjs
+```
+
+同步结果无差异时，不会覆盖已有的 Markdown 和 JSON 文件。
+
+### 7. 启动浏览器桥接服务
+
 启动浏览器桥接服务：
 
 ```bash
 cd plugins/GuthonBridge
 npm run start:bridge
 ```
+
+### 8. 恢复全量同步
+
+手动删除当前 ACTIVE 的 `var/source/readonly` 源码后，需要先删除对应同步游标，再重新全量同步：
+
+```bash
+sqlite3 var/runtime/index/products/demo-product.db "DELETE FROM gusen_sync_state WHERE state_key='last_success_time:products.demo-product';"
+.venv/bin/python scripts/run_sync_once.py
+```
+
+切换 ACTIVE 后，索引路径和 `last_success_time:<ACTIVE>` 必须同时改为对应产品或项目。
 
 ## 输出格式
 

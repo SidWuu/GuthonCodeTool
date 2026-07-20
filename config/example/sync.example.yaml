@@ -21,3 +21,9 @@ rules:
     - U00000XXXX
   prefer_version_mac: true
   skip_error_source: true
+
+guthon_api:
+  active_version: "2.0"
+  bundle_files:
+    v1_5: "docs/private/guthon-api/1.5/app.<hash>.js"
+    v2_0: "docs/private/guthon-api/2.0/app.<hash>.js"

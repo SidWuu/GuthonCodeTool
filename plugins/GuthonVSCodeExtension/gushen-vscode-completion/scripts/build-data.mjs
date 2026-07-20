@@ -4,8 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
-const defaultApiDir = path.resolve(rootDir, '..', '..', '..', 'AI帮助文档', '谷神方言API');
+const defaultApiDir = path.resolve(rootDir, '..', '..', '..', 'var', 'docs', '谷神方言API');
 const apiDir = process.argv[2] ? path.resolve(process.argv[2]) : defaultApiDir;
+const outputDir = process.argv[3] ? path.resolve(process.argv[3]) : path.join(rootDir, 'data');
 
 const sources = [
   ['java', 'java.md'],
@@ -71,7 +72,7 @@ function parseMarkdown(markdown, language) {
   return items;
 }
 
-fs.mkdirSync(path.join(rootDir, 'data'), { recursive: true });
+fs.mkdirSync(outputDir, { recursive: true });
 
 const index = {};
 for (const [language, fileName] of sources) {
@@ -80,12 +81,12 @@ for (const [language, fileName] of sources) {
   const items = parseMarkdown(markdown, language);
   index[language] = items;
   fs.writeFileSync(
-    path.join(rootDir, 'data', `${language}.json`),
+    path.join(outputDir, `${language}.json`),
     `${JSON.stringify(items, null, 2)}\n`
   );
 }
 
-fs.writeFileSync(path.join(rootDir, 'data', 'index.json'), `${JSON.stringify(index, null, 2)}\n`);
+fs.writeFileSync(path.join(outputDir, 'index.json'), `${JSON.stringify(index, null, 2)}\n`);
 
 console.log(
   sources

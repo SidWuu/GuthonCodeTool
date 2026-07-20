@@ -11,4 +11,5 @@ TODO.md
 .DS_Store
 temp/
 tests/
-superpowers/
+docs/superpowers/
+docs/private/

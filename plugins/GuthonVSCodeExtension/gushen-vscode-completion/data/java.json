@@ -4,168 +4,168 @@
     "group": "ai",
     "prefix": "ai.textModeration",
     "body": "$vs.ai.textModeration(text)",
-    "description": "文字内容审核 仅华为AI 需要配置华为AI服务"
+    "description": "文字内容审核（仅华为AI，需要配置华为AI服务)"
   },
   {
     "language": "java",
     "group": "ai",
     "prefix": "ai.textToAudio",
     "body": "$vs.ai.textToAudio(text,voiceName,speechSpeed)",
-    "description": "文字合成语音 仅华为AI 需要配置华为AI服务"
+    "description": "文字合成语音（仅华为AI，需要配置华为AI服务)"
   },
   {
     "language": "java",
     "group": "ai",
     "prefix": "ai.textToAudio",
     "body": "$vs.ai.textToAudio(text,voiceName)",
-    "description": "文字合成语音 仅华为AI 需要配置华为AI服务"
+    "description": "文字合成语音（仅华为AI，需要配置华为AI服务)"
   },
   {
     "language": "java",
     "group": "ai",
     "prefix": "ai.textTranslation",
     "body": "$vs.ai.textTranslation(text,toLang,fromLang)",
-    "description": "文字翻译 仅华为AI 需要配置华为AI服务"
+    "description": "文字翻译（仅华为AI，需要配置华为AI服务)"
   },
   {
     "language": "java",
     "group": "ai",
     "prefix": "ai.textTranslation",
     "body": "$vs.ai.textTranslation(text,toLang)",
-    "description": "文字翻译 仅华为AI 需要配置华为AI服务"
+    "description": "文字翻译（仅华为AI，需要配置华为AI服务)"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.andDataAuth",
     "body": "$vs.auth.andDataAuth(tableId,tableAliasName)",
-    "description": "获取当前用户数据权限SQL"
+    "description": "获取当前用户数据权限SQL。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.andDataAuth",
     "body": "$vs.auth.andDataAuth(tableId)",
-    "description": "获取当前用户数据权限SQL"
+    "description": "获取当前用户数据权限SQL。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.doUserFieldLoginAPP",
     "body": "$vs.auth.doUserFieldLoginAPP(userId,loginField,langId)",
-    "description": "使用用户唯一编码初始化当前浏览器的登录环境 一般用于三方系统单点登录 注意 本方法只可在主数据环境下运行"
+    "description": "使用用户唯一编码初始化当前浏览器的登录环境（一般用于三方系统单点登录），注意：本方法只可在主数据环境下运行。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.doUserFieldLoginAPP",
     "body": "$vs.auth.doUserFieldLoginAPP(userId,loginField)",
-    "description": "使用用户唯一编码初始化当前浏览器的登录环境 一般用于三方系统单点登录 注意 本方法只可在主数据环境下运行"
+    "description": "使用用户唯一编码初始化当前浏览器的登录环境（一般用于三方系统单点登录），注意：本方法只可在主数据环境下运行。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.doUserFieldLoginPC",
     "body": "$vs.auth.doUserFieldLoginPC(userId,loginField,langId)",
-    "description": "使用用户唯一编码初始化当前浏览器的登录环境 一般用于三方系统单点登录 注意 本方法只可在主数据环境下运行"
+    "description": "使用用户唯一编码初始化当前浏览器的登录环境（一般用于三方系统单点登录），注意：本方法只可在主数据环境下运行。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.doUserFieldLoginPC",
     "body": "$vs.auth.doUserFieldLoginPC(userId,loginField)",
-    "description": "使用用户唯一编码初始化当前浏览器的登录环境 一般用于三方系统单点登录 注意 本方法只可在主数据环境下运行"
+    "description": "使用用户唯一编码初始化当前浏览器的登录环境（一般用于三方系统单点登录），注意：本方法只可在主数据环境下运行。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.doUserTaskLogin",
     "body": "$vs.auth.doUserTaskLogin(userId,systemId)",
-    "description": "以服务端身份登录 并初始化登录场景 一般用于接口调用时初始化当前请求的用户执行身份 注意 不可在用户发起的请求里调用本方法 只可在服务调用环境中心运行"
+    "description": "以服务端身份登录，并初始化登录场景，一般用于接口调用时初始化当前请求的用户执行身份（注意：不可在用户发起的请求里调用本方法，只可在服务调用环境中心运行）。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.doUserTaskLogin",
     "body": "$vs.auth.doUserTaskLogin(userId)",
-    "description": "以服务端身份登录 并初始化登录场景 一般用于接口调用时初始化当前请求的用户执行身份 注意 不可在用户发起的请求里调用本方法 只可在服务调用环境中心运行"
+    "description": "以服务端身份登录，并初始化登录场景，一般用于接口调用时初始化当前请求的用户执行身份（注意：不可在用户发起的请求里调用本方法，只可在服务调用环境中心运行）。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.getDataAuthCode",
     "body": "$vs.auth.getDataAuthCode(authFieldId)",
-    "description": "获取用户拥有的数据权限代码列表 查询数据权限"
+    "description": "获取用户拥有的数据权限代码列表（查询数据权限）。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.getMenus",
     "body": "$vs.auth.getMenus(mkId)",
-    "description": "获取菜单信息"
+    "description": "获取菜单信息。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.getUserAuths",
     "body": "$vs.auth.getUserAuths(mkId,auths,userId)",
-    "description": "获取指定用户对指定模式是否存在指定的按钮权限"
+    "description": "获取指定用户对指定模式是否存在指定的按钮权限。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.getUserAuths",
     "body": "$vs.auth.getUserAuths(mkId,auths)",
-    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限"
+    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.getUserAuthsWithPageId",
     "body": "$vs.auth.getUserAuthsWithPageId(mkId,auths,pageId,userId)",
-    "description": "获取指定用户对指定模式是否存在指定的按钮权限"
+    "description": "获取指定用户对指定模式是否存在指定的按钮权限。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.getUserAuthsWithPageId",
     "body": "$vs.auth.getUserAuthsWithPageId(mkId,auths,pageId)",
-    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限"
+    "description": "获取当前登录用户对指定模式是否存在指定的按钮权限。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.getUserDataAuths",
     "body": "$vs.auth.getUserDataAuths(userId,authFieldId)",
-    "description": "获指定数据权限类型下用户的数据权限 `本方法需要访问数据库 尽量不要在循环中使用 否则执行效率很低 \\"
+    "description": "获指定数据权限类型下用户的数据权限。`本方法需要访问数据库，尽量不要在循环中使用，否则执行效率很低。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.getUserDataAuths",
     "body": "$vs.auth.getUserDataAuths(userId)",
-    "description": "获用户所拥有的所有数据权限 `本方法需要访问数据库 尽量不要在循环中使用 否则执行效率很低 \\"
+    "description": "获用户所拥有的所有数据权限。`本方法需要访问数据库，尽量不要在循环中使用，否则执行效率很低。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.getUsersDataAuths",
     "body": "$vs.auth.getUsersDataAuths(userIds,authFieldId)",
-    "description": "获指定数据权限类型下用户的数据权限 `本方法需要访问数据库 尽量不要在循环中使用 否则执行效率很低 \\"
+    "description": "获指定数据权限类型下用户的数据权限。`本方法需要访问数据库，尽量不要在循环中使用，否则执行效率很低。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.getUsersDataAuths",
     "body": "$vs.auth.getUsersDataAuths(userIds)",
-    "description": "获指定数据权限类型下用户的数据权限 `本方法需要访问数据库 尽量不要在循环中使用 否则执行效率很低 \\"
+    "description": "获指定数据权限类型下用户的数据权限。`本方法需要访问数据库，尽量不要在循环中使用，否则执行效率很低。"
   },
   {
     "language": "java",
     "group": "auth",
     "prefix": "auth.offCurThreadDataAuth",
     "body": "$vs.auth.offCurThreadDataAuth()",
-    "description": "禁用当前线程的所有数据权限校验 支持跨微服务调用和子线程"
+    "description": "禁用当前线程的所有数据权限校验（支持跨微服务调用和子线程）。"
   },
   {
     "language": "java",
@@ -242,7 +242,7 @@
     "group": "bill",
     "prefix": "bill.parseBillNoHeader",
     "body": "$vs.billNoTools.parseBillNoHeader(strBillTypeCode,form)",
-    "description": "解析单据类型 生产单据号码头 含日期【若有】 不含流水号部分"
+    "description": "解析单据类型，生产单据号码头（含日期【若有】，不含流水号部分）"
   },
   {
     "language": "java",
@@ -424,42 +424,42 @@
     "group": "barcode",
     "prefix": "barcode.createQrCode",
     "body": "$vs.barcode.createQrCode(text,width,charset)",
-    "description": "创建二维码图片 无LOGO图片"
+    "description": "创建二维码图片(无LOGO图片)"
   },
   {
     "language": "java",
     "group": "barcode",
     "prefix": "barcode.createQrCode",
     "body": "$vs.barcode.createQrCode(text,width)",
-    "description": "创建二维码图片 无LOGO图片"
+    "description": "创建二维码图片(无LOGO图片)"
   },
   {
     "language": "java",
     "group": "barcode",
     "prefix": "barcode.createQrCode",
     "body": "$vs.barcode.createQrCode(text)",
-    "description": "创建二维码图片 无LOGO图片"
+    "description": "创建二维码图片(无LOGO图片)"
   },
   {
     "language": "java",
     "group": "barcode",
     "prefix": "barcode.createQrCodeWithLogo",
     "body": "$vs.barcode.createQrCodeWithLogo(text,logoFilePath,width,charset)",
-    "description": "创建二维码图片 含LOGO图片"
+    "description": "创建二维码图片(含LOGO图片)"
   },
   {
     "language": "java",
     "group": "barcode",
     "prefix": "barcode.createQrCodeWithLogo",
     "body": "$vs.barcode.createQrCodeWithLogo(text,logoFilePath,width)",
-    "description": "创建二维码图片 含LOGO图片"
+    "description": "创建二维码图片(含LOGO图片)"
   },
   {
     "language": "java",
     "group": "barcode",
     "prefix": "barcode.createQrCodeWithLogo",
     "body": "$vs.barcode.createQrCodeWithLogo(text,logoFilePath)",
-    "description": "创建二维码图片 含LOGO图片"
+    "description": "创建二维码图片(含LOGO图片)"
   },
   {
     "language": "java",
@@ -571,7 +571,7 @@
     "group": "cache",
     "prefix": "cache.getCodes",
     "body": "$vs.cache.getCodes(strCodeType)",
-    "description": "获取数据字典对应的集合 所有记录 含未启用记录"
+    "description": "获取数据字典对应的集合（所有记录，含未启用记录）"
   },
   {
     "language": "java",
@@ -592,7 +592,7 @@
     "group": "cache",
     "prefix": "cache.getImageRandomCode",
     "body": "$vs.cache.getImageRandomCode()",
-    "description": "从缓存中获取图片验证码 图片验证码加载地址 `ROOT_PATH/authimg.img?width=100&height=50` ``` 如 <img src=\"{ROOT_PATH}/authimg.img?width=100&height=50\" id=\"randomCode\" onclick=\"reloadCode 100 50 \"/> ``\\"
+    "description": "从缓存中获取图片验证码，图片验证码加载地址：`ROOT_PATH/authimg.img?width=100&height=50` ``` 如： <img src=\"{ROOT_PATH}/authimg.img?width=100&height=50\" id=\"randomCode\" onclick=\"reloadCode(100,50);\"/> ``"
   },
   {
     "language": "java",
@@ -606,42 +606,42 @@
     "group": "cache",
     "prefix": "cache.getValue",
     "body": "$vs.cache.getValue(strTableId,fieldName,dataFieldValue)",
-    "description": "获取缓存对象 单字段数据唯一性"
+    "description": "获取缓存对象（单字段数据唯一性）"
   },
   {
     "language": "java",
     "group": "cache",
     "prefix": "cache.putCache",
     "body": "$vs.cache.putCache(strCacheKEY,data,timeout)",
-    "description": "把数据放到缓存 若redis启用则放到redis否则放到服务器本地内容"
+    "description": "把数据放到缓存（若redis启用则放到redis否则放到服务器本地内容)"
   },
   {
     "language": "java",
     "group": "cache",
     "prefix": "cache.putCache",
     "body": "$vs.cache.putCache(strCacheKEY,data)",
-    "description": "把数据放到缓存 若redis启用则放到redis否则放到服务器本地内容 数据永久有效"
+    "description": "把数据放到缓存（若redis启用则放到redis否则放到服务器本地内容)，数据永久有效"
   },
   {
     "language": "java",
     "group": "cache",
     "prefix": "cache.putUserSessionCache",
     "body": "$vs.cache.putUserSessionCache(strCacheKEY,data)",
-    "description": "把数据放到用户会话缓存中 用户退出登录后数据连带删除"
+    "description": "把数据放到用户会话缓存中（用户退出登录后数据连带删除)"
   },
   {
     "language": "java",
     "group": "cache",
     "prefix": "cache.refreshUserSession",
     "body": "$vs.cache.refreshUserSession(userId,systemId)",
-    "description": "刷新用户缓存 刷新内容包括 操作权限、数据权限、会员信息 协同用户 、用户身份 管理or系统管理员 、登录初始化脚本执行等"
+    "description": "刷新用户缓存，刷新内容包括：操作权限、数据权限、会员信息（协同用户）、用户身份（管理or系统管理员）、登录初始化脚本执行等。"
   },
   {
     "language": "java",
     "group": "cache",
     "prefix": "cache.refreshUserSession",
     "body": "$vs.cache.refreshUserSession(userId)",
-    "description": "刷新用户缓存 刷新内容包括 操作权限、数据权限、会员信息 协同用户 、用户身份 管理or系统管理员 、登录初始化脚本执行等"
+    "description": "刷新用户缓存，刷新内容包括：操作权限、数据权限、会员信息（协同用户）、用户身份（管理or系统管理员）、登录初始化脚本执行等。"
   },
   {
     "language": "java",
@@ -655,7 +655,7 @@
     "group": "cache",
     "prefix": "cache.removeCacheBean",
     "body": "$vs.cache.removeCacheBean(strTableId,dataFieldValue)",
-    "description": "删除缓存对象 用于刷新缓存数据"
+    "description": "删除缓存对象（用于刷新缓存数据）"
   },
   {
     "language": "java",
@@ -676,21 +676,21 @@
     "group": "cipher",
     "prefix": "cipher.base64DeCode",
     "body": "$vs.cipher.base64DeCode(base64str)",
-    "description": "对BASE64字符串解码 并返回二进制数组"
+    "description": "对BASE64字符串解码，并返回二进制数组"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.base64EnCode",
     "body": "$vs.cipher.base64EnCode(bytes)",
-    "description": "对二进制数组进行BASE64编码 返回base64字符串"
+    "description": "对二进制数组进行BASE64编码，返回base64字符串"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.bytesToHex",
     "body": "$vs.cipher.bytesToHex(bytes)",
-    "description": "将二进制字节数组转为十六进制字符串 大写"
+    "description": "将二进制字节数组转为十六进制字符串（大写）"
   },
   {
     "language": "java",
@@ -774,14 +774,14 @@
     "group": "cipher",
     "prefix": "cipher.hmacSHA256B",
     "body": "$vs.cipher.hmacSHA256B(data,secret)",
-    "description": "HmacSHA256摘要算法 字节版"
+    "description": "HmacSHA256摘要算法（字节版）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.hmacSHA256S",
     "body": "$vs.cipher.hmacSHA256S(data,secret)",
-    "description": "HmacSHA256摘要算法 字节版"
+    "description": "HmacSHA256摘要算法（字节版）"
   },
   {
     "language": "java",
@@ -802,28 +802,28 @@
     "group": "cipher",
     "prefix": "cipher.hmacSHA512B",
     "body": "$vs.cipher.hmacSHA512B(data,secret)",
-    "description": "HmacSHA512摘要算法 字节版"
+    "description": "HmacSHA512摘要算法（字节版）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.hmacSHA512S",
     "body": "$vs.cipher.hmacSHA512S(data,secret)",
-    "description": "HmacSHA512摘要算法 字节版"
+    "description": "HmacSHA512摘要算法（字节版）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.replaceHtmlToStr",
     "body": "$vs.cipher.replaceHtmlToStr(htmlstr)",
-    "description": "将HTML字符串转义 如 空格 转义为 &nbsp"
+    "description": "将HTML字符串转义（如： 空格 转义为 ）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.replaceStrToHtml",
     "body": "$vs.cipher.replaceStrToHtml(str)",
-    "description": "将字符串转义HTML 如 &nbsp 转义为 空格"
+    "description": "将字符串转义HTML（如： 转义为 空格 ）"
   },
   {
     "language": "java",
@@ -872,49 +872,49 @@
     "group": "cipher",
     "prefix": "cipher.signHmac",
     "body": "$vs.cipher.signHmac(hmacType,data,secret)",
-    "description": "Hmac算法通用版 base64版"
+    "description": "Hmac算法通用版（base64版）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.signHmacMD5",
     "body": "$vs.cipher.signHmacMD5(data,secret)",
-    "description": "HmacDM5摘要算法 base64版"
+    "description": "HmacDM5摘要算法（base64版）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.signHmacSHA1",
     "body": "$vs.cipher.signHmacSHA1(data,secret)",
-    "description": "HmacSHA1摘要算法 base64版"
+    "description": "HmacSHA1摘要算法（base64版）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.signHmacSHA224",
     "body": "$vs.cipher.signHmacSHA224(data,secret)",
-    "description": "HmacSHA224摘要算法 base64版"
+    "description": "HmacSHA224摘要算法（base64版）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.signHmacSHA256",
     "body": "$vs.cipher.signHmacSHA256(data,secret)",
-    "description": "signHmacSHA256摘要算法 base64版"
+    "description": "signHmacSHA256摘要算法（base64版）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.signHmacSHA384",
     "body": "$vs.cipher.signHmacSHA384(data,secret)",
-    "description": "signHmacSHA384摘要算法 base64版"
+    "description": "signHmacSHA384摘要算法（base64版）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.signHmacSHA512",
     "body": "$vs.cipher.signHmacSHA512(data,secret)",
-    "description": "signHmacSHA512摘要算法 base64版"
+    "description": "signHmacSHA512摘要算法（base64版）"
   },
   {
     "language": "java",
@@ -949,49 +949,49 @@
     "group": "cipher",
     "prefix": "cipher.sm3encode",
     "body": "$vs.cipher.sm3encode(str)",
-    "description": "使用国密对数据进行摘要 类似MD5"
+    "description": "使用国密对数据进行摘要（类似MD5）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.sm4decode",
     "body": "$vs.cipher.sm4decode(cipherbase64,key,mode,padding,iv)",
-    "description": "使用国密对称加密算法对数据进行解密 类似DES"
+    "description": "使用国密对称加密算法对数据进行解密（类似DES）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.sm4decode",
     "body": "$vs.cipher.sm4decode(cipherbase64,key,mode,padding)",
-    "description": "使用国密对称加密算法对数据进行解密 类似DES"
+    "description": "使用国密对称加密算法对数据进行解密（类似DES）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.sm4decode",
     "body": "$vs.cipher.sm4decode(cipherbase64,key)",
-    "description": "使用国密对称加密算法对数据进行解密 类似DES"
+    "description": "使用国密对称加密算法对数据进行解密（类似DES）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.sm4encode",
     "body": "$vs.cipher.sm4encode(str,key,mode,padding,iv)",
-    "description": "使用国密对称加密算法对数据进行加密 类似DES"
+    "description": "使用国密对称加密算法对数据进行加密（类似DES）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.sm4encode",
     "body": "$vs.cipher.sm4encode(str,key,mode,padding)",
-    "description": "使用国密对称加密算法对数据进行加密 类似DES"
+    "description": "使用国密对称加密算法对数据进行加密（类似DES）"
   },
   {
     "language": "java",
     "group": "cipher",
     "prefix": "cipher.sm4encode",
     "body": "$vs.cipher.sm4encode(str,key)",
-    "description": "使用国密对称加密算法对数据进行加密 类似DES"
+    "description": "使用国密对称加密算法对数据进行加密（类似DES）"
   },
   {
     "language": "java",
@@ -1082,28 +1082,28 @@
     "group": "db",
     "prefix": "db.batchInsert",
     "body": "$vs.dbTools.batchInsert(strTableName,datas,isNeedDataAuth)",
-    "description": "往表`$strTableName`中批量新增一条记录 注意 `$datas`中的所有键值必须是表`$strTableName`的字段 否则操作失败"
+    "description": "往表`$strTableName`中批量新增一条记录，注意：`$datas`中的所有键值必须是表`$strTableName`的字段，否则操作失败"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.batchInsert",
     "body": "$vs.dbTools.batchInsert(strTableName,datas)",
-    "description": "往表`$strTableName`中批量新增一条记录 含数据权限 注意 `$datas`中的所有键值必须是表`$strTableName`的字段 否则操作失败"
+    "description": "往表`$strTableName`中批量新增一条记录（含数据权限），注意：`$datas`中的所有键值必须是表`$strTableName`的字段，否则操作失败"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.batchUpdate",
     "body": "$vs.dbTools.batchUpdate(strTableName,datas,wheres)",
-    "description": "修改表`$strTableName`中符合条件的记录 不含数据权限 注意 1、`$datas`和`$wheres`中的记录数、顺序必须相同 即一对数据一对条件必须匹配 2、`$datas`中每组的字段个数必须相同 3、`$wheres`中每组的字段个数必须相同 4、`$datas`中每组的字段必须是表`$strTableName`的字段 否则操作失败 5、`$where`必须包含条件 也就是不允许全表更新 否则操作失败"
+    "description": "修改表`$strTableName`中符合条件的记录（不含数据权限）。 注意： 1、`$datas`和`$wheres`中的记录数、顺序必须相同（即一对数据一对条件必须匹配）； 2、`$datas`中每组的字段个数必须相同； 3、`$wheres`中每组的字段个数必须相同； 4、`$datas`中每组的字段必须是表`$strTableName`的字段，否则操作失败; 5、`$where`必须包含条件（也就是不允许全表更新），否则操作失败"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.clearDatabaseCache",
     "body": "$vs.dbTools.clearDatabaseCache()",
-    "description": "清理当前线程内的MYBATIS一级缓存 一般用于需要实时读取数据库同一条记录的情况"
+    "description": "清理当前线程内的MYBATIS一级缓存（一般用于需要实时读取数据库同一条记录的情况）"
   },
   {
     "language": "java",
@@ -1124,14 +1124,14 @@
     "group": "db",
     "prefix": "db.count",
     "body": "$vs.dbTools.count(strTableName,where,isNeedDataAuth)",
-    "description": "查询表`$strTableName`中符合条件的记录数 含数据权限"
+    "description": "查询表`$strTableName`中符合条件的记录数（含数据权限）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.count",
     "body": "$vs.dbTools.count(strTableName,where)",
-    "description": "查询表`$strTableName`中符合条件的记录数 含数据权限"
+    "description": "查询表`$strTableName`中符合条件的记录数（含数据权限）"
   },
   {
     "language": "java",
@@ -1145,70 +1145,70 @@
     "group": "db",
     "prefix": "db.createTempTable",
     "body": "$vs.dbTools.createTempTable(strSql,where,isEnableDataAuth)",
-    "description": "创建临时表 警告 调用本语句时 数据库会隐式发起commit操作 本语句前 所有对数据库记录的修改将自动提交 无法回滚"
+    "description": "创建临时表，警告：调用本语句时，数据库会隐式发起commit操作，本语句前，所有对数据库记录的修改将自动提交，无法回滚。"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.createTempTable",
     "body": "$vs.dbTools.createTempTable(strSql,where)",
-    "description": "创建临时表 警告 调用本语句时 数据库会隐式发起commit操作 本语句前 所有对数据库记录的修改将自动提交 无法回滚"
+    "description": "创建临时表，警告：调用本语句时，数据库会隐式发起commit操作，本语句前，所有对数据库记录的修改将自动提交，无法回滚。"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.createTempTable",
     "body": "$vs.dbTools.createTempTable(strSql)",
-    "description": "创建临时表 警告 调用本语句时 数据库会隐式发起commit操作 本语句前 所有对数据库记录的修改将自动提交 无法回滚"
+    "description": "创建临时表，警告：调用本语句时，数据库会隐式发起commit操作，本语句前，所有对数据库记录的修改将自动提交，无法回滚。"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.delete",
     "body": "$vs.dbTools.delete(strTableName,where,isNeedDataAuth)",
-    "description": "删除表`$strTableName`中符合条件的记录 含数据权限 注意 `$where`必须包含条件 也就是不允许全表删除 否则操作失败"
+    "description": "删除表`$strTableName`中符合条件的记录（含数据权限），注意：`$where`必须包含条件（也就是不允许全表删除），否则操作失败"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.delete",
     "body": "$vs.dbTools.delete(strTableName,where)",
-    "description": "删除表`$strTableName`中符合条件的记录 含数据权限 注意 `$where`必须包含条件 也就是不允许全表删除 否则操作失败"
+    "description": "删除表`$strTableName`中符合条件的记录（含数据权限），注意：`$where`必须包含条件（也就是不允许全表删除），否则操作失败"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.dropAllTempTable",
     "body": "$vs.dbTools.dropAllTempTable()",
-    "description": "本方法已废弃 请不要使用 请使用 dropTempTable 方法"
+    "description": "本方法已废弃，请不要使用 请使用 dropTempTable 方法"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.dropTempTable",
     "body": "$vs.dbTools.dropTempTable(tableId)",
-    "description": "删除临时表 警告 调用本语句时 数据库会隐式发起commit操作 本语句前 所有对数据库记录的修改将自动提交 无法回滚"
+    "description": "删除临时表，警告：调用本语句时，数据库会隐式发起commit操作，本语句前，所有对数据库记录的修改将自动提交，无法回滚。"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.execute",
     "body": "$vs.dbTools.execute(strSql,where,isEnableDataAuth)",
-    "description": "执行数据库更新语句 无数据权限"
+    "description": "执行数据库更新语句（无数据权限）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.execute",
     "body": "$vs.dbTools.execute(strSql,where)",
-    "description": "执行数据库更新语句 无数据权限"
+    "description": "执行数据库更新语句（无数据权限）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.executeDDL",
     "body": "$vs.dbTools.executeDDL(strSql,where)",
-    "description": "执行非事务SQL语句 如 truncate、create、drop等语句"
+    "description": "执行非事务SQL语句，如：truncate、create、drop等语句。"
   },
   {
     "language": "java",
@@ -1271,14 +1271,14 @@
     "group": "db",
     "prefix": "db.insert",
     "body": "$vs.dbTools.insert(strTableName,data,isNeedDataAuth)",
-    "description": "往表`$strTableName`中新增一条记录 含数据权限 注意 `$data`中的所有键值必须是表`$strTableName`的字段 否则操作失败"
+    "description": "往表`$strTableName`中新增一条记录（含数据权限），注意：`$data`中的所有键值必须是表`$strTableName`的字段，否则操作失败"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.insert",
     "body": "$vs.dbTools.insert(strTableName,data)",
-    "description": "往表`$strTableName`中新增一条记录 含数据权限 注意 `$data`中的所有键值必须是表`$strTableName`的字段 否则操作失败"
+    "description": "往表`$strTableName`中新增一条记录（含数据权限），注意：`$data`中的所有键值必须是表`$strTableName`的字段，否则操作失败"
   },
   {
     "language": "java",
@@ -1292,14 +1292,14 @@
     "group": "db",
     "prefix": "db.list",
     "body": "$vs.dbTools.list(strSql,where,isEnableDataAuth)",
-    "description": "执行数据库查询语句 无数据权限"
+    "description": "执行数据库查询语句（无数据权限）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.list",
     "body": "$vs.dbTools.list(strSql,where)",
-    "description": "执行数据库查询语句 无数据权限"
+    "description": "执行数据库查询语句（无数据权限）"
   },
   {
     "language": "java",
@@ -1320,84 +1320,84 @@
     "group": "db",
     "prefix": "db.remoteList",
     "body": "$vs.dbTools.remoteList(systemId,strSql,where,isNeedDataAuth)",
-    "description": "执行远程数据库查询语句 无数据权限"
+    "description": "执行远程数据库查询语句（无数据权限）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.remoteList",
     "body": "$vs.dbTools.remoteList(systemId,strSql,where)",
-    "description": "执行远程数据库查询语句 无数据权限"
+    "description": "执行远程数据库查询语句（无数据权限）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.remoteUniqueResult",
     "body": "$vs.dbTools.remoteUniqueResult(systemId,strSql,where)",
-    "description": "执行远程数据库查询语句 并返回单行结果集 无数据权限"
+    "description": "执行远程数据库查询语句，并返回单行结果集（无数据权限）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.select",
     "body": "$vs.dbTools.select(strTableName,strColumns,where,isNeedDataAuth)",
-    "description": "查询表`$strTableName`中符合条件的记录 根据`$isNeedDataAuth`判断是否含数据权限"
+    "description": "查询表`$strTableName`中符合条件的记录（根据`$isNeedDataAuth`判断是否含数据权限）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.select",
     "body": "$vs.dbTools.select(strTableName,strColumns,where)",
-    "description": "查询表`$strTableName`中符合条件的记录 含数据权限"
+    "description": "查询表`$strTableName`中符合条件的记录（含数据权限）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.select",
     "body": "$vs.dbTools.select(strTableName,where)",
-    "description": "查询表`$strTableName`中符合条件的记录 含数据权限"
+    "description": "查询表`$strTableName`中符合条件的记录（含数据权限）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.selectOne",
     "body": "$vs.dbTools.selectOne(strTableName,strColumns,where)",
-    "description": "查询表`$strTableName`中符合条件的记录 唯一返回 若返回结果大于1行则报异常"
+    "description": "查询表`$strTableName`中符合条件的记录（唯一返回，若返回结果大于1行则报异常）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.selectOne",
     "body": "$vs.dbTools.selectOne(strTableName,where)",
-    "description": "查询表`$strTableName`中符合条件的记录 唯一返回 若返回结果大于1行则报异常"
+    "description": "查询表`$strTableName`中符合条件的记录（唯一返回，若返回结果大于1行则报异常）"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.uniqueResult",
     "body": "$vs.dbTools.uniqueResult(strSql,where)",
-    "description": "执行数据库查询语句 并返回单行结果集 无数据权限 注意 若存在多行返回则会报异常"
+    "description": "执行数据库查询语句，并返回单行结果集（无数据权限），注意：若存在多行返回则会报异常"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.update",
     "body": "$vs.dbTools.update(strTableName,data,where,isNeedDataAuth)",
-    "description": "修改表`$strTableName`中符合条件的记录 含数据权限 注意 `$data`中的所有键值必须是表`$strTableName`的字段 否则操作失败 `$where`必须包含条件 也就是不允许全表更新 否则操作失败"
+    "description": "修改表`$strTableName`中符合条件的记录（含数据权限），注意：`$data`中的所有键值必须是表`$strTableName`的字段，否则操作失败;`$where`必须包含条件（也就是不允许全表更新），否则操作失败"
   },
   {
     "language": "java",
     "group": "db",
     "prefix": "db.update",
     "body": "$vs.dbTools.update(strTableName,data,where)",
-    "description": "修改表`$strTableName`中符合条件的记录 含数据权限 注意 `$data`中的所有键值必须是表`$strTableName`的字段 否则操作失败 `$where`必须包含条件 也就是不允许全表更新 否则操作失败"
+    "description": "修改表`$strTableName`中符合条件的记录（含数据权限），注意：`$data`中的所有键值必须是表`$strTableName`的字段，否则操作失败;`$where`必须包含条件（也就是不允许全表更新），否则操作失败"
   },
   {
     "language": "java",
     "group": "date",
     "prefix": "date.dateAdd",
     "body": "$vs.date.dateAdd(date,intAddValue)",
-    "description": "对日期加 或减 天数操作"
+    "description": "对日期加（或减）天数操作"
   },
   {
     "language": "java",
@@ -1411,7 +1411,7 @@
     "group": "date",
     "prefix": "date.dateHourAdd",
     "body": "$vs.date.dateHourAdd(date,intAddValue)",
-    "description": "对日加 或减 小时操作"
+    "description": "对日加（或减）小时操作"
   },
   {
     "language": "java",
@@ -1425,35 +1425,35 @@
     "group": "date",
     "prefix": "date.dateMinuteAdd",
     "body": "$vs.date.dateMinuteAdd(date,intAddValue)",
-    "description": "对日加 或减 分钟操作"
+    "description": "对日加（或减）分钟操作"
   },
   {
     "language": "java",
     "group": "date",
     "prefix": "date.dateMonthAdd",
     "body": "$vs.date.dateMonthAdd(date,intAddValue)",
-    "description": "对日期加 或减 月操作"
+    "description": "对日期加（或减）月操作"
   },
   {
     "language": "java",
     "group": "date",
     "prefix": "date.dateSecondAdd",
     "body": "$vs.date.dateSecondAdd(date,intAddValue)",
-    "description": "对日加 或减 秒钟操作"
+    "description": "对日加（或减）秒钟操作"
   },
   {
     "language": "java",
     "group": "date",
     "prefix": "date.dateYearAdd",
     "body": "$vs.date.dateYearAdd(date,intAddValue)",
-    "description": "对日期加 或减 年操作"
+    "description": "对日期加（或减）年操作"
   },
   {
     "language": "java",
     "group": "date",
     "prefix": "date.format",
     "body": "$vs.date.format(date,format)",
-    "description": "日期格式化 同 `$vs.format.formatDate date format `方法"
+    "description": "日期格式化，同：`$vs.format.formatDate(date,format)`方法"
   },
   {
     "language": "java",
@@ -1467,14 +1467,14 @@
     "group": "date",
     "prefix": "date.getDbDate",
     "body": "$vs.date.getDbDate()",
-    "description": "获取数据库时间 不含毫秒"
+    "description": "获取数据库时间（不含毫秒）"
   },
   {
     "language": "java",
     "group": "date",
     "prefix": "date.getDbTimeStamp",
     "body": "$vs.date.getDbTimeStamp()",
-    "description": "获取数据库时间 含毫秒"
+    "description": "获取数据库时间（含毫秒）"
   },
   {
     "language": "java",
@@ -1543,29 +1543,29 @@
     "language": "java",
     "group": "ex",
     "prefix": "ex.throwException",
-    "body": "$vs.exception.throwException(errorMsg)",
-    "description": "向用户端抛出异常提示 若当前存在事务 则会回滚事务"
+    "body": "$vs.exception.throwException(strMsg,args...)",
+    "description": "向用户端抛出异常提示(若当前存在事务，则会回滚事务)"
   },
   {
     "language": "java",
     "group": "fmt",
     "prefix": "fmt.formatDate",
     "body": "$vs.format.formatDate(date,strFmt)",
-    "description": "格式化日期成 `$strFmt` 格式的字符串"
+    "description": "格式化日期成(`$strFmt`)格式的字符串"
   },
   {
     "language": "java",
     "group": "fmt",
     "prefix": "fmt.formatDate",
     "body": "$vs.format.formatDate(date)",
-    "description": "格式化日期成默认格式 `yyyy-MM-dd` 的字符串"
+    "description": "格式化日期成默认格式(`yyyy-MM-dd`)的字符串"
   },
   {
     "language": "java",
     "group": "fmt",
     "prefix": "fmt.formatNumber",
     "body": "$vs.format.formatNumber(num,strFmt)",
-    "description": "格式化数字成 `$strFmt` 格式的字符串"
+    "description": "格式化数字成(`$strFmt`)格式的字符串"
   },
   {
     "language": "java",
@@ -1593,14 +1593,14 @@
     "group": "file",
     "prefix": "file.batchDownload",
     "body": "$vs.file.batchDownload(files,fileName,ignoreNotFound)",
-    "description": "触发批量文件下载请求 注意 本方法必须在`地址映射`的服务组件下调用 JS代码可以是 `window.open ROOT_PATH + \"/gdpaas/comp/filedownload/demo.htm\" \\"
+    "description": "触发批量文件下载请求（注意：本方法必须在`地址映射`的服务组件下调用，JS代码可以是：`window.open(ROOT_PATH + \"/gdpaas/comp/filedownload/demo.htm\")`）"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.batchDownload",
     "body": "$vs.file.batchDownload(files,fileName)",
-    "description": "触发批量文件下载请求 注意 本方法必须在`地址映射`的服务组件下调用 JS代码可以是 `window.open ROOT_PATH + \"/gdpaas/comp/filedownload/demo.htm\" \\"
+    "description": "触发批量文件下载请求（注意：本方法必须在`地址映射`的服务组件下调用，JS代码可以是：`window.open(ROOT_PATH + \"/gdpaas/comp/filedownload/demo.htm\")`）"
   },
   {
     "language": "java",
@@ -1621,7 +1621,7 @@
     "group": "file",
     "prefix": "file.desDeCodeFile",
     "body": "$vs.file.desDeCodeFile(path,pass)",
-    "description": "对文件内容进行解密 注意 必须是谷神 $vs.file.desEnCodeFile 生成的密文文件 否则会解密失败"
+    "description": "对文件内容进行解密（注意：必须是谷神 $vs.file.desEnCodeFile 生成的密文文件，否则会解密失败)"
   },
   {
     "language": "java",
@@ -1635,14 +1635,14 @@
     "group": "file",
     "prefix": "file.download",
     "body": "$vs.file.download(path,fileName)",
-    "description": "触发文件下载请求 注意 本方法必须在`地址映射`的服务组件下调用 JS代码可以是 `window.open ROOT_PATH + \"/gdpaas/comp/filedownload/demo.htm\" \\"
+    "description": "触发文件下载请求（注意：本方法必须在`地址映射`的服务组件下调用，JS代码可以是：`window.open(ROOT_PATH + \"/gdpaas/comp/filedownload/demo.htm\")`）"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.download",
     "body": "$vs.file.download(path)",
-    "description": "触发文件下载请求 注意 本方法必须在`地址映射`的服务组件下调用 JS代码可以是 `window.open ROOT_PATH + \"/gdpaas/comp/filedownload/demo.htm\" \\"
+    "description": "触发文件下载请求（注意：本方法必须在`地址映射`的服务组件下调用，JS代码可以是：`window.open(ROOT_PATH + \"/gdpaas/comp/filedownload/demo.htm\")`）"
   },
   {
     "language": "java",
@@ -1656,21 +1656,21 @@
     "group": "file",
     "prefix": "file.getFileDownloadURL",
     "body": "$vs.file.getFileDownloadURL(filePath,disName,desKey)",
-    "description": "获取私有文件下载 访问 地址 地址15天有效 视文件服务设置"
+    "description": "获取私有文件下载（访问）地址，地址15天有效（视文件服务设置）"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.getFileDownloadURL",
     "body": "$vs.file.getFileDownloadURL(filePath,disName)",
-    "description": "获取私有文件下载 访问 地址 地址15天有效 视文件服务设置"
+    "description": "获取私有文件下载（访问）地址，地址15天有效（视文件服务设置）"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.getFileDownloadURL",
     "body": "$vs.file.getFileDownloadURL(filePath)",
-    "description": "获取私有文件下载 访问 地址 地址15天有效 视文件服务设置"
+    "description": "获取私有文件下载（访问）地址，地址15天有效（视文件服务设置）"
   },
   {
     "language": "java",
@@ -1691,7 +1691,7 @@
     "group": "file",
     "prefix": "file.getFileToTemp",
     "body": "$vs.file.getFileToTemp(filePath)",
-    "description": "从文件服务器上下载私有文件到本地临时服务 若无文件服务器 则从本地文件复制到临时目录 文件使用完后需要调用 `$vs.file.removeLocalTempFile $path `删除临时文件"
+    "description": "从文件服务器上下载私有文件到本地临时服务（若无文件服务器，则从本地文件复制到临时目录），文件使用完后需要调用 `$vs.file.removeLocalTempFile($path)`删除临时文件"
   },
   {
     "language": "java",
@@ -1719,7 +1719,7 @@
     "group": "file",
     "prefix": "file.getWebFileToTemp",
     "body": "$vs.file.getWebFileToTemp(filePath)",
-    "description": "从文件服务器上下载公有文件到本地临时服务 若无文件服务器 则从本地文件复制到临时目录 文件使用完后需要调用 `$vs.file.removeLocalTempFile $path `删除临时文件"
+    "description": "从文件服务器上下载公有文件到本地临时服务（若无文件服务器，则从本地文件复制到临时目录），文件使用完后需要调用 `$vs.file.removeLocalTempFile($path)`删除临时文件"
   },
   {
     "language": "java",
@@ -1754,84 +1754,84 @@
     "group": "file",
     "prefix": "file.moveFile",
     "body": "$vs.file.moveFile(srcFilePath,targetDir)",
-    "description": "移动一个文件到指定目录"
+    "description": "移动一个文件到指定目录。"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.parseAndSaveFileToPrivate",
     "body": "$vs.file.parseAndSaveFileToPrivate()",
-    "description": "解析当前请求中用户的上传的文件 并将文件传送到文件服务器的私有文件区"
+    "description": "解析当前请求中用户的上传的文件，并将文件传送到文件服务器的私有文件区"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.parseAndSaveFileToPrivate",
     "body": "$vs.file.parseAndSaveFileToPrivate(fileType)",
-    "description": "解析当前请求中用户的上传的文件 并将文件传送到文件服务器的私有文件区"
+    "description": "解析当前请求中用户的上传的文件，并将文件传送到文件服务器的私有文件区"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.parseAndSaveFileToPublic",
     "body": "$vs.file.parseAndSaveFileToPublic()",
-    "description": "解析当前请求中用户的上传的文件 并将文件传送到文件服务器的公有文件区"
+    "description": "解析当前请求中用户的上传的文件，并将文件传送到文件服务器的公有文件区"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.parseAndSaveFileToPublic",
     "body": "$vs.file.parseAndSaveFileToPublic(fileType)",
-    "description": "解析当前请求中用户的上传的文件 并将文件传送到文件服务器的公有文件区"
+    "description": "解析当前请求中用户的上传的文件，并将文件传送到文件服务器的公有文件区"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.putFile",
     "body": "$vs.file.putFile(localFilePath,remoteFilePath,desKey)",
-    "description": "加密文件 并上传一个本地文件到目标服务器 私有文件区 WEB地址不可直接访问 注意 上传成功后将会自动删除临时文件 若上传失败 则请手动删除临时文件"
+    "description": "加密文件，并上传一个本地文件到目标服务器（私有文件区，WEB地址不可直接访问），注意：上传成功后将会自动删除临时文件，若上传失败，则请手动删除临时文件"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.putFile",
     "body": "$vs.file.putFile(localFilePath,remoteFilePath)",
-    "description": "上传一个本地文件到目标服务器 私有文件区 WEB地址不可直接访问 注意 上传成功后将会自动删除临时文件 若上传失败 则请手动删除临时文件"
+    "description": "上传一个本地文件到目标服务器（私有文件区，WEB地址不可直接访问），注意：上传成功后将会自动删除临时文件，若上传失败，则请手动删除临时文件"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.putFile",
     "body": "$vs.file.putFile(localFilePath)",
-    "description": "上传一个本地文件到目标服务器 私有文件区 WEB地址不可直接访问 注意 上传成功后将会自动删除临时文件 若上传失败 则请手动删除临时文件"
+    "description": "上传一个本地文件到目标服务器（私有文件区，WEB地址不可直接访问），注意：上传成功后将会自动删除临时文件，若上传失败，则请手动删除临时文件"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.putWebFile",
     "body": "$vs.file.putWebFile(localFilePath,remoteFilePath)",
-    "description": "上传一个本地文件到目标服务器 公有文件区 WEB地址可以直接访问 注意 上传成功后将会自动删除临时文件 若上传失败 则请手动删除临时文件"
+    "description": "上传一个本地文件到目标服务器（公有文件区，WEB地址可以直接访问），注意：上传成功后将会自动删除临时文件，若上传失败，则请手动删除临时文件"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.putWebFile",
     "body": "$vs.file.putWebFile(localFilePath)",
-    "description": "上传一个本地文件到目标服务器 公有文件区 WEB地址可以直接访问 注意 上传成功后将会自动删除临时文件 若上传失败 则请手动删除临时文件"
+    "description": "上传一个本地文件到目标服务器（公有文件区，WEB地址可以直接访问），注意：上传成功后将会自动删除临时文件，若上传失败，则请手动删除临时文件"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.putWebImage",
     "body": "$vs.file.putWebImage(localFilePath,remoteFilePath)",
-    "description": "上传一个本地图片到目标服务器 公有文件区 WEB地址可以直接访问 并生成 中小 2张缩略图 注意 上传成功后将会自动删除临时文件 若上传失败 则请手动删除临时文件"
+    "description": "上传一个本地图片到目标服务器（公有文件区，WEB地址可以直接访问），并生成（中小）2张缩略图，注意：上传成功后将会自动删除临时文件，若上传失败，则请手动删除临时文件"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.putWebImage",
     "body": "$vs.file.putWebImage(localFilePath)",
-    "description": "上传一个本地图片到目标服务器 公有文件区 WEB地址可以直接访问 并生成 中小 2张缩略图 注意 上传成功后将会自动删除临时文件 若上传失败 则请手动删除临时文件"
+    "description": "上传一个本地图片到目标服务器（公有文件区，WEB地址可以直接访问），并生成（中小）2张缩略图，注意：上传成功后将会自动删除临时文件，若上传失败，则请手动删除临时文件"
   },
   {
     "language": "java",
@@ -1908,7 +1908,7 @@
     "group": "file",
     "prefix": "file.removeLocalTempDir",
     "body": "$vs.file.removeLocalTempDir(filePath)",
-    "description": "删除本地临时目录 递归删除目录下所有文件及子目录"
+    "description": "删除本地临时目录（递归删除目录下所有文件及子目录）"
   },
   {
     "language": "java",
@@ -1922,7 +1922,7 @@
     "group": "file",
     "prefix": "file.rename",
     "body": "$vs.file.rename(filePath,newName)",
-    "description": "修改一个文件的名称"
+    "description": "修改一个文件的名称。"
   },
   {
     "language": "java",
@@ -1943,21 +1943,21 @@
     "group": "file",
     "prefix": "file.unzip",
     "body": "$vs.file.unzip(zipFile)",
-    "description": "解压缩一个文件并返回解压后的目录结构"
+    "description": "解压缩一个文件并返回解压后的目录结构。"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.zipDir",
     "body": "$vs.file.zipDir(dirPath)",
-    "description": "压缩一个目录并返回压缩文件的相对路径"
+    "description": "压缩一个目录并返回压缩文件的相对路径。"
   },
   {
     "language": "java",
     "group": "file",
     "prefix": "file.zipFile",
     "body": "$vs.file.zipFile(path)",
-    "description": "压缩一个文件 注意不是目录 并返回压缩文件的相对路径"
+    "description": "压缩一个文件（注意不是目录）并返回压缩文件的相对路径。"
   },
   {
     "language": "java",
@@ -2272,7 +2272,7 @@
     "group": "math",
     "prefix": "math.cbrt",
     "body": "$vs.math.cbrt(d)",
-    "description": "计算立方根 cbrt 8 = 2.0"
+    "description": "计算立方根 cbrt(8) = 2.0"
   },
   {
     "language": "java",
@@ -2300,14 +2300,14 @@
     "group": "math",
     "prefix": "math.max",
     "body": "$vs.math.max(d,dn)",
-    "description": "再给定的数字中 返回最大的一个数字"
+    "description": "再给定的数字中，返回最大的一个数字"
   },
   {
     "language": "java",
     "group": "math",
     "prefix": "math.min",
     "body": "$vs.math.min(d,dn)",
-    "description": "再给定的数字中 返回最小的一个数字"
+    "description": "再给定的数字中，返回最小的一个数字"
   },
   {
     "language": "java",
@@ -2328,14 +2328,14 @@
     "group": "math",
     "prefix": "math.precise",
     "body": "$vs.math.precise(num1,num2,stropt,intScale)",
-    "description": "数字‘+’、‘-’、‘*’、‘/’运算 功能同 `$vs.util.precise\\"
+    "description": "数字‘+’、‘-’、‘*’、‘/’运算，功能同：`$vs.util.precise"
   },
   {
     "language": "java",
     "group": "math",
     "prefix": "math.precise",
     "body": "$vs.math.precise(num1,num2,stropt)",
-    "description": "数字‘+’、‘-’、‘*’、‘/’运算 功能同 `$vs.util.precise\\"
+    "description": "数字‘+’、‘-’、‘*’、‘/’运算，功能同：`$vs.util.precise"
   },
   {
     "language": "java",
@@ -2349,7 +2349,7 @@
     "group": "math",
     "prefix": "math.random",
     "body": "$vs.math.random(max)",
-    "description": "返回 0 - $max - 1 的整数"
+    "description": "返回 0 - ($max - 1)的整数"
   },
   {
     "language": "java",
@@ -2363,7 +2363,7 @@
     "group": "math",
     "prefix": "math.sqrt",
     "body": "$vs.math.sqrt(d)",
-    "description": "计算平方根 sqrt 16 = 4.0"
+    "description": "计算平方根 sqrt(16) = 4.0"
   },
   {
     "language": "java",
@@ -2440,35 +2440,35 @@
     "group": "msg",
     "prefix": "msg.sendCropWxMessage",
     "body": "$vs.message.sendCropWxMessage(userId,userName,openId,msgTypeId,bill,extitems)",
-    "description": "发送微信企业号消息给指定人 不是系统内的人 站内信不发"
+    "description": "发送微信企业号消息给指定人（不是系统内的人，站内信不发）"
   },
   {
     "language": "java",
     "group": "msg",
     "prefix": "msg.sendCropWxMessage",
     "body": "$vs.message.sendCropWxMessage(userId,userName,openId,msgTypeId,bill)",
-    "description": "发送微信企业号消息给指定人 不是系统内的人 站内信不发"
+    "description": "发送微信企业号消息给指定人（不是系统内的人，站内信不发）"
   },
   {
     "language": "java",
     "group": "msg",
     "prefix": "msg.sendDingTalkMessage",
     "body": "$vs.message.sendDingTalkMessage(userId,userName,openId,msgTypeId,bill,extitems)",
-    "description": "发送钉钉消息给指定人 不是系统内的人 站内信不发"
+    "description": "发送钉钉消息给指定人（不是系统内的人，站内信不发）"
   },
   {
     "language": "java",
     "group": "msg",
     "prefix": "msg.sendDingTalkMessage",
     "body": "$vs.message.sendDingTalkMessage(userId,userName,openId,msgTypeId,bill)",
-    "description": "发送钉钉消息给指定人 不是系统内的人 站内信不发"
+    "description": "发送钉钉消息给指定人（不是系统内的人，站内信不发）"
   },
   {
     "language": "java",
     "group": "msg",
     "prefix": "msg.sendInterTargetSystemMessage",
     "body": "$vs.message.sendInterTargetSystemMessage(appId,data)",
-    "description": "发送接口通知消息 仅用于通知第三方接口有新消息需要获取用"
+    "description": "发送接口通知消息（仅用于通知第三方接口有新消息需要获取用)"
   },
   {
     "language": "java",
@@ -2482,21 +2482,21 @@
     "group": "msg",
     "prefix": "msg.sendSimpleMessage",
     "body": "$vs.message.sendSimpleMessage(userId,msgTitle,context)",
-    "description": "发送一个简单消息给用户 当前系统内的操作员"
+    "description": "发送一个简单消息给用户（当前系统内的操作员)"
   },
   {
     "language": "java",
     "group": "msg",
     "prefix": "msg.sendSmsCode",
     "body": "$vs.message.sendSmsCode(mobile,context,code,busCode)",
-    "description": "发送验证码短信 注 需要实现过程函数`system.common.callback.sendSmsCode`才可发送"
+    "description": "发送验证码短信（注：需要实现过程函数`system.common.callback.sendSmsCode`才可发送）"
   },
   {
     "language": "java",
     "group": "msg",
     "prefix": "msg.sendSmsMessage",
     "body": "$vs.message.sendSmsMessage(mobile,context,busCode)",
-    "description": "发送验证码短信 注 需要实现过程函数`system.common.callback.sendSmsMessage`才可发送"
+    "description": "发送验证码短信（注：需要实现过程函数`system.common.callback.sendSmsMessage`才可发送）"
   },
   {
     "language": "java",
@@ -2524,98 +2524,98 @@
     "group": "msg",
     "prefix": "msg.sendWeChatMessage",
     "body": "$vs.message.sendWeChatMessage(userId,userName,openId,msgTypeId,bill,extitems)",
-    "description": "发送微信公众号消息给指定人 不是系统内的人 站内信不发"
+    "description": "发送微信公众号消息给指定人（不是系统内的人，站内信不发）"
   },
   {
     "language": "java",
     "group": "msg",
     "prefix": "msg.sendWeChatMessage",
     "body": "$vs.message.sendWeChatMessage(userId,userName,openId,msgTypeId,bill)",
-    "description": "发送微信公众号消息给指定人 不是系统内的人 站内信不发"
+    "description": "发送微信公众号消息给指定人（不是系统内的人，站内信不发）"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.batchSend",
     "body": "$vs.mq.batchSend(topic,datas)",
-    "description": "批量发起MQ消息 不可使用秘钥功能 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中"
+    "description": "批量发起MQ消息（不可使用秘钥功能）。（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.batchSend",
     "body": "$vs.mq.batchSend(topic,tag,datas)",
-    "description": "批量发起MQ消息 不可使用秘钥功能 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中"
+    "description": "批量发起MQ消息（不可使用秘钥功能）。（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.send",
     "body": "$vs.mq.send(topic,data)",
-    "description": "发送MQ消息 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中"
+    "description": "发送MQ消息。（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.send",
     "body": "$vs.mq.send(topic,tag,data)",
-    "description": "发送MQ消息 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中"
+    "description": "发送MQ消息。（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.start",
     "body": "$vs.mq.start(topic,accessKey,secretKey)",
-    "description": "有密链接频道 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中"
+    "description": "有密链接频道。（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.starts",
     "body": "$vs.mq.starts(topic,accessKey,secretKey)",
-    "description": "有密链接频道 所有频道秘钥相同 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中"
+    "description": "有密链接频道（所有频道秘钥相同）。（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.subscribe",
     "body": "$vs.mq.subscribe(topic,procName,funName)",
-    "description": "发起MQ消息订阅 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中 **过程脚本 ** ``` com.golden.xxx.subscribe $topic string $tag strig $msgs list ``\\"
+    "description": "发起MQ消息订阅（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）。 **过程脚本：** ``` com.golden.xxx.subscribe($topic:string,$tag:strig,$msgs:list)``"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.subscribe",
     "body": "$vs.mq.subscribe(topic,tag,procName,funName,accessKey,secretKey)",
-    "description": "发起MQ消息订阅 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中 **过程脚本 ** ``` com.golden.xxx.subscribe $topic string $tag strig $msgs list ``\\"
+    "description": "发起MQ消息订阅（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）。 **过程脚本：** ``` com.golden.xxx.subscribe($topic:string,$tag:strig,$msgs:list)``"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.subscribe",
     "body": "$vs.mq.subscribe(topic,tag,procName,funName)",
-    "description": "发起MQ消息订阅 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中 **过程脚本 ** ``` com.golden.xxx.subscribe $topic string $tag strig $msgs list ``\\"
+    "description": "发起MQ消息订阅（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）。 **过程脚本：** ``` com.golden.xxx.subscribe($topic:string,$tag:strig,$msgs:list)``"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.subscribes",
     "body": "$vs.mq.subscribes(topics,procName,funName)",
-    "description": "发起MQ消息批量订阅 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中 **过程脚本 ** ``` com.golden.xxx.subscribe $topic string $tag strig $msgs list ``\\"
+    "description": "发起MQ消息批量订阅（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）。 **过程脚本：** ``` com.golden.xxx.subscribe($topic:string,$tag:strig,$msgs:list)``"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.subscribes",
     "body": "$vs.mq.subscribes(topics,tag,procName,funName,accessKey,secretKey)",
-    "description": "发起MQ消息批量订阅 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中 **过程脚本 ** ``` com.golden.xxx.subscribe $topic string $tag strig $msgs list ``\\"
+    "description": "发起MQ消息批量订阅（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）。 **过程脚本：** ``` com.golden.xxx.subscribe($topic:string,$tag:strig,$msgs:list)``"
   },
   {
     "language": "java",
     "group": "mq",
     "prefix": "mq.subscribes",
     "body": "$vs.mq.subscribes(topics,tag,procName,funName)",
-    "description": "发起MQ消息批量订阅 注意 从1.5.0版本开始 谷神框架不再默认支持RocketMQ功能 若项目需要用到RocketMQ 请下载插件包放到libs目录中 **过程脚本 ** ``` com.golden.xxx.subscribe $topic string $tag strig $msgs list ``\\"
+    "description": "发起MQ消息批量订阅（注意：从1.5.0版本开始，谷神框架不再默认支持RocketMQ功能，若项目需要用到RocketMQ，请下载插件包放到libs目录中）。 **过程脚本：** ``` com.golden.xxx.subscribe($topic:string,$tag:strig,$msgs:list)``"
   },
   {
     "language": "java",
@@ -2657,14 +2657,14 @@
     "group": "ocr",
     "prefix": "ocr.idCardBack",
     "body": "$vs.ocr.idCardBack(filePath)",
-    "description": "识别身份证背面 国徽 信息"
+    "description": "识别身份证背面（国徽)信息"
   },
   {
     "language": "java",
     "group": "ocr",
     "prefix": "ocr.idCardFront",
     "body": "$vs.ocr.idCardFront(filePath)",
-    "description": "识别身份证正面 国徽 信息"
+    "description": "识别身份证正面（国徽)信息"
   },
   {
     "language": "java",
@@ -2678,147 +2678,147 @@
     "group": "page",
     "prefix": "page.getPage",
     "body": "$vs.page.getPage(pageId)",
-    "description": "获取页面对象 主数据可以获取所有服务【含各个微服务】的页面对象 各个微服务调用本方法只能获取到本微服务的页面对象"
+    "description": "获取页面对象（主数据可以获取所有服务【含各个微服务】的页面对象，各个微服务调用本方法只能获取到本微服务的页面对象）"
   },
   {
     "language": "java",
     "group": "page",
     "prefix": "page.getPageControl",
     "body": "$vs.page.getPageControl(pageId,ctrlId)",
-    "description": "获取页面内的控件 主数据可以获取所有服务【含各个微服务】的页面对象 各个微服务调用本方法只能获取到本微服务的页面对象"
+    "description": "获取页面内的控件（主数据可以获取所有服务【含各个微服务】的页面对象，各个微服务调用本方法只能获取到本微服务的页面对象）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callDetailPageSearch",
     "body": "$vs.proc.callDetailPageSearch(pageId,form)",
-    "description": "调用详情页面查询单据数据 支持跨微服务查询"
+    "description": "调用详情页面查询单据数据（支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callMainPageFind",
     "body": "$vs.proc.callMainPageFind(pageId,form,pageSize,pageNo,mainTableId)",
-    "description": "调用主页面报表查询接口查询数据 分页 支持跨微服务查询"
+    "description": "调用主页面报表查询接口查询数据（分页，支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callMainPageFind",
     "body": "$vs.proc.callMainPageFind(pageId,form,pageSize,pageNo)",
-    "description": "调用主页面报表查询接口查询数据 分页 支持跨微服务查询"
+    "description": "调用主页面报表查询接口查询数据（分页，支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callMainPageList",
     "body": "$vs.proc.callMainPageList(pageId,form,mainTableId)",
-    "description": "调用主页面报表查询接口查询数据 不分页 支持跨微服务查询"
+    "description": "调用主页面报表查询接口查询数据（不分页，支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callMainPageList",
     "body": "$vs.proc.callMainPageList(pageId,form)",
-    "description": "调用主页面报表查询接口查询数据 不分页 支持跨微服务查询"
+    "description": "调用主页面报表查询接口查询数据（不分页，支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callMainPageSum",
     "body": "$vs.proc.callMainPageSum(pageId,form,mainTableId)",
-    "description": "调用主页面报表汇总数据 支持跨微服务查询"
+    "description": "调用主页面报表汇总数据（支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callMainPageSum",
     "body": "$vs.proc.callMainPageSum(pageId,form)",
-    "description": "调用主页面报表汇总数据 支持跨微服务查询"
+    "description": "调用主页面报表汇总数据（支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageRemove",
     "body": "$vs.proc.callPageRemove(mainPageId,editPageId,whereData,bntId,ignoreTrans,ignoreDataAuth)",
-    "description": "服务端调用页面的单据删除方法 一般用于接口等需要删除单据时与原保存代码复用的场景 注意 本方法必须在无事务环境下运行"
+    "description": "服务端调用页面的单据删除方法（一般用于接口等需要删除单据时与原保存代码复用的场景），注意：本方法必须在无事务环境下运行。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageRemove",
     "body": "$vs.proc.callPageRemove(mainPageId,editPageId,whereData,bntId,ignoreTrans)",
-    "description": "服务端调用页面的单据删除方法 一般用于接口等需要删除单据时与原保存代码复用的场景 注意 本方法必须在无事务环境下运行"
+    "description": "服务端调用页面的单据删除方法（一般用于接口等需要删除单据时与原保存代码复用的场景），注意：本方法必须在无事务环境下运行。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageRemove",
     "body": "$vs.proc.callPageRemove(mainPageId,editPageId,whereData,bntId)",
-    "description": "服务端调用页面的单据删除方法 一般用于接口等需要删除单据时与原保存代码复用的场景 注意 本方法必须在无事务环境下运行"
+    "description": "服务端调用页面的单据删除方法（一般用于接口等需要删除单据时与原保存代码复用的场景），注意：本方法必须在无事务环境下运行。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageRemove",
     "body": "$vs.proc.callPageRemove(mainPageId,editPageId,whereData)",
-    "description": "服务端调用页面的单据删除方法 一般用于接口等需要删除单据时与原保存代码复用的场景 注意 本方法必须在无事务环境下运行"
+    "description": "服务端调用页面的单据删除方法（一般用于接口等需要删除单据时与原保存代码复用的场景），注意：本方法必须在无事务环境下运行。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageSave",
     "body": "$vs.proc.callPageSave(pageId,data,bntId,ignoreTrans,ignoreDataAuth)",
-    "description": "服务端调用页面的单据新增方法 一般用于接口等需要创建单据时与原保存代码复用的场景"
+    "description": "服务端调用页面的单据新增方法（一般用于接口等需要创建单据时与原保存代码复用的场景）。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageSave",
     "body": "$vs.proc.callPageSave(pageId,data,bntId,ignoreTrans)",
-    "description": "服务端调用页面的单据新增方法 一般用于接口等需要创建单据时与原保存代码复用的场景"
+    "description": "服务端调用页面的单据新增方法（一般用于接口等需要创建单据时与原保存代码复用的场景）。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageSave",
     "body": "$vs.proc.callPageSave(pageId,data,bntId)",
-    "description": "服务端调用页面的单据新增方法 一般用于接口等需要创建单据时与原保存代码复用的场景"
+    "description": "服务端调用页面的单据新增方法（一般用于接口等需要创建单据时与原保存代码复用的场景）。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageSave",
     "body": "$vs.proc.callPageSave(pageId,data)",
-    "description": "服务端调用页面的单据新增方法 一般用于接口等需要创建单据时与原保存代码复用的场景"
+    "description": "服务端调用页面的单据新增方法（一般用于接口等需要创建单据时与原保存代码复用的场景）。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageUpdate",
     "body": "$vs.proc.callPageUpdate(pageId,data,bntId,ignoreTrans,ignoreDataAuth)",
-    "description": "服务端调用页面的单据修改方法 一般用于接口等需要创建单据时与原保存代码复用的场景 注意 本方法必须在无事务环境下运行"
+    "description": "服务端调用页面的单据修改方法（一般用于接口等需要创建单据时与原保存代码复用的场景），注意：本方法必须在无事务环境下运行。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageUpdate",
     "body": "$vs.proc.callPageUpdate(pageId,data,bntId,ignoreTrans)",
-    "description": "服务端调用页面的单据修改方法 一般用于接口等需要创建单据时与原保存代码复用的场景 注意 本方法必须在无事务环境下运行"
+    "description": "服务端调用页面的单据修改方法（一般用于接口等需要创建单据时与原保存代码复用的场景），注意：本方法必须在无事务环境下运行。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageUpdate",
     "body": "$vs.proc.callPageUpdate(pageId,data,bntId)",
-    "description": "服务端调用页面的单据修改方法 一般用于接口等需要创建单据时与原保存代码复用的场景 注意 本方法必须在无事务环境下运行"
+    "description": "服务端调用页面的单据修改方法（一般用于接口等需要创建单据时与原保存代码复用的场景），注意：本方法必须在无事务环境下运行。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.callPageUpdate",
     "body": "$vs.proc.callPageUpdate(pageId,data)",
-    "description": "服务端调用页面的单据修改方法 一般用于接口等需要创建单据时与原保存代码复用的场景 注意 本方法必须在无事务环境下运行"
+    "description": "服务端调用页面的单据修改方法（一般用于接口等需要创建单据时与原保存代码复用的场景），注意：本方法必须在无事务环境下运行。"
   },
   {
     "language": "java",
@@ -2839,35 +2839,42 @@
     "group": "proc",
     "prefix": "proc.exportMainPage",
     "body": "$vs.proc.exportMainPage(pageId,form,mainTableId,fields,fileName,title)",
-    "description": "导出主页面数据为EXCEL文件 支持跨微服务查询"
+    "description": "导出主页面数据为EXCEL文件（支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.exportMainPage",
     "body": "$vs.proc.exportMainPage(pageId,form,mainTableId,fields,fileName)",
-    "description": "导出主页面数据为EXCEL文件 支持跨微服务查询"
+    "description": "导出主页面数据为EXCEL文件（支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.exportMainPage",
     "body": "$vs.proc.exportMainPage(pageId,form,mainTableId,fields)",
-    "description": "导出主页面数据为EXCEL文件 支持跨微服务查询"
+    "description": "导出主页面数据为EXCEL文件（支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.exportMainPage",
     "body": "$vs.proc.exportMainPage(pageId,form,mainTableId)",
-    "description": "导出主页面数据为EXCEL文件 支持跨微服务查询"
+    "description": "导出主页面数据为EXCEL文件（支持跨微服务查询）"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.exportMainPage",
     "body": "$vs.proc.exportMainPage(pageId,form)",
-    "description": "导出主页面数据为EXCEL文件 支持跨微服务查询"
+    "description": "导出主页面数据为EXCEL文件（支持跨微服务查询）"
+  },
+  {
+    "language": "java",
+    "group": "proc",
+    "prefix": "proc.find",
+    "body": "$vs.proc.find(strProcName,timeout,systemId,routeId)",
+    "description": "查找过程脚本服务"
   },
   {
     "language": "java",
@@ -2895,238 +2902,252 @@
     "group": "proc",
     "prefix": "proc.invoke",
     "body": "$vs.proc.invoke(strProcName,funName,args)",
-    "description": "立即执行过程脚本中的方法 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` $vs.proc.invoke \"com.golden.proc\" \"noParamFun\" #set $bean=$vs.proc.invoke \"com.golden.proc\" \"get\" $form 1000 ``\\"
+    "description": "立即执行过程脚本中的方法。 **用 法**： ``` $vs.proc.invoke(\"com.golden.proc\",\"noParamFun\") #set($bean=$vs.proc.invoke(\"com.golden.proc\",\"get\",$form,1000)) ``"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.invokeWithGlobalTrans",
     "body": "$vs.proc.invokeWithGlobalTrans(strProcName,funName,args)",
-    "description": "立即执行过程脚本中的方法 强制使用分布式事务调用 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` $vs.proc.invokeWithGlobalTrans \"com.golden.proc\" \"noParamFun\" #set $bean=$vs.proc.invokeWithGlobalTrans \"com.golden.proc\" \"get\" $form 1000 ``\\"
+    "description": "立即执行过程脚本中的方法（强制使用分布式事务调用）。 **用 法**： ``` $vs.proc.invokeWithGlobalTrans(\"com.golden.proc\",\"noParamFun\") #set($bean=$vs.proc.invokeWithGlobalTrans(\"com.golden.proc\",\"get\",$form,1000)) ``"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.isHaveProc",
     "body": "$vs.proc.isHaveProc(procName,funName)",
-    "description": "判断过程函数是否存在 支持跨数据库"
+    "description": "判断过程函数是否存在（支持跨数据库）。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.isHaveServiceComp",
     "body": "$vs.proc.isHaveServiceComp(compId)",
-    "description": "判断服务组件是否存在 注意不能跨数据库"
+    "description": "判断服务组件是否存在（注意不能跨数据库）。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.runServiceComp",
     "body": "$vs.proc.runServiceComp(strCompId,args,isInGlobalTran)",
-    "description": "执行服务组件 注意 不支持跨数据库"
+    "description": "执行服务组件（注意：不支持跨数据库)。"
   },
   {
     "language": "java",
     "group": "proc",
     "prefix": "proc.runServiceComp",
     "body": "$vs.proc.runServiceComp(strCompId,args)",
-    "description": "执行服务组件 注意 不支持跨数据库"
+    "description": "执行服务组件（注意：不支持跨数据库)。"
+  },
+  {
+    "language": "java",
+    "group": "prop",
+    "prefix": "prop.getCurRouteId",
+    "body": "$vs.properties.getCurRouteId()",
+    "description": "获取当前系统运行的多系统路由环境编码。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getModuleConfig",
     "body": "$vs.properties.getModuleConfig(configId,systemId)",
-    "description": "获取模块配置参数根对象 取数规则 判断要求的系统是否为当前系统 若为当前系统 则读取本地库数据 若存在配置则返回 若不存在 则返回为空 若判断要求的系统编码不是本地 则漫游到要求的系统编码中读取对应的参数配置"
+    "description": "获取模块配置参数根对象，取数规则：判断要求的系统是否为当前系统，若为当前系统，则读取本地库数据，若存在配置则返回，若不存在，则返回为空；若判断要求的系统编码不是本地，则漫游到要求的系统编码中读取对应的参数配置。。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getModuleConfig",
     "body": "$vs.properties.getModuleConfig(configId)",
-    "description": "获取模块配置参数根对象 取数规则 读取当前数据源 数据库 下的配置参数 若存在且唯一 则返回 若存在且不唯一 则抛异常 必须传值系统编码进行过滤 即 模块参数编码尽量不要设置成一样的 每个应用的参数编码区分开来 如 com.golden.bdp.BTXXX 、 com.golden.ebp.BTXXX 这样就可以通过模块编码来作为唯一条件读取模块配置 注意 本方法不支持漫游 即 不可以在主数据通过模块配置编码读取业务微服务的配置信息"
+    "description": "获取模块配置参数根对象，取数规则：读取当前数据源（数据库）下的配置参数，若存在且唯一，则返回，若存在且不唯一，则抛异常，必须传值系统编码进行过滤。即，模块参数编码尽量不要设置成一样的，每个应用的参数编码区分开来，如：com.golden.bdp.BTXXX 、 com.golden.ebp.BTXXX，这样就可以通过模块编码来作为唯一条件读取模块配置，注意：本方法不支持漫游，即，不可以在主数据通过模块配置编码读取业务微服务的配置信息。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getModuleConfigValue",
     "body": "$vs.properties.getModuleConfigValue(configId,path,defvalue,systemId)",
-    "description": "获取模块配置参数值 取数规则 判断要求的系统是否为当前系统 若为当前系统 则读取本地库数据 若存在配置则返回 若不存在 则返回为空 若判断要求的系统编码不是本地 则漫游到要求的系统编码中读取对应的参数配置"
+    "description": "获取模块配置参数值。取数规则：判断要求的系统是否为当前系统，若为当前系统，则读取本地库数据，若存在配置则返回，若不存在，则返回为空；若判断要求的系统编码不是本地，则漫游到要求的系统编码中读取对应的参数配置。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getModuleConfigValue",
     "body": "$vs.properties.getModuleConfigValue(configId,path,defvalue)",
-    "description": "获取模块配置参数值 取数规则 读取当前数据源 数据库 下的配置参数 若存在且唯一 则返回 若存在且不唯一 则抛异常 必须传值系统编码进行过滤 即 模块参数编码尽量不要设置成一样的 每个应用的参数编码区分开来 如 com.golden.bdp.BTXXX 、 com.golden.ebp.BTXXX 这样就可以通过模块编码来作为唯一条件读取模块配置 注意 本方法不支持漫游 即 不可以在主数据通过模块配置编码读取业务微服务的配置信息"
+    "description": "获取模块配置参数值。取数规则：读取当前数据源（数据库）下的配置参数，若存在且唯一，则返回，若存在且不唯一，则抛异常，必须传值系统编码进行过滤。即，模块参数编码尽量不要设置成一样的，每个应用的参数编码区分开来，如：com.golden.bdp.BTXXX 、 com.golden.ebp.BTXXX，这样就可以通过模块编码来作为唯一条件读取模块配置，注意：本方法不支持漫游，即，不可以在主数据通过模块配置编码读取业务微服务的配置信息。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getModuleConfigValue",
     "body": "$vs.properties.getModuleConfigValue(configId,path)",
-    "description": "获取模块配置参数值 取数规则 读取当前数据源 数据库 下的配置参数 若存在且唯一 则返回 若存在且不唯一 则抛异常 必须传值系统编码进行过滤 即 模块参数编码尽量不要设置成一样的 每个应用的参数编码区分开来 如 com.golden.bdp.BTXXX 、 com.golden.ebp.BTXXX 这样就可以通过模块编码来作为唯一条件读取模块配置 注意 本方法不支持漫游 即 不可以在主数据通过模块配置编码读取业务微服务的配置信息"
+    "description": "获取模块配置参数值。取数规则：读取当前数据源（数据库）下的配置参数，若存在且唯一，则返回，若存在且不唯一，则抛异常，必须传值系统编码进行过滤。即，模块参数编码尽量不要设置成一样的，每个应用的参数编码区分开来，如：com.golden.bdp.BTXXX 、 com.golden.ebp.BTXXX，这样就可以通过模块编码来作为唯一条件读取模块配置，注意：本方法不支持漫游，即，不可以在主数据通过模块配置编码读取业务微服务的配置信息。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getProperty",
     "body": "$vs.properties.getProperty(key,defValue)",
-    "description": "获取配置变量值"
+    "description": "获取配置变量值。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getProperty",
     "body": "$vs.properties.getProperty(key)",
-    "description": "获取配置变量值"
+    "description": "获取配置变量值。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegAuthorizeNo",
     "body": "$vs.properties.getRegAuthorizeNo()",
-    "description": "获取授权文件里的授权书编号 授权书编号为资源管理服务里客户授权里的授权书编号"
+    "description": "获取授权文件里的授权书编号(授权书编号为资源管理服务里客户授权里的授权书编号)。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegClient",
     "body": "$vs.properties.getRegClient()",
-    "description": "获取授权文件里的客户号 客户号为资源管理服务里客户管理里的客户号"
+    "description": "获取授权文件里的客户号(客户号为资源管理服务里客户管理里的客户号)。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegDate",
     "body": "$vs.properties.getRegDate()",
-    "description": "获取授权日期"
+    "description": "获取授权日期。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegDisabledMenus",
     "body": "$vs.properties.getRegDisabledMenus()",
-    "description": "获取禁用菜单 null or empty 表示无"
+    "description": "获取禁用菜单（null or empty 表示无）。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegIsOnlineUserModel",
     "body": "$vs.properties.getRegIsOnlineUserModel()",
-    "description": "获取授权文件里的授权用户数控制模式是否为在线人数控制"
+    "description": "获取授权文件里的授权用户数控制模式是否为在线人数控制。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegLastDate",
     "body": "$vs.properties.getRegLastDate()",
-    "description": "获取授权截止日期"
+    "description": "获取授权截止日期。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegMaxOrg",
     "body": "$vs.properties.getRegMaxOrg()",
-    "description": "获取授权文件里的授权最大机构数"
+    "description": "获取授权文件里的授权最大机构数。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegMaxUser",
     "body": "$vs.properties.getRegMaxUser()",
-    "description": "获取授权文件里的授权用户数"
+    "description": "获取授权文件里的授权用户数。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegModels",
     "body": "$vs.properties.getRegModels()",
-    "description": "获取授权模块列表 null or empty 表示所有模块"
+    "description": "获取授权模块列表（null or empty 表示所有模块）。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegOtherConfig",
     "body": "$vs.properties.getRegOtherConfig()",
-    "description": "获取授权文件中其他配置项"
+    "description": "获取授权文件中其他配置项。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegPublisher",
     "body": "$vs.properties.getRegPublisher()",
-    "description": "获取授权文件颁发单位名称"
+    "description": "获取授权文件颁发单位名称。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegSystems",
     "body": "$vs.properties.getRegSystems()",
-    "description": "获取授权文件里授权的系统编码"
+    "description": "获取授权文件里授权的系统编码。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegUnitName",
     "body": "$vs.properties.getRegUnitName()",
-    "description": "获取授权文件使用单位名称"
+    "description": "获取授权文件使用单位名称。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getRegVersion",
     "body": "$vs.properties.getRegVersion()",
-    "description": "获取授权文件版本号"
+    "description": "获取授权文件版本号。"
+  },
+  {
+    "language": "java",
+    "group": "prop",
+    "prefix": "prop.getRouteSystemIds",
+    "body": "$vs.properties.getRouteSystemIds()",
+    "description": "获取分系统路由设置及系统编码对照表。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getSystemDbInfo",
     "body": "$vs.properties.getSystemDbInfo()",
-    "description": "获取当前系统数据库连接信息 用户、数据库、IP、端口等 不含密码"
+    "description": "获取当前系统数据库连接信息（用户、数据库、IP、端口等，不含密码）。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getSystemDbInfo",
     "body": "$vs.properties.getSystemDbInfo(systemId)",
-    "description": "获取指定系统数据库连接信息 用户、数据库、IP、端口等 不含密码 本方法支持跨微服务漫游"
+    "description": "获取指定系统数据库连接信息（用户、数据库、IP、端口等，不含密码）本方法支持跨微服务漫游。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getSystemVarValue",
     "body": "$vs.properties.getSystemVarValue(varId,defValue,systemId)",
-    "description": "获取应用参数配置值"
+    "description": "获取应用参数配置值。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getSystemVarValue",
     "body": "$vs.properties.getSystemVarValue(varId,defValue)",
-    "description": "获取应用参数配置值"
+    "description": "获取应用参数配置值。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getSystemVarValue",
     "body": "$vs.properties.getSystemVarValue(varId)",
-    "description": "获取应用参数配置值"
+    "description": "获取应用参数配置值。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.getUserPassType",
     "body": "$vs.properties.getUserPassType()",
-    "description": "获取当前系统用户密码算法类型"
+    "description": "获取当前系统用户密码算法类型。"
   },
   {
     "language": "java",
     "group": "prop",
     "prefix": "prop.isDevelop",
     "body": "$vs.properties.isDevelop()",
-    "description": "当前运行的环境是否为开发环境还是打包后的环境"
+    "description": "当前运行的环境是否为开发环境还是打包后的环境。"
   },
   {
     "language": "java",
@@ -3140,28 +3161,28 @@
     "group": "redis",
     "prefix": "redis.blpop",
     "body": "$vs.redis.blpop(key,timeout)",
-    "description": "移出并获取列表的第一个元素 如果列表没有元素会阻塞列表直到发现可弹出元素为止"
+    "description": "移出并获取列表的第一个元素， 如果列表没有元素会阻塞列表直到发现可弹出元素为止。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.blpopBean",
     "body": "$vs.redis.blpopBean(key,timeout)",
-    "description": "移出并获取列表的最后一个元素 如果列表没有元素会阻塞列表直到等待超时或发现可弹出元素为止"
+    "description": "移出并获取列表的最后一个元素， 如果列表没有元素会阻塞列表直到等待超时或发现可弹出元素为止。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.brpop",
     "body": "$vs.redis.brpop(key,timeout)",
-    "description": "移出并获取列表的最后一个元素 如果列表没有元素会阻塞列表直到等待超时或发现可弹出元素为止"
+    "description": "移出并获取列表的最后一个元素， 如果列表没有元素会阻塞列表直到等待超时或发现可弹出元素为止。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.decr",
     "body": "$vs.redis.decr(key,i)",
-    "description": "将 key 中储存的数字值减`$i\\"
+    "description": "将 key 中储存的数字值减`$i"
   },
   {
     "language": "java",
@@ -3175,42 +3196,42 @@
     "group": "redis",
     "prefix": "redis.del",
     "body": "$vs.redis.del(key)",
-    "description": "移除redis中 key指定的元素"
+    "description": "移除redis中，key指定的元素。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.dels",
     "body": "$vs.redis.dels(keys)",
-    "description": "移除redis中 key指定的元素"
+    "description": "移除redis中，key指定的元素。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.exists",
     "body": "$vs.redis.exists(key)",
-    "description": "判断是否存在指定的键值"
+    "description": "判断是否存在指定的键值。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.expire",
     "body": "$vs.redis.expire(key,timeout)",
-    "description": "设置键的生存时间"
+    "description": "设置键的生存时间。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.expireAt",
     "body": "$vs.redis.expireAt(key,time)",
-    "description": "设置键的生存时间"
+    "description": "设置键的生存时间。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.get",
     "body": "$vs.redis.get(key)",
-    "description": "获取redis中的数据 字符串返回"
+    "description": "获取redis中的数据（字符串返回)"
   },
   {
     "language": "java",
@@ -3224,266 +3245,266 @@
     "group": "redis",
     "prefix": "redis.getset",
     "body": "$vs.redis.getset(key,value)",
-    "description": "获取redis中的数据 并设置新的数据"
+    "description": "获取redis中的数据，并设置新的数据"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.getsetBean",
     "body": "$vs.redis.getsetBean(key,value)",
-    "description": "获取redis中的数据 并设置新的数据"
+    "description": "获取redis中的数据，并设置新的数据"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hdel",
     "body": "$vs.redis.hdel(key,field)",
-    "description": "从hash表中删除数据"
+    "description": "从hash表中删除数据。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hdelBean",
     "body": "$vs.redis.hdelBean(key,field)",
-    "description": "从hash表中删除数据"
+    "description": "从hash表中删除数据。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hexists",
     "body": "$vs.redis.hexists(key,field)",
-    "description": "查看哈希表 key 中 指定的字段是否存在"
+    "description": "查看哈希表 key 中，指定的字段是否存在。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hexistsBean",
     "body": "$vs.redis.hexistsBean(key,field)",
-    "description": "查看哈希表 key 中 指定的字段是否存在"
+    "description": "查看哈希表 key 中，指定的字段是否存在。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hget",
     "body": "$vs.redis.hget(key,field)",
-    "description": "从hash表中获取数据"
+    "description": "从hash表中获取数据。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hgetAll",
     "body": "$vs.redis.hgetAll(key)",
-    "description": "获取在哈希表中指定 key 的所有字段和值"
+    "description": "获取在哈希表中指定 key 的所有字段和值。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hgetAllBean",
     "body": "$vs.redis.hgetAllBean(key)",
-    "description": "获取在哈希表中指定 key 的所有字段和值"
+    "description": "获取在哈希表中指定 key 的所有字段和值。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hgetBean",
     "body": "$vs.redis.hgetBean(key,field)",
-    "description": "从hash表中获取数据"
+    "description": "从hash表中获取数据。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hkeys",
     "body": "$vs.redis.hkeys(key)",
-    "description": "获取所有哈希表中的字段"
+    "description": "获取所有哈希表中的字段。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hkeysBean",
     "body": "$vs.redis.hkeysBean(key)",
-    "description": "获取所有哈希表中的字段"
+    "description": "获取所有哈希表中的字段。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hlen",
     "body": "$vs.redis.hlen(key)",
-    "description": "获取哈希表中字段的数量"
+    "description": "获取哈希表中字段的数量。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hlenBean",
     "body": "$vs.redis.hlenBean(key)",
-    "description": "获取哈希表中字段的数量"
+    "description": "获取哈希表中字段的数量。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hmget",
-    "body": "$vs.redis.hmget(key,fields)",
-    "description": "获取所有给定字段的值"
+    "body": "$vs.redis.hmget(key)",
+    "description": "获取所有给定字段的值。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hmgetBean",
-    "body": "$vs.redis.hmgetBean(key,fields)",
-    "description": "获取所有给定字段的值"
+    "body": "$vs.redis.hmgetBean(key)",
+    "description": "获取所有给定字段的值。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hmset",
     "body": "$vs.redis.hmset(key,value)",
-    "description": "hash表多值设置"
+    "description": "hash表多值设置。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hmsetBean",
     "body": "$vs.redis.hmsetBean(key,value)",
-    "description": "hash表多值设置"
+    "description": "hash表多值设置。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hset",
     "body": "$vs.redis.hset(key,field,value)",
-    "description": "将哈希表 key 中的字段 field 的值设为 value"
+    "description": "将哈希表 key 中的字段 field 的值设为 value 。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hsetBean",
     "body": "$vs.redis.hsetBean(key,field,value)",
-    "description": "将哈希表 key 中的字段 field 的值设为 value"
+    "description": "将哈希表 key 中的字段 field 的值设为 value 。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hsetnx",
     "body": "$vs.redis.hsetnx(key,field,value)",
-    "description": "将哈希表 key 中的字段 field 的值设为 value 只有在字段 field 不存在时 设置哈希表字段的值"
+    "description": "将哈希表 key 中的字段 field 的值设为 value (只有在字段 field 不存在时，设置哈希表字段的值)。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hsetnxBean",
     "body": "$vs.redis.hsetnxBean(key,field,value)",
-    "description": "将哈希表 key 中的字段 field 的值设为 value 只有在字段 field 不存在时 设置哈希表字段的值"
+    "description": "将哈希表 key 中的字段 field 的值设为 value (只有在字段 field 不存在时，设置哈希表字段的值)。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hvals",
     "body": "$vs.redis.hvals(key)",
-    "description": "获取所有值"
+    "description": "获取所有值。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.hvalsBean",
     "body": "$vs.redis.hvalsBean(key)",
-    "description": "获取所有值"
+    "description": "获取所有值。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.incr",
     "body": "$vs.redis.incr(key,i)",
-    "description": "将 key 中储存的数字值加`$i\\"
+    "description": "将 key 中储存的数字值加`$i"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.incr",
     "body": "$vs.redis.incr(key)",
-    "description": "将 key 中储存的数字值加`$i\\"
+    "description": "将 key 中储存的数字值加`$i"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.lindex",
     "body": "$vs.redis.lindex(key,index)",
-    "description": "通过索引获取列表中的元素"
+    "description": "通过索引获取列表中的元素。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.lindexBean",
     "body": "$vs.redis.lindexBean(key,index)",
-    "description": "通过索引获取列表中的元素"
+    "description": "通过索引获取列表中的元素。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.llen",
     "body": "$vs.redis.llen(key)",
-    "description": "获取列表长度"
+    "description": "获取列表长度。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.llenBean",
     "body": "$vs.redis.llenBean(key)",
-    "description": "获取列表长度"
+    "description": "获取列表长度。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.lpop",
     "body": "$vs.redis.lpop(key)",
-    "description": "移出并获取列表的第一个元素"
+    "description": "移出并获取列表的第一个元素。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.lpopBean",
     "body": "$vs.redis.lpopBean(key)",
-    "description": "移出并获取列表的第一个元素"
+    "description": "移出并获取列表的第一个元素。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.lpush",
     "body": "$vs.redis.lpush(key,value)",
-    "description": "将一个值插入到列表头部"
+    "description": "将一个值插入到列表头部。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.lpushBean",
     "body": "$vs.redis.lpushBean(key,value)",
-    "description": "将一个值插入到列表头部"
+    "description": "将一个值插入到列表头部。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.lpushx",
     "body": "$vs.redis.lpushx(key,value)",
-    "description": "将一个值插入到已存在的列表头部 如果列表不存在 操作无效"
+    "description": "将一个值插入到已存在的列表头部。如果列表不存在，操作无效。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.lpushxBean",
     "body": "$vs.redis.lpushxBean(key,value)",
-    "description": "将一个值插入到已存在的列表头部"
+    "description": "将一个值插入到已存在的列表头部。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.lrange",
     "body": "$vs.redis.lrange(key,start,stop)",
-    "description": "获取列表指定范围内的元素"
+    "description": "获取列表指定范围内的元素。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.lrangeBean",
     "body": "$vs.redis.lrangeBean(key,start,stop)",
-    "description": "获取列表指定范围内的元素"
+    "description": "获取列表指定范围内的元素。"
   },
   {
     "language": "java",
@@ -3511,56 +3532,56 @@
     "group": "redis",
     "prefix": "redis.rename",
     "body": "$vs.redis.rename(oldKey,newKey)",
-    "description": "重命名KEY 当 newkey 已经存在时 RENAME 命令将覆盖旧值"
+    "description": "重命名KEY(当 newkey 已经存在时， RENAME 命令将覆盖旧值。)"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.renameNx",
     "body": "$vs.redis.renameNx(oldKey,newKey)",
-    "description": "当且仅当 newkey 不存在时 将 key 改名为 newkey"
+    "description": "当且仅当 newkey 不存在时，将 key 改名为 newkey 。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.rpop",
     "body": "$vs.redis.rpop(key)",
-    "description": "移除列表的最后一个元素 返回值为移除的元素"
+    "description": "移除列表的最后一个元素，返回值为移除的元素。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.rpopBean",
     "body": "$vs.redis.rpopBean(key)",
-    "description": "移除列表的最后一个元素 返回值为移除的元素"
+    "description": "移除列表的最后一个元素，返回值为移除的元素。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.rpush",
     "body": "$vs.redis.rpush(key,value)",
-    "description": "在列表尾部中添加一个值"
+    "description": "在列表尾部中添加一个值。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.rpushBean",
     "body": "$vs.redis.rpushBean(key,value)",
-    "description": "在列表尾部中添加一个值"
+    "description": "在列表尾部中添加一个值。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.rpushx",
     "body": "$vs.redis.rpushx(key,value)",
-    "description": "在列表尾部中添加一个值 如果列表不存在 操作无效"
+    "description": "在列表尾部中添加一个值。如果列表不存在，操作无效。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.rpushxBean",
     "body": "$vs.redis.rpushxBean(key,value)",
-    "description": "在列表尾部中添加一个值"
+    "description": "在列表尾部中添加一个值。"
   },
   {
     "language": "java",
@@ -3581,42 +3602,42 @@
     "group": "redis",
     "prefix": "redis.setBean",
     "body": "$vs.redis.setBean(key,value,timeout)",
-    "description": "向缓存添加一个数据 对象"
+    "description": "向缓存添加一个数据（对象)。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.setnx",
     "body": "$vs.redis.setnx(key,value)",
-    "description": "将 key 的值设为 value 当且仅当 key 不存在"
+    "description": "将 key 的值设为 value ，当且仅当 key 不存在。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.setnxBean",
     "body": "$vs.redis.setnxBean(key,value)",
-    "description": "将 key 的值设为 value 当且仅当 key 不存在"
+    "description": "将 key 的值设为 value ，当且仅当 key 不存在。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.setrange",
     "body": "$vs.redis.setrange(key,value,offset)",
-    "description": "用 value 参数覆写 overwrite 给定 key 所储存的字符串值 从偏移量 offset 开始"
+    "description": "用 value 参数覆写(overwrite)给定 key 所储存的字符串值，从偏移量 offset 开始。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.strlen",
     "body": "$vs.redis.strlen(key)",
-    "description": "返回 key 所储存的字符串值的长度"
+    "description": "返回 key 所储存的字符串值的长度。"
   },
   {
     "language": "java",
     "group": "redis",
     "prefix": "redis.ttl",
     "body": "$vs.redis.ttl(key)",
-    "description": "查询KEY的剩余有效时间"
+    "description": "查询KEY的剩余有效时间。"
   },
   {
     "language": "java",
@@ -3637,14 +3658,14 @@
     "group": "re",
     "prefix": "re.findAllIgnore",
     "body": "$vs.regexp.findAllIgnore(str,exp,groupIndex)",
-    "description": "通过正则表达式查找所有符合规则的字符串 不区分大小写"
+    "description": "通过正则表达式查找所有符合规则的字符串（不区分大小写）"
   },
   {
     "language": "java",
     "group": "re",
     "prefix": "re.findAllIgnore",
     "body": "$vs.regexp.findAllIgnore(str,exp)",
-    "description": "通过正则表达式查找所有符合规则的字符串 不区分大小写"
+    "description": "通过正则表达式查找所有符合规则的字符串（不区分大小写）"
   },
   {
     "language": "java",
@@ -3665,28 +3686,28 @@
     "group": "re",
     "prefix": "re.findFirstIgnore",
     "body": "$vs.regexp.findFirstIgnore(str,exp,groupIndex)",
-    "description": "通过正则表达式查找第一次出现的符合规则的字符串 不区分大小写"
+    "description": "通过正则表达式查找第一次出现的符合规则的字符串（不区分大小写）"
   },
   {
     "language": "java",
     "group": "re",
     "prefix": "re.findFirstIgnore",
     "body": "$vs.regexp.findFirstIgnore(str,exp)",
-    "description": "通过正则表达式查找第一次出现的符合规则的字符串 不区分大小写"
+    "description": "通过正则表达式查找第一次出现的符合规则的字符串（不区分大小写）"
   },
   {
     "language": "java",
     "group": "re",
     "prefix": "re.match",
     "body": "$vs.regexp.match(str,exp)",
-    "description": "调用java的正则匹配命令 返回java正则匹配结果对象"
+    "description": "调用java的正则匹配命令，返回java正则匹配结果对象"
   },
   {
     "language": "java",
     "group": "re",
     "prefix": "re.matchIgnore",
     "body": "$vs.regexp.matchIgnore(str,exp)",
-    "description": "调用java的正则匹配命令 返回java正则匹配结果对象"
+    "description": "调用java的正则匹配命令，返回java正则匹配结果对象"
   },
   {
     "language": "java",
@@ -3700,7 +3721,7 @@
     "group": "re",
     "prefix": "re.replaceAllIgnore",
     "body": "$vs.regexp.replaceAllIgnore(str,exp,newstr)",
-    "description": "通过正则表达式替换所有符合规则的字符串 不区分大小写"
+    "description": "通过正则表达式替换所有符合规则的字符串（不区分大小写）"
   },
   {
     "language": "java",
@@ -3714,7 +3735,7 @@
     "group": "re",
     "prefix": "re.replaceFirstIgnore",
     "body": "$vs.regexp.replaceFirstIgnore(str,exp,newstr)",
-    "description": "通过正则表达式替换第一次出现的符合规则的字符串 不区分大小写"
+    "description": "通过正则表达式替换第一次出现的符合规则的字符串（不区分大小写）"
   },
   {
     "language": "java",
@@ -3868,7 +3889,7 @@
     "group": "req",
     "prefix": "req.getRemoteAddr",
     "body": "$vs.request.getRemoteAddr()",
-    "description": "获取本次请求远程地址 由于请求经过了代理 故此处不一定准确 要获取用户浏览器IP 请使用`$vs.http.getClientIp `[原生方法]"
+    "description": "获取本次请求远程地址（由于请求经过了代理，故此处不一定准确），要获取用户浏览器IP，请使用`$vs.http.getClientIp()`[原生方法]"
   },
   {
     "language": "java",
@@ -3882,7 +3903,7 @@
     "group": "req",
     "prefix": "req.getRemoteUser",
     "body": "$vs.request.getRemoteUser()",
-    "description": "获取请求用户 注意不是谷神用户 此方法一般不需要调用 [原生方法]"
+    "description": "获取请求用户（注意不是谷神用户，此方法一般不需要调用）[原生方法]"
   },
   {
     "language": "java",
@@ -3896,7 +3917,7 @@
     "group": "req",
     "prefix": "req.getScheme",
     "body": "$vs.request.getScheme()",
-    "description": "获取本次请求协议 由于请求经过了代理 故此处不一定准确 [原生方法]"
+    "description": "获取本次请求协议（由于请求经过了代理，故此处不一定准确）[原生方法]"
   },
   {
     "language": "java",
@@ -3910,7 +3931,7 @@
     "group": "req",
     "prefix": "req.getServerPort",
     "body": "$vs.request.getServerPort()",
-    "description": "获取本次请求服务请求端口 由于请求经过了代理 故此处不一定准确 要获取本地http监听端口 使用`$vs.properties.getProperty \"server.port\" `[原生方法]"
+    "description": "获取本次请求服务请求端口（由于请求经过了代理，故此处不一定准确），要获取本地http监听端口，使用`$vs.properties.getProperty(\"server.port\")`[原生方法]"
   },
   {
     "language": "java",
@@ -3945,7 +3966,7 @@
     "group": "resp",
     "prefix": "resp.addHeader",
     "body": "$vs.response.addHeader(name,value)",
-    "description": "设置响应头 注意本方法采用追加模式【也就是会存在多个相同键的头】 [原生方法]"
+    "description": "设置响应头（注意本方法采用追加模式【也就是会存在多个相同键的头】）[原生方法]"
   },
   {
     "language": "java",
@@ -3966,7 +3987,7 @@
     "group": "resp",
     "prefix": "resp.setHeader",
     "body": "$vs.response.setHeader(name,value)",
-    "description": "设置响应头 注意本方法采用覆盖模式 [原生方法]"
+    "description": "设置响应头（注意本方法采用覆盖模式）[原生方法]"
   },
   {
     "language": "java",
@@ -3994,28 +4015,28 @@
     "group": "sqlb",
     "prefix": "sqlb.and",
     "body": "$vs.sqlTools.and(sqlBean,strField,objData,strOpt)",
-    "description": "添加AND查询条件 等值"
+    "description": "添加AND查询条件（等值）"
   },
   {
     "language": "java",
     "group": "sqlb",
     "prefix": "sqlb.and",
     "body": "$vs.sqlTools.and(sqlBean,strField,objData)",
-    "description": "添加AND查询条件 等值"
+    "description": "添加AND查询条件（等值）"
   },
   {
     "language": "java",
     "group": "sqlb",
     "prefix": "sqlb.date",
     "body": "$vs.sqlTools.date(sqlBean,strField,strData,strOpt)",
-    "description": "添加日期查询条件 若`$strOpt`为`=`则判断从`00 00 00`到`23 59 59`内的数据"
+    "description": "添加日期查询条件，若`$strOpt`为`=`则判断从`00:00:00`到`23:59:59`内的数据"
   },
   {
     "language": "java",
     "group": "sqlb",
     "prefix": "sqlb.date",
     "body": "$vs.sqlTools.date(sqlBean,strField,strData)",
-    "description": "添加日期查询条件 等值 判断从`00 00 00`到`23 59 59`内的数据"
+    "description": "添加日期查询条件（等值），判断从`00:00:00`到`23:59:59`内的数据"
   },
   {
     "language": "java",
@@ -4036,14 +4057,14 @@
     "group": "sqlb",
     "prefix": "sqlb.leftLike",
     "body": "$vs.sqlTools.leftLike(sqlBean,strField,strData)",
-    "description": "添加LIKE查询条件`like $strData%` 如 `$vs.sqlTools.leftLike $sqlBean \"a.MAIN_CODE\" $form.MAIN_CODE \\"
+    "description": "添加LIKE查询条件`like $strData%`， 如： `$vs.sqlTools.leftLike($sqlBean,\"a.MAIN_CODE\",$form.MAIN_CODE)"
   },
   {
     "language": "java",
     "group": "sqlb",
     "prefix": "sqlb.like",
     "body": "$vs.sqlTools.like(sqlBean,strField,strData)",
-    "description": "添加LIKE查询条件`like %$strData%` 如 `$vs.sqlTools.like $sqlBean \"a.MAIN_CODE\" $form.MAIN_CODE \\"
+    "description": "添加LIKE查询条件`like %$strData%`， 如： `$vs.sqlTools.like($sqlBean,\"a.MAIN_CODE\",$form.MAIN_CODE)"
   },
   {
     "language": "java",
@@ -4057,7 +4078,7 @@
     "group": "sqlb",
     "prefix": "sqlb.rightLike",
     "body": "$vs.sqlTools.rightLike(sqlBean,strField,strData)",
-    "description": "添加LIKE查询条件`like %$strData` 如 `$vs.sqlTools.rightLike $sqlBean \"a.MAIN_CODE\" $form.MAIN_CODE \\"
+    "description": "添加LIKE查询条件`like %$strData`， 如： `$vs.sqlTools.rightLike($sqlBean,\"a.MAIN_CODE\",$form.MAIN_CODE)"
   },
   {
     "language": "java",
@@ -4078,14 +4099,14 @@
     "group": "sqlh",
     "prefix": "sqlh.and",
     "body": "$vs.sqlHelper.and(form,strTableFieldId,strDataFieldId)",
-    "description": "添加AND查询条件 等值 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` #set $sql= $sql + $vs.sqlHelper.and $form \"CODE_FIELD\" \"DATA_FIELD\" ``\\"
+    "description": "添加AND查询条件（等值） **用 法**： ``` #set($sql= $sql + $vs.sqlHelper.and($form,\"CODE_FIELD\",\"DATA_FIELD\")) ``"
   },
   {
     "language": "java",
     "group": "sqlh",
     "prefix": "sqlh.and",
     "body": "$vs.sqlHelper.and(form,strTableFieldId)",
-    "description": "添加AND查询条件 等值 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` #set $sql= $sql + $vs.sqlHelper.and $form \"CODE_FIELD\" ``\\"
+    "description": "添加AND查询条件（等值） **用 法**： ``` #set($sql= $sql + $vs.sqlHelper.and($form,\"CODE_FIELD\")) ``"
   },
   {
     "language": "java",
@@ -4120,14 +4141,14 @@
     "group": "sqlh",
     "prefix": "sqlh.andLike",
     "body": "$vs.sqlHelper.andLike(form,strTableFieldId,strDataFieldId)",
-    "description": "添加LIKE查询条件 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` #set $sql= $sql + $vs.sqlHelper.andLike $form \"CODE_FIELD\" \"DATA_FIELD\" ``\\"
+    "description": "添加LIKE查询条件 **用 法**： ``` #set($sql= $sql + $vs.sqlHelper.andLike($form,\"CODE_FIELD\",\"DATA_FIELD\")) ``"
   },
   {
     "language": "java",
     "group": "sqlh",
     "prefix": "sqlh.andLike",
     "body": "$vs.sqlHelper.andLike(form,strTableFieldId)",
-    "description": "添加LIKE查询条件 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` #set $sql= $sql + $vs.sqlHelper.andLike $form \"CODE_FIELD\" ``\\"
+    "description": "添加LIKE查询条件 **用 法**： ``` #set($sql= $sql + $vs.sqlHelper.andLike($form,\"CODE_FIELD\")) ``"
   },
   {
     "language": "java",
@@ -4176,63 +4197,63 @@
     "group": "sqlh",
     "prefix": "sqlh.like",
     "body": "$vs.sqlHelper.like(form,strTableFieldId,strDataFieldId)",
-    "description": "添加LIKE查询条件 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` #set $sql= $sql + \" and \" + $vs.sqlHelper.like $form \"CODE_FIELD\" \"DATA_FIELD\" ``\\"
+    "description": "添加LIKE查询条件 **用 法**： ``` #set($sql= $sql + \" and \" + $vs.sqlHelper.like($form,\"CODE_FIELD\",\"DATA_FIELD\")) ``"
   },
   {
     "language": "java",
     "group": "sqlh",
     "prefix": "sqlh.like",
     "body": "$vs.sqlHelper.like(form,strTableFieldId)",
-    "description": "添加LIKE查询条件 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` #set $sql= $sql + \" and \" $vs.sqlHelper.like $form \"CODE_FIELD\" ``\\"
+    "description": "添加LIKE查询条件 **用 法**： ``` #set($sql= $sql + \" and \" $vs.sqlHelper.like($form,\"CODE_FIELD\")) ``"
   },
   {
     "language": "java",
     "group": "sqlh",
     "prefix": "sqlh.listIn",
     "body": "$vs.sqlHelper.listIn(list,strTableFieldId)",
-    "description": "添加IN查询条件 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` #set $sql= $sql + \" and \" + $vs.sqlHelper.listIn $list \"CODE_FIELD\" ``\\"
+    "description": "添加IN查询条件 **用 法**： ``` #set($sql= $sql + \" and \" + $vs.sqlHelper.listIn($list,\"CODE_FIELD\")) ``"
   },
   {
     "language": "java",
     "group": "sqlh",
     "prefix": "sqlh.listNotIn",
     "body": "$vs.sqlHelper.listNotIn(list,strTableFieldId)",
-    "description": "添加 NOT IN查询条件 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` #set $sql= $sql + \" and \" + $vs.sqlHelper.listNotIn $list \"CODE_FIELD\" ``\\"
+    "description": "添加 NOT IN查询条件 **用 法**： ``` #set($sql= $sql + \" and \" + $vs.sqlHelper.listNotIn($list,\"CODE_FIELD\")) ``"
   },
   {
     "language": "java",
     "group": "sqlh",
     "prefix": "sqlh.strIn",
     "body": "$vs.sqlHelper.strIn(strValues,strTableFieldId)",
-    "description": "添加IN查询条件 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` #set $sql= $sql + \" and \" + $vs.sqlHelper.strIn $strValues \"CODE_FIELD\" ``\\"
+    "description": "添加IN查询条件 **用 法**： ``` #set($sql= $sql + \" and \" + $vs.sqlHelper.strIn($strValues,\"CODE_FIELD\")) ``"
   },
   {
     "language": "java",
     "group": "sqlh",
     "prefix": "sqlh.strNotIn",
     "body": "$vs.sqlHelper.strNotIn(strValues,strTableFieldId)",
-    "description": "添加IN查询条件 **用&nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp &nbsp 法** ``` #set $sql= $sql + \" and \" + $vs.sqlHelper.strNotIn $strValues \"CODE_FIELD\" ``\\"
+    "description": "添加IN查询条件 **用 法**： ``` #set($sql= $sql + \" and \" + $vs.sqlHelper.strNotIn($strValues,\"CODE_FIELD\")) ``"
   },
   {
     "language": "java",
     "group": "thread",
     "prefix": "thread.get",
     "body": "$vs.thread.get(key,defvalue)",
-    "description": "从线程变量池中拿出变量 若变量不存在 则返回默认值"
+    "description": "从线程变量池中拿出变量，若变量不存在，则返回默认值。"
   },
   {
     "language": "java",
     "group": "thread",
     "prefix": "thread.get",
     "body": "$vs.thread.get(key)",
-    "description": "从线程变量池中拿出变量 若变量不存在 则返回`null\\"
+    "description": "从线程变量池中拿出变量，若变量不存在，则返回`null`。"
   },
   {
     "language": "java",
     "group": "thread",
     "prefix": "thread.put",
     "body": "$vs.thread.put(key,value)",
-    "description": "将变量放到当前线程变量池中 使得此变量在本次调用中所有代码均可访问 支持跨系统调用链漫游"
+    "description": "将变量放到当前线程变量池中，使得此变量在本次调用中所有代码均可访问（支持跨系统调用链漫游）。"
   },
   {
     "language": "java",
@@ -4246,42 +4267,42 @@
     "group": "thread",
     "prefix": "thread.runFutureTask",
     "body": "$vs.thread.runFutureTask(strProcName,funName,args)",
-    "description": "将一个任务放到异步线程队列等待执行 不参与分布式事务"
+    "description": "将一个任务放到异步线程队列等待执行（不参与分布式事务）"
   },
   {
     "language": "java",
     "group": "thread",
     "prefix": "thread.runFutureTaskWithGlobalTrans",
     "body": "$vs.thread.runFutureTaskWithGlobalTrans(strProcName,funName,args)",
-    "description": "将一个任务放到异步线程队列等待执行 参与分布式事务"
+    "description": "将一个任务放到异步线程队列等待执行（参与分布式事务）"
   },
   {
     "language": "java",
     "group": "thread",
     "prefix": "thread.runServiceComp",
     "body": "$vs.thread.runServiceComp(strCompId,args)",
-    "description": "将一个任务放到异步线程队列等待执行 执行服务组件 注意 不支持跨数据库"
+    "description": "将一个任务放到异步线程队列等待执行，执行服务组件（注意：不支持跨数据库)。"
   },
   {
     "language": "java",
     "group": "thread",
     "prefix": "thread.runServiceCompFutureTask",
     "body": "$vs.thread.runServiceCompFutureTask(strCompId,args,isTran)",
-    "description": "将一个任务放到异步线程队列等待执行 执行服务组件 注意 不支持跨数据库"
+    "description": "将一个任务放到异步线程队列等待执行，执行服务组件（注意：不支持跨数据库)。"
   },
   {
     "language": "java",
     "group": "thread",
     "prefix": "thread.runServiceCompFutureTask",
     "body": "$vs.thread.runServiceCompFutureTask(strCompId,args)",
-    "description": "将一个任务放到异步线程队列等待执行 执行服务组件 注意 不支持跨数据库"
+    "description": "将一个任务放到异步线程队列等待执行，执行服务组件（注意：不支持跨数据库)。"
   },
   {
     "language": "java",
     "group": "thread",
     "prefix": "thread.sleep",
     "body": "$vs.thread.sleep(time)",
-    "description": "暂停线程"
+    "description": "暂停线程。"
   },
   {
     "language": "java",
@@ -4365,7 +4386,7 @@
     "group": "user",
     "prefix": "user.USER_TYPE - 当前登录用户用户类型",
     "body": "$vs.user.USER_TYPE",
-    "description": ""
+    "description": "当前登录用户用户类型：10 - 操作员 20 - 管理员（会员用户） 30 - 管理员（后台用户）"
   },
   {
     "language": "java",
@@ -4407,14 +4428,14 @@
     "group": "util",
     "prefix": "util.checkInput",
     "body": "$vs.util.checkInput(obj,tipMsg)",
-    "description": "判断一个对象是否为空 参见 `$vs.util.isNull` 若为空 则抛出信息为`$tipMsg`的异常提示"
+    "description": "判断一个对象是否为空（参见：`$vs.util.isNull`），若为空，则抛出信息为`$tipMsg`的异常提示"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.concat",
-    "body": "$vs.util.concat(str1,str2)",
-    "description": "字符串拼接 此方法已过时 您可以直接做字符串相加操作"
+    "body": "$vs.util.concat(str1,str2...)",
+    "description": "字符串拼接（此方法已过时，您可以直接做字符串相加操作）"
   },
   {
     "language": "java",
@@ -4435,14 +4456,14 @@
     "group": "util",
     "prefix": "util.equals",
     "body": "$vs.util.equals(str1,str2)",
-    "description": "判断两个字符串内容是否相同 区分大小写"
+    "description": "判断两个字符串内容是否相同（区分大小写）"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.equalsIgnoreCase",
     "body": "$vs.util.equalsIgnoreCase(str1,str2)",
-    "description": "判断两个字符串内容是否相同 不区分大小写"
+    "description": "判断两个字符串内容是否相同（不区分大小写）"
   },
   {
     "language": "java",
@@ -4491,7 +4512,7 @@
     "group": "util",
     "prefix": "util.getMd5",
     "body": "$vs.util.getMd5(str)",
-    "description": "产生32位的MD5值 大写"
+    "description": "产生32位的MD5值（大写）"
   },
   {
     "language": "java",
@@ -4505,14 +4526,14 @@
     "group": "util",
     "prefix": "util.getRandomNumber",
     "body": "$vs.util.getRandomNumber(max,min)",
-    "description": "获取随机数 介于 $max-1 和$min间的数字"
+    "description": "获取随机数（介于($max-1)和$min间的数字）"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.getRandomNumber",
     "body": "$vs.util.getRandomNumber(max)",
-    "description": "获取随机数 介于 $max-1 和0间的数字"
+    "description": "获取随机数（介于($max-1)和0间的数字）"
   },
   {
     "language": "java",
@@ -4540,14 +4561,14 @@
     "group": "util",
     "prefix": "util.ifNull",
     "body": "$vs.util.ifNull(obj,defaultValue)",
-    "description": "判断一个对象是否为空 参见 `$vs.util.isNull` 并返回对应的值"
+    "description": "判断一个对象是否为空（参见：`$vs.util.isNull`）并返回对应的值"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.isBlankOne",
     "body": "$vs.util.isBlankOne(obj1,objn)",
-    "description": "判断所提供的参数中 是否存在至少1个是`null` 或者空字符串 则返回`true\\"
+    "description": "判断所提供的参数中，是否存在至少1个是`null`（或者空字符串）则返回`true"
   },
   {
     "language": "java",
@@ -4561,56 +4582,56 @@
     "group": "util",
     "prefix": "util.isList",
     "body": "$vs.util.isList(v)",
-    "description": "判断一个对象是否为List 若对象值为null 则返回false"
+    "description": "判断一个对象是否为List，若对象值为null，则返回false"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.isMap",
     "body": "$vs.util.isMap(v)",
-    "description": "判断一个对象是否为Map 若对象值为null 则返回false"
+    "description": "判断一个对象是否为Map，若对象值为null，则返回false"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.isNotNull",
     "body": "$vs.util.isNotNull(obj)",
-    "description": "判断一个对象是否非空 若对象为字符串 则判断是否非空字符串 忽略空白字符"
+    "description": "判断一个对象是否非空，若对象为字符串，则判断是否非空字符串（忽略空白字符）"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.isNotZero",
     "body": "$vs.util.isNotZero(num)",
-    "description": "判断数字是非为0 或者null"
+    "description": "判断数字是非为0（或者null）"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.isNull",
     "body": "$vs.util.isNull(obj)",
-    "description": "判断一个对象是否为空 若对象为字符串 则判断是否为空字符串 忽略空白字符"
+    "description": "判断一个对象是否为空，若对象为字符串，则判断是否为空字符串（忽略空白字符）"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.isNumeric",
     "body": "$vs.util.isNumeric(v)",
-    "description": "判断一个对象是否为数字 若对象值为null 则返回false"
+    "description": "判断一个对象是否为数字，若对象值为null，则返回false"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.isString",
     "body": "$vs.util.isString(v)",
-    "description": "判断一个对象是否为字符串 若对象值为null 则返回false"
+    "description": "判断一个对象是否为字符串，若对象值为null，则返回false"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.isZero",
     "body": "$vs.util.isZero(num)",
-    "description": "判断数字是否为0 或者null"
+    "description": "判断数字是否为0（或者null）"
   },
   {
     "language": "java",
@@ -4624,7 +4645,7 @@
     "group": "util",
     "prefix": "util.list2map",
     "body": "$vs.util.list2map(list,fieldId)",
-    "description": "List<Object>类型数据转为Map<String Object>"
+    "description": "List<Object>类型数据转为Map<String,Object>"
   },
   {
     "language": "java",
@@ -4652,14 +4673,14 @@
     "group": "util",
     "prefix": "util.mapClone",
     "body": "$vs.util.mapClone(src)",
-    "description": "新建一个对象 `Map` 且将`$src`中的值复制一份到新的对象"
+    "description": "新建一个对象（`Map`）且将`$src`中的值复制一份到新的对象"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.mapCopy",
     "body": "$vs.util.mapCopy(src,target)",
-    "description": "将`$src`和`$target`中相同属性的值复制到`$target`中 若`$target`为空 则复制`$src`的所有属性 同 mapClone"
+    "description": "将`$src`和`$target`中相同属性的值复制到`$target`中，若`$target`为空，则复制`$src`的所有属性（同）mapClone"
   },
   {
     "language": "java",
@@ -4680,7 +4701,7 @@
     "group": "util",
     "prefix": "util.newLinkedHashMap",
     "body": "$vs.util.newLinkedHashMap()",
-    "description": "创建一个有序Map类型的变量 一般用于接口或者对变量顺序有要求的场合"
+    "description": "创建一个有序Map类型的变量，一般用于接口或者对变量顺序有要求的场合"
   },
   {
     "language": "java",
@@ -4707,7 +4728,7 @@
     "language": "java",
     "group": "util",
     "prefix": "util.newList",
-    "body": "$vs.util.newList(obj)",
+    "body": "$vs.util.newList(obj...)",
     "description": "创建一个List类型的变量"
   },
   {
@@ -4722,7 +4743,7 @@
     "group": "util",
     "prefix": "util.newMap",
     "body": "$vs.util.newMap(k,v,k,v)",
-    "description": "创建一个Map类型的变量 并赋初始值"
+    "description": "创建一个Map类型的变量，并赋初始值"
   },
   {
     "language": "java",
@@ -4743,35 +4764,35 @@
     "group": "util",
     "prefix": "util.parseXml",
     "body": "$vs.util.parseXml(xml,charset)",
-    "description": "解析XML字符串 用法见http //docs.guthon.com/docs/gdfaas/gdfaas-1d6lr5ttid3i8"
+    "description": "解析XML字符串，用法见http://docs.guthon.com/docs/gdfaas/gdfaas-1d6lr5ttid3i8"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.parseXml",
     "body": "$vs.util.parseXml(xml)",
-    "description": "解析XML字符串 用法见http //docs.guthon.com/docs/gdfaas/gdfaas-1d6lr5ttid3i8"
+    "description": "解析XML字符串，用法见http://docs.guthon.com/docs/gdfaas/gdfaas-1d6lr5ttid3i8"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.precise",
     "body": "$vs.util.precise(num1,num2,stropt,intScale)",
-    "description": "数字‘+’、‘-’、‘*’、‘/’运算 功能同 `$vs.math.precise\\"
+    "description": "数字‘+’、‘-’、‘*’、‘/’运算，功能同：`$vs.math.precise"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.precise",
     "body": "$vs.util.precise(num1,num2,stropt)",
-    "description": "数字‘+’、‘-’、‘*’、‘/’运算 功能同 `$vs.math.precise\\"
+    "description": "数字‘+’、‘-’、‘*’、‘/’运算，功能同：`$vs.math.precise"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.replaceFirst",
     "body": "$vs.util.replaceFirst(str,tag,new)",
-    "description": "替换第一次出现的字符串 非正则"
+    "description": "替换第一次出现的字符串"
   },
   {
     "language": "java",
@@ -4806,35 +4827,35 @@
     "group": "util",
     "prefix": "util.sort",
     "body": "$vs.util.sort(list,fieldId)",
-    "description": "对列表进行排序 升序"
+    "description": "对列表进行排序（升序)"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.sortList",
     "body": "$vs.util.sortList(list,order)",
-    "description": "对基础数据 number string date 列表进行排序"
+    "description": "对基础数据(number,string,date)列表进行排序"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.sortList",
     "body": "$vs.util.sortList(list)",
-    "description": "对基础数据 number string date 列表进行排序"
+    "description": "对基础数据(number,string,date)列表进行排序"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.split",
     "body": "$vs.util.split(str,ch)",
-    "description": "根据给定的字符串分隔符 解析字符串"
+    "description": "根据给定的字符串分隔符，解析字符串"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.startScriptRunTimeCount",
     "body": "$vs.util.startScriptRunTimeCount(tagName)",
-    "description": "开启代码运行耗时统计 在代码段 或函数 第一行代码调用 统计本身也会消耗性能 生产环境慎用"
+    "description": "开启代码运行耗时统计（在代码段（或函数）第一行代码调用），统计本身也会消耗性能，生产环境慎用"
   },
   {
     "language": "java",
@@ -4862,35 +4883,35 @@
     "group": "util",
     "prefix": "util.strLen",
     "body": "$vs.util.strLen(str)",
-    "description": "获取字符串长度 一个中文占1个长度"
+    "description": "获取字符串长度（一个中文占1个长度)"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.strPos",
     "body": "$vs.util.strPos(str,sub)",
-    "description": "判断一个字符串在另外一个字符串中第一次出现的位置 从0开始"
+    "description": "判断一个字符串在另外一个字符串中第一次出现的位置（从0开始)"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.strPosLast",
     "body": "$vs.util.strPosLast(str,sub)",
-    "description": "判断一个字符串在另外一个字符串中最后一次出现的位置 从0开始"
+    "description": "判断一个字符串在另外一个字符串中最后一次出现的位置（从0开始)"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.strReplace",
     "body": "$vs.util.strReplace(str,tag,new)",
-    "description": "替换所有出现的字符串 非正则"
+    "description": "替换所有出现的字符串（非正则）"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.strReplaceAll",
     "body": "$vs.util.strReplaceAll(str,tag,new)",
-    "description": "替换所有出现的字符串 支持正则"
+    "description": "替换所有出现的字符串（支持正则）"
   },
   {
     "language": "java",
@@ -4939,7 +4960,7 @@
     "group": "util",
     "prefix": "util.strTrueLen",
     "body": "$vs.util.strTrueLen(str)",
-    "description": "获取字符串字节长度 一个中文占2个长度"
+    "description": "获取字符串字节长度（一个中文占2个长度)"
   },
   {
     "language": "java",
@@ -4953,14 +4974,14 @@
     "group": "util",
     "prefix": "util.substring",
     "body": "$vs.util.substring(str,start)",
-    "description": "截取字符串 从$start到字符串末尾"
+    "description": "截取字符串，从$start到字符串末尾"
   },
   {
     "language": "java",
     "group": "util",
     "prefix": "util.toCamelCase",
     "body": "$vs.util.toCamelCase(str)",
-    "description": "字段转驼峰 HELLO_word -> helloWord"
+    "description": "字段转驼峰，HELLO_word -> helloWord"
   },
   {
     "language": "java",
@@ -4988,7 +5009,7 @@
     "group": "util",
     "prefix": "util.toUnderlineCase",
     "body": "$vs.util.toUnderlineCase(str)",
-    "description": "驼峰转字段 helloWord -> HELLO_WORD"
+    "description": "驼峰转字段，helloWord -> HELLO_WORD"
   },
   {
     "language": "java",
@@ -5002,7 +5023,7 @@
     "group": "util",
     "prefix": "util.trim",
     "body": "$vs.util.trim(str)",
-    "description": "去掉字符串两边的空白字符 包括空格、tab、回车、换行等"
+    "description": "去掉字符串两边的空白字符（包括空格、tab、回车、换行等）"
   },
   {
     "language": "java",
@@ -5030,28 +5051,28 @@
     "group": "wf",
     "prefix": "wf.activate",
     "body": "$vs.workflow.activate(userId,billcode,billtypeCode,comment)",
-    "description": "激活实例 只能激活手动冻结、复审冻结"
+    "description": "激活实例（只能激活手动冻结、复审冻结）"
   },
   {
     "language": "java",
     "group": "wf",
     "prefix": "wf.addApprover",
     "body": "$vs.workflow.addApprover(userId,billcode,billtypeCode,comment,targetNodeId,addUserIds)",
-    "description": "添加审批人 仅限未审的节点 和加签不同 加签是在节点后面增加一个新节点"
+    "description": "添加审批人（仅限未审的节点，和加签不同，加签是在节点后面增加一个新节点）"
   },
   {
     "language": "java",
     "group": "wf",
     "prefix": "wf.addsign",
     "body": "$vs.workflow.addsign(userId,billcode,billtypeCode,addSignUserId)",
-    "description": "加签 单人"
+    "description": "加签（单人）"
   },
   {
     "language": "java",
     "group": "wf",
     "prefix": "wf.addsigns",
     "body": "$vs.workflow.addsigns(userId,billcode,billtypeCode,addSignUserIds,addSignType)",
-    "description": "加签 多人会签"
+    "description": "加签（多人会签）"
   },
   {
     "language": "java",
@@ -5079,7 +5100,7 @@
     "group": "wf",
     "prefix": "wf.assign",
     "body": "$vs.workflow.assign(userId,billcode,billtypeCode,comment,targetNodeId,assignId,assignUserIds)",
-    "description": "指派审批人 如果都指派了且流程被冻结 则自动激活流程 审批到下个未指派的节点则又被冻结"
+    "description": "指派审批人（如果都指派了且流程被冻结，则自动激活流程，审批到下个未指派的节点则又被冻结）"
   },
   {
     "language": "java",
@@ -5128,7 +5149,7 @@
     "group": "wf",
     "prefix": "wf.invalid",
     "body": "$vs.workflow.invalid(userId,billcode,billtypeCode,comment)",
-    "description": "作废 作废已审核通过的流程"
+    "description": "作废（作废已审核通过的流程）"
   },
   {
     "language": "java",
@@ -5156,35 +5177,35 @@
     "group": "wf",
     "prefix": "wf.submit",
     "body": "$vs.workflow.submit(userId,billcode,billtypeCode,processId,data,meta,remark,content,files,nextUserIds,nextSignType,systemId,memberCode)",
-    "description": "提交单据到审批工作流 并且指定下级审核人"
+    "description": "提交单据到审批工作流，并且指定下级审核人"
   },
   {
     "language": "java",
     "group": "wf",
     "prefix": "wf.submit",
     "body": "$vs.workflow.submit(userId,billcode,billtypeCode,processId,data,meta,remark,content,files,nextUserIds,nextSignType,systemId)",
-    "description": "提交单据到审批工作流 并且指定下级审核人"
+    "description": "提交单据到审批工作流，并且指定下级审核人"
   },
   {
     "language": "java",
     "group": "wf",
     "prefix": "wf.submit",
     "body": "$vs.workflow.submit(userId,billcode,billtypeCode,processId,data,meta,remark,content,files,nextUserIds,nextSignType)",
-    "description": "提交单据到审批工作流 并且指定下级审核人"
+    "description": "提交单据到审批工作流，并且指定下级审核人"
   },
   {
     "language": "java",
     "group": "wf",
     "prefix": "wf.submit",
     "body": "$vs.workflow.submit(userId,billcode,billtypeCode,processId,data,meta,remark,content,files)",
-    "description": "提交单据到审批工作流 并且指定下级审核人"
+    "description": "提交单据到审批工作流，并且指定下级审核人"
   },
   {
     "language": "java",
     "group": "wf",
     "prefix": "wf.submit",
     "body": "$vs.workflow.submit(userId,billcode,billtypeCode,processId,data,meta,remark)",
-    "description": "提交单据到审批工作流 并且指定下级审核人"
+    "description": "提交单据到审批工作流，并且指定下级审核人"
   },
   {
     "language": "java",
