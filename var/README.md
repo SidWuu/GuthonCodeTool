@@ -31,9 +31,9 @@ source/workcopy/    开发工作副本，改源码优先看这里
 常见源码结构：
 
 ```text
-source/readonly/products/{子系统}/page/{模型序号}_{模型}/{模块序号}_{模块}/{页面名 页面ID}/
-source/readonly/products/{子系统}/procedure/{过程别名}/{函数名}/
-source/readonly/project/{项目名}/{子系统}/...
+source/readonly/products/{产品名称}/{子系统}/page/{模型序号}_{模型}/{模块序号}_{模块}/{页面名 页面ID}/
+source/readonly/products/{产品名称}/{子系统}/procedure/{过程别名}/{函数名}/
+source/readonly/project/{项目名称}/{子系统}/...
 source/workcopy/products/{产品名}/{子系统}/page|procedure/...
 source/workcopy/projects/{项目名}/{子系统}/page|procedure/...
 ```
@@ -71,9 +71,12 @@ diff.md           修改说明草稿
 建议结构：
 
 ```text
-database/schema/   表结构 JSON
-database/dict/     字典、枚举、字段说明
+database/schema/{products|projects}/{名称}/    表结构 JSON
+database/billtype/{products|projects}/{名称}/  单据类型 JSON
+database/dict/                               字典、枚举、字段说明
 ```
+
+表结构和单据类型按根仓库 `config/sync.yaml` 的当前 `sync.ACTIVE` 隔离，目录末级使用产品或项目配置中的 `name`。
 
 ## docs
 

@@ -734,6 +734,8 @@ def resolve_datasource(cfg, name=None):
 
 
 def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, stats):
+    if reconcile_readonly_index_paths(conn, layer, product_id, project_id, layer_cfg):
+        conn.commit()
     ds_name = layer_cfg["datasource"]
     ds = cfg["datasource"]["datasource"][ds_name]
     table_cfg = cfg["source_tables"]
@@ -895,12 +897,43 @@ def reconcile_deleted_pages(conn, layer, product_id, project_id, current_page_id
     return len(stale)
 
 
+def readonly_layer_root(layer, product_id, project_id, layer_cfg):
+    name = layer_cfg.get("name")
+    if not name:
+        item_id = product_id if layer == "PRODUCT" else project_id
+        raise SystemExit(f"Missing name for {layer.lower()} source: {item_id}")
+    owner = "products" if layer == "PRODUCT" else "project"
+    return readonly_source_dir() / owner / path_part(name)
+
+
+def reconcile_readonly_index_paths(conn, layer, product_id, project_id, layer_cfg):
+    if layer != "PRODUCT":
+        return 0
+    legacy_root = readonly_source_dir() / "products" / path_part(product_id)
+    target_root = readonly_layer_root(layer, product_id, project_id, layer_cfg)
+    if legacy_root == target_root or legacy_root.exists() or not target_root.exists():
+        return 0
+    legacy_prefix = str(legacy_root.relative_to(ROOT)) + "/"
+    target_prefix = str(target_root.relative_to(ROOT)) + "/"
+    identity = (layer, product_id, project_id)
+    changed = 0
+    for table, column in (
+        ("gusen_source_record", "local_path"),
+        ("gusen_invoke_call", "json_path"),
+        ("gusen_dynamic_call", "json_path"),
+    ):
+        cursor = conn.execute(
+            f"UPDATE {table} SET {column}=replace({column}, ?, ?) "
+            f"WHERE source_layer=? AND product_id=? AND project_id=? AND {column} LIKE ?",
+            (legacy_prefix, target_prefix, *identity, legacy_prefix + "%"),
+        )
+        changed += cursor.rowcount
+    return changed
+
+
 def source_base(row, layer, product_id, project_id, layer_cfg, system_scope):
     system_name = _system_name(row, system_scope)
-    if layer == "PRODUCT":
-        layer_root = readonly_source_dir() / "products" / path_part(product_id)
-    else:
-        layer_root = readonly_source_dir() / "project" / path_part(layer_cfg.get("name") or project_id)
+    layer_root = readonly_layer_root(layer, product_id, project_id, layer_cfg)
     root = layer_root / path_part(system_name)
     if row["source_table"] == PAGE_SOURCE_TYPE:
         module_name = row.get("mk_name") or row.get("mk_id") or "未归属模块"
@@ -923,7 +956,7 @@ def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, ch
     base = source_base(row, layer, product_id, project_id, layer_cfg, system_scope)
     if row["source_table"] != PAGE_SOURCE_TYPE:
         system_name = _system_name(row, system_scope)
-        layer_root = readonly_source_dir() / "products" / path_part(product_id) if layer == "PRODUCT" else readonly_source_dir() / "project" / path_part(layer_cfg.get("name") or project_id)
+        layer_root = readonly_layer_root(layer, product_id, project_id, layer_cfg)
         _link_shared_procedure_dirs(layer_root, system_name, row, system_scope)
     if base.exists():
         shutil.rmtree(base)
@@ -1665,17 +1698,17 @@ def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
     )
     source_rel = found["local_path"]
     source_path = ROOT / source_rel
-    target = work_copy_dir() / owner / _work_copy_source_relative_path(source_rel, product_id, project_id)
+    target = work_copy_dir() / owner / _work_copy_source_relative_path(source_rel, project_id)
     return _prepare_work_copy(source_path, target, found, _work_copy_change_key(found))
 
 
-def _work_copy_source_relative_path(source_path, product_id, project_id):
+def _work_copy_source_relative_path(source_path, project_id):
     path = Path(source_path)
     marker = ("source", "readonly", "project") if project_id else ("source", "readonly", "products")
     rel = _path_after_marker(path, marker)
-    if project_id or (rel.parts and rel.parts[0] == path_part(product_id)):
-        return Path(*rel.parts[1:])
-    return rel
+    if not rel.parts:
+        raise ValueError(f"Source path has no configured name after {'/'.join(marker)}: {path}")
+    return Path(*rel.parts[1:])
 
 
 def _path_after_marker(path: Path, marker: tuple[str, ...]) -> Path:

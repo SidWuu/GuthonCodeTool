@@ -34,6 +34,19 @@ def read_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def resolve_output_dir(base_dir, requested=None, config=None):
+    if requested:
+        return Path(requested)
+    config = config or gusen_hub.load_config()
+    active, products, projects = gusen_hub.resolve_active(config)
+    kind = active.partition(".")[0]
+    _item_id, item = (products or projects)[0]
+    name = item.get("name")
+    if not name:
+        raise SystemExit(f"Missing name for sync.ACTIVE: {active}")
+    return Path(base_dir) / kind / gusen_hub.path_part(name)
+
+
 def to_camel_key(key):
     text = str(key)
     if "_" not in text and not text.isupper():
@@ -207,11 +220,6 @@ def export_table_schema(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=Non
     return summary
 
 
-def load_datasource(name=None):
-    cfg = gusen_hub.load_config()
-    return gusen_hub.resolve_datasource(cfg, name)
-
-
 def resolve_data_source_ids(conn, datasource_name, requested=None):
     cfg = gusen_hub.load_config()
     allowed = gusen_hub.resolve_system_scope(conn, cfg, datasource_name).get("data_source_ids") or []
@@ -225,22 +233,24 @@ def resolve_data_source_ids(conn, datasource_name, requested=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Export Gushen table schemas directly from SQL.")
     parser.add_argument("--datasource", help="Datasource override. Defaults to the product or project selected by sync.ACTIVE.")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument("--output-dir", help="Output directory override. Defaults to var/database/schema/{products|projects}/<active_name>.")
     parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to IDs resolved from config/sync.yaml systems.include.system_aliases.")
     parser.add_argument("--table-ids", help="Comma-separated TABLE_ID list. Omit to export all tables in selected data sources.")
     args = parser.parse_args(argv)
 
     requested_data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else []
     table_ids = normalize_table_ids(args.table_ids)
-    datasource_name, datasource = load_datasource(args.datasource)
+    config = gusen_hub.load_config()
+    output_dir = resolve_output_dir(DEFAULT_OUTPUT_DIR, args.output_dir, config)
+    datasource_name, datasource = gusen_hub.resolve_datasource(config, args.datasource)
     try:
         with gusen_hub.db_connect(datasource) as conn:
             data_source_ids = resolve_data_source_ids(conn, datasource_name, requested_data_source_ids)
-            summary = export_table_schema(conn, Path(args.output_dir), data_source_ids=data_source_ids, table_ids=table_ids)
+            summary = export_table_schema(conn, output_dir, data_source_ids=data_source_ids, table_ids=table_ids)
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2
-    result = {"ok": True, **summary, "outputDir": args.output_dir}
+    result = {"ok": True, **summary, "outputDir": str(output_dir)}
     gusen_hub.append_pull_log(
         "database",
         "manual",
@@ -248,7 +258,7 @@ def main(argv=None):
             "dataSourceIds": data_source_ids,
             "tableIds": table_ids,
             "exported_table_count": summary.get("exported_table_count", 0),
-            "outputDir": args.output_dir,
+            "outputDir": str(output_dir),
         },
         payload={"datasource": datasource_name, "dataSourceIds": data_source_ids, "tableIds": table_ids},
         result=result,

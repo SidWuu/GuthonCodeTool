@@ -248,13 +248,14 @@ class WorkCopyTest(unittest.TestCase):
             gusen_hub.ROOT, gusen_hub.VAR_DIR = root, root / "var"
             self.addCleanup(setattr, gusen_hub, "ROOT", old_root)
             self.addCleanup(setattr, gusen_hub, "VAR_DIR", old_var)
-            product_path = root / "var/source/readonly/products/系统/procedure/demo.proc/save"
+            product_path = root / "var/source/readonly/products/产品A/系统/procedure/demo.proc/save"
             project_path = root / "var/source/readonly/project/项目A/系统/procedure/demo.proc/save"
             product_path.mkdir(parents=True)
             project_path.mkdir(parents=True)
             (product_path / "source.vm").write_text("new product\n", encoding="utf-8")
             (project_path / "source.vm").write_text("project snapshot\n", encoding="utf-8")
             conn = gusen_hub.connect_index(root / "hub.db")
+            self.addCleanup(conn.close)
             insert = """
                 INSERT INTO gusen_source_record(
                     source_layer, product_id, project_id, source_table, source_id, source_alias_id,
@@ -270,6 +271,43 @@ class WorkCopyTest(unittest.TestCase):
             self.assertEqual(row["source_id"], "PROJECT-ID")
             self.assertEqual(owner, Path("项目A"))
             self.assertEqual((root / row["local_path"] / "source.vm").read_text(encoding="utf-8"), "project snapshot\n")
+
+    def test_product_name_directory_repairs_generated_index_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            old_root, old_var = gusen_hub.ROOT, gusen_hub.VAR_DIR
+            gusen_hub.ROOT, gusen_hub.VAR_DIR = root, root / "var"
+            self.addCleanup(setattr, gusen_hub, "ROOT", old_root)
+            self.addCleanup(setattr, gusen_hub, "VAR_DIR", old_var)
+            (root / "var/source/readonly/products/产品A").mkdir(parents=True)
+            conn = gusen_hub.connect_index(root / "hub.db")
+            self.addCleanup(conn.close)
+            old_path = "var/source/readonly/products/product-a/系统/procedure/demo.proc/save/source.vm"
+            conn.execute(
+                """INSERT INTO gusen_source_record(
+                    source_layer, product_id, project_id, source_table, source_id, source_alias_id,
+                    fun_id, source_name, change_key, local_path, status, indexed_time
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ("PRODUCT", "product-a", "", "procedure", "P1", "demo.proc", "save", "保存", "v1", old_path, "OK", "now"),
+            )
+            for table in ("gusen_invoke_call", "gusen_dynamic_call"):
+                conn.execute(
+                    f"INSERT INTO {table}(source_layer, product_id, project_id, source_table, source_id, source_alias_id, fun_id, json_path) VALUES(?,?,?,?,?,?,?,?)",
+                    ("PRODUCT", "product-a", "", "procedure", "P1", "demo.proc", "save", old_path),
+                )
+
+            changed = gusen_hub.reconcile_readonly_index_paths(
+                conn, "PRODUCT", "product-a", "", {"name": "产品A"}
+            )
+
+            self.assertEqual(3, changed)
+            for table, column in (
+                ("gusen_source_record", "local_path"),
+                ("gusen_invoke_call", "json_path"),
+                ("gusen_dynamic_call", "json_path"),
+            ):
+                path = conn.execute(f"SELECT {column} path FROM {table}").fetchone()["path"]
+                self.assertTrue(path.startswith("var/source/readonly/products/产品A/"))
 
 
 if __name__ == "__main__":
