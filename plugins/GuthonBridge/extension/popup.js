@@ -231,14 +231,51 @@ async function runInMainWorld(tabId, command, payload) {
         if (selected?.id) {
           return selected.id.replace(/^tab-/, "");
         }
-        const params = new URLSearchParams(location.search);
-        return (
-          params.get("pageId") ||
-          params.get("sourceId") ||
-          params.get("id") ||
-          params.get("page_id") ||
-          ""
-        );
+        const normalizePageCode = (value) => {
+          if (typeof value !== "string" && typeof value !== "number") {
+            return "";
+          }
+          return String(value).trim();
+        };
+        for (const editorVm of getEditorInstances()) {
+          let vm = editorVm;
+          let depth = 0;
+          while (vm && depth < 16) {
+            const directCode = normalizePageCode(vm.pageId || vm.pageCode);
+            if (directCode) {
+              return directCode;
+            }
+            for (const model of [
+              vm.page,
+              vm.localPage,
+              vm.pageInfo,
+              vm.currentPage,
+              vm.selectedPage,
+              vm.modulePage,
+              vm.module,
+              vm.form
+            ]) {
+              const modelCode = normalizePageCode(model?.pageId || model?.pageCode);
+              if (modelCode) {
+                return modelCode;
+              }
+            }
+            vm = vm.$parent;
+            depth += 1;
+          }
+        }
+        const searchParams = new URLSearchParams(location.search);
+        const hashQuery = location.hash.includes("?")
+          ? location.hash.slice(location.hash.indexOf("?") + 1)
+          : "";
+        const hashParams = new URLSearchParams(hashQuery);
+        for (const key of ["pageId", "sourceId", "id", "page_id"]) {
+          const value = normalizePageCode(searchParams.get(key) || hashParams.get(key));
+          if (value) {
+            return value;
+          }
+        }
+        return "";
       }
 
       function getPageFunctionTitle() {
