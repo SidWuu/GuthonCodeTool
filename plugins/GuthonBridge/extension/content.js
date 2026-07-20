@@ -72,7 +72,7 @@ async function ensurePageBridge() {
   async function injectPageScript(name) {
     await new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `${runtime.getURL(name)}?v=20260717i`;
+      script.src = `${runtime.getURL(name)}?v=20260720a`;
       script.dataset.source = "guthon-bridge";
       script.onload = () => { script.remove(); resolve(); };
       script.onerror = () => { script.remove(); reject(new Error("页面桥接脚本加载失败")); };
@@ -1131,7 +1131,21 @@ function getCurrentPageCode() {
     return pane.id.replace(/^pane-/, "");
   }
   const selected = document.querySelector('.el-tabs__item[aria-selected="true"][id^="tab-PG-"]');
-  return selected?.id?.replace(/^tab-/, "") || "";
+  if (selected?.id) {
+    return selected.id.replace(/^tab-/, "");
+  }
+  const searchParams = new URLSearchParams(location.search);
+  const hashQuery = location.hash.includes("?")
+    ? location.hash.slice(location.hash.indexOf("?") + 1)
+    : "";
+  const hashParams = new URLSearchParams(hashQuery);
+  for (const key of ["pageId", "sourceId", "id", "page_id"]) {
+    const value = searchParams.get(key) || hashParams.get(key);
+    if (value) {
+      return String(value).trim();
+    }
+  }
+  return "";
 }
 
 function readElementName(element) {

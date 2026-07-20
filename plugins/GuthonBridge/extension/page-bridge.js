@@ -92,6 +92,75 @@
     return element.__vue__ || element.__vueParentComponent?.proxy || null;
   }
 
+  function normalizePageCode(value) {
+    if (typeof value !== "string" && typeof value !== "number") {
+      return "";
+    }
+    return String(value).trim();
+  }
+
+  function readPageCodeFromVm(vm) {
+    const directCode = normalizePageCode(vm?.pageId || vm?.pageCode);
+    if (directCode) {
+      return directCode;
+    }
+    for (const model of [
+      vm?.page,
+      vm?.localPage,
+      vm?.pageInfo,
+      vm?.currentPage,
+      vm?.selectedPage,
+      vm?.modulePage,
+      vm?.module,
+      vm?.form
+    ]) {
+      const modelCode = normalizePageCode(model?.pageId || model?.pageCode);
+      if (modelCode) {
+        return modelCode;
+      }
+    }
+    return "";
+  }
+
+  function getPageCodeFromVue() {
+    const activePane = Array.from(document.querySelectorAll('[role="tabpanel"]')).find(isVisible);
+    const scopeRoot = activePane || document.querySelector(".work-context");
+    if (!scopeRoot) {
+      return "";
+    }
+    const elements = [scopeRoot, ...scopeRoot.querySelectorAll("*")];
+    const seen = new Set();
+    for (const element of elements) {
+      let vm = getVueInstance(element);
+      let depth = 0;
+      while (vm && depth < 16 && !seen.has(vm)) {
+        seen.add(vm);
+        const pageCode = readPageCodeFromVm(vm);
+        if (pageCode) {
+          return pageCode;
+        }
+        vm = vm.$parent;
+        depth += 1;
+      }
+    }
+    return "";
+  }
+
+  function getPageCodeFromUrl() {
+    const searchParams = new URLSearchParams(location.search);
+    const hashQuery = location.hash.includes("?")
+      ? location.hash.slice(location.hash.indexOf("?") + 1)
+      : "";
+    const hashParams = new URLSearchParams(hashQuery);
+    for (const key of ["pageId", "sourceId", "id", "page_id"]) {
+      const value = normalizePageCode(searchParams.get(key) || hashParams.get(key));
+      if (value) {
+        return value;
+      }
+    }
+    return "";
+  }
+
   function resolveProcedureTarget(source, offset) {
     if (typeof source !== "string" || !Number.isInteger(offset)) {
       return null;
@@ -1045,7 +1114,10 @@
       return pane.id.replace(/^pane-/, "");
     }
     const selected = document.querySelector('.el-tabs__item[aria-selected="true"][id^="tab-PG-"]');
-    return selected?.id?.replace(/^tab-/, "") || "";
+    if (selected?.id) {
+      return selected.id.replace(/^tab-/, "");
+    }
+    return getPageCodeFromVue() || getPageCodeFromUrl();
   }
 
   function formatFieldLine(field) {

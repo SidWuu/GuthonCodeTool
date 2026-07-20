@@ -604,6 +604,12 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("function collectControlGroups"), true);
   assert.equal(pageBridge.includes('root.matches?.(selector) ? [root] : []'), true);
   assert.equal(pageBridge.includes('[role="tabpanel"][id^="pane-PG-"]'), true);
+  assert.equal(pageBridge.includes("function getPageCodeFromVue"), true);
+  assert.equal(pageBridge.includes("function readPageCodeFromVm"), true);
+  assert.equal(pageBridge.includes("vm?.pageId || vm?.pageCode"), true);
+  assert.equal(pageBridge.includes("getPageCodeFromVue() || getPageCodeFromUrl()"), true);
+  assert.equal(pageBridge.includes('location.hash.includes("?")'), true);
+  assert.equal(contentScript.includes('?v=20260720a'), true);
   assert.equal(pageBridge.includes("/(Form|Table)$/"), true);
   assert.equal(pageBridge.includes("getControlTitle"), true);
   assert.equal(pageBridge.includes('return controlName ? `${prefix}.${controlName}` : prefix;'), true);
