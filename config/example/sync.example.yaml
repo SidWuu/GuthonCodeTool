@@ -1,29 +1,50 @@
 # 同步对象、子系统别名、周期和本地目录模板。
+# 源码同步和本地存储配置。
 sync:
+  # 当前开发对象；格式为 products.<产品ID> 或 projects.<项目ID>。
   ACTIVE: products.demo-product
+  # 轮询间隔秒数，供外部定时同步任务使用。
   interval_seconds: 600
+  # 增量查询回看分钟数，用于覆盖时间边界和时钟偏差。
   lookback_minutes: 10
+  # 保留项；当前实现固定使用 var/source/readonly。
   readonly_source_dir: var/source/readonly
+  # 保留项；当前实现固定使用 var/source/workcopy。
   work_copy_dir: var/source/workcopy
+  # 保留项；当前实现固定使用 var/knowledge。
   generated_doc_dir: var/knowledge
-  # 每个 ACTIVE 自动使用 index_dir/{products|projects}/<id>.db。
+  # SQLite 索引根目录；每个 ACTIVE 自动使用 {products|projects}/<id>.db。
   index_dir: var/runtime/index
 
+# 子系统同步范围配置。
 systems:
+  # 要包含的子系统条件。
   include:
-    # 只维护别名；系统和数据源信息从各自数据库查询并自动缓存。
+    # 子系统别名列表；系统和数据源信息从各自数据库查询并自动缓存。
     system_aliases:
+      # 示例子系统别名，可按需增加多个列表项。
       - demo.system
 
+# 源码可用性和变更判断规则。
 rules:
+  # 保留项；当前实现固定要求已签入或属于下方签出人白名单。
   require_check_in_date: true
+  # 允许同步其未签入源码的签出人 ID 列表。
   allow_unchecked_check_out_user_ids:
+    # 示例签出人 ID，可按需增加多个列表项。
     - U00000XXXX
+  # 保留项；当前实现有 VERSION_MAC 时固定优先用作变更键。
   prefer_version_mac: true
+  # 保留项；当前实现固定跳过错误标记为 1 的源码。
   skip_error_source: true
 
+# 谷神 API 文档与 VSCode 补全数据同步配置。
 guthon_api:
+  # 当前启用的谷神版本，同时决定根目录文档和插件补全数据。
   active_version: "2.0"
+  # 各谷神版本对应的本地 app.<hash>.js 文件。
   bundle_files:
+    # 谷神 1.5 bundle 路径；文件放在不提交的 docs/private 下。
     v1_5: "docs/private/guthon-api/1.5/app.<hash>.js"
+    # 谷神 2.0 bundle 路径；文件放在不提交的 docs/private 下。
     v2_0: "docs/private/guthon-api/2.0/app.<hash>.js"

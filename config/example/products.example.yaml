@@ -1,11 +1,21 @@
 # 产品源码同步范围模板。
+# 产品配置集合；键名是 sync.ACTIVE 使用的产品 ID。
 products:
+  # 示例产品 ID，需在同一配置中保持唯一。
   demo-product:
+    # 产品名称，用作 readonly、workcopy 和数据库快照的目录名。
     name: 示例产品
+    # 引用 datasource.yaml 中的数据源标识。
     datasource: product-dev
+    # 保留项；当前实现根据 products 分组固定判定为 PRODUCT。
     source_layer: PRODUCT
+    # 源码包含规则。
     include:
+      # true 表示包含当前产品范围内的全部支持类型源码。
       all: true
+    # 保留的源码排除规则；当前同步脚本不读取。
     exclude:
+      # 预留的 PAGE 别名前缀排除列表。
       page_alias_prefix: []
+      # 预留的过程别名前缀排除列表。
       procedure_alias_prefix: []

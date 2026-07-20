@@ -1,15 +1,29 @@
 # 项目源码同步范围模板。
+# 项目配置集合；键名是 sync.ACTIVE 使用的项目 ID。
 projects:
+  # 示例项目 ID，需在同一配置中保持唯一。
   demo-project:
+    # 项目名称，用作 readonly、workcopy 和数据库快照的目录名。
     name: 示例项目
+    # 引用 datasource.yaml 中的数据源标识。
     datasource: project-dev
+    # 项目继承的产品 ID，对应 products.yaml 中的键名。
     product_id: demo-product
+    # 保留项；当前实现根据 projects 分组固定判定为 PROJECT。
     source_layer: PROJECT
+    # 源码包含规则。
     include:
+      # true 表示包含当前项目范围内的全部支持类型源码。
       all: true
+    # 保留的源码排除规则；当前同步脚本不读取。
     exclude:
+      # 预留的 PAGE 别名前缀排除列表。
       page_alias_prefix: []
+      # 预留的过程别名前缀排除列表。
       procedure_alias_prefix: []
+    # 预留的附加查询条件；当前同步脚本不读取。
     extra_where:
+      # 预留的 PAGE 附加条件。
       page: ""
+      # 预留的过程函数附加条件。
       procedure: ""

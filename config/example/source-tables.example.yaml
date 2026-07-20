@@ -1,49 +1,96 @@
 # PAGE 和过程函数源码表字段映射模板，product_content_field 用于项目继承标记。
+# 源码类型与数据库表字段的映射集合。
 source_tables:
+  # PAGE 源码映射。
   page:
+    # 保留项；当前实现只要 page 段存在就会同步 PAGE。
     enabled: true
+    # 保存 PAGE JSON 的源码表名。
     source_table_name: PAGE_SOURCE_TABLE
+    # PAGE 主键字段。
     id_field: PAGE_KEY_FIELD
+    # PAGE 别名字段。
     alias_field: PAGE_ALIAS_FIELD
+    # PAGE 名称字段。
     name_field: PAGE_NAME_FIELD
+    # PAGE JSON 内容字段。
     content_field: PAGE_CONTENT_FIELD
+    # PAGE 更新时间字段，用于增量查询。
     update_time_field: PAGE_UPDATE_TIME_FIELD
+    # PAGE 签入时间字段。
     check_in_date_field: CHECK_IN_TIME_FIELD
+    # PAGE 当前签出人字段。
     check_out_user_id_field: CHECK_OUT_USER_ID_FIELD
+    # PAGE 签出时间字段。
     check_out_date_field: CHECK_OUT_DATE_FIELD
+    # PAGE 版本标识字段，优先作为本地变更键。
     version_mac_field: VERSION_FIELD
+    # PAGE 源码错误标记字段。
     error_field: ERROR_FLAG_FIELD
+    # PAGE 源码错误信息字段。
     error_message_field: ERROR_MESSAGE_FIELD
+    # PAGE 所属子系统字段。
     system_id_field: SYSTEM_ID_FIELD
+    # 模块信息表名。
     module_table_name: MODULE_SOURCE_TABLE
+    # PAGE 表与模块表的关联字段。
     module_join_field: MODULE_ID_FIELD
+    # 模块名称字段。
     module_name_field: MODULE_NAME_FIELD
+    # 模块排序字段，用于生成三位目录序号。
     module_order_field: MODULE_ORDER_FIELD
+    # 模块所属模型字段。
     module_model_field: MODULE_MODEL_ID_FIELD
+    # 模型信息表名。
     model_table_name: MODEL_SOURCE_TABLE
+    # 模型主键字段。
     model_id_field: MODEL_ID_FIELD
+    # 模型名称字段。
     model_name_field: MODEL_NAME_FIELD
+    # 模型排序字段，用于生成三位目录序号。
     model_order_field: MODEL_ORDER_FIELD
+    # 父模型字段，用于还原完整模型目录链。
     model_parent_field: MODEL_PARENT_ID_FIELD
 
+  # 过程函数源码映射。
   procedure:
+    # 保留项；当前实现只要 procedure 段存在就会同步过程函数。
     enabled: true
+    # 过程定义主表名，提供别名和数据源归属。
     procedure_table_name: PROCEDURE_TABLE
+    # 过程函数脚本表名。
     source_table_name: PROCEDURE_SCRIPT_TABLE
+    # 过程主表与脚本表的关联字段。
     join_field: PROCEDURE_KEY_FIELD
+    # 过程函数脚本记录主键字段。
     id_field: PROCEDURE_KEY_FIELD
+    # 过程别名字段。
     alias_field: PROCEDURE_ALIAS_FIELD
+    # 函数 ID 字段。
     fun_id_field: FUNCTION_ID_FIELD
+    # 函数名称字段。
     name_field: FUNCTION_NAME_FIELD
+    # 函数参数定义字段。
     params_field: FUNCTION_PARAMS_FIELD
+    # 当前层的函数脚本字段。
     content_field: FUNCTION_SCRIPT_FIELD
+    # 项目继承标记对应的产品快照脚本字段。
     product_content_field: PRODUCT_FUNCTION_SCRIPT_FIELD
+    # 函数更新时间字段，用于增量查询。
     update_time_field: FUNCTION_UPDATE_TIME_FIELD
+    # 函数签入时间字段。
     check_in_date_field: CHECK_IN_TIME_FIELD
+    # 函数当前签出人字段。
     check_out_user_id_field: CHECK_OUT_USER_ID_FIELD
+    # 函数签出时间字段。
     check_out_date_field: CHECK_OUT_DATE_FIELD
+    # 函数版本标识字段，优先作为本地变更键。
     version_mac_field: VERSION_FIELD
+    # 函数源码错误标记字段。
     error_field: ERROR_FLAG_FIELD
+    # 函数源码错误信息字段。
     error_message_field: ERROR_MESSAGE_FIELD
+    # 过程名称字段。
     procedure_name_field: PROCEDURE_NAME_FIELD
+    # 过程所属数据源字段，用于子系统范围过滤。
     data_source_id_field: DATA_SOURCE_KEY_FIELD

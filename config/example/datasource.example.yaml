@@ -1,19 +1,36 @@
 # 数据库连接模板；真实凭据通过环境变量提供。
+# 数据源集合；键名供 products.yaml 和 projects.yaml 的 datasource 引用。
 datasource:
+  # 产品开发库的数据源标识，可按本地环境改名。
   product-dev:
+    # 数据源显示名称，仅用于识别连接。
     name: 示例产品开发库
+    # 数据库类型；当前工具仅实现 mysql。
     type: mysql
+    # 数据库主机地址，从环境变量读取。
     host: ${GUSEN_PRODUCT_DB_HOST}
+    # 数据库端口，从环境变量读取。
     port: ${GUSEN_PRODUCT_DB_PORT}
+    # 数据库名称，从环境变量读取。
     database: ${GUSEN_PRODUCT_DB_NAME}
+    # 只读用户名，从环境变量读取。
     username: ${GUSEN_PRODUCT_DB_READONLY_USER}
+    # 只读密码，从环境变量读取。
     password: ${GUSEN_PRODUCT_DB_READONLY_PASSWORD}
 
+  # 项目开发库的数据源标识，可按本地环境改名。
   project-dev:
+    # 数据源显示名称，仅用于识别连接。
     name: 示例项目开发库
+    # 数据库类型；当前工具仅实现 mysql。
     type: mysql
+    # 数据库主机地址，从环境变量读取。
     host: ${GUSEN_PROJECT_DB_HOST}
+    # 数据库端口，从环境变量读取。
     port: ${GUSEN_PROJECT_DB_PORT}
+    # 数据库名称，从环境变量读取。
     database: ${GUSEN_PROJECT_DB_NAME}
+    # 只读用户名，从环境变量读取。
     username: ${GUSEN_PROJECT_DB_READONLY_USER}
+    # 只读密码，从环境变量读取。
     password: ${GUSEN_PROJECT_DB_READONLY_PASSWORD}
