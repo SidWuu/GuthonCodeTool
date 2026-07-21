@@ -265,7 +265,6 @@ raw.json
 scripts/*.js
 scripts/*.sql
 scripts/*.vm
-README.md
 ```
 
 过程函数目录常见文件：
@@ -273,7 +272,6 @@ README.md
 ```text
 meta.json
 source.vm
-README.md
 ```
 
 表结构 JSON 保留常用字段：

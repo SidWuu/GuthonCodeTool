@@ -43,6 +43,26 @@ class WorkCopyTest(unittest.TestCase):
         (source / "raw.json").write_text('{"page":{"name":"old"}}\n', encoding="utf-8")
         return temp, source, target
 
+    def test_export_keeps_meta_without_readme(self):
+        with tempfile.TemporaryDirectory() as temp:
+            old_var_dir = gusen_hub.VAR_DIR
+            gusen_hub.VAR_DIR = Path(temp)
+            try:
+                path, _status, _scripts = gusen_hub.write_source(
+                    {**ROW, "source_content": "#set($a = 1)", "data_source_id": "DS-DEMO"},
+                    "PRODUCT",
+                    "demo",
+                    "",
+                    {"name": "示例产品"},
+                    {"system_name_by_data_source_id": {"DS-DEMO": "示例系统"}},
+                    "VERSION:1",
+                )
+            finally:
+                gusen_hub.VAR_DIR = old_var_dir
+
+            self.assertTrue((path / "meta.json").exists())
+            self.assertFalse((path / "README.md").exists())
+
     def test_local_and_upstream_changes_refuse_overwrite(self):
         temp, source, target = self.make_paths()
         self.addCleanup(temp.cleanup)

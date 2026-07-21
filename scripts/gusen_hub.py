@@ -980,7 +980,6 @@ def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, ch
         script_path = base / "source.vm"
         script_path.write_text(content, encoding="utf-8")
         scripts = [("procedure_script", script_path, content)]
-    (base / "README.md").write_text(f"# {_source_alias_id(row)}\n\n- status: {status}\n", encoding="utf-8")
     return base, status, scripts
 
 

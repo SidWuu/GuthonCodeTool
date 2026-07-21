@@ -46,7 +46,6 @@ source/workcopy/projects/{项目名}/{子系统}/page|procedure/...
 meta.json      源码表元数据、change_key、status
 raw.json       页面原始 JSON
 scripts/       从 raw.json 拆出的脚本、SQL、VM 片段
-README.md      单个源码对象的简要说明
 ```
 
 过程函数目录常见文件：
@@ -54,7 +53,6 @@ README.md      单个源码对象的简要说明
 ```text
 meta.json      源码表元数据、change_key、status
 source.vm      过程函数源码
-README.md      单个源码对象的简要说明
 ```
 
 工作副本常见辅助文件：
