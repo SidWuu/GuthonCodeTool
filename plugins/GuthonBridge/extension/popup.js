@@ -211,10 +211,14 @@ async function runInMainWorld(tabId, command, payload) {
           (selectedTab.id &&
             document.querySelector(`[role="tabpanel"][aria-labelledby="${selectedTab.id}"]`)) ||
           null;
+        const tabId = String(selectedTab.id || "").replace(/^tab-/, "");
+        const separator = tabId.lastIndexOf("@");
         return {
           element: selectedTab,
           label,
-          panel
+          panel,
+          procedureId: separator > 0 ? tabId.slice(0, separator) : "",
+          funId: separator > 0 ? tabId.slice(separator + 1) : label
         };
       }
 
@@ -317,7 +321,7 @@ async function runInMainWorld(tabId, command, payload) {
 
       function inspectCurrentProcedureContext() {
         const selectedTab = getSelectedTabInfo();
-        const selectedFunId = String(selectedTab?.label || "").trim();
+        const selectedFunId = String(selectedTab?.funId || selectedTab?.label || "").trim();
         const pageTitle = getPageFunctionTitle();
         const titleInfo = parseFullFunctionName(pageTitle);
         const candidates = [];
@@ -351,7 +355,7 @@ async function runInMainWorld(tabId, command, payload) {
           }
           candidates.push({
             vm,
-            procedureId: fun?.procedureId,
+            procedureId: fun?.procedureId || (candidateFunId === selectedFunId ? selectedTab?.procedureId : ""),
             procedureName: procedureKeyword,
             procedureKeyword,
             fullName: parsed.fullName,
@@ -369,7 +373,7 @@ async function runInMainWorld(tabId, command, payload) {
 
         if (selectedFunId && titleInfo && selectedFunId === titleInfo.funId) {
           return {
-            procedureId: "",
+            procedureId: selectedTab?.procedureId || "",
             procedureName: titleInfo.procedureKeyword,
             procedureKeyword: titleInfo.procedureKeyword,
             fullName: `${titleInfo.procedureKeyword}.${selectedFunId}`,
@@ -381,13 +385,27 @@ async function runInMainWorld(tabId, command, payload) {
           };
         }
 
+        if (selectedTab?.procedureId && selectedFunId) {
+          return {
+            procedureId: selectedTab.procedureId,
+            procedureName: "",
+            procedureKeyword: "",
+            fullName: "",
+            funId: selectedFunId,
+            script: "",
+            flag: 0,
+            versionMac: "",
+            resolvedBy: "selected-tab-id"
+          };
+        }
+
         if (titleInfo) {
           return {
             procedureId: "",
             procedureName: titleInfo.procedureKeyword,
             procedureKeyword: titleInfo.procedureKeyword,
             fullName: titleInfo.fullName,
-            funId: selectedFunId || titleInfo.funId,
+            funId: titleInfo.funId,
             script: "",
             flag: 0,
             versionMac: "",
@@ -1188,7 +1206,7 @@ async function resolveHubSourceTarget() {
     if (!target.pageId && !target.procedureKeyword) {
       throw new Error("当前模块开发页面没有识别到页面编码");
     }
-  } else if (!target.procedureKeyword || !target.funId) {
+  } else if ((!target.procedureId && !target.procedureKeyword) || !target.funId) {
     throw new Error("当前过程函数信息不完整");
   }
   setResolvedTarget(target);
@@ -1306,7 +1324,7 @@ async function runHubPull(force = false) {
   if (payload.sourceType === "page" && !payload.sourceId && !payload.alias) {
     throw new Error("当前页面没有识别到页面源码表查询条件");
   }
-  if (payload.sourceType === "procedure" && (!payload.alias || !payload.funId)) {
+  if (payload.sourceType === "procedure" && ((!payload.sourceId && !payload.alias) || !payload.funId)) {
     throw new Error("当前页面没有识别到过程函数源码表查询条件");
   }
   return chrome.runtime.sendMessage({ type: "pull-hub-source", payload });

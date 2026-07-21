@@ -749,13 +749,17 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   assert.equal(isModifier({ ctrlKey: true }), true);
   let treeNode = null;
   let located = null;
+  const openedNodes = [];
   const developVm = {
     dataSourceId: "",
     openTabs: [],
     getScriptTreeNode: () => treeNode,
     parseProcFunInfo: (_procedure, fun) => ({ id: `PR-1@${fun.funId}`, data: fun }),
     handleNodeClick(node) {
-      this.openTabs.push(node);
+      openedNodes.push(node);
+      if (!this.openTabs.some((tab) => tab.id === node.id)) {
+        this.openTabs.push(node);
+      }
     },
     loadProcTree(callback) {
       treeNode = { id: "PR-1@saveForecast", data: { procedureId: "PR-1", funId: "saveForecast" } };
@@ -774,6 +778,8 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
     fun: { funId: "saveForecast" }
   });
   assert.equal(developVm.openTabs[0].id, "PR-1@saveForecast");
+  assert.equal(openedNodes.length, 2);
+  assert.equal(openedNodes[1], treeNode);
   assert.equal(located.id, "PR-1@saveForecast");
   assert.equal(located.dataSourceId, "0015");
   const liveDevelopVm = { $options: { name: "gdpaas_dev_procedure_develop" }, onOpenPage() {} };
@@ -928,8 +934,12 @@ test("page bridge does not mix stale fullName package with current function id",
 
   assert.equal(pageBridge.includes("parsed.funId === funId"), true);
   assert.equal(pageBridge.includes("selectedFunId === titleInfo.funId"), true);
+  assert.equal(pageBridge.includes('resolvedBy: "selected-tab-id"'), true);
+  assert.equal(pageBridge.includes("selectedTab?.panel"), true);
   assert.equal(popupScript.includes("parsed.funId === (candidateFunId || selectedFunId)"), true);
   assert.equal(popupScript.includes("selectedFunId === titleInfo.funId"), true);
+  assert.equal(popupScript.includes('resolvedBy: "selected-tab-id"'), true);
+  assert.equal(popupScript.includes("(!payload.sourceId && !payload.alias)"), true);
 });
 
 test("floating pull shows a visible diagnostic message", () => {

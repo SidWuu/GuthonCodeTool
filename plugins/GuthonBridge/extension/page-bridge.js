@@ -263,6 +263,9 @@
       throw new Error(`过程树中未找到函数: ${target.procedureName}.${target.funId}`);
     }
     treeNode.dataSourceId = target.dataSourceId;
+    if (treeNode !== openNode) {
+      developVm.handleNodeClick(treeNode);
+    }
     developVm.toLocation?.(treeNode);
     setTimeout(() => {
       developVm.$refs?.tree?.$el?.querySelector(".el-tree-node.is-current")?.scrollIntoView?.({ block: "center", inline: "nearest" });
@@ -1300,20 +1303,34 @@
     if (!selectedTab) {
       return null;
     }
+    const label = String(selectedTab.innerText || selectedTab.textContent || "").trim();
+    const controlsId = selectedTab.getAttribute("aria-controls") || selectedTab.getAttribute("aria-owns") || "";
+    const panel =
+      (controlsId && document.getElementById(controlsId)) ||
+      (selectedTab.id && document.querySelector(`[role="tabpanel"][aria-labelledby="${selectedTab.id}"]`)) ||
+      null;
+    const tabId = String(selectedTab.id || "").replace(/^tab-/, "");
+    const separator = tabId.lastIndexOf("@");
     return {
-      label: String(selectedTab.innerText || selectedTab.textContent || "").trim()
+      label,
+      panel,
+      procedureId: separator > 0 ? tabId.slice(0, separator) : "",
+      funId: separator > 0 ? tabId.slice(separator + 1) : label
     };
   }
 
   function getPageFunctionTitle() {
+    const selectedTab = getSelectedTabInfo();
     const candidates = [
+      selectedTab?.panel,
       ".gd-function-head",
       ".procedure-script-editor",
       ".el-tabs__content",
       "body"
     ];
-    for (const selector of candidates) {
-      const text = document.querySelector(selector)?.innerText || "";
+    for (const candidate of candidates) {
+      const node = typeof candidate === "string" ? document.querySelector(candidate) : candidate;
+      const text = node?.innerText || "";
       const match = text.match(/function\s+([A-Za-z0-9_$.]+)\s*\(/);
       if (match) {
         return match[1];
@@ -1339,7 +1356,8 @@
   }
 
   function inspectCurrentProcedure() {
-    const selectedFunId = String(getSelectedTabInfo()?.label || "").trim();
+    const selectedTab = getSelectedTabInfo();
+    const selectedFunId = String(selectedTab?.funId || selectedTab?.label || "").trim();
     const titleInfo = parseFullFunctionName(getPageFunctionTitle());
 
     for (const vm of getAllVueInstances()) {
@@ -1372,7 +1390,7 @@
       }
 
       return {
-        procedureId: fun?.procedureId,
+        procedureId: fun?.procedureId || (funId === selectedFunId ? selectedTab?.procedureId : ""),
         procedureName: procedureKeyword,
         procedureKeyword,
         fullName: parsed.fullName,
@@ -1386,7 +1404,7 @@
 
     if (selectedFunId && titleInfo && selectedFunId === titleInfo.funId) {
       return {
-        procedureId: "",
+        procedureId: selectedTab?.procedureId || "",
         procedureName: titleInfo.procedureKeyword,
         procedureKeyword: titleInfo.procedureKeyword,
         fullName: `${titleInfo.procedureKeyword}.${selectedFunId}`,
@@ -1398,13 +1416,27 @@
       };
     }
 
+    if (selectedTab?.procedureId && selectedFunId) {
+      return {
+        procedureId: selectedTab.procedureId,
+        procedureName: "",
+        procedureKeyword: "",
+        fullName: "",
+        funId: selectedFunId,
+        script: "",
+        flag: 0,
+        versionMac: "",
+        resolvedBy: "selected-tab-id"
+      };
+    }
+
     if (titleInfo) {
       return {
         procedureId: "",
         procedureName: titleInfo.procedureKeyword,
         procedureKeyword: titleInfo.procedureKeyword,
         fullName: titleInfo.fullName,
-        funId: selectedFunId || titleInfo.funId,
+        funId: titleInfo.funId,
         script: "",
         flag: 0,
         versionMac: "",
