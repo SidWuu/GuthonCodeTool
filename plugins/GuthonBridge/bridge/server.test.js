@@ -609,7 +609,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("vm?.pageId || vm?.pageCode"), true);
   assert.equal(pageBridge.includes("getPageCodeFromVue() || getPageCodeFromUrl()"), true);
   assert.equal(pageBridge.includes('location.hash.includes("?")'), true);
-  assert.equal(contentScript.includes('?v=20260720a'), true);
+  assert.equal(contentScript.includes('?v=20260721b'), true);
   assert.equal(pageBridge.includes("/(Form|Table)$/"), true);
   assert.equal(pageBridge.includes("getControlTitle"), true);
   assert.equal(pageBridge.includes('return controlName ? `${prefix}.${controlName}` : prefix;'), true);
@@ -884,6 +884,7 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
     __vue__: buttonSetup
   };
   window.GuthonProcedureNavigation.minimizeScriptEditor({
+    offsetWidth: 1,
     __vue__: { editor: { getValue: () => "button-unsaved" } },
     closest: () => buttonWrapper
   });
@@ -892,7 +893,16 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   assert.equal(buttonEditorOpened, true);
   assert.equal(buttonRestoredText, "button-unsaved");
   assert.equal(buttonClasses.size, 0);
+  buttonEditorOpened = false;
   window.GuthonProcedureNavigation.minimizeScriptEditor({
+    __vue__: { editor: { getValue: () => "button-hidden" } },
+    closest: () => buttonWrapper
+  });
+  await restore({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(buttonEditorOpened, true);
+  assert.equal(buttonClasses.size, 0);
+  window.GuthonProcedureNavigation.minimizeScriptEditor({
+    offsetWidth: 1,
     __vue__: { editor: { getValue: () => "button-unsaved" } },
     closest: () => buttonWrapper
   });
@@ -900,6 +910,11 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   assert.equal(buttonEditorClosed, true);
   assert.equal(buttonClasses.size, 0);
   assert.equal(pageBridge.includes('document.addEventListener("contextmenu", onContextMenu, true)'), true);
+  assert.equal(pageBridge.includes("installScriptEditorMinimizeButtons();"), true);
+  assert.equal(pageBridge.includes('button.className = "el-dialog__headerbtn guthon-script-editor-minimize"'), true);
+  assert.equal(pageBridge.includes('icon.className = "el-dialog__close el-icon el-icon-minus"'), true);
+  assert.equal(pageBridge.includes("const editor = editors.find(isVisible) || editors[0]"), true);
+  assert.equal(pageBridge.includes("buttonSetup && !minimizedScriptEditor.editorWasVisible"), true);
   assert.equal(pageBridge.includes("editor.onMouseMove?.("), true);
   assert.equal(pageBridge.includes("color:#409eff!important;cursor:pointer!important"), true);
   assert.equal(pageBridge.includes("developVm.handleNodeClick(openNode)"), true);

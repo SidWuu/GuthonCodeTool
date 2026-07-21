@@ -372,7 +372,7 @@
     );
     const bar = document.createElement("div");
     bar.className = "guthon-minimized-script-bar";
-    bar.textContent = "双击返回模块开发编辑器";
+    bar.textContent = "双击还原模块开发编辑器";
     const closeButton = document.createElement("button");
     closeButton.type = "button";
     closeButton.className = "guthon-minimized-script-close";
@@ -444,6 +444,10 @@
       } else {
         opener.showScriptEditPage();
       }
+      if (buttonSetup && !minimizedScriptEditor.editorWasVisible) {
+        finish();
+        return;
+      }
       let restoredEditor;
       while (!restoredEditor && Date.now() < deadline) {
         const restoredElements = buttonSetup
@@ -499,7 +503,45 @@
     mask?.classList.add("guthon-minimized-script-mask");
     bar.addEventListener("dblclick", restore);
     document.body.appendChild(bar);
-    minimizedScriptEditor = { wrapper, mask, bar, restore, scriptKey, text: editor.getValue() };
+    minimizedScriptEditor = {
+      wrapper,
+      mask,
+      bar,
+      restore,
+      scriptKey,
+      text: editor.getValue(),
+      editorWasVisible: Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects?.().length)
+    };
+  }
+
+  function installScriptEditorMinimizeButtons() {
+    Array.from(document.querySelectorAll(".el-dialog__wrapper.gd-script-dialog")).forEach((wrapper) => {
+      const header = wrapper.querySelector(":scope > .el-dialog > .el-dialog__header");
+      if (!header) {
+        return;
+      }
+      let button = header.querySelector(".guthon-script-editor-minimize");
+      if (!button) {
+        button = document.createElement("button");
+        button.type = "button";
+        button.className = "el-dialog__headerbtn guthon-script-editor-minimize";
+        button.title = "缩小编辑器";
+        button.setAttribute("aria-label", "缩小编辑器");
+        const icon = document.createElement("i");
+        icon.className = "el-dialog__close el-icon el-icon-minus";
+        button.appendChild(icon);
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const editors = Array.from(wrapper.querySelectorAll(".script-editor"));
+          const editor = editors.find(isVisible) || editors[0];
+          if (editor) {
+            minimizeScriptEditor(editor);
+          }
+        });
+        header.appendChild(button);
+      }
+    });
   }
 
   function onNavigationKeyUp(event) {
@@ -563,6 +605,7 @@
         }));
       });
     });
+    installScriptEditorMinimizeButtons();
   }
 
   let copiedFields = null;
@@ -1606,6 +1649,7 @@
     .guthon-procedure-link{color:#409eff!important;cursor:pointer!important}
     .guthon-minimized-script-mask{display:none!important}
     .guthon-minimized-script-editor{display:none!important}
+    .guthon-script-editor-minimize{right:42px!important}
     .guthon-minimized-script-bar{position:fixed;top:12px;left:50%;display:flex;align-items:center;gap:10px;width:auto;max-width:calc(100vw - 32px);height:36px;transform:translateX(-50%);box-sizing:border-box;padding:6px 7px 6px 14px;border:1px solid #409eff;border-radius:4px;background:#fff;color:#409eff;white-space:nowrap;font-size:14px;cursor:move;box-shadow:0 2px 12px rgba(0,0,0,.25);z-index:3000}
     .guthon-minimized-script-close{width:22px;height:22px;padding:0;border:0;border-radius:3px;background:transparent;color:#909399;font-size:20px;line-height:20px;cursor:pointer}
     .guthon-minimized-script-close:hover{background:#f2f6fc;color:#f56c6c}
