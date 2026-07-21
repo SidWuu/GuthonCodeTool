@@ -135,9 +135,12 @@ systems:
 rules:
   allow_unchecked_check_out_user_ids:
     - U00000XXXX
+  pull_auto_add_git: false
 ```
 
 `allow_unchecked_check_out_user_ids` 控制哪些签出人的未签入源码允许被同步或拉取。
+
+`pull_auto_add_git` 为 `true` 时，拉取后自动查找 workcopy 所在的最近 Git 仓库，并只暂存该 workcopy 下的未跟踪新文件；不会暂存已有文件的修改，也不会强制添加被 `.gitignore` 忽略的文件。
 
 `ACTIVE` 同时决定源码同步范围、SQLite 索引库，以及表结构、单据类型默认连接的产品库或项目库。索引库位于 `sync.index_dir/{products|projects}/<id>.db`，源码查询和工作副本读取只使用当前 ACTIVE 的索引。工具按 datasource 分别查询一次 `gd_system`，结果自动缓存到 `config/system-data.json`；别名变化或缓存中没有当前 datasource 时会重新查询。
 

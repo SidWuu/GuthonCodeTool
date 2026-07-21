@@ -152,7 +152,9 @@ process.stdin.on("end", () => {
     workCopyPath: ${JSON.stringify(workCopyPath)},
     workCopyStatus: "LOCAL_CHANGED",
     workCopyAction: "PRESERVED",
-    localChanged: true
+    localChanged: true,
+    gitAddStatus: "ADDED",
+    gitAdded: 4
   }));
 });
 `,
@@ -205,7 +207,9 @@ process.stdin.on("end", () => {
       workCopyPath,
       workCopyStatus: "LOCAL_CHANGED",
       workCopyAction: "PRESERVED",
-      localChanged: true
+      localChanged: true,
+      gitAddStatus: "ADDED",
+      gitAdded: 4
     });
   } finally {
     server.kill();

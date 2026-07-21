@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -33,6 +34,37 @@ ROW = {
 
 
 class WorkCopyTest(unittest.TestCase):
+    def test_auto_git_add_stages_only_new_workcopy_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            target = repo / "var/source/workcopy/demo.proc/save"
+            target.mkdir(parents=True)
+            (target / "source.vm").write_text("new source\n", encoding="utf-8")
+            tracked = target / "meta.json"
+            tracked.write_text("{}\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", str(tracked.relative_to(repo))], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "baseline"],
+                check=True,
+            )
+            tracked.write_text('{"changed":true}\n', encoding="utf-8")
+
+            result = gusen_hub._auto_add_work_copy(
+                {"sync": {"rules": {"pull_auto_add_git": True}}},
+                target,
+            )
+
+            staged = subprocess.run(
+                ["git", "-C", str(repo), "diff", "--cached", "--name-only"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.splitlines()
+            self.assertEqual("ADDED", result["gitAddStatus"])
+            self.assertEqual(1, result["gitAdded"])
+            self.assertEqual(["var/source/workcopy/demo.proc/save/source.vm"], staged)
+
     def make_paths(self):
         temp = tempfile.TemporaryDirectory()
         root = Path(temp.name)

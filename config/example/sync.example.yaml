@@ -37,6 +37,8 @@ rules:
   prefer_version_mac: true
   # 保留项；当前实现固定跳过错误标记为 1 的源码。
   skip_error_source: true
+  # 拉取 workcopy 后，自动暂存其所在 Git 仓库中的未跟踪新文件；不会强制添加被忽略文件。
+  pull_auto_add_git: false
 
 # 谷神 API 文档与 VSCode 补全数据同步配置。
 guthon_api:

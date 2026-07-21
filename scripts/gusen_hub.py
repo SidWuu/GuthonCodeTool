@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -1591,6 +1592,50 @@ def _prepare_work_copy(source_path: Path, target: Path, row, change_key: str, mo
     return status
 
 
+def _auto_add_work_copy(cfg: dict, target: Path):
+    rules = cfg["sync"].get("rules") or {}
+    if not rules.get("pull_auto_add_git"):
+        return {"gitAddStatus": "DISABLED", "gitAdded": 0}
+    try:
+        root_result = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return {"gitAddStatus": "GIT_UNAVAILABLE", "gitAdded": 0}
+    if root_result.returncode:
+        return {"gitAddStatus": "NO_REPOSITORY", "gitAdded": 0}
+    repo_root = Path(root_result.stdout.strip()).resolve()
+    try:
+        relative_target = target.resolve().relative_to(repo_root).as_posix()
+    except ValueError:
+        return {"gitAddStatus": "OUTSIDE_REPOSITORY", "gitAdded": 0}
+    untracked = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-files", "--others", "--exclude-standard", "-z", "--", relative_target],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    paths = [path for path in untracked.stdout.split("\0") if path]
+    if not paths:
+        ignored = subprocess.run(
+            ["git", "-C", str(repo_root), "check-ignore", "-q", "--", relative_target],
+            check=False,
+        )
+        return {"gitAddStatus": "IGNORED" if ignored.returncode == 0 else "NO_NEW_FILES", "gitAdded": 0}
+    added = subprocess.run(
+        ["git", "-C", str(repo_root), "add", "--", *paths],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if added.returncode:
+        return {"gitAddStatus": "FAILED", "gitAdded": 0, "gitAddMessage": added.stderr.strip()}
+    return {"gitAddStatus": "ADDED", "gitAdded": len(paths), "gitRoot": str(repo_root)}
+
+
 def _current_work_copy_source(metadata: dict):
     cfg = load_config()
     conn = connect_index(active_index_path(cfg))
@@ -1698,7 +1743,9 @@ def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
     source_rel = found["local_path"]
     source_path = ROOT / source_rel
     target = work_copy_dir() / owner / _work_copy_source_relative_path(source_rel, project_id)
-    return _prepare_work_copy(source_path, target, found, _work_copy_change_key(found))
+    result = _prepare_work_copy(source_path, target, found, _work_copy_change_key(found))
+    result.update(_auto_add_work_copy(cfg, target))
+    return result
 
 
 def _work_copy_source_relative_path(source_path, project_id):
@@ -1755,6 +1802,8 @@ def pull_source_to_work_copy(payload: dict):
                 "workCopyStatus": work_result["state"],
                 "workCopyAction": work_result["action"],
                 "localChanged": work_result["localChanged"],
+                "gitAddStatus": work_result.get("gitAddStatus", "DISABLED"),
+                "gitAdded": work_result.get("gitAdded", 0),
                 "pulled": 1,
                 "source": {key: _str(found[key]) if key in found.keys() else "" for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},
             }
@@ -1786,6 +1835,8 @@ def pull_source_to_work_copy(payload: dict):
         "workCopyStatus": work_results[0]["state"] if len(work_results) == 1 else "MULTIPLE",
         "workCopyAction": work_results[0]["action"] if len(work_results) == 1 else "MULTIPLE",
         "localChanged": local_changed,
+        "gitAddStatus": work_results[0].get("gitAddStatus", "DISABLED") if len(work_results) == 1 else "MULTIPLE",
+        "gitAdded": sum(result.get("gitAdded", 0) for result in work_results),
         "pulled": len(work_results),
         "source": {key: _str(row.get(key)) for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},
     }

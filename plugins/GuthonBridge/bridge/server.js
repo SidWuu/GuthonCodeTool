@@ -114,7 +114,7 @@ function appendPullLog(options) {
 }
 
 function sourceSummary(payload, result = {}) {
-  return {
+  const summary = {
     sourceType: payload.sourceType || "",
     sourceId: payload.sourceId || "",
     alias: payload.alias || "",
@@ -126,6 +126,11 @@ function sourceSummary(payload, result = {}) {
     workCopyAction: result.workCopyAction || "",
     localChanged: result.localChanged ?? ""
   };
+  if ("gitAddStatus" in result) {
+    summary.gitAddStatus = result.gitAddStatus;
+    summary.gitAdded = result.gitAdded ?? 0;
+  }
+  return summary;
 }
 
 function tableSchemaSummary(payload, result = {}) {
