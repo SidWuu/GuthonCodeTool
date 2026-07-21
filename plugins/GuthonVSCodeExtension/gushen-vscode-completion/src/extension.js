@@ -12,6 +12,7 @@ const {
   itemSortText,
   mergeCompletionData,
   resolveRoute,
+  shouldProvideApiCompletions,
 } = require('./rules');
 const { createDocumentSelector } = require('./selector');
 const { procedureTargetAt, selectDefinitionPaths } = require('./definition');
@@ -65,6 +66,9 @@ function createProvider(context) {
     provideCompletionItems(document, position) {
       const lineText = document.lineAt(position.line).text;
       const currentWord = getCurrentWord(lineText, position.character);
+      if (!shouldProvideApiCompletions(currentWord)) {
+        return [];
+      }
       const rules = loadRules(context);
       const route = resolveRoute(rules, document.languageId, currentWord);
       const items = filterItems(data, route, currentWord);
@@ -115,8 +119,7 @@ function activate(context) {
   const disposable = vscode.languages.registerCompletionItemProvider(
     selector,
     provider,
-    '.',
-    '$'
+    '.'
   );
   const definitionDisposable = vscode.languages.registerDefinitionProvider(
     createDocumentSelector(['java'], SUPPORTED_SCHEMES),

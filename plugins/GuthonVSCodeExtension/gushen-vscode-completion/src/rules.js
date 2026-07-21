@@ -117,9 +117,9 @@ function matchingSegment(value, typed) {
     return segments[exactIndex];
   }
 
-  const prefixIndex = lowerSegments.findIndex((segment) => segment.startsWith(typed));
-  if (prefixIndex !== -1) {
-    return segments[prefixIndex];
+  const prefixMatches = segments.filter((segment, index) => lowerSegments[index].startsWith(typed));
+  if (prefixMatches.length) {
+    return prefixMatches.join(' ');
   }
 
   const camelIndex = segments.findIndex((segment, index) => {
@@ -286,6 +286,10 @@ function itemFilterText(item, typedPrefix) {
   return `${item.prefix} ${matchingSegment(bodyCallPath(item.body), normalizedTyped) || typed}`;
 }
 
+function shouldProvideApiCompletions(currentWord) {
+  return !normalizeText(currentWord).startsWith('$');
+}
+
 function itemGroupRank(item) {
   const group = normalizeKey(item.group);
   const ranks = {
@@ -346,5 +350,6 @@ module.exports = {
   itemSortText,
   mergeCompletionData,
   resolveRoute,
+  shouldProvideApiCompletions,
   templateToSnippet,
 };

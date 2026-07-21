@@ -15,6 +15,7 @@ const {
   mergeCompletionData,
   getCurrentWord,
   itemSortText,
+  shouldProvideApiCompletions,
   templateToSnippet,
 } = require('../src/rules');
 
@@ -245,6 +246,23 @@ test('uses the matched segment as filter text to avoid stale fuzzy matches', () 
     itemFilterText({ prefix: 'tryCatchFinally', group: 'syntax', body: ['#try', '#end'] }, 'fi'),
     'tryCatchFinally'
   );
+});
+
+test('keeps all matching prefix segments available for continued filtering', () => {
+  const filterText = itemFilterText({
+    prefix: 'sqlh.strIn',
+    body: '$vs.sqlHelper.strIn(strValues,strTableFieldId)',
+  }, 's');
+
+  assert.equal(filterText, 'sqlh strIn');
+  assert.equal(fuzzyMatch('sqlh', filterText), true);
+  assert.equal(fuzzyMatch('strin', filterText), true);
+});
+
+test('leaves dollar-prefixed completion to VS Code local variables', () => {
+  assert.equal(shouldProvideApiCompletions('$'), false);
+  assert.equal(shouldProvideApiCompletions('$form'), false);
+  assert.equal(shouldProvideApiCompletions('strin'), true);
 });
 
 test('prevents stale fi candidates from surviving the final find filter', () => {
