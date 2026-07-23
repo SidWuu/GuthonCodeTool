@@ -2046,10 +2046,6 @@ def _now():
     return dt.datetime.now().replace(microsecond=0).isoformat(sep=" ")
 
 
-def safe(value):
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or ""))
-
-
 def path_part(value):
     return re.sub(r'[\\\\/:*?"<>|]+', "_", str(value or "未命名")).strip() or "未命名"
 

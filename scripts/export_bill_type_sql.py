@@ -29,10 +29,6 @@ def write_json(path, data):
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def read_json(path):
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 def drop_empty(value):
     if isinstance(value, list):
         return [drop_empty(item) for item in value]
@@ -150,10 +146,6 @@ def export_bill_types(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None,
     }
 
 
-def load_config():
-    return gusen_hub.load_config()
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Export Gushen bill types directly from SQL.")
     parser.add_argument("--datasource", help="Datasource override. Defaults to the product or project selected by sync.ACTIVE.")
@@ -164,7 +156,7 @@ def main(argv=None):
 
     requested_data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else []
     bill_type_codes = normalize_bill_type_codes(args.bill_type_codes)
-    config = load_config()
+    config = gusen_hub.load_config()
     output_dir = resolve_output_dir(DEFAULT_OUTPUT_DIR, args.output_dir, config)
     datasource_name, datasource = gusen_hub.resolve_datasource(config, args.datasource)
     with gusen_hub.db_connect(datasource) as conn:

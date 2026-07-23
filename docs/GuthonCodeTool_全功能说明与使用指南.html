@@ -38,6 +38,7 @@ h3{margin:30px 0 12px;font-size:21px;line-height:1.35;scroll-margin-top:24px}
 h4{margin:24px 0 10px;font-size:17px} p{margin:10px 0}
 ul,ol{padding-left:1.35em;margin:12px 0 18px} li{margin:5px 0}
 code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:.92em;background:#edf1f8;border:1px solid #dfe5ef;border-radius:5px;padding:1px 5px}
+blockquote a{color: #3e64d8;}
 .code-wrap{position:relative;margin:16px 0 22px}
 .code-wrap pre{overflow-x:auto;margin:0;padding:20px;border-radius:14px;background:var(--code-bg);color:var(--code-text);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
 .code-wrap pre code{background:none;border:0;padding:0;color:inherit;font-size:13.5px}
@@ -85,8 +86,9 @@ blockquote p{margin:4px 0} .divider{border:0;border-top:1px solid var(--line);ma
 </div>
 <blockquote>
   <p>面向谷神低代码开发平台的本地开发辅助工具集  </p>
-  <p>仓库：<code>https://github.com/SidWuu/GuthonCodeTool</code></p>
-  <p>镜像仓库：<code>https://gitee.com/sidwu/GuthonCodeTool</code></p>
+  <p>仓库：<a href="https://github.com/SidWuu/GuthonCodeTool">https://github.com/SidWuu/GuthonCodeTool</a></p>
+  <p>镜像仓库：<a href="https://gitee.com/sidwu/GuthonCodeTool">https://gitee.com/sidwu/GuthonCodeTool</a></p>
+  <p>AI规范文件下载：<a href="http://192.168.15.110:8088/docs/guthon-ai-standard.zip">http://192.168.15.110:8088/docs/guthon-ai-standard.zip</a></p>
 </blockquote><section class="section"><h2 id="1-工具简介">1. 工具简介</h2><p>GuthonCodeTool 用于把谷神开发平台中的页面源码、过程函数、数据库表结构、单据类型和调用关系整理到本地，形成可检索、可比较、可交付、可供 AI 辅助分析的开发工作区。</p><p>它主要解决以下问题：</p><ul><li>平台源码分散在数据库和在线编辑器中，不便于全文检索和版本比较。</li><li>页面、过程函数之间存在调用关系，人工查找效率低。</li><li>本地修改可能与平台最新版本分叉，直接覆盖存在风险。</li><li>数据表字段、单据类型等元数据需要反复进入平台查询。</li><li>在线开发页面缺少快捷跳转、字段复制、源码快速拉取等辅助能力。</li><li>AI 编程工具无法直接理解平台数据库中的源码和结构。</li></ul><p>工具采用“根仓库保存工具代码，<code>var/</code> 保存本机私有数据”的模式。源码、数据库结构、SQLite 索引、日志和工作副本不会提交到公开工具仓库。</p><hr class="divider"/></section><section class="section"><h2 id="2-功能总览">2. 功能总览</h2><h3 id="2-1-源码-hub">2.1 源码 Hub</h3><p>源码 Hub 是工具的核心能力，负责从谷神源码表同步页面和过程函数源码。</p><p>主要能力：</p><ul><li>同步产品层源码和项目层源码，二者相互隔离。</li><li>通过 <code>sync.ACTIVE</code> 指定当前开发对象。</li><li>每个产品或项目使用独立 SQLite 索引库，避免索引相互污染。</li><li>按子系统别名和数据源范围过滤。</li><li>默认同步已签入源码。</li><li>可配置允许同步指定签出人的未签入源码。</li><li>通过 <code>VERSION_MAC</code> 优先判断源码是否变化。</li><li>未变化时复用本地只读镜像，不重复写文件和重建索引。</li><li>变化时更新本地文件并重新生成调用关系。</li><li>支持初始化索引、一次性全量或增量同步、手动拉取单个对象。</li></ul><p>适用场景：</p><ul><li>将谷神平台源码定期同步到本地。</li><li>使用 VS Code、IDEA、Codex、Claude Code 等工具分析业务代码。</li><li>查询某个页面或过程函数的来源、调用方和被调用方。</li><li>在不同产品、项目之间切换开发上下文。</li></ul><h3 id="2-2-页面源码导出">2.2 页面源码导出</h3><p>页面源码会按业务层级自动整理目录，典型结构为：</p><div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>{子系统}/page/{模型序号}_{模型}/{模块序号}_{模块}/{页面名 页面ID}</code></pre></div><p>目录中的常见文件：</p><div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>meta.json
 raw.json
 scripts/*.js

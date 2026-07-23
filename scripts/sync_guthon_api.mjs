@@ -330,20 +330,17 @@ function run(command, args, cwd = repoRoot) {
 function validateGenerated(tempDataDir, expected, oldCounts, allowShrink) {
   const generatedIndex = JSON.parse(fs.readFileSync(path.join(tempDataDir, 'index.json'), 'utf8'));
   for (const language of languages) {
-    const standalone = JSON.parse(
-      fs.readFileSync(path.join(tempDataDir, `${language}.json`), 'utf8')
-    );
-    assert.deepEqual(standalone, generatedIndex[language]);
-    assert.equal(standalone.length, expected[language].length);
-    for (const item of standalone) {
+    const generated = generatedIndex[language];
+    assert.equal(generated.length, expected[language].length);
+    for (const item of generated) {
       assert.equal(typeof item.prefix, 'string');
       assert.equal(typeof item.body, 'string');
       assert.equal(typeof item.description, 'string');
       assert.ok(item.prefix && item.body && item.group);
     }
     const oldCount = oldCounts[language] || 0;
-    if (!allowShrink && standalone.length < oldCount) {
-      throw new Error(`${language} API 从 ${oldCount} 减少到 ${standalone.length}；如确认删除请加 --allow-shrink`);
+    if (!allowShrink && generated.length < oldCount) {
+      throw new Error(`${language} API 从 ${oldCount} 减少到 ${generated.length}；如确认删除请加 --allow-shrink`);
     }
   }
 }
@@ -451,10 +448,8 @@ function main() {
     const targets = new Map();
     for (const language of languages) {
       const markdown = fs.readFileSync(path.join(tempDocs, `${language}.md`));
-      const json = fs.readFileSync(path.join(tempData, `${language}.json`));
       targets.set(path.join(versionApiDir, `${language}.md`), markdown);
       targets.set(path.join(apiDir, `${language}.md`), markdown);
-      targets.set(path.join(dataDir, `${language}.json`), json);
     }
     const index = fs.readFileSync(path.join(tempData, 'index.json'));
     // 根 index.json 最后替换；插件运行时只读取它，前序中断不会破坏现有补全。

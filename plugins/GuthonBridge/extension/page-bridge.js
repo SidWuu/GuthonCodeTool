@@ -36,15 +36,22 @@
   }
 
   function walk(value, visitor) {
-    if (Array.isArray(value)) {
-      value.forEach((item) => walk(item, visitor));
-      return;
+    const pending = [value];
+    const seen = new WeakSet();
+    while (pending.length) {
+      const current = pending.pop();
+      if (!current || typeof current !== "object" || seen.has(current)) {
+        continue;
+      }
+      seen.add(current);
+      if (!Array.isArray(current) && visitor(current) === false) {
+        return;
+      }
+      const children = Array.isArray(current) ? current : Object.values(current);
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        pending.push(children[index]);
+      }
     }
-    if (!value || typeof value !== "object") {
-      return;
-    }
-    visitor(value);
-    Object.values(value).forEach((item) => walk(item, visitor));
   }
 
   function collectMatches(root, keyword) {
@@ -80,7 +87,9 @@
       const value = pickFirst(obj, keys);
       if (value !== undefined) {
         found = value;
+        return false;
       }
+      return undefined;
     });
     return found;
   }
@@ -678,6 +687,19 @@
     return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
   }
 
+  function isDataTableManagementPage() {
+    if (location.href.includes("/gdpaas/dev/table") || location.href.includes("/basesetup/table")) {
+      return true;
+    }
+    return Array.from(document.querySelectorAll('[aria-selected="true"], .is-active, .active'))
+      .some((node) => String(node.innerText || node.textContent || "").includes("数据表管理"));
+  }
+
+  function isBillTypePage() {
+    return Array.from(document.querySelectorAll('[aria-selected="true"], .is-active, .active'))
+      .some((node) => /^单据类型/.test(String(node.innerText || node.textContent || "").trim()));
+  }
+
   function readFirst(obj, keys) {
     for (const key of keys) {
       const value = obj?.[key];
@@ -842,6 +864,41 @@
   }
 
   function inspectCurrentPageSource() {
+    const selectedTab = getSelectedTabInfo();
+    const sourceName = String(selectedTab?.label || "").trim() || "源码片段";
+    const candidates = [];
+    for (const vm of getAllVueInstances()) {
+      if (vm.fun || vm.localFun) {
+        continue;
+      }
+      const pageId = findDeepFirst(vm, ["pageId"]);
+      if (!pageId) {
+        continue;
+      }
+      const pageVersion = findDeepFirst(vm, ["pageVersion", "versionMac", "version"]) || "";
+      const pageName = findDeepFirst(vm, ["pageName", "pageTitle", "title", "label", "name"]) || "";
+      const script =
+        pickFirst(vm.form, ["xml", "script", "content", "source", "pageModuleXml", "moduleXml"]) ||
+        findDeepFirst(vm, ["pageModuleXml", "moduleXml", "xml", "script", "content", "source"]) ||
+        "";
+      candidates.push({
+        mode: "page-source",
+        pageId: String(pageId),
+        pageVersion: String(pageVersion),
+        procedureId: String(pageId),
+        procedureName: String(pageName || pageId),
+        procedureKeyword: String(pageName || pageId),
+        fullName: String(pageName || pageId),
+        funId: sourceName,
+        script: String(script),
+        sourceName,
+        resolvedBy: "page-source"
+      });
+    }
+    const current = candidates.find((item) => item.script) || candidates[0];
+    if (current) {
+      return current;
+    }
     const pageCode = getCurrentPageCode();
     if (!pageCode) {
       throw new Error("当前模块开发页面没有识别到页面编码");
@@ -869,6 +926,32 @@
       billTypeCodes: getSelectedBillTypeCodes(),
       resolvedBy: "bill-type-tab"
     };
+  }
+
+  function inspectCurrentHubSource() {
+    if (isBillTypePage()) {
+      return { mode: "billtype", ...inspectBillTypeTarget() };
+    }
+    if (isDataTableManagementPage()) {
+      return { mode: "table-schema", ...inspectTableSchemaTarget() };
+    }
+    if (location.href.includes("/gdpaas/dev/modules")) {
+      const pageCode = getCurrentPageCode();
+      if (!pageCode) {
+        throw new Error("当前模块开发页面没有识别到页面编码");
+      }
+      return {
+        mode: "page-source",
+        pageId: pageCode,
+        procedureId: pageCode,
+        procedureName: pageCode,
+        procedureKeyword: pageCode,
+        fullName: pageCode,
+        funId: "",
+        resolvedBy: "module-page-code"
+      };
+    }
+    return inspectCurrentProcedure();
   }
 
   function putMapValue(map, key, value) {
@@ -1531,37 +1614,6 @@
     };
   }
 
-  function resolveProcedureByPackage(searchResult, procedureKeyword) {
-    const matches = collectMatches(searchResult, procedureKeyword);
-    const exact = matches.find((item) => {
-      const name = [
-        item.procedureName,
-        item.fullName,
-        item.className,
-        item.procName,
-        item.name,
-        item.label
-      ]
-        .filter(Boolean)
-        .join(" ");
-      return name.includes(procedureKeyword);
-    });
-    const chosen = exact || matches[0];
-    if (!chosen) {
-      throw new Error(`未找到过程函数: ${procedureKeyword}`);
-    }
-    const procedureId = pickFirst(chosen, ["procedureId", "procId", "id", "value"]);
-    if (!procedureId) {
-      throw new Error(`已找到候选项，但无法解析 procedureId: ${procedureKeyword}`);
-    }
-    return {
-      procedureId,
-      procedureName:
-        pickFirst(chosen, ["procedureName", "fullName", "className", "procName", "name", "label"]) ||
-        procedureKeyword
-    };
-  }
-
   async function pullProcedure(payload) {
     const currentEditor = findCurrentProcedureEditorContext(payload);
     if (currentEditor && currentEditor.procedureId) {
@@ -1602,6 +1654,51 @@
     };
   }
 
+  async function pullCurrentProcedure(payload) {
+    const pulled = await pullProcedure(payload);
+    return {
+      procedureId: pulled.procedureId,
+      procedureName: pulled.procedureName,
+      funId: payload.funId,
+      script: pulled.script,
+      flag: pulled.flag ?? 0,
+      versionMac: pulled.versionMac || "",
+      resolvedBy: `${pulled.resolvedBy || "unknown"}+read`
+    };
+  }
+
+  async function pullPageSource() {
+    const current = inspectCurrentPageSource();
+    if (!current?.pageId) {
+      throw new Error("当前页面没有识别到模块源码片段");
+    }
+    const refreshed = await postForm("/develop/dev/pages/getPageModuleXml.htm", {
+      pageId: current.pageId
+    });
+    if (refreshed.code && refreshed.code !== 0) {
+      throw new Error(refreshed.message || "读取页面源码失败");
+    }
+    return {
+      ...current,
+      script:
+        findDeepFirst(refreshed, ["pageModuleXml", "moduleXml", "xml", "content", "source"]) ||
+        current.script ||
+        "",
+      pageVersion: String(
+        findDeepFirst(refreshed, ["pageVersion", "versionMac", "version"]) ||
+        current.pageVersion ||
+        ""
+      ),
+      resolvedBy: `${current.resolvedBy || "page-source"}+read`
+    };
+  }
+
+  function inspectCurrent() {
+    return location.href.includes("/gdpaas/dev/modules")
+      ? inspectCurrentPageSource()
+      : inspectCurrentProcedure();
+  }
+
   async function disabledWriteCommand() {
     throw new Error("本插件已屏蔽签出和回推功能");
   }
@@ -1621,6 +1718,10 @@
     inspectCurrentPageSource,
     inspectTableSchemaTarget,
     inspectBillTypeTarget,
+    "inspect-current": inspectCurrent,
+    "inspect-hub-source": inspectCurrentHubSource,
+    "pull": pullCurrentProcedure,
+    "pull-page-source": pullPageSource,
     checkOutProcedure: disabledWriteCommand,
     pushProcedure: disabledWriteCommand
   };

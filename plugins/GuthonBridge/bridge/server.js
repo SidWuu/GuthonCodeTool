@@ -151,12 +151,12 @@ function billTypeSummary(payload, result = {}) {
   };
 }
 
-function runHubPull(payload) {
+function runJsonCommand(args, errorLabel, input) {
   return new Promise((resolve, reject) => {
-    const child = spawn(HUB_PYTHON, [HUB_PULL_SCRIPT, "--json-stdin"], {
+    const child = spawn(HUB_PYTHON, args, {
       cwd: ROOT,
       env: { ...process.env, GUTHON_SUPPRESS_PULL_LOG: "1" },
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"]
     });
     let stdout = "";
     let stderr = "";
@@ -169,91 +169,45 @@ function runHubPull(payload) {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error((stderr || stdout || `Hub command failed with exit code ${code}`).trim()));
+        reject(new Error((stderr || stdout || `${errorLabel} failed with exit code ${code}`).trim()));
         return;
       }
       try {
         resolve(JSON.parse(stdout || "{}"));
       } catch (error) {
-        reject(new Error(`Hub command returned invalid JSON: ${error.message}`));
+        reject(new Error(`${errorLabel} returned invalid JSON: ${error.message}`));
       }
     });
-    child.stdin.end(JSON.stringify(payload));
+    if (input !== undefined) {
+      child.stdin.end(JSON.stringify(input));
+    }
   });
+}
+
+function runHubPull(payload) {
+  return runJsonCommand([HUB_PULL_SCRIPT, "--json-stdin"], "Hub command", payload);
 }
 
 function runTableSchemaExport(payload) {
-  return new Promise((resolve, reject) => {
-    const args = [TABLE_SCHEMA_SCRIPT];
-    if (payload.dataSourceId) {
-      args.push("--data-source-ids", String(payload.dataSourceId));
-    }
-    if (Array.isArray(payload.tableIds) && payload.tableIds.length > 0) {
-      args.push("--table-ids", payload.tableIds.join(","));
-    }
-    const child = spawn(HUB_PYTHON, args, {
-      cwd: ROOT,
-      env: { ...process.env, GUTHON_SUPPRESS_PULL_LOG: "1" },
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error((stderr || stdout || `Table schema command failed with exit code ${code}`).trim()));
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout || "{}"));
-      } catch (error) {
-        reject(new Error(`Table schema command returned invalid JSON: ${error.message}`));
-      }
-    });
-  });
+  const args = [TABLE_SCHEMA_SCRIPT];
+  if (payload.dataSourceId) {
+    args.push("--data-source-ids", String(payload.dataSourceId));
+  }
+  if (Array.isArray(payload.tableIds) && payload.tableIds.length > 0) {
+    args.push("--table-ids", payload.tableIds.join(","));
+  }
+  return runJsonCommand(args, "Table schema command");
 }
 
 function runBillTypeExport(payload) {
-  return new Promise((resolve, reject) => {
-    const args = [BILL_TYPE_SCRIPT];
-    if (Array.isArray(payload.dataSourceIds) && payload.dataSourceIds.length > 0) {
-      args.push("--data-source-ids", payload.dataSourceIds.join(","));
-    }
-    if (Array.isArray(payload.billTypeCodes) && payload.billTypeCodes.length > 0) {
-      args.push("--bill-type-codes", payload.billTypeCodes.join(","));
-    }
-    const child = spawn(HUB_PYTHON, args, {
-      cwd: ROOT,
-      env: { ...process.env, GUTHON_SUPPRESS_PULL_LOG: "1" },
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error((stderr || stdout || `Bill type command failed with exit code ${code}`).trim()));
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout || "{}"));
-      } catch (error) {
-        reject(new Error(`Bill type command returned invalid JSON: ${error.message}`));
-      }
-    });
-  });
+  const args = [BILL_TYPE_SCRIPT];
+  if (Array.isArray(payload.dataSourceIds) && payload.dataSourceIds.length > 0) {
+    args.push("--data-source-ids", payload.dataSourceIds.join(","));
+  }
+  if (Array.isArray(payload.billTypeCodes) && payload.billTypeCodes.length > 0) {
+    args.push("--bill-type-codes", payload.billTypeCodes.join(","));
+  }
+  return runJsonCommand(args, "Bill type command");
 }
 
 const server = http.createServer(async (req, res) => {

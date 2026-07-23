@@ -247,7 +247,17 @@ cd plugins/GuthonBridge
 npm run start:bridge
 ```
 
-### 8. 恢复全量同步
+### 8. 环境诊断
+
+只读检查配置、Python/Node、Bridge 状态和 VS Code 补全数据：
+
+```bash
+.venv/bin/python scripts/doctor.py
+```
+
+Bridge 未启动时只显示 `WARN`；配置或必要运行环境异常时返回非零退出码。使用 `--json` 可输出机器可读结果。
+
+### 9. 恢复全量同步
 
 手动删除当前 ACTIVE 的 `var/source/readonly` 源码后，需要先删除对应同步游标，再重新全量同步：
 

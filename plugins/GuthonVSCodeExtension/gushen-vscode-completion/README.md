@@ -59,9 +59,6 @@ Generated completion data:
 
 ```text
 data/index.json
-data/java.json
-data/javascript.json
-data/sql.json
 ```
 
 Manual syntax snippets:
@@ -95,7 +92,7 @@ Open this folder, then press F5.
 Package:
 
 ```bash
-vsce package
+npm run package
 ```
 
 Install the packaged extension:

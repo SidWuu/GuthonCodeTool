@@ -1,0 +1,7 @@
+.vscode/**
+scripts/**
+test/**
+data/java.json
+data/javascript.json
+data/sql.json
+*.vsix

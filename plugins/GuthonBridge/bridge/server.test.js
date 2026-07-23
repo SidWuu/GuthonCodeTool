@@ -353,6 +353,8 @@ test("popup exposes separate page and hub pull actions without hub target input"
   const html = fs.readFileSync(POPUP_HTML_PATH, "utf8");
   const script = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
   const background = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
+  const content = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
   const runHubPullScript = script.slice(script.indexOf("async function runHubPull"), script.indexOf("pullPageBtn.addEventListener"));
 
   assert.equal(html.includes("pullPageBtn"), true);
@@ -361,11 +363,13 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes("pull-hub-source"), true);
   assert.equal(script.includes("parseHubTarget"), false);
   assert.equal(script.includes("inspect-hub-source"), true);
-  assert.equal(script.includes("function inspectCurrentHubSourceContext"), true);
-  assert.equal(script.includes("function inspectTableSchemaTarget"), true);
-  assert.equal(script.includes("function getDataSourceName"), true);
-  assert.equal(script.includes("function getLabeledSelectValue"), true);
-  assert.equal(script.includes("[A-Z][A-Z0-9]+_[A-Z0-9_]"), true);
+  assert.equal(script.includes('type: "run-page-command"'), true);
+  assert.equal(content.includes('message?.type === "run-page-command"'), true);
+  assert.equal(pageBridge.includes("function inspectCurrentHubSource"), true);
+  assert.equal(pageBridge.includes("function inspectTableSchemaTarget"), true);
+  assert.equal(pageBridge.includes("function getDataSourceName"), true);
+  assert.equal(pageBridge.includes("function getLabeledSelectValue"), true);
+  assert.equal(pageBridge.includes("[A-Z][A-Z0-9]+_[A-Z0-9_]"), true);
   assert.equal(script.includes('mode === "table-schema"'), true);
   assert.equal(script.includes('mode === "billtype"'), true);
   assert.equal(script.includes('type: "export-table-schema"'), true);
@@ -488,6 +492,7 @@ test("pull button floats over the current Guthon toolbar without changing toolba
 
 test("copy mode button and overlay are available on module page editors", () => {
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
   const renderCopyDataScript = contentScript.slice(
     contentScript.indexOf("function renderCopyData"),
     contentScript.indexOf("async function showCopyOverlay")
@@ -523,20 +528,19 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("word-break: break-all"), true);
   assert.equal(contentScript.includes("installFloatingDrag"), false);
   assert.equal(contentScript.includes("pullCurrentProcedure(root, sourceButton)"), true);
-  assert.equal(contentScript.includes('isModuleRoute() ? "inspectCurrentPageSource" : "inspectCurrentProcedure"'), true);
+  assert.equal(contentScript.includes('isModuleRoute() ? "inspect-hub-source" : "inspectCurrentProcedure"'), true);
   assert.equal(contentScript.includes('sourceType: target.mode === "page-source" ? "page" : "procedure"'), true);
   assert.equal(contentScript.includes('runPageCommand("collectModuleCopyText")'), true);
-  assert.equal(contentScript.includes("collectModulePageFields"), true);
+  assert.equal(contentScript.includes("collectModulePageFields"), false);
   assert.equal(contentScript.includes("guthon-bridge-copy-overlay"), true);
-  assert.equal(contentScript.includes("当前页面编码"), true);
-  assert.equal(contentScript.includes("findCurrentPageToolbar"), true);
-  assert.equal(contentScript.includes("collectControlFields"), true);
-  assert.equal(contentScript.includes(".el-table"), true);
-  assert.equal(contentScript.includes("vm = vm.$parent"), true);
-  assert.equal(contentScript.includes('key === "datasource"'), true);
+  assert.equal(pageBridge.includes("当前页面编码"), true);
+  assert.equal(contentScript.includes("findCurrentPageToolbar"), false);
+  assert.equal(pageBridge.includes("collectControlFields"), true);
+  assert.equal(pageBridge.includes(".el-table"), true);
+  assert.equal(pageBridge.includes("vm = vm.$parent"), true);
   assert.equal(contentScript.includes("复制模式只支持模块开发页面"), true);
-  assert.equal(contentScript.includes("readElementName"), true);
-  assert.equal(contentScript.includes("字段: ${field.field"), true);
+  assert.equal(pageBridge.includes("readElementName"), true);
+  assert.equal(pageBridge.includes("字段: ${field.field"), true);
   assert.equal(contentScript.includes("guthon-bridge-copy-text"), true);
   assert.equal(contentScript.includes("guthon-bridge-field-table"), true);
   assert.equal(contentScript.includes("guthon-bridge-cell-value"), true);
@@ -591,7 +595,6 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("exportCurrentBillType(root, sourceButton)"), true);
   assert.equal(contentScript.includes("stopExtensionLoops();"), true);
 
-  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
   assert.equal(pageBridge.includes("function inspectCurrentPageSource"), true);
   assert.equal(pageBridge.includes('mode: "page-source"'), true);
   assert.equal(pageBridge.includes("collectModuleCopyText"), true);
@@ -612,6 +615,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("function readPageCodeFromVm"), true);
   assert.equal(pageBridge.includes("vm?.pageId || vm?.pageCode"), true);
   assert.equal(pageBridge.includes("getPageCodeFromVue() || getPageCodeFromUrl()"), true);
+  assert.equal(pageBridge.includes('resolvedBy: "module-page-code"'), true);
   assert.equal(pageBridge.includes('location.hash.includes("?")'), true);
   assert.equal(contentScript.includes('?v=20260721b'), true);
   assert.equal(pageBridge.includes("/(Form|Table)$/"), true);
@@ -940,10 +944,37 @@ test("page bridge does not mix stale fullName package with current function id",
   assert.equal(pageBridge.includes("selectedFunId === titleInfo.funId"), true);
   assert.equal(pageBridge.includes('resolvedBy: "selected-tab-id"'), true);
   assert.equal(pageBridge.includes("selectedTab?.panel"), true);
-  assert.equal(popupScript.includes("parsed.funId === (candidateFunId || selectedFunId)"), true);
-  assert.equal(popupScript.includes("selectedFunId === titleInfo.funId"), true);
-  assert.equal(popupScript.includes('resolvedBy: "selected-tab-id"'), true);
+  assert.equal(popupScript.includes("function inspectCurrentProcedureContext"), false);
+  assert.equal(popupScript.includes('type: "run-page-command"'), true);
   assert.equal(popupScript.includes("(!payload.sourceId && !payload.alias)"), true);
+});
+
+test("page bridge traverses deep cyclic Vue data without overflowing the call stack", () => {
+  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
+  const helperSource = pageBridge.slice(
+    pageBridge.indexOf("function walk"),
+    pageBridge.indexOf("function getVueInstance")
+  );
+  const context = {};
+  vm.runInNewContext(`${helperSource}\nglobalThis.walk = walk;\nglobalThis.findDeepFirst = findDeepFirst;`, context);
+  const root = {};
+  let current = root;
+  for (let index = 0; index < 20000; index += 1) {
+    current.next = {};
+    current = current.next;
+  }
+  current.root = root;
+  let visited = 0;
+  context.walk(root, () => { visited += 1; });
+  assert.equal(visited, 20001);
+
+  root.pageId = "PG-1";
+  Object.defineProperty(root.next, "blocked", {
+    get() {
+      throw new Error("findDeepFirst continued after finding pageId");
+    }
+  });
+  assert.equal(context.findDeepFirst(root, ["pageId"]), "PG-1");
 });
 
 test("floating pull shows a visible diagnostic message", () => {

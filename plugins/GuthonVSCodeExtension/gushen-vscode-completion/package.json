@@ -32,6 +32,7 @@
   },
   "scripts": {
     "build:data": "node scripts/build-data.mjs",
+    "package": "vsce package",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {}

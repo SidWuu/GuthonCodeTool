@@ -80,10 +80,6 @@ for (const [language, fileName] of sources) {
   const markdown = fs.readFileSync(filePath, 'utf8');
   const items = parseMarkdown(markdown, language);
   index[language] = items;
-  fs.writeFileSync(
-    path.join(outputDir, `${language}.json`),
-    `${JSON.stringify(items, null, 2)}\n`
-  );
 }
 
 fs.writeFileSync(path.join(outputDir, 'index.json'), `${JSON.stringify(index, null, 2)}\n`);

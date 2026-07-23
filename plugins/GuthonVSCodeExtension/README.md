@@ -76,7 +76,7 @@ Shell Command: Install 'code' command in PATH
 
 ```bash
 cd plugins/GuthonVSCodeExtension/gushen-vscode-completion
-vsce package
+npm run package
 code --install-extension gushen-vscode-completion-0.1.0.vsix --force
 ```
 
@@ -148,20 +148,13 @@ gushen-vscode-completion/data/manual.json
 cd plugins/GuthonVSCodeExtension/gushen-vscode-completion
 npm run build:data -- /path/to/api-docs
 npm test
-vsce package
+npm run package
 code --install-extension gushen-vscode-completion-0.1.0.vsix --force
 ```
 
 `/path/to/api-docs` 目录需要包含 `java.md`、`javascript.md` 和 `sql.md`。
 
-`npm run build:data` 会重新生成：
-
-```text
-data/java.json
-data/javascript.json
-data/sql.json
-data/index.json
-```
+`npm run build:data` 会重新生成 `data/index.json`。
 
 不会覆盖：
 

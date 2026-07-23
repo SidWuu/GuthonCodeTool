@@ -147,26 +147,6 @@ function sendRuntimeMessage(message) {
   });
 }
 
-async function getOutputDir() {
-  const storageLocal = getStorageLocal();
-  if (!storageLocal) {
-    throw new Error("extension context invalid");
-  }
-  const stored = await storageLocal.get(OUTPUT_DIR_STORAGE_KEY);
-  const outputDir = String(stored[OUTPUT_DIR_STORAGE_KEY] || "").trim();
-  if (!outputDir) {
-    throw new Error("请先点击插件图标，在弹窗里填写保存目录");
-  }
-  if (!outputDir.startsWith("/")) {
-    throw new Error("保存目录必须是本机绝对路径");
-  }
-  return outputDir;
-}
-
-function buildObjectKey(target) {
-  return `${target.procedureKeyword || target.procedureName || ""}#${target.funId || ""}`;
-}
-
 function setButtonTitle(root, message) {
   root.querySelector("button").title = message;
 }
@@ -234,15 +214,6 @@ function isBillTypeRoute() {
 function findNativeToolbar(scope = document) {
   return Array.from(scope.querySelectorAll(".tool-menu.tool-box, .gd-function-head, .function.head"))
     .find(isVisible);
-}
-
-function findCurrentPageToolbar() {
-  const activePane = Array.from(document.querySelectorAll('[role="tabpanel"]')).find(isVisible);
-  const workContext = activePane?.querySelector(".work-context");
-  const toolbar =
-    (workContext && findNativeToolbar(workContext)) ||
-    findNativeToolbar(activePane || document);
-  return toolbar || null;
 }
 
 function makeNativeButton(text, className) {
@@ -571,7 +542,7 @@ async function pullCurrentProcedure(root, button = root.querySelector("button"),
       throw new Error(`本地桥接服务不可用: ${bridgeHealth?.message || "unknown"}`);
     }
 
-    const inspected = await runPageCommand(isModuleRoute() ? "inspectCurrentPageSource" : "inspectCurrentProcedure");
+    const inspected = await runPageCommand(isModuleRoute() ? "inspect-hub-source" : "inspectCurrentProcedure");
     if (!inspected?.ok) {
       throw new Error(`${isModuleRoute() ? "识别当前页面失败" : "识别当前函数失败"}: ${inspected?.message || (isModuleRoute() ? "未识别到当前页面" : "未识别到当前过程函数")}`);
     }
@@ -820,13 +791,6 @@ function installTreeAutoScroll() {
   gTreeScrollListenerInstalled = true;
 }
 
-function getVueInstance(element) {
-  if (!element || typeof element !== "object") {
-    return null;
-  }
-  return element.__vue__ || element.__vueParentComponent?.proxy || null;
-}
-
 async function showFieldsMoverOverlay(root) {
   if (!isModuleRoute()) {
     throw new Error("字段平移只支持模块开发页面");
@@ -872,381 +836,6 @@ async function pasteCopiedFields(root) {
   setMessage(root, `已粘贴 ${pasted.data.pasted} 个，跳过重复 ${pasted.data.duplicate} 个，无效 ${pasted.data.invalid} 个`, "success");
   return pasted.data;
 }
-
-function readFirst(obj, keys) {
-  for (const key of keys) {
-    const value = obj?.[key];
-    if (value !== undefined && value !== null && value !== "") {
-      if (typeof value === "object") {
-        return JSON.stringify(value);
-      }
-      return String(value);
-    }
-  }
-  return "";
-}
-
-function readNestedFirst(obj, paths) {
-  for (const path of paths) {
-    const value = path.split(".").reduce((holder, key) => holder?.[key], obj);
-    if (value !== undefined && value !== null && value !== "") {
-      if (typeof value === "object") {
-        return JSON.stringify(value);
-      }
-      return String(value);
-    }
-  }
-  return "";
-}
-
-function isTruthy(value) {
-  return value === true || value === 1 || value === "1" || value === "true" || value === "Y" || value === "yes";
-}
-
-function isFalsy(value) {
-  return value === false || value === 0 || value === "0" || value === "false" || value === "N" || value === "no";
-}
-
-function hasFieldMeta(field) {
-  return Boolean(field.type || field.format || field.template || field.selectType || field.valueField || field.otherFill || field.queryParams);
-}
-
-function mergeFieldInfo(base, extra) {
-  if (!extra) {
-    return base;
-  }
-  return {
-    ...base,
-    field: base.field || extra.field,
-    label: base.label || extra.label,
-    type: base.type || extra.type,
-    format: base.format || extra.format,
-    template: base.template || extra.template,
-    selectType: base.selectType || extra.selectType,
-    valueField: base.valueField || extra.valueField,
-    otherFill: base.otherFill || extra.otherFill,
-    queryParams: base.queryParams || extra.queryParams,
-    width: base.width || extra.width,
-    sum: base.sum || extra.sum,
-    align: base.align || extra.align,
-    required: base.required || extra.required,
-    hidden: base.hidden || extra.hidden
-  };
-}
-
-function collectHiddenFieldIds(root) {
-  const hiddenFields = new Set();
-  const selector = ".input-hide-area, .hide-field-list";
-  const areas = (root.matches?.(selector) ? [root] : []).concat(Array.from(root.querySelectorAll(selector)));
-  areas.forEach((area) => {
-    Array.from(area.querySelectorAll("*")).forEach((node) => {
-      const ownText = Array.from(node.childNodes)
-        .filter((child) => child.nodeType === Node.TEXT_NODE)
-        .map((child) => child.textContent)
-        .join(" ");
-      const text = [
-        node.getAttribute?.("data-field"),
-        node.getAttribute?.("data-field-id"),
-        node.getAttribute?.("prop"),
-        node.getAttribute?.("title"),
-        ownText
-      ].filter(Boolean).join(" ");
-      const normalized = String(text).replace(/\s+/g, " ").trim();
-      if (normalized) {
-        hiddenFields.add(normalized);
-      }
-      normalized.match(/[A-Za-z0-9_]{2,}/g)?.forEach((token) => hiddenFields.add(token));
-    });
-  });
-  return hiddenFields;
-}
-
-function isDomHiddenField(info, hiddenFields) {
-  return Array.from(hiddenFields).some((value) => value === info.field || value === info.label || value.includes(info.field) || value.includes(info.label));
-}
-
-function makeFieldInfo(obj, extra = {}) {
-  const field = readFirst(obj, ["fieldId", "field", "prop", "property", "columnName", "colName", "name", "id"]);
-  const label = readFirst(obj, ["label", "title", "disName", "displayName", "name"]);
-  if (!field || !label || field.startsWith("el-table_")) {
-    return null;
-  }
-  const requiredValue =
-    obj?.nullable === false || obj?.allowNull === false || obj?.allowBlank === false
-      ? true
-      : readFirst(obj, ["required", "isRequired", "mustInput", "notNull", "isMust", "must", "require"]);
-  const hiddenValue = obj?.visible === false ? true : readFirst(obj, ["hidden", "isHidden", "hide", "isHide"]);
-  const configuredHidden =
-    isTruthy(hiddenValue) || (hiddenValue !== undefined && hiddenValue !== "" && isFalsy(hiddenValue));
-  const info = {
-    field,
-    label,
-    type: readFirst(obj, ["type", "colType", "displayMode", "controlType"]),
-    format: readFirst(obj, ["format", "formatter", "formatType"]),
-    template: readFirst(obj, ["fieldTemplateName", "templateName", "fieldTemplateId"]),
-    selectType: readNestedFirst(obj, ["selectCompName", "selectBox.selectCompName", "selectCompId", "selectBox.selectCompId", "selectType", "dropType", "dataSourceType"]),
-    valueField: readNestedFirst(obj, ["selectBox.selectCodefieldId", "valueField", "valueName", "valueCol", "codeField"]),
-    otherFill: readNestedFirst(obj, ["selectBox.otherSetFields", "otherFill", "otherValue", "fillFields", "fillField"]),
-    queryParams: readNestedFirst(obj, ["selectBox.queryParams", "selectBox.queryParam", "queryParams", "queryParam", "params", "param"]),
-    width: readFirst(obj, ["disWidth", "displayWidth", "width", "labelWidth", "textWidth", "colWidth"]),
-    sum: isTruthy(readFirst(obj, ["isSum", "sum", "summary", "isSummary", "total", "isTotal"])),
-    align: readFirst(obj, ["align", "dataAlign", "textAlign", "headerAlign"]),
-    required: isTruthy(requiredValue),
-    hidden: extra.hidden ? isDomHiddenField({ field, label }, extra.hiddenFields || new Set()) : configuredHidden,
-    index: 0
-  };
-  return info;
-}
-
-function collectControlFields(root, options = {}, hiddenFields = collectHiddenFieldIds(root)) {
-  const fields = [];
-  const selector = "[data-control-name], .input-box, .data-table, .data-table-control, .detail-table, .el-table";
-  const controls = (root.matches?.(selector) ? [root] : []).concat(Array.from(root.querySelectorAll(selector)));
-  controls.forEach((element) => {
-    if (!options.includeHiddenControls && !isVisible(element)) {
-      return;
-    }
-    if (options.excludeTabPages && element.closest('[role="tabpanel"][id^="pane-tabPage"]')) {
-      return;
-    }
-    let vm = getVueInstance(element);
-    for (let depth = 0; vm && depth < 4; depth += 1, vm = vm.$parent) {
-      [
-        { items: vm.fields, hidden: false },
-        { items: vm.columns, hidden: false },
-        { items: vm.hideFields, hidden: true }
-      ].forEach(({ items, hidden }) => {
-        if (!Array.isArray(items)) {
-          return;
-        }
-        items.forEach((item) => {
-          const info = makeFieldInfo(item, { hidden, hiddenFields });
-          if (info && hidden && !isDomHiddenField(info, hiddenFields)) {
-            return;
-          }
-          if (info) {
-            fields.push(info);
-          }
-        });
-      });
-    }
-  });
-  return fields;
-}
-
-function collectConfigFields(root, hiddenFields = collectHiddenFieldIds(root), options = {}) {
-  const fields = [];
-  const seen = new WeakSet();
-
-  function visit(value, depth) {
-    if (!value || typeof value !== "object" || depth > 4 || seen.has(value)) {
-      return;
-    }
-    seen.add(value);
-
-    if (Array.isArray(value)) {
-      value.slice(0, 200).forEach((item) => visit(item, depth + 1));
-      return;
-    }
-
-    const info = makeFieldInfo(value, { hiddenFields });
-    if (info) {
-      fields.push(info);
-    }
-
-    Object.entries(value).forEach(([key, child]) => {
-      if (key === "datasource" || key.startsWith("_") || key.startsWith("$") || typeof child === "function") {
-        return;
-      }
-      if (/field|fields|column|columns|cols|form|table|control|param|items|children/i.test(key)) {
-        visit(child, depth + 1);
-      }
-    });
-  }
-
-  Array.from(root.querySelectorAll("*")).forEach((element) => {
-    if (!options.includeHiddenControls && !isVisible(element)) {
-      return;
-    }
-    const vm = getVueInstance(element);
-    if (vm) {
-      visit(vm, 0);
-    }
-  });
-
-  return fields;
-}
-
-function collectDomFields(root) {
-  const fields = [];
-  root.querySelectorAll(".el-form-item, th").forEach((node) => {
-    const labelNode = node.querySelector(".el-form-item__label, .cell");
-    const label = String(labelNode?.innerText || labelNode?.textContent || "").replace(/\s+/g, " ").trim();
-    const formName =
-      node.querySelector("[prop]")?.getAttribute("prop") ||
-      node.querySelector("[name]")?.getAttribute("name") ||
-      node.querySelector("[for]")?.getAttribute("for") ||
-      node.getAttribute("prop") ||
-      node.getAttribute("for") ||
-      "";
-    if (!label || ["操作", "添加按钮", "删除按钮"].includes(label)) {
-      return;
-    }
-    fields.push({
-      field: formName,
-      label,
-      type: node.matches("th") ? "table-column" : "",
-      format: "",
-      template: "",
-      selectType: "",
-      valueField: "",
-      otherFill: "",
-      queryParams: "",
-      width: "",
-      sum: false,
-      align: "",
-      required: label.startsWith("*"),
-      hidden: false,
-      index: 0
-    });
-  });
-  return fields;
-}
-
-function dedupeFields(fields) {
-  const seen = new Set();
-  return fields.filter((field) => {
-    const key = `${field.field}|${field.label}|${field.type}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-
-function getCurrentPageCode() {
-  const pane = Array.from(document.querySelectorAll('[role="tabpanel"][id^="pane-PG-"]')).find(isVisible);
-  if (pane) {
-    return pane.id.replace(/^pane-/, "");
-  }
-  const selected = document.querySelector('.el-tabs__item[aria-selected="true"][id^="tab-PG-"]');
-  if (selected?.id) {
-    return selected.id.replace(/^tab-/, "");
-  }
-  const searchParams = new URLSearchParams(location.search);
-  const hashQuery = location.hash.includes("?")
-    ? location.hash.slice(location.hash.indexOf("?") + 1)
-    : "";
-  const hashParams = new URLSearchParams(hashQuery);
-  for (const key of ["pageId", "sourceId", "id", "page_id"]) {
-    const value = searchParams.get(key) || hashParams.get(key);
-    if (value) {
-      return String(value).trim();
-    }
-  }
-  return "";
-}
-
-function readElementName(element) {
-  const raw =
-    element?.getAttribute?.("data-control-name") ||
-    element?.getAttribute?.("name") ||
-    element?.getAttribute?.("data-name") ||
-    element?.getAttribute?.("aria-label") ||
-    element?.id ||
-    "";
-  return String(raw).replace(/^pane-/, "").replace(/^tab-/, "").trim();
-}
-
-function collectGroupFields(root, options = {}) {
-  const hiddenFields = collectHiddenFieldIds(root);
-  const controlFields = collectControlFields(root, options, hiddenFields);
-  const configFields = collectConfigFields(root, hiddenFields, options);
-  const domFields = collectDomFields(root);
-  const metaByField = new Map(configFields.filter(hasFieldMeta).map((field) => [field.field, field]));
-  const fields = (controlFields.length ? controlFields : configFields.length ? configFields : domFields)
-    .map((field) => mergeFieldInfo(field, metaByField.get(field.field)));
-  return dedupeFields(fields).filter((field) => field.field);
-}
-
-function normalizeGroups(groups) {
-  return groups.map((group) => ({
-    ...group,
-    fields: group.fields.map((field, index) => ({ ...field, index: index + 1 }))
-  }));
-}
-
-function collectModulePageFields() {
-  const pageCode = getCurrentPageCode();
-  const activePane =
-    Array.from(document.querySelectorAll('[role="tabpanel"][id^="pane-PG-"]')).find(isVisible) ||
-    Array.from(document.querySelectorAll('[role="tabpanel"]')).find(isVisible);
-  const activeWorkContext = Array.from((activePane || document).querySelectorAll(".work-context")).find(isVisible);
-  const groups = [];
-
-  if (activeWorkContext) {
-    const mainRoot = activeWorkContext.querySelector(".tool-menu.tool-box")?.closest(".el-tab-pane") || activeWorkContext;
-    groups.push({
-      title: readElementName(mainRoot) || "form",
-      fields: collectGroupFields(mainRoot, { excludeTabPages: true })
-    });
-  }
-
-  Array.from((activeWorkContext || activePane || document).querySelectorAll('[role="tabpanel"][id^="pane-tabPage"]')).forEach((pane, index) => {
-    const tabId = pane.getAttribute("aria-labelledby");
-    const label = tabId ? String(document.getElementById(tabId)?.innerText || "").trim() : "";
-    groups.push({
-      title: label || readElementName(pane) || `tabPage${index}`,
-      fields: collectGroupFields(pane, { includeHiddenControls: true })
-    });
-  });
-
-  return {
-    pageCode,
-    groups: normalizeGroups(groups.filter((group) => group.fields.length))
-  };
-}
-
-function formatFieldLine(field) {
-  const lines = [
-    `序号: ${field.index || ""}`,
-    `字段: ${field.field || ""}`,
-    `显示名称: ${field.label}`,
-    `显示类型: ${field.type}`,
-    `显示格式: ${field.format}`,
-    `字段模板: ${field.template}`,
-    `显示宽度: ${field.width || ""}`,
-    `是否必填: ${field.required ? "是" : "否"}`,
-    `是否合计: ${field.sum ? "是" : "否"}`,
-    `数据对齐: ${field.align || ""}`,
-    `显示: ${field.hidden ? "否" : "是"}`
-  ];
-  if (field.type === "select" || field.selectType || field.valueField || field.otherFill || field.queryParams) {
-    lines.push(
-      `下拉类型: ${field.selectType}`,
-      `数值字段: ${field.valueField}`,
-      `其他填值: ${field.otherFill}`,
-      `查询参数: ${field.queryParams}`
-    );
-  }
-  return lines.map((line) => `|  |- ${line}`).join("\n");
-}
-
-function formatModuleCopyText(data) {
-  const lines = [`|- 当前页面编码 ${data.pageCode || ""}`];
-  data.groups.forEach((group) => {
-    lines.push(`|- ${group.title}`);
-    group.fields.forEach((field) => {
-      lines.push(formatFieldLine(field));
-    });
-  });
-  if (data.groups.length === 0) {
-    lines.push("|- 未识别到字段信息");
-  }
-  return lines.join("\n");
-}
-
 function selectNodeText(node) {
   const range = document.createRange();
   range.selectNodeContents(node);
@@ -1541,12 +1130,11 @@ async function showCopyOverlay() {
   });
   document.body.appendChild(overlay);
   const copied = await runPageCommand("collectModuleCopyText");
-  if (copied?.ok) {
-    renderCopyData(overlay, copied.data.data, copied.data.text);
-  } else {
-    const data = collectModulePageFields();
-    renderCopyData(overlay, data, formatModuleCopyText(data));
+  if (!copied?.ok) {
+    removeNode(COPY_OVERLAY_ID);
+    throw new Error(copied?.message || "读取页面字段失败");
   }
+  renderCopyData(overlay, copied.data.data, copied.data.text);
 }
 
 async function refreshToolbarButtons() {
@@ -1583,18 +1171,20 @@ async function refreshToolbarButtons() {
 
 getRuntime()?.onMessage?.addListener((message, sender, sendResponse) => {
   const root = document.getElementById(FLOATING_ROOT_ID) || document.body;
-  const action = message?.type === "show-copy-overlay"
-    ? () => showCopyOverlay()
+  const action = message?.type === "run-page-command"
+    ? () => runPageCommand(message.command, message.payload)
+    : message?.type === "show-copy-overlay"
+    ? async () => ({ ok: true, data: await showCopyOverlay() })
     : message?.type === "show-fields-mover"
-      ? () => showFieldsMoverOverlay(root)
+      ? async () => ({ ok: true, data: await showFieldsMoverOverlay(root) })
       : message?.type === "paste-fields-mover"
-        ? () => pasteCopiedFields(root)
+        ? async () => ({ ok: true, data: await pasteCopiedFields(root) })
         : null;
   if (!action) {
     return false;
   }
   action()
-    .then((data) => sendResponse({ ok: true, data }))
+    .then(sendResponse)
     .catch((error) => sendResponse({ ok: false, message: error?.message || String(error) }));
   return true;
 });
