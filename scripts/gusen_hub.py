@@ -378,6 +378,21 @@ def query_source_context(conn, product_id, source_id, fun_id="", limit=20):
     return {"source": source, "outgoing": outgoing, "incoming": incoming, "dynamic": dynamic}
 
 
+def query_incoming_callers(conn, product_id, target_alias_id, target_fun_id, limit=100):
+    limit = max(1, min(int(limit), 100))
+    return conn.execute(
+        """
+        SELECT source_layer, project_id, source_table, source_id, source_alias_id, fun_id,
+               source_name, script_type, json_path, line_no, invoke_type, confidence
+        FROM gusen_invoke_call
+        WHERE product_id=? AND target_alias_id=? AND target_fun_id=?
+        ORDER BY source_table, source_alias_id, fun_id, line_no
+        LIMIT ?
+        """,
+        (product_id, target_alias_id, target_fun_id, limit),
+    ).fetchall()
+
+
 def db_connect(ds: dict):
     if ds.get("type", "mysql") != "mysql":
         raise SystemExit(f"Only mysql datasource is implemented now: {ds.get('name')}")
@@ -652,7 +667,9 @@ LIMIT 1
 
 def run_sync_once(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--init-only", action="store_true", help="create local sqlite schema and docs only")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--init-only", action="store_true", help="create local sqlite schema and docs only")
+    mode.add_argument("--reindex-calls", action="store_true", help="rebuild call index from local readonly sources")
     parsed = parser.parse_args(args)
     cfg = load_config()
     sync = cfg["sync"]["sync"]
@@ -662,6 +679,16 @@ def run_sync_once(args=None):
     if parsed.init_only:
         active, _products, _projects = resolve_active(cfg)
         export_status(conn, {"mode": "init-only", "active": active, "changed": 0, "candidates": 0, "failures": 0})
+        export_knowledge_readme(conn, index_name, active)
+        return
+    if parsed.reindex_calls:
+        active, products, projects = resolve_active(cfg)
+        for product_id, product in products:
+            reconcile_readonly_index_paths(conn, "PRODUCT", product_id, "", product)
+        for project_id, project in projects:
+            reconcile_readonly_index_paths(conn, "PROJECT", project["product_id"], project_id, project)
+        indexed = reindex_local_calls(conn)
+        export_status(conn, {"mode": "reindex-calls", "active": active, "changed": indexed, "failures": 0})
         export_knowledge_readme(conn, index_name, active)
         return
 
@@ -1073,7 +1100,7 @@ CALL_PATTERNS = [
     ("vm_open_dialog", re.compile(r"\$vm\.openDialog\(\s*['\"]([^'\"]+)['\"]")),
     ("gutil_request", re.compile(r"gUtil\.request\(\s*['\"]([^'\"]+)['\"]")),
 ]
-PROC_FIND = re.compile(r"#set\(\s*\$(\w+)\s*=\s*\$vs\.proc\.find\(\s*['\"]([^'\"]+)['\"]\s*\)")
+PROC_FIND = re.compile(r"#set\s*\(\s*\$(\w+)\s*=\s*\$vs\.proc\.find\(\s*['\"]([^'\"]+)['\"]\s*\)")
 
 
 def index_calls(conn, row, layer, product_id, project_id, script_type, script_path, content, indexed_time):
@@ -1111,6 +1138,39 @@ def _insert_call(conn, row, layer, product_id, project_id, script_type, script_p
         """,
         (layer, product_id, project_id, row["source_table"], row["source_id"], _source_alias_id(row), row["fun_id"] or "", row["source_name"], script_type, str(script_path.relative_to(ROOT)), line_no, target_alias, target_fun, expr.strip(), invoke_type, "HIGH", _str(row.get("update_time")), indexed_time),
     )
+
+
+def reindex_local_calls(conn):
+    conn.execute("DELETE FROM gusen_invoke_call")
+    conn.execute("DELETE FROM gusen_dynamic_call")
+    indexed = 0
+    rows = conn.execute("SELECT * FROM gusen_source_record WHERE status='OK' ORDER BY local_path").fetchall()
+    for row in rows:
+        base = ROOT / row["local_path"]
+        if row["source_table"] == PAGE_SOURCE_TYPE:
+            scripts = [
+                (path.stem, path, path.read_text(encoding="utf-8"))
+                for path in sorted((base / "scripts").glob("*"))
+                if path.is_file()
+            ]
+        else:
+            path = base / "source.vm"
+            scripts = [("procedure_script", path, path.read_text(encoding="utf-8"))] if path.is_file() else []
+        for script_type, script_path, content in scripts:
+            index_calls(
+                conn,
+                dict(row),
+                row["source_layer"],
+                row["product_id"],
+                row["project_id"],
+                script_type,
+                script_path,
+                content,
+                _now(),
+            )
+            indexed += 1
+    conn.commit()
+    return indexed
 
 
 def export_product_docs(conn, product_id):

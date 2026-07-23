@@ -34,6 +34,27 @@ ROW = {
 
 
 class WorkCopyTest(unittest.TestCase):
+    def test_reindex_mode_repairs_paths_before_rebuilding_calls(self):
+        conn = MagicMock()
+        cfg = {"sync": {"sync": {}}}
+        product = {"name": "产品A"}
+        project = {"name": "项目A", "product_id": "product-a"}
+        calls = []
+        with patch.multiple(
+            gusen_hub,
+            load_config=MagicMock(return_value=cfg),
+            active_index_path=MagicMock(return_value=gusen_hub.ROOT / "var/index.db"),
+            connect_index=MagicMock(return_value=conn),
+            resolve_active=MagicMock(return_value=("products.product-a", [("product-a", product)], [("project-a", project)])),
+            reconcile_readonly_index_paths=MagicMock(side_effect=lambda *_args: calls.append("repair")),
+            reindex_local_calls=MagicMock(side_effect=lambda *_args: calls.append("reindex") or 2),
+            export_status=MagicMock(),
+            export_knowledge_readme=MagicMock(),
+        ):
+            gusen_hub.run_sync_once(["--reindex-calls"])
+
+        self.assertEqual(["repair", "repair", "reindex"], calls)
+
     def test_auto_git_add_stages_only_new_workcopy_files(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

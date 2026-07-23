@@ -164,6 +164,12 @@ rules:
 .venv/bin/python scripts/run_sync_once.py
 ```
 
+仅在调用识别规则升级后，从现有只读源码重建调用索引：
+
+```bash
+.venv/bin/python scripts/run_sync_once.py --reindex-calls
+```
+
 ### 3. 拉取源码并创建工作副本
 
 从已有源码索引生成工作副本：

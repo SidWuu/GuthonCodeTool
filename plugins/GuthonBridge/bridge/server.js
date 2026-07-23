@@ -13,6 +13,7 @@ const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_P
 const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "scripts", "pull_source_to_work_copy.py");
 const TABLE_SCHEMA_SCRIPT = process.env.GUTHON_TABLE_SCHEMA_SCRIPT || path.join(ROOT, "scripts", "export_table_schema_sql.py");
 const BILL_TYPE_SCRIPT = process.env.GUTHON_BILL_TYPE_SCRIPT || path.join(ROOT, "scripts", "export_bill_type_sql.py");
+const HUB_QUERY_SCRIPT = process.env.GUTHON_HUB_QUERY_SCRIPT || path.join(ROOT, "scripts", "query_hub_context.py");
 const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(ROOT, "var", "runtime", "logs", "pull-log.ndjson");
 
 fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
@@ -210,6 +211,18 @@ function runBillTypeExport(payload) {
   return runJsonCommand(args, "单据类型拉取");
 }
 
+function runProcedureCallers(payload) {
+  const alias = String(payload.alias || "").trim();
+  const funId = String(payload.funId || "").trim();
+  if (!alias || !funId) {
+    throw new Error("缺少过程别名或函数名");
+  }
+  return runJsonCommand(
+    [HUB_QUERY_SCRIPT, "callers", "--alias", alias, "--fun", funId, "--limit", "100"],
+    "调用方查询"
+  );
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     return sendJson(res, 200, { ok: true });
@@ -368,6 +381,15 @@ const server = http.createServer(async (req, res) => {
         ok: false,
         message: error.message
       });
+      return sendJson(res, 500, { ok: false, message: error.message });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/queryProcedureCallers") {
+    try {
+      const payload = await readBody(req);
+      return sendJson(res, 200, { ok: true, ...(await runProcedureCallers(payload)) });
+    } catch (error) {
       return sendJson(res, 500, { ok: false, message: error.message });
     }
   }

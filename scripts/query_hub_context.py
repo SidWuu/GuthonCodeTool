@@ -19,6 +19,10 @@ def main(args=None):
     context.add_argument("--source-id", required=True)
     context.add_argument("--fun", default="")
     context.add_argument("--limit", type=int, default=20)
+    callers = subparsers.add_parser("callers")
+    callers.add_argument("--alias", required=True)
+    callers.add_argument("--fun", required=True)
+    callers.add_argument("--limit", type=int, default=100)
     parsed = parser.parse_args(args)
     cfg = gusen_hub.load_config()
     _active, products, projects = gusen_hub.resolve_active(cfg)
@@ -30,8 +34,13 @@ def main(args=None):
     try:
         if parsed.command == "find":
             result = {"productId": product_id, "candidates": _rows(gusen_hub.find_source_candidates(conn, product_id, parsed.keyword, parsed.limit))}
-        else:
+        elif parsed.command == "context":
             result = {key: (dict(value) if key == "source" else _rows(value)) for key, value in gusen_hub.query_source_context(conn, product_id, parsed.source_id, parsed.fun, parsed.limit).items()}
+        else:
+            result = {
+                "target": {"alias": parsed.alias, "funId": parsed.fun},
+                "callers": _rows(gusen_hub.query_incoming_callers(conn, product_id, parsed.alias, parsed.fun, parsed.limit)),
+            }
     finally:
         conn.close()
     print(json.dumps(result, ensure_ascii=False, indent=2))

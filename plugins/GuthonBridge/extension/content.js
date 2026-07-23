@@ -2,6 +2,7 @@ const OUTPUT_DIR_STORAGE_KEY = "guthonBridgeOutputDir";
 const FLOATING_ROOT_ID = "guthon-bridge-floating-root";
 const COPY_OVERLAY_ID = "guthon-bridge-copy-overlay";
 const FIELDS_MOVER_OVERLAY_ID = "guthon-bridge-fields-mover-overlay";
+const CALLERS_OVERLAY_ID = "guthon-bridge-callers-overlay";
 
 let gIntervalId = null;
 let gTreeScrollListenerInstalled = false;
@@ -72,7 +73,7 @@ async function ensurePageBridge() {
   async function injectPageScript(name) {
     await new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `${runtime.getURL(name)}?v=20260721b`;
+      script.src = `${runtime.getURL(name)}?v=20260723d`;
       script.dataset.source = "guthon-bridge";
       script.onload = () => { script.remove(); resolve(); };
       script.onerror = () => { script.remove(); reject(new Error("页面桥接脚本加载失败")); };
@@ -226,13 +227,13 @@ function makeNativeButton(text, className) {
 
 function ensureInlineStyles() {
   const existing = document.getElementById("guthon-bridge-inline-style");
-  if (existing?.dataset.version === "20260717h") {
+  if (existing?.dataset.version === "20260723b") {
     return;
   }
   existing?.remove();
   const style = document.createElement("style");
   style.id = "guthon-bridge-inline-style";
-  style.dataset.version = "20260717h";
+  style.dataset.version = "20260723b";
   style.textContent = `
     .guthon-bridge-inline {
       position: fixed;
@@ -326,6 +327,63 @@ function ensureInlineStyles() {
     }
     .guthon-bridge-message[data-tone="success"] {
       color: #67c23a;
+    }
+    #${CALLERS_OVERLAY_ID} {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483647;
+      display: grid;
+      place-items: start center;
+      padding: 10vh 24px 24px;
+      box-sizing: border-box;
+      background: rgba(15, 23, 42, 0.42);
+    }
+    #${CALLERS_OVERLAY_ID} .guthon-bridge-callers-panel {
+      width: min(720px, 100%);
+      max-height: calc(90vh - 48px);
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border: 1px solid #dcdfe6;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+    }
+    #${CALLERS_OVERLAY_ID} .guthon-bridge-callers-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid #ebeef5;
+    }
+    #${CALLERS_OVERLAY_ID} .guthon-bridge-callers-list {
+      overflow: auto;
+      padding: 8px;
+    }
+    #${CALLERS_OVERLAY_ID} .guthon-bridge-caller {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      margin: 0 0 6px;
+      padding: 9px 10px;
+      border: 1px solid #ebeef5;
+      background: #fff;
+      color: #303133;
+      text-align: left;
+      cursor: pointer;
+    }
+    #${CALLERS_OVERLAY_ID} .guthon-bridge-caller:hover {
+      border-color: #409eff;
+      background: #ecf5ff;
+    }
+    #${CALLERS_OVERLAY_ID} .guthon-bridge-caller-meta,
+    #${CALLERS_OVERLAY_ID} .guthon-bridge-callers-state {
+      color: #909399;
+      font-size: 12px;
+    }
+    #${CALLERS_OVERLAY_ID} .guthon-bridge-callers-state {
+      padding: 16px;
     }
     #${FIELDS_MOVER_OVERLAY_ID} {
       position: fixed;
@@ -934,6 +992,80 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function callerLabel(caller) {
+  if (caller.source_table === "page") {
+    return `模块开发 · ${caller.source_name || caller.source_alias_id || caller.source_id}`;
+  }
+  return `过程函数 · ${caller.source_alias_id}.${caller.fun_id}`;
+}
+
+function callerMeta(caller) {
+  const layer = caller.source_layer === "PROJECT" ? "项目层" : "产品层";
+  const location = caller.line_no ? `第 ${caller.line_no} 行` : "未记录行号";
+  return `${layer} · ${location}`;
+}
+
+async function showProcedureCallers(target) {
+  removeNode(CALLERS_OVERLAY_ID);
+  ensureInlineStyles();
+  const overlay = document.createElement("div");
+  overlay.id = CALLERS_OVERLAY_ID;
+  overlay.innerHTML = `
+    <div class="guthon-bridge-callers-panel">
+      <div class="guthon-bridge-callers-head">
+        <strong>${escapeHtml(target.procedureKeyword)}.${escapeHtml(target.funId)} 的调用方</strong>
+        <button type="button" class="el-button el-button--default el-button--mini is-plain">关闭</button>
+      </div>
+      <div class="guthon-bridge-callers-list">
+        <div class="guthon-bridge-callers-state">正在查询调用方...</div>
+      </div>
+    </div>
+  `;
+  overlay.querySelector(".guthon-bridge-callers-head button").addEventListener("click", () => removeNode(CALLERS_OVERLAY_ID));
+  document.body.appendChild(overlay);
+
+  const result = await sendRuntimeMessage({
+    type: "query-procedure-callers",
+    payload: { alias: target.procedureKeyword, funId: target.funId }
+  });
+  if (!result?.ok) {
+    throw new Error(result?.message || "调用方查询失败");
+  }
+  const callers = Array.isArray(result.callers) ? result.callers : [];
+  const list = overlay.querySelector(".guthon-bridge-callers-list");
+  if (!callers.length) {
+    list.innerHTML = '<div class="guthon-bridge-callers-state">未找到静态调用方</div>';
+    return;
+  }
+  list.innerHTML = callers.map((caller, index) => `
+    <button type="button" class="guthon-bridge-caller" data-index="${index}">
+      <strong>${escapeHtml(callerLabel(caller))}</strong>
+      <span class="guthon-bridge-caller-meta">${escapeHtml(callerMeta(caller))}</span>
+    </button>
+  `).join("");
+  list.addEventListener("click", async (event) => {
+    const button = event.target.closest(".guthon-bridge-caller");
+    if (!button) {
+      return;
+    }
+    const caller = callers[Number(button.dataset.index)];
+    button.disabled = true;
+    try {
+      const opened = await runPageCommand(
+        caller.source_table === "page" ? "open-module-caller" : "open-procedure-caller",
+        caller
+      );
+      if (!opened?.ok) {
+        throw new Error(opened?.message || "跳转失败");
+      }
+      removeNode(CALLERS_OVERLAY_ID);
+    } catch (error) {
+      button.disabled = false;
+      list.insertAdjacentHTML("afterbegin", `<div class="guthon-bridge-callers-state">${escapeHtml(error?.message || "跳转失败")}</div>`);
+    }
+  });
+}
+
 function renderTableCell(value) {
   const text = escapeHtml(value);
   return `<td><div class="guthon-bridge-cell-value" title="${text}">${text}</div></td>`;
@@ -1187,6 +1319,23 @@ getRuntime()?.onMessage?.addListener((message, sender, sendResponse) => {
     .then(sendResponse)
     .catch((error) => sendResponse({ ok: false, message: error?.message || String(error) }));
   return true;
+});
+
+window.addEventListener("message", (event) => {
+  const message = event.data;
+  if (
+    event.source === window
+    && message?.source === "guthon-page-bridge"
+    && message?.event === "procedure-callers-request"
+  ) {
+    showProcedureCallers(message.data).catch((error) => {
+      const state = document.querySelector(`#${CALLERS_OVERLAY_ID} .guthon-bridge-callers-state`);
+      if (state) {
+        state.textContent = error?.message || "调用方查询失败";
+      }
+      console.error("谷神桥接：调用方查询失败", error);
+    });
+  }
 });
 
 refreshToolbarButtons().catch(() => {});

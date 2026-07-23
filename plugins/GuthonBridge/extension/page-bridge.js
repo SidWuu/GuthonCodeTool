@@ -203,6 +203,40 @@
     return procedureKeyword ? { procedureKeyword, funId: word } : null;
   }
 
+  function resolveProcedureDefinitionTarget(source, offset) {
+    if (typeof source !== "string" || !Number.isInteger(offset)) {
+      return null;
+    }
+    const definition = /\bfunction\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*\(/g;
+    for (const match of source.matchAll(definition)) {
+      const fullName = match[1];
+      const start = match.index + match[0].indexOf(fullName);
+      if (offset < start || offset > start + fullName.length) {
+        continue;
+      }
+      const separator = fullName.lastIndexOf(".");
+      return {
+        procedureKeyword: fullName.slice(0, separator),
+        funId: fullName.slice(separator + 1)
+      };
+    }
+    return null;
+  }
+
+  function resolveProcedureDefinitionText(text) {
+    const match = String(text || "").match(
+      /\bfunction\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*\(/
+    );
+    if (!match) {
+      return null;
+    }
+    const separator = match[1].lastIndexOf(".");
+    return {
+      procedureKeyword: match[1].slice(0, separator),
+      funId: match[1].slice(separator + 1)
+    };
+  }
+
   function resolveLocalFunctionTarget(source, offset) {
     if (typeof source !== "string" || !Number.isInteger(offset) || source[offset - 1] !== "@") {
       return null;
@@ -225,6 +259,10 @@
     const local = resolveLocalFunctionTarget(model.getValue(), offset);
     if (local) {
       return { local, word, lineNumber: position.lineNumber };
+    }
+    const definition = resolveProcedureDefinitionTarget(model.getValue(), offset);
+    if (definition) {
+      return { definition: true, target: definition, word, lineNumber: position.lineNumber };
     }
     const target = resolveProcedureTarget(model.getValue(), offset);
     return target ? { target, word, lineNumber: position.lineNumber } : null;
@@ -321,12 +359,100 @@
     await openProcedureTarget({ ...procedure, funId: target.funId });
   }
 
+  function requestProcedureCallers(target) {
+    const key = `${target.procedureKeyword}.${target.funId}`;
+    if (lastCallersRequest === key) {
+      return;
+    }
+    lastCallersRequest = key;
+    setTimeout(() => {
+      if (lastCallersRequest === key) {
+        lastCallersRequest = "";
+      }
+    }, 500);
+    window.postMessage(
+      {
+        source: "guthon-page-bridge",
+        event: "procedure-callers-request",
+        data: target
+      },
+      "*"
+    );
+  }
+
+  async function openProcedureCaller(payload) {
+    await navigateToProcedure(
+      {
+        procedureKeyword: payload.source_alias_id,
+        funId: payload.fun_id
+      },
+      null
+    );
+  }
+
+  async function openModuleCaller(payload) {
+    const router = findVueRouter();
+    if (!router) {
+      throw new Error("未找到谷神页面路由");
+    }
+    try {
+      await router.push({ name: "gdpaas_dev_modules" });
+    } catch (error) {
+      if (!/redundant|duplicated/i.test(error?.message || "")) {
+        throw error;
+      }
+    }
+    const labels = [payload.source_id, payload.source_alias_id, payload.source_name]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      const pageTab = document.getElementById(`tab-${payload.source_id}`);
+      if (pageTab) {
+        pageTab.click();
+        return;
+      }
+      const instances = Array.from(document.querySelectorAll("*")).map(getVueInstance).filter(Boolean);
+      const treeVm = instances.find((vm) => Array.isArray(vm.modules));
+      const developVm = instances.find(
+        (vm) => vm?.$options?.name === "gdpaas_dev_modules" && typeof vm.onOpenPage === "function"
+      ) || (typeof treeVm?.$parent?.onOpenPage === "function" ? treeVm.$parent : null);
+      let page;
+      walk(treeVm?.modules, (item) => {
+        if (String(item.pageId || "") === String(payload.source_id || "")) {
+          page = item;
+          return false;
+        }
+        return undefined;
+      });
+      if (developVm && page) {
+        await Promise.resolve(developVm.onOpenPage(page));
+        return;
+      }
+      const treeItem = Array.from(
+        document.querySelectorAll(".el-tree-node__content, [role='treeitem']")
+      ).find((element) => {
+        const text = String(element.innerText || element.textContent || "").trim();
+        return labels.some((label) => text === label || text.includes(label));
+      });
+      if (treeItem) {
+        treeItem.click();
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("已打开模块开发，但未找到调用页面");
+  }
+
   const navigationEditors = new WeakSet();
   const navigationDisposables = [];
   const navigationDecorations = new Map();
   let navigationBusy = false;
   let minimizedScriptEditor = null;
   let suppressContextMenuUntil = 0;
+  let lastCallersRequest = "";
+  let procedureTitleLink = null;
+  const procedureTitleHighlight = "guthon-procedure-title-link";
 
   function setProcedureLink(editor, hit) {
     if (!editor?.deltaDecorations) {
@@ -559,6 +685,7 @@
   function onNavigationKeyUp(event) {
     if (event.key === "Control" || event.key === "Meta") {
       clearProcedureLinks();
+      highlightProcedureTitle(null);
     }
   }
 
@@ -569,6 +696,72 @@
     suppressContextMenuUntil = 0;
     event.preventDefault();
     event.stopImmediatePropagation();
+  }
+
+  function onProcedureTitleClick(event) {
+    if (
+      event.button !== 0
+      || !isProcedureNavigationModifier(event)
+      || !event.target?.closest?.(".script-editor, .monaco-editor, .gd-function-head, .function.head")
+    ) {
+      return;
+    }
+    const line = event.target.closest(
+      ".sticky-widget, .sticky-line-content, .monaco-sticky-scroll, .view-line, .gd-function-head, .function.head"
+    );
+    const target = resolveProcedureDefinitionText(line?.innerText || line?.textContent || "");
+    if (!target) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    requestProcedureCallers(target);
+  }
+
+  function onProcedureTitleMove(event) {
+    const line = isProcedureNavigationModifier(event)
+      && event.target?.closest?.(".script-editor, .monaco-editor, .gd-function-head, .function.head")
+      && event.target.closest(
+        ".sticky-widget, .sticky-line-content, .monaco-sticky-scroll, .view-line, .gd-function-head, .function.head"
+      );
+    const next = line && resolveProcedureDefinitionText(line.innerText || line.textContent || "") ? line : null;
+    highlightProcedureTitle(next);
+  }
+
+  function highlightProcedureTitle(line) {
+    if (line === procedureTitleLink) {
+      return;
+    }
+    procedureTitleLink?.classList.remove("guthon-procedure-title-cursor");
+    CSS.highlights?.delete(procedureTitleHighlight);
+    procedureTitleLink = line;
+    const match = String(line?.textContent || line?.innerText || "").match(
+      /\bfunction\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*\(/
+    );
+    if (!match || !CSS.highlights || typeof Highlight !== "function") {
+      return;
+    }
+    const start = match.index + match[0].indexOf(match[1]);
+    const end = start + match[1].length;
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    let offset = 0;
+    let node;
+    let started = false;
+    while ((node = walker.nextNode())) {
+      const nextOffset = offset + node.textContent.length;
+      if (!started && start >= offset && start < nextOffset) {
+        range.setStart(node, start - offset);
+        started = true;
+      }
+      if (started && end > offset && end <= nextOffset) {
+        range.setEnd(node, end - offset);
+        CSS.highlights.set(procedureTitleHighlight, new Highlight(range));
+        line.classList.add("guthon-procedure-title-cursor");
+        return;
+      }
+      offset = nextOffset;
+    }
   }
 
   function installProcedureNavigation() {
@@ -606,6 +799,8 @@
               editor.setPosition?.({ lineNumber: hit.local.lineNumber, column: 1 });
               editor.revealLineInCenter?.(hit.local.lineNumber);
               editor.focus?.();
+            } else if (hit.definition) {
+              requestProcedureCallers(hit.target);
             } else {
               await navigateToProcedure(hit.target, element);
             }
@@ -1722,6 +1917,8 @@
     "inspect-hub-source": inspectCurrentHubSource,
     "pull": pullCurrentProcedure,
     "pull-page-source": pullPageSource,
+    "open-procedure-caller": openProcedureCaller,
+    "open-module-caller": openModuleCaller,
     checkOutProcedure: disabledWriteCommand,
     pushProcedure: disabledWriteCommand
   };
@@ -1776,10 +1973,14 @@
 
   window.addEventListener("message", onMessage);
   document.addEventListener("contextmenu", onContextMenu, true);
+  document.addEventListener("click", onProcedureTitleClick, true);
+  document.addEventListener("mousemove", onProcedureTitleMove, true);
   document.addEventListener("keyup", onNavigationKeyUp);
   const navigationStyle = document.createElement("style");
   navigationStyle.textContent = `
     .guthon-procedure-link{color:#409eff!important;cursor:pointer!important}
+    ::highlight(guthon-procedure-title-link){color:#409eff}
+    .guthon-procedure-title-cursor,.guthon-procedure-title-cursor *{cursor:pointer!important}
     .guthon-minimized-script-mask{display:none!important}
     .guthon-minimized-script-editor{display:none!important}
     .guthon-script-editor-minimize{right:42px!important}
@@ -1790,11 +1991,15 @@
   (document.head || document.documentElement).appendChild(navigationStyle);
   const navigationApi = {
     resolveProcedureTarget,
+    resolveProcedureDefinitionTarget,
+    resolveProcedureDefinitionText,
     resolveLocalFunctionTarget,
     findProcedureDevelopVm,
     isProcedureNavigationModifier,
     minimizeScriptEditor,
-    openProcedureInVm
+    openProcedureInVm,
+    openModuleCaller,
+    highlightProcedureTitle
   };
   window.GuthonProcedureNavigation = navigationApi;
   installProcedureNavigation();
@@ -1802,9 +2007,12 @@
   window.__guthonPageBridgeCleanup = function () {
     window.removeEventListener("message", onMessage);
     document.removeEventListener("contextmenu", onContextMenu, true);
+    document.removeEventListener("click", onProcedureTitleClick, true);
+    document.removeEventListener("mousemove", onProcedureTitleMove, true);
     document.removeEventListener("keyup", onNavigationKeyUp);
     clearInterval(navigationInterval);
     clearProcedureLinks();
+    highlightProcedureTitle(null);
     navigationDisposables.forEach((disposable) => disposable?.dispose?.());
     navigationStyle.remove();
     if (window.GuthonProcedureNavigation === navigationApi) {

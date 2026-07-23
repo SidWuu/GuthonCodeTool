@@ -66,6 +66,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse(result);
     }
 
+    if (message.type === "query-procedure-callers") {
+      const result = await postJson("/queryProcedureCallers", message.payload || {});
+      return sendResponse(result);
+    }
+
     return sendResponse({ ok: false, message: "不支持的消息类型" });
   })().catch((error) => {
     sendResponse({

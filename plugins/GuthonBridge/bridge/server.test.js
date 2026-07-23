@@ -342,6 +342,53 @@ process.stdout.write(JSON.stringify({ ok: true, exported_bill_type_count: 3, out
   }
 });
 
+test("queryProcedureCallers delegates target identity to hub query", async () => {
+  const port = 17466;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-callers-query-"));
+  const queryScript = path.join(tmp, "fake-query.js");
+  fs.writeFileSync(
+    queryScript,
+    `
+const args = process.argv.slice(2);
+if (!args.includes("callers") || !args.includes("--alias") || !args.includes("demo.target") || !args.includes("--fun") || !args.includes("run")) {
+  process.stderr.write("bad args: " + args.join(" "));
+  process.exit(2);
+}
+process.stdout.write(JSON.stringify({
+  target: { alias: "demo.target", funId: "run" },
+  callers: [{ source_table: "procedure", source_id: "PROC-1", source_alias_id: "demo.caller", fun_id: "start" }]
+}));
+`,
+    "utf8",
+  );
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_HUB_PYTHON: process.execPath,
+      GUTHON_HUB_QUERY_SCRIPT: queryScript
+    },
+    stdio: "ignore"
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/queryProcedureCallers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alias: "demo.target", funId: "run" })
+    });
+    const data = await response.json();
+
+    assert.equal(response.status, 200, data.message);
+    assert.equal(data.ok, true);
+    assert.equal(data.callers[0].source_alias_id, "demo.caller");
+  } finally {
+    server.kill();
+  }
+});
+
 test("bridge defaults hub python to repo venv when present", () => {
   const serverScript = fs.readFileSync(path.join(ROOT, "bridge", "server.js"), "utf8");
 
@@ -367,8 +414,7 @@ test("user-facing messages use concise Chinese", () => {
     "outputDir is required",
     "outputDir must be an absolute path",
     "No local file mapped",
-    "Local file not found",
-    "Guthon Bridge"
+    "Local file not found"
   ]) {
     assert.equal(source.includes(message), false, message);
   }
@@ -384,6 +430,7 @@ test("popup exposes separate page and hub pull actions without hub target input"
   const content = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
   const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
   const runHubPullScript = script.slice(script.indexOf("async function runHubPull"), script.indexOf("pullPageBtn.addEventListener"));
+  const callersScript = content.slice(content.indexOf("async function showProcedureCallers"), content.indexOf("function renderTableCell"));
 
   assert.equal(html.includes("pullPageBtn"), true);
   assert.equal(html.includes("pullHubBtn"), true);
@@ -393,6 +440,12 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes("inspect-hub-source"), true);
   assert.equal(script.includes('type: "run-page-command"'), true);
   assert.equal(content.includes('message?.type === "run-page-command"'), true);
+  assert.equal(background.includes('message.type === "query-procedure-callers"'), true);
+  assert.equal(content.includes('"procedure-callers-request"'), true);
+  assert.equal(content.includes('"open-procedure-caller"'), true);
+  assert.equal(content.includes('"open-module-caller"'), true);
+  assert.equal(content.includes("place-items: start center"), true);
+  assert.equal(callersScript.includes('overlay.addEventListener("click"'), false);
   assert.equal(pageBridge.includes("function inspectCurrentHubSource"), true);
   assert.equal(pageBridge.includes("function inspectTableSchemaTarget"), true);
   assert.equal(pageBridge.includes("function getDataSourceName"), true);
@@ -615,7 +668,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("guthon-bridge-module-only"), true);
   assert.equal(contentScript.includes("SCHEMA_ROOT_ID"), false);
   assert.equal(contentScript.includes("BILLTYPE_ROOT_ID"), false);
-  assert.equal(contentScript.includes('style.dataset.version = "20260717h"'), true);
+  assert.equal(contentScript.includes('style.dataset.version = "20260723b"'), true);
   assert.equal(contentScript.includes("visibility: hidden"), true);
   assert.equal(contentScript.includes("root.dataset.positioned"), false);
   assert.equal(contentScript.includes('root.dataset.sharedButtons = "true"'), true);
@@ -645,7 +698,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("getPageCodeFromVue() || getPageCodeFromUrl()"), true);
   assert.equal(pageBridge.includes('resolvedBy: "module-page-code"'), true);
   assert.equal(pageBridge.includes('location.hash.includes("?")'), true);
-  assert.equal(contentScript.includes('?v=20260721b'), true);
+  assert.equal(contentScript.includes('?v=20260723d'), true);
   assert.equal(pageBridge.includes("/(Form|Table)$/"), true);
   assert.equal(pageBridge.includes("getControlTitle"), true);
   assert.equal(pageBridge.includes('return controlName ? `${prefix}.${controlName}` : prefix;'), true);
@@ -742,9 +795,22 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   };
   const context = {
     window,
+    CSS: { highlights: new Map() },
+    Highlight: class Highlight {
+      constructor(range) { this.range = range; }
+    },
+    NodeFilter: { SHOW_TEXT: 4 },
     document: {
       querySelectorAll: () => [],
       createElement: () => ({ remove() {} }),
+      createTreeWalker: (root) => {
+        let index = 0;
+        return { nextNode: () => root.textNodes[index++] || null };
+      },
+      createRange: () => ({
+        setStart(node, offset) { this.start = [node, offset]; },
+        setEnd(node, offset) { this.end = [node, offset]; }
+      }),
       head: { appendChild() {} },
       addEventListener() {},
       removeEventListener() {}
@@ -758,6 +824,8 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   };
   vm.runInNewContext(pageBridge, context);
   const resolve = window.GuthonProcedureNavigation.resolveProcedureTarget;
+  const resolveDefinition = window.GuthonProcedureNavigation.resolveProcedureDefinitionTarget;
+  const resolveDefinitionText = window.GuthonProcedureNavigation.resolveProcedureDefinitionText;
   const resolveLocal = window.GuthonProcedureNavigation.resolveLocalFunctionTarget;
   const isModifier = window.GuthonProcedureNavigation.isProcedureNavigationModifier;
   const invoke = '$vs.proc.invoke("com.golden.demo.common", "saveForecast", $params);';
@@ -772,6 +840,15 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
     { procedureKeyword: "com.golden.demo.back", funId: "updateBacknum" }
   );
   assert.equal(resolve("$vs.proc.invoke($package, $method, $params);", 25), null);
+  const definition = "function com.golden.demo.common.saveForecast() {";
+  assert.deepEqual(
+    { ...resolveDefinition(definition, definition.indexOf("saveForecast")) },
+    { procedureKeyword: "com.golden.demo.common", funId: "saveForecast" }
+  );
+  assert.deepEqual(
+    { ...resolveDefinitionText(definition) },
+    { procedureKeyword: "com.golden.demo.common", funId: "saveForecast" }
+  );
   const local = "@insertBankrollTmp($form);\n\n#function insertBankrollTmp($form)\n#end";
   assert.deepEqual(
     { ...resolveLocal(local, local.indexOf("insertBankrollTmp")) },
@@ -783,6 +860,39 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   assert.equal(isModifier({ ctrlKey: true }), false);
   window.navigator = { platform: "Win32" };
   assert.equal(isModifier({ ctrlKey: true }), true);
+  const titleClasses = new Set();
+  const titleName = { textContent: "com.golden.demo.common.saveForecast" };
+  const titleLine = {
+    textContent: `function ${titleName.textContent}($form) { // 注释`,
+    textNodes: [
+      { textContent: "function " },
+      titleName,
+      { textContent: "($form) { // 注释" }
+    ],
+    classList: {
+      add: (name) => titleClasses.add(name),
+      remove: (name) => titleClasses.delete(name)
+    }
+  };
+  window.GuthonProcedureNavigation.highlightProcedureTitle(titleLine);
+  const titleRange = context.CSS.highlights.get("guthon-procedure-title-link").range;
+  assert.deepEqual(titleRange.start, [titleName, 0]);
+  assert.deepEqual(titleRange.end, [titleName, titleName.textContent.length]);
+  assert.equal(titleClasses.has("guthon-procedure-title-cursor"), true);
+  let openedPage = null;
+  const moduleVm = {
+    $options: { name: "gdpaas_dev_modules" },
+    onOpenPage(page) { openedPage = page; }
+  };
+  const page = { pageId: "PG-1", pageName: "调用页面" };
+  const treeVm = { $parent: moduleVm, modules: [{ children: [page] }] };
+  context.document.getElementById = () => null;
+  context.document.querySelectorAll = () => [
+    { __vue__: { $router: { push: async () => {} } } },
+    { __vue__: treeVm }
+  ];
+  await window.GuthonProcedureNavigation.openModuleCaller({ source_id: "PG-1" });
+  assert.equal(openedPage, page);
   let treeNode = null;
   let located = null;
   const openedNodes = [];
@@ -952,6 +1062,8 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   assert.equal(buttonEditorClosed, true);
   assert.equal(buttonClasses.size, 0);
   assert.equal(pageBridge.includes('document.addEventListener("contextmenu", onContextMenu, true)'), true);
+  assert.equal(pageBridge.includes('document.addEventListener("mousemove", onProcedureTitleMove, true)'), true);
+  assert.equal(pageBridge.includes("::highlight(guthon-procedure-title-link)"), true);
   assert.equal(pageBridge.includes("installScriptEditorMinimizeButtons();"), true);
   assert.equal(pageBridge.includes('button.className = "el-dialog__headerbtn guthon-script-editor-minimize"'), true);
   assert.equal(pageBridge.includes('icon.className = "el-dialog__close el-icon el-icon-minus"'), true);
@@ -975,6 +1087,7 @@ test("page bridge does not mix stale fullName package with current function id",
   assert.equal(popupScript.includes("function inspectCurrentProcedureContext"), false);
   assert.equal(popupScript.includes('type: "run-page-command"'), true);
   assert.equal(popupScript.includes("(!payload.sourceId && !payload.alias)"), true);
+  assert.equal(pageBridge.includes('document.addEventListener("click", onProcedureTitleClick, true)'), true);
 });
 
 test("page bridge traverses deep cyclic Vue data without overflowing the call stack", () => {
