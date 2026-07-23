@@ -895,6 +895,11 @@
       .some((node) => /^单据类型/.test(String(node.innerText || node.textContent || "").trim()));
   }
 
+  function isViewManagementPage() {
+    return location.href.includes("/gdpaas/sys/views") || Array.from(document.querySelectorAll('[aria-selected="true"], .is-active, .active'))
+      .some((node) => /^视图管理/.test(String(node.innerText || node.textContent || "").trim()));
+  }
+
   function readFirst(obj, keys) {
     for (const key of keys) {
       const value = obj?.[key];
@@ -1045,6 +1050,22 @@
     return codes;
   }
 
+  function getSelectedViewIds() {
+    const ids = [];
+    Array.from(document.querySelectorAll("body *")).forEach((element) => {
+      if (!isVisible(element) || !isSelectedTableElement(element)) {
+        return;
+      }
+      const row = element.closest("tr");
+      const viewId = String(row?.innerText || row?.textContent || element.innerText || element.textContent || "")
+        .match(/\bV_[A-Z0-9_]+\b/)?.[0];
+      if (viewId && !ids.includes(viewId)) {
+        ids.push(viewId);
+      }
+    });
+    return ids;
+  }
+
   function inspectTableSchemaTarget() {
     const dataSourceId = getDataSourceId();
     if (!dataSourceId) {
@@ -1123,7 +1144,23 @@
     };
   }
 
+  function inspectViewTarget() {
+    const dataSourceId = getDataSourceId();
+    if (!dataSourceId) {
+      throw new Error("当前视图管理页面没有识别到数据源");
+    }
+    return {
+      dataSourceId,
+      dataSourceName: getDataSourceName(),
+      viewIds: getSelectedViewIds(),
+      resolvedBy: "view-management"
+    };
+  }
+
   function inspectCurrentHubSource() {
+    if (isViewManagementPage()) {
+      return { mode: "views", ...inspectViewTarget() };
+    }
     if (isBillTypePage()) {
       return { mode: "billtype", ...inspectBillTypeTarget() };
     }
@@ -1913,6 +1950,7 @@
     inspectCurrentPageSource,
     inspectTableSchemaTarget,
     inspectBillTypeTarget,
+    inspectViewTarget,
     "inspect-current": inspectCurrent,
     "inspect-hub-source": inspectCurrentHubSource,
     "pull": pullCurrentProcedure,

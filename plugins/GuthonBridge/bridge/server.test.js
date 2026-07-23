@@ -342,6 +342,66 @@ process.stdout.write(JSON.stringify({ ok: true, exported_bill_type_count: 3, out
   }
 });
 
+test("exportViewSql delegates view filters to script", async () => {
+  const port = 17467;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-view-command-"));
+  const viewScript = path.join(tmp, "fake-views.js");
+  const logPath = path.join(tmp, "pull-log.ndjson");
+  fs.writeFileSync(
+    viewScript,
+    `
+const args = process.argv.slice(2);
+if (!args.includes("--data-source-ids") || !args.includes("0015")) {
+  process.stderr.write("bad data source args: " + args.join(" "));
+  process.exit(2);
+}
+if (!args.includes("--view-ids") || !args.includes("V_RM_TEST")) {
+  process.stderr.write("bad view args: " + args.join(" "));
+  process.exit(2);
+}
+process.stdout.write(JSON.stringify({ ok: true, exported_view_count: 1, outputDir: "/tmp/views" }));
+`,
+    "utf8",
+  );
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_HUB_PYTHON: process.execPath,
+      GUTHON_VIEW_SQL_SCRIPT: viewScript,
+      GUTHON_PULL_LOG_PATH: logPath
+    },
+    stdio: "ignore"
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/exportViewSql`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dataSourceIds: ["0015"],
+        viewIds: ["V_RM_TEST"]
+      })
+    });
+    const data = await response.json();
+    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
+
+    assert.equal(response.status, 200, data.message);
+    assert.equal(data.exported_view_count, 1);
+    assert.equal(log.pullType, "views");
+    assert.deepEqual(log.summary, {
+      dataSourceIds: ["0015"],
+      viewIds: ["V_RM_TEST"],
+      exported_view_count: 1,
+      outputDir: "/tmp/views"
+    });
+  } finally {
+    server.kill();
+  }
+});
+
 test("queryProcedureCallers delegates target identity to hub query", async () => {
   const port = 17466;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-callers-query-"));
@@ -448,6 +508,7 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(callersScript.includes('overlay.addEventListener("click"'), false);
   assert.equal(pageBridge.includes("function inspectCurrentHubSource"), true);
   assert.equal(pageBridge.includes("function inspectTableSchemaTarget"), true);
+  assert.equal(pageBridge.includes("function inspectViewTarget"), true);
   assert.equal(pageBridge.includes("function getDataSourceName"), true);
   assert.equal(pageBridge.includes("function getLabeledSelectValue"), true);
   assert.equal(pageBridge.includes("[A-Z][A-Z0-9]+_[A-Z0-9_]"), true);
@@ -455,6 +516,7 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes('mode === "billtype"'), true);
   assert.equal(script.includes('type: "export-table-schema"'), true);
   assert.equal(script.includes('type: "export-bill-type"'), true);
+  assert.equal(script.includes('type: "export-view-sql"'), true);
   assert.equal(script.includes('type: "log-pull-failure"'), true);
   assert.equal(background.includes('postJson("/logPullFailure"'), true);
   assert.equal(background.includes('chrome.runtime.onInstalled.addListener'), true);
@@ -555,6 +617,25 @@ test("bill type tab exposes bill type export action", () => {
   assert.equal(contentScript.includes('type: "export-bill-type"'), true);
   assert.equal(contentScript.includes("billTypeCodes"), true);
   assert.equal(backgroundScript.includes("/exportBillType"), true);
+});
+
+test("view management page exposes view source export action", () => {
+  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const backgroundScript = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
+  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
+  const refreshScript = contentScript.slice(
+    contentScript.indexOf("async function refreshToolbarButtons"),
+    contentScript.indexOf("getRuntime()?.onMessage")
+  );
+
+  assert.equal(contentScript.includes("拉取视图源码"), true);
+  assert.equal(contentScript.includes("isViewRoute"), true);
+  assert.equal(refreshScript.includes("isViewRoute()"), true);
+  assert.equal(contentScript.includes("inspectViewTarget"), true);
+  assert.equal(contentScript.includes('type: "export-view-sql"'), true);
+  assert.equal(backgroundScript.includes("/exportViewSql"), true);
+  assert.equal(pageBridge.includes("getSelectedViewIds"), true);
+  assert.equal(pageBridge.includes('mode: "views"'), true);
 });
 
 test("pull button floats over the current Guthon toolbar without changing toolbar layout", () => {

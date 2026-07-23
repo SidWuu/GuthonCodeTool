@@ -71,10 +71,11 @@ diff.md           修改说明草稿
 ```text
 database/schema/{products|projects}/{名称}/    表结构 JSON
 database/billtype/{products|projects}/{名称}/  单据类型 JSON
+database/views/{products|projects}/{名称}/     视图 SQL
 database/dict/                               字典、枚举、字段说明
 ```
 
-表结构和单据类型按根仓库 `config/sync.yaml` 的当前 `sync.ACTIVE` 隔离，目录末级使用产品或项目配置中的 `name`。
+表结构、单据类型和视图源码按根仓库 `config/sync.yaml` 的当前 `sync.ACTIVE` 隔离，目录末级使用产品或项目配置中的 `name`。
 
 ## docs
 

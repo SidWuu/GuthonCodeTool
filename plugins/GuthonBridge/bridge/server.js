@@ -13,6 +13,7 @@ const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_P
 const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "scripts", "pull_source_to_work_copy.py");
 const TABLE_SCHEMA_SCRIPT = process.env.GUTHON_TABLE_SCHEMA_SCRIPT || path.join(ROOT, "scripts", "export_table_schema_sql.py");
 const BILL_TYPE_SCRIPT = process.env.GUTHON_BILL_TYPE_SCRIPT || path.join(ROOT, "scripts", "export_bill_type_sql.py");
+const VIEW_SQL_SCRIPT = process.env.GUTHON_VIEW_SQL_SCRIPT || path.join(ROOT, "scripts", "export_view_sql.py");
 const HUB_QUERY_SCRIPT = process.env.GUTHON_HUB_QUERY_SCRIPT || path.join(ROOT, "scripts", "query_hub_context.py");
 const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(ROOT, "var", "runtime", "logs", "pull-log.ndjson");
 
@@ -152,6 +153,15 @@ function billTypeSummary(payload, result = {}) {
   };
 }
 
+function viewSqlSummary(payload, result = {}) {
+  return {
+    dataSourceIds: Array.isArray(payload.dataSourceIds) ? payload.dataSourceIds : [],
+    viewIds: Array.isArray(payload.viewIds) ? payload.viewIds : [],
+    exported_view_count: result.exported_view_count ?? "",
+    outputDir: result.outputDir || ""
+  };
+}
+
 function runJsonCommand(args, errorLabel, input) {
   return new Promise((resolve, reject) => {
     const child = spawn(HUB_PYTHON, args, {
@@ -209,6 +219,17 @@ function runBillTypeExport(payload) {
     args.push("--bill-type-codes", payload.billTypeCodes.join(","));
   }
   return runJsonCommand(args, "单据类型拉取");
+}
+
+function runViewSqlExport(payload) {
+  const args = [VIEW_SQL_SCRIPT];
+  if (Array.isArray(payload.dataSourceIds) && payload.dataSourceIds.length > 0) {
+    args.push("--data-source-ids", payload.dataSourceIds.join(","));
+  }
+  if (Array.isArray(payload.viewIds) && payload.viewIds.length > 0) {
+    args.push("--view-ids", payload.viewIds.join(","));
+  }
+  return runJsonCommand(args, "视图源码拉取");
 }
 
 function runProcedureCallers(payload) {
@@ -377,6 +398,31 @@ const server = http.createServer(async (req, res) => {
       appendPullLog({
         pullType: "billtype",
         summary: billTypeSummary(payload),
+        payload,
+        ok: false,
+        message: error.message
+      });
+      return sendJson(res, 500, { ok: false, message: error.message });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/exportViewSql") {
+    let payload = {};
+    try {
+      payload = await readBody(req);
+      const result = await runViewSqlExport(payload);
+      appendPullLog({
+        pullType: "views",
+        summary: viewSqlSummary(payload, result),
+        payload,
+        result,
+        ok: result?.ok
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      appendPullLog({
+        pullType: "views",
+        summary: viewSqlSummary(payload),
         payload,
         ok: false,
         message: error.message

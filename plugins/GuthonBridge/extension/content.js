@@ -212,6 +212,11 @@ function isBillTypeRoute() {
     .some((item) => isVisible(item) && isActiveTab(item) && /^单据类型/.test(String(item.innerText || item.textContent || "").trim()));
 }
 
+function isViewRoute() {
+  return location.hash.includes("/gdpaas/sys/views") || Array.from(document.querySelectorAll(".el-tabs__item, .tabs-item, [role='tab']"))
+    .some((item) => isVisible(item) && isActiveTab(item) && /^视图管理/.test(String(item.innerText || item.textContent || "").trim()));
+}
+
 function findNativeToolbar(scope = document) {
   return Array.from(scope.querySelectorAll(".tool-menu.tool-box, .gd-function-head, .function.head"))
     .find(isVisible);
@@ -746,12 +751,59 @@ async function exportCurrentBillType(root, button = root.querySelector("button")
   }
 }
 
+async function exportCurrentViewSql(root, button = root.querySelector("button")) {
+  try {
+    button.disabled = true;
+    setButtonText(root, "源码拉取");
+    setButtonTitle(root, "正在拉取视图源码...");
+    setMessage(root, "正在拉取视图源码...", "busy");
+
+    const bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
+    if (!bridgeHealth?.ok) {
+      throw new Error(`本地桥接服务不可用：${bridgeHealth?.message || "未知错误"}`);
+    }
+
+    const inspected = await runPageCommand("inspectViewTarget");
+    if (!inspected?.ok) {
+      throw new Error(`识别视图失败: ${inspected?.message || "未识别到数据源"}`);
+    }
+
+    const result = await sendRuntimeMessage({
+      type: "export-view-sql",
+      payload: {
+        dataSourceIds: [inspected.data.dataSourceId],
+        viewIds: inspected.data.viewIds || []
+      }
+    });
+    if (!result?.ok) {
+      throw new Error(result?.message || "视图源码拉取失败");
+    }
+
+    button.textContent = "成功";
+    const selected = Array.isArray(inspected.data.viewIds) && inspected.data.viewIds.length > 0;
+    const source = [inspected.data.dataSourceId, inspected.data.dataSourceName].filter(Boolean).join(" ");
+    const detail = selected ? `已拉取选中视图: ${inspected.data.viewIds.join(", ")}` : `已拉取数据源 ${source} 全部视图`;
+    setButtonTitle(root, `${detail}: ${result.outputDir}`);
+    setMessage(root, `${detail}: ${result.exported_view_count}`, "success");
+    setTimeout(() => setButtonText(root, "源码拉取"), 1600);
+  } catch (error) {
+    console.error("谷神桥接：视图源码拉取失败", error);
+    button.textContent = "失败";
+    const message = error?.message || String(error);
+    setButtonTitle(root, message);
+    setMessage(root, message, "error");
+    setTimeout(() => setButtonText(root, "源码拉取"), 2200);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function removeNode(id) {
   document.getElementById(id)?.remove();
 }
 
 function installSourcePullButton() {
-  if (!isSupportedGuthonPage() || (!isProcedureRoute() && !isModuleRoute() && !isDataTableRoute() && !isBillTypeRoute())) {
+  if (!isSupportedGuthonPage() || (!isProcedureRoute() && !isModuleRoute() && !isDataTableRoute() && !isBillTypeRoute() && !isViewRoute())) {
     return;
   }
 
@@ -763,7 +815,7 @@ function installSourcePullButton() {
   }
   document.getElementById("guthon-bridge-schema-root")?.remove();
   document.getElementById("guthon-bridge-billtype-root")?.remove();
-  const mode = isModuleRoute() ? "module" : isProcedureRoute() ? "procedure" : isDataTableRoute() ? "table" : "billtype";
+  const mode = isModuleRoute() ? "module" : isProcedureRoute() ? "procedure" : isDataTableRoute() ? "table" : isBillTypeRoute() ? "billtype" : "views";
   if (!root) {
     root = document.createElement("div");
     root.id = FLOATING_ROOT_ID;
@@ -811,6 +863,7 @@ function installSourcePullButton() {
     sourceButton.addEventListener("click", () => {
       if (isDataTableRoute()) exportCurrentTableSchema(root, sourceButton);
       else if (isBillTypeRoute()) exportCurrentBillType(root, sourceButton);
+      else if (isViewRoute()) exportCurrentViewSql(root, sourceButton);
       else pullCurrentProcedure(root, sourceButton);
     });
     document.body.appendChild(root);
@@ -1287,7 +1340,7 @@ async function refreshToolbarButtons() {
     if (isModuleRoute() || isProcedureRoute()) {
       await ensurePageBridge();
     }
-    if (isModuleRoute() || isProcedureRoute() || isDataTableRoute() || isBillTypeRoute()) {
+    if (isModuleRoute() || isProcedureRoute() || isDataTableRoute() || isBillTypeRoute() || isViewRoute()) {
       installSourcePullButton();
     } else {
       removeNode(FLOATING_ROOT_ID);

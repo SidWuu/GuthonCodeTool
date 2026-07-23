@@ -66,6 +66,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse(result);
     }
 
+    if (message.type === "export-view-sql") {
+      const result = await postJson("/exportViewSql", message.payload || {});
+      return sendResponse(result);
+    }
+
     if (message.type === "query-procedure-callers") {
       const result = await postJson("/queryProcedureCallers", message.payload || {});
       return sendResponse(result);
