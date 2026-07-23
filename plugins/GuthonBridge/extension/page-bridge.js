@@ -3,7 +3,7 @@
     try {
       window.__guthonPageBridgeCleanup();
     } catch (error) {
-      console.warn("guthon bridge cleanup failed", error);
+      console.warn("谷神桥接：清理页面桥接失败", error);
     }
   }
 
@@ -1595,7 +1595,7 @@
     }
     const procedureId = pickFirst(chosen, ["procedureId", "procId", "id", "value"]);
     if (!procedureId) {
-      throw new Error(`已找到候选项，但无法解析 procedureId: ${procedureKeyword}.${funId}`);
+      throw new Error(`已找到候选项，但无法解析过程函数编码：${procedureKeyword}.${funId}`);
     }
     return {
       procedureId,

@@ -43,10 +43,10 @@ function sanitizeSegment(input) {
 function buildFilePath(payload) {
   const outputDir = String(payload.outputDir || "").trim();
   if (!outputDir) {
-    throw new Error("outputDir is required");
+    throw new Error("缺少保存目录");
   }
   if (!path.isAbsolute(outputDir)) {
-    throw new Error("outputDir must be an absolute path");
+    throw new Error("保存目录必须是绝对路径");
   }
 
   const funId = payload.metadata?.funId || "unknownFun";
@@ -169,13 +169,13 @@ function runJsonCommand(args, errorLabel, input) {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error((stderr || stdout || `${errorLabel} failed with exit code ${code}`).trim()));
+        reject(new Error((stderr || stdout || `${errorLabel}失败，退出码：${code}`).trim()));
         return;
       }
       try {
         resolve(JSON.parse(stdout || "{}"));
       } catch (error) {
-        reject(new Error(`${errorLabel} returned invalid JSON: ${error.message}`));
+        reject(new Error(`${errorLabel}返回的 JSON 无效：${error.message}`));
       }
     });
     if (input !== undefined) {
@@ -185,7 +185,7 @@ function runJsonCommand(args, errorLabel, input) {
 }
 
 function runHubPull(payload) {
-  return runJsonCommand([HUB_PULL_SCRIPT, "--json-stdin"], "Hub command", payload);
+  return runJsonCommand([HUB_PULL_SCRIPT, "--json-stdin"], "源码拉取", payload);
 }
 
 function runTableSchemaExport(payload) {
@@ -196,7 +196,7 @@ function runTableSchemaExport(payload) {
   if (Array.isArray(payload.tableIds) && payload.tableIds.length > 0) {
     args.push("--table-ids", payload.tableIds.join(","));
   }
-  return runJsonCommand(args, "Table schema command");
+  return runJsonCommand(args, "表结构拉取");
 }
 
 function runBillTypeExport(payload) {
@@ -207,7 +207,7 @@ function runBillTypeExport(payload) {
   if (Array.isArray(payload.billTypeCodes) && payload.billTypeCodes.length > 0) {
     args.push("--bill-type-codes", payload.billTypeCodes.join(","));
   }
-  return runJsonCommand(args, "Bill type command");
+  return runJsonCommand(args, "单据类型拉取");
 }
 
 const server = http.createServer(async (req, res) => {
@@ -227,7 +227,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const payload = await readBody(req);
       if (!payload.objectKey || typeof payload.content !== "string") {
-        return sendJson(res, 400, { ok: false, message: "objectKey and content are required" });
+        return sendJson(res, 400, { ok: false, message: "缺少对象标识或文件内容" });
       }
       const filePath = buildFilePath(payload);
       fs.writeFileSync(filePath, payload.content, "utf8");
@@ -256,16 +256,16 @@ const server = http.createServer(async (req, res) => {
     try {
       const payload = await readBody(req);
       if (!payload.objectKey) {
-        return sendJson(res, 400, { ok: false, message: "objectKey is required" });
+        return sendJson(res, 400, { ok: false, message: "缺少对象标识" });
       }
 
       const manifest = readManifest();
       const entry = manifest[payload.objectKey];
       if (!entry) {
-        return sendJson(res, 404, { ok: false, message: `No local file mapped for ${payload.objectKey}` });
+        return sendJson(res, 404, { ok: false, message: `未找到本地文件映射：${payload.objectKey}` });
       }
       if (!fs.existsSync(entry.filePath)) {
-        return sendJson(res, 404, { ok: false, message: `Local file not found: ${entry.filePath}` });
+        return sendJson(res, 404, { ok: false, message: `本地文件不存在：${entry.filePath}` });
       }
 
       return sendJson(res, 200, {
@@ -372,10 +372,10 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  return sendJson(res, 404, { ok: false, message: "Not found" });
+  return sendJson(res, 404, { ok: false, message: "接口不存在" });
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Guthon bridge listening at http://127.0.0.1:${PORT}`);
-  console.log(`Workspace: ${WORKSPACE_DIR}`);
+  console.log(`谷神桥接服务已启动：http://127.0.0.1:${PORT}`);
+  console.log(`工作目录：${WORKSPACE_DIR}`);
 });

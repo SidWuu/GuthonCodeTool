@@ -349,6 +349,34 @@ test("bridge defaults hub python to repo venv when present", () => {
   assert.equal(serverScript.includes("fs.existsSync(DEFAULT_HUB_PYTHON)"), true);
 });
 
+test("user-facing messages use concise Chinese", () => {
+  const files = [
+    path.join(ROOT, "bridge", "server.js"),
+    path.join(ROOT, "extension", "background.js"),
+    CONTENT_SCRIPT_PATH,
+    path.join(ROOT, "extension", "page-bridge.js"),
+    POPUP_HTML_PATH,
+    POPUP_SCRIPT_PATH
+  ];
+  const source = files.map((file) => fs.readFileSync(file, "utf8")).join("\n");
+  for (const message of [
+    "Bridge call failed",
+    "Unknown message type",
+    "extension context invalid",
+    "extension invalid",
+    "outputDir is required",
+    "outputDir must be an absolute path",
+    "No local file mapped",
+    "Local file not found",
+    "Guthon Bridge"
+  ]) {
+    assert.equal(source.includes(message), false, message);
+  }
+  const manifest = JSON.parse(fs.readFileSync(EXTENSION_MANIFEST_PATH, "utf8"));
+  assert.equal(manifest.name, "Guthon Bridge");
+  assert.equal(manifest.action.default_title, "Guthon Bridge");
+});
+
 test("popup exposes separate page and hub pull actions without hub target input", () => {
   const html = fs.readFileSync(POPUP_HTML_PATH, "utf8");
   const script = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
@@ -983,5 +1011,5 @@ test("floating pull shows a visible diagnostic message", () => {
   assert.equal(contentScript.includes("guthon-bridge-message"), true);
   assert.equal(contentScript.includes("setMessage(root,"), true);
   assert.equal(contentScript.includes("}, 10000);"), true);
-  assert.equal(contentScript.includes("console.error(\"Guthon Bridge pull failed\""), true);
+  assert.equal(contentScript.includes("console.error(\"谷神桥接：源码拉取失败\""), true);
 });

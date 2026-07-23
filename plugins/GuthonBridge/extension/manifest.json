@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Guthon Bridge",
   "version": "0.1.0",
-  "description": "Development tools for the Guthon low-code platform.",
+  "description": "谷神低代码平台开发增强辅助工具",
   "permissions": [
     "activeTab",
     "scripting",

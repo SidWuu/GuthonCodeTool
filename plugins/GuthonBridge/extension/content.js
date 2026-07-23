@@ -41,7 +41,7 @@ function isSupportedGuthonPage() {
 async function ensurePageBridge() {
   const runtime = getRuntime();
   if (!runtime?.getURL) {
-    throw new Error("extension context invalid");
+    throw new Error("扩展已失效，请刷新页面");
   }
   const ready = await new Promise((resolve) => {
     const requestId = `guthon-ready-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -85,7 +85,7 @@ async function ensurePageBridge() {
 
 async function runPageCommand(command, payload = {}) {
   if (!isExtensionAlive()) {
-    return { ok: false, message: "extension invalid" };
+    return { ok: false, message: "扩展已失效，请刷新页面" };
   }
   try {
     await ensurePageBridge();
@@ -133,7 +133,7 @@ async function runPageCommand(command, payload = {}) {
 function sendRuntimeMessage(message) {
   const runtime = getRuntime();
   if (!runtime?.sendMessage) {
-    return Promise.reject(new Error("extension context invalid (reloaded or disabled)"));
+    return Promise.reject(new Error("扩展已更新，请刷新页面"));
   }
   return new Promise((resolve, reject) => {
     runtime.sendMessage(message, (response) => {
@@ -539,7 +539,7 @@ async function pullCurrentProcedure(root, button = root.querySelector("button"),
       throw new Error(toErrorMessage("连接本地服务失败", error));
     }
     if (!bridgeHealth?.ok) {
-      throw new Error(`本地桥接服务不可用: ${bridgeHealth?.message || "unknown"}`);
+      throw new Error(`本地桥接服务不可用：${bridgeHealth?.message || "未知错误"}`);
     }
 
     const inspected = await runPageCommand(isModuleRoute() ? "inspect-hub-source" : "inspectCurrentProcedure");
@@ -587,7 +587,7 @@ async function pullCurrentProcedure(root, button = root.querySelector("button"),
     setMessage(root, `${successMessage}: ${pullResult.workCopyPath}`, "success");
     setTimeout(() => setButtonTextNode(button, "源码拉取"), 1600);
   } catch (error) {
-    console.error("Guthon Bridge pull failed", error);
+    console.error("谷神桥接：源码拉取失败", error);
     button.textContent = "失败";
     const message = error?.message || String(error);
     button.title = message;
@@ -607,7 +607,7 @@ async function exportCurrentTableSchema(root, button = root.querySelector("butto
 
     const bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
     if (!bridgeHealth?.ok) {
-      throw new Error(`本地桥接服务不可用: ${bridgeHealth?.message || "unknown"}`);
+      throw new Error(`本地桥接服务不可用：${bridgeHealth?.message || "未知错误"}`);
     }
 
     const inspected = await runPageCommand("inspectTableSchemaTarget");
@@ -630,7 +630,7 @@ async function exportCurrentTableSchema(root, button = root.querySelector("butto
     setMessage(root, `${detail}: ${result.exported_table_count}`, "success");
     setTimeout(() => setButtonText(root, "源码拉取"), 1600);
   } catch (error) {
-    console.error("Guthon Bridge table schema export failed", error);
+    console.error("谷神桥接：表结构拉取失败", error);
     button.textContent = "失败";
     const message = error?.message || String(error);
     setButtonTitle(root, message);
@@ -650,7 +650,7 @@ async function exportCurrentBillType(root, button = root.querySelector("button")
 
     const bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
     if (!bridgeHealth?.ok) {
-      throw new Error(`本地桥接服务不可用: ${bridgeHealth?.message || "unknown"}`);
+      throw new Error(`本地桥接服务不可用：${bridgeHealth?.message || "未知错误"}`);
     }
 
     const inspected = await runPageCommand("inspectBillTypeTarget");
@@ -677,7 +677,7 @@ async function exportCurrentBillType(root, button = root.querySelector("button")
     setMessage(root, `${detail}: ${result.exported_bill_type_count}`, "success");
     setTimeout(() => setButtonText(root, "源码拉取"), 1600);
   } catch (error) {
-    console.error("Guthon Bridge bill type export failed", error);
+    console.error("谷神桥接：单据类型拉取失败", error);
     button.textContent = "失败";
     const message = error?.message || String(error);
     setButtonTitle(root, message);
@@ -806,7 +806,7 @@ async function showFieldsMoverOverlay(root) {
   overlay.innerHTML = `
     <div class="guthon-bridge-fields-mover-panel">
       <div class="guthon-bridge-fields-mover-head"><strong>复制字段</strong><button type="button" class="guthon-bridge-fields-mover-close">关闭</button></div>
-      <div class="guthon-bridge-fields-mover-list">${fields.map((field) => `<label class="guthon-bridge-fields-mover-item"><input type="checkbox" data-index="${field.index}" /><span>${escapeHtml(field.label)} <span class="guthon-bridge-fields-mover-meta">${escapeHtml(field.fieldId || "无 fieldId")}</span></span></label>`).join("") || "当前组件没有字段"}</div>
+      <div class="guthon-bridge-fields-mover-list">${fields.map((field) => `<label class="guthon-bridge-fields-mover-item"><input type="checkbox" data-index="${field.index}" /><span>${escapeHtml(field.label)} <span class="guthon-bridge-fields-mover-meta">${escapeHtml(field.fieldId || "无字段编码")}</span></span></label>`).join("") || "当前组件没有字段"}</div>
       <div class="guthon-bridge-fields-mover-actions"><button type="button" class="guthon-bridge-fields-mover-select-all">全选字段</button><button type="button" class="guthon-bridge-fields-mover-cancel">取消</button><button type="button" class="guthon-bridge-fields-mover-copy">复制</button></div>
     </div>`;
   const close = () => removeNode(FIELDS_MOVER_OVERLAY_ID);
@@ -1161,7 +1161,7 @@ async function refreshToolbarButtons() {
       removeNode(FLOATING_ROOT_ID);
     }
   } catch (error) {
-    console.warn("Guthon Bridge refreshToolbarButtons error", error);
+    console.warn("谷神桥接：刷新工具栏失败", error);
     if (!isExtensionAlive()) {
       removeNode(FLOATING_ROOT_ID);
       stopExtensionLoops();

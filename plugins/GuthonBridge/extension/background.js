@@ -28,7 +28,7 @@ async function postJson(path, payload) {
   });
   const data = await response.json();
   if (!response.ok || data.ok === false) {
-    throw new Error(data.message || `Bridge call failed: ${path}`);
+    throw new Error(data.message || `桥接请求失败：${path}`);
   }
   return data;
 }
@@ -66,7 +66,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse(result);
     }
 
-    return sendResponse({ ok: false, message: "Unknown message type" });
+    return sendResponse({ ok: false, message: "不支持的消息类型" });
   })().catch((error) => {
     sendResponse({
       ok: false,
