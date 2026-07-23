@@ -900,6 +900,11 @@
       .some((node) => /^视图管理/.test(String(node.innerText || node.textContent || "").trim()));
   }
 
+  function isSystemScriptPage() {
+    return location.href.includes("/gdpaas/dev/systemscript") || Array.from(document.querySelectorAll('[aria-selected="true"], .is-active, .active'))
+      .some((node) => /^系统脚本/.test(String(node.innerText || node.textContent || "").trim()));
+  }
+
   function readFirst(obj, keys) {
     for (const key of keys) {
       const value = obj?.[key];
@@ -1066,6 +1071,25 @@
     return ids;
   }
 
+  function getCurrentSystemScriptTarget() {
+    const node = document.querySelector(".el-tree-node.is-current");
+    const text = String(node?.innerText || node?.textContent || "").trim();
+    const match = text.match(/\bSYS-[A-Z0-9-]+\b/i);
+    if (!match) {
+      return { systemId: "", systemName: "" };
+    }
+    return {
+      systemId: match[0],
+      systemName: text.slice(0, match.index).replace(/[^\p{L}\p{N}]+$/u, "").trim()
+    };
+  }
+
+  function getSelectedSystemScriptTypes() {
+    return Array.from(document.querySelectorAll('tr[data-guthon-bridge-system-script-selected="true"]'))
+      .map((row) => Number(String(row.cells?.[2]?.innerText || row.cells?.[2]?.textContent || "").trim()))
+      .filter((value, index, values) => Number.isInteger(value) && value > 0 && values.indexOf(value) === index);
+  }
+
   function inspectTableSchemaTarget() {
     const dataSourceId = getDataSourceId();
     if (!dataSourceId) {
@@ -1157,7 +1181,22 @@
     };
   }
 
+  function inspectSystemScriptTarget() {
+    const system = getCurrentSystemScriptTarget();
+    if (!system.systemId) {
+      throw new Error("当前系统脚本页面没有识别到应用系统");
+    }
+    return {
+      ...system,
+      scriptTypes: getSelectedSystemScriptTypes(),
+      resolvedBy: "system-script-management"
+    };
+  }
+
   function inspectCurrentHubSource() {
+    if (isSystemScriptPage()) {
+      return { mode: "system-scripts", ...inspectSystemScriptTarget() };
+    }
     if (isViewManagementPage()) {
       return { mode: "views", ...inspectViewTarget() };
     }
@@ -1951,6 +1990,7 @@
     inspectTableSchemaTarget,
     inspectBillTypeTarget,
     inspectViewTarget,
+    inspectSystemScriptTarget,
     "inspect-current": inspectCurrent,
     "inspect-hub-source": inspectCurrentHubSource,
     "pull": pullCurrentProcedure,

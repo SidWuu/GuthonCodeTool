@@ -43,8 +43,9 @@ def fetch_rows(conn, table_name, data_source_ids, view_ids=None):
         return list(cur.fetchall())
 
 
-def export_views(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, view_ids=None):
+def export_views(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, view_ids=None, config=None):
     output_dir = Path(output_dir)
+    config = config or gusen_hub.load_config()
     data_source_ids = normalize_data_source_ids(data_source_ids)
     if not data_source_ids:
         raise ValueError("data_source_ids is required")
@@ -65,6 +66,7 @@ def export_views(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, view
             system_by_data_source.setdefault(data_source_id, system)
 
     exported = 0
+    git_added = 0
     for view in sorted(views, key=lambda row: (str(row.get("DATA_SOURCE_ID") or ""), str(row.get("VIEW_ID") or ""))):
         data_source_id = str(view.get("DATA_SOURCE_ID") or "")
         view_id = str(view.get("VIEW_ID") or "")
@@ -74,7 +76,9 @@ def export_views(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, view
         system = system_by_data_source.get(data_source_id, {})
         folder = output_dir / system_folder_name(data_source_id, system.get("SYSTEM_NAME"))
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"{sanitize_name(view_id)}.sql").write_text(f"{source}\n", encoding="utf-8")
+        source_path = folder / f"{sanitize_name(view_id)}.sql"
+        source_path.write_text(f"{source}\n", encoding="utf-8")
+        git_added += gusen_hub._auto_add_work_copy(config, source_path)["gitAdded"]
         exported += 1
 
     return {
@@ -82,6 +86,7 @@ def export_views(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, view
         "exported_view_count": exported,
         "data_source_ids": data_source_ids,
         "view_ids": view_ids,
+        "git_added": git_added,
     }
 
 
@@ -101,7 +106,7 @@ def main(argv=None):
     try:
         with gusen_hub.db_connect(datasource) as conn:
             data_source_ids = resolve_data_source_ids(conn, datasource_name, requested_data_source_ids)
-            summary = export_views(conn, output_dir, data_source_ids, view_ids)
+            summary = export_views(conn, output_dir, data_source_ids, view_ids, config)
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2

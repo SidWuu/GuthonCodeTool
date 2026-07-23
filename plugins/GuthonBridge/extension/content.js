@@ -6,6 +6,7 @@ const CALLERS_OVERLAY_ID = "guthon-bridge-callers-overlay";
 
 let gIntervalId = null;
 let gTreeScrollListenerInstalled = false;
+let gSystemScriptSelectionInstalled = false;
 
 function getRuntime() {
   try {
@@ -217,6 +218,11 @@ function isViewRoute() {
     .some((item) => isVisible(item) && isActiveTab(item) && /^视图管理/.test(String(item.innerText || item.textContent || "").trim()));
 }
 
+function isSystemScriptRoute() {
+  return location.hash.includes("/gdpaas/dev/systemscript") || Array.from(document.querySelectorAll(".el-tabs__item, .tabs-item, [role='tab']"))
+    .some((item) => isVisible(item) && isActiveTab(item) && /^系统脚本/.test(String(item.innerText || item.textContent || "").trim()));
+}
+
 function findNativeToolbar(scope = document) {
   return Array.from(scope.querySelectorAll(".tool-menu.tool-box, .gd-function-head, .function.head"))
     .find(isVisible);
@@ -232,13 +238,13 @@ function makeNativeButton(text, className) {
 
 function ensureInlineStyles() {
   const existing = document.getElementById("guthon-bridge-inline-style");
-  if (existing?.dataset.version === "20260723b") {
+  if (existing?.dataset.version === "20260723c") {
     return;
   }
   existing?.remove();
   const style = document.createElement("style");
   style.id = "guthon-bridge-inline-style";
-  style.dataset.version = "20260723b";
+  style.dataset.version = "20260723c";
   style.textContent = `
     .guthon-bridge-inline {
       position: fixed;
@@ -286,6 +292,12 @@ function ensureInlineStyles() {
     .guthon-bridge-inline:not([data-mode="module"]) .guthon-bridge-module-only {
       visibility: hidden;
       pointer-events: none;
+    }
+    .guthon-bridge-inline:not([data-mode="system-scripts"]) .guthon-bridge-system-script-only {
+      display: none;
+    }
+    tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
+      background: #ecf5ff !important;
     }
     .guthon-bridge-fields-mover-group > span {
       width: 108px;
@@ -798,12 +810,64 @@ async function exportCurrentViewSql(root, button = root.querySelector("button"))
   }
 }
 
+async function exportCurrentSystemScripts(root, button, pullAll = false) {
+  const idleText = pullAll ? "全部拉取" : "选中拉取";
+  try {
+    button.disabled = true;
+    setButtonTextNode(button, "拉取中");
+    button.title = "正在拉取系统脚本...";
+    setMessage(root, "正在拉取系统脚本...", "busy");
+
+    const bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
+    if (!bridgeHealth?.ok) {
+      throw new Error(`本地桥接服务不可用：${bridgeHealth?.message || "未知错误"}`);
+    }
+
+    const inspected = await runPageCommand("inspectSystemScriptTarget");
+    if (!inspected?.ok) {
+      throw new Error(`识别系统脚本失败: ${inspected?.message || "未识别到应用系统"}`);
+    }
+    const scriptTypes = pullAll ? [] : inspected.data.scriptTypes || [];
+    if (!pullAll && scriptTypes.length === 0) {
+      throw new Error("请先点击脚本行进行选中，或使用“全部拉取”");
+    }
+
+    const result = await sendRuntimeMessage({
+      type: "export-system-scripts",
+      payload: {
+        systemIds: [inspected.data.systemId],
+        scriptTypes
+      }
+    });
+    if (!result?.ok) {
+      throw new Error(result?.message || "系统脚本拉取失败");
+    }
+
+    button.textContent = "成功";
+    const target = [inspected.data.systemName, inspected.data.systemId].filter(Boolean).join(" ");
+    const detail = pullAll ? `已拉取 ${target} 全部系统脚本` : `已拉取脚本类型 ${scriptTypes.join(", ")}`;
+    const outputPath = pullAll ? result.outputDir : result.work_copy_paths?.[0] || result.outputDir;
+    button.title = `${detail}: ${outputPath}`;
+    setMessage(root, `${detail}: ${outputPath}`, "success");
+    setTimeout(() => setButtonTextNode(button, idleText), 1600);
+  } catch (error) {
+    console.error("谷神桥接：系统脚本拉取失败", error);
+    button.textContent = "失败";
+    const message = error?.message || String(error);
+    button.title = message;
+    setMessage(root, message, "error");
+    setTimeout(() => setButtonTextNode(button, idleText), 2200);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function removeNode(id) {
   document.getElementById(id)?.remove();
 }
 
 function installSourcePullButton() {
-  if (!isSupportedGuthonPage() || (!isProcedureRoute() && !isModuleRoute() && !isDataTableRoute() && !isBillTypeRoute() && !isViewRoute())) {
+  if (!isSupportedGuthonPage() || (!isProcedureRoute() && !isModuleRoute() && !isDataTableRoute() && !isBillTypeRoute() && !isViewRoute() && !isSystemScriptRoute())) {
     return;
   }
 
@@ -815,7 +879,7 @@ function installSourcePullButton() {
   }
   document.getElementById("guthon-bridge-schema-root")?.remove();
   document.getElementById("guthon-bridge-billtype-root")?.remove();
-  const mode = isModuleRoute() ? "module" : isProcedureRoute() ? "procedure" : isDataTableRoute() ? "table" : isBillTypeRoute() ? "billtype" : "views";
+  const mode = isModuleRoute() ? "module" : isProcedureRoute() ? "procedure" : isDataTableRoute() ? "table" : isBillTypeRoute() ? "billtype" : isSystemScriptRoute() ? "system-scripts" : "views";
   if (!root) {
     root = document.createElement("div");
     root.id = FLOATING_ROOT_ID;
@@ -824,6 +888,9 @@ function installSourcePullButton() {
     root.dataset.sharedButtons = "true";
     const sourceButton = makeNativeButton("源码拉取", "guthon-bridge-inline-button guthon-bridge-source-button");
     root.appendChild(sourceButton);
+    const systemAllButton = makeNativeButton("全部拉取", "guthon-bridge-system-script-all guthon-bridge-system-script-only");
+    systemAllButton.addEventListener("click", () => exportCurrentSystemScripts(root, systemAllButton, true));
+    root.appendChild(systemAllButton);
     const copyButton = makeNativeButton("复制模式", "guthon-bridge-copy-button guthon-bridge-module-only");
     copyButton.addEventListener("click", async () => {
       try {
@@ -864,12 +931,46 @@ function installSourcePullButton() {
       if (isDataTableRoute()) exportCurrentTableSchema(root, sourceButton);
       else if (isBillTypeRoute()) exportCurrentBillType(root, sourceButton);
       else if (isViewRoute()) exportCurrentViewSql(root, sourceButton);
+      else if (isSystemScriptRoute()) exportCurrentSystemScripts(root, sourceButton, false);
       else pullCurrentProcedure(root, sourceButton);
     });
     document.body.appendChild(root);
   }
   root.dataset.mode = mode;
+  root.querySelector(".guthon-bridge-source-button").textContent = mode === "system-scripts" ? "选中拉取" : "源码拉取";
   positionBridgeRoot(root);
+}
+
+function installSystemScriptSelection() {
+  if (gSystemScriptSelectionInstalled) {
+    return;
+  }
+  document.addEventListener("click", (event) => {
+    if (!isSupportedGuthonPage() || !isSystemScriptRoute()) {
+      return;
+    }
+    const clickedRow = event.target?.closest?.(".gd-data-table .el-table__body tr");
+    const table = clickedRow?.closest?.(".gd-data-table");
+    if (!clickedRow || !table) {
+      return;
+    }
+    const clickedRows = Array.from(clickedRow.parentElement?.children || []);
+    const rowIndex = clickedRows.indexOf(clickedRow);
+    const mainBody = Array.from(table.children)
+      .find((child) => child.classList?.contains("el-table__body-wrapper"))
+      ?.querySelector("tbody");
+    const row = mainBody?.children?.[rowIndex];
+    if (!row || !Number(String(row.cells?.[2]?.innerText || "").trim())) {
+      return;
+    }
+    const wasSelected = row.dataset.guthonBridgeSystemScriptSelected === "true";
+    mainBody.querySelectorAll('tr[data-guthon-bridge-system-script-selected="true"]')
+      .forEach((item) => delete item.dataset.guthonBridgeSystemScriptSelected);
+    if (!wasSelected) {
+      row.dataset.guthonBridgeSystemScriptSelected = "true";
+    }
+  }, true);
+  gSystemScriptSelectionInstalled = true;
 }
 
 function scrollCurrentTreeNode() {
@@ -1336,11 +1437,12 @@ async function refreshToolbarButtons() {
     }
 
     installTreeAutoScroll();
+    installSystemScriptSelection();
 
     if (isModuleRoute() || isProcedureRoute()) {
       await ensurePageBridge();
     }
-    if (isModuleRoute() || isProcedureRoute() || isDataTableRoute() || isBillTypeRoute() || isViewRoute()) {
+    if (isModuleRoute() || isProcedureRoute() || isDataTableRoute() || isBillTypeRoute() || isViewRoute() || isSystemScriptRoute()) {
       installSourcePullButton();
     } else {
       removeNode(FLOATING_ROOT_ID);

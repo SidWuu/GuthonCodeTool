@@ -1656,9 +1656,10 @@ def _auto_add_work_copy(cfg: dict, target: Path):
     rules = cfg["sync"].get("rules") or {}
     if not rules.get("pull_auto_add_git"):
         return {"gitAddStatus": "DISABLED", "gitAdded": 0}
+    git_cwd = target if target.is_dir() else target.parent
     try:
         root_result = subprocess.run(
-            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+            ["git", "-C", str(git_cwd), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             check=False,
@@ -1697,6 +1698,16 @@ def _auto_add_work_copy(cfg: dict, target: Path):
 
 
 def _current_work_copy_source(metadata: dict):
+    if metadata.get("source_table") == "system-script":
+        source_path = Path((metadata.get("_workcopy") or {}).get("sourcePath") or "")
+        source_path = source_path if source_path.is_absolute() else ROOT / source_path
+        if not source_path.exists():
+            return None, None, ""
+        try:
+            source_meta = json.loads((source_path / "meta.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None, source_path, ""
+        return metadata, source_path, _str(source_meta.get("changeKey"))
     cfg = load_config()
     conn = connect_index(active_index_path(cfg))
     source_type = metadata.get("source_table") or ""

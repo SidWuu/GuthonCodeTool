@@ -1,3 +1,4 @@
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -69,6 +70,27 @@ class ExportViewSqlTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(ValueError, "missing_view_ids=V_MISSING"):
                 exporter.export_views(conn, Path(tmp), ["0015"], ["V_MISSING"])
+
+    def test_auto_git_add_stages_only_exported_view(self):
+        views = [{"DATA_SOURCE_ID": "0015", "VIEW_ID": "V_TEST", "VIEW_SQL": "SELECT 1"}]
+        systems = [{"DATA_SOURCE_ID": "0015", "SYSTEM_NAME": "风险管理"}]
+        conn = FakeConnection([views, systems])
+        config = {"sync": {"rules": {"pull_auto_add_git": True}}}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / "unrelated.sql").write_text("SELECT 2\n", encoding="utf-8")
+            summary = exporter.export_views(conn, repo / "views", ["0015"], ["V_TEST"], config)
+            staged = subprocess.run(
+                ["git", "-C", str(repo), "-c", "core.quotePath=false", "diff", "--cached", "--name-only"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.splitlines()
+
+        self.assertEqual(1, summary["git_added"])
+        self.assertEqual(["views/0015_风险管理/V_TEST.sql"], staged)
 
 
 if __name__ == "__main__":

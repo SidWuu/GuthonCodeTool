@@ -14,6 +14,7 @@ const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "s
 const TABLE_SCHEMA_SCRIPT = process.env.GUTHON_TABLE_SCHEMA_SCRIPT || path.join(ROOT, "scripts", "export_table_schema_sql.py");
 const BILL_TYPE_SCRIPT = process.env.GUTHON_BILL_TYPE_SCRIPT || path.join(ROOT, "scripts", "export_bill_type_sql.py");
 const VIEW_SQL_SCRIPT = process.env.GUTHON_VIEW_SQL_SCRIPT || path.join(ROOT, "scripts", "export_view_sql.py");
+const SYSTEM_SCRIPT_EXPORT_SCRIPT = process.env.GUTHON_SYSTEM_SCRIPT_EXPORT_SCRIPT || path.join(ROOT, "scripts", "export_system_script_sql.py");
 const HUB_QUERY_SCRIPT = process.env.GUTHON_HUB_QUERY_SCRIPT || path.join(ROOT, "scripts", "query_hub_context.py");
 const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(ROOT, "var", "runtime", "logs", "pull-log.ndjson");
 
@@ -162,6 +163,16 @@ function viewSqlSummary(payload, result = {}) {
   };
 }
 
+function systemScriptSummary(payload, result = {}) {
+  return {
+    systemIds: Array.isArray(payload.systemIds) ? payload.systemIds : [],
+    scriptTypes: Array.isArray(payload.scriptTypes) ? payload.scriptTypes : [],
+    exported_system_script_count: result.exported_system_script_count ?? "",
+    workCopyPaths: Array.isArray(result.work_copy_paths) ? result.work_copy_paths : [],
+    outputDir: result.outputDir || ""
+  };
+}
+
 function runJsonCommand(args, errorLabel, input) {
   return new Promise((resolve, reject) => {
     const child = spawn(HUB_PYTHON, args, {
@@ -230,6 +241,18 @@ function runViewSqlExport(payload) {
     args.push("--view-ids", payload.viewIds.join(","));
   }
   return runJsonCommand(args, "视图源码拉取");
+}
+
+function runSystemScriptExport(payload) {
+  const args = [SYSTEM_SCRIPT_EXPORT_SCRIPT];
+  if (Array.isArray(payload.systemIds) && payload.systemIds.length > 0) {
+    args.push("--system-ids", payload.systemIds.join(","));
+  }
+  if (Array.isArray(payload.scriptTypes) && payload.scriptTypes.length > 0) {
+    args.push("--script-types", payload.scriptTypes.join(","));
+    args.push("--workcopy");
+  }
+  return runJsonCommand(args, "系统脚本拉取");
 }
 
 function runProcedureCallers(payload) {
@@ -423,6 +446,31 @@ const server = http.createServer(async (req, res) => {
       appendPullLog({
         pullType: "views",
         summary: viewSqlSummary(payload),
+        payload,
+        ok: false,
+        message: error.message
+      });
+      return sendJson(res, 500, { ok: false, message: error.message });
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/exportSystemScripts") {
+    let payload = {};
+    try {
+      payload = await readBody(req);
+      const result = await runSystemScriptExport(payload);
+      appendPullLog({
+        pullType: "system-scripts",
+        summary: systemScriptSummary(payload, result),
+        payload,
+        result,
+        ok: result?.ok
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      appendPullLog({
+        pullType: "system-scripts",
+        summary: systemScriptSummary(payload),
         payload,
         ok: false,
         message: error.message

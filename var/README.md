@@ -33,6 +33,7 @@ source/workcopy/    开发工作副本，改源码优先看这里
 ```text
 source/readonly/products/{产品名称}/{子系统}/page/{模型序号}_{模型}/{模块序号}_{模块}/{页面名 页面ID}/
 source/readonly/products/{产品名称}/{子系统}/procedure/{过程别名}/{函数名}/
+source/readonly/products/{产品名称}/{子系统}/scripts/{脚本序号}-{脚本类型}[-{脚本描述}]/
 source/readonly/project/{项目名称}/{子系统}/...
 source/workcopy/products/{产品名}/{子系统}/page|procedure/...
 source/workcopy/projects/{项目名}/{子系统}/page|procedure/...
@@ -54,6 +55,17 @@ scripts/       从 raw.json 拆出的脚本、SQL、VM 片段
 meta.json      源码表元数据、change_key、status
 source.vm      过程函数源码
 ```
+
+系统脚本目录常见文件：
+
+```text
+meta.json      脚本类型、所属子系统、签入签出和产品继承信息
+source.js      初始化脚本、系统私有或自定义 JAVASCRIPT
+source.css     系统私有或自定义 CSS
+```
+
+系统脚本“选中拉取”会在 `source/workcopy/{products|projects}/...` 生成同结构工作副本和 `.guthon-baseline`；“全部拉取”只更新 readonly。
+视图和系统脚本拉取会按根仓库 `config/sync.yaml` 的 `pull_auto_add_git` 规则，只自动暂存新生成且未被忽略的文件。
 
 工作副本常见辅助文件：
 

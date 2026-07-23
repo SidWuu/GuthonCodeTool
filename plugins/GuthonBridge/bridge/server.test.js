@@ -402,6 +402,67 @@ process.stdout.write(JSON.stringify({ ok: true, exported_view_count: 1, outputDi
   }
 });
 
+test("exportSystemScripts delegates selected system and script types", async () => {
+  const port = 17468;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-system-script-command-"));
+  const exportScript = path.join(tmp, "fake-system-scripts.js");
+  const logPath = path.join(tmp, "pull-log.ndjson");
+  fs.writeFileSync(
+    exportScript,
+    `
+const args = process.argv.slice(2);
+if (!args.includes("--system-ids") || !args.includes("SYS-DD01-06B1-6B6C4E52")) {
+  process.stderr.write("bad system args: " + args.join(" "));
+  process.exit(2);
+}
+if (!args.includes("--script-types") || !args.includes("20") || !args.includes("--workcopy")) {
+  process.stderr.write("bad script type args: " + args.join(" "));
+  process.exit(2);
+}
+process.stdout.write(JSON.stringify({ ok: true, exported_system_script_count: 1, work_copy_paths: ["/tmp/workcopy"], outputDir: "/tmp/system-scripts" }));
+`,
+    "utf8",
+  );
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_HUB_PYTHON: process.execPath,
+      GUTHON_SYSTEM_SCRIPT_EXPORT_SCRIPT: exportScript,
+      GUTHON_PULL_LOG_PATH: logPath
+    },
+    stdio: "ignore"
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/exportSystemScripts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemIds: ["SYS-DD01-06B1-6B6C4E52"],
+        scriptTypes: [20]
+      })
+    });
+    const data = await response.json();
+    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
+
+    assert.equal(response.status, 200, data.message);
+    assert.equal(data.exported_system_script_count, 1);
+    assert.equal(log.pullType, "system-scripts");
+    assert.deepEqual(log.summary, {
+      systemIds: ["SYS-DD01-06B1-6B6C4E52"],
+      scriptTypes: [20],
+      exported_system_script_count: 1,
+      workCopyPaths: ["/tmp/workcopy"],
+      outputDir: "/tmp/system-scripts"
+    });
+  } finally {
+    server.kill();
+  }
+});
+
 test("queryProcedureCallers delegates target identity to hub query", async () => {
   const port = 17466;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-callers-query-"));
@@ -638,6 +699,23 @@ test("view management page exposes view source export action", () => {
   assert.equal(pageBridge.includes('mode: "views"'), true);
 });
 
+test("system script page exposes selected and all export actions", () => {
+  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const backgroundScript = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
+  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
+
+  assert.equal(contentScript.includes("isSystemScriptRoute"), true);
+  assert.equal(contentScript.includes("installSystemScriptSelection"), true);
+  assert.equal(contentScript.includes("选中拉取"), true);
+  assert.equal(contentScript.includes("全部拉取"), true);
+  assert.equal(contentScript.includes("inspectSystemScriptTarget"), true);
+  assert.equal(contentScript.includes('type: "export-system-scripts"'), true);
+  assert.equal(backgroundScript.includes("/exportSystemScripts"), true);
+  assert.equal(pageBridge.includes("getCurrentSystemScriptTarget"), true);
+  assert.equal(pageBridge.includes("getSelectedSystemScriptTypes"), true);
+  assert.equal(pageBridge.includes('mode: "system-scripts"'), true);
+});
+
 test("pull button floats over the current Guthon toolbar without changing toolbar layout", () => {
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
 
@@ -749,7 +827,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("guthon-bridge-module-only"), true);
   assert.equal(contentScript.includes("SCHEMA_ROOT_ID"), false);
   assert.equal(contentScript.includes("BILLTYPE_ROOT_ID"), false);
-  assert.equal(contentScript.includes('style.dataset.version = "20260723b"'), true);
+  assert.equal(contentScript.includes('style.dataset.version = "20260723c"'), true);
   assert.equal(contentScript.includes("visibility: hidden"), true);
   assert.equal(contentScript.includes("root.dataset.positioned"), false);
   assert.equal(contentScript.includes('root.dataset.sharedButtons = "true"'), true);
@@ -849,7 +927,7 @@ test("popup waits for storage.local output directory persistence", () => {
   assert.equal(popupScript.includes('runFieldsMover("show-fields-mover")'), true);
   assert.equal(popupScript.includes('runFieldsMover("paste-fields-mover")'), true);
   assert.equal(popupScript.includes("runHubPull(true)"), true);
-  assert.equal(popupScript.includes('forceRefreshBtn.style.display = canPullSource ? "" : "none"'), true);
+  assert.equal(popupScript.includes('forceRefreshBtn.style.display = canPullSource || isSystemScripts ? "" : "none"'), true);
   assert.equal(popupScript.includes('pullHubBtn.parentElement.classList.toggle("full-width", !canPullSource)'), true);
   assert.equal(popupScript.includes('setStatus("当前页面是模块开发")'), true);
   assert.equal(popupScript.includes('copyFieldsBtn.style.display = isModule ? "" : "none"'), true);

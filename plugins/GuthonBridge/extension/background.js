@@ -71,6 +71,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse(result);
     }
 
+    if (message.type === "export-system-scripts") {
+      const result = await postJson("/exportSystemScripts", message.payload || {});
+      return sendResponse(result);
+    }
+
     if (message.type === "query-procedure-callers") {
       const result = await postJson("/queryProcedureCallers", message.payload || {});
       return sendResponse(result);
