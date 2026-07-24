@@ -16,12 +16,28 @@ cp config/example/sync.example.yaml config/sync.yaml
 
 ## datasource.yaml
 
-配置产品库和项目库。项目继承产品代码时，别名通常相同，因此 PRODUCT / PROJECT 靠数据库区分：
+配置产品库、项目库和独立测试库。数据源键名统一使用“对象 ID-环境”，`name` 统一使用“项目名_环境”：
 
 ```text
-product-dev   -> PRODUCT
-project-dev   -> PROJECT
+demo-product-dev   -> 示例产品_开发
+demo-product-test  -> 示例产品_测试
+demo-project-dev   -> 示例项目_开发
 ```
+
+测试数据源必须额外配置：
+
+```yaml
+object: products.demo-product
+environment: test
+diagnosis:
+  enabled: true
+  query_only: true
+databases:
+  - demo_basic
+  - demo_trade
+```
+
+源码排查脚本只连接同时满足 `environment: test`、`diagnosis.enabled: true` 和 `diagnosis.query_only: true` 的数据源。`databases` 是该测试服务器允许查询的数据库白名单，开发库不配置 `diagnosis`。
 
 ## sync.yaml 中的 systems
 
@@ -66,3 +82,16 @@ sync:
 ```
 
 `products.<id>` 来自 `products.yaml`，只拉取并比较该产品源码；`projects.<id>` 来自 `projects.yaml`，只拉取并比较该项目自己的 readonly 源码。readonly 源码分别保存到 `var/source/readonly/products/<产品名称>/` 和 `var/source/readonly/project/<项目名称>/`；每个 ACTIVE 的索引分别保存到 `sync.index_dir/{products|projects}/<id>.db`，表结构、单据类型和视图源码分别保存到 `var/database/{schema|billtype|views}/{products|projects}/<名称>/`，不同对象之间不会互相覆盖；首次切换到一个对象时执行全量同步。
+
+## 源码逻辑排查
+
+复制排查定义模板到私有 `var/` 目录后，按已拉取源码填写参数、逻辑步骤和查询 SQL：
+
+```bash
+cp config/example/source-diagnosis.example.json var/diagnosis/cases/<排查名称>.json
+.venv/bin/python scripts/run_source_diagnosis.py var/diagnosis/cases/<排查名称>.json
+```
+
+排查定义中的 `database` 指定默认数据库；某一步需要查询另一个数据库时，在该步骤增加同名 `database` 覆盖。数据库必须存在于数据源的 `databases` 白名单中，脚本不会执行 `USE`。
+
+执行器只接受单条 `SELECT`，使用绑定参数，每一步在对应数据库的新只读事务中执行。首个不满足 `continue_when` 的步骤停止，报告写入 `var/docs/业务排查文档/<日期>/`。完整参数、数据库、原生 SQL 和查询结果保存在报告中；终端只输出状态、停止步骤、结论和报告路径。

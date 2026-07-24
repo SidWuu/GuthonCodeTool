@@ -1,10 +1,14 @@
 # 数据库连接模板；真实凭据通过环境变量提供。
 # 数据源集合；键名供 products.yaml 和 projects.yaml 的 datasource 引用。
 datasource:
-  # 产品开发库的数据源标识，可按本地环境改名。
-  product-dev:
-    # 数据源显示名称，仅用于识别连接。
-    name: 示例产品开发库
+  # 数据源键名统一使用“对象 ID-环境”。
+  demo-product-dev:
+    # name 统一使用“项目名_环境”。
+    name: 示例产品_开发
+    # 对应 products.yaml 或 projects.yaml 中的对象。
+    object: products.demo-product
+    # 环境标识使用 dev 或 test。
+    environment: dev
     # 数据库类型；当前工具仅实现 mysql。
     type: mysql
     # 数据库主机地址，从环境变量读取。
@@ -18,10 +22,29 @@ datasource:
     # 只读密码，从环境变量读取。
     password: ${GUSEN_PRODUCT_DB_READONLY_PASSWORD}
 
-  # 项目开发库的数据源标识，可按本地环境改名。
-  project-dev:
-    # 数据源显示名称，仅用于识别连接。
-    name: 示例项目开发库
+  # 独立测试库；源码排查脚本只允许连接显式启用的 test 数据源。
+  demo-product-test:
+    name: 示例产品_测试
+    object: products.demo-product
+    environment: test
+    diagnosis:
+      enabled: true
+      query_only: true
+    type: mysql
+    host: ${GUSEN_PRODUCT_TEST_DB_HOST}
+    port: ${GUSEN_PRODUCT_TEST_DB_PORT}
+    username: ${GUSEN_PRODUCT_TEST_DB_USER}
+    password: ${GUSEN_PRODUCT_TEST_DB_PASSWORD}
+    # 测试服务器允许排查脚本连接的数据库白名单。
+    databases:
+      - demo_basic
+      - demo_trade
+
+  # 项目开发库的数据源标识。
+  demo-project-dev:
+    name: 示例项目_开发
+    object: projects.demo-project
+    environment: dev
     # 数据库类型；当前工具仅实现 mysql。
     type: mysql
     # 数据库主机地址，从环境变量读取。

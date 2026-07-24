@@ -77,6 +77,14 @@ GuthonCodeTool 是面向谷神低代码开发平台的本地开发工具集。�
 - 标准脚本和自定义脚本均按 `SCRIPT_TYPE` 导出，空脚本保留 `meta.json` 和空源码文件。
 - Bridge 在系统脚本页提供“选中拉取”和“全部拉取”悬浮按钮；选中拉取同时创建或安全刷新 workcopy，全部拉取只更新 readonly。
 
+### 源码逻辑排查
+
+- `scripts/run_source_diagnosis.py` 按已拉取源码整理的逻辑步骤查询独立测试库。
+- 数据源必须显式标记为 `test`、启用 `diagnosis`、声明 `query_only` 并配置允许查询的数据库白名单。
+- 排查定义指定默认数据库，步骤可切换到白名单中的其他数据库；每一步使用独立只读事务。
+- 首个不满足源码继续条件的步骤停止，完整参数、原生 SQL、查询结果和结论写入 `var/docs/业务排查文档/`。
+- 终端只返回状态、停止步骤、结论和报告路径，避免完整查询结果进入 AI 上下文。
+
 ### Guthon Bridge
 
 仓库内包含 Chrome 扩展和本地 HTTP 桥接服务：
@@ -125,6 +133,8 @@ var/database/views/{products|projects}/<名称>/     视图 SQL
 var/knowledge/          Markdown 索引
 var/runtime/index/      本地 SQLite 索引库
 var/runtime/logs/       拉取日志
+var/diagnosis/cases/    AI 生成的临时排查定义
+var/docs/业务排查文档/  源码逻辑排查报告
 ```
 
 ## 配置
@@ -220,6 +230,35 @@ rules:
 ```
 
 状态包括 `CLEAN`、`LOCAL_CHANGED`、`UPSTREAM_CHANGED`、`CONFLICT` 和 `UPSTREAM_MISSING`。本地修改未被新上游包含时才进入 `CONFLICT`，手动拉取会保留工作副本并返回失败提示。
+
+### 执行源码逻辑排查
+
+日常使用时直接向 AI 提供“问题、排查参数、测试数据库”，不需要手工编写 JSON 或执行命令。例如：
+
+```text
+排查现货购销事件没有处理的问题。
+参数：合同批号 CGHT2607230040001。
+默认查询 yshj_fxglx；基础资料需要时查询 yshj_basic。
+```
+
+AI 按以下流程处理：
+
+1. 根据源码索引定位目标对象和调用链，核对 readonly/workcopy、表结构和业务文档。
+2. 按源码执行顺序生成临时排查定义到 `var/diagnosis/cases/`。
+3. 使用 `gdrm-product-test` 查询指定数据库；每一步只执行单条 `SELECT` 和独立只读事务。
+4. 在首个不满足源码继续条件的步骤停止。
+5. 将排查参数、源码逻辑、原生 SQL、查询结果、停止位置和结论写入 `var/docs/业务排查文档/<日期>/`。
+
+`config/example/source-diagnosis.example.json` 是排查定义的格式示例，供 AI、脚本测试和无 AI 时的手工备用方式使用，不是日常需要维护的业务文件。
+
+需要脱离 AI 手工执行时，再复制模板并填写排查步骤：
+
+```bash
+cp config/example/source-diagnosis.example.json var/diagnosis/cases/<排查名称>.json
+.venv/bin/python scripts/run_source_diagnosis.py var/diagnosis/cases/<排查名称>.json
+```
+
+排查定义显式指定独立测试数据源和默认数据库，不跟随 `sync.ACTIVE`；单个步骤可以覆盖到同一数据源白名单中的其他数据库。详细格式见 `config/README.md`。
 
 ### 5. 导出平台元数据
 

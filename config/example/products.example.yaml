@@ -6,7 +6,7 @@ products:
     # 产品名称，用作 readonly、workcopy 和数据库快照的目录名。
     name: 示例产品
     # 引用 datasource.yaml 中的数据源标识。
-    datasource: product-dev
+    datasource: demo-product-dev
     # 保留项；当前实现根据 products 分组固定判定为 PRODUCT。
     source_layer: PRODUCT
     # 源码包含规则。

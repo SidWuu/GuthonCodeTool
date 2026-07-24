@@ -6,7 +6,7 @@ projects:
     # 项目名称，用作 readonly、workcopy 和数据库快照的目录名。
     name: 示例项目
     # 引用 datasource.yaml 中的数据源标识。
-    datasource: project-dev
+    datasource: demo-project-dev
     # 项目继承的产品 ID，对应 products.yaml 中的键名。
     product_id: demo-product
     # 保留项；当前实现根据 projects 分组固定判定为 PROJECT。

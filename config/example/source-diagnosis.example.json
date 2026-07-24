@@ -1,0 +1,32 @@
+{
+  "name": "示例源码逻辑",
+  "source_scope": "products.demo-product",
+  "datasource": "demo-product-test",
+  "database": "demo_trade",
+  "parameters": {
+    "业务批号": "TEST001"
+  },
+  "max_rows": 200,
+  "source_files": [
+    {
+      "path": "var/source/readonly/products/示例产品/示例过程/source.vm",
+      "function": "示例函数"
+    }
+  ],
+  "steps": [
+    {
+      "id": "01",
+      "name": "检查入口数据",
+      "source": "示例过程/source.vm:1",
+      "logic": "源码只处理状态为 0 的入口数据",
+      "sql": "SELECT E.ID, E.PROCESS_STATUS FROM DEMO_EVENT E WHERE E.BUSINESS_BATCH = %s AND E.PROCESS_STATUS = 0",
+      "bindings": [
+        "业务批号"
+      ],
+      "continue_when": "rows_found",
+      "pass_conclusion": "存在满足源码入口条件的数据",
+      "stop_conclusion": "测试库不存在满足源码入口条件的数据"
+    }
+  ],
+  "success_conclusion": "全部数据库检查点均满足源码继续执行条件"
+}
