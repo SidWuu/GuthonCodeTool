@@ -110,13 +110,15 @@ def script_info(script_type):
     return f"脚本类型{value}", "js"
 
 
-def resolve_script(row):
+def resolve_script(row, extension):
     source = str(row.get("SCRIPT") or "")
     product_source = str(row.get("PROD_SCRIPT") or "")
     if gusen_hub.INHERIT_MARKER.search(source):
         return gusen_hub._resolve_inherited_script(source, product_source), "PRODUCT"
     if not source and row.get("IS_PRODUCT") and product_source:
         return product_source, "PRODUCT"
+    if extension == "js" and source and product_source and not row.get("IS_PRODUCT"):
+        return product_source.rstrip("\r\n") + "\n" + source.lstrip("\r\n"), "CURRENT"
     return source, "CURRENT"
 
 
@@ -202,7 +204,7 @@ def export_system_scripts(
         script_dir = output_dir / relative_dir
         migrate_script_dir(script_dir.parent, script_type, script_dir)
         script_dir.mkdir(parents=True, exist_ok=True)
-        source, source_origin = resolve_script(row)
+        source, source_origin = resolve_script(row, extension)
         source_change_key = change_key(source, row)
         source_file = f"source.{extension}"
         (script_dir / source_file).write_text(source, encoding="utf-8")

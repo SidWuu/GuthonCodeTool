@@ -55,7 +55,7 @@ class ExportSystemScriptSqlTest(unittest.TestCase):
                 "SCRIPT_TYPE": 20,
                 "SYSTEM_ID": "SYS-1",
                 "SCRIPT": "const current = true;",
-                "PROD_SCRIPT": "",
+                "PROD_SCRIPT": "const product = true;\n",
                 "IS_PRODUCT": 0,
                 "USE_REMARK": None,
             },
@@ -86,7 +86,7 @@ class ExportSystemScriptSqlTest(unittest.TestCase):
             custom = (root / "10000-系统私有CSS脚本-一键换肤样式/source.css").read_text(encoding="utf-8")
             meta = json.loads((root / "30-系统私有CSS脚本/meta.json").read_text(encoding="utf-8"))
 
-        self.assertEqual("const current = true;", current)
+        self.assertEqual("const product = true;\nconst current = true;", current)
         self.assertEqual(".root { color: red; }\n", inherited)
         self.assertEqual(".custom {}", custom)
         self.assertEqual("PRODUCT", meta["sourceOrigin"])
