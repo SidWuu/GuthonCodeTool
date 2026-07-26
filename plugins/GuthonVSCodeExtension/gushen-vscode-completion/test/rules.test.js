@@ -347,6 +347,45 @@ test('keeps manual decimal-format completions free of JSON escape characters', (
   assert.equal(itemBodyToSnippet(completion.body), '\\$vs.decimalTools.weight_decimalP');
 });
 
+test('covers every registered custom base tool API', () => {
+  const expectedMembers = {
+    baseTools: [
+      'spec5Flag', 'dbtypeFlag', 'setGoodsSpec', 'isNumber', 'toCharArray',
+      'excelToString', 'convertToUTF8', 'isMobile', 'numberToChinese',
+      'engineFormula', 'uploadTempFile', 'encryptToSha1', 'formulaCalc',
+      'partition', 'subList', 'getBytesLength', 'getBytesMd5',
+    ],
+    doubleTools: [
+      'convertDoubleFormat', 'convertToString', 'expMore', 'expGe',
+      'intToDouble', 'Mathfloor', 'preciseDevCy', 'digitToChinese',
+    ],
+    dateTools: [
+      'isYdmDate', 'isHmsDateToString', 'isDate', 'stringToDate',
+      'dateToString', 'dateToDate', 'checkMaxG', 'checkMax', 'getDay',
+      'getBetweenMonths', 'getBetweenDays',
+    ],
+    decimalTools: [
+      'num_decimalP', 'weight_decimalP', 'price_decimalP', 'exprice_decimalP',
+      'money_decimalP', 'taxrate_decimalP', 'exrate_decimalP',
+    ],
+    lineageTools: ['createTypeList'],
+    streamTools: ['groupingBySeparator', 'groupingBy', 'groupByToMap', 'getListByField'],
+  };
+
+  for (const [group, members] of Object.entries(expectedMembers)) {
+    const items = manualData.java.filter((item) => item.group === group);
+    const actualMembers = items.map((item) => item.body.match(/^\$vs\.[^.]+\.([^(]+)/)?.[1]);
+
+    assert.deepEqual([...new Set(actualMembers)].sort(), members.toSorted(), group);
+    assert.equal(items.every((item) => item.description), true, group);
+  }
+
+  assert.equal(
+    manualData.java.some((item) => item.body === '$vs.baseTools.numberToChinese(number,isTraditional)'),
+    true
+  );
+});
+
 test('builds completion label with a short description for the suggestion row', () => {
   assert.deepEqual(
     itemLabel({

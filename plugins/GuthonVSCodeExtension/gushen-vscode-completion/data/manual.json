@@ -95,49 +95,343 @@
     },
     {
       "language": "java",
-      "group": "syntax",
+      "group": "baseTools",
+      "prefix": "baseTools.spec5Flag",
+      "body": "$vs.baseTools.spec5Flag",
+      "description": "规格系数5启用标识"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.dbtypeFlag",
+      "body": "$vs.baseTools.dbtypeFlag",
+      "description": "数据库语法类型标识"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.setGoodsSpec",
+      "body": "$vs.baseTools.setGoodsSpec(map,specName)",
+      "description": "拆分规格并将数字部分回写到规格属性字段"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.isNumber",
+      "body": "$vs.baseTools.isNumber(obj)",
+      "description": "判断字符串是否为数字"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.toCharArray",
+      "body": "$vs.baseTools.toCharArray(str)",
+      "description": "将字符串转换为谷神可用的字符列表"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.excelToString",
+      "body": "$vs.baseTools.excelToString(d)",
+      "description": "Excel 导入时将单元格值转换为字符串"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.convertToUTF8",
+      "body": "$vs.baseTools.convertToUTF8(s)",
+      "description": "将 ISO-8859-1 编码字符串转换为 UTF-8"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.isMobile",
+      "body": "$vs.baseTools.isMobile(mobile)",
+      "description": "判断字符串是否为中国大陆手机号"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.numberToChinese",
+      "body": "$vs.baseTools.numberToChinese(number)",
+      "description": "将数字转换为中文大写，默认使用繁体"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.numberToChinese",
+      "body": "$vs.baseTools.numberToChinese(number,isTraditional)",
+      "description": "将数字转换为中文大写并指定是否使用繁体"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.engineFormula",
+      "body": "$vs.baseTools.engineFormula(formula)",
+      "description": "通过谷神脚本执行器解析公式"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.uploadTempFile",
+      "body": "$vs.baseTools.uploadTempFile(path,savePath,fileName)",
+      "description": "下载公网文件到指定临时目录并返回文件大小"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.encryptToSha1",
+      "body": "$vs.baseTools.encryptToSha1(str)",
+      "description": "计算字符串的 SHA-1 摘要"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.formulaCalc",
+      "body": "$vs.baseTools.formulaCalc(formula)",
+      "description": "按照给定算术表达式计算结果"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.partition",
+      "body": "$vs.baseTools.partition(list,size)",
+      "description": "将列表按指定大小分组"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.subList",
+      "body": "$vs.baseTools.subList(list,start,end,step)",
+      "description": "按起止位置和步长截取列表"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.getBytesLength",
+      "body": "$vs.baseTools.getBytesLength(bytes)",
+      "description": "获取字节数组长度"
+    },
+    {
+      "language": "java",
+      "group": "baseTools",
+      "prefix": "baseTools.getBytesMd5",
+      "body": "$vs.baseTools.getBytesMd5(bytes)",
+      "description": "计算字节数组的 MD5 值并转换为大写"
+    },
+    {
+      "language": "java",
+      "group": "doubleTools",
+      "prefix": "doubleTools.convertDoubleFormat",
+      "body": "$vs.doubleTools.convertDoubleFormat(d,dec)",
+      "description": "将数字格式化为指定精度的千分位字符串"
+    },
+    {
+      "language": "java",
+      "group": "doubleTools",
+      "prefix": "doubleTools.convertToString",
+      "body": "$vs.doubleTools.convertToString(d,dec)",
+      "description": "将数字转换为指定精度的非千分位字符串"
+    },
+    {
+      "language": "java",
+      "group": "doubleTools",
+      "prefix": "doubleTools.expMore",
+      "body": "$vs.doubleTools.expMore(a,b)",
+      "description": "判断 a 是否大于 b，空值按 0 处理"
+    },
+    {
+      "language": "java",
+      "group": "doubleTools",
+      "prefix": "doubleTools.expGe",
+      "body": "$vs.doubleTools.expGe(a,b)",
+      "description": "判断 a 是否大于等于 b，空值按 0 处理"
+    },
+    {
+      "language": "java",
+      "group": "doubleTools",
+      "prefix": "doubleTools.intToDouble",
+      "body": "$vs.doubleTools.intToDouble(a)",
+      "description": "将 Integer 转换为 Double，空值返回 0"
+    },
+    {
+      "language": "java",
+      "group": "doubleTools",
+      "prefix": "doubleTools.Mathfloor",
+      "body": "$vs.doubleTools.Mathfloor(a)",
+      "description": "向下舍入取整，空值返回 0"
+    },
+    {
+      "language": "java",
+      "group": "doubleTools",
+      "prefix": "doubleTools.preciseDevCy",
+      "body": "$vs.doubleTools.preciseDevCy(a,b,scale)",
+      "description": "按指定小数位做除法并使用 CEILING 舍入"
+    },
+    {
+      "language": "java",
+      "group": "doubleTools",
+      "prefix": "doubleTools.digitToChinese",
+      "body": "$vs.doubleTools.digitToChinese(a)",
+      "description": "将金额数字转换为中文大写"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.isYdmDate",
+      "body": "$vs.dateTools.isYdmDate(dateStr)",
+      "description": "按 yyyy-MM-dd、yyyyMMdd、yyyy/MM/dd 或 yyyy.MM.dd 校验并解析日期"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.isHmsDateToString",
+      "body": "$vs.dateTools.isHmsDateToString(dateStr)",
+      "description": "校验并转换 HH:mm:ss、HHmmss 或完整日期时间字符串"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.isDate",
+      "body": "$vs.dateTools.isDate(dateStr,patternString)",
+      "description": "按指定格式严格校验并解析日期"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.stringToDate",
+      "body": "$vs.dateTools.stringToDate(dateStr,patten)",
+      "description": "按指定格式将字符串转换为日期"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.dateToString",
+      "body": "$vs.dateTools.dateToString(_date,patten)",
+      "description": "按指定格式将日期转换为字符串"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.dateToDate",
+      "body": "$vs.dateTools.dateToDate(_date,patten)",
+      "description": "按指定格式截取并重新解析日期"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.checkMaxG",
+      "body": "$vs.dateTools.checkMaxG(d1,d2)",
+      "description": "判断日期 d1 是否大于 d2"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.checkMax",
+      "body": "$vs.dateTools.checkMax(d1,d2)",
+      "description": "判断日期 d1 是否大于等于 d2"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.getDay",
+      "body": "$vs.dateTools.getDay(date)",
+      "description": "获取日期中的日"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.getBetweenMonths",
+      "body": "$vs.dateTools.getBetweenMonths(startDate,endDate)",
+      "description": "计算两个日期之间相差的月份数"
+    },
+    {
+      "language": "java",
+      "group": "dateTools",
+      "prefix": "dateTools.getBetweenDays",
+      "body": "$vs.dateTools.getBetweenDays(startDate,endDate)",
+      "description": "计算两个日期之间相差的天数"
+    },
+    {
+      "language": "java",
+      "group": "lineageTools",
+      "prefix": "lineageTools.createTypeList",
+      "body": "$vs.lineageTools.createTypeList(selfDatas,optBillDatas)",
+      "description": "根据当前单据和相关单据数据创建单据类型关系树列表"
+    },
+    {
+      "language": "java",
+      "group": "streamTools",
+      "prefix": "streamTools.groupingBySeparator",
+      "body": "$vs.streamTools.groupingBySeparator(separatorChars,list,fields)",
+      "description": "按一个或多个字段分组，并用指定分隔符拼接 Map 键"
+    },
+    {
+      "language": "java",
+      "group": "streamTools",
+      "prefix": "streamTools.groupingBy",
+      "body": "$vs.streamTools.groupingBy(list,fields)",
+      "description": "按一个或多个字段分组，使用连字符拼接 Map 键"
+    },
+    {
+      "language": "java",
+      "group": "streamTools",
+      "prefix": "streamTools.groupByToMap",
+      "body": "$vs.streamTools.groupByToMap(list,fileName)",
+      "description": "按指定字段唯一值将列表转换为 Map"
+    },
+    {
+      "language": "java",
+      "group": "streamTools",
+      "prefix": "streamTools.getListByField",
+      "body": "$vs.streamTools.getListByField(list,field)",
+      "description": "提取列表中指定字段的非空去重值"
+    },
+    {
+      "language": "java",
+      "group": "decimalTools",
       "prefix": "numP",
       "body": "$vs.decimalTools.num_decimalP",
       "description": "谷神后端格式化:数量"
     },
     {
       "language": "java",
-      "group": "syntax",
+      "group": "decimalTools",
       "prefix": "weightP",
       "body": "$vs.decimalTools.weight_decimalP",
       "description": "谷神后端格式化:重量"
     },
     {
       "language": "java",
-      "group": "syntax",
+      "group": "decimalTools",
       "prefix": "priceP",
       "body": "$vs.decimalTools.price_decimalP",
       "description": "谷神后端格式化:含税单价"
     },
     {
       "language": "java",
-      "group": "syntax",
+      "group": "decimalTools",
       "prefix": "expriceP",
       "body": "$vs.decimalTools.exprice_decimalP",
       "description": "谷神后端格式化:无税单价"
     },
     {
       "language": "java",
-      "group": "syntax",
+      "group": "decimalTools",
       "prefix": "moneyP",
       "body": "$vs.decimalTools.money_decimalP",
       "description": "谷神后端格式化:金额"
     },
     {
       "language": "java",
-      "group": "syntax",
+      "group": "decimalTools",
       "prefix": "taxrateP",
       "body": "$vs.decimalTools.taxrate_decimalP",
       "description": "谷神后端格式化:税率"
     },
     {
       "language": "java",
-      "group": "syntax",
+      "group": "decimalTools",
       "prefix": "exrateP",
       "body": "$vs.decimalTools.exrate_decimalP",
       "description": "谷神后端格式化:汇率"

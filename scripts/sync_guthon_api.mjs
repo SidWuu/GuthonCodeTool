@@ -21,6 +21,7 @@ const dataDir = path.join(extensionDir, 'data');
 const buildDataScript = path.join(extensionDir, 'scripts', 'build-data.mjs');
 const syncConfigPath = path.join(repoRoot, 'config', 'sync.yaml');
 const languages = ['java', 'javascript', 'sql'];
+const protectedFiles = new Set([path.join(apiDir, 'custom.md')]);
 
 function unquote(value) {
   const text = String(value || '').trim();
@@ -358,7 +359,8 @@ function apiCounts(directory) {
 
 function changedContents(contents) {
   return new Map([...contents].filter(([target, content]) =>
-    !fs.existsSync(target) || !fs.readFileSync(target).equals(content)
+    !protectedFiles.has(path.resolve(target))
+      && (!fs.existsSync(target) || !fs.readFileSync(target).equals(content))
   ));
 }
 
@@ -393,6 +395,9 @@ function selfTest() {
   } finally {
     fs.rmSync(configFile, { force: true });
   }
+  assert.equal(changedContents(new Map([
+    [path.join(apiDir, 'custom.md'), Buffer.from('不得覆盖')],
+  ])).size, 0);
   console.log('sync_guthon_api self-test: ok');
 }
 
