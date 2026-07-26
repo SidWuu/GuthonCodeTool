@@ -176,12 +176,36 @@ rules:
 
 ## 使用
 
+切换 `sync.ACTIVE` 后，一键依次完成源码拉取与索引、数据库表结构、单据类型、系统脚本和视图同步：
+
+macOS / Linux：
+
+```bash
+.venv/bin/python scripts/sync_active_all.py
+```
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\sync_active_all.py
+```
+
+任一步失败时脚本立即停止；执行期间如果 `sync.ACTIVE` 发生变化，也会停止后续步骤。
+
 ### 1. 初始化源码索引
 
 初始化源码索引库：
 
+macOS / Linux：
+
 ```bash
 .venv/bin/python scripts/run_sync_once.py --init-only
+```
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_sync_once.py --init-only
 ```
 
 首次使用时先执行初始化。
@@ -190,31 +214,66 @@ rules:
 
 按当前 `sync.ACTIVE` 同步源码：
 
+macOS / Linux：
+
 ```bash
 .venv/bin/python scripts/run_sync_once.py
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_sync_once.py
+```
+
 仅在调用识别规则升级后，从现有只读源码重建调用索引：
+
+macOS / Linux：
 
 ```bash
 .venv/bin/python scripts/run_sync_once.py --reindex-calls
+```
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_sync_once.py --reindex-calls
 ```
 
 ### 3. 拉取源码并创建工作副本
 
 从已有源码索引生成工作副本：
 
+macOS / Linux：
+
 ```bash
 .venv/bin/python scripts/create_work_copy.py --product <product_id> --type procedure --alias <procedure_alias> --fun <fun_id>
 .venv/bin/python scripts/create_work_copy.py --project <project_id> --type page --alias <page_alias>
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\create_work_copy.py --product <product_id> --type procedure --alias <procedure_alias> --fun <fun_id>
+.\.venv\Scripts\python.exe scripts\create_work_copy.py --project <project_id> --type page --alias <page_alias>
+```
+
 从源码表直接拉取并生成工作副本：
+
+macOS / Linux：
 
 ```bash
 .venv/bin/python scripts/pull_source_to_work_copy.py --type procedure --alias <procedure_alias> --fun <fun_id>
 .venv/bin/python scripts/pull_source_to_work_copy.py --type page --source-id <page_id>
 .venv/bin/python scripts/pull_source_to_work_copy.py --type page --alias <page_alias>
+```
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\pull_source_to_work_copy.py --type procedure --alias <procedure_alias> --fun <fun_id>
+.\.venv\Scripts\python.exe scripts\pull_source_to_work_copy.py --type page --source-id <page_id>
+.\.venv\Scripts\python.exe scripts\pull_source_to_work_copy.py --type page --alias <page_alias>
 ```
 
 手动拉取使用 `config/sync.yaml` 的 `sync.ACTIVE`；显式传入的项目或产品必须与 ACTIVE 一致。
@@ -223,10 +282,20 @@ rules:
 
 检查工作副本、刷新差异和生成交付清单：
 
+macOS / Linux：
+
 ```bash
 .venv/bin/python scripts/workcopy.py status <workcopy_path>
 .venv/bin/python scripts/workcopy.py diff <workcopy_path>
 .venv/bin/python scripts/workcopy.py package <workcopy_path>
+```
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\workcopy.py status <workcopy_path>
+.\.venv\Scripts\python.exe scripts\workcopy.py diff <workcopy_path>
+.\.venv\Scripts\python.exe scripts\workcopy.py package <workcopy_path>
 ```
 
 状态包括 `CLEAN`、`LOCAL_CHANGED`、`UPSTREAM_CHANGED`、`CONFLICT` 和 `UPSTREAM_MISSING`。本地修改未被新上游包含时才进入 `CONFLICT`，手动拉取会保留工作副本并返回失败提示。
@@ -253,9 +322,18 @@ AI 按以下流程处理：
 
 需要脱离 AI 手工执行时，再复制模板并填写排查步骤：
 
+macOS / Linux：
+
 ```bash
 cp config/example/source-diagnosis.example.json var/diagnosis/cases/<排查名称>.json
 .venv/bin/python scripts/run_source_diagnosis.py var/diagnosis/cases/<排查名称>.json
+```
+
+Windows PowerShell：
+
+```powershell
+Copy-Item config\example\source-diagnosis.example.json var\diagnosis\cases\<排查名称>.json
+.\.venv\Scripts\python.exe scripts\run_source_diagnosis.py var\diagnosis\cases\<排查名称>.json
 ```
 
 排查定义显式指定独立测试数据源和默认数据库，不跟随 `sync.ACTIVE`；单个步骤可以覆盖到同一数据源白名单中的其他数据库。详细格式见 `config/README.md`。
@@ -266,58 +344,133 @@ cp config/example/source-diagnosis.example.json var/diagnosis/cases/<排查名�
 
 导出表结构：
 
+macOS / Linux：
+
 ```bash
 .venv/bin/python scripts/export_table_schema_sql.py
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_table_schema_sql.py
+```
+
 临时覆盖数据源范围：
+
+macOS / Linux：
 
 ```bash
 .venv/bin/python scripts/export_table_schema_sql.py --data-source-ids 0015,0018
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_table_schema_sql.py --data-source-ids 0015,0018
+```
+
 导出单据类型：
+
+macOS / Linux：
 
 ```bash
 .venv/bin/python scripts/export_bill_type_sql.py
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_bill_type_sql.py
+```
+
 临时覆盖数据源范围：
+
+macOS / Linux：
 
 ```bash
 .venv/bin/python scripts/export_bill_type_sql.py --data-source-ids 0015,0008
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_bill_type_sql.py --data-source-ids 0015,0008
+```
+
 导出视图源码：
+
+macOS / Linux：
 
 ```bash
 .venv/bin/python scripts/export_view_sql.py
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_view_sql.py
+```
+
 只导出指定视图：
+
+macOS / Linux：
 
 ```bash
 .venv/bin/python scripts/export_view_sql.py --data-source-ids 0015 --view-ids V_RM_EXAMPLE
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_view_sql.py --data-source-ids 0015 --view-ids V_RM_EXAMPLE
+```
+
 导出系统脚本：
+
+macOS / Linux：
 
 ```bash
 .venv/bin/python scripts/export_system_script_sql.py
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_system_script_sql.py
+```
+
 临时覆盖数据源范围：
+
+macOS / Linux：
 
 ```bash
 .venv/bin/python scripts/export_system_script_sql.py --data-source-ids 0015
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_system_script_sql.py --data-source-ids 0015
+```
+
 只导出指定应用系统和脚本类型：
+
+macOS / Linux：
 
 ```bash
 .venv/bin/python scripts/export_system_script_sql.py \
   --system-ids SYS-EXAMPLE \
   --script-types 20 \
+  --workcopy
+```
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_system_script_sql.py `
+  --system-ids SYS-EXAMPLE `
+  --script-types 20 `
   --workcopy
 ```
 
@@ -329,9 +482,18 @@ cp config/example/source-diagnosis.example.json var/diagnosis/cases/<排查名�
 2. 在 `config/sync.yaml` 的 `guthon_api` 中配置 `active_version` 和对应的 `bundle_files` 路径。
 3. 先检查，再执行同步：
 
+macOS / Linux：
+
 ```bash
 node scripts/sync_guthon_api.mjs --check
 node scripts/sync_guthon_api.mjs
+```
+
+Windows PowerShell：
+
+```powershell
+node scripts\sync_guthon_api.mjs --check
+node scripts\sync_guthon_api.mjs
 ```
 
 同步结果无差异时，不会覆盖已有的 Markdown 和 JSON 文件。
@@ -340,8 +502,17 @@ node scripts/sync_guthon_api.mjs
 
 启动浏览器桥接服务：
 
+macOS / Linux：
+
 ```bash
 cd plugins/GuthonBridge
+npm run start:bridge
+```
+
+Windows PowerShell：
+
+```powershell
+Set-Location plugins\GuthonBridge
 npm run start:bridge
 ```
 
@@ -349,8 +520,16 @@ npm run start:bridge
 
 只读检查配置、Python/Node、Bridge 状态和 VS Code 补全数据：
 
+macOS / Linux：
+
 ```bash
 .venv/bin/python scripts/doctor.py
+```
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\doctor.py
 ```
 
 Bridge 未启动时只显示 `WARN`；配置或必要运行环境异常时返回非零退出码。使用 `--json` 可输出机器可读结果。
@@ -359,9 +538,18 @@ Bridge 未启动时只显示 `WARN`；配置或必要运行环境异常时返回
 
 手动删除当前 ACTIVE 的 `var/source/readonly` 源码后，需要先删除对应同步游标，再重新全量同步：
 
+macOS / Linux：
+
 ```bash
 sqlite3 var/runtime/index/products/demo-product.db "DELETE FROM gusen_sync_state WHERE state_key='last_success_time:products.demo-product';"
 .venv/bin/python scripts/run_sync_once.py
+```
+
+Windows PowerShell：
+
+```powershell
+sqlite3 var\runtime\index\products\demo-product.db "DELETE FROM gusen_sync_state WHERE state_key='last_success_time:products.demo-product';"
+.\.venv\Scripts\python.exe scripts\run_sync_once.py
 ```
 
 切换 ACTIVE 后，索引路径和 `last_success_time:<ACTIVE>` 必须同时改为对应产品或项目。
@@ -437,12 +625,14 @@ source, database, billtype, views, system-scripts
 
 Python 脚本：
 
+macOS / Linux：
+
 ```bash
-python3 -m unittest discover -s tests
-python3 -m unittest scripts/test_workcopy.py
-python3 -m py_compile \
+.venv/bin/python -m unittest discover -s tests
+.venv/bin/python -m py_compile \
   scripts/gusen_hub.py \
   scripts/run_sync_once.py \
+  scripts/sync_active_all.py \
   scripts/create_work_copy.py \
   scripts/pull_source_to_work_copy.py \
   scripts/workcopy.py \
@@ -452,7 +642,26 @@ python3 -m py_compile \
   scripts/export_system_script_sql.py
 ```
 
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests
+.\.venv\Scripts\python.exe -m py_compile `
+  scripts\gusen_hub.py `
+  scripts\run_sync_once.py `
+  scripts\sync_active_all.py `
+  scripts\create_work_copy.py `
+  scripts\pull_source_to_work_copy.py `
+  scripts\workcopy.py `
+  scripts\export_table_schema_sql.py `
+  scripts\export_bill_type_sql.py `
+  scripts\export_view_sql.py `
+  scripts\export_system_script_sql.py
+```
+
 浏览器扩展和本地 bridge：
+
+macOS / Linux：
 
 ```bash
 cd plugins/GuthonBridge
@@ -463,6 +672,19 @@ node --check extension/content.js
 node --check extension/page-bridge.js
 node --check extension/popup.js
 node --check extension/background.js
+```
+
+Windows PowerShell：
+
+```powershell
+Set-Location plugins\GuthonBridge
+npm test
+node --check bridge\server.js
+node --check extension\host-config.js
+node --check extension\content.js
+node --check extension\page-bridge.js
+node --check extension\popup.js
+node --check extension\background.js
 ```
 
 ## 文档
