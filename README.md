@@ -356,6 +356,8 @@ Windows PowerShell：
 .\.venv\Scripts\python.exe scripts\export_table_schema_sql.py
 ```
 
+表结构默认只导出当前 `sync.ACTIVE` 对应数据源中、被 `config/sync.yaml` 的 `systems.include.system_aliases` 命中的系统。它不会默认导出所有平台数据源；例如只配置 `com.golden.bdp.gdrm` 时，只会导出风险管理数据源。要扩大默认范围，先在 `sync.yaml` 增加所需系统别名并重新执行导出；运行结果中的 `dataSourceIds` 是本次实际导出的数据源范围。
+
 临时覆盖数据源范围：
 
 macOS / Linux：
@@ -498,6 +500,32 @@ node scripts\sync_guthon_api.mjs
 
 同步结果无差异时，不会覆盖已有的 Markdown 和 JSON 文件。
 
+### 6.1 VS Code 谷神工具扩展
+
+扩展提供谷神方言补全、API 悬浮说明、过程函数跳转，以及左侧活动栏的“谷神工具”面板。面板可初始化工作区、同步源码、导出表结构/单据类型/系统脚本/视图、执行排查和检查或打包 Workcopy。
+
+同事日常使用只需从最新 GitHub Release 下载 VSIX、本机系统对应的 `GuthonCodeTool` 应用和 Bridge 浏览器插件，无需安装 Python 或克隆本仓库。首次使用：
+
+1. 在 VS Code 通过 **Install from VSIX...** 安装发布包中的 VSIX，并执行 `Developer: Reload Window`。
+2. 点击左侧活动栏“谷神工具”图标，选择“初始化工作区”。依次选择下载的 `GuthonCodeTool` 应用和一个长期保留的本地数据目录，例如 `D:\GuthonCodeToolData` 或 `~/Documents/GuthonCodeToolData`。
+3. 工具准备 `config/`，后续初始化和同步会在同一数据目录下按需生成 `var/`。同步源码在 `var/source/readonly/`，开发工作副本在 `var/source/workcopy/`，索引与运行数据写入 `var/knowledge/`、`var/runtime/`。
+4. 在“工作区 → 配置文件”直接编辑 `datasource.yaml`、`products.yaml`、`projects.yaml`、`source-tables.yaml` 和 `sync.yaml`，填写本地数据源与 `sync.ACTIVE` 后再开始同步。
+
+同步、导出、排查、Workcopy 等会改动本地数据的操作，均会在单击后要求确认；配置文件、打开本地数据目录和刷新面板仍可单击直接执行。
+
+Release 不包含个人配置、已拉取源码、数据库导出、索引、运行日志或 AI 规范；这些内容继续由同事在本地数据目录单独维护。
+
+### 6.2 自动发布 Release
+
+工具脚本、配置模板、VS Code 扩展或 Bridge 插件的改动合并到 `main` 后，GitHub Actions 自动创建版本号为 `v0.1.<运行序号>` 的 Release，并上传且仅上传：
+
+- `GuthonCodeTool-windows-x64.exe`
+- `GuthonCodeTool-macos-arm64.zip`
+- `GuthonCodeTool-vscode.vsix`
+- `GuthonBridge.zip`（浏览器扩展和本地 Bridge 服务）
+
+也可以在 GitHub 的 **Actions → Build Release → Run workflow** 手动重发一个新版本。`dist/` 仍是本地构建产物目录，不提交 Git。
+
 ### 7. 启动浏览器桥接服务
 
 启动浏览器桥接服务：
@@ -505,14 +533,18 @@ node scripts\sync_guthon_api.mjs
 macOS / Linux：
 
 ```bash
-cd plugins/GuthonBridge
+cd <GuthonBridge 解压目录>
+export GUTHON_TOOL_PATH="/path/to/GuthonCodeTool"
+export GUTHON_TOOL_HOME="$HOME/Documents/GuthonCodeToolData"
 npm run start:bridge
 ```
 
 Windows PowerShell：
 
 ```powershell
-Set-Location plugins\GuthonBridge
+Set-Location <GuthonBridge 解压目录>
+$env:GUTHON_TOOL_PATH = "D:\GuthonCodeTool\GuthonCodeTool-windows-x64.exe"
+$env:GUTHON_TOOL_HOME = "D:\GuthonCodeToolData"
 npm run start:bridge
 ```
 

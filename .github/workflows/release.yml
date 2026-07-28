@@ -1,0 +1,121 @@
+name: Build Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/**"
+      - "config/example/**"
+      - "plugins/GuthonBridge/**"
+      - "plugins/GuthonVSCodeExtension/**"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-app:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: GuthonCodeTool-windows
+            asset: GuthonCodeTool-windows-x64.exe
+          - os: macos-15
+            artifact: GuthonCodeTool-macos
+            asset: GuthonCodeTool-macos-arm64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: python -m pip install pyinstaller pymysql
+
+      - name: Build application
+        run: python scripts/build_guthon_tool.py
+
+      - name: Prepare Windows application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Copy-Item dist/GuthonCodeTool.exe "${{ matrix.asset }}"
+
+      - name: Prepare macOS application
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent dist/GuthonCodeTool "${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.artifact }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  build-plugins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Test and package VS Code extension
+        working-directory: plugins/GuthonVSCodeExtension/gushen-vscode-completion
+        run: |
+          npm test
+          npm version "0.1.${GITHUB_RUN_NUMBER}" --no-git-tag-version
+          npx --yes @vscode/vsce@3.9.2 package \
+            --allow-missing-repository \
+            --out ../../../GuthonCodeTool-vscode.vsix
+
+      - name: Test Bridge
+        working-directory: plugins/GuthonBridge
+        run: npm test
+
+      - name: Package Bridge browser extension
+        working-directory: plugins/GuthonBridge
+        run: |
+          node -e 'const fs=require("fs"); const p=require("./extension/manifest.json"); p.version=`0.1.${process.env.GITHUB_RUN_NUMBER}`; fs.writeFileSync("extension/manifest.json", JSON.stringify(p, null, 2) + "\n")'
+          zip -r ../../GuthonBridge.zip README.md package.json bridge/server.js extension -x "*.DS_Store" "*.test.js"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-plugins
+          path: |
+            GuthonCodeTool-vscode.vsix
+            GuthonBridge.zip
+          if-no-files-found: error
+
+  release:
+    needs:
+      - build-app
+      - build-plugins
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: v0.1.${{ github.run_number }}
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+
+      - name: Verify release assets
+        run: |
+          test "$(find release -maxdepth 1 -type f | wc -l)" -eq 4
+          find release -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "$RELEASE_TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "GuthonCodeTool $RELEASE_TAG" \
+            --generate-notes \
+            --latest

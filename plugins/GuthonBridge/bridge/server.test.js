@@ -515,6 +515,7 @@ test("bridge defaults hub python to repo venv when present", () => {
 
   assert.equal(serverScript.includes('path.join(ROOT, ".venv", "bin", "python")'), true);
   assert.equal(serverScript.includes("fs.existsSync(DEFAULT_HUB_PYTHON)"), true);
+  assert.equal(serverScript.includes('path.join(HUB_TOOL_HOME || ROOT, "var", "runtime", "logs", "pull-log.ndjson")'), true);
 });
 
 test("user-facing messages use concise Chinese", () => {
