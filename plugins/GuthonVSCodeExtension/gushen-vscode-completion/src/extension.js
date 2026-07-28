@@ -35,6 +35,22 @@ const TOOL_COMMANDS = {
   diagnose: 'diagnose',
   workcopy: 'workcopy',
 };
+const CONFIG_FILES = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'source-tables.yaml', 'sync.yaml'];
+const TOOL_LABELS = {
+  setup: '初始化工作区',
+  init: '初始化源码索引',
+  'sync-source': '同步当前 ACTIVE 源码',
+  'sync-all': '同步当前 ACTIVE 全部资料',
+  reindex: '重建本地调用索引',
+  'export-markdown': '导出源码索引文档',
+  'export-schema': '导出表结构',
+  'export-bill-type': '导出单据类型',
+  'export-system-script': '导出系统脚本',
+  'export-view': '导出视图源码',
+  doctor: '检查本地环境',
+  diagnose: '执行源码逻辑排查',
+  workcopy: '执行 Workcopy 操作',
+};
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -149,8 +165,11 @@ async function configuredTool() {
 }
 
 async function runTool(command, extraArgs = []) {
+  const label = TOOL_LABELS[command] || command;
+  const confirmed = await vscode.window.showWarningMessage(`确认${label}？`, { modal: true }, '执行');
+  if (confirmed !== '执行') return false;
   const tool = await configuredTool();
-  if (!tool) return;
+  if (!tool) return false;
   const output = vscode.window.createOutputChannel('GuthonCodeTool');
   output.show(true);
   output.appendLine(`运行：${command}`);
@@ -163,11 +182,12 @@ async function runTool(command, extraArgs = []) {
     output.appendLine(message);
     (code === 0 ? vscode.window.showInformationMessage : vscode.window.showErrorMessage)(message);
   });
+  return true;
 }
 
-function toolItem(label, command, icon, description) {
+function toolItem(label, command, icon, description, args = []) {
   const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
-  item.command = { command, title: label };
+  item.command = { command, title: label, arguments: args };
   item.iconPath = new vscode.ThemeIcon(icon);
   item.description = description;
   return item;
@@ -195,8 +215,12 @@ class ToolTreeDataProvider {
     const workspace = new vscode.TreeItem('工作区', vscode.TreeItemCollapsibleState.Expanded);
     workspace.iconPath = new vscode.ThemeIcon(ready ? 'pass-filled' : 'warning');
     workspace.description = ready ? '已配置' : '未配置';
+    const configFiles = new vscode.TreeItem('配置文件', vscode.TreeItemCollapsibleState.Collapsed);
+    configFiles.iconPath = new vscode.ThemeIcon('settings-gear');
+    configFiles.children = CONFIG_FILES.map((filename) => toolItem(filename, 'gushenCompletion.editConfig', 'edit', undefined, [filename]));
     workspace.children = [
       toolItem('初始化工作区', 'gushenCompletion.setupTool', 'folder-library', ready ? toolHome : '选择程序和本地数据目录'),
+      configFiles,
       toolItem('打开本地数据目录', 'gushenCompletion.openToolHome', 'folder-opened'),
     ];
     const source = new vscode.TreeItem('源码', vscode.TreeItemCollapsibleState.Expanded);
@@ -272,6 +296,13 @@ function activate(context) {
       if (action) return runTool(TOOL_COMMANDS.workcopy, [action.value, selected[0].fsPath]);
     }),
     vscode.commands.registerCommand('gushenCompletion.refreshToolView', () => toolView.refresh()),
+    vscode.commands.registerCommand('gushenCompletion.editConfig', async (filename) => {
+      const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
+      if (!toolHome) return vscode.window.showErrorMessage('请先执行 “Guthon: 初始化工作区”');
+      const file = path.join(toolHome, 'config', filename);
+      if (!fs.existsSync(file)) return vscode.window.showErrorMessage(`配置文件不存在：${file}。请先执行 “Guthon: 初始化工作区”`);
+      return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
+    }),
     vscode.commands.registerCommand('gushenCompletion.openToolHome', () => {
       const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
       return toolHome ? vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(toolHome)) : vscode.window.showErrorMessage('请先执行 “Guthon: 初始化工作区”');

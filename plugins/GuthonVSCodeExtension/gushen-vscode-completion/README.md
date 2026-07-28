@@ -19,6 +19,10 @@ Build `dist/GuthonCodeTool` (or `GuthonCodeTool.exe` on Windows) on each target 
 
 The extension also adds a dedicated `谷神工具` icon to VS Code's left activity bar. Its tree exposes initialization, source/index sync, metadata export, environment checks, source diagnosis, and workcopy status/diff/package actions, so colleagues do not need to use the command palette.
 
+Expand `工作区` → `配置文件` to edit the selected local data directory's `datasource.yaml`, `products.yaml`, `projects.yaml`, `source-tables.yaml`, or `sync.yaml` directly in VS Code.
+
+Each sidebar action that runs the packaged tool asks for confirmation before it starts. Opening configuration files and local folders remains single-click.
+
 For the existing Chrome Bridge's current-PAGE pull, set `GUTHON_TOOL_PATH` to this executable and `GUTHON_TOOL_HOME` to the same local data directory before starting the Bridge. Without these variables, the Bridge retains its current Python-script development fallback.
 
 The executable also retains the non-UI entry points: `create-workcopy`, `workcopy`, `query`, `diagnose`, `doctor`, `export-markdown`, and each metadata export command. Pass original script arguments after `--`, for example: `GuthonCodeTool query --home <目录> -- callers --alias <别名> --fun <函数>`.
