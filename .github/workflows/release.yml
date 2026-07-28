@@ -111,11 +111,69 @@ jobs:
           test "$(find release -maxdepth 1 -type f | wc -l)" -eq 4
           find release -maxdepth 1 -type f -printf '%f\n' | sort
 
+      - name: Generate Chinese release notes
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$RELEASE_TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            --jq .body > generated-notes.md
+          sed -i \
+            -e 's/^## What'\''s Changed$/## 本次变更/' \
+            -e 's/^## New Contributors$/## 新贡献者/' \
+            -e 's/^\*\*Full Changelog\*\*:/\*\*完整变更记录\*\*:/' \
+            generated-notes.md
+          {
+            echo "本版本由 main 分支自动构建并发布。"
+            echo
+            echo "## 下载内容"
+            echo
+            echo "- Windows x64 应用：\`GuthonCodeTool-windows-x64.exe\`"
+            echo "- macOS Apple Silicon 应用：\`GuthonCodeTool-macos-arm64.zip\`"
+            echo "- VS Code 扩展：\`GuthonCodeTool-vscode.vsix\`"
+            echo "- GuthonBridge 浏览器扩展及本地服务：\`GuthonBridge.zip\`"
+            echo
+            cat generated-notes.md
+          } > release-notes.md
+
       - name: Create GitHub Release
         run: |
           gh release create "$RELEASE_TAG" release/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "GuthonCodeTool $RELEASE_TAG" \
-            --generate-notes \
+            --title "GuthonCodeTool $RELEASE_TAG 正式版" \
+            --notes-file release-notes.md \
             --latest
+
+      - name: 创建 Gitee Release
+        id: gitee-release
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+        run: |
+          response=$(curl --fail-with-body --silent --show-error \
+            -X POST \
+            -F "access_token=$GITEE_TOKEN" \
+            -F "tag_name=$RELEASE_TAG" \
+            -F "target_commitish=main" \
+            -F "name=GuthonCodeTool $RELEASE_TAG 正式版" \
+            -F "body=<release-notes.md" \
+            "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/releases")
+
+          release_id=$(echo "$response" | jq -er '.id')
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+      - name: 上传 Gitee Release 附件
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+          GITEE_RELEASE_ID: ${{ steps.gitee-release.outputs.release_id }}
+        run: |
+          for file in release/*; do
+            curl --fail-with-body --silent --show-error \
+              -X POST \
+              -F "access_token=$GITEE_TOKEN" \
+              -F "file=@$file" \
+              "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/releases/$GITEE_RELEASE_ID/attach_files"
+          done
