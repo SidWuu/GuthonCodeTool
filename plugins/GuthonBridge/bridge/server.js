@@ -18,7 +18,7 @@ const BILL_TYPE_SCRIPT = process.env.GUTHON_BILL_TYPE_SCRIPT || path.join(ROOT, 
 const VIEW_SQL_SCRIPT = process.env.GUTHON_VIEW_SQL_SCRIPT || path.join(ROOT, "scripts", "export_view_sql.py");
 const SYSTEM_SCRIPT_EXPORT_SCRIPT = process.env.GUTHON_SYSTEM_SCRIPT_EXPORT_SCRIPT || path.join(ROOT, "scripts", "export_system_script_sql.py");
 const HUB_QUERY_SCRIPT = process.env.GUTHON_HUB_QUERY_SCRIPT || path.join(ROOT, "scripts", "query_hub_context.py");
-const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(ROOT, "var", "runtime", "logs", "pull-log.ndjson");
+const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(HUB_TOOL_HOME || ROOT, "var", "runtime", "logs", "pull-log.ndjson");
 
 fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
 

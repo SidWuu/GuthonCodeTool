@@ -28,6 +28,26 @@ plugins/GuthonBridge/
 
 ## 启动 Bridge
 
+从 GitHub Release 下载 `GuthonBridge.zip` 后，先解压，再设置同一 Release 中的应用路径和本地数据目录：
+
+macOS / Linux：
+
+```bash
+export GUTHON_TOOL_PATH="/path/to/GuthonCodeTool"
+export GUTHON_TOOL_HOME="$HOME/Documents/GuthonCodeToolData"
+npm run start:bridge
+```
+
+Windows PowerShell：
+
+```powershell
+$env:GUTHON_TOOL_PATH = "D:\GuthonCodeTool\GuthonCodeTool-windows-x64.exe"
+$env:GUTHON_TOOL_HOME = "D:\GuthonCodeToolData"
+npm run start:bridge
+```
+
+仓库源码开发模式仍可直接运行：
+
 ```bash
 npm run start:bridge
 ```
