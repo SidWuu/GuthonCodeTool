@@ -1059,7 +1059,13 @@ def parse_page_scripts(base: Path, raw: str):
             ext = "vm" if event_type == "serviceEvents" else "js"
         else:
             ext = "vm" if "SaveScript" in key or key in {"script", "doMethodScript", "compScript"} else "js"
-        name = path_part(".".join(path[-2:] + [key])) if path else path_part(key)
+        tab_index = next((i for i, part in enumerate(path) if re.fullmatch(r"tabPage\d+", part)), None)
+        name_parts = path[tab_index:] if tab_index is not None else path[-2:]
+        table_index = next((i for i, part in enumerate(name_parts[1:], 1) if part in {"mainTable", "detailTable"}), None)
+        if table_index is not None:
+            name_parts = name_parts[:1] + name_parts[table_index:]
+        name_parts = [part for i, part in enumerate(name_parts) if i == 0 or part != name_parts[i - 1]]
+        name = path_part(".".join(name_parts + [key])) if path else path_part(key)
         script_path = out_dir / f"{name}.{ext}"
         script_path.write_text(value, encoding="utf-8")
         scripts.append((key, script_path, value))
