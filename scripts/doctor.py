@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 import urllib.error
 import urllib.request
@@ -38,9 +37,6 @@ def run_checks(bridge_port=17361):
             sys.version.split()[0],
         )
     )
-
-    node = shutil.which("node")
-    checks.append(result("node", "PASS" if node else "FAIL", node or "not found"))
 
     missing = [name for name in CONFIG_FILES if not (ROOT / "config" / name).is_file()]
     if missing:

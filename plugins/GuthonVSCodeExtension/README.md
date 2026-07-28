@@ -1,6 +1,37 @@
-# 谷神 VS Code 扩展
+# Guthon Nexus
 
-本目录用于存放谷神方言 VS Code 本地扩展，目前支持代码补全、API 悬浮备注和本地过程函数源码快捷跳转。扩展不依赖 IntelliCode，也不调用 Copilot，补全数据随扩展离线提供。
+Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口，不再只是代码补全扩展。它把工作区初始化、源码与配置数据同步、Workcopy 维护和谷神方言编辑能力集中到 VS Code 左侧同名面板中。
+
+扩展不依赖 IntelliCode，也不调用 Copilot；谷神 API 补全数据随 VSIX 离线提供。
+
+## 开发工具面板
+
+### 工作区
+
+- 初始化工作区：选择 GuthonCodeTool 应用和本地数据目录，创建缺失配置但不覆盖已有文件。
+- 切换工作区：已初始化时再次点击“初始化工作区”，确认后选择新的本地数据目录；取消时保留原工作区。
+- 配置文件：直接编辑 `datasource.yaml`、`products.yaml`、`projects.yaml`、`source-tables.yaml` 和 `sync.yaml`。
+- 打开本地数据目录。
+
+### 源码与配置数据
+
+- 初始化源码索引、同步当前 `sync.ACTIVE` 源码、重建调用索引和导出源码索引文档。
+- 一键同步当前 ACTIVE 全部资料。
+- 单独导出表结构、单据类型、系统脚本和视图源码。
+
+### 维护
+
+- 检查本地环境。
+- 选择 JSON 定义执行只读源码逻辑排查。
+- 查看 Workcopy 状态、生成差异报告和打包交付物。
+
+### Guthon Bridge
+
+- 在左侧面板单击“启动 Guthon Bridge”或“停止 Guthon Bridge”。
+- Nexus 自动复用已选择的 GuthonCodeTool 应用和本地数据目录，无需安装 Node.js、设置环境变量或打开终端。
+- Bridge 运行时切换工作区，会自动停止旧服务并使用新工作区重启。
+
+所有会运行 GuthonCodeTool 的操作都要求用户确认；打开配置文件和本地目录保持单击。
 
 ## 代码补全
 
@@ -46,10 +77,10 @@ $proc.函数名($参数)
 
 ## 安装方式
 
-从 [GuthonCodeTool Releases](https://github.com/SidWuu/GuthonCodeTool/releases) 下载 `gushen-vscode-completion-0.1.0.vsix` 后安装：
+从 [GuthonCodeTool Releases](https://github.com/SidWuu/GuthonCodeTool/releases) 下载 `GuthonCodeTool-vscode.vsix` 后安装：
 
 ```bash
-code --install-extension /path/to/gushen-vscode-completion-0.1.0.vsix --force
+code --install-extension /path/to/GuthonCodeTool-vscode.vsix --force
 ```
 
 安装后在 VS Code 中执行：
@@ -67,7 +98,7 @@ Shell Command: Install 'code' command in PATH
 也可以在 VS Code 扩展面板右上角菜单中选择 `Install from VSIX...`，然后选择：
 
 ```text
-下载的 gushen-vscode-completion-0.1.0.vsix 文件
+下载的 GuthonCodeTool-vscode.vsix 文件
 ```
 
 ## 重新打包
@@ -77,7 +108,7 @@ Shell Command: Install 'code' command in PATH
 ```bash
 cd plugins/GuthonVSCodeExtension/gushen-vscode-completion
 npm run package
-code --install-extension gushen-vscode-completion-0.1.0.vsix --force
+code --install-extension GuthonCodeTool-vscode.vsix --force
 ```
 
 ## 修改补全规则
@@ -149,7 +180,7 @@ cd plugins/GuthonVSCodeExtension/gushen-vscode-completion
 npm run build:data -- /path/to/api-docs
 npm test
 npm run package
-code --install-extension gushen-vscode-completion-0.1.0.vsix --force
+code --install-extension GuthonCodeTool-vscode.vsix --force
 ```
 
 `/path/to/api-docs` 目录需要包含 `java.md`、`javascript.md` 和 `sql.md`。

@@ -18,3 +18,4 @@ dist/
 tests/
 docs/superpowers/
 docs/private/
+plugins/GuthonVSCodeExtension/gushen-vscode-completion/bridge/server.js

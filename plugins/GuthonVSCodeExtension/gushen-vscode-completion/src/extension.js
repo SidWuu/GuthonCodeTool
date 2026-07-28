@@ -17,6 +17,8 @@ const {
 } = require('./rules');
 const { createDocumentSelector } = require('./selector');
 const { procedureTargetAt, selectDefinitionPaths } = require('./definition');
+const { prepareWorkspaceSetup } = require('./tool-workspace');
+const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 
 const SUPPORTED_LANGUAGES = ['java', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled'];
@@ -164,10 +166,12 @@ async function configuredTool() {
   return { toolPath, toolHome };
 }
 
-async function runTool(command, extraArgs = []) {
+async function runTool(command, extraArgs = [], askForConfirmation = true) {
   const label = TOOL_LABELS[command] || command;
-  const confirmed = await vscode.window.showWarningMessage(`确认${label}？`, { modal: true }, '执行');
-  if (confirmed !== '执行') return false;
+  if (askForConfirmation) {
+    const confirmed = await vscode.window.showWarningMessage(`确认${label}？`, { modal: true }, '执行');
+    if (confirmed !== '执行') return false;
+  }
   const tool = await configuredTool();
   if (!tool) return false;
   const output = vscode.window.createOutputChannel('GuthonCodeTool');
@@ -194,7 +198,8 @@ function toolItem(label, command, icon, description, args = []) {
 }
 
 class ToolTreeDataProvider {
-  constructor() {
+  constructor(bridge = { isRunning: () => false }) {
+    this.bridge = bridge;
     this.changed = new vscode.EventEmitter();
     this.onDidChangeTreeData = this.changed.event;
   }
@@ -247,7 +252,18 @@ class ToolTreeDataProvider {
       toolItem('执行源码逻辑排查', 'gushenCompletion.runDiagnosis', 'search'),
       toolItem('检查或打包 Workcopy', 'gushenCompletion.inspectWorkcopy', 'package'),
     ];
-    return [workspace, source, metadata, maintenance];
+    const bridge = new vscode.TreeItem('Guthon Bridge', vscode.TreeItemCollapsibleState.Expanded);
+    const bridgeRunning = this.bridge.isRunning();
+    bridge.iconPath = new vscode.ThemeIcon(bridgeRunning ? 'vm-running' : 'vm-outline');
+    bridge.description = bridgeRunning ? '运行中 · 127.0.0.1:17361' : '未启动';
+    bridge.children = [
+      toolItem(
+        bridgeRunning ? '停止 Guthon Bridge' : '启动 Guthon Bridge',
+        bridgeRunning ? 'gushenCompletion.stopBridge' : 'gushenCompletion.startBridge',
+        bridgeRunning ? 'debug-stop' : 'play'
+      ),
+    ];
+    return [workspace, source, metadata, bridge, maintenance];
   }
 }
 
@@ -267,10 +283,46 @@ function activate(context) {
     selector,
     createHoverProvider(context)
   );
-  const toolView = new ToolTreeDataProvider();
+  const bridgeOutput = vscode.window.createOutputChannel('Guthon Bridge');
+  let toolView;
+  const bridge = createBridgeProcess({
+    scriptPath: resolveBridgeScript(context.extensionPath),
+    onOutput: (text) => bridgeOutput.append(text),
+    onError: (error) => vscode.window.showErrorMessage(`Guthon Bridge 启动失败：${error.message}`),
+    onExit: (code) => {
+      if (code) vscode.window.showErrorMessage(`Guthon Bridge 已退出（退出码 ${code}），请查看输出面板`);
+    },
+    onStateChange: () => toolView?.refresh(),
+  });
+  toolView = new ToolTreeDataProvider(bridge);
   const toolViewDisposable = vscode.window.registerTreeDataProvider('gushenCompletion.toolView', toolView);
   const toolCommands = [
-    vscode.commands.registerCommand('gushenCompletion.setupTool', async () => { await runTool(TOOL_COMMANDS.setup); toolView.refresh(); }),
+    vscode.commands.registerCommand('gushenCompletion.setupTool', async () => {
+      const config = vscode.workspace.getConfiguration('gushenCompletion');
+      const setupMode = await prepareWorkspaceSetup(config, vscode.window, vscode.ConfigurationTarget.Global);
+      if (!setupMode) return;
+      await runTool(TOOL_COMMANDS.setup, [], setupMode !== 'switch');
+      if (setupMode === 'switch' && bridge.isRunning()) {
+        const tool = await configuredTool();
+        if (tool) await bridge.restart(tool);
+      }
+      toolView.refresh();
+    }),
+    vscode.commands.registerCommand('gushenCompletion.startBridge', async () => {
+      const tool = await configuredTool();
+      if (!tool) return;
+      try {
+        if (!bridge.start(tool)) return vscode.window.showInformationMessage('Guthon Bridge 已在运行');
+        bridgeOutput.show(true);
+        return vscode.window.showInformationMessage('Guthon Bridge 已启动：http://127.0.0.1:17361');
+      } catch (error) {
+        return vscode.window.showErrorMessage(`Guthon Bridge 启动失败：${error.message}`);
+      }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.stopBridge', async () => {
+      if (!await bridge.stop()) return vscode.window.showInformationMessage('Guthon Bridge 未运行');
+      return vscode.window.showInformationMessage('Guthon Bridge 已停止');
+    }),
     vscode.commands.registerCommand('gushenCompletion.initSourceIndex', () => runTool(TOOL_COMMANDS.init)),
     vscode.commands.registerCommand('gushenCompletion.syncActiveSource', () => runTool(TOOL_COMMANDS.syncSource)),
     vscode.commands.registerCommand('gushenCompletion.syncActiveAll', () => runTool(TOOL_COMMANDS.syncAll)),
@@ -298,18 +350,18 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.refreshToolView', () => toolView.refresh()),
     vscode.commands.registerCommand('gushenCompletion.editConfig', async (filename) => {
       const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
-      if (!toolHome) return vscode.window.showErrorMessage('请先执行 “Guthon: 初始化工作区”');
+      if (!toolHome) return vscode.window.showErrorMessage('请先执行 “Guthon Nexus: 初始化工作区”');
       const file = path.join(toolHome, 'config', filename);
-      if (!fs.existsSync(file)) return vscode.window.showErrorMessage(`配置文件不存在：${file}。请先执行 “Guthon: 初始化工作区”`);
+      if (!fs.existsSync(file)) return vscode.window.showErrorMessage(`配置文件不存在：${file}。请先执行 “Guthon Nexus: 初始化工作区”`);
       return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
     }),
     vscode.commands.registerCommand('gushenCompletion.openToolHome', () => {
       const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
-      return toolHome ? vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(toolHome)) : vscode.window.showErrorMessage('请先执行 “Guthon: 初始化工作区”');
+      return toolHome ? vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(toolHome)) : vscode.window.showErrorMessage('请先执行 “Guthon Nexus: 初始化工作区”');
     }),
   ];
 
-  context.subscriptions.push(disposable, definitionDisposable, hoverDisposable, toolViewDisposable, toolView.changed, ...toolCommands);
+  context.subscriptions.push(disposable, definitionDisposable, hoverDisposable, toolViewDisposable, toolView.changed, bridgeOutput, bridge, ...toolCommands);
 }
 
 function deactivate() {}

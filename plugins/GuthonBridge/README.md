@@ -28,29 +28,15 @@ plugins/GuthonBridge/
 
 ## 启动 Bridge
 
-从 GitHub Release 下载 `GuthonBridge.zip` 后，先解压，再设置同一 Release 中的应用路径和本地数据目录：
+普通用户在 Guthon Nexus 左侧面板单击“启动 Guthon Bridge”。Nexus 会复用已选择的 GuthonCodeTool 应用和本地数据目录，并使用 VS Code 自带的 Node 运行环境启动服务，不需要安装 Node.js、设置环境变量或打开终端。切换工作区时，运行中的 Bridge 会自动使用新目录重启。
 
-macOS / Linux：
-
-```bash
-export GUTHON_TOOL_PATH="/path/to/GuthonCodeTool"
-export GUTHON_TOOL_HOME="$HOME/Documents/GuthonCodeToolData"
-npm run start:bridge
-```
-
-Windows PowerShell：
-
-```powershell
-$env:GUTHON_TOOL_PATH = "D:\GuthonCodeTool\GuthonCodeTool-windows-x64.exe"
-$env:GUTHON_TOOL_HOME = "D:\GuthonCodeToolData"
-npm run start:bridge
-```
-
-仓库源码开发模式仍可直接运行：
+以下命令只用于仓库源码调试：
 
 ```bash
 npm run start:bridge
 ```
+
+未设置 `GUTHON_TOOL_PATH` 时，源码调试模式继续回退到仓库中的 Python 脚本。
 
 默认监听：
 

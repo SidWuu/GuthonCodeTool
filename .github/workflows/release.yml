@@ -68,6 +68,7 @@ jobs:
         working-directory: plugins/GuthonVSCodeExtension/gushen-vscode-completion
         run: |
           npm test
+          npm run build:bridge
           npm version "0.1.${GITHUB_RUN_NUMBER}" --no-git-tag-version
           npx --yes @vscode/vsce@3.9.2 package \
             --allow-missing-repository \
@@ -82,14 +83,14 @@ jobs:
         working-directory: plugins/GuthonBridge
         run: |
           node -e 'const fs=require("fs"); const p=require("./extension/manifest.json"); p.version=`0.1.${process.env.GITHUB_RUN_NUMBER}`; fs.writeFileSync("extension/manifest.json", JSON.stringify(p, null, 2) + "\n")'
-          zip -r ../../GuthonBridge.zip README.md package.json bridge/server.js extension -x "*.DS_Store" "*.test.js"
+          zip -r ../../GuthonCodeTool-chrome.zip extension -x "*.DS_Store" "*.test.js"
 
       - uses: actions/upload-artifact@v7
         with:
           name: release-plugins
           path: |
             GuthonCodeTool-vscode.vsix
-            GuthonBridge.zip
+            GuthonCodeTool-chrome.zip
           if-no-files-found: error
 
   release:
@@ -130,8 +131,8 @@ jobs:
             echo
             echo "- Windows x64 应用：\`GuthonCodeTool-windows-x64.exe\`"
             echo "- macOS Apple Silicon 应用：\`GuthonCodeTool-macos-arm64.zip\`"
-            echo "- VS Code 扩展：\`GuthonCodeTool-vscode.vsix\`"
-            echo "- GuthonBridge 浏览器扩展及本地服务：\`GuthonBridge.zip\`"
+            echo "- Guthon Nexus：\`GuthonCodeTool-vscode.vsix\`"
+            echo "- Guthon Bridge：\`GuthonCodeTool-chrome.zip\`"
             echo
             cat generated-notes.md
           } > release-notes.md
@@ -141,7 +142,7 @@ jobs:
           gh release create "$RELEASE_TAG" release/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "GuthonCodeTool $RELEASE_TAG 正式版" \
+            --title "GuthonCodeTool $RELEASE_TAG" \
             --notes-file release-notes.md \
             --latest
 
@@ -161,7 +162,7 @@ jobs:
             -F "access_token=$GITEE_TOKEN" \
             -F "tag_name=$RELEASE_TAG" \
             -F "target_commitish=main" \
-            -F "name=GuthonCodeTool $RELEASE_TAG 正式版" \
+            -F "name=GuthonCodeTool $RELEASE_TAG" \
             -F "body=<release-notes.md" \
             "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/releases")
 

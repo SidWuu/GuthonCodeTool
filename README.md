@@ -500,16 +500,18 @@ node scripts\sync_guthon_api.mjs
 
 同步结果无差异时，不会覆盖已有的 Markdown 和 JSON 文件。
 
-### 6.1 VS Code 谷神工具扩展
+### 6.1 Guthon Nexus
 
-扩展提供谷神方言补全、API 悬浮说明、过程函数跳转，以及左侧活动栏的“谷神工具”面板。面板可初始化工作区、同步源码、导出表结构/单据类型/系统脚本/视图、执行排查和检查或打包 Workcopy。
+Guthon Nexus 提供谷神方言补全、API 悬浮说明、过程函数跳转，以及左侧活动栏的同名工具面板。面板可初始化或切换工作区、同步源码、导出表结构/单据类型/系统脚本/视图、执行排查和检查或打包 Workcopy。
 
 同事日常使用只需从最新 GitHub Release 下载 VSIX、本机系统对应的 `GuthonCodeTool` 应用和 Bridge 浏览器插件，无需安装 Python 或克隆本仓库。首次使用：
 
 1. 在 VS Code 通过 **Install from VSIX...** 安装发布包中的 VSIX，并执行 `Developer: Reload Window`。
-2. 点击左侧活动栏“谷神工具”图标，选择“初始化工作区”。依次选择下载的 `GuthonCodeTool` 应用和一个长期保留的本地数据目录，例如 `D:\GuthonCodeToolData` 或 `~/Documents/GuthonCodeToolData`。
+2. 点击左侧活动栏“Guthon Nexus”图标，选择“初始化工作区”。依次选择下载的 `GuthonCodeTool` 应用和一个长期保留的本地数据目录，例如 `D:\GuthonCodeToolData` 或 `~/Documents/GuthonCodeToolData`。
+   已初始化时再次点击“初始化工作区”，确认“切换工作区”后选择新的本地数据目录；取消确认或目录选择时继续保留原工作区。
 3. 工具准备 `config/`，后续初始化和同步会在同一数据目录下按需生成 `var/`。同步源码在 `var/source/readonly/`，开发工作副本在 `var/source/workcopy/`，索引与运行数据写入 `var/knowledge/`、`var/runtime/`。
 4. 在“工作区 → 配置文件”直接编辑 `datasource.yaml`、`products.yaml`、`projects.yaml`、`source-tables.yaml` 和 `sync.yaml`，填写本地数据源与 `sync.ACTIVE` 后再开始同步。
+5. 需要网页 Bridge 功能时，在同一面板单击“启动 Guthon Bridge”。Nexus 自动传入当前应用和数据目录，不需要安装 Node.js、设置环境变量或打开终端。
 
 同步、导出、排查、Workcopy 等会改动本地数据的操作，均会在单击后要求确认；配置文件、打开本地数据目录和刷新面板仍可单击直接执行。
 
@@ -521,36 +523,20 @@ Release 不包含个人配置、已拉取源码、数据库导出、索引、运
 
 - `GuthonCodeTool-windows-x64.exe`
 - `GuthonCodeTool-macos-arm64.zip`
-- `GuthonCodeTool-vscode.vsix`
-- `GuthonBridge.zip`（浏览器扩展和本地 Bridge 服务）
+- `GuthonCodeTool-vscode.vsix`（Guthon Nexus）
+- `GuthonCodeTool-chrome.zip`（Guthon Bridge 浏览器扩展）
 
 也可以在 GitHub 的 **Actions → Build Release → Run workflow** 手动重发一个新版本。`dist/` 仍是本地构建产物目录，不提交 Git。
 
 ### 7. 启动浏览器桥接服务
 
-启动浏览器桥接服务：
+在 Guthon Nexus 左侧面板单击“启动 Guthon Bridge”，状态变为“运行中 · 127.0.0.1:17361”后即可使用 Chrome 扩展。再次单击可停止服务；运行中切换工作区时会自动使用新目录重启。
 
-macOS / Linux：
-
-```bash
-cd <GuthonBridge 解压目录>
-export GUTHON_TOOL_PATH="/path/to/GuthonCodeTool"
-export GUTHON_TOOL_HOME="$HOME/Documents/GuthonCodeToolData"
-npm run start:bridge
-```
-
-Windows PowerShell：
-
-```powershell
-Set-Location <GuthonBridge 解压目录>
-$env:GUTHON_TOOL_PATH = "D:\GuthonCodeTool\GuthonCodeTool-windows-x64.exe"
-$env:GUTHON_TOOL_HOME = "D:\GuthonCodeToolData"
-npm run start:bridge
-```
+Bridge 服务随 VSIX 提供，并由 Guthon Nexus 使用 VS Code 自带的 Node 运行时启动。普通用户不需要单独安装 Node.js，也不要同时在终端执行旧的 `npm run start:bridge` 命令。若输出出现 `EADDRINUSE 127.0.0.1:17361`，表示旧 Bridge 仍在占用端口；关闭对应终端服务后，再从 Nexus 启动。
 
 ### 8. 环境诊断
 
-只读检查配置、Python/Node、Bridge 状态和 VS Code 补全数据：
+只读检查配置、应用运行环境、Bridge 状态和 VS Code 补全数据：
 
 macOS / Linux：
 

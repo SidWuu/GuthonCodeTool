@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="GuthonCodeTool macOS 与 Windows 从零安装、初始化、日常工作流、平台差异和常见问题"/>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233c5ddd'/%3E%3Cpath d='M18 19h28v8H27v10h15v8H18z' fill='white'/%3E%3C/svg%3E">
+<title>GuthonCodeTool 使用手册</title>
+<style>
+:root{
+  --bg:#f4f6fb;--surface:#fff;--surface-soft:#f8faff;--text:#172033;--muted:#65708a;
+  --primary:#3c5ddd;--primary-deep:#1d347f;--primary-soft:#eaf0ff;--line:#e2e7f1;
+  --success:#16836b;--warning:#b45f06;--code:#101827;--code-text:#e7eefb;
+  --shadow:0 18px 55px rgba(28,47,94,.10);--radius:18px;
+}
+[data-theme="dark"]{
+  --bg:#0d1321;--surface:#151d2d;--surface-soft:#111827;--text:#e9eef9;--muted:#9aa7bd;
+  --primary:#7391ff;--primary-deep:#b7c7ff;--primary-soft:#202d50;--line:#263149;
+  --code:#080d16;--code-text:#edf3ff;--shadow:0 18px 55px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:28px}
+body{
+  margin:0;background:var(--bg);color:var(--text);line-height:1.76;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;
+  transition:background .2s,color .2s;
+}
+a{color:var(--primary);text-underline-offset:3px}
+.progress{position:fixed;z-index:100;left:0;top:0;width:0;height:3px;background:linear-gradient(90deg,#7ea2ff,#fff);box-shadow:0 0 12px #6d8cff}
+.hero{
+  position:relative;overflow:hidden;color:#fff;padding:72px 24px 68px;
+  background:
+    radial-gradient(circle at 88% 14%,rgba(140,170,255,.42),transparent 29%),
+    radial-gradient(circle at 8% 88%,rgba(77,113,239,.24),transparent 30%),
+    linear-gradient(135deg,#172554 0%,#223f9d 55%,#4569e3 100%);
+}
+.hero:after{
+  content:"";position:absolute;right:-90px;bottom:-160px;width:430px;height:430px;border:1px solid rgba(255,255,255,.15);
+  border-radius:50%;box-shadow:0 0 0 48px rgba(255,255,255,.035),0 0 0 96px rgba(255,255,255,.025);
+}
+.hero-inner{position:relative;z-index:1;max-width:1240px;margin:auto}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border:1px solid rgba(255,255,255,.24);
+  border-radius:999px;background:rgba(255,255,255,.10);font-size:13px;letter-spacing:.04em
+}
+.eyebrow-dot{width:7px;height:7px;border-radius:50%;background:#8ef0d2;box-shadow:0 0 0 5px rgba(142,240,210,.13)}
+.hero h1{max-width:920px;margin:20px 0 16px;font-size:clamp(38px,6vw,67px);line-height:1.08;letter-spacing:-.035em}
+.hero p{max-width:820px;margin:0;color:rgba(255,255,255,.84);font-size:18px}
+.hero-meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:22px}
+.hero-meta span{padding:5px 10px;border-radius:8px;background:rgba(255,255,255,.10);font-size:12px;color:rgba(255,255,255,.88)}
+.hero-actions{display:flex;flex-wrap:wrap;gap:11px;margin-top:28px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 16px;border-radius:10px;text-decoration:none;font-weight:700}
+.btn-primary{background:#fff;color:#213b99}.btn-ghost{color:#fff;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.07)}
+.layout{max-width:1380px;margin:auto;padding:34px 24px 80px;display:grid;grid-template-columns:292px minmax(0,1fr);gap:28px;align-items:start}
+.sidebar{
+  position:sticky;top:18px;max-height:calc(100vh - 36px);overflow:hidden;display:flex;flex-direction:column;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)
+}
+.side-head{padding:19px 19px 13px;border-bottom:1px solid var(--line)}
+.side-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.side-title strong{font-size:16px}.chapter-count{font-size:11px;color:var(--muted);background:var(--surface-soft);padding:3px 7px;border-radius:999px}
+.search{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface-soft);color:var(--text);outline:none}
+.search:focus{border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 14%,transparent)}
+.toc{padding:10px 12px 18px;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.toc-link{display:block;padding:7px 9px;border-radius:8px;text-decoration:none;color:var(--muted);font-size:13.5px;line-height:1.45;border-left:2px solid transparent}
+.toc-link:hover{color:var(--primary);background:var(--primary-soft)}
+.toc-link.active{color:var(--primary);background:var(--primary-soft);border-left-color:var(--primary);font-weight:700}
+.toc-sub{padding-left:20px;font-size:12.5px}.toc-deep{padding-left:33px;font-size:12px}
+.main{min-width:0}
+.overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px;margin-bottom:24px}
+.overview-card{
+  position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:19px;
+  box-shadow:0 10px 28px rgba(28,47,94,.055)
+}
+.overview-card:after{content:"";position:absolute;right:-24px;top:-30px;width:85px;height:85px;border-radius:50%;background:var(--primary-soft)}
+.overview-number{position:relative;z-index:1;width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:linear-gradient(135deg,var(--primary),#8098f5);color:#fff;font-size:12px;font-weight:800}
+.overview-card h3{position:relative;z-index:1;margin:12px 0 5px;font-size:17px}.overview-card p{margin:0;color:var(--muted);font-size:13px}
+.notice{display:flex;gap:13px;margin:0 0 23px;padding:17px 18px;background:var(--primary-soft);border:1px solid color-mix(in srgb,var(--primary) 18%,var(--line));border-radius:14px}
+.notice-icon{flex:0 0 auto;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:var(--primary);color:#fff;font-weight:800;font-family:Georgia,serif}
+.notice p{margin:2px 0;color:var(--muted)}.notice strong{color:var(--text)}
+.wiki-section{min-width:0;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:34px;margin:0 0 22px;box-shadow:0 10px 30px rgba(28,47,94,.055)}
+h2{margin:0 0 22px;font-size:29px;line-height:1.25;letter-spacing:-.015em}
+h2:after{content:"";display:block;width:46px;height:4px;margin-top:12px;border-radius:5px;background:linear-gradient(90deg,var(--primary),#9eb0f5)}
+h3{margin:31px 0 12px;padding-top:2px;font-size:21px;line-height:1.38}h4{margin:25px 0 10px;font-size:17px}
+p{margin:10px 0}strong{font-weight:750}
+ul,ol{padding-left:1.45em;margin:12px 0 19px}li{margin:6px 0}li::marker{color:var(--primary)}
+code{font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace;font-size:.91em;background:var(--primary-soft);border:1px solid var(--line);border-radius:6px;padding:1px 5px}
+p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
+.code-wrap{position:relative;min-width:0;max-width:100%;margin:16px 0 22px}
+.code-wrap pre{margin:0;padding:45px 20px 20px;overflow:auto;border-radius:14px;background:var(--code);color:var(--code-text);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.code-wrap pre code{padding:0;border:0;background:none;color:inherit;font-size:13.5px;white-space:pre}
+.code-lang{position:absolute;z-index:1;left:15px;top:12px;text-transform:uppercase;color:#94a7c2;font:700 11px/1.4 "Segoe UI",sans-serif;letter-spacing:.08em}
+.copy-btn{position:absolute;z-index:1;right:10px;top:8px;border:0;border-radius:8px;padding:7px 10px;background:rgba(255,255,255,.11);color:#fff;cursor:pointer}
+.copy-btn:hover{background:rgba(255,255,255,.2)}
+.divider{border:0;border-top:1px solid var(--line);margin:28px 0}
+.check-item{display:flex;align-items:flex-start;gap:9px}.check-item input{margin-top:6px;accent-color:var(--primary)}
+.toolbar{position:fixed;z-index:90;right:18px;bottom:18px;display:flex;flex-direction:column;gap:9px}
+.round-btn{width:42px;height:42px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);cursor:pointer;font-size:16px}
+.round-btn:hover{color:var(--primary);transform:translateY(-1px)}
+.mobile-menu{display:none}
+.footer{max-width:1380px;margin:auto;padding:0 24px 42px;text-align:center;color:var(--muted);font-size:13px}
+.no-result{padding:12px;color:var(--muted);font-size:13px;display:none}
+@media(max-width:1050px){
+  .layout{grid-template-columns:1fr}.sidebar{position:relative;top:auto;max-height:none}.toc{max-height:360px}.overview{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:680px){
+  .hero{padding:48px 18px 43px}.hero h1{font-size:39px}.hero p{font-size:15.5px}
+  .layout{padding:20px 13px 58px}.overview{grid-template-columns:1fr}.wiki-section{padding:23px 18px;border-radius:14px}
+  h2{font-size:24px}h3{font-size:19px}.toolbar{right:12px;bottom:12px}
+}
+@media print{
+  body{background:#fff;color:#111}.hero{background:#fff;color:#111;padding:24px 0;border-bottom:2px solid #ddd}.hero p{color:#333}
+  .hero-actions,.sidebar,.toolbar,.progress,.copy-btn,.code-lang{display:none!important}.layout{display:block;padding:24px 0}.overview{grid-template-columns:repeat(3,1fr)}
+  .overview-card,.wiki-section{box-shadow:none;break-inside:avoid}.wiki-section{border-color:#ddd}.code-wrap pre{white-space:pre-wrap}
+}
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<header class="hero">
+  <div class="hero-inner">
+    <span class="eyebrow"><span class="eyebrow-dot"></span>macOS &amp; Windows</span>
+    <h1>GuthonCodeTool<br>使用手册</h1>
+    <p>面向第一次使用和日常开发，按同一套 VS Code 操作完成下载、初始化、同步、Bridge 安装、Workcopy 开发与升级。</p>
+    <div class="hero-meta"><span>从零开始</span><span>跨平台共用</span><span>日常工作流</span><span>常见问题</span></div>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="#1-准备与下载">开始安装</a>
+      <a class="btn btn-ghost" href="index.html">内部知识库</a>
+      <a class="btn btn-ghost" href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">Github Release</a>
+      <a class="btn btn-ghost" href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Release</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<div class="side-head"><div class="side-title"><strong>使用目录</strong><span class="chapter-count">10 章</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索章节…（按 / 聚焦）" aria-label="搜索章节"></div>
+<nav class="toc" id="toc">
+<a class="toc-link" href="#1-准备与下载" data-title="1. 准备与下载">1. 准备与下载</a>
+<a class="toc-link" href="#2-安装应用和-vs-code-扩展" data-title="2. 安装应用和 vs code 扩展">2. 安装应用和 VS Code 扩展</a>
+<a class="toc-link toc-sub" href="#2-1-macos" data-title="2.1 macos">2.1 macOS</a>
+<a class="toc-link toc-sub" href="#2-2-windows" data-title="2.2 windows">2.2 Windows</a>
+<a class="toc-link toc-sub" href="#2-3-安装-vsix" data-title="2.3 安装 vsix">2.3 安装 VSIX</a>
+<a class="toc-link" href="#3-初始化工作区" data-title="3. 初始化工作区">3. 初始化工作区</a>
+<a class="toc-link" href="#4-填写配置和放置-ai-规范" data-title="4. 填写配置和放置 ai 规范">4. 填写配置和放置 AI 规范</a>
+<a class="toc-link" href="#5-首次初始化和同步" data-title="5. 首次初始化和同步">5. 首次初始化和同步</a>
+<a class="toc-link" href="#6-安装和启动-bridge" data-title="6. 安装和启动 bridge">6. 安装和启动 Bridge</a>
+<a class="toc-link toc-sub" href="#6-1-加载-chrome-扩展" data-title="6.1 加载 chrome 扩展">6.1 加载 Chrome 扩展</a>
+<a class="toc-link toc-sub" href="#6-2-启动本地服务" data-title="6.2 启动本地服务">6.2 启动本地服务</a>
+<a class="toc-link" href="#7-日常工作流" data-title="7. 日常工作流">7. 日常工作流</a>
+<a class="toc-link" href="#8-系统差异和解决步骤" data-title="8. 系统差异和解决步骤">8. 系统差异和解决步骤</a>
+<a class="toc-link" href="#9-升级和迁移" data-title="9. 升级和迁移">9. 升级和迁移</a>
+<a class="toc-link" href="#10-常见问题与验收" data-title="10. 常见问题与验收">10. 常见问题与验收</a>
+<div class="no-result" id="noResult">没有匹配的章节</div>
+</nav>
+</aside>
+  <main class="main">
+<div class="overview">
+<article class="overview-card"><div class="overview-number">01</div><h3>下载</h3><p>从同一 Release 获取应用、VSIX 与 GuthonBridge。</p></article>
+<article class="overview-card"><div class="overview-number">02</div><h3>初始化</h3><p>在 VS Code 侧边栏选择应用和本地数据目录。</p></article>
+<article class="overview-card"><div class="overview-number">03</div><h3>配置</h3><p>填写五个 YAML，并放入公司提供的 AI 规范。</p></article>
+<article class="overview-card"><div class="overview-number">04</div><h3>同步</h3><p>初始化索引，再同步当前 ACTIVE 全部资料。</p></article>
+<article class="overview-card"><div class="overview-number">05</div><h3>开发</h3><p>通过 Bridge 拉取 Workcopy，只修改工作副本。</p></article>
+<article class="overview-card"><div class="overview-number">06</div><h3>交付</h3><p>检查差异，人工回写、测试、提交和签入。</p></article>
+</div>
+<aside class="notice"><div class="notice-icon">i</div><div>
+<p>macOS 与 Windows 的 VS Code 操作、配置结构和日常工作流相同；只有应用文件名和系统安全提示不同。</p>
+<p>普通使用不需要克隆仓库、安装 Python、安装 Node.js 或创建虚拟环境。</p>
+</div></aside>
+
+<section class="wiki-section">
+<h2 id="1-准备与下载">1. 准备与下载</h2>
+<p>开始前准备 VS Code、Chrome、数据库只读连接信息、产品/项目配置，以及公司提供的 AI 规范文件。</p>
+<p>打开 <a href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">GitHub Releases</a> 或 
+  <a href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Releases</a>
+  ，在同一个版本下载：</p>
+<ul>
+<li>macOS Apple Silicon：<code>GuthonCodeTool-macos-arm64.zip</code></li>
+<li>Windows x64：<code>GuthonCodeTool-windows-x64.exe</code></li>
+<li>VSCode扩展 Guthon Nexus：<code>GuthonCodeTool-vscode.vsix</code></li>
+<li>Chrome扩展 Guthon Bridge：<code>GuthonCodeTool-chrome.zip</code></li>
+<li>内部配置文件/AI规范文件：<code><a href="http://192.168.15.110:8088/docs/">http://192.168.15.110:8088/docs/</a></code></li>
+</ul>
+<p>建议固定两个目录位置：</p>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button>
+  <pre><code>应用目录：只放 GuthonCodeTool 应用、Guthon Bridge、Guthon Nexus
+本地数据目录：长期保存 config、var、源码、索引和 Workcopy</code></pre></div>
+</section>
+
+<section class="wiki-section">
+<h2 id="2-安装应用和-vs-code-扩展">2. 安装应用和 VS Code 扩展</h2>
+<h3 id="2-1-macos">2.1 macOS</h3>
+<ol>
+<li>确认 Mac 为 Apple 芯片：菜单“关于本机”中的芯片应为 M1、M2、M3、M4 或后续型号。</li>
+<li>解压 <code>GuthonCodeTool-macos-arm64.zip</code>，将其中的 <code>GuthonCodeTool</code> 放入固定应用目录。</li>
+<li>如果文件没有执行权限，在终端执行：</li>
+</ol>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>chmod +x "/你的应用目录/GuthonCodeTool"</code></pre></div>
+<p>若系统阻止运行，请先确认文件来自本项目 Release，再打开“系统设置 → 隐私与安全性”，对被阻止的 GuthonCodeTool 选择“仍要打开”。</p>
+<h3 id="2-2-windows">2.2 Windows</h3>
+<ol>
+<li>把 <code>GuthonCodeTool-windows-x64.exe</code> 放到固定目录，例如 <code>D:\GuthonCodeTool\</code>。</li>
+<li>不要放进经常清理的“下载”或临时目录。</li>
+<li>若 SmartScreen 拦截，先确认文件来自本项目 Release，再选择“更多信息 → 仍要运行”。</li>
+</ol>
+<h3 id="2-3-安装-vsix">2.3 安装 VSIX</h3>
+<ol>
+<li>打开 VS Code 的“扩展”面板。</li>
+<li>点击右上角 <code>...</code>，选择“从 VSIX 安装...”。</li>
+<li>选择 <code>GuthonCodeTool-vscode.vsix</code>。</li>
+<li>安装后执行“Developer: Reload Window”或重新启动 VS Code。</li>
+<li>确认左侧活动栏出现“Guthon Nexus”图标。</li>
+</ol>
+</section>
+
+<section class="wiki-section">
+<h2 id="3-初始化工作区">3. 初始化工作区</h2>
+<ol>
+<li>点击 VS Code 左侧“Guthon Nexus”。</li>
+<li>展开“工作区”，单击“初始化工作区”。</li>
+<li>在确认框点击“执行”。</li>
+<li>选择当前系统的 GuthonCodeTool 应用。</li>
+<li>选择长期保存私有数据的本地数据目录；可以选择空目录。</li>
+<li>等待输出面板显示 <code>GuthonCodeTool 完成：setup</code>。</li>
+</ol>
+<p>工作区已初始化后，再次点击“初始化工作区”会提示是否切换。确认后选择新的本地数据目录，工具会在新目录创建缺失配置；取消确认或目录选择时继续使用原工作区。切换不会删除、迁移或修改旧工作区。</p>
+<p>初始化会创建缺失的五个配置模板，不会覆盖已经存在的配置。完成后目录为：</p>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/
+├── config/
+│   ├── datasource.yaml
+│   ├── products.yaml
+│   ├── projects.yaml
+│   ├── source-tables.yaml
+│   └── sync.yaml
+└── var/  # 第一次同步或放入 AI 规范后出现</code></pre></div>
+</section>
+
+<section class="wiki-section">
+<h2 id="4-填写配置和放置-ai-规范">4. 填写配置和放置 AI 规范</h2>
+<p>在“Guthon Nexus → 工作区 → 配置文件”中单击文件名即可编辑。优先使用公司提供的真实配置；不要把数据库密码、源码或配置提交到公开仓库。</p>
+<ul>
+<li><code>datasource.yaml</code>：数据库连接。配置引用环境变量时，必须在启动 VS Code 前设置对应变量，并重启 VS Code。</li>
+<li><code>products.yaml</code>：产品 ID、名称和 datasource。</li>
+<li><code>projects.yaml</code>：项目 ID、名称、datasource 和继承产品。</li>
+<li><code>source-tables.yaml</code>：源码表与字段映射，通常直接使用公司提供版本。</li>
+<li><code>sync.yaml</code>：把 <code>sync.ACTIVE</code> 改为当前产品或项目，并填写子系统别名和未签入源码用户白名单。</li>
+</ul>
+<div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" type="button">复制</button><pre><code>sync:
+  ACTIVE: products.&lt;产品ID&gt;
+# 或
+sync:
+  ACTIVE: projects.&lt;项目ID&gt;</code></pre></div>
+<p>将内部 AI 规范保持原目录层级复制到本地数据目录，至少包括：</p>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/var/AGENTS.md
+&lt;本地数据目录&gt;/var/docs/GUSHEN_DEVELOPMENT_BASELINE.md
+&lt;本地数据目录&gt;/var/docs/谷神模块开发规范.md
+&lt;本地数据目录&gt;/var/docs/谷神方言API/custom.md
+&lt;本地数据目录&gt;/var/docs/谷神方言API/java.md
+&lt;本地数据目录&gt;/var/docs/谷神方言API/javascript.md
+&lt;本地数据目录&gt;/var/docs/谷神方言API/sql.md</code></pre></div>
+</section>
+
+<section class="wiki-section">
+<h2 id="5-首次初始化和同步">5. 首次初始化和同步</h2>
+<ol>
+<li>确认 <code>sync.yaml</code> 的 ACTIVE 和子系统范围正确。</li>
+<li>点击“维护 → 检查本地环境”，确认输出没有 FAIL。</li>
+<li>点击“源码 → 初始化源码索引”，确认后等待完成。</li>
+<li>点击“配置数据 → 同步当前 ACTIVE 全部资料”。</li>
+<li>检查输出依次出现源码与索引、数据库表结构、单据类型、系统脚本和视图。</li>
+</ol>
+<p>同步期间不要修改 ACTIVE。任何一步失败，后续步骤会停止，应先按输出面板中的第一条错误处理。</p>
+<p>结果集中保存在本地数据目录的 <code>var/</code> 中。日常开发只修改 <code>var/source/workcopy</code>，不要修改 <code>var/source/readonly</code>。</p>
+</section>
+
+<section class="wiki-section">
+<h2 id="6-安装和启动-bridge">6. 安装和启动 Bridge</h2>
+<p>只使用 VS Code 同步和导出功能时可以跳过本章。需要从谷神网页拉取当前对象、复制字段或快捷跳转时才需要 Bridge。</p>
+<h3 id="6-1-加载-chrome-扩展">6.1 加载 Chrome 扩展</h3>
+<ol>
+<li>解压 <code>GuthonCodeTool-chrome.zip</code> 到固定目录。</li>
+<li>按内部环境修改 <code>extension/host-config.js</code>，不要扩大到无关地址。</li>
+<li>打开 <code>chrome://extensions</code>，开启“开发者模式”。</li>
+<li>点击“加载已解压的扩展程序”，选择解压目录中的 <code>extension</code>。</li>
+<li>把 Guthon Bridge 固定到 Chrome 工具栏。</li>
+</ol>
+<h3 id="6-2-启动本地服务">6.2 启动本地服务</h3>
+<ol>
+<li>打开 VS Code 左侧“Guthon Nexus”面板。</li>
+<li>单击“启动 Guthon Bridge”。Nexus 自动使用初始化时选择的应用和本地数据目录。</li>
+<li>面板显示“运行中 · 127.0.0.1:17361”后即可使用；单击“停止 Guthon Bridge”可关闭服务。</li>
+</ol>
+<p>Bridge 服务已经包含在 VSIX 中，由 Guthon Nexus 使用 VS Code 自带的 Node 运行时启动。普通用户无需安装 Node.js、设置环境变量或保持终端窗口运行。Bridge 运行中切换工作区时，Nexus 会自动使用新目录重启。也可以打开 <a href="http://127.0.0.1:17361/health" target="_blank" rel="noopener">http://127.0.0.1:17361/health</a>，看到 <code>{"ok":true}</code> 即表示服务正常。</p>
+<p>升级到该方式后，不要再同时从终端执行旧的 <code>npm run start:bridge</code>。如果输出出现 <code>EADDRINUSE 127.0.0.1:17361</code>，说明已有 Bridge 占用端口；先关闭原终端中的服务，再回到 Guthon Nexus 启动。</p>
+</section>
+
+<section class="wiki-section">
+<h2 id="7-日常工作流">7. 日常工作流</h2>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>确认或切换 sync.ACTIVE
+        ↓
+同步当前 ACTIVE 全部资料
+        ↓
+启动 Bridge，从谷神页面拉取目标 Workcopy
+        ↓
+VS Code / AI 只分析和修改 Workcopy
+        ↓
+“检查或打包 Workcopy”生成状态和差异
+        ↓
+人工复制回谷神平台并测试、提交、签入
+        ↓
+再次拉取，确认基线刷新</code></pre></div>
+<ol>
+<li>开始开发前，在侧边栏打开 <code>sync.yaml</code>，确认 ACTIVE。</li>
+<li>切换产品或项目后，执行“同步当前 ACTIVE 全部资料”。</li>
+<li>在谷神过程函数、模块、数据表、单据类型、视图或系统脚本页面使用 Bridge。</li>
+<li>打开 Bridge 返回的 Workcopy 路径；AI 先读取 <code>var/AGENTS.md</code> 和命中的规范。</li>
+<li>通过“维护 → 检查或打包 Workcopy”查看状态、生成差异报告或交付物。</li>
+<li>在谷神平台人工签出并回写，完成测试、提交和签入。</li>
+</ol>
+<p>工具不会自动回写平台，这是防止误覆盖的安全边界。</p>
+</section>
+
+<section class="wiki-section">
+<h2 id="8-系统差异和解决步骤">8. 系统差异和解决步骤</h2>
+<h3>macOS</h3>
+<ul>
+<li>当前只提供 Apple Silicon 应用，Intel Mac 暂不支持。</li>
+<li>应用没有执行权限：执行 <code>chmod +x</code> 后重新选择应用。</li>
+<li>Gatekeeper 阻止：确认下载来源后，在“隐私与安全性”中选择“仍要打开”。</li>
+<li>终端设置的数据库环境变量未被 VS Code 读取：从同一终端启动 VS Code，或按公司方式配置用户环境后重启 VS Code。</li>
+</ul>
+<h3>Windows</h3>
+<ul>
+<li>当前只提供 Windows x64 EXE。</li>
+<li>SmartScreen 阻止：确认下载来源后使用“更多信息 → 仍要运行”。</li>
+<li>目录链接失败：开启 Windows 开发人员模式，或由管理员完成首次同步。</li>
+<li>路径过长：使用 <code>D:\GuthonCodeToolData</code> 等短路径，并按公司策略启用长路径支持。</li>
+<li>终端环境变量未生效：关闭并重新打开 VS Code 和 PowerShell。</li>
+</ul>
+</section>
+
+<section class="wiki-section">
+<h2 id="9-升级和迁移">9. 升级和迁移</h2>
+<ol>
+<li>从最新 Release 下载当前系统应用、VSIX 和 GuthonBridge。</li>
+<li>关闭正在运行的同步任务和 Bridge。</li>
+<li>用新应用替换旧应用；路径不变时 VS Code 无需重新初始化。</li>
+<li>从 VSIX 重新安装扩展，并重新加载 VS Code。</li>
+<li>替换 Bridge 前备份自己的 <code>extension/host-config.js</code>，然后重新加载 Chrome 扩展。</li>
+<li>运行“检查本地环境”，再执行一次当前 ACTIVE 同步。</li>
+</ol>
+<p>升级时不要删除本地数据目录。配置、AI 规范、readonly、Workcopy、SQLite 和日志都保存在该目录，与应用版本分离。</p>
+<p>迁移电脑时，应安全复制整个本地数据目录，再在新电脑执行一次“初始化工作区”选择新应用和该目录；数据库凭据和系统环境变量需按公司要求重新配置。</p>
+</section>
+
+<section class="wiki-section">
+<h2 id="10-常见问题与验收">10. 常见问题与验收</h2>
+<h3>左侧没有“Guthon Nexus”图标</h3>
+<p>确认 VSIX 已安装并启用，执行“Developer: Reload Window”；仍未出现时卸载旧版本后重新安装当前 Release 的 VSIX。</p>
+<h3>点击功能后提示启动失败</h3>
+<p>重新执行“初始化工作区”，选择未改名、未移动且属于当前系统的应用。macOS 同时检查执行权限。</p>
+<h3>同步只得到一个产品或项目的数据</h3>
+<p>同步范围由 <code>sync.ACTIVE</code> 决定。切换 ACTIVE 后重新执行“同步当前 ACTIVE 全部资料”，工具不会把多个 ACTIVE 混到同一索引。</p>
+<h3>Bridge 显示无法连接</h3>
+<ol>
+<li>确认 Guthon Nexus 面板显示 Bridge“运行中”。</li>
+<li>访问 <code>http://127.0.0.1:17361/health</code>。</li>
+<li>停止后重新启动 Bridge，并在“输出 → Guthon Bridge”查看第一条错误。</li>
+<li>若错误包含 <code>EADDRINUSE</code>，关闭其他终端或旧版工具中占用 <code>17361</code> 的 Bridge，再从 Nexus 启动。</li>
+<li>重新加载 Chrome 扩展并刷新谷神页面。</li>
+</ol>
+<h3>Workcopy 显示冲突</h3>
+<p>不要删除基线或强制覆盖。比较本地修改与平台最新源码，确认需要保留的内容并人工处理后再拉取。</p>
+<h3>验收清单</h3>
+<ul>
+<li><label class="check-item"><input type="checkbox" disabled><span>应用、VSIX 和 Bridge 来自同一个 Release。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>VS Code 左侧出现“Guthon Nexus”。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>工作区显示“已配置”，五个 YAML 可以从侧边栏打开。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>AI 规范已放入本地数据目录的 <code>var/</code>。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>环境检查没有 FAIL，初始化索引和全部资料同步成功。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>Bridge 健康检查返回 <code>{"ok":true}</code>。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>能从谷神页面拉取 Workcopy，并能生成差异报告。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>已明确只修改 Workcopy，代码由人工回写和测试。</span></label></li>
+</ul>
+</section>
+</main>
+</div>
+<div class="toolbar">
+  <button class="round-btn" id="themeToggle" type="button" title="切换明暗主题" aria-label="切换明暗主题">◐</button>
+  <button class="round-btn" id="backTop" type="button" title="返回顶部" aria-label="返回顶部">↑</button>
+</div>
+<footer class="footer">GuthonCodeTool 使用手册 · macOS 与 Windows 共用</footer>
+<script>
+const root=document.documentElement;
+const savedTheme=localStorage.getItem("guthon-wiki-theme");
+if(savedTheme)root.dataset.theme=savedTheme;
+document.getElementById("themeToggle").addEventListener("click",()=>{
+  const next=root.dataset.theme==="dark"?"light":"dark";
+  root.dataset.theme=next;localStorage.setItem("guthon-wiki-theme",next);
+});
+document.getElementById("backTop").addEventListener("click",()=>scrollTo({top:0,behavior:"smooth"}));
+addEventListener("scroll",()=>{
+  const height=document.documentElement.scrollHeight-innerHeight;
+  document.getElementById("progress").style.width=(height>0?scrollY/height*100:0)+"%";
+},{passive:true});
+document.querySelectorAll(".copy-btn").forEach(button=>button.addEventListener("click",async()=>{
+  const text=button.parentElement.querySelector("code").innerText;
+  try{await navigator.clipboard.writeText(text)}
+  catch{const area=document.createElement("textarea");area.value=text;area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.select();document.execCommand("copy");area.remove()}
+  const old=button.textContent;button.textContent="已复制";setTimeout(()=>button.textContent=old,1200);
+}));
+const search=document.getElementById("tocSearch");
+const links=[...document.querySelectorAll(".toc-link")];
+search.addEventListener("input",()=>{
+  const query=search.value.trim().toLowerCase();let shown=0;
+  links.forEach(link=>{const visible=!query||link.dataset.title.includes(query);link.style.display=visible?"":"none";if(visible)shown++});
+  document.getElementById("noResult").style.display=shown?"none":"block";
+});
+addEventListener("keydown",event=>{if(event.key==="/"&&document.activeElement!==search){event.preventDefault();search.focus()}});
+const observed=[...document.querySelectorAll("h2[id],h3[id]")];
+const linkMap=new Map(links.map(link=>[link.getAttribute("href").slice(1),link]));
+const observer=new IntersectionObserver(entries=>{
+  const visible=entries.filter(entry=>entry.isIntersecting).sort((a,b)=>a.boundingClientRect.top-b.boundingClientRect.top)[0];
+  if(!visible)return;
+  links.forEach(link=>link.classList.remove("active"));
+  const active=linkMap.get(visible.target.id);if(active){active.classList.add("active");active.scrollIntoView({block:"nearest"})}
+},{rootMargin:"-12% 0px -76% 0px",threshold:[0,1]});
+observed.forEach(item=>observer.observe(item));
+document.querySelectorAll('a[href^="http"]').forEach(link=>{link.target="_blank";link.rel="noopener"});
+</script>
+</body>
+</html>
