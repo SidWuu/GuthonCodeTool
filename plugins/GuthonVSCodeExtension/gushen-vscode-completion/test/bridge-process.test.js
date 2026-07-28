@@ -35,7 +35,28 @@ test('starts Bridge with the selected application and workspace', () => {
   assert.deepEqual(calls[0][1], ['/extension/bridge/server.js']);
   assert.equal(calls[0][2].env.ELECTRON_RUN_AS_NODE, '1');
   assert.equal(calls[0][2].env.GUTHON_TOOL_PATH, '/tool/GuthonCodeTool');
+  assert.equal(calls[0][2].env.GUTHON_TOOL_ENTRY, '');
   assert.equal(calls[0][2].env.GUTHON_TOOL_HOME, '/data/workspace');
+});
+
+test('passes the Python entry point to Bridge in development mode', () => {
+  const calls = [];
+  const bridge = createBridgeProcess({
+    scriptPath: '/extension/bridge/server.js',
+    spawnProcess: (...args) => {
+      calls.push(args);
+      return fakeChild();
+    },
+  });
+
+  bridge.start({
+    toolPath: '/repo/.venv/bin/python',
+    toolEntry: '/repo/scripts/guthon_tool.py',
+    toolHome: '/data/workspace',
+  });
+
+  assert.equal(calls[0][2].env.GUTHON_TOOL_PATH, '/repo/.venv/bin/python');
+  assert.equal(calls[0][2].env.GUTHON_TOOL_ENTRY, '/repo/scripts/guthon_tool.py');
 });
 
 test('restarts Bridge with a switched workspace', async () => {

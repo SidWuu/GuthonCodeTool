@@ -26,6 +26,7 @@ function createBridgeProcess(options) {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
         GUTHON_TOOL_PATH: tool.toolPath,
+        GUTHON_TOOL_ENTRY: tool.toolEntry || '',
         GUTHON_TOOL_HOME: tool.toolHome,
       },
       stdio: ['ignore', 'pipe', 'pipe'],

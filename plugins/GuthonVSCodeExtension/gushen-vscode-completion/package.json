@@ -17,6 +17,7 @@
     "onLanguage:javascript",
     "onLanguage:sql",
     "onCommand:gushenCompletion.setupTool",
+    "onCommand:gushenCompletion.selectExecutionMode",
     "onCommand:gushenCompletion.startBridge",
     "onCommand:gushenCompletion.stopBridge",
     "onCommand:gushenCompletion.initSourceIndex",
@@ -55,11 +56,23 @@
           "type": "string",
           "default": "",
           "description": "Absolute directory for GuthonCodeTool local config, readonly source, workcopy, and indexes."
+        },
+        "gushenCompletion.executionMode": {
+          "type": "string",
+          "enum": ["packaged", "development"],
+          "default": "packaged",
+          "description": "Use the packaged application or run Python scripts directly from a GuthonCodeTool source checkout."
+        },
+        "gushenCompletion.developmentRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the GuthonCodeTool source checkout used in development mode."
         }
       }
     },
     "commands": [
       { "command": "gushenCompletion.setupTool", "title": "Guthon Nexus: 初始化工作区" },
+      { "command": "gushenCompletion.selectExecutionMode", "title": "Guthon Nexus: 切换运行模式" },
       { "command": "gushenCompletion.startBridge", "title": "Guthon Nexus: 启动 Guthon Bridge" },
       { "command": "gushenCompletion.stopBridge", "title": "Guthon Nexus: 停止 Guthon Bridge" },
       { "command": "gushenCompletion.initSourceIndex", "title": "Guthon Nexus: 初始化源码索引" },

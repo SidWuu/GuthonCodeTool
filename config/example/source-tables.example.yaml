@@ -94,3 +94,23 @@ source_tables:
     procedure_name_field: PROCEDURE_NAME_FIELD
     # 过程所属数据源字段，用于子系统范围过滤。
     data_source_id_field: DATA_SOURCE_KEY_FIELD
+
+  # 系统脚本源码映射。实际表名和字段名由内部配置提供，不提交公开仓库。
+  system_script:
+    enabled: true
+    system_table_name: SYSTEM_METADATA_TABLE
+    source_table_name: SYSTEM_SCRIPT_TABLE
+    system_id_field: SYSTEM_KEY_FIELD
+    script_system_id_field: SCRIPT_SYSTEM_KEY_FIELD
+    system_name_field: SYSTEM_NAME_FIELD
+    system_alias_id_field: SYSTEM_ALIAS_FIELD
+    data_source_id_field: DATA_SOURCE_KEY_FIELD
+    script_type_field: SCRIPT_TYPE_FIELD
+    content_field: CURRENT_SCRIPT_FIELD
+    product_content_field: PRODUCT_SCRIPT_FIELD
+    last_update_field: SCRIPT_UPDATE_TIME_FIELD
+    check_out_user_id_field: CHECK_OUT_USER_ID_FIELD
+    check_out_date_field: CHECK_OUT_DATE_FIELD
+    check_in_date_field: CHECK_IN_TIME_FIELD
+    is_product_field: PRODUCT_FLAG_FIELD
+    description_field: SCRIPT_DESCRIPTION_FIELD

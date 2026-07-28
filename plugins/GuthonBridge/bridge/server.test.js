@@ -216,6 +216,55 @@ process.stdin.on("end", () => {
   }
 });
 
+test("pullHubSource uses the configured Python tool entry in development mode", async () => {
+  const port = 17466;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-development-tool-"));
+  const toolEntry = path.join(tmp, "fake-tool.js");
+  const toolHome = path.join(tmp, "home");
+  const logPath = path.join(tmp, "pull-log.ndjson");
+  fs.writeFileSync(
+    toolEntry,
+    `
+const args = process.argv.slice(2);
+if (args[0] !== "pull" || args[1] !== "--home" || args[2] !== ${JSON.stringify(toolHome)}) {
+  process.stderr.write(JSON.stringify(args));
+  process.exit(2);
+}
+process.stdin.resume();
+process.stdin.on("end", () => process.stdout.write(JSON.stringify({ ok: true, mode: "development" })));
+`,
+    "utf8",
+  );
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_TOOL_PATH: process.execPath,
+      GUTHON_TOOL_ENTRY: toolEntry,
+      GUTHON_TOOL_HOME: toolHome,
+      GUTHON_PULL_LOG_PATH: logPath,
+    },
+    stdio: "ignore",
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/pullHubSource`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceType: "procedure", alias: "demo.pkg", funId: "save" }),
+    });
+    const data = await response.json();
+
+    assert.equal(response.status, 200, data.message);
+    assert.equal(data.ok, true);
+    assert.equal(data.mode, "development");
+  } finally {
+    server.kill();
+  }
+});
+
 test("exportTableSchema delegates data source and table filters to script", async () => {
   const port = 17463;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-schema-command-"));

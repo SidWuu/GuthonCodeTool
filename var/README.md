@@ -65,6 +65,7 @@ source.css     系统私有或自定义 CSS
 ```
 
 系统脚本“选中拉取”会在 `source/workcopy/{products|projects}/...` 生成同结构工作副本和 `.guthon-baseline`；“全部拉取”只更新 readonly。
+项目 JavaScript 同时包含产品快照和项目覆盖时，`source.js` 按“产品源码在前、项目覆盖在后”合并；系统脚本的真实表名和字段名只保存在本机 `config/source-tables.yaml`。
 视图和系统脚本拉取会按根仓库 `config/sync.yaml` 的 `pull_auto_add_git` 规则，只自动暂存新生成且未被忽略的文件。
 
 工作副本常见辅助文件：

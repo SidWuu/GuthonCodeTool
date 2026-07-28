@@ -197,6 +197,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <li>macOS 发行物：<code>GuthonCodeTool-macos-arm64.zip</code>，当前只支持 Apple Silicon。</li>
 <li>应用本身不保存用户配置，升级时直接替换应用文件即可。</li>
 </ul>
+<p>Guthon Nexus 默认使用发行模式调用应用。维护者可切换到调试模式，直接运行源码仓库的虚拟环境和 Python 入口；面板命令与 Bridge 请求都会在每次执行时加载最新脚本，因此日常修改无需重建应用。切换模式不会改变本地数据目录。</p>
 </section>
 
 <section class="section">
@@ -206,7 +207,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <li><code>datasource.yaml</code>：产品、项目和只读排查数据源；敏感值可引用环境变量。</li>
 <li><code>products.yaml</code>：产品名称、数据源和源码范围。</li>
 <li><code>projects.yaml</code>：项目名称、数据源和继承产品。</li>
-<li><code>source-tables.yaml</code>：PAGE 与过程函数表名、字段名映射。</li>
+<li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射；公开模板只保留占位符，真实表名和字段名由内部配置提供。</li>
 <li><code>sync.yaml</code>：ACTIVE、子系统别名、未签入源码白名单和拉取规则。</li>
 </ul>
 <p><code>setup</code> 只补齐缺失文件，不覆盖用户配置。系统与数据源映射查询后缓存到 <code>config/system-data.json</code>。</p>
@@ -250,7 +251,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <li><strong>表结构：</strong><code>export_table_schema_sql.py</code> 查询 <code>gd_tables</code>、<code>gd_tables_field</code> 和 <code>gd_system</code>。</li>
 <li><strong>单据类型：</strong><code>export_bill_type_sql.py</code> 查询 <code>gd_bill_type</code> 和 <code>gd_system</code>。</li>
 <li><strong>视图：</strong><code>export_view_sql.py</code> 读取 <code>gdp_tables_views.VIEW_SQL</code>。</li>
-<li><strong>系统脚本：</strong><code>export_system_script_sql.py</code> 读取 <code>gd_system_script</code>；项目继承时使用产品脚本，项目 JavaScript 覆盖代码追加在产品代码之后。</li>
+<li><strong>系统脚本：</strong><code>export_system_script_sql.py</code> 按本机语义映射查询；项目 JavaScript 同时存在产品快照与项目覆盖时，固定按产品在前、项目在后合并。</li>
 </ul>
 <p>四类导出均复用 ACTIVE 的数据源与子系统范围。<code>sync-all</code> 固定按“源码 → 表结构 → 单据类型 → 系统脚本 → 视图”执行，任一步失败或 ACTIVE 中途变化即停止。</p>
 </section>

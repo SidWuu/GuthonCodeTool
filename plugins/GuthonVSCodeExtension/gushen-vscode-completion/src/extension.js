@@ -19,6 +19,7 @@ const { createDocumentSelector } = require('./selector');
 const { procedureTargetAt, selectDefinitionPaths } = require('./definition');
 const { prepareWorkspaceSetup } = require('./tool-workspace');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
+const { resolveDevelopmentRuntime, toolArguments } = require('./tool-runtime');
 
 const SUPPORTED_LANGUAGES = ['java', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled'];
@@ -147,23 +148,49 @@ function createHoverProvider(context) {
   };
 }
 
+async function configuredRuntime(config, mode) {
+  if (mode === 'development') {
+    let developmentRoot = config.get('developmentRoot', '');
+    try {
+      runtime = resolveDevelopmentRuntime(developmentRoot);
+    } catch {
+      const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: '选择 GuthonCodeTool 源码仓库根目录' });
+      if (!selected) return undefined;
+      developmentRoot = selected[0].fsPath;
+      try {
+        runtime = resolveDevelopmentRuntime(developmentRoot);
+      } catch (error) {
+        vscode.window.showErrorMessage(error.message);
+        return undefined;
+      }
+      await config.update('developmentRoot', developmentRoot, vscode.ConfigurationTarget.Global);
+    }
+    return runtime;
+  } else {
+    let toolPath = config.get('toolPath', '');
+    if (!toolPath || !fs.existsSync(toolPath)) {
+      const selected = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: false, canSelectMany: false, title: '选择 GuthonCodeTool 可执行程序' });
+      if (!selected) return undefined;
+      toolPath = selected[0].fsPath;
+      await config.update('toolPath', toolPath, vscode.ConfigurationTarget.Global);
+    }
+    return { mode: 'packaged', toolPath };
+  }
+}
+
 async function configuredTool() {
   const config = vscode.workspace.getConfiguration('gushenCompletion');
-  let toolPath = config.get('toolPath', '');
+  const mode = config.get('executionMode', 'packaged');
+  const runtime = await configuredRuntime(config, mode);
+  if (!runtime) return undefined;
   let toolHome = config.get('toolHome', '');
-  if (!toolPath) {
-    const selected = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: false, canSelectMany: false, title: '选择 GuthonCodeTool 可执行程序' });
-    if (!selected) return undefined;
-    toolPath = selected[0].fsPath;
-    await config.update('toolPath', toolPath, vscode.ConfigurationTarget.Global);
-  }
   if (!toolHome) {
     const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: '选择 GuthonCodeTool 本地数据目录' });
     if (!selected) return undefined;
     toolHome = selected[0].fsPath;
     await config.update('toolHome', toolHome, vscode.ConfigurationTarget.Global);
   }
-  return { toolPath, toolHome };
+  return { ...runtime, toolHome };
 }
 
 async function runTool(command, extraArgs = [], askForConfirmation = true) {
@@ -176,8 +203,8 @@ async function runTool(command, extraArgs = [], askForConfirmation = true) {
   if (!tool) return false;
   const output = vscode.window.createOutputChannel('GuthonCodeTool');
   output.show(true);
-  output.appendLine(`运行：${command}`);
-  const child = spawn(tool.toolPath, [command, '--home', tool.toolHome, ...(extraArgs.length ? ['--', ...extraArgs] : [])], { shell: false });
+  output.appendLine(`运行：${command}（${tool.mode === 'development' ? '调试模式' : '发行模式'}）`);
+  const child = spawn(tool.toolPath, toolArguments(tool, command, extraArgs), { shell: false });
   child.stdout.on('data', (data) => output.append(data.toString()));
   child.stderr.on('data', (data) => output.append(data.toString()));
   child.on('error', (error) => vscode.window.showErrorMessage(`GuthonCodeTool 启动失败：${error.message}`));
@@ -216,6 +243,8 @@ class ToolTreeDataProvider {
     if (element) return element.children || [];
     const config = vscode.workspace.getConfiguration('gushenCompletion');
     const toolHome = config.get('toolHome', '');
+    const executionMode = config.get('executionMode', 'packaged');
+    const developmentRoot = config.get('developmentRoot', '');
     const ready = toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'));
     const workspace = new vscode.TreeItem('工作区', vscode.TreeItemCollapsibleState.Expanded);
     workspace.iconPath = new vscode.ThemeIcon(ready ? 'pass-filled' : 'warning');
@@ -224,6 +253,12 @@ class ToolTreeDataProvider {
     configFiles.iconPath = new vscode.ThemeIcon('settings-gear');
     configFiles.children = CONFIG_FILES.map((filename) => toolItem(filename, 'gushenCompletion.editConfig', 'edit', undefined, [filename]));
     workspace.children = [
+      toolItem(
+        `运行模式：${executionMode === 'development' ? '调试模式' : '发行模式'}`,
+        'gushenCompletion.selectExecutionMode',
+        executionMode === 'development' ? 'beaker' : 'package',
+        executionMode === 'development' ? developmentRoot : '打包应用'
+      ),
       toolItem('初始化工作区', 'gushenCompletion.setupTool', 'folder-library', ready ? toolHome : '选择程序和本地数据目录'),
       configFiles,
       toolItem('打开本地数据目录', 'gushenCompletion.openToolHome', 'folder-opened'),
@@ -297,6 +332,21 @@ function activate(context) {
   toolView = new ToolTreeDataProvider(bridge);
   const toolViewDisposable = vscode.window.registerTreeDataProvider('gushenCompletion.toolView', toolView);
   const toolCommands = [
+    vscode.commands.registerCommand('gushenCompletion.selectExecutionMode', async () => {
+      const config = vscode.workspace.getConfiguration('gushenCompletion');
+      const selected = await vscode.window.showQuickPick([
+        { label: '发行模式', description: '调用打包的 GuthonCodeTool 应用', value: 'packaged' },
+        { label: '调试模式', description: '直接调用源码仓库中的 Python 脚本', value: 'development' },
+      ], { title: '选择 Guthon Nexus 运行模式' });
+      if (!selected) return;
+      const runtime = await configuredRuntime(config, selected.value);
+      if (!runtime) return;
+      await config.update('executionMode', selected.value, vscode.ConfigurationTarget.Global);
+      const toolHome = config.get('toolHome', '');
+      if (bridge.isRunning()) await bridge.restart({ ...runtime, toolHome });
+      toolView.refresh();
+      return vscode.window.showInformationMessage(`已切换为${selected.label}`);
+    }),
     vscode.commands.registerCommand('gushenCompletion.setupTool', async () => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
       const setupMode = await prepareWorkspaceSetup(config, vscode.window, vscode.ConfigurationTarget.Global);

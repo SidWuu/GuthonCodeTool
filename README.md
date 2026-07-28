@@ -70,11 +70,11 @@ GuthonCodeTool 是面向谷神低代码开发平台的本地开发工具集。�
 
 ### 系统脚本
 
-- `scripts/export_system_script_sql.py` 从 `gd_system_script` 拉取系统脚本。
+- `scripts/export_system_script_sql.py` 按本机 `source-tables.yaml` 的系统脚本语义映射查询，不在公开脚本中写入真实表名和字段名。
 - 数据库连接默认读取 `sync.ACTIVE`，并按 `systems.include.system_aliases` 限定子系统。
-- 项目脚本使用 `@inherit();` 或只有产品源码时导出 `PROD_SCRIPT`。
+- 项目 JavaScript 同时存在产品快照和项目覆盖时，固定按“产品源码在前、项目覆盖在后”合并，不再依赖产品标记字段推断；CSS 和显式继承保持原规则。
 - 输出到 `var/source/readonly/{products|project}/<名称>/<子系统>/scripts/<脚本序号>-<脚本类型>[-<脚本描述>]/`。
-- 标准脚本和自定义脚本均按 `SCRIPT_TYPE` 导出，空脚本保留 `meta.json` 和空源码文件。
+- 标准脚本和自定义脚本均按配置映射的脚本类型导出，空脚本保留 `meta.json` 和空源码文件。
 - Bridge 在系统脚本页提供“选中拉取”和“全部拉取”悬浮按钮；选中拉取同时创建或安全刷新 workcopy，全部拉取只更新 readonly。
 
 ### 源码逻辑排查
@@ -510,8 +510,10 @@ Guthon Nexus 提供谷神方言补全、API 悬浮说明、过程函数跳转，
 2. 点击左侧活动栏“Guthon Nexus”图标，选择“初始化工作区”。依次选择下载的 `GuthonCodeTool` 应用和一个长期保留的本地数据目录，例如 `D:\GuthonCodeToolData` 或 `~/Documents/GuthonCodeToolData`。
    已初始化时再次点击“初始化工作区”，确认“切换工作区”后选择新的本地数据目录；取消确认或目录选择时继续保留原工作区。
 3. 工具准备 `config/`，后续初始化和同步会在同一数据目录下按需生成 `var/`。同步源码在 `var/source/readonly/`，开发工作副本在 `var/source/workcopy/`，索引与运行数据写入 `var/knowledge/`、`var/runtime/`。
-4. 在“工作区 → 配置文件”直接编辑 `datasource.yaml`、`products.yaml`、`projects.yaml`、`source-tables.yaml` 和 `sync.yaml`，填写本地数据源与 `sync.ACTIVE` 后再开始同步。
+4. 在“工作区 → 配置文件”直接编辑 `datasource.yaml`、`products.yaml`、`projects.yaml`、`source-tables.yaml` 和 `sync.yaml`，填写本地数据源与 `sync.ACTIVE` 后再开始同步。系统脚本拉取要求内部 `source-tables.yaml` 已包含 `system_script` 语义映射。
 5. 需要网页 Bridge 功能时，在同一面板单击“启动 Guthon Bridge”。Nexus 自动传入当前应用和数据目录，不需要安装 Node.js、设置环境变量或打开终端。
+
+日常修改 Python 的维护者可在“工作区 → 运行模式”切换为“调试模式”，首次选择 GuthonCodeTool 源码仓库根目录。Nexus 会直接调用该仓库的 `.venv` 和 `scripts/guthon_tool.py`；面板操作和 Bridge 拉取都会在下一次执行时使用最新脚本，不需要重新构建应用。切回“发行模式”后继续使用原先选择的打包应用，工作区数据目录不变。
 
 同步、导出、排查、Workcopy 等会改动本地数据的操作，均会在单击后要求确认；配置文件、打开本地数据目录和刷新面板仍可单击直接执行。
 

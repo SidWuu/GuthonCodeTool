@@ -8,6 +8,7 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口，不再只是代码补
 
 ### 工作区
 
+- 运行模式：普通用户使用“发行模式”；维护者使用“调试模式”直接运行源码仓库的 `.venv` 和 Python 入口。
 - 初始化工作区：选择 GuthonCodeTool 应用和本地数据目录，创建缺失配置但不覆盖已有文件。
 - 切换工作区：已初始化时再次点击“初始化工作区”，确认后选择新的本地数据目录；取消时保留原工作区。
 - 配置文件：直接编辑 `datasource.yaml`、`products.yaml`、`projects.yaml`、`source-tables.yaml` 和 `sync.yaml`。
@@ -28,8 +29,9 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口，不再只是代码补
 ### Guthon Bridge
 
 - 在左侧面板单击“启动 Guthon Bridge”或“停止 Guthon Bridge”。
-- Nexus 自动复用已选择的 GuthonCodeTool 应用和本地数据目录，无需安装 Node.js、设置环境变量或打开终端。
+- Nexus 自动复用当前运行模式和本地数据目录：发行模式调用应用，调试模式调用源码仓库 Python；无需设置 Bridge 环境变量或打开终端。
 - Bridge 运行时切换工作区，会自动停止旧服务并使用新工作区重启。
+- Bridge 运行时切换运行模式，也会自动重启；调试模式下每次拉取都会读取最新 Python 脚本。
 
 所有会运行 GuthonCodeTool 的操作都要求用户确认；打开配置文件和本地目录保持单击。
 

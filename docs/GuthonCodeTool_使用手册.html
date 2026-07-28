@@ -223,6 +223,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>等待输出面板显示 <code>GuthonCodeTool 完成：setup</code>。</li>
 </ol>
 <p>工作区已初始化后，再次点击“初始化工作区”会提示是否切换。确认后选择新的本地数据目录，工具会在新目录创建缺失配置；取消确认或目录选择时继续使用原工作区。切换不会删除、迁移或修改旧工作区。</p>
+<p>普通用户保持“工作区 → 运行模式：发行模式”。需要随时修改 Python 脚本的维护者可单击该项切换为“调试模式”，首次选择 GuthonCodeTool 源码仓库根目录；仓库必须存在 <code>.venv</code> 和 <code>scripts/guthon_tool.py</code>。之后 Nexus 面板操作和 Bridge 拉取都会直接运行最新源码，无需重新构建应用。切回发行模式不会改变本地数据目录。</p>
 <p>初始化会创建缺失的五个配置模板，不会覆盖已经存在的配置。完成后目录为：</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/
 ├── config/
@@ -241,7 +242,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li><code>datasource.yaml</code>：数据库连接。配置引用环境变量时，必须在启动 VS Code 前设置对应变量，并重启 VS Code。</li>
 <li><code>products.yaml</code>：产品 ID、名称和 datasource。</li>
 <li><code>projects.yaml</code>：项目 ID、名称、datasource 和继承产品。</li>
-<li><code>source-tables.yaml</code>：源码表与字段映射，通常直接使用公司提供版本。</li>
+<li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射，通常直接使用公司提供版本；真实表名和字段名只保存在本机配置中。</li>
 <li><code>sync.yaml</code>：把 <code>sync.ACTIVE</code> 改为当前产品或项目，并填写子系统别名和未签入源码用户白名单。</li>
 </ul>
 <div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" type="button">复制</button><pre><code>sync:

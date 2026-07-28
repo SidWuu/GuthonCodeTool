@@ -13,6 +13,7 @@ const MANIFEST_PATH = path.join(WORKSPACE_ROOT, "manifest.json");
 const DEFAULT_HUB_PYTHON = path.join(ROOT, ".venv", "bin", "python");
 const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_PYTHON) ? DEFAULT_HUB_PYTHON : "python3");
 const HUB_TOOL = process.env.GUTHON_TOOL_PATH || "";
+const HUB_TOOL_ENTRY = process.env.GUTHON_TOOL_ENTRY || "";
 const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "scripts", "pull_source_to_work_copy.py");
 const TABLE_SCHEMA_SCRIPT = process.env.GUTHON_TABLE_SCHEMA_SCRIPT || path.join(ROOT, "scripts", "export_table_schema_sql.py");
 const BILL_TYPE_SCRIPT = process.env.GUTHON_BILL_TYPE_SCRIPT || path.join(ROOT, "scripts", "export_bill_type_sql.py");
@@ -218,7 +219,7 @@ function runToolCommand(command, args, errorLabel, input) {
   if (!HUB_TOOL_HOME) {
     return Promise.reject(new Error("GUTHON_TOOL_HOME is required when GUTHON_TOOL_PATH is set"));
   }
-  return runJsonProcess(HUB_TOOL, [command, "--home", HUB_TOOL_HOME, "--", ...args], errorLabel, input);
+  return runJsonProcess(HUB_TOOL, [...(HUB_TOOL_ENTRY ? [HUB_TOOL_ENTRY] : []), command, "--home", HUB_TOOL_HOME, "--", ...args], errorLabel, input);
 }
 
 function runHubPull(payload) {

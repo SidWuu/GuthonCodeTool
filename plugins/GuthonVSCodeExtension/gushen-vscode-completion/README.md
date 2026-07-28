@@ -21,11 +21,13 @@ Clicking `Guthon Nexus: 初始化工作区` again after initialization asks whet
 
 The extension also adds a dedicated `Guthon Nexus` icon to VS Code's left activity bar. Its tree exposes initialization, source/index sync, metadata export, environment checks, source diagnosis, and workcopy status/diff/package actions, so colleagues do not need to use the command palette.
 
+`工作区` → `运行模式` defaults to `发行模式`. Maintainers can switch to `调试模式` and select a GuthonCodeTool source checkout containing `.venv` and `scripts/guthon_tool.py`. Sidebar commands and Bridge requests then run the current Python sources directly; switching back reuses the saved packaged application and the same data directory.
+
 Expand `工作区` → `配置文件` to edit the selected local data directory's `datasource.yaml`, `products.yaml`, `projects.yaml`, `source-tables.yaml`, or `sync.yaml` directly in VS Code.
 
 Each sidebar action that runs the packaged tool asks for confirmation before it starts. Opening configuration files and local folders remains single-click.
 
-The sidebar also starts and stops Guthon Bridge with VS Code's bundled Node runtime. It automatically passes the selected executable and local data directory, so users do not need to install Node.js or set `GUTHON_TOOL_PATH` / `GUTHON_TOOL_HOME`. Switching an initialized workspace restarts a running Bridge with the new directory.
+The sidebar also starts and stops Guthon Bridge with VS Code's bundled Node runtime. It automatically passes the active packaged or development runtime and local data directory, so users do not need to set Bridge environment variables. Switching a workspace or execution mode restarts a running Bridge.
 
 The executable also retains the non-UI entry points: `create-workcopy`, `workcopy`, `query`, `diagnose`, `doctor`, `export-markdown`, and each metadata export command. Pass original script arguments after `--`, for example: `GuthonCodeTool query --home <目录> -- callers --alias <别名> --fun <函数>`.
 
@@ -38,6 +40,7 @@ The executable also retains the non-UI entry points: `create-workcopy`, `workcop
 - Runs environment checks and readonly source diagnosis.
 - Inspects workcopy status, generates diffs, and packages delivery files.
 - Starts and stops Guthon Bridge without a separate Node.js installation or terminal command.
+- Switches between the packaged application and live Python source development.
 - Java, JavaScript, and SQL completions from generated local data.
 - Java syntax snippets for Gushen backend script directives.
 - Route-based cross-source completions:
