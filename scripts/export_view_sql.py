@@ -18,7 +18,7 @@ from export_table_schema_sql import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = gusen_hub.ROOT
 DEFAULT_OUTPUT_DIR = ROOT / "var" / "database" / "views"
 
 

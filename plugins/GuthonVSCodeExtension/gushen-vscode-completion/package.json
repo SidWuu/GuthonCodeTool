@@ -15,7 +15,23 @@
   "activationEvents": [
     "onLanguage:java",
     "onLanguage:javascript",
-    "onLanguage:sql"
+    "onLanguage:sql",
+    "onCommand:gushenCompletion.setupTool",
+    "onCommand:gushenCompletion.initSourceIndex",
+    "onCommand:gushenCompletion.syncActiveSource",
+    "onCommand:gushenCompletion.syncActiveAll",
+    "onCommand:gushenCompletion.openToolHome",
+    "onCommand:gushenCompletion.reindexCalls",
+    "onCommand:gushenCompletion.exportMarkdown",
+    "onCommand:gushenCompletion.exportSchema",
+    "onCommand:gushenCompletion.exportBillTypes",
+    "onCommand:gushenCompletion.exportSystemScripts",
+    "onCommand:gushenCompletion.exportViews",
+    "onCommand:gushenCompletion.runDoctor",
+    "onCommand:gushenCompletion.runDiagnosis",
+    "onCommand:gushenCompletion.inspectWorkcopy",
+    "onCommand:gushenCompletion.refreshToolView",
+    "onView:gushenCompletion.toolView"
   ],
   "main": "./src/extension.js",
   "contributes": {
@@ -26,8 +42,50 @@
           "type": "string",
           "default": "",
           "description": "Optional absolute path to a custom rules.json file. Empty means use the extension bundled rules.json."
+        },
+        "gushenCompletion.toolPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the packaged GuthonCodeTool executable."
+        },
+        "gushenCompletion.toolHome": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute directory for GuthonCodeTool local config, readonly source, workcopy, and indexes."
         }
       }
+    },
+    "commands": [
+      { "command": "gushenCompletion.setupTool", "title": "Guthon: 初始化工作区" },
+      { "command": "gushenCompletion.initSourceIndex", "title": "Guthon: 初始化源码索引" },
+      { "command": "gushenCompletion.syncActiveSource", "title": "Guthon: 同步当前 ACTIVE 源码" },
+      { "command": "gushenCompletion.syncActiveAll", "title": "Guthon: 同步当前 ACTIVE 全部资料" },
+      { "command": "gushenCompletion.openToolHome", "title": "Guthon: 打开本地数据目录" },
+      { "command": "gushenCompletion.reindexCalls", "title": "Guthon: 重建本地调用索引" },
+      { "command": "gushenCompletion.exportMarkdown", "title": "Guthon: 导出源码索引文档" },
+      { "command": "gushenCompletion.exportSchema", "title": "Guthon: 导出表结构" },
+      { "command": "gushenCompletion.exportBillTypes", "title": "Guthon: 导出单据类型" },
+      { "command": "gushenCompletion.exportSystemScripts", "title": "Guthon: 导出系统脚本" },
+      { "command": "gushenCompletion.exportViews", "title": "Guthon: 导出视图源码" },
+      { "command": "gushenCompletion.runDoctor", "title": "Guthon: 检查本地环境" },
+      { "command": "gushenCompletion.runDiagnosis", "title": "Guthon: 执行源码逻辑排查" },
+      { "command": "gushenCompletion.inspectWorkcopy", "title": "Guthon: 检查或打包 Workcopy" },
+      { "command": "gushenCompletion.refreshToolView", "title": "Guthon: 刷新工具面板", "icon": "$(refresh)" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "guthon", "title": "谷神工具", "icon": "resources/guthon.svg" }
+      ]
+    },
+    "views": {
+      "guthon": [
+        { "id": "gushenCompletion.toolView", "name": "谷神工具" }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        { "command": "gushenCompletion.refreshToolView", "when": "view == gushenCompletion.toolView", "group": "navigation" }
+      ]
     }
   },
   "scripts": {

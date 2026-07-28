@@ -12,6 +12,9 @@ bridge/workspace/
 AGENTS.md
 TODO.md
 temp/
+build/
+dist/
+/*.spec
 tests/
 docs/superpowers/
 docs/private/

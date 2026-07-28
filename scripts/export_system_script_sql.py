@@ -13,7 +13,7 @@ import gusen_hub
 from export_table_schema_sql import normalize_data_source_ids, resolve_data_source_ids
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = gusen_hub.ROOT
 DEFAULT_OUTPUT_DIR = ROOT / "var" / "source" / "readonly"
 STANDARD_TYPES = {
     10: ("系统启动初始化脚本", "js"),

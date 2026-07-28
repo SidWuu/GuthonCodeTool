@@ -10,6 +10,8 @@ const WORKSPACE_DIR = path.join(BRIDGE_ROOT, "workspace", "procedures");
 const MANIFEST_PATH = path.join(BRIDGE_ROOT, "workspace", "manifest.json");
 const DEFAULT_HUB_PYTHON = path.join(ROOT, ".venv", "bin", "python");
 const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_PYTHON) ? DEFAULT_HUB_PYTHON : "python3");
+const HUB_TOOL = process.env.GUTHON_TOOL_PATH || "";
+const HUB_TOOL_HOME = process.env.GUTHON_TOOL_HOME || "";
 const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "scripts", "pull_source_to_work_copy.py");
 const TABLE_SCHEMA_SCRIPT = process.env.GUTHON_TABLE_SCHEMA_SCRIPT || path.join(ROOT, "scripts", "export_table_schema_sql.py");
 const BILL_TYPE_SCRIPT = process.env.GUTHON_BILL_TYPE_SCRIPT || path.join(ROOT, "scripts", "export_bill_type_sql.py");
@@ -173,9 +175,9 @@ function systemScriptSummary(payload, result = {}) {
   };
 }
 
-function runJsonCommand(args, errorLabel, input) {
+function runJsonProcess(executable, args, errorLabel, input) {
   return new Promise((resolve, reject) => {
-    const child = spawn(HUB_PYTHON, args, {
+    const child = spawn(executable, args, {
       cwd: ROOT,
       env: { ...process.env, GUTHON_SUPPRESS_PULL_LOG: "1" },
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"]
@@ -206,52 +208,83 @@ function runJsonCommand(args, errorLabel, input) {
   });
 }
 
+function runJsonCommand(args, errorLabel, input) {
+  return runJsonProcess(HUB_PYTHON, args, errorLabel, input);
+}
+
+function runToolCommand(command, args, errorLabel, input) {
+  if (!HUB_TOOL) return undefined;
+  if (!HUB_TOOL_HOME) {
+    return Promise.reject(new Error("GUTHON_TOOL_HOME is required when GUTHON_TOOL_PATH is set"));
+  }
+  return runJsonProcess(HUB_TOOL, [command, "--home", HUB_TOOL_HOME, "--", ...args], errorLabel, input);
+}
+
 function runHubPull(payload) {
+  if (HUB_TOOL) {
+    return runToolCommand("pull", [], "源码拉取", payload);
+  }
   return runJsonCommand([HUB_PULL_SCRIPT, "--json-stdin"], "源码拉取", payload);
 }
 
 function runTableSchemaExport(payload) {
   const args = [TABLE_SCHEMA_SCRIPT];
+  const toolArgs = [];
   if (payload.dataSourceId) {
     args.push("--data-source-ids", String(payload.dataSourceId));
+    toolArgs.push("--data-source-ids", String(payload.dataSourceId));
   }
   if (Array.isArray(payload.tableIds) && payload.tableIds.length > 0) {
     args.push("--table-ids", payload.tableIds.join(","));
+    toolArgs.push("--table-ids", payload.tableIds.join(","));
   }
+  if (HUB_TOOL) return runToolCommand("export-schema", toolArgs, "表结构拉取");
   return runJsonCommand(args, "表结构拉取");
 }
 
 function runBillTypeExport(payload) {
   const args = [BILL_TYPE_SCRIPT];
+  const toolArgs = [];
   if (Array.isArray(payload.dataSourceIds) && payload.dataSourceIds.length > 0) {
     args.push("--data-source-ids", payload.dataSourceIds.join(","));
+    toolArgs.push("--data-source-ids", payload.dataSourceIds.join(","));
   }
   if (Array.isArray(payload.billTypeCodes) && payload.billTypeCodes.length > 0) {
     args.push("--bill-type-codes", payload.billTypeCodes.join(","));
+    toolArgs.push("--bill-type-codes", payload.billTypeCodes.join(","));
   }
+  if (HUB_TOOL) return runToolCommand("export-bill-type", toolArgs, "单据类型拉取");
   return runJsonCommand(args, "单据类型拉取");
 }
 
 function runViewSqlExport(payload) {
   const args = [VIEW_SQL_SCRIPT];
+  const toolArgs = [];
   if (Array.isArray(payload.dataSourceIds) && payload.dataSourceIds.length > 0) {
     args.push("--data-source-ids", payload.dataSourceIds.join(","));
+    toolArgs.push("--data-source-ids", payload.dataSourceIds.join(","));
   }
   if (Array.isArray(payload.viewIds) && payload.viewIds.length > 0) {
     args.push("--view-ids", payload.viewIds.join(","));
+    toolArgs.push("--view-ids", payload.viewIds.join(","));
   }
+  if (HUB_TOOL) return runToolCommand("export-view", toolArgs, "视图源码拉取");
   return runJsonCommand(args, "视图源码拉取");
 }
 
 function runSystemScriptExport(payload) {
   const args = [SYSTEM_SCRIPT_EXPORT_SCRIPT];
+  const toolArgs = [];
   if (Array.isArray(payload.systemIds) && payload.systemIds.length > 0) {
     args.push("--system-ids", payload.systemIds.join(","));
+    toolArgs.push("--system-ids", payload.systemIds.join(","));
   }
   if (Array.isArray(payload.scriptTypes) && payload.scriptTypes.length > 0) {
     args.push("--script-types", payload.scriptTypes.join(","));
     args.push("--workcopy");
+    toolArgs.push("--script-types", payload.scriptTypes.join(","), "--workcopy");
   }
+  if (HUB_TOOL) return runToolCommand("export-system-script", toolArgs, "系统脚本拉取");
   return runJsonCommand(args, "系统脚本拉取");
 }
 
@@ -261,10 +294,9 @@ function runProcedureCallers(payload) {
   if (!alias || !funId) {
     throw new Error("缺少过程别名或函数名");
   }
-  return runJsonCommand(
-    [HUB_QUERY_SCRIPT, "callers", "--alias", alias, "--fun", funId, "--limit", "100"],
-    "调用方查询"
-  );
+  const args = ["callers", "--alias", alias, "--fun", funId, "--limit", "100"];
+  if (HUB_TOOL) return runToolCommand("query", args, "调用方查询");
+  return runJsonCommand([HUB_QUERY_SCRIPT, ...args], "调用方查询");
 }
 
 const server = http.createServer(async (req, res) => {
