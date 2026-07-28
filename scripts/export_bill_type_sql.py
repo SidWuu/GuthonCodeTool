@@ -12,7 +12,7 @@ import gusen_hub
 from export_table_schema_sql import normalize_data_source_ids, resolve_data_source_ids, resolve_output_dir
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = gusen_hub.ROOT
 DEFAULT_OUTPUT_DIR = ROOT / "var" / "database" / "billtype"
 
 

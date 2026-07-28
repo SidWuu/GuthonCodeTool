@@ -17,7 +17,9 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+# Packaged launches set GUTHON_HOME so config and private source data stay outside
+# the application install directory. Source checkouts keep their current root.
+ROOT = Path(os.environ.get("GUTHON_HOME") or Path(__file__).resolve().parents[1]).expanduser().resolve()
 CONFIG_DIR = ROOT / "config"
 VAR_DIR = ROOT / "var"
 PAGE_SOURCE_TYPE = "page"

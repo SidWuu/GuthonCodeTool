@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import gusen_hub
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = gusen_hub.ROOT
 REPORT_ROOT = ROOT / "var" / "docs" / "业务排查文档"
 CONTINUE_CONDITIONS = {"always", "rows_found", "no_rows"}
 ALLOWED_FUNCTIONS = {
