@@ -54,7 +54,7 @@ def main() -> int:
         subprocess.run(command, cwd=ROOT, env=env, check=True)
     except subprocess.CalledProcessError as error:
         return error.returncode or 1
-    print(f"已生成：{ROOT / 'dist'}")
+    print(f"Build output: {ROOT / 'dist'}")
     return 0
 
 
