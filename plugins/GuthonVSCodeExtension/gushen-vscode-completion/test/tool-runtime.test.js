@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { resolveDevelopmentRuntime, toolArguments } = require('../src/tool-runtime');
+const { resolveDevelopmentRuntime, toolArguments, writeRuntimeDescriptor } = require('../src/tool-runtime');
 
 test('resolves the repository virtualenv and Python entry point', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-runtime-'));
@@ -28,4 +28,33 @@ test('builds matching packaged and development command arguments', () => {
     toolArguments({ toolEntry: '/repo/scripts/guthon_tool.py', toolHome: '/data' }, 'pull'),
     ['/repo/scripts/guthon_tool.py', 'pull', '--home', '/data']
   );
+});
+
+test('writes packaged and development runtime descriptors for AI tools', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-runtime-home-'));
+
+  const descriptorPath = writeRuntimeDescriptor({
+    mode: 'packaged',
+    toolPath: '/tool/GuthonCodeTool',
+    toolHome: home,
+  });
+  assert.deepEqual(JSON.parse(fs.readFileSync(descriptorPath, 'utf8')), {
+    mode: 'packaged',
+    command: ['/tool/GuthonCodeTool'],
+    home,
+  });
+
+  writeRuntimeDescriptor({
+    mode: 'development',
+    toolPath: '/repo/.venv/bin/python',
+    toolEntry: '/repo/scripts/guthon_tool.py',
+    toolHome: home,
+  });
+  assert.deepEqual(JSON.parse(fs.readFileSync(descriptorPath, 'utf8')), {
+    mode: 'development',
+    command: ['/repo/.venv/bin/python', '/repo/scripts/guthon_tool.py'],
+    home,
+  });
+
+  fs.rmSync(home, { recursive: true });
 });

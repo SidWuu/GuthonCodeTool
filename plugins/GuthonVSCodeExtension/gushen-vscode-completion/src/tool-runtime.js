@@ -22,4 +22,16 @@ function toolArguments(tool, command, extraArgs = []) {
   ];
 }
 
-module.exports = { resolveDevelopmentRuntime, toolArguments };
+function writeRuntimeDescriptor(tool) {
+  const runtimeDir = path.join(tool.toolHome, 'var', 'runtime');
+  const descriptorPath = path.join(runtimeDir, 'tool-runtime.json');
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.writeFileSync(descriptorPath, `${JSON.stringify({
+    mode: tool.mode,
+    command: [tool.toolPath, ...(tool.toolEntry ? [tool.toolEntry] : [])],
+    home: tool.toolHome,
+  }, null, 2)}\n`, 'utf8');
+  return descriptorPath;
+}
+
+module.exports = { resolveDevelopmentRuntime, toolArguments, writeRuntimeDescriptor };

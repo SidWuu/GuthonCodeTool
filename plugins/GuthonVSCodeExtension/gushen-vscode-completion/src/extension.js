@@ -19,7 +19,7 @@ const { createDocumentSelector } = require('./selector');
 const { procedureTargetAt, selectDefinitionPaths } = require('./definition');
 const { prepareWorkspaceSetup } = require('./tool-workspace');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
-const { resolveDevelopmentRuntime, toolArguments } = require('./tool-runtime');
+const { resolveDevelopmentRuntime, toolArguments, writeRuntimeDescriptor } = require('./tool-runtime');
 
 const SUPPORTED_LANGUAGES = ['java', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled'];
@@ -190,7 +190,9 @@ async function configuredTool() {
     toolHome = selected[0].fsPath;
     await config.update('toolHome', toolHome, vscode.ConfigurationTarget.Global);
   }
-  return { ...runtime, toolHome };
+  const tool = { ...runtime, toolHome };
+  writeRuntimeDescriptor(tool);
+  return tool;
 }
 
 async function runTool(command, extraArgs = [], askForConfirmation = true) {
@@ -343,6 +345,7 @@ function activate(context) {
       if (!runtime) return;
       await config.update('executionMode', selected.value, vscode.ConfigurationTarget.Global);
       const toolHome = config.get('toolHome', '');
+      if (toolHome) writeRuntimeDescriptor({ ...runtime, toolHome });
       if (bridge.isRunning()) await bridge.restart({ ...runtime, toolHome });
       toolView.refresh();
       return vscode.window.showInformationMessage(`已切换为${selected.label}`);

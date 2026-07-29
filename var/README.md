@@ -119,6 +119,7 @@ knowledge/projects/{project_id}/invoke-index.md
 
 ```text
 runtime/index/hub.db   同步、源码记录、调用索引
+runtime/tool-runtime.json  Nexus 当前运行模式、命令前缀和本地数据目录
 runtime/logs/          日志
 runtime/temp/          临时文件
 runtime/cache/         缓存
@@ -127,7 +128,7 @@ runtime/cache/         缓存
 ## AI 助手处理顺序
 
 1. 先读 `AGENTS.md` 和 `docs/` 下的相关规则。
-2. 先查询 `runtime/index/` 的对应DB局部上下文。
+2. 读取 `runtime/tool-runtime.json`，按当前 Nexus 运行模式查询 `runtime/index/` 的对应 DB 局部上下文。
 3. 看开发副本时进入 `source/workcopy/`。
 4. 看上游基线时进入 `source/readonly/`。
 5. 涉及本机私有工具时进入 `tools/`。

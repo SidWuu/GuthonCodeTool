@@ -9,6 +9,7 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口，不再只是代码补
 ### 工作区
 
 - 运行模式：普通用户使用“发行模式”；维护者使用“调试模式”直接运行源码仓库的 `.venv` 和 Python 入口。
+- 运行时描述：把当前模式、命令前缀和本地数据目录写入 `var/runtime/tool-runtime.json`，供 AI 使用同一套规范调用。
 - 初始化工作区：选择 GuthonCodeTool 应用和本地数据目录，创建缺失配置但不覆盖已有文件。
 - 切换工作区：已初始化时再次点击“初始化工作区”，确认后选择新的本地数据目录；取消时保留原工作区。
 - 配置文件：直接编辑 `datasource.yaml`、`products.yaml`、`projects.yaml`、`source-tables.yaml` 和 `sync.yaml`。

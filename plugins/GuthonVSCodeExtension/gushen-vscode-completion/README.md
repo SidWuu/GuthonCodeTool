@@ -23,13 +23,15 @@ The extension also adds a dedicated `Guthon Nexus` icon to VS Code's left activi
 
 `工作区` → `运行模式` defaults to `发行模式`. Maintainers can switch to `调试模式` and select a GuthonCodeTool source checkout containing `.venv` and `scripts/guthon_tool.py`. Sidebar commands and Bridge requests then run the current Python sources directly; switching back reuses the saved packaged application and the same data directory.
 
+Nexus writes the selected runtime to `<本地数据目录>/var/runtime/tool-runtime.json`. Its `command` array is either the packaged executable or the development Python executable plus `scripts/guthon_tool.py`; `home` is the shared local data directory. AI tools use this file instead of guessing the VS Code setting.
+
 Expand `工作区` → `配置文件` to edit the selected local data directory's `datasource.yaml`, `products.yaml`, `projects.yaml`, `source-tables.yaml`, or `sync.yaml` directly in VS Code.
 
 Each sidebar action that runs the packaged tool asks for confirmation before it starts. Opening configuration files and local folders remains single-click.
 
 The sidebar also starts and stops Guthon Bridge with VS Code's bundled Node runtime. It automatically passes the active packaged or development runtime and local data directory, so users do not need to set Bridge environment variables. Switching a workspace or execution mode restarts a running Bridge.
 
-The executable also retains the non-UI entry points: `create-workcopy`, `workcopy`, `query`, `diagnose`, `doctor`, `export-markdown`, and each metadata export command. Pass original script arguments after `--`, for example: `GuthonCodeTool query --home <目录> -- callers --alias <别名> --fun <函数>`.
+Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `query`, `diagnose`, `doctor`, `export-markdown`, and each metadata export command. Append the command arguments to the runtime descriptor's `command` array, for example `command + ["query", "--home", home, "--", "callers", "--alias", "<别名>", "--fun", "<函数>"]`.
 
 ## Features
 
