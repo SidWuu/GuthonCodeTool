@@ -1623,7 +1623,6 @@ def _initialize_work_copy(source_path: Path, target: Path, row, change_key: str,
     _write_work_copy_metadata(target, row, source_path, change_key, mode)
     status = _work_copy_state(target, source_path, change_key)
     status["action"] = "CREATED"
-    _write_work_copy_diff(target, status)
     return status
 
 
@@ -1644,7 +1643,8 @@ def _prepare_work_copy(source_path: Path, target: Path, row, change_key: str, mo
         status["localChanged"] = False
     if status["localChanged"]:
         status["action"] = "CONFLICT" if status["upstreamChanged"] else "PRESERVED"
-        _write_work_copy_diff(target, status, notes)
+        if status["upstreamChanged"] or (target / WORK_COPY_DIFF_FILE).exists():
+            _write_work_copy_diff(target, status, notes)
         if status["upstreamChanged"]:
             raise SystemExit(
                 f"工作副本与上游均有变化，已拒绝覆盖: {target}\n"
@@ -1659,7 +1659,8 @@ def _prepare_work_copy(source_path: Path, target: Path, row, change_key: str, mo
         status["action"] = "UPDATED"
     else:
         status["action"] = "UNCHANGED"
-    _write_work_copy_diff(target, status, notes)
+    if (target / WORK_COPY_DIFF_FILE).exists():
+        _write_work_copy_diff(target, status, notes)
     return status
 
 

@@ -72,7 +72,7 @@ source.css     系统私有或自定义 CSS
 
 ```text
 source-meta.json  工作副本对应的索引记录
-diff.md           修改说明草稿
+diff.md           按需生成的差异报告和修改说明草稿
 ```
 
 ## database

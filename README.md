@@ -35,7 +35,7 @@ GuthonCodeTool 是面向谷神低代码开发平台的本地开发工具集。�
 ### 工作副本
 
 - 从 readonly 源码生成 `var/source/workcopy`。
-- 工作副本保留 `.guthon-baseline`、`source-meta.json` 和自动生成的 `diff.md`。
+- 工作副本保留 `.guthon-baseline` 和 `source-meta.json`；`diff.md` 在显式检查差异、打包交付或发生冲突时生成。
 - 再次拉取前检查本地修改和上游版本；本地修改已回写到上游时刷新基线，内容分叉时拒绝覆盖。
 - `scripts/workcopy.py` 可查看状态、刷新差异并生成 `delivery.md` 交付清单。
 - 工具不自动回写平台，修改结果由人工复制回谷神平台保存、提交、签入。
@@ -277,6 +277,8 @@ Windows PowerShell：
 ```
 
 手动拉取使用 `config/sync.yaml` 的 `sync.ACTIVE`；显式传入的项目或产品必须与 ACTIVE 一致。
+
+目标对象明确时，直接选中拉取并修改对应 workcopy，不需要先执行全量同步或索引查询。只有目标不明确或需要跨对象影响分析时才查询源码索引；只有结论依赖当前运行数据、实时配置或数据库约束时才查询数据库。
 
 ### 4. 检查与交付工作副本
 
