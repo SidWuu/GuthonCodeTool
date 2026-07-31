@@ -29,18 +29,198 @@ WORK_COPY_META_FILE = "source-meta.json"
 WORK_COPY_DIFF_FILE = "diff.md"
 WORK_COPY_DELIVERY_FILE = "delivery.md"
 WORK_COPY_MANAGED_FILES = {WORK_COPY_META_FILE, WORK_COPY_DIFF_FILE, WORK_COPY_DELIVERY_FILE}
+WORKSPACE_ENV = "GUTHON_WORKSPACE"
+WORKSPACE_STEPS = ("source", "schema", "billType", "systemScripts", "views")
 
 
-def source_dir() -> Path:
-    return VAR_DIR / "source"
+def workspace_key(value=None):
+    key = str(value or os.environ.get(WORKSPACE_ENV) or "").strip()
+    if not key:
+        raise SystemExit("Missing --workspace. Use products.<product_id> or projects.<project_id>.")
+    return key
 
 
-def readonly_source_dir() -> Path:
-    return source_dir() / "readonly"
+def set_workspace(value):
+    os.environ[WORKSPACE_ENV] = workspace_key(value)
 
 
-def pull_log_path() -> Path:
-    return Path(os.environ.get("GUTHON_PULL_LOG_PATH") or VAR_DIR / "runtime" / "logs" / "pull-log.ndjson")
+def list_workspaces(config):
+    workspaces = []
+    seen_names = {"products": set(), "projects": set()}
+    for kind, config_key, prefix, layer in (
+        ("products", "products", "PRD", "PRODUCT"),
+        ("projects", "projects", "PRJ", "PROJECT"),
+    ):
+        for item_id, item in (config.get(config_key, {}).get(config_key) or {}).items():
+            name = str(item.get("name") or "").strip()
+            if not name:
+                raise SystemExit(f"Missing name for {kind}.{item_id}")
+            if name in seen_names[kind]:
+                raise SystemExit(f"Duplicate {kind} display name: {name}")
+            seen_names[kind].add(name)
+            key = f"{kind}.{item_id}"
+            root = VAR_DIR / "workspace" / path_part(f"{prefix} {name}")
+            datasource_name = str(item.get("datasource") or "").strip()
+            datasource = (config.get("datasource", {}).get("datasource") or {}).get(datasource_name)
+            if not datasource:
+                raise SystemExit(f"Unknown datasource for {key}: {datasource_name}")
+            workspaces.append(
+                {
+                    "workspaceKey": key,
+                    "kind": kind,
+                    "type": "product" if kind == "products" else "project",
+                    "id": item_id,
+                    "name": name,
+                    "displayName": f"{prefix} {name}",
+                    "layer": layer,
+                    "productId": item_id if kind == "products" else str(item.get("product_id") or ""),
+                    "projectId": "" if kind == "products" else item_id,
+                    "datasourceName": datasource_name,
+                    "datasource": datasource,
+                    "systems": item.get("systems") or {},
+                    "sourceScope": {
+                        "include": item.get("include") or {},
+                        "exclude": item.get("exclude") or {},
+                        "extraWhere": item.get("extra_where") or {},
+                    },
+                    "pageOrigins": [str(value).rstrip("/") for value in item.get("page_origins") or [] if str(value).strip()],
+                    "config": item,
+                    "root": root,
+                    "docsDir": root / "docs",
+                    "sourceDir": root / "source",
+                    "readonlyDir": root / "source" / "readonly",
+                    "workcopyDir": root / "source" / "workcopy",
+                    "databaseDir": root / "database",
+                    "contextDir": root / "context",
+                    "indexPath": root / "context" / "index.db",
+                    "statePath": root / "context" / "state.json",
+                    "logsDir": root / "context" / "logs",
+                }
+            )
+    return workspaces
+
+
+def resolve_workspace(config, value=None):
+    key = workspace_key(value)
+    for workspace in list_workspaces(config):
+        if workspace["workspaceKey"] == key:
+            return workspace
+    raise SystemExit(f"Unknown workspace: {key}")
+
+
+def current_workspace(config=None):
+    return resolve_workspace(config or load_config())
+
+
+def ensure_workspace_structure(workspace):
+    for path in (
+        workspace["docsDir"],
+        workspace["readonlyDir"],
+        workspace["workcopyDir"],
+        workspace["databaseDir"] / "schema",
+        workspace["databaseDir"] / "billtype",
+        workspace["databaseDir"] / "views",
+        workspace["contextDir"],
+        workspace["logsDir"],
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+
+
+def workspace_config_digest(config, workspace):
+    payload = {
+        "workspace": workspace["config"],
+        "datasource": workspace["datasource"],
+        "rules": config.get("sync", {}).get("rules") or {},
+        "sourceTables": config.get("source_tables") or {},
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def load_workspace_state(config, workspace):
+    path = workspace["statePath"]
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        state = {}
+    digest = workspace_config_digest(config, workspace)
+    steps = state.get("steps") if isinstance(state.get("steps"), dict) else {}
+    all_synced = state.get("configDigest") == digest and all(
+        (steps.get(step) or {}).get("status") == "SUCCESS" for step in WORKSPACE_STEPS
+    )
+    if not state:
+        status = "UNINITIALIZED"
+    elif all_synced:
+        status = "SYNCED"
+    elif state.get("configDigest") == digest and state.get("lastFailure"):
+        status = "FAILED"
+    else:
+        status = "PARTIAL"
+    return {
+        "workspaceKey": workspace["workspaceKey"],
+        "configDigest": digest,
+        "status": status,
+        "lastFullSyncAt": state.get("lastFullSyncAt") or "",
+        "steps": steps,
+        "lastFailure": state.get("lastFailure"),
+    }
+
+
+def update_workspace_state(config, workspace, step=None, status=None, error="", full_sync=False):
+    ensure_workspace_structure(workspace)
+    state = load_workspace_state(config, workspace)
+    state["configDigest"] = workspace_config_digest(config, workspace)
+    state.pop("status", None)
+    now = _now()
+    if step:
+        state.setdefault("steps", {})[step] = {"status": status, "updatedAt": now}
+    if error:
+        state["lastFailure"] = {"step": step or "", "message": str(error)[:1000], "time": now}
+    elif status == "SUCCESS" and (state.get("lastFailure") or {}).get("step") == step:
+        state["lastFailure"] = None
+    if full_sync:
+        state["lastFullSyncAt"] = now
+        state["lastFailure"] = None
+    workspace["statePath"].write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return load_workspace_state(config, workspace)
+
+
+def workspace_summary(config, workspace):
+    state = load_workspace_state(config, workspace)
+    return {
+        "workspaceKey": workspace["workspaceKey"],
+        "type": workspace["type"],
+        "id": workspace["id"],
+        "name": workspace["name"],
+        "displayName": workspace["displayName"],
+        "root": str(workspace["root"]),
+        "status": state["status"],
+        "lastFullSyncAt": state["lastFullSyncAt"],
+        "steps": state["steps"],
+        "lastFailure": state["lastFailure"],
+    }
+
+
+def source_dir(workspace=None) -> Path:
+    return (workspace or current_workspace())["sourceDir"]
+
+
+def readonly_source_dir(workspace=None) -> Path:
+    return (workspace or current_workspace())["readonlyDir"]
+
+
+def work_copy_dir(workspace=None) -> Path:
+    return (workspace or current_workspace())["workcopyDir"]
+
+
+def pull_log_path(workspace=None) -> Path:
+    if os.environ.get("GUTHON_PULL_LOG_PATH"):
+        return Path(os.environ["GUTHON_PULL_LOG_PATH"])
+    return (workspace or current_workspace())["logsDir"] / "pull-log.ndjson"
 
 
 def append_pull_log(pull_type, trigger, summary, payload=None, result=None, ok=True, message="") -> Path:
@@ -61,10 +241,6 @@ def append_pull_log(pull_type, trigger, summary, payload=None, result=None, ok=T
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     return path
-
-
-def work_copy_dir() -> Path:
-    return source_dir() / "workcopy"
 
 
 def load_yaml(path: Path):
@@ -118,6 +294,10 @@ def _next_content_line(lines, start):
 
 
 def _scalar(value: str):
+    if value == "[]":
+        return []
+    if value == "{}":
+        return {}
     if value in ("true", "True"):
         return True
     if value in ("false", "False"):
@@ -149,13 +329,18 @@ def load_config():
             + ", ".join(missing)
             + "\nCopy config/example/*.example.yaml to config/*.yaml and fill them first."
         )
-    config = {key: load_yaml(CONFIG_DIR / filename) for key, filename in files.items()}
-    config["systems"] = config["sync"].get("systems") or {}
-    return config
+    return {key: load_yaml(CONFIG_DIR / filename) for key, filename in files.items()}
 
 
-def system_aliases(config: dict):
-    return list(dict.fromkeys(str(item).strip() for item in (config.get("systems", {}).get("include") or {}).get("system_aliases", []) if str(item).strip()))
+def system_aliases(config: dict, workspace=None):
+    workspace = workspace or resolve_workspace(config)
+    return list(
+        dict.fromkeys(
+            str(item).strip()
+            for item in (workspace.get("systems", {}).get("include") or {}).get("system_aliases", [])
+            if str(item).strip()
+        )
+    )
 
 
 def _build_system_scope(records, selected):
@@ -199,8 +384,9 @@ def _build_system_scope(records, selected):
     }
 
 
-def resolve_system_scope(conn, config: dict, datasource_name: str):
-    selected = system_aliases(config)
+def resolve_system_scope(conn, config: dict, datasource_name: str, workspace=None):
+    workspace = workspace or resolve_workspace(config)
+    selected = system_aliases(config, workspace)
     if not selected:
         return {"system_ids": [], "data_source_ids": []}
     cache_path = CONFIG_DIR / "system-data.json"
@@ -224,7 +410,7 @@ def resolve_system_scope(conn, config: dict, datasource_name: str):
                 for row in cur.fetchall()
             ]
         if not records:
-            raise SystemExit("No gd_system rows match systems.include.system_aliases in config/sync.yaml")
+            raise SystemExit(f"No gd_system rows match systems.include.system_aliases for {workspace['workspaceKey']}")
         cache["datasources"][datasource_name] = {"system_aliases": selected, "systems": records}
         cache["generated_at"] = _now()
         cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -235,6 +421,70 @@ def resolve_system_scope(conn, config: dict, datasource_name: str):
     if not scope.get("system_ids") or not scope.get("data_source_ids"):
         raise SystemExit(f"Invalid system cache for datasource: {datasource_name}")
     return scope
+
+
+def request_identity(payload):
+    data_source_ids = {
+        str(value)
+        for value in (
+            [payload.get("dataSourceId")]
+            + list(payload.get("dataSourceIds") or [])
+        )
+        if value not in (None, "")
+    }
+    system_ids = {
+        str(value)
+        for value in (
+            [payload.get("systemId")]
+            + list(payload.get("systemIds") or [])
+        )
+        if value not in (None, "")
+    }
+    return str(payload.get("pageOrigin") or "").rstrip("/"), data_source_ids, system_ids
+
+
+def workspace_matches_request(config, workspace, payload):
+    origin, data_source_ids, system_ids = request_identity(payload)
+    if workspace["pageOrigins"] and origin not in workspace["pageOrigins"]:
+        return False
+    if not data_source_ids and not system_ids:
+        return bool(origin)
+    try:
+        scope = resolve_system_scope(None, config, workspace["datasourceName"], workspace)
+    except AttributeError:
+        with db_connect(workspace["datasource"]) as conn:
+            scope = resolve_system_scope(conn, config, workspace["datasourceName"], workspace)
+    return data_source_ids.issubset(set(scope.get("data_source_ids") or [])) and system_ids.issubset(
+        set(scope.get("system_ids") or [])
+    )
+
+
+def route_workspace_request(config, payload):
+    requested = str(payload.get("workspaceKey") or "").strip()
+    if requested:
+        workspace = resolve_workspace(config, requested)
+        if any(request_identity(payload)[1:]) or workspace["pageOrigins"]:
+            if not workspace_matches_request(config, workspace, payload):
+                raise SystemExit(f"Page identity does not match workspace: {requested}")
+        return {"ok": True, "workspaceKey": requested, "workspace": workspace_summary(config, workspace)}
+    candidates = [
+        workspace
+        for workspace in list_workspaces(config)
+        if workspace_matches_request(config, workspace, payload)
+    ]
+    if len(candidates) == 1:
+        workspace = candidates[0]
+        return {
+            "ok": True,
+            "workspaceKey": workspace["workspaceKey"],
+            "workspace": workspace_summary(config, workspace),
+        }
+    return {
+        "ok": False,
+        "workspaceSelectionRequired": True,
+        "message": "请选择目标工作区" if candidates else "页面身份未匹配到工作区",
+        "candidates": [workspace_summary(config, workspace) for workspace in candidates],
+    }
 
 
 def connect_index(index_db: Path) -> sqlite3.Connection:
@@ -669,52 +919,65 @@ LIMIT 1
 
 def run_sync_once(args=None):
     parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--init-only", action="store_true", help="create local sqlite schema and docs only")
     mode.add_argument("--reindex-calls", action="store_true", help="rebuild call index from local readonly sources")
     parsed = parser.parse_args(args)
     cfg = load_config()
+    if parsed.workspace:
+        set_workspace(parsed.workspace)
+    workspace = resolve_workspace(cfg)
+    ensure_workspace_structure(workspace)
     sync = cfg["sync"]["sync"]
-    index_path = active_index_path(cfg)
+    index_path = workspace["indexPath"]
     index_name = str(index_path.relative_to(ROOT))
     conn = connect_index(index_path)
     if parsed.init_only:
-        active, _products, _projects = resolve_active(cfg)
-        export_status(conn, {"mode": "init-only", "active": active, "changed": 0, "candidates": 0, "failures": 0})
-        export_knowledge_readme(conn, index_name, active)
+        export_status(conn, {"mode": "init-only", "workspaceKey": workspace["workspaceKey"], "changed": 0, "candidates": 0, "failures": 0})
+        export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
         return
     if parsed.reindex_calls:
-        active, products, projects = resolve_active(cfg)
-        for product_id, product in products:
-            reconcile_readonly_index_paths(conn, "PRODUCT", product_id, "", product)
-        for project_id, project in projects:
-            reconcile_readonly_index_paths(conn, "PROJECT", project["product_id"], project_id, project)
         indexed = reindex_local_calls(conn)
-        export_status(conn, {"mode": "reindex-calls", "active": active, "changed": indexed, "failures": 0})
-        export_knowledge_readme(conn, index_name, active)
+        export_status(conn, {"mode": "reindex-calls", "workspaceKey": workspace["workspaceKey"], "changed": indexed, "failures": 0})
+        export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
         return
 
     lookback = int(sync.get("lookback_minutes", 10))
-    active, products, projects = resolve_active(cfg)
-    state_key = f"last_success_time:{active}"
+    state_key = "last_success_time"
     sync_from = _sync_from(conn, lookback, state_key)
-    stats = {"mode": "sync", "active": active, "sync_from": sync_from, "candidates": 0, "changed": 0, "deleted": 0, "failures": 0}
-    for product_id, product in products:
-        stats = _sync_layer(conn, cfg, product, "PRODUCT", product_id, "", sync_from, stats)
-    for project_id, project in projects:
-        stats = _sync_layer(conn, cfg, project, "PROJECT", project["product_id"], project_id, sync_from, stats)
+    stats = {
+        "mode": "sync",
+        "workspaceKey": workspace["workspaceKey"],
+        "sync_from": sync_from,
+        "candidates": 0,
+        "changed": 0,
+        "deleted": 0,
+        "failures": 0,
+    }
+    stats = _sync_layer(
+        conn,
+        cfg,
+        workspace["config"],
+        workspace["layer"],
+        workspace["productId"],
+        workspace["projectId"],
+        sync_from,
+        stats,
+        workspace,
+    )
     conn.execute(
         "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
         (state_key, _now()),
     )
     conn.commit()
     export_status(conn, stats)
-    export_knowledge_readme(conn, index_name, active)
+    export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
     append_pull_log(
         "source",
         "scheduled",
         {
-            "active": active,
+            "workspaceKey": workspace["workspaceKey"],
             "candidates": stats.get("candidates", 0),
             "changed": stats.get("changed", 0),
             "deleted": stats.get("deleted", 0),
@@ -726,52 +989,27 @@ def run_sync_once(args=None):
     )
 
 
-def resolve_active(cfg):
-    sync = cfg["sync"]["sync"]
-    active = sync.get("ACTIVE") or sync.get("active")
-    if not active:
-        raise SystemExit("Missing sync.ACTIVE. Use products.<product_id> or projects.<project_id>.")
-    kind, _, item_id = str(active).partition(".")
-    if kind == "products":
-        product = (cfg["products"].get("products") or {}).get(item_id)
-        if product:
-            return active, [(item_id, product)], []
-    if kind == "projects":
-        project = (cfg["projects"].get("projects") or {}).get(item_id)
-        if project:
-            return active, [], [(item_id, project)]
-    raise SystemExit(f"Invalid sync.ACTIVE: {active}")
+def workspace_index_path(cfg, value=None):
+    return resolve_workspace(cfg, value)["indexPath"]
 
 
-def active_index_path(cfg):
-    active, _products, _projects = resolve_active(cfg)
-    kind, _, item_id = active.partition(".")
-    index_dir = cfg["sync"]["sync"].get("index_dir")
-    if not index_dir:
-        raise SystemExit("Missing sync.index_dir.")
-    return ROOT / index_dir / kind / f"{path_part(item_id)}.db"
-
-
-def resolve_datasource(cfg, name=None):
+def resolve_datasource(cfg, name=None, workspace=None):
     if not name:
-        _active, products, projects = resolve_active(cfg)
-        _item_id, item = (products or projects)[0]
-        name = item.get("datasource")
+        workspace = workspace or resolve_workspace(cfg)
+        name = workspace["datasourceName"]
     datasource = (cfg["datasource"].get("datasource") or {}).get(name)
     if not datasource:
         raise SystemExit(f"Unknown datasource: {name}")
     return name, datasource
 
 
-def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, stats):
-    if reconcile_readonly_index_paths(conn, layer, product_id, project_id, layer_cfg):
-        conn.commit()
+def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, stats, workspace):
     ds_name = layer_cfg["datasource"]
     ds = cfg["datasource"]["datasource"][ds_name]
     table_cfg = cfg["source_tables"]
     rules = cfg["sync"].get("rules") or {}
     with db_connect(ds) as remote:
-        system_scope = resolve_system_scope(remote, cfg, ds_name)
+        system_scope = resolve_system_scope(remote, cfg, ds_name, workspace)
         page_query, page_params = _scoped_sql(page_sql(table_cfg, rules), system_scope, "system", table_cfg)
         inventory_query, inventory_params = _scoped_sql(page_inventory_sql(table_cfg), system_scope, "system", table_cfg)
         proc_query, proc_params = _scoped_sql(proc_sql(table_cfg, rules), system_scope, "data_source", table_cfg)
@@ -928,37 +1166,7 @@ def reconcile_deleted_pages(conn, layer, product_id, project_id, current_page_id
 
 
 def readonly_layer_root(layer, product_id, project_id, layer_cfg):
-    name = layer_cfg.get("name")
-    if not name:
-        item_id = product_id if layer == "PRODUCT" else project_id
-        raise SystemExit(f"Missing name for {layer.lower()} source: {item_id}")
-    owner = "products" if layer == "PRODUCT" else "project"
-    return readonly_source_dir() / owner / path_part(name)
-
-
-def reconcile_readonly_index_paths(conn, layer, product_id, project_id, layer_cfg):
-    if layer != "PRODUCT":
-        return 0
-    legacy_root = readonly_source_dir() / "products" / path_part(product_id)
-    target_root = readonly_layer_root(layer, product_id, project_id, layer_cfg)
-    if legacy_root == target_root or legacy_root.exists() or not target_root.exists():
-        return 0
-    legacy_prefix = str(legacy_root.relative_to(ROOT)) + "/"
-    target_prefix = str(target_root.relative_to(ROOT)) + "/"
-    identity = (layer, product_id, project_id)
-    changed = 0
-    for table, column in (
-        ("gusen_source_record", "local_path"),
-        ("gusen_invoke_call", "json_path"),
-        ("gusen_dynamic_call", "json_path"),
-    ):
-        cursor = conn.execute(
-            f"UPDATE {table} SET {column}=replace({column}, ?, ?) "
-            f"WHERE source_layer=? AND product_id=? AND project_id=? AND {column} LIKE ?",
-            (legacy_prefix, target_prefix, *identity, legacy_prefix + "%"),
-        )
-        changed += cursor.rowcount
-    return changed
+    return readonly_source_dir()
 
 
 def source_base(row, layer, product_id, project_id, layer_cfg, system_scope):
@@ -1182,7 +1390,7 @@ def reindex_local_calls(conn):
 
 
 def export_product_docs(conn, product_id):
-    out = VAR_DIR / "knowledge" / "products" / product_id
+    out = current_workspace()["contextDir"]
     out.mkdir(parents=True, exist_ok=True)
     rows = conn.execute(
         """
@@ -1229,7 +1437,7 @@ def export_product_docs(conn, product_id):
 
 
 def export_project_docs(conn, project_id):
-    out = VAR_DIR / "knowledge" / "projects" / project_id
+    out = current_workspace()["contextDir"]
     out.mkdir(parents=True, exist_ok=True)
     (out / "effective-source-index.md").unlink(missing_ok=True)
     rows = conn.execute(
@@ -1260,7 +1468,7 @@ def export_project_docs(conn, project_id):
 
 
 def export_status(conn, stats):
-    out = VAR_DIR / "knowledge"
+    out = current_workspace()["contextDir"]
     out.mkdir(parents=True, exist_ok=True)
     lines = ["# 谷神源码 Hub 同步状态", "", f"- 最近生成时间：{_now()}"]
     for key, value in stats.items():
@@ -1269,7 +1477,7 @@ def export_status(conn, stats):
 
 
 def export_knowledge_readme(conn, index_db, active):
-    out = VAR_DIR / "knowledge"
+    out = current_workspace()["contextDir"]
     out.mkdir(parents=True, exist_ok=True)
     source_count = conn.execute("SELECT COUNT(*) FROM gusen_source_record").fetchone()[0]
     call_count = conn.execute("SELECT COUNT(*) FROM gusen_invoke_call").fetchone()[0]
@@ -1278,7 +1486,7 @@ def export_knowledge_readme(conn, index_db, active):
         "# 谷神源码知识入口",
         "",
         f"- 当前索引：`{index_db}`",
-        f"- 当前范围：`{active}`",
+        f"- 当前工作区：`{active}`",
         f"- 源码对象数：{source_count}",
         f"- 静态调用数：{call_count}",
         f"- 动态调用点数：{dynamic_count}",
@@ -1286,12 +1494,12 @@ def export_knowledge_readme(conn, index_db, active):
         "AI 开发先查询 SQLite 局部上下文，不读取全量 Markdown 索引：",
         "",
         "```text",
-        'command + ["query", "--home", home, "--", "find", "<关键字>"]',
-        'command + ["query", "--home", home, "--", "context", "--source-id", "<source_id>", "--fun", "<fun_id>"]',
-        'command + ["query", "--home", home, "--", "callers", "--alias", "<source_alias_id>", "--fun", "<fun_id>"]',
+        f'command + ["query", "--home", home, "--workspace", "{active}", "--", "find", "<关键字>"]',
+        f'command + ["query", "--home", home, "--workspace", "{active}", "--", "context", "--source-id", "<source_id>", "--fun", "<fun_id>"]',
+        f'command + ["query", "--home", home, "--workspace", "{active}", "--", "callers", "--alias", "<source_alias_id>", "--fun", "<fun_id>"]',
         "```",
         "",
-        "其中 `command` 和 `home` 读取自 `var/runtime/tool-runtime.json`；该文件由 Guthon Nexus 按当前发行或调试模式生成。PAGE 没有函数名时删除 `--fun` 及其值。",
+        "其中 `command` 和 `home` 读取自 `var/nexus/tool-runtime.json`；该文件由 Guthon Nexus 按当前发行或调试模式生成。PAGE 没有函数名时删除 `--fun` 及其值。",
         "",
         "全量 Markdown 仅在显式运行 `scripts/export_hub_markdown.py` 时生成；默认使用上述 SQLite 局部查询。",
     ]
@@ -1668,6 +1876,8 @@ def _auto_add_work_copy(cfg: dict, target: Path):
     rules = cfg["sync"].get("rules") or {}
     if not rules.get("pull_auto_add_git"):
         return {"gitAddStatus": "DISABLED", "gitAdded": 0}
+    if os.environ.get("GUTHON_DEFER_GIT_ADD") == "1":
+        return {"gitAddStatus": "DEFERRED", "gitAdded": 0}
     git_cwd = target if target.is_dir() else target.parent
     try:
         root_result = subprocess.run(
@@ -1699,7 +1909,8 @@ def _auto_add_work_copy(cfg: dict, target: Path):
         )
         return {"gitAddStatus": "IGNORED" if ignored.returncode == 0 else "NO_NEW_FILES", "gitAdded": 0}
     added = subprocess.run(
-        ["git", "-C", str(repo_root), "add", "--", *paths],
+        ["git", "-C", str(repo_root), "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        input="\0".join(paths) + "\0",
         capture_output=True,
         text=True,
         check=False,
@@ -1707,6 +1918,36 @@ def _auto_add_work_copy(cfg: dict, target: Path):
     if added.returncode:
         return {"gitAddStatus": "FAILED", "gitAdded": 0, "gitAddMessage": added.stderr.strip()}
     return {"gitAddStatus": "ADDED", "gitAdded": len(paths), "gitRoot": str(repo_root)}
+
+
+def untracked_files(repo_root=None):
+    repo_root = repo_root or VAR_DIR
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-files", "--others", "--exclude-standard", "-z"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return set(result.stdout.split("\0")) - {""} if result.returncode == 0 else set()
+
+
+def auto_add_operation_files(config, before, workspace):
+    if not (config.get("sync", {}).get("rules") or {}).get("pull_auto_add_git"):
+        return {"gitAddStatus": "DISABLED", "gitAdded": 0}
+    prefix = workspace["root"].relative_to(VAR_DIR).as_posix() + "/"
+    paths = sorted(path for path in untracked_files() - set(before) if path.startswith(prefix))
+    if not paths:
+        return {"gitAddStatus": "NO_NEW_FILES", "gitAdded": 0}
+    result = subprocess.run(
+        ["git", "-C", str(VAR_DIR), "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        input="\0".join(paths) + "\0",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        return {"gitAddStatus": "FAILED", "gitAdded": 0, "gitAddMessage": result.stderr.strip()}
+    return {"gitAddStatus": "ADDED", "gitAdded": len(paths), "gitRoot": str(VAR_DIR)}
 
 
 def _current_work_copy_source(metadata: dict):
@@ -1721,7 +1962,8 @@ def _current_work_copy_source(metadata: dict):
             return None, source_path, ""
         return metadata, source_path, _str(source_meta.get("changeKey"))
     cfg = load_config()
-    conn = connect_index(active_index_path(cfg))
+    workspace = resolve_workspace(cfg, metadata.get("workspaceKey"))
+    conn = connect_index(workspace["indexPath"])
     source_type = metadata.get("source_table") or ""
     alias = metadata.get("source_alias_id") or ""
     fun = metadata.get("fun_id") or ""
@@ -1795,28 +2037,24 @@ def work_copy_cli(args=None):
 
 def create_work_copy(args=None):
     parser = argparse.ArgumentParser()
-    scope = parser.add_mutually_exclusive_group(required=True)
-    scope.add_argument("--project")
-    scope.add_argument("--product")
     parser.add_argument("--type", required=True, choices=[PAGE_SOURCE_TYPE, PROCEDURE_SOURCE_TYPE])
     parser.add_argument("--alias", required=True)
     parser.add_argument("--fun", default="")
     parsed = parser.parse_args(args)
     cfg = load_config()
-    layer, product_id, project_id, _layer_cfg = resolve_pull_scope(
-        cfg,
-        {"scope": "product" if parsed.product else "project", "productId": parsed.product, "projectId": parsed.project},
-    )
-    conn = connect_index(active_index_path(cfg))
-    row, _owner = find_work_copy_source(conn, cfg, product_id if layer == "PRODUCT" else None, project_id or None, parsed.type, parsed.alias, parsed.fun)
-    result = create_work_copy_from_row(conn, cfg, row, product_id, project_id)
+    workspace = resolve_workspace(cfg)
+    layer, product_id, project_id, _layer_cfg = resolve_pull_scope(cfg, {"workspaceKey": workspace["workspaceKey"]})
+    conn = connect_index(workspace["indexPath"])
+    row = find_work_copy_source(conn, product_id if layer == "PRODUCT" else None, project_id or None, parsed.type, parsed.alias, parsed.fun)
+    result = create_work_copy_from_row(conn, cfg, row, workspace)
     print(result["path"])
 
 
-def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
-    found, owner = find_work_copy_source(
+def create_work_copy_from_row(conn, cfg, row, workspace):
+    product_id = workspace["productId"]
+    project_id = workspace["projectId"]
+    found = find_work_copy_source(
         conn,
-        cfg,
         product_id=product_id if not project_id else None,
         project_id=project_id,
         source_type=row["source_table"],
@@ -1825,40 +2063,37 @@ def create_work_copy_from_row(conn, cfg, row, product_id, project_id):
     )
     source_rel = found["local_path"]
     source_path = ROOT / source_rel
-    target = work_copy_dir() / owner / _work_copy_source_relative_path(source_rel, project_id)
-    result = _prepare_work_copy(source_path, target, found, _work_copy_change_key(found))
+    target = workspace["workcopyDir"] / _work_copy_source_relative_path(source_path, workspace)
+    work_row = dict(found)
+    work_row["workspaceKey"] = workspace["workspaceKey"]
+    result = _prepare_work_copy(source_path, target, work_row, _work_copy_change_key(found))
     result.update(_auto_add_work_copy(cfg, target))
     return result
 
 
-def _work_copy_source_relative_path(source_path, project_id):
-    path = Path(source_path)
-    marker = ("source", "readonly", "project") if project_id else ("source", "readonly", "products")
-    rel = _path_after_marker(path, marker)
-    if not rel.parts:
-        raise ValueError(f"Source path has no configured name after {'/'.join(marker)}: {path}")
-    return Path(*rel.parts[1:])
-
-
-def _path_after_marker(path: Path, marker: tuple[str, ...]) -> Path:
-    parts = path.parts
-    size = len(marker)
-    for index in range(len(parts) - size + 1):
-        if parts[index : index + size] == marker:
-            return Path(*parts[index + size :])
-    raise ValueError(f"Path is not under {'/'.join(marker)}: {path}")
+def _work_copy_source_relative_path(source_path, workspace):
+    try:
+        return Path(source_path).resolve().relative_to(workspace["readonlyDir"].resolve())
+    except ValueError as error:
+        raise ValueError(f"Source path is outside workspace readonly: {source_path}") from error
 
 
 def pull_source_to_work_copy(payload: dict):
     cfg = load_config()
+    route = route_workspace_request(cfg, payload)
+    if not route["ok"]:
+        return route
+    payload = {**payload, "workspaceKey": route["workspaceKey"]}
+    set_workspace(route["workspaceKey"])
+    workspace = resolve_workspace(cfg)
     layer, product_id, project_id, layer_cfg = resolve_pull_scope(cfg, payload)
     rules = cfg["sync"].get("rules") or {}
-    conn = connect_index(active_index_path(cfg))
+    conn = connect_index(workspace["indexPath"])
     sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload, rules)
     ds_name = layer_cfg["datasource"]
     ds = cfg["datasource"]["datasource"][ds_name]
     with db_connect(ds) as remote:
-        system_scope = resolve_system_scope(remote, cfg, ds_name)
+        system_scope = resolve_system_scope(remote, cfg, ds_name, workspace)
         model_paths = load_model_paths(remote, cfg["source_tables"]) if payload["sourceType"] == PAGE_SOURCE_TYPE else {}
         with remote.cursor() as cur:
             cur.execute(sql, params)
@@ -1873,12 +2108,13 @@ def pull_source_to_work_copy(payload: dict):
             candidate["model_path"] = model_paths.get(_str(candidate.get("model_id")))
     if not row:
         if project_id:
-            found, _owner = find_work_copy_source(
-                conn, cfg, None, project_id, payload["sourceType"], payload.get("alias") or payload.get("sourceId") or "", payload.get("funId") or ""
+            found = find_work_copy_source(
+                conn, None, project_id, payload["sourceType"], payload.get("alias") or payload.get("sourceId") or "", payload.get("funId") or ""
             )
-            work_result = create_work_copy_from_row(conn, cfg, found, product_id, project_id)
+            work_result = create_work_copy_from_row(conn, cfg, found, workspace)
             return {
                 "ok": True,
+                "workspaceKey": workspace["workspaceKey"],
                 "changed": False,
                 "message": "拉取成功, 已保留本地修改" if work_result["localChanged"] else "拉取成功, 无变更",
                 "workCopyPath": work_result["path"],
@@ -1906,12 +2142,13 @@ def pull_source_to_work_copy(payload: dict):
         changed = upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, system_scope, force=bool(payload.get("force"))) or changed
     conn.commit()
     for candidate in rows:
-        work_results.append(create_work_copy_from_row(conn, cfg, candidate, product_id, project_id))
+        work_results.append(create_work_copy_from_row(conn, cfg, candidate, workspace))
     conn.commit()
     work_copy_path = os.path.commonpath([result["path"] for result in work_results])
     local_changed = any(result["localChanged"] for result in work_results)
     return {
         "ok": True,
+        "workspaceKey": workspace["workspaceKey"],
         "changed": changed,
         "message": "拉取成功, 已保留本地修改" if local_changed else "拉取成功" if changed else "拉取成功, 无变更",
         "workCopyPath": work_copy_path,
@@ -1926,31 +2163,13 @@ def pull_source_to_work_copy(payload: dict):
 
 
 def resolve_pull_scope(cfg: dict, payload: dict):
-    scope = payload.get("scope")
-    product_id = payload.get("productId") or ""
-    project_id = payload.get("projectId") or ""
-    active, products, projects = resolve_active(cfg)
-    if products:
-        active_product_id, layer_cfg = products[0]
-        if scope and (scope != "product" or product_id != active_product_id):
-            raise SystemExit(f"Requested source scope does not match sync.ACTIVE: {active}")
-        return "PRODUCT", active_product_id, "", layer_cfg
-    active_project_id, layer_cfg = projects[0]
-    if scope and (scope != "project" or project_id != active_project_id):
-        raise SystemExit(f"Requested source scope does not match sync.ACTIVE: {active}")
-    return "PROJECT", layer_cfg["product_id"], active_project_id, layer_cfg
+    workspace = resolve_workspace(cfg, payload.get("workspaceKey"))
+    return workspace["layer"], workspace["productId"], workspace["projectId"], workspace["config"]
 
 
-def pull_source_payload_from_args(scope, product_id, project_id, source_type, source_id, alias, fun, force=False):
-    if not scope:
-        if project_id:
-            scope = "project"
-        elif product_id:
-            scope = "product"
+def pull_source_payload_from_args(workspace, source_type, source_id, alias, fun, force=False):
     return {
-        "scope": scope,
-        "productId": product_id,
-        "projectId": project_id,
+        "workspaceKey": workspace,
         "sourceType": source_type,
         "sourceId": source_id,
         "alias": alias,
@@ -1962,9 +2181,7 @@ def pull_source_payload_from_args(scope, product_id, project_id, source_type, so
 def pull_source_to_work_copy_cli(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--json-stdin", action="store_true")
-    parser.add_argument("--scope", choices=["product", "project"])
-    parser.add_argument("--product-id")
-    parser.add_argument("--project-id")
+    parser.add_argument("--workspace")
     parser.add_argument("--type", dest="source_type", choices=[PAGE_SOURCE_TYPE, PROCEDURE_SOURCE_TYPE])
     parser.add_argument("--source-id")
     parser.add_argument("--alias")
@@ -1974,8 +2191,11 @@ def pull_source_to_work_copy_cli(args=None):
     if parsed.json_stdin:
         payload = json.loads(sys.stdin.read() or "{}")
     else:
-        payload = pull_source_payload_from_args(parsed.scope, parsed.product_id, parsed.project_id, parsed.source_type, parsed.source_id, parsed.alias, parsed.fun, parsed.force)
+        payload = pull_source_payload_from_args(parsed.workspace, parsed.source_type, parsed.source_id, parsed.alias, parsed.fun, parsed.force)
     result = pull_source_to_work_copy(payload)
+    if result.get("workspaceSelectionRequired"):
+        print(json.dumps(result, ensure_ascii=False))
+        return
     append_pull_log(
         "source",
         "manual",
@@ -1998,7 +2218,7 @@ def pull_source_to_work_copy_cli(args=None):
     print(json.dumps(result, ensure_ascii=False))
 
 
-def find_work_copy_source(conn, cfg, product_id, project_id, source_type, alias, fun):
+def find_work_copy_source(conn, product_id, project_id, source_type, alias, fun):
     if product_id:
         row = conn.execute(
             """
@@ -2009,8 +2229,7 @@ def find_work_copy_source(conn, cfg, product_id, project_id, source_type, alias,
         ).fetchone()
         if not row:
             raise SystemExit("Product source not found. Run sync first.")
-        product_name = (cfg["products"].get("products") or {}).get(product_id, {}).get("name") or product_id
-        return row, Path("products") / path_part(product_name)
+        return row
     row = conn.execute(
         """
         SELECT * FROM gusen_source_record
@@ -2022,8 +2241,7 @@ def find_work_copy_source(conn, cfg, product_id, project_id, source_type, alias,
     ).fetchone()
     if not row:
         raise SystemExit("Project source not found. Run sync first.")
-    project_name = (cfg["projects"].get("projects") or {}).get(project_id, {}).get("name") or project_id
-    return row, Path(path_part(project_name))
+    return row
 
 
 def _write_table(path, title, headers, rows):

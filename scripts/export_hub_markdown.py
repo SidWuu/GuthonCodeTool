@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
+import argparse
+
 import gusen_hub
 
 
-def main():
+def main(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace")
+    parsed = parser.parse_args(args)
     cfg = gusen_hub.load_config()
-    _active, products, projects = gusen_hub.resolve_active(cfg)
-    conn = gusen_hub.connect_index(gusen_hub.active_index_path(cfg))
+    if parsed.workspace:
+        gusen_hub.set_workspace(parsed.workspace)
+    workspace = gusen_hub.resolve_workspace(cfg)
+    conn = gusen_hub.connect_index(workspace["indexPath"])
     try:
-        for product_id, _product in products:
-            gusen_hub.export_product_docs(conn, product_id)
-        for project_id, _project in projects:
-            gusen_hub.export_project_docs(conn, project_id)
+        if workspace["type"] == "product":
+            gusen_hub.export_product_docs(conn, workspace["productId"])
+        else:
+            gusen_hub.export_project_docs(conn, workspace["projectId"])
     finally:
         conn.close()
 

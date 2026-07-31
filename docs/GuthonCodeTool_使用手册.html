@@ -125,7 +125,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
     <div class="hero-meta"><span>从零开始</span><span>跨平台共用</span><span>日常工作流</span><span>常见问题</span></div>
     <div class="hero-actions">
       <a class="btn btn-primary" href="#1-准备与下载">开始安装</a>
-      <a class="btn btn-ghost" href="index.html">内部知识库</a>
+      <a class="btn btn-ghost" href="GuthonCodeTool_全功能说明.html">全功能说明</a>
       <a class="btn btn-ghost" href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">Github Release</a>
       <a class="btn btn-ghost" href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Release</a>
     </div>
@@ -158,7 +158,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <article class="overview-card"><div class="overview-number">01</div><h3>下载</h3><p>从同一 Release 获取应用、VSIX 与 GuthonBridge。</p></article>
 <article class="overview-card"><div class="overview-number">02</div><h3>初始化</h3><p>在 VS Code 侧边栏选择应用和本地数据目录。</p></article>
 <article class="overview-card"><div class="overview-number">03</div><h3>配置</h3><p>填写五个 YAML，并放入公司提供的 AI 规范。</p></article>
-<article class="overview-card"><div class="overview-number">04</div><h3>同步</h3><p>初始化索引，再同步当前 ACTIVE 全部资料。</p></article>
+<article class="overview-card"><div class="overview-number">04</div><h3>同步</h3><p>在项目树选择产品或项目，独立同步全部资料。</p></article>
 <article class="overview-card"><div class="overview-number">05</div><h3>开发</h3><p>通过 Bridge 拉取 Workcopy，只修改工作副本。</p></article>
 <article class="overview-card"><div class="overview-number">06</div><h3>交付</h3><p>检查差异，人工回写、测试、提交和签入。</p></article>
 </div>
@@ -178,7 +178,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>Windows x64：<code>GuthonCodeTool-windows-x64.exe</code></li>
 <li>VSCode扩展 Guthon Nexus：<code>GuthonCodeTool-vscode.vsix</code></li>
 <li>Chrome扩展 Guthon Bridge：<code>GuthonCodeTool-chrome.zip</code></li>
-<li>内部配置文件/AI规范文件：<code><a href="http://192.168.15.110:8088/docs/">http://192.168.15.110:8088/docs/</a></code></li>
+<li>内部配置文件和 AI 规范：从公司内部文档入口获取，不写入公开手册或仓库。</li>
 </ul>
 <p>建议固定两个目录位置：</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button>
@@ -240,16 +240,20 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <p>在“Guthon Nexus → 工作区 → 配置文件”中单击文件名即可编辑。优先使用公司提供的真实配置；不要把数据库密码、源码或配置提交到公开仓库。</p>
 <ul>
 <li><code>datasource.yaml</code>：数据库连接。配置引用环境变量时，必须在启动 VS Code 前设置对应变量，并重启 VS Code。</li>
-<li><code>products.yaml</code>：产品 ID、名称和 datasource。</li>
-<li><code>projects.yaml</code>：项目 ID、名称、datasource 和继承产品。</li>
+<li><code>products.yaml</code>：产品 ID、名称、datasource、子系统别名和可选页面来源。</li>
+<li><code>projects.yaml</code>：项目 ID、名称、datasource、继承产品、子系统别名和可选页面来源。</li>
 <li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射，通常直接使用公司提供版本；真实表名和字段名只保存在本机配置中。</li>
-<li><code>sync.yaml</code>：把 <code>sync.ACTIVE</code> 改为当前产品或项目，并填写子系统别名和未签入源码用户白名单。</li>
+<li><code>sync.yaml</code>：全局同步窗口、未签入源码用户白名单和自动暂存规则，不设置当前或默认工作区。</li>
 </ul>
-<div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" type="button">复制</button><pre><code>sync:
-  ACTIVE: products.&lt;产品ID&gt;
-# 或
-sync:
-  ACTIVE: projects.&lt;项目ID&gt;</code></pre></div>
+<div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" type="button">复制</button><pre><code>products:
+  &lt;产品ID&gt;:
+    name: &lt;产品名称&gt;
+    datasource: &lt;数据源键&gt;
+    systems:
+      include:
+        system_aliases:
+          - &lt;子系统别名&gt;
+    page_origins: []</code></pre></div>
 <p>将内部 AI 规范保持原目录层级复制到本地数据目录，至少包括：</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/var/AGENTS.md
 &lt;本地数据目录&gt;/var/docs/GUSHEN_DEVELOPMENT_BASELINE.md
@@ -263,14 +267,14 @@ sync:
 <section class="wiki-section">
 <h2 id="5-首次初始化和同步">5. 首次初始化和同步</h2>
 <ol>
-<li>确认 <code>sync.yaml</code> 的 ACTIVE 和子系统范围正确。</li>
+<li>确认产品、项目各自的数据源和子系统范围正确。</li>
 <li>点击“维护 → 检查本地环境”，确认输出没有 FAIL。</li>
-<li>点击“源码 → 初始化源码索引”，确认后等待完成。</li>
-<li>点击“配置数据 → 同步当前 ACTIVE 全部资料”。</li>
+<li>展开“项目”，确认产品显示为 <code>PRD</code>、项目显示为 <code>PRJ</code>。</li>
+<li>在目标产品或项目节点点击“同步项目全部资料”。</li>
 <li>检查输出依次出现源码与索引、数据库表结构、单据类型、系统脚本和视图。</li>
 </ol>
-<p>同步期间不要修改 ACTIVE。任何一步失败，后续步骤会停止，应先按输出面板中的第一条错误处理。</p>
-<p>结果集中保存在本地数据目录的 <code>var/</code> 中。日常开发只修改 <code>var/source/workcopy</code>，不要修改 <code>var/source/readonly</code>。</p>
+<p>所有同步任务通过全局队列串行执行。任何一步失败，后续步骤会停止；只有五步成功且配置摘要一致时，节点状态才显示“已同步”。</p>
+<p>结果保存在 <code>var/workspace/PRD &lt;产品名称&gt;/</code> 或 <code>var/workspace/PRJ &lt;项目名称&gt;/</code>。日常开发只修改目标工作区的 <code>source/workcopy</code>，不要修改 <code>source/readonly</code>。</p>
 </section>
 
 <section class="wiki-section">
@@ -290,15 +294,15 @@ sync:
 <li>单击“启动 Guthon Bridge”。Nexus 自动使用初始化时选择的应用和本地数据目录。</li>
 <li>面板显示“运行中 · 127.0.0.1:17361”后即可使用；单击“停止 Guthon Bridge”可关闭服务。</li>
 </ol>
-<p>Bridge 服务已经包含在 VSIX 中，由 Guthon Nexus 使用 VS Code 自带的 Node 运行时启动。普通用户无需安装 Node.js、设置环境变量或保持终端窗口运行。Bridge 运行中切换工作区时，Nexus 会自动使用新目录重启。也可以打开 <a href="http://127.0.0.1:17361/health" target="_blank" rel="noopener">http://127.0.0.1:17361/health</a>，看到 <code>{"ok":true}</code> 即表示服务正常。</p>
+<p>Bridge 服务已经包含在 VSIX 中，由 Guthon Nexus 使用 VS Code 自带的 Node 运行时启动。普通用户无需安装 Node.js、设置环境变量或保持终端窗口运行。Bridge 会按请求中的 <code>workspaceKey</code> 或页面身份匹配产品、项目；多个候选时 Chrome 会要求本次选择。也可以打开 <a href="http://127.0.0.1:17361/health" target="_blank" rel="noopener">http://127.0.0.1:17361/health</a>，看到 <code>{"ok":true}</code> 即表示服务正常。</p>
 <p>升级到该方式后，不要再同时从终端执行旧的 <code>npm run start:bridge</code>。如果输出出现 <code>EADDRINUSE 127.0.0.1:17361</code>，说明已有 Bridge 占用端口；先关闭原终端中的服务，再回到 Guthon Nexus 启动。</p>
 </section>
 
 <section class="wiki-section">
 <h2 id="7-日常工作流">7. 日常工作流</h2>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>确认或切换 sync.ACTIVE
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>在“项目”树选择 PRD 或 PRJ
         ↓
-同步当前 ACTIVE 全部资料
+同步该工作区全部资料
         ↓
 启动 Bridge，从谷神页面拉取目标 Workcopy
         ↓
@@ -310,8 +314,8 @@ VS Code / AI 只分析和修改 Workcopy
         ↓
 再次拉取，确认基线刷新</code></pre></div>
 <ol>
-<li>开始开发前，在侧边栏打开 <code>sync.yaml</code>，确认 ACTIVE。</li>
-<li>切换产品或项目后，执行“同步当前 ACTIVE 全部资料”。</li>
+<li>开始开发前，从“项目”树确定目标产品或项目。</li>
+<li>执行该节点的“同步项目全部资料”，确认状态为“已同步”。</li>
 <li>在谷神过程函数、模块、数据表、单据类型、视图或系统脚本页面使用 Bridge。</li>
 <li>打开 Bridge 返回的 Workcopy 路径；AI 先读取 <code>var/AGENTS.md</code> 和命中的规范。</li>
 <li>通过“维护 → 检查或打包 Workcopy”查看状态、生成差异报告或交付物。</li>
@@ -347,7 +351,7 @@ VS Code / AI 只分析和修改 Workcopy
 <li>用新应用替换旧应用；路径不变时 VS Code 无需重新初始化。</li>
 <li>从 VSIX 重新安装扩展，并重新加载 VS Code。</li>
 <li>替换 Bridge 前备份自己的 <code>extension/host-config.js</code>，然后重新加载 Chrome 扩展。</li>
-<li>运行“检查本地环境”，再执行一次当前 ACTIVE 同步。</li>
+<li>运行“检查本地环境”，再选择一个产品和一个项目分别执行完整同步。</li>
 </ol>
 <p>升级时不要删除本地数据目录。配置、AI 规范、readonly、Workcopy、SQLite 和日志都保存在该目录，与应用版本分离。</p>
 <p>迁移电脑时，应安全复制整个本地数据目录，再在新电脑执行一次“初始化工作区”选择新应用和该目录；数据库凭据和系统环境变量需按公司要求重新配置。</p>
@@ -359,8 +363,8 @@ VS Code / AI 只分析和修改 Workcopy
 <p>确认 VSIX 已安装并启用，执行“Developer: Reload Window”；仍未出现时卸载旧版本后重新安装当前 Release 的 VSIX。</p>
 <h3>点击功能后提示启动失败</h3>
 <p>重新执行“初始化工作区”，选择未改名、未移动且属于当前系统的应用。macOS 同时检查执行权限。</p>
-<h3>同步只得到一个产品或项目的数据</h3>
-<p>同步范围由 <code>sync.ACTIVE</code> 决定。切换 ACTIVE 后重新执行“同步当前 ACTIVE 全部资料”，工具不会把多个 ACTIVE 混到同一索引。</p>
+<h3>项目树没有显示某个产品或项目</h3>
+<p>检查 <code>products.yaml</code> 或 <code>projects.yaml</code> 的键、名称和 datasource，然后刷新 Nexus。每个节点独立绑定 <code>workspaceKey</code>，不会共享默认工作区。</p>
 <h3>Bridge 显示无法连接</h3>
 <ol>
 <li>确认 Guthon Nexus 面板显示 Bridge“运行中”。</li>
@@ -377,7 +381,7 @@ VS Code / AI 只分析和修改 Workcopy
 <li><label class="check-item"><input type="checkbox" disabled><span>VS Code 左侧出现“Guthon Nexus”。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>工作区显示“已配置”，五个 YAML 可以从侧边栏打开。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>AI 规范已放入本地数据目录的 <code>var/</code>。</span></label></li>
-<li><label class="check-item"><input type="checkbox" disabled><span>环境检查没有 FAIL，初始化索引和全部资料同步成功。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>环境检查没有 FAIL，项目树同时显示 PRD、PRJ，两个样例均完整同步成功。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>Bridge 健康检查返回 <code>{"ok":true}</code>。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>能从谷神页面拉取 Workcopy，并能生成差异报告。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>已明确只修改 Workcopy，代码由人工回写和测试。</span></label></li>

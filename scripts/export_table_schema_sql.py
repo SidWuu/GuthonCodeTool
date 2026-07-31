@@ -14,7 +14,7 @@ import gusen_hub
 
 
 ROOT = gusen_hub.ROOT
-DEFAULT_OUTPUT_DIR = ROOT / "var" / "database" / "schema"
+DEFAULT_OUTPUT_DIR = ROOT / "var" / "workspace"
 
 
 def sanitize_name(value):
@@ -38,13 +38,7 @@ def resolve_output_dir(base_dir, requested=None, config=None):
     if requested:
         return Path(requested)
     config = config or gusen_hub.load_config()
-    active, products, projects = gusen_hub.resolve_active(config)
-    kind = active.partition(".")[0]
-    _item_id, item = (products or projects)[0]
-    name = item.get("name")
-    if not name:
-        raise SystemExit(f"Missing name for sync.ACTIVE: {active}")
-    return Path(base_dir) / kind / gusen_hub.path_part(name)
+    return gusen_hub.resolve_workspace(config)["databaseDir"] / "schema"
 
 
 def to_camel_key(key):
@@ -232,15 +226,18 @@ def resolve_data_source_ids(conn, datasource_name, requested=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Export Gushen table schemas directly from SQL.")
-    parser.add_argument("--datasource", help="Datasource override. Defaults to the product or project selected by sync.ACTIVE.")
-    parser.add_argument("--output-dir", help="Output directory override. Defaults to var/database/schema/{products|projects}/<active_name>.")
-    parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to IDs resolved from config/sync.yaml systems.include.system_aliases.")
+    parser.add_argument("--workspace")
+    parser.add_argument("--datasource", help="Datasource override. Defaults to the selected workspace datasource.")
+    parser.add_argument("--output-dir", help="Output directory override. Defaults to <workspace>/database/schema.")
+    parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to the workspace system aliases.")
     parser.add_argument("--table-ids", help="Comma-separated TABLE_ID list. Omit to export all tables in selected data sources.")
     args = parser.parse_args(argv)
 
     requested_data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else []
     table_ids = normalize_table_ids(args.table_ids)
     config = gusen_hub.load_config()
+    if args.workspace:
+        gusen_hub.set_workspace(args.workspace)
     output_dir = resolve_output_dir(DEFAULT_OUTPUT_DIR, args.output_dir, config)
     datasource_name, datasource = gusen_hub.resolve_datasource(config, args.datasource)
     try:

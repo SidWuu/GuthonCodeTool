@@ -39,16 +39,20 @@ databases:
 
 源码排查脚本只连接同时满足 `environment: test`、`diagnosis.enabled: true` 和 `diagnosis.query_only: true` 的数据源。`databases` 是该测试服务器允许查询的数据库白名单，开发库不配置 `diagnosis`。
 
-## sync.yaml 中的 systems
+## products.yaml / projects.yaml 中的 systems
 
-用于限制只同步指定子系统源码。
+每个产品、项目分别配置用于限制同步范围的子系统：
 
 ```yaml
-systems:
-  include:
-    # 只配置别名；系统和数据源信息不需要人工维护
-    system_aliases:
-      - demo.system
+products:
+  demo-product:
+    name: 示例产品
+    datasource: demo-product-dev
+    systems:
+      include:
+        system_aliases:
+          - demo.system
+    page_origins: []
 ```
 
 页面源码按 `source-tables.yaml` 中配置的页面子系统字段过滤。
@@ -65,23 +69,23 @@ systems:
 
 过程函数的 `content_field` 配置项目脚本字段，`product_content_field` 配置继承标记对应的产品快照脚本字段。PAGE 后台脚本的产品快照直接读取 JSON 中与 `script` 同级的 `superScript`。
 
-## sync.yaml
+## 多工作区
 
-`sync.ACTIVE` 控制当前开发对象：全量拉取和定时拉取只同步 ACTIVE 指向的源码，表结构和单据类型也默认连接该产品或项目配置的 `datasource`：
+工具不设置默认工作区。工作区键来自 `products.yaml`、`projects.yaml`，所有工作区命令都必须显式传入：
 
-```yaml
-sync:
-  ACTIVE: products.demo-product
+```bash
+.venv/bin/python scripts/guthon_tool.py sync-all --home . --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py sync-source --home . --workspace projects.demo-project
 ```
 
-开发项目源码时改成：
+目录按显示名称平铺，真实身份始终使用稳定键：
 
-```yaml
-sync:
-  ACTIVE: projects.demo-project
+```text
+var/workspace/PRD 示例产品/
+var/workspace/PRJ 示例项目/
 ```
 
-`products.<id>` 来自 `products.yaml`，只拉取并比较该产品源码；`projects.<id>` 来自 `projects.yaml`，只拉取并比较该项目自己的 readonly 源码。readonly 源码分别保存到 `var/source/readonly/products/<产品名称>/` 和 `var/source/readonly/project/<项目名称>/`；每个 ACTIVE 的索引分别保存到 `sync.index_dir/{products|projects}/<id>.db`，表结构、单据类型和视图源码分别保存到 `var/database/{schema|billtype|views}/{products|projects}/<名称>/`，不同对象之间不会互相覆盖；首次切换到一个对象时执行全量同步。
+每个工作区独立包含 `source/readonly`、`source/workcopy`、`database/{schema,billtype,views}`、`docs` 和 `context/index.db`。`context/state.json` 只有在源码、表结构、单据类型、系统脚本和视图五步成功且配置摘要一致时才显示 `SYNCED`。
 
 ## 源码逻辑排查
 

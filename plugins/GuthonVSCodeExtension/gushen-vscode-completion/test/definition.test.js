@@ -22,14 +22,14 @@ test('uses the latest binding for a procedure variable', () => {
 });
 
 test('prefers the current project scope before duplicate mirrors', () => {
-  const current = '/repo/var/source/readonly/project/鞍钢国贸/国内贸易/page/edit/source.vm';
-  const project = '/repo/var/source/readonly/project/鞍钢国贸/国内贸易/procedure/demo/save/source.vm';
-  const product = '/repo/var/source/readonly/products/gdrm-product/国内贸易/procedure/demo/save/source.vm';
+  const current = '/repo/var/workspace/PRJ 鞍钢国贸/source/readonly/国内贸易/page/edit/source.vm';
+  const project = '/repo/var/workspace/PRJ 鞍钢国贸/source/readonly/国内贸易/procedure/demo/save/source.vm';
+  const product = '/repo/var/workspace/PRD 期现产品/source/readonly/国内贸易/procedure/demo/save/source.vm';
   assert.deepEqual(selectDefinitionPaths([product, project], current), [project]);
 });
 
 test('prefers workcopy outside a source mirror', () => {
-  const workcopy = '/repo/var/source/workcopy/products/期现产品/风险管理/procedure/demo/save/source.vm';
-  const readonly = '/repo/var/source/readonly/products/gdrm-product/风险管理/procedure/demo/save/source.vm';
+  const workcopy = '/repo/var/workspace/PRD 期现产品/source/workcopy/风险管理/procedure/demo/save/source.vm';
+  const readonly = '/repo/var/workspace/PRD 期现产品/source/readonly/风险管理/procedure/demo/save/source.vm';
   assert.deepEqual(selectDefinitionPaths([readonly, workcopy], '/repo/example.vm'), [workcopy]);
 });

@@ -15,7 +15,7 @@ from export_table_schema_sql import normalize_data_source_ids
 
 
 ROOT = gusen_hub.ROOT
-DEFAULT_OUTPUT_DIR = ROOT / "var" / "source" / "readonly"
+DEFAULT_OUTPUT_DIR = ROOT / "var" / "workspace"
 STANDARD_TYPES = {
     10: ("系统启动初始化脚本", "js"),
     11: ("用户登录初始化脚本", "js"),
@@ -48,24 +48,12 @@ def resolve_output_dir(base_dir=DEFAULT_OUTPUT_DIR, requested=None, config=None)
     if requested:
         return Path(requested)
     config = config or gusen_hub.load_config()
-    active, products, projects = gusen_hub.resolve_active(config)
-    _item_id, item = (products or projects)[0]
-    name = item.get("name")
-    if not name:
-        raise SystemExit(f"Missing name for sync.ACTIVE: {active}")
-    owner = "products" if products else "project"
-    return Path(base_dir) / owner / gusen_hub.path_part(name)
+    return gusen_hub.resolve_workspace(config)["readonlyDir"]
 
 
 def resolve_workcopy_dir(config=None):
     config = config or gusen_hub.load_config()
-    active, products, projects = gusen_hub.resolve_active(config)
-    _item_id, item = (products or projects)[0]
-    name = item.get("name")
-    if not name:
-        raise SystemExit(f"Missing name for sync.ACTIVE: {active}")
-    owner = "products" if products else "projects"
-    return ROOT / "var" / "source" / "workcopy" / owner / gusen_hub.path_part(name)
+    return gusen_hub.resolve_workspace(config)["workcopyDir"]
 
 
 def normalize_values(value):
@@ -306,6 +294,7 @@ def export_system_scripts(
             migrate_script_dir(target.parent, script_type, target)
             work_copy_row = {
                 **metadata,
+                "workspaceKey": gusen_hub.resolve_workspace(config)["workspaceKey"],
                 "source_table": "system-script",
                 "source_id": system_id,
                 "source_alias_id": system_id,
@@ -335,14 +324,15 @@ def export_system_scripts(
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Export Gushen system scripts directly from platform metadata.")
-    parser.add_argument("--datasource", help="Datasource override. Defaults to the product or project selected by sync.ACTIVE.")
+    parser.add_argument("--workspace")
+    parser.add_argument("--datasource", help="Datasource override. Defaults to the selected workspace datasource.")
     parser.add_argument(
         "--output-dir",
-        help="Output directory override. Defaults to var/source/readonly/{products|project}/<active_name>.",
+        help="Output directory override. Defaults to <workspace>/source/readonly.",
     )
     parser.add_argument(
         "--data-source-ids",
-        help="Comma-separated data source IDs. Defaults to IDs resolved from config/sync.yaml systems.include.system_aliases.",
+        help="Comma-separated data source IDs. Defaults to the workspace system aliases.",
     )
     parser.add_argument("--system-ids", help="Comma-separated system IDs. Defaults to all configured systems.")
     parser.add_argument("--script-types", help="Comma-separated script type list. Defaults to all scripts in selected systems.")
@@ -370,6 +360,8 @@ def main(argv=None):
     system_ids = normalize_values(args.system_ids)
     script_types = normalize_script_types(args.script_types)
     config = gusen_hub.load_config()
+    if args.workspace:
+        gusen_hub.set_workspace(args.workspace)
     output_dir = resolve_output_dir(requested=args.output_dir, config=config)
     datasource_name, datasource = gusen_hub.resolve_datasource(config, args.datasource)
     try:

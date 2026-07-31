@@ -12,18 +12,19 @@ function resolveDevelopmentRuntime(root, platform = process.platform) {
   return { mode: 'development', toolEntry, toolPath };
 }
 
-function toolArguments(tool, command, extraArgs = []) {
+function toolArguments(tool, command, extraArgs = [], workspaceKey = '') {
   return [
     ...(tool.toolEntry ? [tool.toolEntry] : []),
     command,
     '--home',
     tool.toolHome,
+    ...(workspaceKey ? ['--workspace', workspaceKey] : []),
     ...(extraArgs.length ? ['--', ...extraArgs] : []),
   ];
 }
 
 function writeRuntimeDescriptor(tool) {
-  const runtimeDir = path.join(tool.toolHome, 'var', 'runtime');
+  const runtimeDir = path.join(tool.toolHome, 'var', 'nexus');
   const descriptorPath = path.join(runtimeDir, 'tool-runtime.json');
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.writeFileSync(descriptorPath, `${JSON.stringify({

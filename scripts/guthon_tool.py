@@ -31,6 +31,14 @@ SCRIPT_COMMANDS = {
     "create-workcopy": ("gusen_hub", "create_work_copy"),
     "workcopy": ("gusen_hub", "work_copy_cli"),
 }
+COMMAND_STEPS = {
+    "sync-source": "source",
+    "export-schema": "schema",
+    "export-bill-type": "billType",
+    "export-system-script": "systemScripts",
+    "export-view": "views",
+}
+GLOBAL_COMMANDS = {"setup", "doctor", "route", "workspaces", "self-test"}
 
 
 def resource_root() -> Path:
@@ -53,7 +61,7 @@ def setup_config(home: Path) -> list[Path]:
     return created
 
 
-def run(command: str, home: Path, extra_args: list[str]) -> int:
+def run(command: str, home: Path, extra_args: list[str], selected_workspace=None) -> int:
     os.environ["GUTHON_HOME"] = str(home)
     if command == "self-test":
         with tempfile.TemporaryDirectory() as temp:
@@ -69,13 +77,55 @@ def run(command: str, home: Path, extra_args: list[str]) -> int:
 
     import gusen_hub
 
+    if command == "workspaces":
+        config = gusen_hub.load_config()
+        print(json.dumps(
+            {"ok": True, "workspaces": [gusen_hub.workspace_summary(config, item) for item in gusen_hub.list_workspaces(config)]},
+            ensure_ascii=False,
+        ))
+        return 0
+    if command == "route":
+        payload = json.load(sys.stdin)
+        print(json.dumps(gusen_hub.route_workspace_request(gusen_hub.load_config(), payload), ensure_ascii=False))
+        return 0
+    if selected_workspace:
+        gusen_hub.set_workspace(selected_workspace)
+    if command not in GLOBAL_COMMANDS and command != "pull" and not selected_workspace:
+        raise SystemExit("Missing --workspace. Use products.<product_id> or projects.<project_id>.")
+
+    config = gusen_hub.load_config()
+    workspace = None if command in GLOBAL_COMMANDS or command == "pull" and not selected_workspace else gusen_hub.resolve_workspace(config)
+    before = gusen_hub.untracked_files() if workspace else set()
+    os.environ["GUTHON_DEFER_GIT_ADD"] = "1"
+    step = COMMAND_STEPS.get(command)
+    result_code = 0
+    try:
+        result_code = _run_workspace_command(command, extra_args, gusen_hub, config, workspace)
+        if result_code:
+            raise RuntimeError(f"{command} failed with exit code {result_code}")
+        if step:
+            gusen_hub.update_workspace_state(config, workspace, step, "SUCCESS")
+    except (Exception, SystemExit) as error:
+        if workspace and step:
+            gusen_hub.update_workspace_state(config, workspace, step, "FAILED", error)
+        raise
+    finally:
+        os.environ.pop("GUTHON_DEFER_GIT_ADD", None)
+    if workspace and command not in {"init", "reindex", "export-markdown", "workcopy", "create-workcopy"}:
+        gusen_hub.auto_add_operation_files(config, before, workspace)
+    return result_code
+
+
+def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
     if command == "init":
+        gusen_hub.ensure_workspace_structure(workspace)
         gusen_hub.run_sync_once(["--init-only"])
+        gusen_hub.update_workspace_state(config, workspace, "source", "INITIALIZED")
         print("本地源码索引初始化完成")
         return 0
     if command == "sync-source":
         gusen_hub.run_sync_once([])
-        print("当前 ACTIVE 源码同步完成")
+        print(f"工作区源码同步完成：{workspace['workspaceKey']}")
         return 0
     if command == "reindex":
         gusen_hub.run_sync_once(["--reindex-calls"])
@@ -83,7 +133,10 @@ def run(command: str, home: Path, extra_args: list[str]) -> int:
         return 0
     if command == "pull":
         payload = json.load(sys.stdin)
-        print(json.dumps(gusen_hub.pull_source_to_work_copy(payload), ensure_ascii=False))
+        if workspace:
+            payload["workspaceKey"] = workspace["workspaceKey"]
+        result = gusen_hub.pull_source_to_work_copy(payload)
+        print(json.dumps(result, ensure_ascii=False))
         return 0
     if command == "export-markdown":
         if extra_args:
@@ -103,22 +156,30 @@ def run(command: str, home: Path, extra_args: list[str]) -> int:
         import export_table_schema_sql
         import export_view_sql
 
-        expected_active = gusen_hub.resolve_active(gusen_hub.load_config())[0]
+        expected_digest = gusen_hub.workspace_config_digest(config, workspace)
         steps = (
-            ("源码与索引", lambda: gusen_hub.run_sync_once([])),
-            ("数据库表结构", lambda: export_table_schema_sql.main([])),
-            ("单据类型", lambda: export_bill_type_sql.main([])),
-            ("系统脚本", lambda: export_system_script_sql.main([])),
-            ("视图", lambda: export_view_sql.main([])),
+            ("source", "源码与索引", lambda: gusen_hub.run_sync_once([])),
+            ("schema", "数据库表结构", lambda: export_table_schema_sql.main([])),
+            ("billType", "单据类型", lambda: export_bill_type_sql.main([])),
+            ("systemScripts", "系统脚本", lambda: export_system_script_sql.main([])),
+            ("views", "视图", lambda: export_view_sql.main([])),
         )
-        for label, action in steps:
-            if gusen_hub.resolve_active(gusen_hub.load_config())[0] != expected_active:
-                raise SystemExit(f"sync.ACTIVE 已从 {expected_active} 变更")
+        for state_step, label, action in steps:
+            latest = gusen_hub.load_config()
+            latest_workspace = gusen_hub.resolve_workspace(latest, workspace["workspaceKey"])
+            if gusen_hub.workspace_config_digest(latest, latest_workspace) != expected_digest:
+                raise SystemExit(f"同步期间工作区配置发生变化：{workspace['workspaceKey']}")
             print(f"同步：{label}", flush=True)
-            result = action()
-            if result not in (None, 0):
-                return int(result)
-        print("当前 ACTIVE 全量同步完成")
+            try:
+                result = action()
+                if result not in (None, 0):
+                    raise RuntimeError(f"{label} failed with exit code {result}")
+                gusen_hub.update_workspace_state(config, workspace, state_step, "SUCCESS")
+            except (Exception, SystemExit) as error:
+                gusen_hub.update_workspace_state(config, workspace, state_step, "FAILED", error)
+                raise
+        gusen_hub.update_workspace_state(config, workspace, full_sync=True)
+        print(f"工作区全量同步完成：{workspace['workspaceKey']}")
         return 0
     raise SystemExit(f"Unsupported command: {command}")
 
@@ -127,13 +188,14 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("setup", "init", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
+        choices=("setup", "workspaces", "route", "init", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
     )
     parser.add_argument("--home", required=True, help="Directory that stores local config and private source data")
+    parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")
     args, extra_args = parser.parse_known_args(argv)
     if extra_args[:1] == ["--"]:
         extra_args = extra_args[1:]
-    return run(args.command, Path(args.home).expanduser().resolve(), extra_args)
+    return run(args.command, Path(args.home).expanduser().resolve(), extra_args, args.workspace)
 
 
 if __name__ == "__main__":

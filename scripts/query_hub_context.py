@@ -11,6 +11,7 @@ def _rows(rows):
 
 def main(args=None):
     parser = argparse.ArgumentParser(description="Query bounded Gushen Hub context without reading source bodies.")
+    parser.add_argument("--workspace")
     subparsers = parser.add_subparsers(dest="command", required=True)
     find = subparsers.add_parser("find")
     find.add_argument("keyword")
@@ -25,12 +26,11 @@ def main(args=None):
     callers.add_argument("--limit", type=int, default=100)
     parsed = parser.parse_args(args)
     cfg = gusen_hub.load_config()
-    _active, products, projects = gusen_hub.resolve_active(cfg)
-    if products:
-        product_id = products[0][0]
-    else:
-        product_id = projects[0][1]["product_id"]
-    conn = gusen_hub.connect_index(gusen_hub.active_index_path(cfg))
+    if parsed.workspace:
+        gusen_hub.set_workspace(parsed.workspace)
+    workspace = gusen_hub.resolve_workspace(cfg)
+    product_id = workspace["productId"]
+    conn = gusen_hub.connect_index(workspace["indexPath"])
     try:
         if parsed.command == "find":
             result = {"productId": product_id, "candidates": _rows(gusen_hub.find_source_candidates(conn, product_id, parsed.keyword, parsed.limit))}

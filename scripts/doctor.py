@@ -44,8 +44,8 @@ def run_checks(bridge_port=17361):
     else:
         try:
             config = gusen_hub.load_config()
-            active, _products, _projects = gusen_hub.resolve_active(config)
-            checks.append(result("config", "PASS", f"ACTIVE={active}"))
+            workspaces = gusen_hub.list_workspaces(config)
+            checks.append(result("config", "PASS", f"workspaces={len(workspaces)}"))
         except (Exception, SystemExit) as error:
             checks.append(result("config", "FAIL", str(error)))
 

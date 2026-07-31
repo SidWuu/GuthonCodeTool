@@ -1,6 +1,6 @@
 const path = require('node:path');
 
-const PROCEDURE_PATH = /\/source\/(workcopy|readonly)\/(products|project)\/([^/]+)\/([^/]+)\//;
+const PROCEDURE_PATH = /\/workspace\/((PRD|PRJ) [^/]+)\/source\/(workcopy|readonly)\/([^/]+)\//;
 
 function procedureTargetAt(source, offset) {
   const invoke = /\$vs\.proc\.invoke\s*\(\s*(['"])([A-Za-z_][\w.]*)\1\s*,\s*(['"])([A-Za-z_]\w*)\3/g;
@@ -32,7 +32,7 @@ function procedureTargetAt(source, offset) {
 
 function sourceInfo(filePath) {
   const match = path.normalize(filePath).replaceAll('\\', '/').match(PROCEDURE_PATH);
-  return match && { layer: match[1], kind: match[2], owner: match[3], business: match[4] };
+  return match && { owner: match[1], kind: match[2], layer: match[3], business: match[4] };
 }
 
 function selectDefinitionPaths(paths, currentPath) {

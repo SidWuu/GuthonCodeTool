@@ -28,7 +28,9 @@ plugins/GuthonBridge/
 
 ## 启动 Bridge
 
-普通用户在 Guthon Nexus 左侧面板单击“启动 Guthon Bridge”。Nexus 会复用当前运行模式和本地数据目录，并使用 VS Code 自带的 Node 运行环境启动服务，不需要安装 Node.js、设置环境变量或打开终端。发行模式调用已选择的 GuthonCodeTool 应用；调试模式直接调用源码仓库的 `.venv` 和 Python 入口，每次拉取使用最新脚本。切换工作区或运行模式时，运行中的 Bridge 会自动重启。
+普通用户在 Guthon Nexus 左侧面板单击“启动 Guthon Bridge”。Nexus 会复用当前运行模式和本地数据目录，并使用 VS Code 自带的 Node 运行环境启动服务，不需要安装 Node.js、设置环境变量或打开终端。发行模式调用已选择的 GuthonCodeTool 应用；调试模式直接调用源码仓库的 `.venv` 和 Python 入口，每次拉取使用最新脚本。切换本地数据目录或运行模式时，运行中的 Bridge 会自动重启。
+
+Bridge 请求携带 `workspaceKey` 时会验证页面身份；未携带时按 `pageOrigin + dataSourceId + systemId` 匹配产品、项目配置。唯一候选直接使用，多个候选由 Chrome 扩展弹窗选择，选择只对当前请求生效。
 
 以下命令只用于仓库源码调试：
 
@@ -135,7 +137,7 @@ const config = {
 2. 打开视图管理页并选择数据源。
 3. 点击页面悬浮按钮或 Chrome 扩展弹窗中的 `拉取视图源码`。
 
-未选中视图时拉取当前数据源下全部视图；选中视图时只拉取选中视图。源码保存到 `var/database/views/{products|projects}/<名称>/`，并按 `pull_auto_add_git` 规则自动暂存新 SQL。
+未选中视图时拉取当前数据源下全部视图；选中视图时只拉取选中视图。源码保存到匹配工作区的 `database/views/`，并按 `pull_auto_add_git` 规则自动暂存本次新生成的 SQL。
 
 ### 拉取系统脚本
 
@@ -144,7 +146,7 @@ const config = {
 3. 单击脚本行可选中或取消选中当前脚本。
 4. 点击页面悬浮的 `选中拉取` 或 `全部拉取`；Chrome 扩展弹窗也提供相同操作。
 
-readonly 使用 `<脚本序号>-<脚本类型>[-<脚本描述>]` 目录名，例如 `20000-系统私有JAVASCRIPT-图片预览`。选中拉取按 `SYSTEM_ID + SCRIPT_TYPE` 精确导出，并在 `var/source/workcopy` 创建或安全刷新对应工作副本；全部拉取只更新左侧当前应用系统的 readonly。两种拉取都会按 `pull_auto_add_git` 规则自动暂存新生成的系统脚本文件。
+readonly 使用 `<脚本序号>-<脚本类型>[-<脚本描述>]` 目录名，例如 `20000-系统私有JAVASCRIPT-图片预览`。选中拉取按 `SYSTEM_ID + SCRIPT_TYPE` 精确导出，并在匹配工作区的 `source/workcopy` 创建或安全刷新对应工作副本；全部拉取只更新该工作区当前应用系统的 readonly。两种拉取都会按 `pull_auto_add_git` 规则自动暂存本次新生成的系统脚本文件。
 
 ### 打开复制模式
 
@@ -173,7 +175,7 @@ readonly 使用 `<脚本序号>-<脚本类型>[-<脚本描述>]` 目录名，例
 本地映射文件：
 
 ```text
-bridge/workspace/manifest.json
+var/nexus/bridge/manifest.json
 ```
 
 ## 不支持

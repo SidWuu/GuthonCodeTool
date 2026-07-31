@@ -42,8 +42,8 @@ const CONFIG_FILES = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'sour
 const TOOL_LABELS = {
   setup: '初始化工作区',
   init: '初始化源码索引',
-  'sync-source': '同步当前 ACTIVE 源码',
-  'sync-all': '同步当前 ACTIVE 全部资料',
+  'sync-source': '同步工作区源码',
+  'sync-all': '同步工作区全部资料',
   reindex: '重建本地调用索引',
   'export-markdown': '导出源码索引文档',
   'export-schema': '导出表结构',
@@ -54,6 +54,7 @@ const TOOL_LABELS = {
   diagnose: '执行源码逻辑排查',
   workcopy: '执行 Workcopy 操作',
 };
+let toolQueue = Promise.resolve();
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -149,6 +150,7 @@ function createHoverProvider(context) {
 }
 
 async function configuredRuntime(config, mode) {
+  let runtime;
   if (mode === 'development') {
     let developmentRoot = config.get('developmentRoot', '');
     try {
@@ -195,7 +197,7 @@ async function configuredTool() {
   return tool;
 }
 
-async function runTool(command, extraArgs = [], askForConfirmation = true) {
+async function runTool(command, extraArgs = [], askForConfirmation = true, workspaceKey = '') {
   const label = TOOL_LABELS[command] || command;
   if (askForConfirmation) {
     const confirmed = await vscode.window.showWarningMessage(`确认${label}？`, { modal: true }, '执行');
@@ -205,17 +207,60 @@ async function runTool(command, extraArgs = [], askForConfirmation = true) {
   if (!tool) return false;
   const output = vscode.window.createOutputChannel('GuthonCodeTool');
   output.show(true);
-  output.appendLine(`运行：${command}（${tool.mode === 'development' ? '调试模式' : '发行模式'}）`);
-  const child = spawn(tool.toolPath, toolArguments(tool, command, extraArgs), { shell: false });
-  child.stdout.on('data', (data) => output.append(data.toString()));
-  child.stderr.on('data', (data) => output.append(data.toString()));
-  child.on('error', (error) => vscode.window.showErrorMessage(`GuthonCodeTool 启动失败：${error.message}`));
-  child.on('close', (code) => {
-    const message = code === 0 ? `GuthonCodeTool 完成：${command}` : `GuthonCodeTool 失败（退出码 ${code}）：${command}`;
-    output.appendLine(message);
-    (code === 0 ? vscode.window.showInformationMessage : vscode.window.showErrorMessage)(message);
+  const execute = () => new Promise((resolve) => {
+    output.appendLine(`运行：${command}${workspaceKey ? ` · ${workspaceKey}` : ''}（${tool.mode === 'development' ? '调试模式' : '发行模式'}）`);
+    const child = spawn(tool.toolPath, toolArguments(tool, command, extraArgs, workspaceKey), { shell: false });
+    child.stdout.on('data', (data) => output.append(data.toString()));
+    child.stderr.on('data', (data) => output.append(data.toString()));
+    child.on('error', (error) => {
+      vscode.window.showErrorMessage(`GuthonCodeTool 启动失败：${error.message}`);
+      resolve(false);
+    });
+    child.on('close', (code) => {
+      const message = code === 0 ? `GuthonCodeTool 完成：${command}` : `GuthonCodeTool 失败（退出码 ${code}）：${command}`;
+      output.appendLine(message);
+      (code === 0 ? vscode.window.showInformationMessage : vscode.window.showErrorMessage)(message);
+      resolve(code === 0);
+    });
   });
-  return true;
+  const pending = toolQueue.then(execute, execute);
+  toolQueue = pending.catch(() => false);
+  return pending;
+}
+
+function configuredToolFromSettings() {
+  const config = vscode.workspace.getConfiguration('gushenCompletion');
+  const toolHome = config.get('toolHome', '');
+  if (!toolHome || !fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'))) return undefined;
+  try {
+    const mode = config.get('executionMode', 'packaged');
+    const runtime = mode === 'development'
+      ? resolveDevelopmentRuntime(config.get('developmentRoot', ''))
+      : { mode: 'packaged', toolPath: config.get('toolPath', '') };
+    if (!runtime.toolPath || !fs.existsSync(runtime.toolPath)) return undefined;
+    return { ...runtime, toolHome };
+  } catch {
+    return undefined;
+  }
+}
+
+function readWorkspaces(tool) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(tool.toolPath, toolArguments(tool, 'workspaces'), { shell: false });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (data) => { stdout += data; });
+    child.stderr.on('data', (data) => { stderr += data; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code) return reject(new Error((stderr || stdout || `退出码 ${code}`).trim()));
+      try {
+        resolve(JSON.parse(stdout).workspaces || []);
+      } catch (error) {
+        reject(new Error(`工作区列表无效：${error.message}`));
+      }
+    });
+  });
 }
 
 function toolItem(label, command, icon, description, args = []) {
@@ -241,7 +286,7 @@ class ToolTreeDataProvider {
     return item;
   }
 
-  getChildren(element) {
+  async getChildren(element) {
     if (element) return element.children || [];
     const config = vscode.workspace.getConfiguration('gushenCompletion');
     const toolHome = config.get('toolHome', '');
@@ -265,29 +310,52 @@ class ToolTreeDataProvider {
       configFiles,
       toolItem('打开本地数据目录', 'gushenCompletion.openToolHome', 'folder-opened'),
     ];
-    const source = new vscode.TreeItem('源码', vscode.TreeItemCollapsibleState.Expanded);
-    source.iconPath = new vscode.ThemeIcon('code');
-    source.children = [
-      toolItem('初始化源码索引', 'gushenCompletion.initSourceIndex', 'database'),
-      toolItem('同步当前 ACTIVE 源码', 'gushenCompletion.syncActiveSource', 'sync'),
-      toolItem('重建本地调用索引', 'gushenCompletion.reindexCalls', 'refresh'),
-      toolItem('导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book'),
-    ];
-    const metadata = new vscode.TreeItem('配置数据', vscode.TreeItemCollapsibleState.Expanded);
-    metadata.iconPath = new vscode.ThemeIcon('server');
-    metadata.children = [
-      toolItem('同步当前 ACTIVE 全部资料', 'gushenCompletion.syncActiveAll', 'cloud-download'),
-      toolItem('导出表结构', 'gushenCompletion.exportSchema', 'table'),
-      toolItem('导出单据类型', 'gushenCompletion.exportBillTypes', 'list-tree'),
-      toolItem('导出系统脚本', 'gushenCompletion.exportSystemScripts', 'file-code'),
-      toolItem('导出视图源码', 'gushenCompletion.exportViews', 'eye'),
-    ];
+    const projects = new vscode.TreeItem('项目', vscode.TreeItemCollapsibleState.Expanded);
+    projects.iconPath = new vscode.ThemeIcon('folder-library');
+    const tool = configuredToolFromSettings();
+    try {
+      const statusLabels = { UNINITIALIZED: '未初始化', PARTIAL: '部分同步', SYNCED: '已同步', FAILED: '同步失败' };
+      const workspaces = tool ? await readWorkspaces(tool) : [];
+      projects.children = workspaces.map((item) => {
+        const node = new vscode.TreeItem(item.displayName, vscode.TreeItemCollapsibleState.Collapsed);
+        node.description = `${item.id} · ${statusLabels[item.status] || item.status}`;
+        node.iconPath = new vscode.ThemeIcon(item.status === 'SYNCED' ? 'pass-filled' : item.status === 'FAILED' ? 'error' : 'folder');
+        const source = new vscode.TreeItem('源码与索引', vscode.TreeItemCollapsibleState.Collapsed);
+        source.iconPath = new vscode.ThemeIcon('code');
+        source.children = [
+          toolItem('初始化源码索引', 'gushenCompletion.initSourceIndex', 'database', undefined, [item.workspaceKey]),
+          toolItem('同步源码', 'gushenCompletion.syncWorkspaceSource', 'sync', undefined, [item.workspaceKey]),
+          toolItem('重建调用索引', 'gushenCompletion.reindexCalls', 'refresh', undefined, [item.workspaceKey]),
+          toolItem('导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book', undefined, [item.workspaceKey]),
+        ];
+        const metadata = new vscode.TreeItem('配置资料', vscode.TreeItemCollapsibleState.Collapsed);
+        metadata.iconPath = new vscode.ThemeIcon('server');
+        metadata.children = [
+          toolItem('导出表结构', 'gushenCompletion.exportSchema', 'table', undefined, [item.workspaceKey]),
+          toolItem('导出单据类型', 'gushenCompletion.exportBillTypes', 'list-tree', undefined, [item.workspaceKey]),
+          toolItem('导出系统脚本', 'gushenCompletion.exportSystemScripts', 'file-code', undefined, [item.workspaceKey]),
+          toolItem('导出视图源码', 'gushenCompletion.exportViews', 'eye', undefined, [item.workspaceKey]),
+        ];
+        node.children = [
+          toolItem('同步工作区全部资料', 'gushenCompletion.syncWorkspaceAll', 'cloud-download', undefined, [item.workspaceKey]),
+          toolItem('打开工作区目录', 'gushenCompletion.openWorkspace', 'folder-opened', undefined, [item.root]),
+          source,
+          metadata,
+          toolItem('执行源码逻辑排查', 'gushenCompletion.runDiagnosis', 'search', undefined, [item.workspaceKey]),
+          toolItem('检查或打包 Workcopy', 'gushenCompletion.inspectWorkcopy', 'package', undefined, [item.workspaceKey]),
+        ];
+        return node;
+      });
+      if (!projects.children.length) {
+        projects.children = [toolItem('尚未配置产品或项目', 'gushenCompletion.editConfig', 'warning', undefined, ['products.yaml'])];
+      }
+    } catch (error) {
+      projects.children = [toolItem(`读取失败：${error.message}`, 'gushenCompletion.refreshToolView', 'error')];
+    }
     const maintenance = new vscode.TreeItem('维护', vscode.TreeItemCollapsibleState.Expanded);
     maintenance.iconPath = new vscode.ThemeIcon('tools');
     maintenance.children = [
       toolItem('检查本地环境', 'gushenCompletion.runDoctor', 'pulse'),
-      toolItem('执行源码逻辑排查', 'gushenCompletion.runDiagnosis', 'search'),
-      toolItem('检查或打包 Workcopy', 'gushenCompletion.inspectWorkcopy', 'package'),
     ];
     const bridge = new vscode.TreeItem('Guthon Bridge', vscode.TreeItemCollapsibleState.Expanded);
     const bridgeRunning = this.bridge.isRunning();
@@ -300,7 +368,7 @@ class ToolTreeDataProvider {
         bridgeRunning ? 'debug-stop' : 'play'
       ),
     ];
-    return [workspace, source, metadata, bridge, maintenance];
+    return [workspace, projects, bridge, maintenance];
   }
 }
 
@@ -376,21 +444,21 @@ function activate(context) {
       if (!await bridge.stop()) return vscode.window.showInformationMessage('Guthon Bridge 未运行');
       return vscode.window.showInformationMessage('Guthon Bridge 已停止');
     }),
-    vscode.commands.registerCommand('gushenCompletion.initSourceIndex', () => runTool(TOOL_COMMANDS.init)),
-    vscode.commands.registerCommand('gushenCompletion.syncActiveSource', () => runTool(TOOL_COMMANDS.syncSource)),
-    vscode.commands.registerCommand('gushenCompletion.syncActiveAll', () => runTool(TOOL_COMMANDS.syncAll)),
-    vscode.commands.registerCommand('gushenCompletion.reindexCalls', () => runTool(TOOL_COMMANDS.reindex)),
-    vscode.commands.registerCommand('gushenCompletion.exportMarkdown', () => runTool(TOOL_COMMANDS.exportMarkdown)),
-    vscode.commands.registerCommand('gushenCompletion.exportSchema', () => runTool(TOOL_COMMANDS.exportSchema)),
-    vscode.commands.registerCommand('gushenCompletion.exportBillTypes', () => runTool(TOOL_COMMANDS.exportBillTypes)),
-    vscode.commands.registerCommand('gushenCompletion.exportSystemScripts', () => runTool(TOOL_COMMANDS.exportSystemScripts)),
-    vscode.commands.registerCommand('gushenCompletion.exportViews', () => runTool(TOOL_COMMANDS.exportViews)),
+    vscode.commands.registerCommand('gushenCompletion.initSourceIndex', (workspaceKey) => runTool(TOOL_COMMANDS.init, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.syncWorkspaceSource', (workspaceKey) => runTool(TOOL_COMMANDS.syncSource, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.syncWorkspaceAll', (workspaceKey) => runTool(TOOL_COMMANDS.syncAll, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.reindexCalls', (workspaceKey) => runTool(TOOL_COMMANDS.reindex, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.exportMarkdown', (workspaceKey) => runTool(TOOL_COMMANDS.exportMarkdown, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.exportSchema', (workspaceKey) => runTool(TOOL_COMMANDS.exportSchema, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.exportBillTypes', (workspaceKey) => runTool(TOOL_COMMANDS.exportBillTypes, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.exportSystemScripts', (workspaceKey) => runTool(TOOL_COMMANDS.exportSystemScripts, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.exportViews', (workspaceKey) => runTool(TOOL_COMMANDS.exportViews, [], true, workspaceKey)),
     vscode.commands.registerCommand('gushenCompletion.runDoctor', () => runTool(TOOL_COMMANDS.doctor, ['--json'])),
-    vscode.commands.registerCommand('gushenCompletion.runDiagnosis', async () => {
+    vscode.commands.registerCommand('gushenCompletion.runDiagnosis', async (workspaceKey) => {
       const selected = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: false, canSelectMany: false, filters: { JSON: ['json'] }, title: '选择排查定义 JSON' });
-      if (selected) return runTool(TOOL_COMMANDS.diagnose, [selected[0].fsPath]);
+      if (selected) return runTool(TOOL_COMMANDS.diagnose, [selected[0].fsPath], true, workspaceKey);
     }),
-    vscode.commands.registerCommand('gushenCompletion.inspectWorkcopy', async () => {
+    vscode.commands.registerCommand('gushenCompletion.inspectWorkcopy', async (workspaceKey) => {
       const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: '选择 Workcopy 目录' });
       if (!selected) return;
       const action = await vscode.window.showQuickPick([
@@ -398,8 +466,10 @@ function activate(context) {
         { label: '生成差异报告', value: 'diff' },
         { label: '打包交付物', value: 'package' },
       ], { title: 'Workcopy 操作' });
-      if (action) return runTool(TOOL_COMMANDS.workcopy, [action.value, selected[0].fsPath]);
+      if (action) return runTool(TOOL_COMMANDS.workcopy, [action.value, selected[0].fsPath], true, workspaceKey);
     }),
+    vscode.commands.registerCommand('gushenCompletion.openWorkspace', (workspaceRoot) =>
+      vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(workspaceRoot))),
     vscode.commands.registerCommand('gushenCompletion.refreshToolView', () => toolView.refresh()),
     vscode.commands.registerCommand('gushenCompletion.editConfig', async (filename) => {
       const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
