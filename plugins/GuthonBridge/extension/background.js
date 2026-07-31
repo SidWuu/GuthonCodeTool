@@ -5,6 +5,10 @@ importScripts("host-config.js");
 chrome.runtime.onInstalled.addListener(() => {
   chrome.tabs.query({}, (tabs) => {
     tabs.filter((tab) => tab.id && GuthonBridgeHost.isAllowed(tab.url)).forEach((tab) => {
+      chrome.scripting.insertCSS({
+        target: { tabId: tab.id },
+        files: ["bridge.css"]
+      }).catch(() => {});
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
         files: ["fields-mover-core.js", "page-bridge.js"],
@@ -12,7 +16,7 @@ chrome.runtime.onInstalled.addListener(() => {
       }).catch(() => {});
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ["host-config.js", "content.js"]
+        files: ["host-config.js", "workspace-selection.js", "content.js"]
       }).catch(() => {});
     });
   });

@@ -158,14 +158,10 @@ async function sendWorkspaceRequest(type, payload) {
   if (!result.candidates?.length) {
     throw new Error(result.message || "页面身份未匹配到工作区");
   }
-  const choices = result.candidates.map((item, index) => `${index + 1}. ${item.displayName} (${item.id})`).join("\n");
-  const selected = Number(window.prompt(`请选择本次请求的工作区：\n${choices}`, "1"));
-  if (!Number.isInteger(selected) || selected < 1 || selected > result.candidates.length) {
-    throw new Error("已取消工作区选择");
-  }
+  const workspaceKey = await GuthonBridgeWorkspace.select(result.candidates, location.href);
   return sendRuntimeMessage({
     type,
-    payload: { ...request, workspaceKey: result.candidates[selected - 1].workspaceKey }
+    payload: { ...request, workspaceKey }
   });
 }
 
@@ -254,370 +250,6 @@ function makeNativeButton(text, className) {
   button.className = `el-button el-button--default el-button--mini is-plain ${className}`;
   button.innerHTML = `<span>${text}</span>`;
   return button;
-}
-
-function ensureInlineStyles() {
-  const existing = document.getElementById("guthon-bridge-inline-style");
-  if (existing?.dataset.version === "20260723c") {
-    return;
-  }
-  existing?.remove();
-  const style = document.createElement("style");
-  style.id = "guthon-bridge-inline-style";
-  style.dataset.version = "20260723c";
-  style.textContent = `
-    .guthon-bridge-inline {
-      position: fixed;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 6px;
-      width: max-content;
-      min-width: 108px;
-      padding: 0;
-      pointer-events: none;
-      user-select: none;
-    }
-    .guthon-bridge-inline button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 108px;
-      min-width: 108px;
-      height: 32px;
-      margin: 0;
-      padding: 7px 10px;
-      border: 1px solid #409eff;
-      border-radius: 3px;
-      background: #409eff;
-      box-shadow: none;
-      color: #fff;
-      font-size: 12px;
-      font-weight: 500;
-      line-height: 1;
-      text-align: center;
-      text-decoration: none;
-      cursor: pointer;
-      pointer-events: auto;
-    }
-    .guthon-bridge-inline button + button {
-      margin-left: 0;
-    }
-    .guthon-bridge-fields-mover-group {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 6px;
-    }
-    .guthon-bridge-inline:not([data-mode="module"]) .guthon-bridge-module-only {
-      visibility: hidden;
-      pointer-events: none;
-    }
-    .guthon-bridge-inline:not([data-mode="system-scripts"]) .guthon-bridge-system-script-only {
-      display: none;
-    }
-    tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
-      background: #ecf5ff !important;
-    }
-    .guthon-bridge-fields-mover-group > span {
-      width: 108px;
-      color: #c0c4cc;
-      font-size: 12px;
-      text-align: center;
-    }
-    .guthon-bridge-inline button span {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      line-height: 1;
-    }
-    .guthon-bridge-inline button:hover,
-    .guthon-bridge-inline button:focus {
-      color: #fff;
-      background: #337ecc;
-      border-color: #337ecc;
-    }
-    .guthon-bridge-message {
-      position: absolute;
-      left: 0;
-      bottom: calc(100% + 8px);
-      box-sizing: border-box;
-      width: 140px;
-      max-width: calc(100vw - 40px);
-      color: #606266;
-      font-size: 12px;
-      background: rgba(255, 255, 255, 0.92);
-      border: 1px solid #ebeef5;
-      border-radius: 3px;
-      padding: 2px 6px;
-      overflow-wrap: anywhere;
-      word-break: break-all;
-      white-space: normal;
-      pointer-events: auto;
-      user-select: text;
-    }
-    .guthon-bridge-message:empty {
-      display: none;
-    }
-    .guthon-bridge-message[data-tone="error"] {
-      color: #f56c6c;
-    }
-    .guthon-bridge-message[data-tone="success"] {
-      color: #67c23a;
-    }
-    #${CALLERS_OVERLAY_ID} {
-      position: fixed;
-      inset: 0;
-      z-index: 2147483647;
-      display: grid;
-      place-items: start center;
-      padding: 10vh 24px 24px;
-      box-sizing: border-box;
-      background: rgba(15, 23, 42, 0.42);
-    }
-    #${CALLERS_OVERLAY_ID} .guthon-bridge-callers-panel {
-      width: min(720px, 100%);
-      max-height: calc(90vh - 48px);
-      display: flex;
-      flex-direction: column;
-      background: #fff;
-      border: 1px solid #dcdfe6;
-      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
-    }
-    #${CALLERS_OVERLAY_ID} .guthon-bridge-callers-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 12px 14px;
-      border-bottom: 1px solid #ebeef5;
-    }
-    #${CALLERS_OVERLAY_ID} .guthon-bridge-callers-list {
-      overflow: auto;
-      padding: 8px;
-    }
-    #${CALLERS_OVERLAY_ID} .guthon-bridge-caller {
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 4px;
-      margin: 0 0 6px;
-      padding: 9px 10px;
-      border: 1px solid #ebeef5;
-      background: #fff;
-      color: #303133;
-      text-align: left;
-      cursor: pointer;
-    }
-    #${CALLERS_OVERLAY_ID} .guthon-bridge-caller:hover {
-      border-color: #409eff;
-      background: #ecf5ff;
-    }
-    #${CALLERS_OVERLAY_ID} .guthon-bridge-caller-meta,
-    #${CALLERS_OVERLAY_ID} .guthon-bridge-callers-state {
-      color: #909399;
-      font-size: 12px;
-    }
-    #${CALLERS_OVERLAY_ID} .guthon-bridge-callers-state {
-      padding: 16px;
-    }
-    #${FIELDS_MOVER_OVERLAY_ID} {
-      position: fixed;
-      inset: 0;
-      z-index: 2147483647;
-      display: grid;
-      place-items: center;
-      padding: 24px;
-      box-sizing: border-box;
-      background: rgba(15, 23, 42, 0.42);
-    }
-    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-panel {
-      width: min(560px, 100%);
-      max-height: calc(100vh - 48px);
-      display: flex;
-      flex-direction: column;
-      background: #fff;
-      border: 1px solid #dcdfe6;
-      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
-    }
-    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-head,
-    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-actions {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 10px 14px;
-    }
-    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-head { border-bottom: 1px solid #ebeef5; }
-    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-list { overflow: auto; padding: 8px 14px; }
-    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-item {
-      display: flex;
-      gap: 8px;
-      padding: 7px 0;
-      border-bottom: 1px solid #f2f6fc;
-      color: #303133;
-      font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-meta { color: #909399; font-size: 12px; }
-    #${FIELDS_MOVER_OVERLAY_ID} .guthon-bridge-fields-mover-actions { justify-content: flex-end; border-top: 1px solid #ebeef5; }
-    #${COPY_OVERLAY_ID} {
-      position: absolute;
-      inset: 0;
-      z-index: 2147483647;
-      min-height: 100vh;
-      padding: 42px 56px;
-      box-sizing: border-box;
-      background: rgba(15, 23, 42, 0.42);
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-copy-panel {
-      max-width: 1450px;
-      max-height: calc(100vh - 84px);
-      margin: 0 auto;
-      display: grid;
-      grid-template-rows: auto 1fr;
-      background: #fff;
-      border: 1px solid #dcdfe6;
-      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-copy-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 10px 14px;
-      border-bottom: 1px solid #ebeef5;
-      font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      cursor: move;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-copy-head button {
-      cursor: pointer;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-copy-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-copy-panel[data-minimized="true"] {
-      grid-template-rows: auto;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-copy-panel[data-minimized="true"] .guthon-bridge-copy-body {
-      display: none;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-copy-body {
-      min-height: 0;
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 320px;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-copy-groups {
-      overflow: auto;
-      padding: 8px;
-    }
-    #${COPY_OVERLAY_ID} details {
-      border: 1px solid #dcdfe6;
-      margin-bottom: 6px;
-      background: #fff;
-    }
-    #${COPY_OVERLAY_ID} summary {
-      cursor: pointer;
-      padding: 6px 8px;
-      background: #f5f7fa;
-      font-weight: 600;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-field-table {
-      width: 100%;
-      table-layout: fixed;
-      border-collapse: collapse;
-      color: #1f2937;
-      font: 11px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-field-table th,
-    #${COPY_OVERLAY_ID} .guthon-bridge-field-table td {
-      border-top: 1px solid #ebeef5;
-      border-right: 1px solid #ebeef5;
-      padding: 5px 4px;
-      vertical-align: middle;
-      overflow: hidden;
-      white-space: nowrap;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-field-table th:last-child,
-    #${COPY_OVERLAY_ID} .guthon-bridge-field-table td:last-child {
-      border-right: 0;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-field-table th {
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      background: #f8fafc;
-      color: #606266;
-      font-weight: 600;
-      text-align: left;
-      white-space: nowrap;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-resize-handle {
-      position: absolute;
-      top: 0;
-      right: 0;
-      width: 6px;
-      height: 100%;
-      cursor: col-resize;
-      user-select: none;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-resize-handle:hover {
-      background: rgba(64, 158, 255, 0.18);
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-field-table tr[data-hidden="true"] {
-      color: #909399;
-      background: #fafafa;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-cell-value {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      user-select: text;
-      white-space: nowrap;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-cell-value.guthon-bridge-cell-selected {
-      background: rgba(64, 158, 255, 0.32);
-      outline: 1px solid rgba(64, 158, 255, 0.6);
-    }
-    #${COPY_OVERLAY_ID} .guthon-bridge-copy-text {
-      box-sizing: border-box;
-      width: 100%;
-      height: 100%;
-      min-height: 360px;
-      resize: none;
-      border: 0;
-      border-left: 1px solid #dcdfe6;
-      padding: 12px;
-      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: #1f2937;
-      outline: none;
-    }
-  `;
-  document.documentElement.appendChild(style);
-}
-
-function positionBridgeRoot(root, toolbar, ratio = 0.72, row = 0) {
-  if (!root) {
-    return false;
-  }
-  void toolbar;
-  void ratio;
-  return positionFloatingRoot(root, row);
-}
-
-function positionFloatingRoot(root, row = 0) {
-  if (!root) {
-    return false;
-  }
-  void row;
-  root.style.left = "20px";
-  root.style.right = "auto";
-  root.style.top = "auto";
-  root.style.bottom = "150px";
-  root.style.zIndex = "2147483646";
-  return true;
 }
 
 async function pullCurrentProcedure(root, button = root.querySelector("button"), force = false) {
@@ -891,7 +523,6 @@ function installSourcePullButton() {
     return;
   }
 
-  ensureInlineStyles();
   let root = document.getElementById(FLOATING_ROOT_ID);
   if (root && root.dataset.sharedButtons !== "true") {
     root.remove();
@@ -958,7 +589,6 @@ function installSourcePullButton() {
   }
   root.dataset.mode = mode;
   root.querySelector(".guthon-bridge-source-button").textContent = mode === "system-scripts" ? "选中拉取" : "源码拉取";
-  positionBridgeRoot(root);
 }
 
 function installSystemScriptSelection() {
@@ -1181,7 +811,6 @@ function callerMeta(caller) {
 
 async function showProcedureCallers(target) {
   removeNode(CALLERS_OVERLAY_ID);
-  ensureInlineStyles();
   const overlay = document.createElement("div");
   overlay.id = CALLERS_OVERLAY_ID;
   overlay.innerHTML = `
@@ -1291,21 +920,21 @@ function renderCopyData(overlay, data, text) {
       <summary>${escapeHtml(group.title)}</summary>
       <table class="guthon-bridge-field-table">
         <colgroup>
-          <col style="width: 3%" />
-          <col style="width: 11%" />
-          <col style="width: 11%" />
-          <col style="width: 6%" />
-          <col style="width: 7%" />
-          <col style="width: 11%" />
-          <col style="width: 4%" />
-          <col style="width: 6%" />
-          <col style="width: 9%" />
-          <col style="width: 8%" />
-          <col style="width: 7%" />
-          <col style="width: 8%" />
-          <col style="width: 3%" />
-          <col style="width: 3%" />
-          <col style="width: 3%" />
+          <col class="guthon-bridge-col-3" />
+          <col class="guthon-bridge-col-11" />
+          <col class="guthon-bridge-col-11" />
+          <col class="guthon-bridge-col-6" />
+          <col class="guthon-bridge-col-7" />
+          <col class="guthon-bridge-col-11" />
+          <col class="guthon-bridge-col-4" />
+          <col class="guthon-bridge-col-6" />
+          <col class="guthon-bridge-col-9" />
+          <col class="guthon-bridge-col-8" />
+          <col class="guthon-bridge-col-7" />
+          <col class="guthon-bridge-col-8" />
+          <col class="guthon-bridge-col-3" />
+          <col class="guthon-bridge-col-3" />
+          <col class="guthon-bridge-col-3" />
         </colgroup>
         <thead>
           <tr>
@@ -1384,7 +1013,6 @@ async function showCopyOverlay() {
     throw new Error("复制模式只支持模块开发页面");
   }
   removeNode(COPY_OVERLAY_ID);
-  ensureInlineStyles();
   const overlay = document.createElement("div");
   overlay.id = COPY_OVERLAY_ID;
   overlay.tabIndex = -1;

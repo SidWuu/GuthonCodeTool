@@ -26,11 +26,13 @@ plugins/GuthonBridge/
   package.json  启动和测试脚本
 ```
 
+扩展的 Popup、页面按钮、弹窗、复制面板和导航高亮样式统一维护在 `extension/bridge.css`；JavaScript 只设置显示状态、拖拽坐标和动态列宽。
+
 ## 启动 Bridge
 
 普通用户在 Guthon Nexus 左侧面板单击“启动 Guthon Bridge”。Nexus 会复用当前运行模式和本地数据目录，并使用 VS Code 自带的 Node 运行环境启动服务，不需要安装 Node.js、设置环境变量或打开终端。发行模式调用已选择的 GuthonCodeTool 应用；调试模式直接调用源码仓库的 `.venv` 和 Python 入口，每次拉取使用最新脚本。切换本地数据目录或运行模式时，运行中的 Bridge 会自动重启。
 
-Bridge 请求携带 `workspaceKey` 时会验证页面身份；未携带时按 `pageOrigin + dataSourceId + systemId` 匹配产品、项目配置。唯一候选直接使用，多个候选由 Chrome 扩展弹窗选择，选择只对当前请求生效。
+Bridge 请求携带 `workspaceKey` 时会验证页面身份；未携带时按 `pageOrigin + dataSourceId + systemId` 匹配产品、项目配置。唯一候选直接使用，多个候选由 Chrome 扩展下拉选择，并按 `协议 + 主机 + /guthon` 记住最近一次选择；切换谷神地址或候选失效时重新选择。
 
 以下命令只用于仓库源码调试：
 

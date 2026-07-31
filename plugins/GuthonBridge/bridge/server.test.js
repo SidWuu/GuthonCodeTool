@@ -13,6 +13,8 @@ const CONTENT_SCRIPT_PATH = path.join(ROOT, "extension", "content.js");
 const POPUP_HTML_PATH = path.join(ROOT, "extension", "popup.html");
 const POPUP_SCRIPT_PATH = path.join(ROOT, "extension", "popup.js");
 const HOST_CONFIG_PATH = path.join(ROOT, "extension", "host-config.js");
+const WORKSPACE_SELECTION_PATH = path.join(ROOT, "extension", "workspace-selection.js");
+const BRIDGE_CSS_PATH = path.join(ROOT, "extension", "bridge.css");
 
 function waitForHealth(port) {
   const url = `http://127.0.0.1:${port}/health`;
@@ -603,6 +605,7 @@ test("popup exposes separate page and hub pull actions without hub target input"
   const script = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
   const background = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
   const content = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
   const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
   const runHubPullScript = script.slice(script.indexOf("async function runHubPull"), script.indexOf("pullPageBtn.addEventListener"));
   const callersScript = content.slice(content.indexOf("async function showProcedureCallers"), content.indexOf("function renderTableCell"));
@@ -619,7 +622,7 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(content.includes('"procedure-callers-request"'), true);
   assert.equal(content.includes('"open-procedure-caller"'), true);
   assert.equal(content.includes('"open-module-caller"'), true);
-  assert.equal(content.includes("place-items: start center"), true);
+  assert.equal(css.includes("place-items: start center"), true);
   assert.equal(callersScript.includes('overlay.addEventListener("click"'), false);
   assert.equal(pageBridge.includes("function inspectCurrentHubSource"), true);
   assert.equal(pageBridge.includes("function inspectTableSchemaTarget"), true);
@@ -635,17 +638,61 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes('type: "log-pull-failure"'), true);
   assert.equal(background.includes('postJson("/logPullFailure"'), true);
   assert.equal(background.includes('chrome.runtime.onInstalled.addListener'), true);
+  assert.equal(background.includes('files: ["bridge.css"]'), true);
   assert.equal(background.includes('files: ["fields-mover-core.js", "page-bridge.js"]'), true);
-  assert.equal(background.includes('files: ["host-config.js", "content.js"]'), true);
+  assert.equal(background.includes('files: ["host-config.js", "workspace-selection.js", "content.js"]'), true);
   assert.equal(background.includes('world: "MAIN"'), true);
   assert.equal(script.includes("拉取单据类型"), true);
   assert.equal(script.includes("workspaceSelectionRequired"), true);
-  assert.equal(script.includes("window.prompt"), true);
+  assert.equal(script.includes("GuthonBridgeWorkspace.select"), true);
   assert.equal(content.includes("workspaceSelectionRequired"), true);
-  assert.equal(content.includes("window.prompt"), true);
+  assert.equal(content.includes("GuthonBridgeWorkspace.select"), true);
+  assert.equal(css.includes(".guthon-bridge-workspace-dialog"), true);
+  assert.equal(html.includes('src="workspace-selection.js"'), true);
+  assert.equal(html.includes('href="bridge.css"'), true);
   assert.equal(runHubPullScript.includes("resolveCurrentTarget"), false);
   assert.equal(html.includes("closeBtn"), true);
   assert.equal(script.includes("window.close()"), true);
+});
+
+test("workspace selection reuses the same Guthon address and an available candidate", () => {
+  delete require.cache[require.resolve(WORKSPACE_SELECTION_PATH)];
+  const { cachedWorkspaceKey, guthonAddress } = require(WORKSPACE_SELECTION_PATH);
+  const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
+  const candidates = [{ workspaceKey: "projects.demo" }];
+  const firstPage = "https://example.test/guthon/gdpaas/dev/modules?id=1";
+  const selection = { address: "https://example.test/guthon", workspaceKey: "projects.demo" };
+
+  assert.equal(guthonAddress(firstPage), selection.address);
+  assert.equal(cachedWorkspaceKey(selection, firstPage, candidates), "projects.demo");
+  assert.equal(cachedWorkspaceKey(selection, "https://example.test/guthon/gdpaas/dev/procedure_develop", candidates), "projects.demo");
+  assert.equal(cachedWorkspaceKey(selection, "https://other.test/guthon/gdpaas/dev/modules", candidates), "");
+  assert.equal(cachedWorkspaceKey(selection, firstPage, []), "");
+  assert.equal(css.includes(".guthon-bridge-workspace-select"), true);
+  assert.equal(css.includes("background: #409eff"), true);
+  assert.equal(css.includes("top: 50% !important"), true);
+  assert.equal(css.includes("inset: 0 !important"), false);
+});
+
+test("extension static styles live only in bridge.css", () => {
+  const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
+  const sources = [
+    CONTENT_SCRIPT_PATH,
+    POPUP_SCRIPT_PATH,
+    POPUP_HTML_PATH,
+    WORKSPACE_SELECTION_PATH,
+    path.join(ROOT, "extension", "page-bridge.js")
+  ].map((file) => fs.readFileSync(file, "utf8"));
+
+  assert.equal(css.includes(".guthon-bridge-inline"), true);
+  assert.equal(css.includes(".guthon-minimized-script-bar"), true);
+  assert.equal(css.includes("body.guthon-bridge-popup"), true);
+  for (const source of sources) {
+    assert.equal(source.includes('createElement("style")'), false);
+    assert.equal(source.includes("style.textContent"), false);
+    assert.equal(source.includes("<style>"), false);
+    assert.equal(source.includes('style="'), false);
+  }
 });
 
 test("extension manifest injects the floating pull button on Guthon pages", () => {
@@ -657,7 +704,8 @@ test("extension manifest injects the floating pull button on Guthon pages", () =
   assert.deepEqual(manifest.content_scripts, [
     {
       matches: ["http://*/*", "https://*/*"],
-      js: ["host-config.js", "content.js"],
+      css: ["bridge.css"],
+      js: ["host-config.js", "workspace-selection.js", "content.js"],
       run_at: "document_idle"
     }
   ]);
@@ -710,6 +758,7 @@ test("floating procedure button pulls hub source", () => {
 
 test("data table page exposes table schema export action", () => {
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
   const backgroundScript = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
   const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
 
@@ -717,9 +766,9 @@ test("data table page exposes table schema export action", () => {
   assert.equal(contentScript.includes("inspectTableSchemaTarget"), true);
   assert.equal(contentScript.includes('sendWorkspaceRequest("export-table-schema"'), true);
   assert.equal(contentScript.includes("isDataTableRoute"), true);
-  assert.equal(contentScript.includes("positionFloatingRoot"), true);
-  assert.equal(contentScript.includes('root.style.left = "20px"'), true);
-  assert.equal(contentScript.includes('root.style.bottom = "150px"'), true);
+  assert.equal(contentScript.includes("positionFloatingRoot"), false);
+  assert.equal(css.includes("left: 20px"), true);
+  assert.equal(css.includes("bottom: 150px"), true);
   assert.equal(backgroundScript.includes("/exportTableSchema"), true);
   assert.equal(pageBridge.includes("inspectTableSchemaTarget"), true);
   assert.equal(pageBridge.includes("getLabeledSelectValue"), true);
@@ -776,13 +825,15 @@ test("system script page exposes selected and all export actions", () => {
 
 test("pull button floats over the current Guthon toolbar without changing toolbar layout", () => {
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
 
-  assert.equal(contentScript.includes("positionBridgeRoot"), true);
+  assert.equal(contentScript.includes("positionBridgeRoot"), false);
   assert.equal(contentScript.includes("installTreeAutoScroll"), true);
   assert.equal(contentScript.includes("scrollIntoView?.({ block: \"center\", inline: \"nearest\" })"), true);
   assert.equal(contentScript.includes(".location-bnt"), true);
   assert.equal(contentScript.includes(".tool-menu.tool-box button"), true);
-  assert.equal(contentScript.includes("position: fixed"), true);
+  assert.equal(css.includes(".guthon-bridge-inline"), true);
+  assert.equal(css.includes("position: fixed"), true);
   assert.equal(contentScript.includes("guthon-bridge-inline-button"), true);
   assert.equal(contentScript.includes(".function.head"), true);
   assert.equal(contentScript.includes('document.querySelector(".procedure-script-editor")'), false);
@@ -790,6 +841,7 @@ test("pull button floats over the current Guthon toolbar without changing toolba
 
 test("copy mode button and overlay are available on module page editors", () => {
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
   const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
   const renderCopyDataScript = contentScript.slice(
     contentScript.indexOf("function renderCopyData"),
@@ -816,14 +868,14 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.indexOf("root.appendChild(sourceButton);") < contentScript.indexOf("root.appendChild(copyButton);"), true);
   assert.equal(contentScript.includes("root.dataset.mode = mode;"), true);
   assert.equal(contentScript.includes('makeNativeButton("复制模式"'), true);
-  assert.equal(contentScript.includes("flex-direction: column"), true);
-  assert.equal(contentScript.includes("display: inline-flex"), true);
-  assert.equal(contentScript.includes("min-width: 108px"), true);
-  assert.equal(contentScript.includes("background: #409eff"), true);
-  assert.equal(contentScript.includes("bottom: calc(100% + 8px)"), true);
-  assert.equal(contentScript.includes("user-select: text"), true);
-  assert.equal(contentScript.includes("width: 140px"), true);
-  assert.equal(contentScript.includes("word-break: break-all"), true);
+  assert.equal(css.includes("flex-direction: column"), true);
+  assert.equal(css.includes("display: inline-flex"), true);
+  assert.equal(css.includes("min-width: 108px"), true);
+  assert.equal(css.includes("background: #409eff"), true);
+  assert.equal(css.includes("bottom: calc(100% + 8px)"), true);
+  assert.equal(css.includes("user-select: text"), true);
+  assert.equal(css.includes("width: 140px"), true);
+  assert.equal(css.includes("word-break: break-all"), true);
   assert.equal(contentScript.includes("installFloatingDrag"), false);
   assert.equal(contentScript.includes("pullCurrentProcedure(root, sourceButton)"), true);
   assert.equal(contentScript.includes('isModuleRoute() ? "inspect-hub-source" : "inspectCurrentProcedure"'), true);
@@ -844,16 +896,17 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("guthon-bridge-cell-value"), true);
   assert.equal(contentScript.includes("pingPageBridge"), true);
   assert.equal(contentScript.includes("guthon-bridge-copy-minimize"), true);
-  assert.equal(contentScript.includes('data-minimized="true"'), true);
+  assert.equal(contentScript.includes("panel.dataset.minimized = String(minimized)"), true);
+  assert.equal(css.includes('[data-minimized="true"]'), true);
   assert.equal(contentScript.includes('minimizeButton.textContent = minimized ? "展开" : "缩小";'), true);
   assert.equal(contentScript.includes("installCopyOverlayInteractions"), true);
   assert.equal(contentScript.includes("guthon-bridge-resize-handle"), true);
-  assert.equal(contentScript.includes('cursor: col-resize'), true);
-  assert.equal(contentScript.includes('cursor: move'), true);
+  assert.equal(css.includes("cursor: col-resize"), true);
+  assert.equal(css.includes("cursor: move"), true);
   assert.equal(contentScript.includes('panel.style.position = "fixed";'), true);
-  assert.equal(contentScript.includes("max-width: 1450px"), true);
-  assert.equal(contentScript.includes("text-overflow: ellipsis"), true);
-  assert.equal(contentScript.includes("white-space: nowrap"), true);
+  assert.equal(css.includes("max-width: 1450px"), true);
+  assert.equal(css.includes("text-overflow: ellipsis"), true);
+  assert.equal(css.includes("white-space: nowrap"), true);
   assert.equal(contentScript.includes("<th>行号</th>"), false);
   assert.equal(contentScript.includes('"字段", "显示名称", "显示类型"'), true);
   assert.equal(contentScript.includes('"查询参数", "必填", "合计", "显示"'), true);
@@ -885,8 +938,8 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("guthon-bridge-module-only"), true);
   assert.equal(contentScript.includes("SCHEMA_ROOT_ID"), false);
   assert.equal(contentScript.includes("BILLTYPE_ROOT_ID"), false);
-  assert.equal(contentScript.includes('style.dataset.version = "20260723c"'), true);
-  assert.equal(contentScript.includes("visibility: hidden"), true);
+  assert.equal(contentScript.includes('style.dataset.version = "20260723c"'), false);
+  assert.equal(css.includes("visibility: hidden"), true);
   assert.equal(contentScript.includes("root.dataset.positioned"), false);
   assert.equal(contentScript.includes('root.dataset.sharedButtons = "true"'), true);
   assert.equal(contentScript.includes("exportCurrentTableSchema(root, sourceButton)"), true);
@@ -946,7 +999,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("/develop/uicomp/getCompNames.htm"), true);
   assert.equal(pageBridge.includes("selectCompId"), true);
   assert.equal(pageBridge.includes("selectBox.codeType"), false);
-  assert.equal(contentScript.includes("root.style.zIndex = \"2147483646\""), true);
+  assert.equal(fs.readFileSync(BRIDGE_CSS_PATH, "utf8").includes("z-index: 2147483646"), true);
 });
 
 test("floating pull waits for page bridge injection before posting commands", () => {
@@ -966,6 +1019,7 @@ test("popup waits for storage.local output directory persistence", () => {
   const popupScript = fs.readFileSync(path.join(ROOT, "extension", "popup.js"), "utf8");
   const popupHtml = fs.readFileSync(path.join(ROOT, "extension", "popup.html"), "utf8");
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
 
   assert.equal(popupScript.includes("function isModuleUrl"), true);
   assert.equal(popupScript.includes("打开复制模式"), true);
@@ -977,19 +1031,19 @@ test("popup waits for storage.local output directory persistence", () => {
   assert.equal(popupHtml.includes('id="copyFieldsBtn"'), true);
   assert.equal(popupHtml.includes('id="pasteFieldsBtn"'), true);
   assert.equal(popupHtml.includes('id="forceRefreshBtn"'), true);
-  assert.equal(popupHtml.includes("background: #409eff"), true);
-  assert.equal(popupHtml.includes(".action-force"), true);
-  assert.equal(popupHtml.includes("grid-template-columns: 3fr 1fr"), true);
-  assert.equal(popupHtml.includes(".source-actions.full-width"), true);
-  assert.equal(popupHtml.includes("border: 0;"), true);
+  assert.equal(css.includes("background: #409eff"), true);
+  assert.equal(css.includes(".action-force"), true);
+  assert.equal(css.includes("grid-template-columns: 3fr 1fr"), true);
+  assert.equal(css.includes(".source-actions.full-width"), true);
+  assert.equal(css.includes("border: 0;"), true);
   assert.equal(popupScript.includes('runFieldsMover("show-fields-mover")'), true);
   assert.equal(popupScript.includes('runFieldsMover("paste-fields-mover")'), true);
   assert.equal(popupScript.includes("runHubPull(true)"), true);
-  assert.equal(popupScript.includes('forceRefreshBtn.style.display = canPullSource || isSystemScripts ? "" : "none"'), true);
+  assert.equal(popupScript.includes("forceRefreshBtn.hidden = !canPullSource && !isSystemScripts"), true);
   assert.equal(popupScript.includes('pullHubBtn.parentElement.classList.toggle("full-width", !canPullSource)'), true);
   assert.equal(popupScript.includes('setStatus("当前页面是模块开发")'), true);
-  assert.equal(popupScript.includes('copyFieldsBtn.style.display = isModule ? "" : "none"'), true);
-  assert.equal(popupScript.includes('pasteFieldsBtn.style.display = isModule ? "" : "none"'), true);
+  assert.equal(popupScript.includes("copyFieldsBtn.hidden = !isModule"), true);
+  assert.equal(popupScript.includes("pasteFieldsBtn.hidden = !isModule"), true);
   assert.equal(contentScript.includes('message?.type === "show-fields-mover"'), true);
   assert.equal(contentScript.includes('message?.type === "paste-fields-mover"'), true);
   assert.equal(contentScript.includes('makeNativeButton("强制刷新"'), false);
@@ -1280,14 +1334,14 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   assert.equal(buttonClasses.size, 0);
   assert.equal(pageBridge.includes('document.addEventListener("contextmenu", onContextMenu, true)'), true);
   assert.equal(pageBridge.includes('document.addEventListener("mousemove", onProcedureTitleMove, true)'), true);
-  assert.equal(pageBridge.includes("::highlight(guthon-procedure-title-link)"), true);
+  assert.equal(fs.readFileSync(BRIDGE_CSS_PATH, "utf8").includes("::highlight(guthon-procedure-title-link)"), true);
   assert.equal(pageBridge.includes("installScriptEditorMinimizeButtons();"), true);
   assert.equal(pageBridge.includes('button.className = "el-dialog__headerbtn guthon-script-editor-minimize"'), true);
   assert.equal(pageBridge.includes('icon.className = "el-dialog__close el-icon el-icon-minus"'), true);
   assert.equal(pageBridge.includes("const editor = editors.find(isVisible) || editors[0]"), true);
   assert.equal(pageBridge.includes("buttonSetup && !minimizedScriptEditor.editorWasVisible"), true);
   assert.equal(pageBridge.includes("editor.onMouseMove?.("), true);
-  assert.equal(pageBridge.includes("color:#409eff!important;cursor:pointer!important"), true);
+  assert.equal(fs.readFileSync(BRIDGE_CSS_PATH, "utf8").includes(".guthon-procedure-link"), true);
   assert.equal(pageBridge.includes("developVm.handleNodeClick(openNode)"), true);
   assert.equal(pageBridge.includes("developVm.loadProcTree(() =>"), true);
   assert.equal(pageBridge.includes("developVm.toLocation?.(treeNode)"), true);

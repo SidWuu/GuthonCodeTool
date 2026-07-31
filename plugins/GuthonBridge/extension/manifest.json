@@ -39,8 +39,12 @@
         "http://*/*",
         "https://*/*"
       ],
+      "css": [
+        "bridge.css"
+      ],
       "js": [
         "host-config.js",
+        "workspace-selection.js",
         "content.js"
       ],
       "run_at": "document_idle"

@@ -1,0 +1,721 @@
+/* Popup */
+body.guthon-bridge-popup {
+  margin: 0;
+  padding: 16px;
+  width: 336px;
+  color: #1e293b;
+  background: #f4f7fb;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.guthon-bridge-popup [hidden] {
+  display: none !important;
+}
+
+.guthon-bridge-popup .wrap {
+  display: grid;
+  gap: 12px;
+}
+
+.guthon-bridge-popup .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.guthon-bridge-popup .title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.guthon-bridge-popup label {
+  display: grid;
+  gap: 4px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.guthon-bridge-popup input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.guthon-bridge-popup input[readonly] {
+  color: #0f172a;
+  background: #f1f5f9;
+  cursor: default;
+}
+
+.guthon-bridge-popup .actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.guthon-bridge-popup .source-actions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 3fr 1fr;
+  gap: 8px;
+}
+
+.guthon-bridge-popup .source-actions.full-width {
+  grid-template-columns: 1fr;
+}
+
+.guthon-bridge-popup button {
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid #409eff;
+  border-radius: 4px;
+  color: #fff;
+  background: #409eff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.guthon-bridge-popup button:hover {
+  border-color: #66b1ff;
+  background: #66b1ff;
+}
+
+.guthon-bridge-popup #pullPageBtn {
+  grid-column: 1 / -1;
+}
+
+.guthon-bridge-popup .action-force {
+  min-height: 28px;
+  padding: 5px 8px;
+  border-color: #e6a23c;
+  color: #e6a23c;
+  background: #fdf6ec;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.guthon-bridge-popup .action-force:hover {
+  border-color: #e6a23c;
+  color: #fff;
+  background: #e6a23c;
+}
+
+.guthon-bridge-popup #closeBtn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  color: #475569;
+  background: transparent;
+  font-size: 18px;
+  line-height: 28px;
+}
+
+.guthon-bridge-popup #status {
+  min-height: 72px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #0f172a;
+  background: #fff;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 12px;
+}
+
+/* Floating actions and overlays */
+.guthon-bridge-inline {
+  position: fixed;
+  right: auto;
+  bottom: 150px;
+  left: 20px;
+  z-index: 2147483646;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  width: max-content;
+  min-width: 108px;
+  padding: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.guthon-bridge-inline button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 108px;
+  min-width: 108px;
+  height: 32px;
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid #409eff;
+  border-radius: 3px;
+  color: #fff;
+  background: #409eff;
+  box-shadow: none;
+  cursor: pointer;
+  pointer-events: auto;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  text-decoration: none;
+}
+
+.guthon-bridge-inline button + button {
+  margin-left: 0;
+}
+
+.guthon-bridge-fields-mover-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.guthon-bridge-inline:not([data-mode="module"]) .guthon-bridge-module-only {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.guthon-bridge-inline:not([data-mode="system-scripts"]) .guthon-bridge-system-script-only {
+  display: none;
+}
+
+tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
+  background: #ecf5ff !important;
+}
+
+.guthon-bridge-fields-mover-group > span {
+  width: 108px;
+  color: #c0c4cc;
+  font-size: 12px;
+  text-align: center;
+}
+
+.guthon-bridge-inline button span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.guthon-bridge-inline button:hover,
+.guthon-bridge-inline button:focus {
+  color: #fff;
+  background: #337ecc;
+  border-color: #337ecc;
+}
+
+.guthon-bridge-message {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  box-sizing: border-box;
+  width: 140px;
+  max-width: calc(100vw - 40px);
+  padding: 2px 6px;
+  border: 1px solid #ebeef5;
+  border-radius: 3px;
+  color: #606266;
+  background: rgba(255, 255, 255, 0.92);
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+  user-select: text;
+  white-space: normal;
+  word-break: break-all;
+  font-size: 12px;
+}
+
+.guthon-bridge-message:empty {
+  display: none;
+}
+
+.guthon-bridge-message[data-tone="error"] {
+  color: #f56c6c;
+}
+
+.guthon-bridge-message[data-tone="success"] {
+  color: #67c23a;
+}
+
+#guthon-bridge-callers-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: grid;
+  place-items: start center;
+  box-sizing: border-box;
+  padding: 10vh 24px 24px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+#guthon-bridge-callers-overlay .guthon-bridge-callers-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: calc(90vh - 48px);
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+}
+
+#guthon-bridge-callers-overlay .guthon-bridge-callers-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+#guthon-bridge-callers-overlay .guthon-bridge-callers-list {
+  overflow: auto;
+  padding: 8px;
+}
+
+#guthon-bridge-callers-overlay .guthon-bridge-caller {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 9px 10px;
+  border: 1px solid #ebeef5;
+  color: #303133;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+
+#guthon-bridge-callers-overlay .guthon-bridge-caller:hover {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+#guthon-bridge-callers-overlay .guthon-bridge-caller-meta,
+#guthon-bridge-callers-overlay .guthon-bridge-callers-state {
+  color: #909399;
+  font-size: 12px;
+}
+
+#guthon-bridge-callers-overlay .guthon-bridge-callers-state {
+  padding: 16px;
+}
+
+#guthon-bridge-fields-mover-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+#guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+}
+
+#guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-head,
+#guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+#guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-head {
+  border-bottom: 1px solid #ebeef5;
+}
+
+#guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-list {
+  overflow: auto;
+  padding: 8px 14px;
+}
+
+#guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-item {
+  display: flex;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid #f2f6fc;
+  color: #303133;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-meta {
+  color: #909399;
+  font-size: 12px;
+}
+
+#guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-actions {
+  justify-content: flex-end;
+  border-top: 1px solid #ebeef5;
+}
+
+#guthon-bridge-copy-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2147483647;
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 42px 56px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-copy-panel {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  max-width: 1450px;
+  max-height: calc(100vh - 84px);
+  margin: 0 auto;
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-copy-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #ebeef5;
+  cursor: move;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-copy-head button {
+  cursor: pointer;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-copy-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-copy-panel[data-minimized="true"] {
+  grid-template-rows: auto;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-copy-panel[data-minimized="true"] .guthon-bridge-copy-body {
+  display: none;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-copy-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  min-height: 0;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-copy-groups {
+  overflow: auto;
+  padding: 8px;
+}
+
+#guthon-bridge-copy-overlay details {
+  margin-bottom: 6px;
+  border: 1px solid #dcdfe6;
+  background: #fff;
+}
+
+#guthon-bridge-copy-overlay summary {
+  padding: 6px 8px;
+  background: #f5f7fa;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-field-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  color: #1f2937;
+  font: 11px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-field-table th,
+#guthon-bridge-copy-overlay .guthon-bridge-field-table td {
+  overflow: hidden;
+  padding: 5px 4px;
+  border-top: 1px solid #ebeef5;
+  border-right: 1px solid #ebeef5;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-field-table th:last-child,
+#guthon-bridge-copy-overlay .guthon-bridge-field-table td:last-child {
+  border-right: 0;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-field-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: #606266;
+  background: #f8fafc;
+  font-weight: 600;
+  text-align: left;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-resize-handle:hover {
+  background: rgba(64, 158, 255, 0.18);
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-field-table tr[data-hidden="true"] {
+  color: #909399;
+  background: #fafafa;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-cell-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-cell-value.guthon-bridge-cell-selected {
+  background: rgba(64, 158, 255, 0.32);
+  outline: 1px solid rgba(64, 158, 255, 0.6);
+}
+
+#guthon-bridge-copy-overlay .guthon-bridge-copy-text {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  padding: 12px;
+  resize: none;
+  border: 0;
+  border-left: 1px solid #dcdfe6;
+  outline: none;
+  color: #1f2937;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.guthon-bridge-col-3 {
+  width: 3%;
+}
+
+.guthon-bridge-col-4 {
+  width: 4%;
+}
+
+.guthon-bridge-col-6 {
+  width: 6%;
+}
+
+.guthon-bridge-col-7 {
+  width: 7%;
+}
+
+.guthon-bridge-col-8 {
+  width: 8%;
+}
+
+.guthon-bridge-col-9 {
+  width: 9%;
+}
+
+.guthon-bridge-col-11 {
+  width: 11%;
+}
+
+/* Workspace selection */
+.guthon-bridge-workspace-dialog {
+  position: fixed !important;
+  top: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: 50% !important;
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 32px)) !important;
+  max-width: 420px !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: calc(100vh - 32px) !important;
+  margin: auto;
+  padding: 0 !important;
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+  border: 1px solid #dcdfe6 !important;
+  border-radius: 8px;
+  color: #303133;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.guthon-bridge-workspace-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.guthon-bridge-workspace-form {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 20px;
+}
+
+.guthon-bridge-workspace-title {
+  display: block;
+  margin: 0;
+  color: #303133;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.guthon-bridge-workspace-select {
+  box-sizing: border-box;
+  width: 100%;
+  height: 38px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  outline: none;
+  color: #303133;
+  background: #fff;
+  font: inherit;
+}
+
+.guthon-bridge-workspace-select:focus {
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.16);
+}
+
+.guthon-bridge-workspace-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.guthon-bridge-workspace-dialog .guthon-bridge-workspace-button {
+  min-width: 72px;
+  min-height: 34px;
+  margin: 0;
+  padding: 7px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+
+.guthon-bridge-workspace-dialog .guthon-bridge-workspace-cancel {
+  border: 1px solid #dcdfe6;
+  color: #606266;
+  background: #fff;
+}
+
+.guthon-bridge-workspace-dialog .guthon-bridge-workspace-cancel:hover {
+  color: #409eff;
+  border-color: #c6e2ff;
+  background: #ecf5ff;
+}
+
+.guthon-bridge-workspace-dialog .guthon-bridge-workspace-confirm {
+  border: 1px solid #409eff;
+  color: #fff;
+  background: #409eff;
+}
+
+.guthon-bridge-workspace-dialog .guthon-bridge-workspace-confirm:hover {
+  border-color: #66b1ff;
+  background: #66b1ff;
+}
+
+/* Main-world navigation */
+.guthon-procedure-link {
+  color: #409eff !important;
+  cursor: pointer !important;
+}
+
+::highlight(guthon-procedure-title-link) {
+  color: #409eff;
+}
+
+.guthon-procedure-title-cursor,
+.guthon-procedure-title-cursor * {
+  cursor: pointer !important;
+}
+
+.guthon-minimized-script-mask,
+.guthon-minimized-script-editor {
+  display: none !important;
+}
+
+.guthon-script-editor-minimize {
+  right: 42px !important;
+}
+
+.guthon-minimized-script-bar {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  width: auto;
+  max-width: calc(100vw - 32px);
+  height: 36px;
+  padding: 6px 7px 6px 14px;
+  transform: translateX(-50%);
+  border: 1px solid #409eff;
+  border-radius: 4px;
+  color: #409eff;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+  cursor: move;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.guthon-minimized-script-close {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: #909399;
+  background: transparent;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 20px;
+}
+
+.guthon-minimized-script-close:hover {
+  color: #f56c6c;
+  background: #f2f6fc;
+}

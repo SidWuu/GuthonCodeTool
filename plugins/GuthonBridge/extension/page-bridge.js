@@ -2056,19 +2056,6 @@
   document.addEventListener("click", onProcedureTitleClick, true);
   document.addEventListener("mousemove", onProcedureTitleMove, true);
   document.addEventListener("keyup", onNavigationKeyUp);
-  const navigationStyle = document.createElement("style");
-  navigationStyle.textContent = `
-    .guthon-procedure-link{color:#409eff!important;cursor:pointer!important}
-    ::highlight(guthon-procedure-title-link){color:#409eff}
-    .guthon-procedure-title-cursor,.guthon-procedure-title-cursor *{cursor:pointer!important}
-    .guthon-minimized-script-mask{display:none!important}
-    .guthon-minimized-script-editor{display:none!important}
-    .guthon-script-editor-minimize{right:42px!important}
-    .guthon-minimized-script-bar{position:fixed;top:12px;left:50%;display:flex;align-items:center;gap:10px;width:auto;max-width:calc(100vw - 32px);height:36px;transform:translateX(-50%);box-sizing:border-box;padding:6px 7px 6px 14px;border:1px solid #409eff;border-radius:4px;background:#fff;color:#409eff;white-space:nowrap;font-size:14px;cursor:move;box-shadow:0 2px 12px rgba(0,0,0,.25);z-index:3000}
-    .guthon-minimized-script-close{width:22px;height:22px;padding:0;border:0;border-radius:3px;background:transparent;color:#909399;font-size:20px;line-height:20px;cursor:pointer}
-    .guthon-minimized-script-close:hover{background:#f2f6fc;color:#f56c6c}
-  `;
-  (document.head || document.documentElement).appendChild(navigationStyle);
   const navigationApi = {
     resolveProcedureTarget,
     resolveProcedureDefinitionTarget,
@@ -2094,7 +2081,6 @@
     clearProcedureLinks();
     highlightProcedureTitle(null);
     navigationDisposables.forEach((disposable) => disposable?.dispose?.());
-    navigationStyle.remove();
     if (window.GuthonProcedureNavigation === navigationApi) {
       delete window.GuthonProcedureNavigation;
     }

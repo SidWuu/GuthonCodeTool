@@ -68,18 +68,18 @@ function setPopupMode(mode) {
   const isSystemScripts = mode === "system-scripts";
   const canPullSource = !isTableSchema && !isBillType && !isViews && !isSystemScripts;
   document.querySelector(".title").textContent = "Guthon Bridge";
-  procedureEl.closest("label").style.display = isModule ? "none" : "";
-  funIdEl.closest("label").style.display = isModule ? "none" : "";
-  outputDirEl.closest("label").style.display = isModule || isTableSchema || isBillType || isViews || isSystemScripts ? "none" : "";
+  procedureEl.closest("label").hidden = isModule;
+  funIdEl.closest("label").hidden = isModule;
+  outputDirEl.closest("label").hidden = isModule || isTableSchema || isBillType || isViews || isSystemScripts;
   procedureLabelEl.textContent = isSystemScripts ? "应用系统" : isTableSchema || isBillType || isViews ? "数据源" : "包名";
   funIdLabelEl.textContent = isSystemScripts ? "脚本类型" : isTableSchema ? "数据表" : isBillType ? "单据类型" : isViews ? "视图" : "函数名";
   pullPageBtn.textContent = isModule ? "打开复制模式" : "拉取页面当前源码";
-  pullPageBtn.style.display = isTableSchema || isBillType || isViews || isSystemScripts ? "none" : "";
+  pullPageBtn.hidden = isTableSchema || isBillType || isViews || isSystemScripts;
   pullHubBtn.textContent = isSystemScripts ? "拉取选中脚本" : isTableSchema ? "拉取表结构" : isBillType ? "拉取单据类型" : isViews ? "拉取视图源码" : "拉取源码表版本";
-  copyFieldsBtn.style.display = isModule ? "" : "none";
-  pasteFieldsBtn.style.display = isModule ? "" : "none";
+  copyFieldsBtn.hidden = !isModule;
+  pasteFieldsBtn.hidden = !isModule;
   forceRefreshBtn.textContent = isSystemScripts ? "拉取全部脚本" : "强制刷新";
-  forceRefreshBtn.style.display = canPullSource || isSystemScripts ? "" : "none";
+  forceRefreshBtn.hidden = !canPullSource && !isSystemScripts;
   pullHubBtn.parentElement.classList.toggle("full-width", !canPullSource);
 }
 
@@ -129,14 +129,10 @@ async function sendWorkspaceRequest(type, payload) {
   if (!result.candidates?.length) {
     throw new Error(result.message || "页面身份未匹配到工作区");
   }
-  const choices = result.candidates.map((item, index) => `${index + 1}. ${item.displayName} (${item.id})`).join("\n");
-  const selected = Number(window.prompt(`请选择本次请求的工作区：\n${choices}`, "1"));
-  if (!Number.isInteger(selected) || selected < 1 || selected > result.candidates.length) {
-    throw new Error("已取消工作区选择");
-  }
+  const workspaceKey = await GuthonBridgeWorkspace.select(result.candidates, tab.url || pageOrigin);
   return chrome.runtime.sendMessage({
     type,
-    payload: { ...request, workspaceKey: result.candidates[selected - 1].workspaceKey }
+    payload: { ...request, workspaceKey }
   });
 }
 
