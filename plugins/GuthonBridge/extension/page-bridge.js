@@ -1188,6 +1188,7 @@
     }
     return {
       ...system,
+      dataSourceId: getDataSourceId(),
       scriptTypes: getSelectedSystemScriptTypes(),
       resolvedBy: "system-script-management"
     };
@@ -1213,6 +1214,7 @@
       }
       return {
         mode: "page-source",
+        dataSourceId: getDataSourceId(),
         pageId: pageCode,
         procedureId: pageCode,
         procedureName: pageCode,
@@ -1222,7 +1224,7 @@
         resolvedBy: "module-page-code"
       };
     }
-    return inspectCurrentProcedure();
+    return { dataSourceId: getDataSourceId(), ...inspectCurrentProcedure() };
   }
 
   function putMapValue(map, key, value) {

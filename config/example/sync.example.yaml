@@ -1,29 +1,9 @@
-# 同步对象、子系统别名、周期和本地目录模板。
-# 源码同步和本地存储配置。
+# 全局同步窗口和安全规则。
 sync:
-  # 当前开发对象；格式为 products.<产品ID> 或 projects.<项目ID>。
-  ACTIVE: products.demo-product
   # 轮询间隔秒数，供外部定时同步任务使用。
   interval_seconds: 600
   # 增量查询回看分钟数，用于覆盖时间边界和时钟偏差。
   lookback_minutes: 10
-  # 保留项；当前实现固定使用 var/source/readonly。
-  readonly_source_dir: var/source/readonly
-  # 保留项；当前实现固定使用 var/source/workcopy。
-  work_copy_dir: var/source/workcopy
-  # 保留项；当前实现固定使用 var/knowledge。
-  generated_doc_dir: var/knowledge
-  # SQLite 索引根目录；每个 ACTIVE 自动使用 {products|projects}/<id>.db。
-  index_dir: var/runtime/index
-
-# 子系统同步范围配置。
-systems:
-  # 要包含的子系统条件。
-  include:
-    # 子系统别名列表；系统和数据源信息从各自数据库查询并自动缓存。
-    system_aliases:
-      # 示例子系统别名，可按需增加多个列表项。
-      - demo.system
 
 # 源码可用性和变更判断规则。
 rules:

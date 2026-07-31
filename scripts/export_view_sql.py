@@ -12,14 +12,13 @@ import gusen_hub
 from export_table_schema_sql import (
     normalize_data_source_ids,
     resolve_data_source_ids,
-    resolve_output_dir,
     sanitize_name,
     system_folder_name,
 )
 
 
 ROOT = gusen_hub.ROOT
-DEFAULT_OUTPUT_DIR = ROOT / "var" / "database" / "views"
+DEFAULT_OUTPUT_DIR = ROOT / "var" / "workspace"
 
 
 def normalize_view_ids(value):
@@ -92,8 +91,9 @@ def export_views(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, view
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Export Gushen view SQL directly from platform metadata.")
-    parser.add_argument("--datasource", help="Datasource override. Defaults to the product or project selected by sync.ACTIVE.")
-    parser.add_argument("--output-dir", help="Output directory override. Defaults to var/database/views/{products|projects}/<active_name>.")
+    parser.add_argument("--workspace")
+    parser.add_argument("--datasource", help="Datasource override. Defaults to the selected workspace datasource.")
+    parser.add_argument("--output-dir", help="Output directory override. Defaults to <workspace>/database/views.")
     parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to configured system aliases.")
     parser.add_argument("--view-ids", help="Comma-separated VIEW_ID list. Defaults to all views in selected data sources.")
     args = parser.parse_args(argv)
@@ -101,7 +101,9 @@ def main(argv=None):
     requested_data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else []
     view_ids = normalize_view_ids(args.view_ids)
     config = gusen_hub.load_config()
-    output_dir = resolve_output_dir(DEFAULT_OUTPUT_DIR, args.output_dir, config)
+    if args.workspace:
+        gusen_hub.set_workspace(args.workspace)
+    output_dir = Path(args.output_dir) if args.output_dir else gusen_hub.resolve_workspace(config)["databaseDir"] / "views"
     datasource_name, datasource = gusen_hub.resolve_datasource(config, args.datasource)
     try:
         with gusen_hub.db_connect(datasource) as conn:

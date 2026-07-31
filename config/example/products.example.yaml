@@ -1,5 +1,5 @@
 # 产品源码同步范围模板。
-# 产品配置集合；键名是 sync.ACTIVE 使用的产品 ID。
+# 产品配置集合；键名组成稳定 workspaceKey：products.<产品ID>。
 products:
   # 示例产品 ID，需在同一配置中保持唯一。
   demo-product:
@@ -7,6 +7,13 @@ products:
     name: 示例产品
     # 引用 datasource.yaml 中的数据源标识。
     datasource: demo-product-dev
+    # 可选浏览器来源；为空时 Bridge 依赖数据源和系统身份匹配。
+    page_origins: []
+    # 当前工作区独立的子系统范围。
+    systems:
+      include:
+        system_aliases:
+          - demo.system
     # 保留项；当前实现根据 products 分组固定判定为 PRODUCT。
     source_layer: PRODUCT
     # 源码包含规则。

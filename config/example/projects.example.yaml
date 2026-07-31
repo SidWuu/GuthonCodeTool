@@ -1,5 +1,5 @@
 # 项目源码同步范围模板。
-# 项目配置集合；键名是 sync.ACTIVE 使用的项目 ID。
+# 项目配置集合；键名组成稳定 workspaceKey：projects.<项目ID>。
 projects:
   # 示例项目 ID，需在同一配置中保持唯一。
   demo-project:
@@ -7,6 +7,13 @@ projects:
     name: 示例项目
     # 引用 datasource.yaml 中的数据源标识。
     datasource: demo-project-dev
+    # 可选浏览器来源；为空时 Bridge 依赖数据源和系统身份匹配。
+    page_origins: []
+    # 当前工作区独立的子系统范围。
+    systems:
+      include:
+        system_aliases:
+          - demo.system
     # 项目继承的产品 ID，对应 products.yaml 中的键名。
     product_id: demo-product
     # 保留项；当前实现根据 projects 分组固定判定为 PROJECT。

@@ -9,17 +9,17 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口，不再只是代码补
 ### 工作区
 
 - 运行模式：普通用户使用“发行模式”；维护者使用“调试模式”直接运行源码仓库的 `.venv` 和 Python 入口。
-- 运行时描述：把当前模式、命令前缀和本地数据目录写入 `var/runtime/tool-runtime.json`，供 AI 使用同一套规范调用。
+- 运行时描述：把当前模式、命令前缀和本地数据目录写入 `var/nexus/tool-runtime.json`，供 AI 使用同一套规范调用。
 - 初始化工作区：选择 GuthonCodeTool 应用和本地数据目录，创建缺失配置但不覆盖已有文件。
 - 切换工作区：已初始化时再次点击“初始化工作区”，确认后选择新的本地数据目录；取消时保留原工作区。
 - 配置文件：直接编辑 `datasource.yaml`、`products.yaml`、`projects.yaml`、`source-tables.yaml` 和 `sync.yaml`。
 - 打开本地数据目录。
 
-### 源码与配置数据
+### 项目
 
-- 初始化源码索引、同步当前 `sync.ACTIVE` 源码、重建调用索引和导出源码索引文档。
-- 一键同步当前 ACTIVE 全部资料。
-- 单独导出表结构、单据类型、系统脚本和视图源码。
+- 同时列出全部 `PRD <产品名称>`、`PRJ <项目名称>` 及其同步状态。
+- 每个节点绑定自己的 `workspaceKey`，可独立同步全部资料、打开目录、查看索引和维护 Workcopy。
+- 不设置当前或默认产品、项目。
 
 ### 维护
 
@@ -31,7 +31,7 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口，不再只是代码补
 
 - 在左侧面板单击“启动 Guthon Bridge”或“停止 Guthon Bridge”。
 - Nexus 自动复用当前运行模式和本地数据目录：发行模式调用应用，调试模式调用源码仓库 Python；无需设置 Bridge 环境变量或打开终端。
-- Bridge 运行时切换工作区，会自动停止旧服务并使用新工作区重启。
+- Bridge 根据请求的 `workspaceKey` 或页面身份路由到对应产品、项目；多个候选由 Chrome 选择。
 - Bridge 运行时切换运行模式，也会自动重启；调试模式下每次拉取都会读取最新 Python 脚本。
 
 所有会运行 GuthonCodeTool 的操作都要求用户确认；打开配置文件和本地目录保持单击。

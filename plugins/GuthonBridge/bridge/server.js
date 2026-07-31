@@ -5,24 +5,22 @@ const path = require("path");
 
 const PORT = Number(process.env.GUTHON_BRIDGE_PORT || 17361);
 const ROOT = path.resolve(__dirname, "..", "..", "..");
-const BRIDGE_ROOT = __dirname;
 const HUB_TOOL_HOME = process.env.GUTHON_TOOL_HOME || "";
-const WORKSPACE_ROOT = HUB_TOOL_HOME ? path.join(HUB_TOOL_HOME, "var", "runtime", "bridge") : path.join(BRIDGE_ROOT, "workspace");
-const WORKSPACE_DIR = path.join(WORKSPACE_ROOT, "procedures");
-const MANIFEST_PATH = path.join(WORKSPACE_ROOT, "manifest.json");
+const BRIDGE_STATE_DIR = path.join(HUB_TOOL_HOME || ROOT, "var", "nexus", "bridge");
+const MANIFEST_PATH = path.join(BRIDGE_STATE_DIR, "manifest.json");
 const DEFAULT_HUB_PYTHON = path.join(ROOT, ".venv", "bin", "python");
 const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_PYTHON) ? DEFAULT_HUB_PYTHON : "python3");
 const HUB_TOOL = process.env.GUTHON_TOOL_PATH || "";
 const HUB_TOOL_ENTRY = process.env.GUTHON_TOOL_ENTRY || "";
+const DEFAULT_TOOL_ENTRY = path.join(ROOT, "scripts", "guthon_tool.py");
 const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "scripts", "pull_source_to_work_copy.py");
 const TABLE_SCHEMA_SCRIPT = process.env.GUTHON_TABLE_SCHEMA_SCRIPT || path.join(ROOT, "scripts", "export_table_schema_sql.py");
 const BILL_TYPE_SCRIPT = process.env.GUTHON_BILL_TYPE_SCRIPT || path.join(ROOT, "scripts", "export_bill_type_sql.py");
 const VIEW_SQL_SCRIPT = process.env.GUTHON_VIEW_SQL_SCRIPT || path.join(ROOT, "scripts", "export_view_sql.py");
 const SYSTEM_SCRIPT_EXPORT_SCRIPT = process.env.GUTHON_SYSTEM_SCRIPT_EXPORT_SCRIPT || path.join(ROOT, "scripts", "export_system_script_sql.py");
 const HUB_QUERY_SCRIPT = process.env.GUTHON_HUB_QUERY_SCRIPT || path.join(ROOT, "scripts", "query_hub_context.py");
-const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(HUB_TOOL_HOME || ROOT, "var", "runtime", "logs", "pull-log.ndjson");
-
-fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(BRIDGE_STATE_DIR, "pull-log.ndjson");
+let commandQueue = Promise.resolve();
 
 function readManifest() {
   if (!fs.existsSync(MANIFEST_PATH)) {
@@ -122,6 +120,7 @@ function appendPullLog(options) {
 
 function sourceSummary(payload, result = {}) {
   const summary = {
+    workspaceKey: payload.workspaceKey || result.workspaceKey || "",
     sourceType: payload.sourceType || "",
     sourceId: payload.sourceId || "",
     alias: payload.alias || "",
@@ -214,22 +213,51 @@ function runJsonCommand(args, errorLabel, input) {
   return runJsonProcess(HUB_PYTHON, args, errorLabel, input);
 }
 
-function runToolCommand(command, args, errorLabel, input) {
-  if (!HUB_TOOL) return undefined;
-  if (!HUB_TOOL_HOME) {
-    return Promise.reject(new Error("GUTHON_TOOL_HOME is required when GUTHON_TOOL_PATH is set"));
-  }
-  return runJsonProcess(HUB_TOOL, [...(HUB_TOOL_ENTRY ? [HUB_TOOL_ENTRY] : []), command, "--home", HUB_TOOL_HOME, "--", ...args], errorLabel, input);
+function runToolCommand(command, args, errorLabel, input, workspaceKey = "") {
+  const executable = HUB_TOOL || HUB_PYTHON;
+  const entry = HUB_TOOL ? HUB_TOOL_ENTRY : DEFAULT_TOOL_ENTRY;
+  const home = HUB_TOOL_HOME || ROOT;
+  return runJsonProcess(
+    executable,
+    [
+      ...(entry ? [entry] : []),
+      command,
+      "--home",
+      home,
+      ...(workspaceKey ? ["--workspace", workspaceKey] : []),
+      ...(args.length ? ["--", ...args] : [])
+    ],
+    errorLabel,
+    input
+  );
 }
 
-function runHubPull(payload) {
-  if (HUB_TOOL) {
-    return runToolCommand("pull", [], "源码拉取", payload);
+async function resolveRequestWorkspace(payload) {
+  if (payload.workspaceKey) {
+    return { ok: true, workspaceKey: payload.workspaceKey };
   }
-  return runJsonCommand([HUB_PULL_SCRIPT, "--json-stdin"], "源码拉取", payload);
+  return runToolCommand("route", [], "工作区路由", payload);
 }
 
-function runTableSchemaExport(payload) {
+function enqueue(action) {
+  const pending = commandQueue.then(action, action);
+  commandQueue = pending.catch(() => {});
+  return pending;
+}
+
+async function runHubPull(payload) {
+  const route = await resolveRequestWorkspace(payload);
+  if (!route.ok) return route;
+  const routed = { ...payload, workspaceKey: route.workspaceKey };
+  if (!HUB_TOOL && process.env.GUTHON_HUB_PULL_SCRIPT) {
+    return runJsonCommand([HUB_PULL_SCRIPT, "--json-stdin"], "源码拉取", routed);
+  }
+  return runToolCommand("pull", [], "源码拉取", routed, route.workspaceKey);
+}
+
+async function runTableSchemaExport(payload) {
+  const route = await resolveRequestWorkspace(payload);
+  if (!route.ok) return route;
   const args = [TABLE_SCHEMA_SCRIPT];
   const toolArgs = [];
   if (payload.dataSourceId) {
@@ -240,11 +268,16 @@ function runTableSchemaExport(payload) {
     args.push("--table-ids", payload.tableIds.join(","));
     toolArgs.push("--table-ids", payload.tableIds.join(","));
   }
-  if (HUB_TOOL) return runToolCommand("export-schema", toolArgs, "表结构拉取");
-  return runJsonCommand(args, "表结构拉取");
+  if (!HUB_TOOL && process.env.GUTHON_TABLE_SCHEMA_SCRIPT) {
+    args.push("--workspace", route.workspaceKey);
+    return runJsonCommand(args, "表结构拉取");
+  }
+  return runToolCommand("export-schema", toolArgs, "表结构拉取", undefined, route.workspaceKey);
 }
 
-function runBillTypeExport(payload) {
+async function runBillTypeExport(payload) {
+  const route = await resolveRequestWorkspace(payload);
+  if (!route.ok) return route;
   const args = [BILL_TYPE_SCRIPT];
   const toolArgs = [];
   if (Array.isArray(payload.dataSourceIds) && payload.dataSourceIds.length > 0) {
@@ -255,11 +288,16 @@ function runBillTypeExport(payload) {
     args.push("--bill-type-codes", payload.billTypeCodes.join(","));
     toolArgs.push("--bill-type-codes", payload.billTypeCodes.join(","));
   }
-  if (HUB_TOOL) return runToolCommand("export-bill-type", toolArgs, "单据类型拉取");
-  return runJsonCommand(args, "单据类型拉取");
+  if (!HUB_TOOL && process.env.GUTHON_BILL_TYPE_SCRIPT) {
+    args.push("--workspace", route.workspaceKey);
+    return runJsonCommand(args, "单据类型拉取");
+  }
+  return runToolCommand("export-bill-type", toolArgs, "单据类型拉取", undefined, route.workspaceKey);
 }
 
-function runViewSqlExport(payload) {
+async function runViewSqlExport(payload) {
+  const route = await resolveRequestWorkspace(payload);
+  if (!route.ok) return route;
   const args = [VIEW_SQL_SCRIPT];
   const toolArgs = [];
   if (Array.isArray(payload.dataSourceIds) && payload.dataSourceIds.length > 0) {
@@ -270,11 +308,16 @@ function runViewSqlExport(payload) {
     args.push("--view-ids", payload.viewIds.join(","));
     toolArgs.push("--view-ids", payload.viewIds.join(","));
   }
-  if (HUB_TOOL) return runToolCommand("export-view", toolArgs, "视图源码拉取");
-  return runJsonCommand(args, "视图源码拉取");
+  if (!HUB_TOOL && process.env.GUTHON_VIEW_SQL_SCRIPT) {
+    args.push("--workspace", route.workspaceKey);
+    return runJsonCommand(args, "视图源码拉取");
+  }
+  return runToolCommand("export-view", toolArgs, "视图源码拉取", undefined, route.workspaceKey);
 }
 
-function runSystemScriptExport(payload) {
+async function runSystemScriptExport(payload) {
+  const route = await resolveRequestWorkspace(payload);
+  if (!route.ok) return route;
   const args = [SYSTEM_SCRIPT_EXPORT_SCRIPT];
   const toolArgs = [];
   if (Array.isArray(payload.systemIds) && payload.systemIds.length > 0) {
@@ -286,19 +329,26 @@ function runSystemScriptExport(payload) {
     args.push("--workcopy");
     toolArgs.push("--script-types", payload.scriptTypes.join(","), "--workcopy");
   }
-  if (HUB_TOOL) return runToolCommand("export-system-script", toolArgs, "系统脚本拉取");
-  return runJsonCommand(args, "系统脚本拉取");
+  if (!HUB_TOOL && process.env.GUTHON_SYSTEM_SCRIPT_EXPORT_SCRIPT) {
+    args.push("--workspace", route.workspaceKey);
+    return runJsonCommand(args, "系统脚本拉取");
+  }
+  return runToolCommand("export-system-script", toolArgs, "系统脚本拉取", undefined, route.workspaceKey);
 }
 
-function runProcedureCallers(payload) {
+async function runProcedureCallers(payload) {
   const alias = String(payload.alias || "").trim();
   const funId = String(payload.funId || "").trim();
   if (!alias || !funId) {
     throw new Error("缺少过程别名或函数名");
   }
+  const route = await resolveRequestWorkspace(payload);
+  if (!route.ok) return route;
   const args = ["callers", "--alias", alias, "--fun", funId, "--limit", "100"];
-  if (HUB_TOOL) return runToolCommand("query", args, "调用方查询");
-  return runJsonCommand([HUB_QUERY_SCRIPT, ...args], "调用方查询");
+  if (!HUB_TOOL && process.env.GUTHON_HUB_QUERY_SCRIPT) {
+    return runJsonCommand([HUB_QUERY_SCRIPT, "--workspace", route.workspaceKey, ...args], "调用方查询");
+  }
+  return runToolCommand("query", args, "调用方查询", undefined, route.workspaceKey);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -307,11 +357,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && req.url === "/health") {
-    return sendJson(res, 200, {
-      ok: true,
-      workspaceDir: WORKSPACE_DIR,
-      manifestPath: MANIFEST_PATH
-    });
+    return sendJson(res, 200, { ok: true });
   }
 
   if (req.method === "POST" && req.url === "/saveRemoteFile") {
@@ -392,7 +438,7 @@ const server = http.createServer(async (req, res) => {
     let payload = {};
     try {
       payload = await readBody(req);
-      const result = await runHubPull(payload);
+      const result = await enqueue(() => runHubPull(payload));
       appendPullLog({
         pullType: "source",
         summary: sourceSummary(payload, result),
@@ -417,7 +463,7 @@ const server = http.createServer(async (req, res) => {
     let payload = {};
     try {
       payload = await readBody(req);
-      const result = await runTableSchemaExport(payload);
+      const result = await enqueue(() => runTableSchemaExport(payload));
       appendPullLog({
         pullType: "database",
         summary: tableSchemaSummary(payload, result),
@@ -442,7 +488,7 @@ const server = http.createServer(async (req, res) => {
     let payload = {};
     try {
       payload = await readBody(req);
-      const result = await runBillTypeExport(payload);
+      const result = await enqueue(() => runBillTypeExport(payload));
       appendPullLog({
         pullType: "billtype",
         summary: billTypeSummary(payload, result),
@@ -467,7 +513,7 @@ const server = http.createServer(async (req, res) => {
     let payload = {};
     try {
       payload = await readBody(req);
-      const result = await runViewSqlExport(payload);
+      const result = await enqueue(() => runViewSqlExport(payload));
       appendPullLog({
         pullType: "views",
         summary: viewSqlSummary(payload, result),
@@ -492,7 +538,7 @@ const server = http.createServer(async (req, res) => {
     let payload = {};
     try {
       payload = await readBody(req);
-      const result = await runSystemScriptExport(payload);
+      const result = await enqueue(() => runSystemScriptExport(payload));
       appendPullLog({
         pullType: "system-scripts",
         summary: systemScriptSummary(payload, result),
@@ -516,7 +562,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/queryProcedureCallers") {
     try {
       const payload = await readBody(req);
-      return sendJson(res, 200, { ok: true, ...(await runProcedureCallers(payload)) });
+      return sendJson(res, 200, { ok: true, ...(await enqueue(() => runProcedureCallers(payload))) });
     } catch (error) {
       return sendJson(res, 500, { ok: false, message: error.message });
     }
@@ -527,5 +573,4 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`谷神桥接服务已启动：http://127.0.0.1:${PORT}`);
-  console.log(`工作目录：${WORKSPACE_DIR}`);
 });

@@ -9,7 +9,7 @@
   "max_rows": 200,
   "source_files": [
     {
-      "path": "var/source/readonly/products/示例产品/示例过程/source.vm",
+      "path": "var/workspace/PRD 示例产品/source/readonly/示例过程/source.vm",
       "function": "示例函数"
     }
   ],

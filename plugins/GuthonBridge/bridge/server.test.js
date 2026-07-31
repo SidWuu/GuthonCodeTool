@@ -180,8 +180,7 @@ process.stdin.on("end", () => {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        scope: "project",
-        projectId: "demo-project",
+        workspaceKey: "projects.demo-project",
         sourceType: "procedure",
         alias: "demo.pkg",
         funId: "save"
@@ -198,6 +197,7 @@ process.stdin.on("end", () => {
     assert.equal(log.ok, true);
     assert.match(log.time, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     assert.deepEqual(log.summary, {
+      workspaceKey: "projects.demo-project",
       sourceType: "procedure",
       sourceId: "",
       alias: "demo.pkg",
@@ -226,7 +226,7 @@ test("pullHubSource uses the configured Python tool entry in development mode", 
     toolEntry,
     `
 const args = process.argv.slice(2);
-if (args[0] !== "pull" || args[1] !== "--home" || args[2] !== ${JSON.stringify(toolHome)}) {
+if (args[0] !== "pull" || args[1] !== "--home" || args[2] !== ${JSON.stringify(toolHome)} || args[3] !== "--workspace" || args[4] !== "projects.demo-project") {
   process.stderr.write(JSON.stringify(args));
   process.exit(2);
 }
@@ -253,7 +253,7 @@ process.stdin.on("end", () => process.stdout.write(JSON.stringify({ ok: true, mo
     const response = await fetch(`http://127.0.0.1:${port}/pullHubSource`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sourceType: "procedure", alias: "demo.pkg", funId: "save" }),
+      body: JSON.stringify({ workspaceKey: "projects.demo-project", sourceType: "procedure", alias: "demo.pkg", funId: "save" }),
     });
     const data = await response.json();
 
@@ -302,6 +302,7 @@ process.stdout.write(JSON.stringify({ ok: true, exported_table_count: 1, outputD
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
+        workspaceKey: "products.demo-product",
         dataSourceId: "0015",
         tableIds: ["RM_TEST"]
       })
@@ -367,6 +368,7 @@ process.stdout.write(JSON.stringify({ ok: true, exported_bill_type_count: 3, out
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
+        workspaceKey: "products.demo-product",
         dataSourceIds: ["0015", "0008"],
         billTypeCodes: ["BT_A", "BT_B"]
       })
@@ -430,6 +432,7 @@ process.stdout.write(JSON.stringify({ ok: true, exported_view_count: 1, outputDi
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        workspaceKey: "products.demo-product",
         dataSourceIds: ["0015"],
         viewIds: ["V_RM_TEST"]
       })
@@ -490,6 +493,7 @@ process.stdout.write(JSON.stringify({ ok: true, exported_system_script_count: 1,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        workspaceKey: "products.demo-product",
         systemIds: ["SYS-DD01-06B1-6B6C4E52"],
         scriptTypes: [20]
       })
@@ -547,7 +551,7 @@ process.stdout.write(JSON.stringify({
     const response = await fetch(`http://127.0.0.1:${port}/queryProcedureCallers`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ alias: "demo.target", funId: "run" })
+      body: JSON.stringify({ workspaceKey: "products.demo-product", alias: "demo.target", funId: "run" })
     });
     const data = await response.json();
 
@@ -564,7 +568,7 @@ test("bridge defaults hub python to repo venv when present", () => {
 
   assert.equal(serverScript.includes('path.join(ROOT, ".venv", "bin", "python")'), true);
   assert.equal(serverScript.includes("fs.existsSync(DEFAULT_HUB_PYTHON)"), true);
-  assert.equal(serverScript.includes('path.join(HUB_TOOL_HOME || ROOT, "var", "runtime", "logs", "pull-log.ndjson")'), true);
+  assert.equal(serverScript.includes('path.join(HUB_TOOL_HOME || ROOT, "var", "nexus", "bridge")'), true);
 });
 
 test("user-facing messages use concise Chinese", () => {
@@ -625,9 +629,9 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(pageBridge.includes("[A-Z][A-Z0-9]+_[A-Z0-9_]"), true);
   assert.equal(script.includes('mode === "table-schema"'), true);
   assert.equal(script.includes('mode === "billtype"'), true);
-  assert.equal(script.includes('type: "export-table-schema"'), true);
-  assert.equal(script.includes('type: "export-bill-type"'), true);
-  assert.equal(script.includes('type: "export-view-sql"'), true);
+  assert.equal(script.includes('"export-table-schema"'), true);
+  assert.equal(script.includes('"export-bill-type"'), true);
+  assert.equal(script.includes('"export-view-sql"'), true);
   assert.equal(script.includes('type: "log-pull-failure"'), true);
   assert.equal(background.includes('postJson("/logPullFailure"'), true);
   assert.equal(background.includes('chrome.runtime.onInstalled.addListener'), true);
@@ -635,6 +639,10 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(background.includes('files: ["host-config.js", "content.js"]'), true);
   assert.equal(background.includes('world: "MAIN"'), true);
   assert.equal(script.includes("拉取单据类型"), true);
+  assert.equal(script.includes("workspaceSelectionRequired"), true);
+  assert.equal(script.includes("window.prompt"), true);
+  assert.equal(content.includes("workspaceSelectionRequired"), true);
+  assert.equal(content.includes("window.prompt"), true);
   assert.equal(runHubPullScript.includes("resolveCurrentTarget"), false);
   assert.equal(html.includes("closeBtn"), true);
   assert.equal(script.includes("window.close()"), true);
@@ -695,7 +703,7 @@ test("floating procedure button pulls hub source", () => {
   assert.equal(contentScript.includes("拉取到本地</button>"), false);
   assert.equal(contentScript.includes('button.textContent = "成功";'), true);
   assert.equal(contentScript.includes('button.textContent = "失败";'), true);
-  assert.equal(pullScript.includes('type: "pull-hub-source"'), true);
+  assert.equal(pullScript.includes('"pull-hub-source"'), true);
   assert.equal(pullScript.includes('type: "save-pull-result"'), false);
   assert.equal(pullScript.includes('runPageCommand("pullProcedure"'), true);
 });
@@ -707,7 +715,7 @@ test("data table page exposes table schema export action", () => {
 
   assert.equal(contentScript.includes("拉取表结构"), true);
   assert.equal(contentScript.includes("inspectTableSchemaTarget"), true);
-  assert.equal(contentScript.includes('type: "export-table-schema"'), true);
+  assert.equal(contentScript.includes('sendWorkspaceRequest("export-table-schema"'), true);
   assert.equal(contentScript.includes("isDataTableRoute"), true);
   assert.equal(contentScript.includes("positionFloatingRoot"), true);
   assert.equal(contentScript.includes('root.style.left = "20px"'), true);
@@ -725,7 +733,7 @@ test("bill type tab exposes bill type export action", () => {
   assert.equal(contentScript.includes("拉取单据类型"), true);
   assert.equal(contentScript.includes("isBillTypeRoute"), true);
   assert.equal(contentScript.includes("inspectBillTypeTarget"), true);
-  assert.equal(contentScript.includes('type: "export-bill-type"'), true);
+  assert.equal(contentScript.includes('"export-bill-type"'), true);
   assert.equal(contentScript.includes("billTypeCodes"), true);
   assert.equal(backgroundScript.includes("/exportBillType"), true);
 });
@@ -743,7 +751,7 @@ test("view management page exposes view source export action", () => {
   assert.equal(contentScript.includes("isViewRoute"), true);
   assert.equal(refreshScript.includes("isViewRoute()"), true);
   assert.equal(contentScript.includes("inspectViewTarget"), true);
-  assert.equal(contentScript.includes('type: "export-view-sql"'), true);
+  assert.equal(contentScript.includes('"export-view-sql"'), true);
   assert.equal(backgroundScript.includes("/exportViewSql"), true);
   assert.equal(pageBridge.includes("getSelectedViewIds"), true);
   assert.equal(pageBridge.includes('mode: "views"'), true);
@@ -759,7 +767,7 @@ test("system script page exposes selected and all export actions", () => {
   assert.equal(contentScript.includes("选中拉取"), true);
   assert.equal(contentScript.includes("全部拉取"), true);
   assert.equal(contentScript.includes("inspectSystemScriptTarget"), true);
-  assert.equal(contentScript.includes('type: "export-system-scripts"'), true);
+  assert.equal(contentScript.includes('"export-system-scripts"'), true);
   assert.equal(backgroundScript.includes("/exportSystemScripts"), true);
   assert.equal(pageBridge.includes("getCurrentSystemScriptTarget"), true);
   assert.equal(pageBridge.includes("getSelectedSystemScriptTypes"), true);

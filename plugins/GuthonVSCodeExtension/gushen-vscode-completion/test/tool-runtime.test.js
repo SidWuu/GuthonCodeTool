@@ -21,8 +21,8 @@ test('resolves the repository virtualenv and Python entry point', () => {
 
 test('builds matching packaged and development command arguments', () => {
   assert.deepEqual(
-    toolArguments({ toolHome: '/data' }, 'export-view', ['--view-ids', 'V1']),
-    ['export-view', '--home', '/data', '--', '--view-ids', 'V1']
+    toolArguments({ toolHome: '/data' }, 'export-view', ['--view-ids', 'V1'], 'products.demo'),
+    ['export-view', '--home', '/data', '--workspace', 'products.demo', '--', '--view-ids', 'V1']
   );
   assert.deepEqual(
     toolArguments({ toolEntry: '/repo/scripts/guthon_tool.py', toolHome: '/data' }, 'pull'),
@@ -57,4 +57,13 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
   });
 
   fs.rmSync(home, { recursive: true });
+});
+
+test('Nexus lists every configured workspace and binds commands to workspaceKey', () => {
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.js'), 'utf8');
+
+  assert.equal(extension.includes("readWorkspaces(tool)"), true);
+  assert.equal(extension.includes("item.displayName"), true);
+  assert.equal(extension.includes("[item.workspaceKey]"), true);
+  assert.equal(extension.includes("syncActive"), false);
 });

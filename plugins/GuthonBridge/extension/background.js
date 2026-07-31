@@ -27,7 +27,7 @@ async function postJson(path, payload) {
     body: JSON.stringify(payload)
   });
   const data = await response.json();
-  if (!response.ok || data.ok === false) {
+  if (!response.ok || (data.ok === false && !data.workspaceSelectionRequired)) {
     throw new Error(data.message || `桥接请求失败：${path}`);
   }
   return data;

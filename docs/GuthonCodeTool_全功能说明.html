@@ -90,7 +90,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <div class="hero-meta"><span>架构与实现</span><span>源码与索引</span><span>Bridge &amp; VS Code</span><span>发布与维护</span></div>
 <div class="hero-actions">
 <a class="btn btn-primary" href="#1-定位与边界">开始阅读</a>
-<a class="btn btn-ghost" href="guthon_code_tool_guide.html">快速开始</a>
+<a class="btn btn-ghost" href="GuthonCodeTool_使用手册.html">快速开始</a>
 <a class="btn btn-ghost" href="https://github.com/SidWuu/GuthonCodeTool" target="_blank" rel="noopener">GitHub 仓库</a>
 </div>
 </div>
@@ -126,13 +126,13 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <article class="feature-card"><div class="feature-icon">01</div><h3>统一运行入口</h3><p>同一套 Python 实现打包为 macOS 与 Windows 应用，由 VS Code 扩展统一调用。</p></article>
 <article class="feature-card"><div class="feature-icon">02</div><h3>本地数据隔离</h3><p>应用与私有数据分离，配置、源码、索引和日志只进入用户选择的数据目录。</p></article>
 <article class="feature-card"><div class="feature-icon">03</div><h3>安全工作副本</h3><p>readonly 保留平台镜像，workcopy 保存本地修改，并通过基线判断阻止覆盖冲突。</p></article>
-<article class="feature-card"><div class="feature-icon">04</div><h3>SQLite 局部检索</h3><p>按 ACTIVE 建立独立索引，支持源码定位、静态调用关系和低置信动态调用记录。</p></article>
+<article class="feature-card"><div class="feature-icon">04</div><h3>SQLite 局部检索</h3><p>每个工作区独立索引，支持源码定位、静态调用关系和低置信动态调用记录。</p></article>
 <article class="feature-card"><div class="feature-icon">05</div><h3>双端增强</h3><p>VS Code 提供本地操作和方言能力，Bridge 增强谷神在线开发页面。</p></article>
 <article class="feature-card"><div class="feature-icon">06</div><h3>自动发行</h3><p>main 变更触发跨平台构建、插件打包、GitHub Release 与 Gitee Release 同步。</p></article>
 </div>
 <blockquote>
 <p>本文解释功能为什么这样实现，以及修改功能时应进入哪些代码路径。</p>
-<p>普通用户从零安装和日常操作请查看：<a href="guthon_code_tool_guide.html">GuthonCodeTool 使用手册</a>。</p>
+<p>普通用户从零安装和日常操作请查看：<a href="GuthonCodeTool_使用手册.html">GuthonCodeTool 使用手册</a>。</p>
 <p>仓库：<a href="https://github.com/SidWuu/GuthonCodeTool">GitHub</a> · <a href="https://gitee.com/sidwu/GuthonCodeTool">Gitee 镜像</a></p>
 </blockquote>
 
@@ -142,7 +142,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <ul>
 <li>工具负责读取、整理、索引和生成安全工作副本。</li>
 <li>工具不会自动签出、保存、提交或签入谷神平台源码。</li>
-<li><code>var/source/readonly</code> 是上游镜像，禁止人工修改；开发只修改 <code>var/source/workcopy</code>。</li>
+<li>每个工作区的 <code>source/readonly</code> 是上游镜像，禁止人工修改；开发只修改同一工作区的 <code>source/workcopy</code>。</li>
 <li>数据库连接、源码、业务文档和运行索引均为本地私有内容，不进入公开仓库或 Release。</li>
 <li>Python 脚本继续作为开发与测试入口；普通用户只使用打包应用、VSIX 和 Bridge。</li>
 </ul>
@@ -159,7 +159,7 @@ Chrome 扩展 ──HTTP──▶ Bridge ─────┘
                           数据库 / 源码表
                                   │
                                   ▼
-                readonly / workcopy / SQLite / logs</code></pre></div>
+                   workspace / nexus</code></pre></div>
 <div class="plugin-highlight">
 <div><strong>GuthonCodeTool 应用</strong><span>统一执行同步、导出、查询、排查和 Workcopy 操作。</span></div>
 <div><strong>VSCode扩展: Guthon Nexus</strong><span>提供侧边栏、配置编辑、代码补全、悬浮说明和本地源码跳转。</span></div>
@@ -170,8 +170,8 @@ Chrome 扩展 ──HTTP──▶ Bridge ─────┘
 <li>VS Code 扩展保存应用路径和本地数据目录。</li>
 <li>用户确认操作后，扩展使用 <code>spawn</code> 启动应用并传入 <code>--home</code>。</li>
 <li>应用设置 <code>GUTHON_HOME</code>，所有配置和私有输出均相对于该目录解析。</li>
-<li><code>sync.ACTIVE</code> 决定当前产品或项目、数据库连接、readonly 范围和 SQLite 索引。</li>
-<li>Bridge 使用同一应用和同一本地数据目录，因此网页拉取与 VS Code 同步共享状态。</li>
+<li>Nexus 节点和 CLI 显式传入 <code>workspaceKey</code>，统一解析数据源、readonly、database 和 <code>context/index.db</code>。</li>
+<li>Bridge 使用显式工作区或页面身份路由；所有同步操作进入全局串行队列。</li>
 </ol>
 </section>
 
@@ -180,16 +180,19 @@ Chrome 扩展 ──HTTP──▶ Bridge ─────┘
 <h3 id="3-1-统一命令入口">3.1 统一命令入口</h3>
 <p><code>scripts/guthon_tool.py</code> 是打包应用入口。macOS 与 Windows 仅文件格式不同，命令和业务逻辑相同。</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>setup                 创建缺失配置，不覆盖已有文件
-init                  初始化当前 ACTIVE 源码索引
-sync-source           同步当前 ACTIVE 源码
+workspaces            列出全部产品、项目和同步状态
+route                 按 Bridge 页面身份解析工作区
+init                  初始化显式工作区源码索引
+sync-source           同步显式工作区源码
 sync-all              依次同步源码、表结构、单据类型、系统脚本和视图
-reindex               从 readonly 重建调用索引
+reindex               从显式工作区 readonly 重建调用索引
 export-schema         导出表结构
 export-bill-type      导出单据类型
 export-system-script  导出系统脚本
 export-view           导出视图
 query / diagnose      查询局部上下文 / 执行只读排查
 workcopy              查看状态、生成差异或交付物</code></pre></div>
+<p>除 <code>setup</code>、<code>doctor</code>、<code>workspaces</code>、<code>route</code> 等全局命令外，均要求 <code>--workspace products.&lt;id&gt;</code> 或 <code>--workspace projects.&lt;id&gt;</code>。</p>
 <h3 id="3-2-打包方式">3.2 打包方式</h3>
 <p><code>scripts/build_guthon_tool.py</code> 使用 PyInstaller <code>--onefile</code>，内置配置模板和运行所需 Python 模块。构建必须在目标系统执行：Windows 生成 EXE，macOS 生成 ARM64 Mach-O。</p>
 <ul>
@@ -205,10 +208,10 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <h3 id="4-1-配置职责">4.1 配置职责</h3>
 <ul>
 <li><code>datasource.yaml</code>：产品、项目和只读排查数据源；敏感值可引用环境变量。</li>
-<li><code>products.yaml</code>：产品名称、数据源和源码范围。</li>
-<li><code>projects.yaml</code>：项目名称、数据源和继承产品。</li>
+<li><code>products.yaml</code>：产品名称、数据源、子系统范围和可选页面来源。</li>
+<li><code>projects.yaml</code>：项目名称、数据源、继承产品、子系统范围和可选页面来源。</li>
 <li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射；公开模板只保留占位符，真实表名和字段名由内部配置提供。</li>
-<li><code>sync.yaml</code>：ACTIVE、子系统别名、未签入源码白名单和拉取规则。</li>
+<li><code>sync.yaml</code>：全局同步窗口、未签入源码白名单和拉取规则，不保存当前或默认工作区。</li>
 </ul>
 <p><code>setup</code> 只补齐缺失文件，不覆盖用户配置。系统与数据源映射查询后缓存到 <code>config/system-data.json</code>。</p>
 <h3 id="4-2-目录契约">4.2 目录契约</h3>
@@ -222,11 +225,16 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 └── var/
     ├── AGENTS.md
     ├── docs/
-    ├── source/readonly/
-    ├── source/workcopy/
-    ├── database/{schema,billtype,views}/
-    ├── knowledge/
-    └── runtime/{index,logs}/</code></pre></div>
+    ├── tools/
+    ├── nexus/{bridge,tool-runtime.json}
+    └── workspace/
+        ├── PRD &lt;产品名称&gt;/
+        └── PRJ &lt;项目名称&gt;/
+            ├── docs/
+            ├── source/{readonly,workcopy}/
+            ├── database/{schema,billtype,views}/
+            └── context/{README.md,index.db,state.json,logs}/</code></pre></div>
+<p><code>PRD</code>、<code>PRJ</code> 只控制目录和 Nexus 展示顺序，真实身份始终来自配置中的 <code>workspaceKey</code>。</p>
 </section>
 
 <section class="section">
@@ -242,7 +250,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <h3 id="5-2-过程函数导出">5.2 过程函数导出</h3>
 <p>过程函数保存到 <code>{子系统}/procedure/{过程别名}/{函数名}/source.vm</code>。项目继承标记使用配置映射的产品脚本；多个子系统共用数据源时只保存一份实体源码，其余目录使用链接。</p>
 <h3 id="5-3-调用索引">5.3 调用索引</h3>
-<p>每个 ACTIVE 使用独立 SQLite：<code>var/runtime/index/{products|projects}/&lt;id&gt;.db</code>。索引记录源码对象、静态调用和低置信动态调用；AI 应通过 <code>query</code> 获取局部上下文，不应直接加载全量源码索引。</p>
+<p>每个工作区使用自己的 <code>context/index.db</code>。索引记录源码对象、静态调用和低置信动态调用；AI 应使用显式 <code>workspaceKey</code> 通过 <code>query</code> 获取局部上下文，默认不得扫描全部工作区。</p>
 </section>
 
 <section class="section">
@@ -253,7 +261,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <li><strong>视图：</strong><code>export_view_sql.py</code> 读取 <code>gdp_tables_views.VIEW_SQL</code>。</li>
 <li><strong>系统脚本：</strong><code>export_system_script_sql.py</code> 按本机语义映射查询；项目 JavaScript 同时存在产品快照与项目覆盖时，固定按产品在前、项目在后合并。</li>
 </ul>
-<p>四类导出均复用 ACTIVE 的数据源与子系统范围。<code>sync-all</code> 固定按“源码 → 表结构 → 单据类型 → 系统脚本 → 视图”执行，任一步失败或 ACTIVE 中途变化即停止。</p>
+<p>四类导出均复用目标工作区的数据源与子系统范围。<code>sync-all</code> 固定按“源码 → 表结构 → 单据类型 → 系统脚本 → 视图”执行；任一步失败或同步期间配置摘要变化即停止。五步全部成功后才把该工作区标为 <code>SYNCED</code>。</p>
 </section>
 
 <section class="section">
@@ -272,9 +280,10 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <p>扩展入口为 <code>plugins/GuthonVSCodeExtension/gushen-vscode-completion/src/extension.js</code>。</p>
 <ul>
 <li>全局保存 <code>gushenCompletion.toolPath</code> 和 <code>gushenCompletion.toolHome</code>。</li>
+<li>“项目”树同时列出产品和项目，每个节点绑定自己的 <code>workspaceKey</code> 和同步状态。</li>
 <li>侧边栏所有执行型操作均先弹出确认；打开配置和目录保持单击。</li>
 <li>已初始化时再次执行“初始化工作区”会先确认是否切换；只有确认并选中新目录后才更新全局 <code>toolHome</code>，取消时保留原工作区。</li>
-<li>使用 <code>spawn(toolPath, [command, "--home", toolHome])</code>，不经过 Shell，因此 macOS 与 Windows 参数一致。</li>
+<li>使用 <code>spawn</code> 直接传递命令、<code>--home</code> 和 <code>--workspace</code>，不经过 Shell，因此 macOS 与 Windows 参数一致。</li>
 <li>提供 Java、JavaScript、SQL 方言补全、API 悬浮说明和过程函数转到定义。</li>
 <li>补全数据在 <code>data/index.json</code>，手工片段在 <code>data/manual.json</code>，路由规则在 <code>rules.json</code>。</li>
 </ul>
@@ -285,6 +294,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <p>Bridge 由 Chrome 扩展和监听 <code>127.0.0.1:17361</code> 的本地服务组成。服务入口为 <code>plugins/GuthonBridge/bridge/server.js</code>，随 VSIX 打包并由 Guthon Nexus 使用 VS Code 自带的 Node 运行环境启停。</p>
 <ul>
 <li>Nexus 直接把当前系统应用和本地数据目录传给 Bridge；用户不需要手工设置 <code>GUTHON_TOOL_PATH</code> 或 <code>GUTHON_TOOL_HOME</code>。</li>
+<li>请求携带 <code>workspaceKey</code> 时验证页面身份；未携带时按 <code>pageOrigin + dataSourceId + systemId</code> 匹配，多个候选由 Chrome 只为当前请求选择。</li>
 <li>页面提供过程函数/PAGE 拉取、表结构、单据类型、视图、系统脚本、复制模式和字段平移。</li>
 <li>允许访问的平台范围由 <code>extension/host-config.js</code> 的 CIDR、域名后缀和路径前缀控制。</li>
 <li>Bridge 不提供平台回写接口；保存、签出、提交和签入仍由用户在谷神平台完成。</li>

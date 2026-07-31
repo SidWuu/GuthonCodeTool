@@ -118,6 +118,28 @@ async function getActiveTab() {
   return tab;
 }
 
+async function sendWorkspaceRequest(type, payload) {
+  const tab = await getActiveTab();
+  const pageOrigin = tab.url ? new URL(tab.url).origin : "";
+  const request = { pageOrigin, ...payload };
+  const result = await chrome.runtime.sendMessage({ type, payload: request });
+  if (!result?.workspaceSelectionRequired) {
+    return result;
+  }
+  if (!result.candidates?.length) {
+    throw new Error(result.message || "页面身份未匹配到工作区");
+  }
+  const choices = result.candidates.map((item, index) => `${index + 1}. ${item.displayName} (${item.id})`).join("\n");
+  const selected = Number(window.prompt(`请选择本次请求的工作区：\n${choices}`, "1"));
+  if (!Number.isInteger(selected) || selected < 1 || selected > result.candidates.length) {
+    throw new Error("已取消工作区选择");
+  }
+  return chrome.runtime.sendMessage({
+    type,
+    payload: { ...request, workspaceKey: result.candidates[selected - 1].workspaceKey }
+  });
+}
+
 async function runInMainWorld(tabId, command, payload) {
   try {
     const result = await chrome.tabs.sendMessage(tabId, {
@@ -293,46 +315,49 @@ async function runHubPull(force = false, pullAllSystemScripts = false) {
     if (!pullAllSystemScripts && scriptTypes.length === 0) {
       throw new Error("请先点击脚本行进行选中，或使用“拉取全部脚本”");
     }
-    return chrome.runtime.sendMessage({
-      type: "export-system-scripts",
-      payload: {
+    return sendWorkspaceRequest(
+      "export-system-scripts",
+      {
+        dataSourceId: target.dataSourceId || "",
         systemIds: [target.systemId],
         scriptTypes
       }
-    });
+    );
   }
   if (target.mode === "views") {
-    return chrome.runtime.sendMessage({
-      type: "export-view-sql",
-      payload: {
+    return sendWorkspaceRequest(
+      "export-view-sql",
+      {
         dataSourceIds: [target.dataSourceId],
         viewIds: target.viewIds
       }
-    });
+    );
   }
   if (target.mode === "billtype") {
-    return chrome.runtime.sendMessage({
-      type: "export-bill-type",
-      payload: {
+    return sendWorkspaceRequest(
+      "export-bill-type",
+      {
         dataSourceIds: [target.dataSourceId],
         billTypeCodes: target.billTypeCodes
       }
-    });
+    );
   }
   if (target.mode === "table-schema") {
-    return chrome.runtime.sendMessage({
-      type: "export-table-schema",
-      payload: {
+    return sendWorkspaceRequest(
+      "export-table-schema",
+      {
         dataSourceId: target.dataSourceId,
         tableIds: target.tableIds
       }
-    });
+    );
   }
   const payload = {
     sourceType: target.mode === "page-source" ? "page" : "procedure",
     sourceId: target.mode === "page-source" ? target.pageId || "" : target.procedureId || "",
     alias: target.procedureKeyword || "",
     funId: target.mode === "page-source" ? "" : target.funId || "",
+    dataSourceId: target.dataSourceId || "",
+    systemId: target.systemId || "",
     force
   };
   if (payload.sourceType === "page" && !payload.sourceId && !payload.alias) {
@@ -341,7 +366,7 @@ async function runHubPull(force = false, pullAllSystemScripts = false) {
   if (payload.sourceType === "procedure" && ((!payload.sourceId && !payload.alias) || !payload.funId)) {
     throw new Error("当前页面没有识别到过程函数源码表查询条件");
   }
-  return chrome.runtime.sendMessage({ type: "pull-hub-source", payload });
+  return sendWorkspaceRequest("pull-hub-source", payload);
 }
 
 pullPageBtn.addEventListener("click", async () => {

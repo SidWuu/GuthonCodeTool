@@ -149,6 +149,26 @@ function sendRuntimeMessage(message) {
   });
 }
 
+async function sendWorkspaceRequest(type, payload) {
+  const request = { pageOrigin: location.origin, ...payload };
+  const result = await sendRuntimeMessage({ type, payload: request });
+  if (!result?.workspaceSelectionRequired) {
+    return result;
+  }
+  if (!result.candidates?.length) {
+    throw new Error(result.message || "页面身份未匹配到工作区");
+  }
+  const choices = result.candidates.map((item, index) => `${index + 1}. ${item.displayName} (${item.id})`).join("\n");
+  const selected = Number(window.prompt(`请选择本次请求的工作区：\n${choices}`, "1"));
+  if (!Number.isInteger(selected) || selected < 1 || selected > result.candidates.length) {
+    throw new Error("已取消工作区选择");
+  }
+  return sendRuntimeMessage({
+    type,
+    payload: { ...request, workspaceKey: result.candidates[selected - 1].workspaceKey }
+  });
+}
+
 function setButtonTitle(root, message) {
   root.querySelector("button").title = message;
 }
@@ -639,16 +659,18 @@ async function pullCurrentProcedure(root, button = root.querySelector("button"),
     }
     let pullResult;
     try {
-      pullResult = await sendRuntimeMessage({
-        type: "pull-hub-source",
-        payload: {
+      pullResult = await sendWorkspaceRequest(
+        "pull-hub-source",
+        {
           sourceType: target.mode === "page-source" ? "page" : "procedure",
           sourceId: target.mode === "page-source" ? target.pageId || "" : target.procedureId || "",
           alias: target.procedureKeyword || target.procedureName || "",
           funId: target.mode === "page-source" ? "" : target.funId || "",
+          dataSourceId: target.dataSourceId || "",
+          systemId: target.systemId || "",
           force
         }
-      });
+      );
     } catch (error) {
       throw new Error(toErrorMessage("源码表拉取失败", error));
     }
@@ -690,10 +712,7 @@ async function exportCurrentTableSchema(root, button = root.querySelector("butto
       throw new Error(`识别数据表失败: ${inspected?.message || "未识别到数据源"}`);
     }
 
-    const result = await sendRuntimeMessage({
-      type: "export-table-schema",
-      payload: inspected.data
-    });
+    const result = await sendWorkspaceRequest("export-table-schema", inspected.data);
     if (!result?.ok) {
       throw new Error(result?.message || "表结构拉取失败");
     }
@@ -733,13 +752,13 @@ async function exportCurrentBillType(root, button = root.querySelector("button")
       throw new Error(`识别单据类型失败: ${inspected?.message || "未识别到数据源"}`);
     }
 
-    const result = await sendRuntimeMessage({
-      type: "export-bill-type",
-      payload: {
+    const result = await sendWorkspaceRequest(
+      "export-bill-type",
+      {
         dataSourceIds: [inspected.data.dataSourceId],
         billTypeCodes: inspected.data.billTypeCodes || []
       }
-    });
+    );
     if (!result?.ok) {
       throw new Error(result?.message || "单据类型拉取失败");
     }
@@ -780,13 +799,13 @@ async function exportCurrentViewSql(root, button = root.querySelector("button"))
       throw new Error(`识别视图失败: ${inspected?.message || "未识别到数据源"}`);
     }
 
-    const result = await sendRuntimeMessage({
-      type: "export-view-sql",
-      payload: {
+    const result = await sendWorkspaceRequest(
+      "export-view-sql",
+      {
         dataSourceIds: [inspected.data.dataSourceId],
         viewIds: inspected.data.viewIds || []
       }
-    });
+    );
     if (!result?.ok) {
       throw new Error(result?.message || "视图源码拉取失败");
     }
@@ -832,13 +851,14 @@ async function exportCurrentSystemScripts(root, button, pullAll = false) {
       throw new Error("请先点击脚本行进行选中，或使用“全部拉取”");
     }
 
-    const result = await sendRuntimeMessage({
-      type: "export-system-scripts",
-      payload: {
+    const result = await sendWorkspaceRequest(
+      "export-system-scripts",
+      {
+        dataSourceId: inspected.data.dataSourceId || "",
         systemIds: [inspected.data.systemId],
         scriptTypes
       }
-    });
+    );
     if (!result?.ok) {
       throw new Error(result?.message || "系统脚本拉取失败");
     }
@@ -1178,10 +1198,10 @@ async function showProcedureCallers(target) {
   overlay.querySelector(".guthon-bridge-callers-head button").addEventListener("click", () => removeNode(CALLERS_OVERLAY_ID));
   document.body.appendChild(overlay);
 
-  const result = await sendRuntimeMessage({
-    type: "query-procedure-callers",
-    payload: { alias: target.procedureKeyword, funId: target.funId }
-  });
+  const result = await sendWorkspaceRequest(
+    "query-procedure-callers",
+    { alias: target.procedureKeyword, funId: target.funId }
+  );
   if (!result?.ok) {
     throw new Error(result?.message || "调用方查询失败");
   }

@@ -9,11 +9,11 @@ import re
 from pathlib import Path
 
 import gusen_hub
-from export_table_schema_sql import normalize_data_source_ids, resolve_data_source_ids, resolve_output_dir
+from export_table_schema_sql import normalize_data_source_ids, resolve_data_source_ids
 
 
 ROOT = gusen_hub.ROOT
-DEFAULT_OUTPUT_DIR = ROOT / "var" / "database" / "billtype"
+DEFAULT_OUTPUT_DIR = ROOT / "var" / "workspace"
 
 
 def sanitize_name(value):
@@ -148,16 +148,19 @@ def export_bill_types(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None,
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Export Gushen bill types directly from SQL.")
-    parser.add_argument("--datasource", help="Datasource override. Defaults to the product or project selected by sync.ACTIVE.")
-    parser.add_argument("--output-dir", help="Output directory override. Defaults to var/database/billtype/{products|projects}/<active_name>.")
-    parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to IDs resolved from config/sync.yaml systems.include.system_aliases.")
+    parser.add_argument("--workspace")
+    parser.add_argument("--datasource", help="Datasource override. Defaults to the selected workspace datasource.")
+    parser.add_argument("--output-dir", help="Output directory override. Defaults to <workspace>/database/billtype.")
+    parser.add_argument("--data-source-ids", help="Comma-separated DATA_SOURCE_ID list. Defaults to the workspace system aliases.")
     parser.add_argument("--bill-type-codes", help="Comma-separated BILL_TYPE_CODE list. Defaults to all bill types in selected data sources.")
     args = parser.parse_args(argv)
 
     requested_data_source_ids = normalize_data_source_ids(args.data_source_ids) if args.data_source_ids else []
     bill_type_codes = normalize_bill_type_codes(args.bill_type_codes)
     config = gusen_hub.load_config()
-    output_dir = resolve_output_dir(DEFAULT_OUTPUT_DIR, args.output_dir, config)
+    if args.workspace:
+        gusen_hub.set_workspace(args.workspace)
+    output_dir = Path(args.output_dir) if args.output_dir else gusen_hub.resolve_workspace(config)["databaseDir"] / "billtype"
     datasource_name, datasource = gusen_hub.resolve_datasource(config, args.datasource)
     with gusen_hub.db_connect(datasource) as conn:
         data_source_ids = resolve_data_source_ids(conn, datasource_name, requested_data_source_ids)
