@@ -674,7 +674,7 @@ tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
   display: none !important;
 }
 
-.guthon-script-editor-minimize {
+.el-dialog__wrapper .el-dialog__header .el-dialog__headerbtn.guthon-script-editor-minimize {
   right: 42px !important;
 }
 

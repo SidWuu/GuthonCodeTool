@@ -1336,8 +1336,11 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   assert.equal(pageBridge.includes('document.addEventListener("mousemove", onProcedureTitleMove, true)'), true);
   assert.equal(fs.readFileSync(BRIDGE_CSS_PATH, "utf8").includes("::highlight(guthon-procedure-title-link)"), true);
   assert.equal(pageBridge.includes("installScriptEditorMinimizeButtons();"), true);
+  assert.equal(pageBridge.includes('document.querySelectorAll(".el-dialog__wrapper")'), true);
+  assert.equal(pageBridge.includes('wrapper.querySelector(".script-editor")'), true);
   assert.equal(pageBridge.includes('button.className = "el-dialog__headerbtn guthon-script-editor-minimize"'), true);
   assert.equal(pageBridge.includes('icon.className = "el-dialog__close el-icon el-icon-minus"'), true);
+  assert.equal(fs.readFileSync(BRIDGE_CSS_PATH, "utf8").includes(".el-dialog__wrapper .el-dialog__header .el-dialog__headerbtn.guthon-script-editor-minimize"), true);
   assert.equal(pageBridge.includes("const editor = editors.find(isVisible) || editors[0]"), true);
   assert.equal(pageBridge.includes("buttonSetup && !minimizedScriptEditor.editorWasVisible"), true);
   assert.equal(pageBridge.includes("editor.onMouseMove?.("), true);

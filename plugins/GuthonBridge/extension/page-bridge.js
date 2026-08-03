@@ -653,7 +653,10 @@
   }
 
   function installScriptEditorMinimizeButtons() {
-    Array.from(document.querySelectorAll(".el-dialog__wrapper.gd-script-dialog")).forEach((wrapper) => {
+    Array.from(document.querySelectorAll(".el-dialog__wrapper")).forEach((wrapper) => {
+      if (!wrapper.querySelector(".script-editor")) {
+        return;
+      }
       const header = wrapper.querySelector(":scope > .el-dialog > .el-dialog__header");
       if (!header) {
         return;
