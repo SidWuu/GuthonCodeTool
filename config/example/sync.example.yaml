@@ -19,6 +19,8 @@ rules:
   skip_error_source: true
   # 拉取 workcopy 后，自动暂存其所在 Git 仓库中的未跟踪新文件；不会强制添加被忽略文件。
   pull_auto_add_git: false
+  # 手动拉取 PAGE 时，true 拉取整个模块菜单，false 只拉取选中的菜单；缺省按 false 处理。
+  pull_more_page: false
 
 # 谷神 API 文档与 VSCode 补全数据同步配置。
 guthon_api:

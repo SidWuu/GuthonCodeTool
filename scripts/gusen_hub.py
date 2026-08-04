@@ -2099,7 +2099,7 @@ def pull_source_to_work_copy(payload: dict):
             cur.execute(sql, params)
             row = cur.fetchone()
             rows = [row] if row else []
-            if row and row["source_table"] == PAGE_SOURCE_TYPE and row.get("mk_id"):
+            if row and row["source_table"] == PAGE_SOURCE_TYPE and row.get("mk_id") and rules.get("pull_more_page", False):
                 module_sql, module_params = module_page_sql(cfg["source_tables"], row, rules)
                 cur.execute(module_sql, module_params)
                 rows = cur.fetchall()
