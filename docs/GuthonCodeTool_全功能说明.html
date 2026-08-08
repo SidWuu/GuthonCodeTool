@@ -182,10 +182,11 @@ Chrome 扩展 ──HTTP──▶ Bridge ─────┘
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>setup                 创建缺失配置，不覆盖已有文件
 workspaces            列出全部产品、项目和同步状态
 route                 按 Bridge 页面身份解析工作区
-init                  初始化显式工作区源码索引
-sync-source           同步显式工作区源码
+sync-source-all       拉取所有源码并重建索引
+sync-source           拉取显式工作区源码
 sync-all              依次同步源码、表结构、单据类型、系统脚本和视图
-reindex               从显式工作区 readonly 重建调用索引
+reindex               从显式工作区 readonly 重建索引
+export-markdown       导出源码索引文档
 export-schema         导出表结构
 export-bill-type      导出单据类型
 export-system-script  导出系统脚本

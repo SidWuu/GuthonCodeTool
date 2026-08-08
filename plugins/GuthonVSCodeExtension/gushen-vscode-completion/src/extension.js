@@ -25,7 +25,7 @@ const SUPPORTED_LANGUAGES = ['java', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled'];
 const TOOL_COMMANDS = {
   setup: 'setup',
-  init: 'init',
+  syncSourceAll: 'sync-source-all',
   syncSource: 'sync-source',
   syncAll: 'sync-all',
   reindex: 'reindex',
@@ -41,10 +41,10 @@ const TOOL_COMMANDS = {
 const CONFIG_FILES = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'source-tables.yaml', 'sync.yaml'];
 const TOOL_LABELS = {
   setup: '初始化工作区',
-  init: '初始化源码索引',
-  'sync-source': '同步工作区源码',
+  'sync-source-all': '拉取源码重建索引',
+  'sync-source': '拉取源码',
   'sync-all': '同步工作区全部资料',
-  reindex: '重建本地调用索引',
+  reindex: '重建索引',
   'export-markdown': '导出源码索引文档',
   'export-schema': '导出表结构',
   'export-bill-type': '导出单据类型',
@@ -323,9 +323,9 @@ class ToolTreeDataProvider {
         const source = new vscode.TreeItem('源码与索引', vscode.TreeItemCollapsibleState.Collapsed);
         source.iconPath = new vscode.ThemeIcon('code');
         source.children = [
-          toolItem('初始化源码索引', 'gushenCompletion.initSourceIndex', 'database', undefined, [item.workspaceKey]),
-          toolItem('同步源码', 'gushenCompletion.syncWorkspaceSource', 'sync', undefined, [item.workspaceKey]),
-          toolItem('重建调用索引', 'gushenCompletion.reindexCalls', 'refresh', undefined, [item.workspaceKey]),
+          toolItem('拉取源码重建索引', 'gushenCompletion.initSourceIndex', 'database', undefined, [item.workspaceKey]),
+          toolItem('拉取源码', 'gushenCompletion.syncWorkspaceSource', 'sync', undefined, [item.workspaceKey]),
+          toolItem('重建索引', 'gushenCompletion.reindexCalls', 'refresh', undefined, [item.workspaceKey]),
           toolItem('导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book', undefined, [item.workspaceKey]),
         ];
         const metadata = new vscode.TreeItem('配置资料', vscode.TreeItemCollapsibleState.Collapsed);
@@ -444,7 +444,7 @@ function activate(context) {
       if (!await bridge.stop()) return vscode.window.showInformationMessage('Guthon Bridge 未运行');
       return vscode.window.showInformationMessage('Guthon Bridge 已停止');
     }),
-    vscode.commands.registerCommand('gushenCompletion.initSourceIndex', (workspaceKey) => runTool(TOOL_COMMANDS.init, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.initSourceIndex', (workspaceKey) => runTool(TOOL_COMMANDS.syncSourceAll, [], true, workspaceKey)),
     vscode.commands.registerCommand('gushenCompletion.syncWorkspaceSource', (workspaceKey) => runTool(TOOL_COMMANDS.syncSource, [], true, workspaceKey)),
     vscode.commands.registerCommand('gushenCompletion.syncWorkspaceAll', (workspaceKey) => runTool(TOOL_COMMANDS.syncAll, [], true, workspaceKey)),
     vscode.commands.registerCommand('gushenCompletion.reindexCalls', (workspaceKey) => runTool(TOOL_COMMANDS.reindex, [], true, workspaceKey)),

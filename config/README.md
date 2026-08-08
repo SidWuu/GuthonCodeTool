@@ -75,7 +75,10 @@ products:
 
 ```bash
 .venv/bin/python scripts/guthon_tool.py sync-all --home . --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py sync-source-all --home . --workspace products.demo-product
 .venv/bin/python scripts/guthon_tool.py sync-source --home . --workspace projects.demo-project
+.venv/bin/python scripts/guthon_tool.py reindex --home . --workspace projects.demo-project
+.venv/bin/python scripts/guthon_tool.py export-markdown --home . --workspace projects.demo-project
 ```
 
 目录按显示名称平铺，真实身份始终使用稳定键：

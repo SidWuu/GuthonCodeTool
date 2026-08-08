@@ -93,10 +93,11 @@ products:
 工作区命令必须显式传入 `--workspace`：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py init --home . --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py sync-source-all --home . --workspace products.demo-product
 .venv/bin/python scripts/guthon_tool.py sync-source --home . --workspace products.demo-product
 .venv/bin/python scripts/guthon_tool.py sync-all --home . --workspace products.demo-product
 .venv/bin/python scripts/guthon_tool.py reindex --home . --workspace projects.demo-project
+.venv/bin/python scripts/guthon_tool.py export-markdown --home . --workspace products.demo-product
 ```
 
 也可以使用完整同步包装脚本：

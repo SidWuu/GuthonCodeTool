@@ -17,9 +17,9 @@ Build `dist/GuthonCodeTool` (or `GuthonCodeTool.exe` on Windows) on each target 
 
 Clicking `Guthon Nexus: 初始化工作区` again after initialization asks whether to switch workspaces. Confirming lets the user select a new local data directory and initializes its missing configuration files; cancelling keeps the current workspace.
 
-Each workspace node can synchronize source, table schemas, bill types, system scripts, and views. All command output is shown in the `GuthonCodeTool` output channel.
+Each workspace node can pull all source and rebuild its index, pull source, rebuild the index, export source-index Markdown, and synchronize table schemas, bill types, system scripts, and views. All command output is shown in the `GuthonCodeTool` output channel.
 
-The extension also adds a dedicated `Guthon Nexus` icon to VS Code's left activity bar. Its tree exposes initialization, source/index sync, metadata export, environment checks, source diagnosis, and workcopy status/diff/package actions, so colleagues do not need to use the command palette.
+The extension also adds a dedicated `Guthon Nexus` icon to VS Code's left activity bar. Its tree exposes workspace setup, source/index operations, metadata export, environment checks, source diagnosis, and workcopy status/diff/package actions, so colleagues do not need to use the command palette.
 
 `工作区` → `运行模式` defaults to `发行模式`. Maintainers can switch to `调试模式` and select a GuthonCodeTool source checkout containing `.venv` and `scripts/guthon_tool.py`. Sidebar commands and Bridge requests then run the current Python sources directly; switching back reuses the saved packaged application and the same data directory.
 

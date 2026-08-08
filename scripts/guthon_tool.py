@@ -32,6 +32,7 @@ SCRIPT_COMMANDS = {
     "workcopy": ("gusen_hub", "work_copy_cli"),
 }
 COMMAND_STEPS = {
+    "sync-source-all": "source",
     "sync-source": "source",
     "export-schema": "schema",
     "export-bill-type": "billType",
@@ -127,13 +128,17 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         gusen_hub.update_workspace_state(config, workspace, "source", "INITIALIZED")
         print("本地源码索引初始化完成")
         return 0
+    if command == "sync-source-all":
+        gusen_hub.run_sync_once(["--full-rebuild"])
+        print(f"工作区全部源码拉取并索引重建完成：{workspace['workspaceKey']}")
+        return 0
     if command == "sync-source":
         gusen_hub.run_sync_once([])
-        print(f"工作区源码同步完成：{workspace['workspaceKey']}")
+        print(f"工作区源码拉取完成：{workspace['workspaceKey']}")
         return 0
     if command == "reindex":
         gusen_hub.run_sync_once(["--reindex-calls"])
-        print("本地调用索引重建完成")
+        print("本地索引重建完成")
         return 0
     if command == "pull":
         payload = json.load(sys.stdin)
@@ -192,7 +197,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("setup", "workspaces", "route", "init", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
+        choices=("setup", "workspaces", "route", "init", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
     )
     parser.add_argument("--home", required=True, help="Directory that stores local config and private source data")
     parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")

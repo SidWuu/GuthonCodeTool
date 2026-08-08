@@ -567,7 +567,6 @@ def connect_index(index_db: Path) -> sqlite3.Connection:
         """
     )
     conn.execute("DROP TABLE IF EXISTS gusen_effective_source")
-    conn.execute("DELETE FROM gusen_sync_state WHERE state_key='last_success_time'")
     conn.commit()
     return conn
 
@@ -930,6 +929,7 @@ def run_sync_once(args=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--init-only", action="store_true", help="create local sqlite schema and docs only")
     mode.add_argument("--reindex-calls", action="store_true", help="rebuild call index from local readonly sources")
+    mode.add_argument("--full-rebuild", action="store_true", help="pull all eligible sources and rebuild the call index")
     parsed = parser.parse_args(args)
     cfg = load_config()
     if parsed.workspace:
@@ -950,11 +950,12 @@ def run_sync_once(args=None):
         export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
         return
 
+    full_rebuild = parsed.full_rebuild
     lookback = int(sync.get("lookback_minutes", 10))
     state_key = "last_success_time"
-    sync_from = _sync_from(conn, lookback, state_key)
+    sync_from = "1970-01-01 00:00:00" if full_rebuild else _sync_from(conn, lookback, state_key)
     stats = {
-        "mode": "sync",
+        "mode": "full-rebuild" if full_rebuild else "sync",
         "workspaceKey": workspace["workspaceKey"],
         "sync_from": sync_from,
         "candidates": 0,
@@ -972,12 +973,15 @@ def run_sync_once(args=None):
         sync_from,
         stats,
         workspace,
+        force=full_rebuild,
     )
     conn.execute(
         "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
         (state_key, _now()),
     )
     conn.commit()
+    if full_rebuild:
+        stats["reindexed"] = reindex_local_calls(conn)
     export_status(conn, stats)
     export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
     append_pull_log(
@@ -1010,7 +1014,7 @@ def resolve_datasource(cfg, name=None, workspace=None):
     return name, datasource
 
 
-def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, stats, workspace):
+def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, stats, workspace, force=False):
     ds_name = layer_cfg["datasource"]
     ds = cfg["datasource"]["datasource"][ds_name]
     table_cfg = cfg["source_tables"]
@@ -1030,7 +1034,7 @@ def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, 
                         continue
                     if row["source_table"] == PAGE_SOURCE_TYPE:
                         row["model_path"] = model_paths.get(_str(row.get("model_id")))
-                    if upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_scope):
+                    if upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_scope, force=force):
                         stats["changed"] += 1
             cur.execute(inventory_query, inventory_params)
             current_page_ids = {row["source_id"] for row in cur.fetchall() if _included(layer_cfg, row)}
