@@ -151,6 +151,16 @@ function sendRuntimeMessage(message) {
 
 async function sendWorkspaceRequest(type, payload) {
   const request = { pageOrigin: location.origin, ...payload };
+  const cachedWorkspaceKey = await GuthonBridgeWorkspace.storedWorkspaceKey(location.href);
+  if (cachedWorkspaceKey) {
+    const cachedResult = await sendRuntimeMessage({
+      type,
+      payload: { ...request, workspaceKey: cachedWorkspaceKey }
+    });
+    if (!GuthonBridgeWorkspace.isWorkspaceCacheError(cachedResult)) {
+      return cachedResult;
+    }
+  }
   const result = await sendRuntimeMessage({ type, payload: request });
   if (!result?.workspaceSelectionRequired) {
     return result;

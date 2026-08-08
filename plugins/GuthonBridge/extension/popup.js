@@ -122,6 +122,16 @@ async function sendWorkspaceRequest(type, payload) {
   const tab = await getActiveTab();
   const pageOrigin = tab.url ? new URL(tab.url).origin : "";
   const request = { pageOrigin, ...payload };
+  const cachedWorkspaceKey = await GuthonBridgeWorkspace.storedWorkspaceKey(tab.url || pageOrigin);
+  if (cachedWorkspaceKey) {
+    const cachedResult = await chrome.runtime.sendMessage({
+      type,
+      payload: { ...request, workspaceKey: cachedWorkspaceKey }
+    });
+    if (!GuthonBridgeWorkspace.isWorkspaceCacheError(cachedResult)) {
+      return cachedResult;
+    }
+  }
   const result = await chrome.runtime.sendMessage({ type, payload: request });
   if (!result?.workspaceSelectionRequired) {
     return result;

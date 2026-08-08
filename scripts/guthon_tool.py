@@ -95,7 +95,11 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
 
     config = gusen_hub.load_config()
     workspace = None if command in GLOBAL_COMMANDS or command == "pull" and not selected_workspace else gusen_hub.resolve_workspace(config)
-    before = gusen_hub.untracked_files() if workspace else set()
+    auto_add_git = bool((config.get("sync", {}).get("rules") or {}).get("pull_auto_add_git"))
+    before = set()
+    if workspace and auto_add_git:
+        workspace_prefix = workspace["root"].relative_to(gusen_hub.VAR_DIR).as_posix()
+        before = gusen_hub.untracked_files(pathspec=[workspace_prefix])
     os.environ["GUTHON_DEFER_GIT_ADD"] = "1"
     step = COMMAND_STEPS.get(command)
     result_code = 0

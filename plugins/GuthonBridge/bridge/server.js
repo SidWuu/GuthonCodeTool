@@ -176,6 +176,14 @@ function systemScriptSummary(payload, result = {}) {
   };
 }
 
+function commandErrorMessage(errorLabel, output, code) {
+  const message = String(output || "").trim();
+  if (/(?:pymysql\.err\.(?:Operational|Interface)Error|CR_SERVER_LOST|Can't connect to MySQL server|Lost connection to MySQL server|\((?:2003|2006|2013),)/i.test(message)) {
+    return "无法连接源码数据库，请确认已连接公司内网或 VPN 后重试";
+  }
+  return message || `${errorLabel}失败，退出码：${code}`;
+}
+
 function runJsonProcess(executable, args, errorLabel, input) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
@@ -194,7 +202,7 @@ function runJsonProcess(executable, args, errorLabel, input) {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error((stderr || stdout || `${errorLabel}失败，退出码：${code}`).trim()));
+        reject(new Error(commandErrorMessage(errorLabel, stderr || stdout, code)));
         return;
       }
       try {

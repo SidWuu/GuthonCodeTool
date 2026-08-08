@@ -18,6 +18,20 @@
       : "";
   }
 
+  async function storedWorkspaceKey(pageUrl) {
+    const storage = root.chrome?.storage?.local;
+    if (!storage?.get) {
+      return "";
+    }
+    const stored = await storage.get(STORAGE_KEY);
+    const selection = stored?.[STORAGE_KEY];
+    return selection?.address === guthonAddress(pageUrl) ? String(selection.workspaceKey || "") : "";
+  }
+
+  function isWorkspaceCacheError(result) {
+    return result?.ok === false && /^(Unknown workspace:|Page identity does not match workspace:)/.test(String(result.message || ""));
+  }
+
   function showWorkspaceDialog(candidates) {
     return new Promise((resolve, reject) => {
       const dialog = document.createElement("dialog");
@@ -81,7 +95,7 @@
     return workspaceKey;
   }
 
-  const api = { cachedWorkspaceKey, guthonAddress, select };
+  const api = { cachedWorkspaceKey, guthonAddress, isWorkspaceCacheError, select, storedWorkspaceKey };
   root.GuthonBridgeWorkspace = api;
   if (typeof module === "object" && module.exports) {
     module.exports = api;

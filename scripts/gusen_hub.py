@@ -443,9 +443,9 @@ def request_identity(payload):
     return str(payload.get("pageOrigin") or "").rstrip("/"), data_source_ids, system_ids
 
 
-def workspace_matches_request(config, workspace, payload):
+def workspace_matches_request(config, workspace, payload, match_origin=True):
     origin, data_source_ids, system_ids = request_identity(payload)
-    if workspace["pageOrigins"] and origin not in workspace["pageOrigins"]:
+    if match_origin and workspace["pageOrigins"] and origin not in workspace["pageOrigins"]:
         return False
     if not data_source_ids and not system_ids:
         return bool(origin)
@@ -463,8 +463,9 @@ def route_workspace_request(config, payload):
     requested = str(payload.get("workspaceKey") or "").strip()
     if requested:
         workspace = resolve_workspace(config, requested)
-        if any(request_identity(payload)[1:]) or workspace["pageOrigins"]:
-            if not workspace_matches_request(config, workspace, payload):
+        identity = request_identity(payload)
+        if not workspace_matches_request(config, workspace, payload):
+            if not any(identity[1:]) or not workspace_matches_request(config, workspace, payload, match_origin=False):
                 raise SystemExit(f"Page identity does not match workspace: {requested}")
         return {"ok": True, "workspaceKey": requested, "workspace": workspace_summary(config, workspace)}
     candidates = [
@@ -479,6 +480,12 @@ def route_workspace_request(config, payload):
             "workspaceKey": workspace["workspaceKey"],
             "workspace": workspace_summary(config, workspace),
         }
+    if not candidates and any(request_identity(payload)[1:]):
+        candidates = [
+            workspace
+            for workspace in list_workspaces(config)
+            if workspace_matches_request(config, workspace, payload, match_origin=False)
+        ]
     return {
         "ok": False,
         "workspaceSelectionRequired": True,
@@ -1920,10 +1927,13 @@ def _auto_add_work_copy(cfg: dict, target: Path):
     return {"gitAddStatus": "ADDED", "gitAdded": len(paths), "gitRoot": str(repo_root)}
 
 
-def untracked_files(repo_root=None):
+def untracked_files(repo_root=None, pathspec=None):
     repo_root = repo_root or VAR_DIR
+    command = ["git", "-C", str(repo_root), "ls-files", "--others", "--exclude-standard", "-z"]
+    if pathspec:
+        command.extend(["--", *pathspec])
     result = subprocess.run(
-        ["git", "-C", str(repo_root), "ls-files", "--others", "--exclude-standard", "-z"],
+        command,
         capture_output=True,
         text=True,
         check=False,
@@ -1935,7 +1945,7 @@ def auto_add_operation_files(config, before, workspace):
     if not (config.get("sync", {}).get("rules") or {}).get("pull_auto_add_git"):
         return {"gitAddStatus": "DISABLED", "gitAdded": 0}
     prefix = workspace["root"].relative_to(VAR_DIR).as_posix() + "/"
-    paths = sorted(path for path in untracked_files() - set(before) if path.startswith(prefix))
+    paths = sorted(path for path in untracked_files(pathspec=[prefix]) - set(before) if path.startswith(prefix))
     if not paths:
         return {"gitAddStatus": "NO_NEW_FILES", "gitAdded": 0}
     result = subprocess.run(

@@ -329,6 +329,43 @@ process.stdout.write(JSON.stringify({ ok: true, exported_table_count: 1, outputD
   }
 });
 
+test("database connection failures return a friendly message", async () => {
+  const port = 17469;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-database-error-"));
+  const schemaScript = path.join(tmp, "fake-schema.js");
+  fs.writeFileSync(
+    schemaScript,
+    'process.stderr.write("Traceback (most recent call last):\\npymysql.err.OperationalError: (2013, \\\"Lost connection to MySQL server during query\\\")"); process.exit(1);',
+    "utf8",
+  );
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_HUB_PYTHON: process.execPath,
+      GUTHON_TABLE_SCHEMA_SCRIPT: schemaScript,
+    },
+    stdio: "ignore",
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/exportTableSchema`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceKey: "products.demo-product", dataSourceId: "0015" }),
+    });
+    const data = await response.json();
+
+    assert.equal(response.status, 500);
+    assert.equal(data.message, "无法连接源码数据库，请确认已连接公司内网或 VPN 后重试");
+    assert.equal(data.message.includes("Traceback"), false);
+  } finally {
+    server.kill();
+  }
+});
+
 test("exportBillType delegates to script and writes pull log", async () => {
   const port = 17464;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-billtype-command-"));
@@ -657,7 +694,7 @@ test("popup exposes separate page and hub pull actions without hub target input"
 
 test("workspace selection reuses the same Guthon address and an available candidate", () => {
   delete require.cache[require.resolve(WORKSPACE_SELECTION_PATH)];
-  const { cachedWorkspaceKey, guthonAddress } = require(WORKSPACE_SELECTION_PATH);
+  const { cachedWorkspaceKey, guthonAddress, isWorkspaceCacheError } = require(WORKSPACE_SELECTION_PATH);
   const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
   const candidates = [{ workspaceKey: "projects.demo" }];
   const firstPage = "https://example.test/guthon/gdpaas/dev/modules?id=1";
@@ -668,10 +705,41 @@ test("workspace selection reuses the same Guthon address and an available candid
   assert.equal(cachedWorkspaceKey(selection, "https://example.test/guthon/gdpaas/dev/procedure_develop", candidates), "projects.demo");
   assert.equal(cachedWorkspaceKey(selection, "https://other.test/guthon/gdpaas/dev/modules", candidates), "");
   assert.equal(cachedWorkspaceKey(selection, firstPage, []), "");
+  assert.equal(isWorkspaceCacheError({ ok: false, message: "Page identity does not match workspace: projects.demo" }), true);
+  assert.equal(isWorkspaceCacheError({ ok: false, message: "源码表拉取失败" }), false);
   assert.equal(css.includes(".guthon-bridge-workspace-select"), true);
   assert.equal(css.includes("background: #409eff"), true);
   assert.equal(css.includes("top: 50% !important"), true);
   assert.equal(css.includes("inset: 0 !important"), false);
+});
+
+test("workspace selection reads the cached key for the current Guthon address", async () => {
+  const previousChrome = globalThis.chrome;
+  globalThis.chrome = {
+    storage: {
+      local: {
+        get: async () => ({
+          guthonBridgeWorkspaceSelection: {
+            address: "https://example.test/guthon",
+            workspaceKey: "projects.demo"
+          }
+        })
+      }
+    }
+  };
+  delete require.cache[require.resolve(WORKSPACE_SELECTION_PATH)];
+  try {
+    const { storedWorkspaceKey } = require(WORKSPACE_SELECTION_PATH);
+    assert.equal(await storedWorkspaceKey("https://example.test/guthon/gdpaas/dev/modules"), "projects.demo");
+    assert.equal(await storedWorkspaceKey("https://other.test/guthon/gdpaas/dev/modules"), "");
+  } finally {
+    delete require.cache[require.resolve(WORKSPACE_SELECTION_PATH)];
+    if (previousChrome === undefined) {
+      delete globalThis.chrome;
+    } else {
+      globalThis.chrome = previousChrome;
+    }
+  }
 });
 
 test("extension static styles live only in bridge.css", () => {

@@ -69,6 +69,19 @@ class WorkspaceRoutingTest(unittest.TestCase):
                 },
             )
 
+    @patch.object(gusen_hub, "resolve_system_scope", side_effect=scope)
+    def test_requests_selection_when_address_changes_but_scope_matches(self, _mock):
+        routed_config = config()
+        routed_config["products"]["products"]["demo"]["page_origins"] = ["http://intranet"]
+        request = {"dataSourceId": "0015", "systemId": "SYS-P", "pageOrigin": "https://internet"}
+
+        selection = gusen_hub.route_workspace_request(routed_config, request)
+        self.assertTrue(selection["workspaceSelectionRequired"])
+        self.assertEqual([item["workspaceKey"] for item in selection["candidates"]], ["products.demo"])
+
+        selected = gusen_hub.route_workspace_request(routed_config, {**request, "workspaceKey": "products.demo"})
+        self.assertEqual(selected["workspaceKey"], "products.demo")
+
     def test_tiny_yaml_keeps_empty_collections(self):
         self.assertEqual(gusen_hub._scalar("[]"), [])
         self.assertEqual(gusen_hub._scalar("{}"), {})
@@ -80,8 +93,10 @@ class WorkspaceRoutingTest(unittest.TestCase):
             root = repo / "workspace" / "PRD 产品"
             root.mkdir(parents=True)
             (root / "old.txt").write_text("old", encoding="utf-8")
+            (repo / "outside.txt").write_text("outside", encoding="utf-8")
             with patch.object(gusen_hub, "VAR_DIR", repo):
-                before = gusen_hub.untracked_files()
+                before = gusen_hub.untracked_files(pathspec=["workspace/PRD 产品"])
+                self.assertEqual(before, {"workspace/PRD 产品/old.txt"})
                 (root / "new.txt").write_text("new", encoding="utf-8")
                 result = gusen_hub.auto_add_operation_files(
                     {"sync": {"rules": {"pull_auto_add_git": True}}},
