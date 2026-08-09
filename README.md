@@ -140,7 +140,7 @@ Windows PowerShell 使用 `.\.venv\Scripts\python.exe`，其余参数不变。
 - `source/readonly` 是上游镜像，禁止人工修改。
 - 所有源码改动只进入同一工作区的 `source/workcopy`。
 - 页面源码只修改拆分脚本，不修改 `raw.json`。
-- 再次拉取会比较本地修改与上游版本；出现分叉时拒绝覆盖。
+- `rules.pull_diff_check` 缺省为 `true`，再次拉取会直接比较 readonly 与 workcopy，存在差异时保留 workcopy 并生成差异报告；设为 `false` 会直接覆盖 readonly/workcopy。
 - 工具不自动回写谷神平台，交付内容仍由人工复制、保存、提交和签入。
 
 目标对象明确时直接通过 Bridge 或 Nexus 拉取，不需要先执行全量同步。目标不明确或需要影响分析时，再查询该工作区的局部索引。

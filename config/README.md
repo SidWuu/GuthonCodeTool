@@ -14,6 +14,10 @@ cp config/example/sync.example.yaml config/sync.yaml
 
 `datasource.yaml` 和 `system-data.json` 不提交。
 
+## sync.yaml
+
+`rules.pull_diff_check` 缺省为 `true`：Bridge 拉取源码后直接比较 `source/readonly` 与 `source/workcopy`，存在差异时保留 workcopy 并生成差异报告。设为 `false` 后，每次拉取都会直接覆盖 readonly/workcopy，且不生成 `source-meta.json` 或差异文件。
+
 ## datasource.yaml
 
 配置产品库、项目库和独立测试库。数据源键名统一使用“对象 ID-环境”，`name` 统一使用“项目名_环境”：

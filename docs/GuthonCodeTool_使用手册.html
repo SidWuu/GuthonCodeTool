@@ -312,7 +312,7 @@ VS Code / AI 只分析和修改 Workcopy
         ↓
 人工复制回谷神平台并测试、提交、签入
         ↓
-再次拉取，确认基线刷新</code></pre></div>
+再次拉取，确认 readonly 与 Workcopy 无差异</code></pre></div>
 <ol>
 <li>开始开发前，从“项目”树确定目标产品或项目。</li>
 <li>执行该节点的“同步项目全部资料”，确认状态为“已同步”。</li>
@@ -321,6 +321,7 @@ VS Code / AI 只分析和修改 Workcopy
 <li>通过“维护 → 检查或打包 Workcopy”查看状态、生成差异报告或交付物。</li>
 <li>在谷神平台人工签出并回写，完成测试、提交和签入。</li>
 </ol>
+<p><code>sync.yaml</code> 的 <code>rules.pull_diff_check</code> 缺省为 <code>true</code>：直接比较 readonly 与 workcopy，存在差异时保留 workcopy 并生成差异报告。设为 <code>false</code> 时直接覆盖 readonly/workcopy。</p>
 <p>工具不会自动回写平台，这是防止误覆盖的安全边界。</p>
 </section>
 
@@ -373,8 +374,8 @@ VS Code / AI 只分析和修改 Workcopy
 <li>若错误包含 <code>EADDRINUSE</code>，关闭其他终端或旧版工具中占用 <code>17361</code> 的 Bridge，再从 Nexus 启动。</li>
 <li>重新加载 Chrome 扩展并刷新谷神页面。</li>
 </ol>
-<h3>Workcopy 显示冲突</h3>
-<p>不要删除基线或强制覆盖。比较本地修改与平台最新源码，确认需要保留的内容并人工处理后再拉取。</p>
+<h3>Workcopy 与 readonly 不一致</h3>
+<p>查看 <code>diff.md</code> 确认需要保留的内容。工具将 readonly 与 workcopy 的任何差异都视为需要保留；需要接受 readonly 覆盖时，将 <code>pull_diff_check</code> 设为 <code>false</code> 后重新拉取。</p>
 <h3>验收清单</h3>
 <ul>
 <li><label class="check-item"><input type="checkbox" disabled><span>应用、VSIX 和 Bridge 来自同一个 Release。</span></label></li>

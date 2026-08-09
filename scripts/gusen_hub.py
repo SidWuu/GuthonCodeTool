@@ -24,11 +24,12 @@ CONFIG_DIR = ROOT / "config"
 VAR_DIR = ROOT / "var"
 PAGE_SOURCE_TYPE = "page"
 PROCEDURE_SOURCE_TYPE = "procedure"
-WORK_COPY_BASELINE_DIR = ".guthon-baseline"
+LEGACY_WORK_COPY_BASELINE_DIR = ".guthon-baseline"
 WORK_COPY_META_FILE = "source-meta.json"
 WORK_COPY_DIFF_FILE = "diff.md"
 WORK_COPY_DELIVERY_FILE = "delivery.md"
 WORK_COPY_MANAGED_FILES = {WORK_COPY_META_FILE, WORK_COPY_DIFF_FILE, WORK_COPY_DELIVERY_FILE}
+WORK_COPY_COMPARE_EXCLUDED_FILES = WORK_COPY_MANAGED_FILES | {"meta.json"}
 WORKSPACE_ENV = "GUTHON_WORKSPACE"
 WORKSPACE_STEPS = ("source", "schema", "billType", "systemScripts", "views")
 
@@ -1539,24 +1540,16 @@ def _tree_files(root: Path, exclude_work_copy_files=False):
         if not path.is_file():
             continue
         rel = path.relative_to(root)
-        if exclude_work_copy_files and (rel.parts[0] == WORK_COPY_BASELINE_DIR or rel.as_posix() in WORK_COPY_MANAGED_FILES):
+        if exclude_work_copy_files and (
+            rel.parts[0] == LEGACY_WORK_COPY_BASELINE_DIR or rel.as_posix() in WORK_COPY_COMPARE_EXCLUDED_FILES
+        ):
             continue
         files[rel.as_posix()] = path
     return files
 
 
-def _tree_digest(root: Path, exclude_work_copy_files=False):
-    digest = hashlib.sha256()
-    for rel, path in sorted(_tree_files(root, exclude_work_copy_files).items()):
-        digest.update(rel.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
-
-
 def _tree_changes(before: Path, after: Path, after_is_work_copy=False):
-    before_files = _tree_files(before)
+    before_files = _tree_files(before, after_is_work_copy)
     after_files = _tree_files(after, after_is_work_copy)
     changes = []
     for rel in sorted(set(before_files) | set(after_files)):
@@ -1570,20 +1563,6 @@ def _tree_changes(before: Path, after: Path, after_is_work_copy=False):
             continue
         changes.append({"status": status, "path": rel})
     return changes
-
-
-def _local_changes_are_upstream(target: Path, upstream: Path, changes: list[dict]):
-    upstream_files = _tree_files(upstream)
-    local_files = _tree_files(target, exclude_work_copy_files=True)
-    return all(
-        (change["path"] not in local_files and change["path"] not in upstream_files)
-        or (
-            change["path"] in local_files
-            and change["path"] in upstream_files
-            and local_files[change["path"]].read_bytes() == upstream_files[change["path"]].read_bytes()
-        )
-        for change in changes
-    )
 
 
 def _work_copy_metadata(target: Path):
@@ -1603,7 +1582,7 @@ def _display_path(path: Path):
         return str(path.resolve())
 
 
-def _write_work_copy_metadata(target: Path, row, source_path: Path, change_key: str, mode: str):
+def _write_work_copy_metadata(target: Path, row, source_path: Path, mode: str):
     old = {}
     meta_path = target / WORK_COPY_META_FILE
     if meta_path.exists():
@@ -1614,27 +1593,18 @@ def _write_work_copy_metadata(target: Path, row, source_path: Path, change_key: 
     old_work_copy = old.get("_workcopy") or {}
     metadata = dict(row)
     metadata["_workcopy"] = {
-        "format": 1,
+        "format": 2,
         "mode": mode,
         "createdAt": old_work_copy.get("createdAt") or _now(),
         "updatedAt": _now(),
         "sourcePath": _display_path(source_path),
-        "baselineChangeKey": change_key,
-        "baselineDigest": _tree_digest(target / WORK_COPY_BASELINE_DIR),
     }
     meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _copy_work_copy_baseline(source_path: Path, target: Path):
-    baseline = target / WORK_COPY_BASELINE_DIR
-    if baseline.exists():
-        shutil.rmtree(baseline)
-    shutil.copytree(source_path, baseline)
-
-
 def _replace_work_copy_source(source_path: Path, target: Path):
     for child in target.iterdir():
-        if child.name in WORK_COPY_MANAGED_FILES or child.name == WORK_COPY_BASELINE_DIR:
+        if child.name in WORK_COPY_MANAGED_FILES:
             continue
         if child.is_dir() and not child.is_symlink():
             shutil.rmtree(child)
@@ -1709,7 +1679,7 @@ def _render_file_diff(before: Path, after: Path, rel: str):
         difflib.unified_diff(
             before_lines,
             after_lines,
-            fromfile=f"baseline/{rel}",
+            fromfile=f"readonly/{rel}",
             tofile=f"workcopy/{rel}",
             lineterm="",
         )
@@ -1722,50 +1692,29 @@ def _render_file_diff(before: Path, after: Path, rel: str):
 
 
 def _work_copy_state(target: Path, upstream_path: Path | None, upstream_change_key=""):
-    metadata = _work_copy_metadata(target)
-    work_copy = metadata.get("_workcopy") or {}
-    baseline = target / WORK_COPY_BASELINE_DIR
-    if not baseline.exists():
-        raise SystemExit(f"旧版工作副本没有基线，拒绝覆盖: {target}")
-    baseline_digest = _str(work_copy.get("baselineDigest"))
-    if baseline_digest and baseline_digest != _tree_digest(baseline):
-        raise SystemExit(f"工作副本基线已被修改，拒绝继续: {baseline}")
-    local_changes = _tree_changes(baseline, target, after_is_work_copy=True)
     upstream_missing = not upstream_path or not upstream_path.exists()
-    upstream_changes = [] if upstream_missing else _tree_changes(baseline, upstream_path)
-    baseline_change_key = _str(work_copy.get("baselineChangeKey"))
-    upstream_changed = upstream_missing or bool(upstream_changes) or bool(
-        upstream_change_key and upstream_change_key != baseline_change_key
-    )
+    local_changes = [] if upstream_missing else _tree_changes(upstream_path, target, after_is_work_copy=True)
     if upstream_missing:
         state = "UPSTREAM_MISSING"
-    elif local_changes and upstream_changed:
-        state = "CONFLICT"
     elif local_changes:
         state = "LOCAL_CHANGED"
-    elif upstream_changed:
-        state = "UPSTREAM_CHANGED"
     else:
         state = "CLEAN"
     return {
         "path": str(target),
         "state": state,
         "localChanged": bool(local_changes),
-        "upstreamChanged": upstream_changed,
         "upstreamMissing": upstream_missing,
-        "baselineChangeKey": baseline_change_key,
         "upstreamChangeKey": upstream_change_key,
         "localChanges": local_changes,
-        "upstreamChanges": upstream_changes,
+        "upstreamPath": str(upstream_path) if upstream_path else "",
     }
 
 
 def _write_work_copy_diff(target: Path, status: dict, notes=""):
     labels = {
         "CLEAN": "无变化",
-        "LOCAL_CHANGED": "仅本地有修改",
-        "UPSTREAM_CHANGED": "仅上游有变化",
-        "CONFLICT": "本地与上游均有变化",
+        "LOCAL_CHANGED": "与 readonly 不一致",
         "UPSTREAM_MISSING": "上游源码不存在",
     }
     lines = [
@@ -1776,29 +1725,22 @@ def _write_work_copy_diff(target: Path, status: dict, notes=""):
         "# Workcopy 状态",
         "",
         f"- 状态：`{status['state']}`（{labels[status['state']]}）",
-        f"- 基线版本：`{status['baselineChangeKey'] or '-'}`",
-        f"- 上游版本：`{status['upstreamChangeKey'] or '-'}`",
-        f"- 本地变更文件：{len(status['localChanges'])}",
-        f"- 上游变更文件：{len(status['upstreamChanges'])}",
+        f"- Readonly 版本：`{status['upstreamChangeKey'] or '-'}`",
+        f"- 差异文件：{len(status['localChanges'])}",
         "",
-        "# 本地文件汇总",
+        "# 差异文件汇总",
         "",
     ]
     if status["localChanges"]:
         lines.extend(f"- `{change['status']}` `{change['path']}`" for change in status["localChanges"])
     else:
         lines.append("- 无")
-    lines.extend(["", "# 上游文件汇总", ""])
-    if status["upstreamChanges"]:
-        lines.extend(f"- `{change['status']}` `{change['path']}`" for change in status["upstreamChanges"])
-    else:
-        lines.append("- 无")
     lines.extend(["", "# Diff", ""])
-    baseline = target / WORK_COPY_BASELINE_DIR
+    readonly = Path(status["upstreamPath"]) if status["upstreamPath"] else None
     for change in status["localChanges"]:
         rel = change["path"]
         lines.extend([f"## {change['status']} `{rel}`", ""])
-        lines.extend(_render_file_diff(baseline / rel, target / rel, rel))
+        lines.extend(_render_file_diff(readonly / rel, target / rel, rel))
         lines.append("")
     if not status["localChanges"]:
         lines.append("无本地源码差异。")
@@ -1810,11 +1752,10 @@ def _write_work_copy_delivery(target: Path, status: dict):
         "# Workcopy 交付清单",
         "",
         f"- 状态：`{status['state']}`",
-        f"- 基线版本：`{status['baselineChangeKey'] or '-'}`",
-        f"- 上游版本：`{status['upstreamChangeKey'] or '-'}`",
+        f"- Readonly 版本：`{status['upstreamChangeKey'] or '-'}`",
         "",
     ]
-    if status["state"] in {"CONFLICT", "UPSTREAM_MISSING"}:
+    if status["state"] == "UPSTREAM_MISSING":
         lines.extend(["> 当前状态不可直接交付，请先处理上游变化。", ""])
     lines.extend(["## 需要回写或复核的文件", ""])
     if status["localChanges"]:
@@ -1838,46 +1779,41 @@ def _write_work_copy_delivery(target: Path, status: dict):
 
 def _initialize_work_copy(source_path: Path, target: Path, row, change_key: str, mode: str):
     shutil.copytree(source_path, target)
-    _copy_work_copy_baseline(source_path, target)
-    _write_work_copy_metadata(target, row, source_path, change_key, mode)
+    _write_work_copy_metadata(target, row, source_path, mode)
     status = _work_copy_state(target, source_path, change_key)
     status["action"] = "CREATED"
     return status
 
 
-def _prepare_work_copy(source_path: Path, target: Path, row, change_key: str, mode="mirror"):
+def _prepare_work_copy(source_path: Path, target: Path, row, change_key: str, mode="mirror", diff_check=True):
+    if not diff_check:
+        action = "OVERWRITTEN" if target.exists() else "CREATED"
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source_path, target)
+        return {"path": str(target), "state": "UNCHECKED", "action": action, "localChanged": False}
     if not target.exists():
         return _initialize_work_copy(source_path, target, row, change_key, mode)
-    baseline = target / WORK_COPY_BASELINE_DIR
-    if not baseline.exists():
-        if _tree_changes(source_path, target, after_is_work_copy=True):
-            raise SystemExit(f"旧版工作副本没有基线且存在修改，拒绝覆盖: {target}")
-        _copy_work_copy_baseline(source_path, target)
-        _write_work_copy_metadata(target, row, source_path, change_key, mode)
+    legacy_baseline = target / LEGACY_WORK_COPY_BASELINE_DIR
+    if legacy_baseline.exists():
+        shutil.rmtree(legacy_baseline)
     notes = _manual_diff_notes(target)
     status = _work_copy_state(target, source_path, change_key)
-    if status["localChanged"] and status["upstreamChanged"] and _local_changes_are_upstream(
-        target, source_path, status["localChanges"]
-    ):
-        status["localChanged"] = False
     if status["localChanged"]:
-        status["action"] = "CONFLICT" if status["upstreamChanged"] else "PRESERVED"
-        if status["upstreamChanged"] or (target / WORK_COPY_DIFF_FILE).exists():
-            _write_work_copy_diff(target, status, notes)
-        if status["upstreamChanged"]:
-            raise SystemExit(
-                f"工作副本与上游均有变化，已拒绝覆盖: {target}\n"
-                f"查看差异: {target / WORK_COPY_DIFF_FILE}"
-            )
+        readonly_meta = source_path / "meta.json"
+        work_copy_meta = target / "meta.json"
+        if readonly_meta.exists():
+            shutil.copy2(readonly_meta, work_copy_meta)
+        elif work_copy_meta.exists():
+            work_copy_meta.unlink()
+        _write_work_copy_metadata(target, row, source_path, mode)
+        status["action"] = "PRESERVED"
+        _write_work_copy_diff(target, status, notes)
         return status
-    if status["upstreamChanged"]:
-        _replace_work_copy_source(source_path, target)
-        _copy_work_copy_baseline(source_path, target)
-        _write_work_copy_metadata(target, row, source_path, change_key, mode)
-        status = _work_copy_state(target, source_path, change_key)
-        status["action"] = "UPDATED"
-    else:
-        status["action"] = "UNCHANGED"
+    _replace_work_copy_source(source_path, target)
+    _write_work_copy_metadata(target, row, source_path, mode)
+    status = _work_copy_state(target, source_path, change_key)
+    status["action"] = "UNCHANGED"
     if (target / WORK_COPY_DIFF_FILE).exists():
         _write_work_copy_diff(target, status, notes)
     return status
@@ -2041,10 +1977,8 @@ def work_copy_cli(args=None):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
     print(f"状态: {status['state']}")
-    print(f"本地变更: {len(status['localChanges'])}")
-    print(f"上游变更: {len(status['upstreamChanges'])}")
-    print(f"基线版本: {status['baselineChangeKey'] or '-'}")
-    print(f"上游版本: {status['upstreamChangeKey'] or '-'}")
+    print(f"与 readonly 差异: {len(status['localChanges'])}")
+    print(f"Readonly 版本: {status['upstreamChangeKey'] or '-'}")
     if output:
         print(f"输出: {output}")
 
@@ -2064,7 +1998,7 @@ def create_work_copy(args=None):
     print(result["path"])
 
 
-def create_work_copy_from_row(conn, cfg, row, workspace):
+def create_work_copy_from_row(conn, cfg, row, workspace, diff_check=True):
     product_id = workspace["productId"]
     project_id = workspace["projectId"]
     found = find_work_copy_source(
@@ -2080,7 +2014,7 @@ def create_work_copy_from_row(conn, cfg, row, workspace):
     target = workspace["workcopyDir"] / _work_copy_source_relative_path(source_path, workspace)
     work_row = dict(found)
     work_row["workspaceKey"] = workspace["workspaceKey"]
-    result = _prepare_work_copy(source_path, target, work_row, _work_copy_change_key(found))
+    result = _prepare_work_copy(source_path, target, work_row, _work_copy_change_key(found), diff_check=diff_check)
     result.update(_auto_add_work_copy(cfg, target))
     return result
 
@@ -2102,6 +2036,7 @@ def pull_source_to_work_copy(payload: dict):
     workspace = resolve_workspace(cfg)
     layer, product_id, project_id, layer_cfg = resolve_pull_scope(cfg, payload)
     rules = cfg["sync"].get("rules") or {}
+    pull_diff_check = rules.get("pull_diff_check", True)
     conn = connect_index(workspace["indexPath"])
     sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload, rules)
     ds_name = layer_cfg["datasource"]
@@ -2125,12 +2060,12 @@ def pull_source_to_work_copy(payload: dict):
             found = find_work_copy_source(
                 conn, None, project_id, payload["sourceType"], payload.get("alias") or payload.get("sourceId") or "", payload.get("funId") or ""
             )
-            work_result = create_work_copy_from_row(conn, cfg, found, workspace)
+            work_result = create_work_copy_from_row(conn, cfg, found, workspace, diff_check=pull_diff_check)
             return {
                 "ok": True,
                 "workspaceKey": workspace["workspaceKey"],
                 "changed": False,
-                "message": "拉取成功, 已保留本地修改" if work_result["localChanged"] else "拉取成功, 无变更",
+                "message": "拉取成功, 已覆盖 workcopy" if not pull_diff_check else "拉取成功, 已保留本地修改" if work_result["localChanged"] else "拉取成功, 无变更",
                 "workCopyPath": work_result["path"],
                 "workCopyStatus": work_result["state"],
                 "workCopyAction": work_result["action"],
@@ -2153,10 +2088,19 @@ def pull_source_to_work_copy(payload: dict):
     work_results = []
     changed = False
     for candidate in rows:
-        changed = upsert_source(conn, candidate, layer, product_id, project_id, layer_cfg, system_scope, force=bool(payload.get("force"))) or changed
+        changed = upsert_source(
+            conn,
+            candidate,
+            layer,
+            product_id,
+            project_id,
+            layer_cfg,
+            system_scope,
+            force=not pull_diff_check or bool(payload.get("force")),
+        ) or changed
     conn.commit()
     for candidate in rows:
-        work_results.append(create_work_copy_from_row(conn, cfg, candidate, workspace))
+        work_results.append(create_work_copy_from_row(conn, cfg, candidate, workspace, diff_check=pull_diff_check))
     conn.commit()
     work_copy_path = os.path.commonpath([result["path"] for result in work_results])
     local_changed = any(result["localChanged"] for result in work_results)
@@ -2164,7 +2108,7 @@ def pull_source_to_work_copy(payload: dict):
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
         "changed": changed,
-        "message": "拉取成功, 已保留本地修改" if local_changed else "拉取成功" if changed else "拉取成功, 无变更",
+        "message": "拉取成功, 已覆盖 readonly/workcopy" if not pull_diff_check else "拉取成功, 已保留本地修改" if local_changed else "拉取成功" if changed else "拉取成功, 无变更",
         "workCopyPath": work_copy_path,
         "workCopyStatus": work_results[0]["state"] if len(work_results) == 1 else "MULTIPLE",
         "workCopyAction": work_results[0]["action"] if len(work_results) == 1 else "MULTIPLE",

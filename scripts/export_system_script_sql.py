@@ -251,6 +251,7 @@ def export_system_scripts(
     git_added = 0
     work_copy_paths = []
     work_copy_actions = []
+    diff_check = (config.get("sync", {}).get("rules") or {}).get("pull_diff_check", True)
     for row in sorted(scripts, key=lambda item: (str(item.get("system_id") or ""), int(item.get("script_type") or 0))):
         system_id = str(row.get("system_id") or "")
         script_type = int(row.get("script_type") or 0)
@@ -302,7 +303,9 @@ def export_system_scripts(
                 "source_name": description or script_type_name,
                 "change_key": source_change_key,
             }
-            result = gusen_hub._prepare_work_copy(script_dir, target, work_copy_row, source_change_key)
+            result = gusen_hub._prepare_work_copy(
+                script_dir, target, work_copy_row, source_change_key, diff_check=diff_check
+            )
             result.update(gusen_hub._auto_add_work_copy(config, target))
             git_added += result["gitAdded"]
             work_copy_paths.append(str(target))

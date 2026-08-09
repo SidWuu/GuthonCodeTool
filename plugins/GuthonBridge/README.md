@@ -111,7 +111,7 @@ const config = {
 2. 打开过程函数开发页或模块开发页。
 3. 点击 `拉取源码表版本`。
 
-拉取成功后会显示工作副本路径。若本地修改已回写到远端，会刷新工作副本基线；若本地与远端内容分叉，按钮会显示冲突提示并保留本地内容。
+拉取成功后会显示工作副本路径。`sync.yaml` 的 `rules.pull_diff_check` 缺省为 `true`：直接比较 readonly 与 workcopy，存在差异时保留 workcopy 并生成 `diff.md`。设为 `false` 时直接覆盖 readonly/workcopy。
 
 ### 拉取表结构
 

@@ -125,7 +125,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <div class="feature-grid">
 <article class="feature-card"><div class="feature-icon">01</div><h3>统一运行入口</h3><p>同一套 Python 实现打包为 macOS 与 Windows 应用，由 VS Code 扩展统一调用。</p></article>
 <article class="feature-card"><div class="feature-icon">02</div><h3>本地数据隔离</h3><p>应用与私有数据分离，配置、源码、索引和日志只进入用户选择的数据目录。</p></article>
-<article class="feature-card"><div class="feature-icon">03</div><h3>安全工作副本</h3><p>readonly 保留平台镜像，workcopy 保存本地修改，并通过基线判断阻止覆盖冲突。</p></article>
+<article class="feature-card"><div class="feature-icon">03</div><h3>安全工作副本</h3><p>readonly 保留平台镜像，workcopy 保存本地修改，并通过直接比较阻止误覆盖。</p></article>
 <article class="feature-card"><div class="feature-icon">04</div><h3>SQLite 局部检索</h3><p>每个工作区独立索引，支持源码定位、静态调用关系和低置信动态调用记录。</p></article>
 <article class="feature-card"><div class="feature-icon">05</div><h3>双端增强</h3><p>VS Code 提供本地操作和方言能力，Bridge 增强谷神在线开发页面。</p></article>
 <article class="feature-card"><div class="feature-icon">06</div><h3>自动发行</h3><p>main 变更触发跨平台构建、插件打包、GitHub Release 与 Gitee Release 同步。</p></article>
@@ -268,11 +268,12 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <section class="section">
 <h2 id="7-workcopy-安全模型">7. Workcopy 安全模型</h2>
 <ol>
-<li>从 readonly 创建 Workcopy，同时保存 <code>.guthon-baseline</code> 和 <code>source-meta.json</code>。</li>
-<li>再次拉取时比较本地内容、原基线和最新上游。</li>
-<li>本地修改已经回写上游时刷新基线；本地与上游分叉时返回冲突并拒绝覆盖。</li>
+<li>从 readonly 创建 Workcopy，同时保存用于定位 readonly 的 <code>source-meta.json</code>。</li>
+<li>再次拉取时直接比较最新 readonly 与 workcopy；存在差异时保留 workcopy 并生成差异报告。</li>
+<li>readonly 与 workcopy 的任何差异都统一保留 workcopy；需要接受 readonly 覆盖时关闭拉取校验。</li>
 <li><code>workcopy status</code> 查看状态，<code>diff</code> 更新差异，<code>package</code> 生成交付清单。</li>
 </ol>
+<p><code>sync.yaml</code> 的 <code>rules.pull_diff_check</code> 缺省为 <code>true</code>。设为 <code>false</code> 后，Bridge 每次拉取都会直接覆盖目标工作区的 readonly/workcopy，且不生成 <code>source-meta.json</code> 或差异文件。</p>
 <p><code>pull_auto_add_git</code> 只暂存本次新生成、未跟踪且未被忽略的文件，不暂存已有文件修改，也不强制添加忽略文件。</p>
 </section>
 
