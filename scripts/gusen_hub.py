@@ -1083,7 +1083,9 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
     desired_path = source_base(row, layer, product_id, project_id, layer_cfg, system_scope)
     if existing and existing["change_key"] == change_key and not force:
         indexed_path = ROOT / existing["local_path"] if existing["local_path"] else None
-        if indexed_path == desired_path and desired_path.exists():
+        if indexed_path == desired_path and desired_path.exists() and all(
+            path.is_file() for path in _source_output_paths(row, desired_path)
+        ):
             return False
     local_path, status, scripts = write_source(row, layer, product_id, project_id, layer_cfg, system_scope, change_key)
     if existing and existing["local_path"]:
@@ -1223,7 +1225,10 @@ def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, ch
     scripts = []
     if row["source_table"] == PAGE_SOURCE_TYPE:
         if not content:
-            return base, status, scripts
+            script_path = base / "scripts" / "compScript.vm"
+            script_path.parent.mkdir(exist_ok=True)
+            script_path.write_text("", encoding="utf-8")
+            return base, status, [("compScript", script_path, "")]
         (base / "raw.json").write_text(content, encoding="utf-8")
         scripts = parse_page_scripts(base, content)
     else:
@@ -1275,23 +1280,48 @@ def parse_page_scripts(base: Path, raw: str):
     out_dir.mkdir(exist_ok=True)
     scripts = []
     for path, key, value, event_type in _walk_scripts(data):
-        if key == "sql":
-            ext = "sql"
-        elif event_type:
-            ext = "vm" if event_type == "serviceEvents" else "js"
-        else:
-            ext = "vm" if "SaveScript" in key or key in {"script", "doMethodScript", "compScript"} else "js"
-        tab_index = next((i for i, part in enumerate(path) if re.fullmatch(r"tabPage\d+", part)), None)
-        name_parts = path[tab_index:] if tab_index is not None else path[-2:]
-        table_index = next((i for i, part in enumerate(name_parts[1:], 1) if part in {"mainTable", "detailTable"}), None)
-        if table_index is not None:
-            name_parts = name_parts[:1] + name_parts[table_index:]
-        name_parts = [part for i, part in enumerate(name_parts) if i == 0 or part != name_parts[i - 1]]
-        name = path_part(".".join(name_parts + [key])) if path else path_part(key)
-        script_path = out_dir / f"{name}.{ext}"
+        script_path = out_dir / _page_script_filename(path, key, event_type)
         script_path.write_text(value, encoding="utf-8")
         scripts.append((key, script_path, value))
     return scripts
+
+
+def _page_script_filename(path, key, event_type):
+    if key == "sql":
+        ext = "sql"
+    elif event_type:
+        ext = "vm" if event_type == "serviceEvents" else "js"
+    else:
+        ext = "vm" if "SaveScript" in key or key in {"script", "doMethodScript", "compScript"} else "js"
+    tab_index = next((i for i, part in enumerate(path) if re.fullmatch(r"tabPage\d+", part)), None)
+    name_parts = path[tab_index:] if tab_index is not None else path[-2:]
+    table_index = next((i for i, part in enumerate(name_parts[1:], 1) if part in {"mainTable", "detailTable"}), None)
+    if table_index is not None:
+        name_parts = name_parts[:1] + name_parts[table_index:]
+    name_parts = [part for i, part in enumerate(name_parts) if i == 0 or part != name_parts[i - 1]]
+    name = path_part(".".join(name_parts + [key])) if path else path_part(key)
+    return f"{name}.{ext}"
+
+
+def _source_output_paths(row, base):
+    if row["source_table"] != PAGE_SOURCE_TYPE:
+        return [base / "source.vm"]
+    content = row.get("source_content") or ""
+    if not content:
+        return [base / "scripts" / "compScript.vm"]
+    try:
+        data = json.loads(content)
+        if isinstance(data, str):
+            data = json.loads(data)
+    except Exception:
+        return [base / "raw.json"]
+    return [
+        base / "raw.json",
+        *(
+            base / "scripts" / _page_script_filename(path, key, event_type)
+            for path, key, _value, event_type in _walk_scripts(data)
+        ),
+    ]
 
 
 def _walk_scripts(value, path=None, inherited_scripts=None, event_type=None):
