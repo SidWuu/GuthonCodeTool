@@ -157,7 +157,7 @@ async function sendWorkspaceRequest(type, payload) {
       type,
       payload: { ...request, workspaceKey: cachedWorkspaceKey }
     });
-    if (!GuthonBridgeWorkspace.isWorkspaceCacheError(cachedResult)) {
+    if (cachedResult?.ok !== false || (type !== "route-workspace" && !GuthonBridgeWorkspace.isWorkspaceCacheError(cachedResult))) {
       return cachedResult;
     }
   }
@@ -597,8 +597,44 @@ function installSourcePullButton() {
     });
     document.body.appendChild(root);
   }
+  if (root.dataset.mode !== mode) {
+    delete root.dataset.workspaceMode;
+    delete root.dataset.workspaceModeKey;
+    delete root.dataset.workspaceModeCheckedAt;
+  }
   root.dataset.mode = mode;
   root.querySelector(".guthon-bridge-source-button").textContent = mode === "system-scripts" ? "选中拉取" : "源码拉取";
+}
+
+async function applyInlineWorkspaceMode() {
+  const root = document.getElementById(FLOATING_ROOT_ID);
+  if (!root) return;
+  const cacheKey = `${location.origin}${location.pathname}#${root.dataset.mode}`;
+  const checkedAt = Number(root.dataset.workspaceModeCheckedAt || 0);
+  if (root.dataset.workspaceModeKey === cacheKey && Date.now() - checkedAt < 10000) return;
+  if (root.dataset.workspaceModeChecking === "true") return;
+  root.dataset.workspaceModeChecking = "true";
+  try {
+    const inspected = await runPageCommand("inspect-hub-source");
+    if (!inspected?.ok) return;
+    const route = await sendWorkspaceRequest("route-workspace", inspected.data || {});
+    const sourceMode = route?.workspace?.sourceMode || "";
+    if (!sourceMode) return;
+    const previousMode = root.dataset.workspaceMode;
+    root.dataset.workspaceModeKey = cacheKey;
+    root.dataset.workspaceModeCheckedAt = String(Date.now());
+    root.dataset.workspaceMode = sourceMode;
+    const svnMode = sourceMode === "svn";
+    root.querySelector(".guthon-bridge-source-button").hidden = svnMode;
+    root.querySelector(".guthon-bridge-system-script-all").hidden = svnMode;
+    if (svnMode) {
+      setMessage(root, "当前工作区使用 SVN 源码模式；请在 Guthon Nexus 打开对象 Workcopy", "idle");
+    } else if (previousMode === "svn") {
+      setMessage(root, "", "idle");
+    }
+  } finally {
+    delete root.dataset.workspaceModeChecking;
+  }
 }
 
 function installSystemScriptSelection() {
@@ -1102,6 +1138,7 @@ async function refreshToolbarButtons() {
     }
     if (isModuleRoute() || isProcedureRoute() || isDataTableRoute() || isBillTypeRoute() || isViewRoute() || isSystemScriptRoute()) {
       installSourcePullButton();
+      await applyInlineWorkspaceMode();
     } else {
       removeNode(FLOATING_ROOT_ID);
     }

@@ -5,6 +5,8 @@ products:
   demo-product:
     # 产品名称，用作 readonly、workcopy 和数据库快照的目录名。
     name: 示例产品
+    # 每个工作区必须明确选择唯一源码事实来源：database 或 svn。
+    source_mode: database
     # 引用 datasource.yaml 中的数据源标识。
     datasource: demo-product-dev
     # 可选浏览器来源；为空时 Bridge 依赖数据源和系统身份匹配。
@@ -14,6 +16,31 @@ products:
       include:
         system_aliases:
           - demo.system
+    # source_mode 改为 svn 时取消以下配置；checkout/workspace 根目录都有安全默认值，通常无需填写。
+    # svn:
+    #   repository_url: ${DEMO_PRODUCT_SVN_URL}
+    #   sparse_checkout: true
+    #   include:
+    #     - pages
+    #     - procedures
+    #     - system-script
+    #     - tables
+    #     - views
+    #   update_policy: manual
+    #   no_auth_cache: true
+    #   username_env: DEMO_SVN_USERNAME
+    #   password_env: DEMO_SVN_PASSWORD
+    #   # 仅在已核对证书且确有需要时显式列出；默认不信任任何证书异常。
+    #   allowed_cert_failures: []
+    #   capabilities:
+    #     initialize: true
+    #     refresh: true
+    #     system_data_bootstrap: true
+    #     status: true
+    #     reindex: true
+    #     workcopy: true
+    #     writeback: true
+    #     commit: false
     # 保留项；当前实现根据 products 分组固定判定为 PRODUCT。
     source_layer: PRODUCT
     # 源码包含规则。

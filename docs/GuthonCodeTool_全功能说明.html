@@ -141,8 +141,8 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <p>GuthonCodeTool 把谷神平台中的 PAGE、过程函数、表结构、单据类型、视图和系统脚本整理到本地，形成可检索、可比较、可供 AI 分析的私有开发工作区。</p>
 <ul>
 <li>工具负责读取、整理、索引和生成安全工作副本。</li>
-<li>工具不会自动签出、保存、提交或签入谷神平台源码。</li>
-<li>每个工作区的 <code>source/readonly</code> 是上游镜像，禁止人工修改；开发只修改同一工作区的 <code>source/workcopy</code>。</li>
+<li>每个工作区显式选择数据库或 SVN 源码 provider；工具不会自动签出谷神源码，也不会执行 <code>svn commit</code>。</li>
+<li>数据库模式的 <code>source/readonly</code> 与 SVN 模式的 <code>var/checkout/&lt;配置 ID&gt;</code> 都是受保护上游；开发只修改同一工作区的 <code>source/workcopy</code>。</li>
 <li>数据库连接、源码、业务文档和运行索引均为本地私有内容，不进入公开仓库或 Release。</li>
 <li>Python 脚本继续作为开发与测试入口；普通用户只使用打包应用、VSIX 和 Bridge。</li>
 </ul>
@@ -156,7 +156,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 Chrome 扩展 ──HTTP──▶ Bridge ─────┘
                                   │
                                   ▼
-                          数据库 / 源码表
+	                    数据库 / 源码表 或 SVN working copy
                                   │
                                   ▼
                    workspace / nexus</code></pre></div>
@@ -170,7 +170,7 @@ Chrome 扩展 ──HTTP──▶ Bridge ─────┘
 <li>VS Code 扩展保存应用路径和本地数据目录。</li>
 <li>用户确认操作后，扩展使用 <code>spawn</code> 启动应用并传入 <code>--home</code>。</li>
 <li>应用设置 <code>GUTHON_HOME</code>，所有配置和私有输出均相对于该目录解析。</li>
-<li>Nexus 节点和 CLI 显式传入 <code>workspaceKey</code>，统一解析数据源、readonly、database 和 <code>context/index.db</code>。</li>
+	<li>Nexus 节点和 CLI 显式传入 <code>workspaceKey</code>，统一解析 provider、checkout/readonly、Workcopy 和 <code>context/index.db</code>。</li>
 <li>Bridge 使用显式工作区或页面身份路由；所有同步操作进入全局串行队列。</li>
 </ol>
 </section>
@@ -182,6 +182,8 @@ Chrome 扩展 ──HTTP──▶ Bridge ─────┘
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>setup                 创建缺失配置，不覆盖已有文件
 workspaces            列出全部产品、项目和同步状态
 route                 按 Bridge 页面身份解析工作区
+workspace-summary     返回源码模式和有效 capabilities
+svn                   初始化/刷新稀疏 working copy，或查看状态与差异
 sync-source-all       拉取所有源码并重建索引
 sync-source           拉取显式工作区源码
 sync-all              依次同步源码、表结构、单据类型、系统脚本和视图
@@ -192,7 +194,8 @@ export-bill-type      导出单据类型
 export-system-script  导出系统脚本
 export-view           导出视图
 query / diagnose      查询局部上下文 / 执行只读排查
-workcopy              查看状态、生成差异或交付物</code></pre></div>
+create-workcopy       按索引创建或打开对象 Workcopy
+workcopy              查看状态、生成差异/交付物，或预检/执行 save-svn</code></pre></div>
 <p>除 <code>setup</code>、<code>doctor</code>、<code>workspaces</code>、<code>route</code> 等全局命令外，均要求 <code>--workspace products.&lt;id&gt;</code> 或 <code>--workspace projects.&lt;id&gt;</code>。</p>
 <h3 id="3-2-打包方式">3.2 打包方式</h3>
 <p><code>scripts/build_guthon_tool.py</code> 使用 PyInstaller <code>--onefile</code>，内置配置模板和运行所需 Python 模块。构建必须在目标系统执行：Windows 生成 EXE，macOS 生成 ARM64 Mach-O。</p>
@@ -209,8 +212,8 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <h3 id="4-1-配置职责">4.1 配置职责</h3>
 <ul>
 <li><code>datasource.yaml</code>：产品、项目和只读排查数据源；敏感值可引用环境变量。</li>
-<li><code>products.yaml</code>：产品名称、数据源、子系统范围和可选页面来源。</li>
-<li><code>projects.yaml</code>：项目名称、数据源、继承产品、子系统范围和可选页面来源。</li>
+<li><code>products.yaml</code>：产品名称、<code>source_mode</code>、数据源、子系统范围、可选页面来源和可选 SVN 契约。</li>
+<li><code>projects.yaml</code>：项目名称、<code>source_mode</code>、数据源、继承产品、子系统范围、可选页面来源和可选 SVN 契约。</li>
 <li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射；公开模板只保留占位符，真实表名和字段名由内部配置提供。</li>
 <li><code>sync.yaml</code>：全局同步窗口、未签入源码白名单和拉取规则，不保存当前或默认工作区。</li>
 </ul>
@@ -227,8 +230,9 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
     ├── AGENTS.md
     ├── docs/
     ├── tools/
-    ├── nexus/{bridge,tool-runtime.json}
-    └── workspace/
+	    ├── nexus/{bridge,tool-runtime.json}
+	    ├── checkout/&lt;配置 ID&gt;/            # SVN 唯一源码事实来源
+	    └── workspace/
         ├── PRD &lt;产品名称&gt;/
         └── PRJ &lt;项目名称&gt;/
             ├── docs/
@@ -236,11 +240,12 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
             ├── database/{schema,billtype,views}/
             └── context/{README.md,index.db,state.json,logs}/</code></pre></div>
 <p><code>PRD</code>、<code>PRJ</code> 只控制目录和 Nexus 展示顺序，真实身份始终来自配置中的 <code>workspaceKey</code>。</p>
+<p><code>source_mode</code> 必须显式为 <code>database</code> 或 <code>svn</code>。SVN 工作区不会创建 readonly 和 database 镜像；<code>checkout_root</code> 必须与 <code>workspace_root</code> 分离，凭据不得写入 YAML。</p>
 </section>
 
 <section class="section">
 <h2 id="5-源码同步与索引">5. 源码同步与索引</h2>
-<p><code>scripts/gusen_hub.py</code> 是源码同步、目录写入、索引和 Workcopy 的共享实现。同步按 datasource 查询子系统，并使用 <code>VERSION_MAC</code> 优先判断变化；未变化时复用 readonly，变化时才重写源码和调用索引。</p>
+<p><code>scripts/gusen_hub.py</code> 是工作区路由与索引的共享实现。数据库 provider 按 datasource 查询源码表并维护 readonly；SVN provider 按 <code>checkout-scope.json</code> 只读扫描 working copy，以文件 hash、BASE revision、源路径和 JSON Pointer 建立同一套对象/调用索引。</p>
 <h3 id="5-1-page-导出">5.1 PAGE 导出</h3>
 <p>PAGE 保存到 <code>{子系统}/page/{模型序号}_{模型}/{模块序号}_{模块}/{页面名 页面ID}</code>。完整 JSON 写入 <code>raw.json</code>，页面脚本、SQL、事件和组件脚本拆入 <code>scripts/</code>。</p>
 <ul>
@@ -252,6 +257,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <p>过程函数保存到 <code>{子系统}/procedure/{过程别名}/{函数名}/source.vm</code>。项目继承标记使用配置映射的产品脚本；多个子系统共用数据源时只保存一份实体源码，其余目录使用链接。</p>
 <h3 id="5-3-调用索引">5.3 调用索引</h3>
 <p>每个工作区使用自己的 <code>context/index.db</code>。索引记录源码对象、静态调用和低置信动态调用；AI 应使用显式 <code>workspaceKey</code> 通过 <code>query</code> 获取局部上下文，默认不得扫描全部工作区。</p>
+<p>SVN PAGE 解析保留原始值和继承解析后的有效值，调用索引使用有效脚本；过程函数、系统脚本、表和视图从稀疏目录直接建索引。普通扫描、查询和 Workcopy 不访问数据库，只有 <code>svn init/refresh</code> 在系统映射缓存缺失时可受控补全 <code>system-data.json</code>。</p>
 </section>
 
 <section class="section">
@@ -263,6 +269,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <li><strong>系统脚本：</strong><code>export_system_script_sql.py</code> 按本机语义映射查询；项目 JavaScript 同时存在产品快照与项目覆盖时，固定按产品在前、项目在后合并。</li>
 </ul>
 <p>四类导出均复用目标工作区的数据源与子系统范围。<code>sync-all</code> 固定按“源码 → 表结构 → 单据类型 → 系统脚本 → 视图”执行；任一步失败或同步期间配置摘要变化即停止。五步全部成功后才把该工作区标为 <code>SYNCED</code>。</p>
+<p>本段导出命令仅适用于数据库模式。SVN 模式把 <code>tables/</code>、<code>views/</code> 作为只读索引对象，系统脚本可投影/写回；当前仓库没有正式 billtype 数据，因此 SVN 模式不伪造单据类型导出，也不提供业务 <code>diagnose</code>。</p>
 </section>
 
 <section class="section">
@@ -275,6 +282,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 </ol>
 <p><code>sync.yaml</code> 的 <code>rules.pull_diff_check</code> 缺省为 <code>true</code>。设为 <code>false</code> 后，Bridge 每次拉取都会直接覆盖目标工作区的 readonly/workcopy，且不生成 <code>source-meta.json</code> 或差异文件。</p>
 <p><code>pull_auto_add_git</code> 只暂存本次新生成、未跟踪且未被忽略的文件，不暂存已有文件修改，也不强制添加忽略文件。</p>
+<p>SVN Workcopy 是对象级懒投影：PAGE 保存受保护的 <code>raw.json</code>、拆分脚本和稳定 JSON Pointer；过程/系统脚本保存源路径、hash、BASE revision、编码、BOM 与换行。<code>save-svn --check</code> 先验证映射、外部修改和 checkout 白名单，<code>save-svn</code> 只原子写入声明文件并输出 <code>svn diff</code>，不 update、不 commit。</p>
 </section>
 
 <section class="section">
@@ -283,6 +291,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <ul>
 <li>全局保存 <code>gushenCompletion.toolPath</code> 和 <code>gushenCompletion.toolHome</code>。</li>
 <li>“项目”树同时列出产品和项目，每个节点绑定自己的 <code>workspaceKey</code> 和同步状态。</li>
+<li>节点显示数据库/SVN 模式，菜单完全由 workspace summary 返回的有效 capabilities 生成；SVN 节点提供初始化、刷新、状态、扫描、Workcopy 和安全写回。</li>
 <li>侧边栏所有执行型操作均先弹出确认；打开配置和目录保持单击。</li>
 <li>已初始化时再次执行“初始化工作区”会先确认是否切换；只有确认并选中新目录后才更新全局 <code>toolHome</code>，取消时保留原工作区。</li>
 <li>使用 <code>spawn</code> 直接传递命令、<code>--home</code> 和 <code>--workspace</code>，不经过 Shell，因此 macOS 与 Windows 参数一致。</li>
@@ -298,6 +307,7 @@ workcopy              查看状态、生成差异或交付物</code></pre></div>
 <li>Nexus 直接把当前系统应用和本地数据目录传给 Bridge；用户不需要手工设置 <code>GUTHON_TOOL_PATH</code> 或 <code>GUTHON_TOOL_HOME</code>。</li>
 <li>请求携带 <code>workspaceKey</code> 时验证页面身份；未携带时按 <code>pageOrigin + dataSourceId + systemId</code> 匹配，多个候选由 Chrome 只为当前请求选择。</li>
 <li>页面提供过程函数/PAGE 拉取、表结构、单据类型、视图、系统脚本、复制模式和字段平移。</li>
+<li>源码拉取和数据库导出只在数据库工作区显示；SVN 工作区前端隐藏、服务端旧接口再次拒绝，复制与跳转能力保留。</li>
 <li>允许访问的平台范围由 <code>extension/host-config.js</code> 的 CIDR、域名后缀和路径前缀控制。</li>
 <li>Bridge 不提供平台回写接口；保存、签出、提交和签入仍由用户在谷神平台完成。</li>
 </ul>

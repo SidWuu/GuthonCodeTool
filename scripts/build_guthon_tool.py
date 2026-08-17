@@ -13,7 +13,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SEP = ";" if sys.platform == "win32" else ":"
 HIDDEN_IMPORTS = (
+    "common.page_projection",
+    "common.source_format",
     "pymysql",
+    "providers.svn.checkout",
+    "providers.svn.projection",
+    "providers.svn.scanner",
+    "providers.svn.writeback",
     "doctor",
     "export_bill_type_sql",
     "export_hub_markdown",

@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { prepareWorkspaceSetup } = require('../src/tool-workspace');
+const { prepareWorkspaceSetup, workspaceActions } = require('../src/tool-workspace');
 
 test('continues normal setup when the workspace is not initialized', async () => {
   const config = { get: () => '' };
@@ -54,4 +54,36 @@ test('updates toolHome after an initialized workspace switch is confirmed', asyn
   assert.equal(await prepareWorkspaceSetup(config, window, 'global'), 'switch');
   assert.deepEqual(updates, [['toolHome', '/new/tool/home', 'global']]);
   fs.rmSync(home, { recursive: true });
+});
+
+test('SVN workspace actions come only from effective capabilities', () => {
+  const actions = workspaceActions({
+    sourceMode: 'svn',
+    capabilities: {
+      'svn.initialize': true,
+      'svn.refresh': false,
+      'svn.status': true,
+      'svn.reindex': true,
+      'svn.workcopy': true,
+      'svn.writeback': false,
+    },
+  });
+
+  assert.deepEqual(actions.source.map((item) => item[1]), [
+    'gushenCompletion.initializeSvn',
+    'gushenCompletion.showSvnStatus',
+    'gushenCompletion.reindexCalls',
+    'gushenCompletion.exportMarkdown',
+  ]);
+  assert.deepEqual(actions.workcopy.map((item) => item[1]), ['gushenCompletion.openSvnWorkcopy']);
+  assert.deepEqual(actions.metadata, []);
+  assert.equal(actions.diagnose, false);
+});
+
+test('database workspace keeps pull, metadata and diagnosis actions', () => {
+  const actions = workspaceActions({ sourceMode: 'database', capabilities: {} });
+
+  assert.equal(actions.source[0][1], 'gushenCompletion.initSourceIndex');
+  assert.equal(actions.metadata.length, 4);
+  assert.equal(actions.diagnose, true);
 });

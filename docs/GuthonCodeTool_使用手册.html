@@ -169,7 +169,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="1-准备与下载">1. 准备与下载</h2>
-<p>开始前准备 VS Code、Chrome、数据库只读连接信息、产品/项目配置，以及公司提供的 AI 规范文件。</p>
+<p>开始前准备 VS Code、Chrome、产品/项目配置和公司提供的 AI 规范文件。数据库模式需要数据库只读连接；SVN 模式需要 SVN 1.10+ 客户端、仓库地址和相应权限。</p>
 <p>打开 <a href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">GitHub Releases</a> 或 
   <a href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Releases</a>
   ，在同一个版本下载：</p>
@@ -240,15 +240,16 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <p>在“Guthon Nexus → 工作区 → 配置文件”中单击文件名即可编辑。优先使用公司提供的真实配置；不要把数据库密码、源码或配置提交到公开仓库。</p>
 <ul>
 <li><code>datasource.yaml</code>：数据库连接。配置引用环境变量时，必须在启动 VS Code 前设置对应变量，并重启 VS Code。</li>
-<li><code>products.yaml</code>：产品 ID、名称、datasource、子系统别名和可选页面来源。</li>
-<li><code>projects.yaml</code>：项目 ID、名称、datasource、继承产品、子系统别名和可选页面来源。</li>
+<li><code>products.yaml</code>：产品 ID、名称、<code>source_mode</code>、datasource、子系统别名和可选页面来源。</li>
+<li><code>projects.yaml</code>：项目 ID、名称、<code>source_mode</code>、datasource、继承产品、子系统别名和可选页面来源。</li>
 <li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射，通常直接使用公司提供版本；真实表名和字段名只保存在本机配置中。</li>
 <li><code>sync.yaml</code>：全局同步窗口、未签入源码用户白名单和自动暂存规则，不设置当前或默认工作区。</li>
 </ul>
 <div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" type="button">复制</button><pre><code>products:
-  &lt;产品ID&gt;:
-    name: &lt;产品名称&gt;
-    datasource: &lt;数据源键&gt;
+	&lt;产品ID&gt;:
+	    name: &lt;产品名称&gt;
+	    source_mode: database  # database 或 svn，必须显式选择
+	    datasource: &lt;数据源键&gt;
     systems:
       include:
         system_aliases:
@@ -270,11 +271,11 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>确认产品、项目各自的数据源和子系统范围正确。</li>
 <li>点击“维护 → 检查本地环境”，确认输出没有 FAIL。</li>
 <li>展开“项目”，确认产品显示为 <code>PRD</code>、项目显示为 <code>PRJ</code>。</li>
-<li>在目标产品或项目节点点击“同步项目全部资料”。</li>
-<li>检查输出依次出现源码与索引、数据库表结构、单据类型、系统脚本和视图。</li>
+	<li>数据库节点点击“同步工作区全部资料”；SVN 节点首次点击“初始化 SVN 稀疏范围”。</li>
+	<li>数据库模式检查源码、表结构、单据类型、系统脚本和视图五步；SVN 模式检查 checkout 范围与本地索引结果。</li>
 </ol>
-<p>所有同步任务通过全局队列串行执行。任何一步失败，后续步骤会停止；只有五步成功且配置摘要一致时，节点状态才显示“已同步”。</p>
-<p>结果保存在 <code>var/workspace/PRD &lt;产品名称&gt;/</code> 或 <code>var/workspace/PRJ &lt;项目名称&gt;/</code>。日常开发只修改目标工作区的 <code>source/workcopy</code>，不要修改 <code>source/readonly</code>。</p>
+<p>所有同步任务通过全局队列串行执行。数据库模式按五步计算状态；SVN 模式的初始化/刷新会自动重建索引，普通“扫描/重建本地 SVN 索引”不会联网更新。</p>
+<p>工具状态、索引和 Workcopy 保存在 <code>var/workspace/PRD &lt;产品名称&gt;/</code> 或 <code>var/workspace/PRJ &lt;项目名称&gt;/</code>。日常开发只修改 <code>source/workcopy</code>；不要修改数据库模式的 <code>source/readonly</code> 或 SVN 模式的 <code>var/checkout/&lt;配置 ID&gt;</code>。</p>
 </section>
 
 <section class="wiki-section">
@@ -295,12 +296,14 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>面板显示“运行中 · 127.0.0.1:17361”后即可使用；单击“停止 Guthon Bridge”可关闭服务。</li>
 </ol>
 <p>Bridge 服务已经包含在 VSIX 中，由 Guthon Nexus 使用 VS Code 自带的 Node 运行时启动。普通用户无需安装 Node.js、设置环境变量或保持终端窗口运行。Bridge 会按请求中的 <code>workspaceKey</code> 或页面身份匹配产品、项目；多个候选时 Chrome 会要求本次选择。也可以打开 <a href="http://127.0.0.1:17361/health" target="_blank" rel="noopener">http://127.0.0.1:17361/health</a>，看到 <code>{"ok":true}</code> 即表示服务正常。</p>
+<p>数据库工作区继续显示网页源码拉取和 metadata 导出。SVN 工作区会隐藏这些旧入口，服务端也会拒绝旧版扩展的直接调用；请在 Nexus 中执行 SVN 初始化/刷新、打开 Workcopy 和安全写回。复制字段、字段平移与源码模式无关。</p>
 <p>升级到该方式后，不要再同时从终端执行旧的 <code>npm run start:bridge</code>。如果输出出现 <code>EADDRINUSE 127.0.0.1:17361</code>，说明已有 Bridge 占用端口；先关闭原终端中的服务，再回到 Guthon Nexus 启动。</p>
 </section>
 
 <section class="wiki-section">
 <h2 id="7-日常工作流">7. 日常工作流</h2>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>在“项目”树选择 PRD 或 PRJ
+<h3>数据库模式</h3>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>在“项目”树选择数据库 PRD 或 PRJ
         ↓
 同步该工作区全部资料
         ↓
@@ -313,6 +316,18 @@ VS Code / AI 只分析和修改 Workcopy
 人工复制回谷神平台并测试、提交、签入
         ↓
 再次拉取，确认 readonly 与 Workcopy 无差异</code></pre></div>
+<h3>SVN 模式</h3>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>首次“初始化 SVN 稀疏范围”，日常按需“刷新 SVN 稀疏范围”
+        ↓
+从 Nexus 按页面 ID / 过程别名+函数 / 系统脚本 ID 打开 Workcopy
+        ↓
+VS Code / AI 只修改 Workcopy；PAGE 只改 scripts，不改 raw.json
+        ↓
+“预检/写回 SVN”先预检，再写回受控 working copy
+        ↓
+审阅 svn diff，按仓库规则人工定向 commit
+        ↓
+等待并复核谷神平台自动同步</code></pre></div>
 <ol>
 <li>开始开发前，从“项目”树确定目标产品或项目。</li>
 <li>执行该节点的“同步项目全部资料”，确认状态为“已同步”。</li>
@@ -323,6 +338,7 @@ VS Code / AI 只分析和修改 Workcopy
 </ol>
 <p><code>sync.yaml</code> 的 <code>rules.pull_diff_check</code> 缺省为 <code>true</code>：直接比较 readonly 与 workcopy，存在差异时保留 workcopy 并生成差异报告。设为 <code>false</code> 时直接覆盖 readonly/workcopy。</p>
 <p>工具不会自动回写平台，这是防止误覆盖的安全边界。</p>
+<p>SVN 模式的“写回”只写本地 working copy，不等于提交或发布；工具固定不执行 <code>svn commit</code>。</p>
 </section>
 
 <section class="wiki-section">

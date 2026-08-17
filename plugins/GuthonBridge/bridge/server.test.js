@@ -267,6 +267,63 @@ process.stdin.on("end", () => process.stdout.write(JSON.stringify({ ok: true, mo
   }
 });
 
+test("routeWorkspace validates page identity and strips local paths", async () => {
+  const port = 17468;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-workspace-summary-"));
+  const toolEntry = path.join(tmp, "fake-tool.js");
+  const toolHome = path.join(tmp, "home");
+  fs.writeFileSync(
+    toolEntry,
+    `
+const args = process.argv.slice(2);
+const expected = ["route", "--home", ${JSON.stringify(toolHome)}];
+if (JSON.stringify(args) !== JSON.stringify(expected)) {
+  process.stderr.write(JSON.stringify(args));
+  process.exit(2);
+}
+let raw = "";
+process.stdin.on("data", chunk => raw += chunk);
+process.stdin.on("end", () => {
+  const payload = JSON.parse(raw);
+  if (payload.workspaceKey !== "products.demo" || payload.checkoutPath !== "/must/not/be/forwarded") process.exit(3);
+  process.stdout.write(JSON.stringify({
+    ok: true,
+    workspaceKey: "products.demo",
+    workspace: { workspaceKey: "products.demo", sourceMode: "svn", root: "/private/root", checkoutPath: "/private/checkout" }
+  }));
+});
+`,
+    "utf8",
+  );
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_TOOL_PATH: process.execPath,
+      GUTHON_TOOL_ENTRY: toolEntry,
+      GUTHON_TOOL_HOME: toolHome,
+    },
+    stdio: "ignore",
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/routeWorkspace`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceKey: "products.demo", checkoutPath: "/must/not/be/forwarded" }),
+    });
+    const data = await response.json();
+    assert.equal(response.status, 200, data.message);
+    assert.equal(data.workspace.sourceMode, "svn");
+    assert.equal(data.workspace.root, undefined);
+    assert.equal(data.workspace.checkoutPath, undefined);
+  } finally {
+    server.kill();
+  }
+});
+
 test("exportTableSchema delegates data source and table filters to script", async () => {
   const port = 17463;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-schema-command-"));

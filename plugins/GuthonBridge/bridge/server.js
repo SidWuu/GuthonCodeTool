@@ -256,7 +256,7 @@ function enqueue(action) {
 async function runHubPull(payload) {
   const route = await resolveRequestWorkspace(payload);
   if (!route.ok) return route;
-  const routed = { ...payload, workspaceKey: route.workspaceKey };
+  const routed = { ...payload, workspaceKey: route.workspaceKey, client: "bridge-legacy-pull" };
   if (!HUB_TOOL && process.env.GUTHON_HUB_PULL_SCRIPT) {
     return runJsonCommand([HUB_PULL_SCRIPT, "--json-stdin"], "源码拉取", routed);
   }
@@ -359,6 +359,21 @@ async function runProcedureCallers(payload) {
   return runToolCommand("query", args, "调用方查询", undefined, route.workspaceKey);
 }
 
+function publicWorkspace(workspace) {
+  if (!workspace) return workspace;
+  return Object.fromEntries([
+    "workspaceKey", "type", "id", "name", "displayName", "sourceMode", "capabilities", "status"
+  ].filter((key) => workspace[key] !== undefined).map((key) => [key, workspace[key]]));
+}
+
+function publicRoute(route) {
+  return {
+    ...route,
+    workspace: publicWorkspace(route.workspace),
+    candidates: Array.isArray(route.candidates) ? route.candidates.map(publicWorkspace) : route.candidates,
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     return sendJson(res, 200, { ok: true });
@@ -366,6 +381,16 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && req.url === "/health") {
     return sendJson(res, 200, { ok: true });
+  }
+
+  if (req.method === "POST" && req.url === "/routeWorkspace") {
+    try {
+      const payload = await readBody(req);
+      const route = await runToolCommand("route", [], "工作区路由", payload);
+      return sendJson(res, 200, publicRoute(route));
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, message: error.message });
+    }
   }
 
   if (req.method === "POST" && req.url === "/saveRemoteFile") {

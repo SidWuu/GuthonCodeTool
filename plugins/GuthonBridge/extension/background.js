@@ -44,6 +44,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse(await response.json());
     }
 
+    if (message.type === "route-workspace") {
+      return sendResponse(await postJson("/routeWorkspace", message.payload || {}));
+    }
+
     if (message.type === "save-pull-result") {
       const payload = message.payload;
       const result = await postJson("/saveRemoteFile", payload);

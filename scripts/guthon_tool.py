@@ -40,6 +40,13 @@ COMMAND_STEPS = {
     "export-view": "views",
 }
 GLOBAL_COMMANDS = {"setup", "doctor", "route", "workspaces", "self-test"}
+DATABASE_ONLY_COMMANDS = {
+    "export-schema": "database.schemaExport",
+    "export-bill-type": "database.billTypeExport",
+    "export-system-script": "database.systemScriptExport",
+    "export-view": "database.viewExport",
+    "diagnose": "database.diagnose",
+}
 
 
 def resource_root() -> Path:
@@ -96,13 +103,24 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
 
     config = gusen_hub.load_config()
     workspace = None if command in GLOBAL_COMMANDS or command == "pull" and not selected_workspace else gusen_hub.resolve_workspace(config)
+    if workspace and command in DATABASE_ONLY_COMMANDS and workspace["sourceMode"] != "database":
+        raise SystemExit(
+            f"{command} is unavailable in SVN source mode for {workspace['workspaceKey']}; "
+            "use the local SVN index or an explicit database workspace"
+        )
     auto_add_git = bool((config.get("sync", {}).get("rules") or {}).get("pull_auto_add_git"))
     before = set()
     if workspace and auto_add_git:
-        workspace_prefix = workspace["root"].relative_to(gusen_hub.VAR_DIR).as_posix()
-        before = gusen_hub.untracked_files(pathspec=[workspace_prefix])
+        workspace_prefix = gusen_hub.workspace_var_prefix(workspace)
+        if workspace_prefix:
+            before = gusen_hub.untracked_files(pathspec=[workspace_prefix])
     os.environ["GUTHON_DEFER_GIT_ADD"] = "1"
     step = COMMAND_STEPS.get(command)
+    if workspace and workspace.get("sourceMode") == "svn":
+        if command in {"reindex", "sync-all"}:
+            step = "source"
+        elif command == "svn" and extra_args and extra_args[0] in {"init", "refresh"}:
+            step = "source"
     result_code = 0
     try:
         result_code = _run_workspace_command(command, extra_args, gusen_hub, config, workspace)
@@ -122,7 +140,58 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
 
 
 def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
+    if command == "workspace-summary":
+        if extra_args:
+            raise SystemExit("workspace-summary does not accept extra arguments")
+        print(json.dumps({"ok": True, "workspace": gusen_hub.workspace_summary(config, workspace)}, ensure_ascii=False))
+        return 0
+    if command == "svn":
+        from providers.svn import checkout
+
+        svn_parser = argparse.ArgumentParser(prog="guthon_tool.py svn")
+        svn_parser.add_argument("action", choices=["init", "refresh", "status"])
+        svn_parser.add_argument("--prune", action="store_true", help="exclude paths removed from the configured sparse scope")
+        svn_parser.add_argument("--diff", action="store_true", help="include full svn diff in status output")
+        svn_parser.add_argument("--remote", action="store_true", help="contact the repository and report out-of-date paths")
+        parsed = svn_parser.parse_args(extra_args)
+        bootstrap = lambda: gusen_hub.bootstrap_system_data(config, workspace)
+        if parsed.action == "init":
+            result = checkout.initialize(workspace, gusen_hub.CONFIG_DIR, bootstrap)
+            conn = gusen_hub.connect_index(workspace["indexPath"])
+            try:
+                result["reindex"] = gusen_hub.index_svn_workspace(conn, config, workspace)
+            finally:
+                conn.close()
+            if result["reindex"].get("failures"):
+                raise SystemExit(f"SVN scan failed; existing index preserved: {result['reindex']['errors']}")
+            gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
+        elif parsed.action == "refresh":
+            result = checkout.refresh(workspace, gusen_hub.CONFIG_DIR, bootstrap, prune=parsed.prune)
+            conn = gusen_hub.connect_index(workspace["indexPath"])
+            try:
+                result["reindex"] = gusen_hub.index_svn_workspace(conn, config, workspace)
+            finally:
+                conn.close()
+            if result["reindex"].get("failures"):
+                raise SystemExit(f"SVN scan failed; existing index preserved: {result['reindex']['errors']}")
+            gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
+        else:
+            checkout.require_capability(workspace, "status")
+            with checkout.operation_lock(workspace, "status", shared=True):
+                result = {
+                    "ok": True,
+                    "status": checkout.svn_status(
+                        workspace["checkoutPath"],
+                        include_diff=parsed.diff,
+                        remote=parsed.remote,
+                        settings=workspace["svn"],
+                    ),
+                }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     if command == "init":
+        if workspace["sourceMode"] == "svn":
+            raise SystemExit("Use 'svn init' to initialize an SVN source workspace")
         gusen_hub.ensure_workspace_structure(workspace)
         gusen_hub.run_sync_once(["--init-only"])
         gusen_hub.update_workspace_state(config, workspace, "source", "INITIALIZED")
@@ -130,14 +199,18 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         return 0
     if command == "sync-source-all":
         gusen_hub.run_sync_once(["--full-rebuild"])
-        print(f"工作区全部源码拉取并索引重建完成：{workspace['workspaceKey']}")
+        verb = "本地 SVN 扫描并索引重建" if workspace["sourceMode"] == "svn" else "全部源码拉取并索引重建"
+        print(f"工作区{verb}完成：{workspace['workspaceKey']}")
         return 0
     if command == "sync-source":
         gusen_hub.run_sync_once([])
-        print(f"工作区源码拉取完成：{workspace['workspaceKey']}")
+        verb = "本地 SVN 扫描" if workspace["sourceMode"] == "svn" else "源码拉取"
+        print(f"工作区{verb}完成：{workspace['workspaceKey']}")
         return 0
     if command == "reindex":
         gusen_hub.run_sync_once(["--reindex-calls"])
+        if workspace["sourceMode"] == "svn":
+            gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
         print("本地索引重建完成")
         return 0
     if command == "pull":
@@ -158,8 +231,14 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         module_name, function_name = SCRIPT_COMMANDS[command]
         module = __import__(module_name)
         result = getattr(module, function_name)(extra_args)
-        return int(result or 0)
+        return int(result) if isinstance(result, (bool, int)) else 0
     if command == "sync-all":
+        if workspace["sourceMode"] == "svn":
+            gusen_hub.run_sync_once([])
+            gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
+            gusen_hub.update_workspace_state(config, workspace, full_sync=True)
+            print(f"SVN 工作区本地扫描、索引和资料摘要完成：{workspace['workspaceKey']}")
+            return 0
         import export_bill_type_sql
         import export_system_script_sql
         import export_table_schema_sql
@@ -197,7 +276,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("setup", "workspaces", "route", "init", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
+        choices=("setup", "workspaces", "workspace-summary", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
     )
     parser.add_argument("--home", required=True, help="Directory that stores local config and private source data")
     parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")

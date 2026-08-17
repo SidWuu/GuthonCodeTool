@@ -36,6 +36,11 @@
     "onCommand:gushenCompletion.runDoctor",
     "onCommand:gushenCompletion.runDiagnosis",
     "onCommand:gushenCompletion.inspectWorkcopy",
+    "onCommand:gushenCompletion.initializeSvn",
+    "onCommand:gushenCompletion.refreshSvn",
+    "onCommand:gushenCompletion.showSvnStatus",
+    "onCommand:gushenCompletion.openSvnWorkcopy",
+    "onCommand:gushenCompletion.saveSvnWorkcopy",
     "onCommand:gushenCompletion.refreshToolView",
     "onView:gushenCompletion.toolView"
   ],
@@ -92,6 +97,11 @@
       { "command": "gushenCompletion.runDoctor", "title": "Guthon Nexus: 检查本地环境" },
       { "command": "gushenCompletion.runDiagnosis", "title": "Guthon Nexus: 执行源码逻辑排查" },
       { "command": "gushenCompletion.inspectWorkcopy", "title": "Guthon Nexus: 检查或打包 Workcopy" },
+      { "command": "gushenCompletion.initializeSvn", "title": "Guthon Nexus: 初始化 SVN 稀疏范围" },
+      { "command": "gushenCompletion.refreshSvn", "title": "Guthon Nexus: 刷新 SVN 稀疏范围" },
+      { "command": "gushenCompletion.showSvnStatus", "title": "Guthon Nexus: 查看 SVN 状态与差异" },
+      { "command": "gushenCompletion.openSvnWorkcopy", "title": "Guthon Nexus: 打开 SVN 对象 Workcopy" },
+      { "command": "gushenCompletion.saveSvnWorkcopy", "title": "Guthon Nexus: 预检或写回 SVN" },
       { "command": "gushenCompletion.refreshToolView", "title": "Guthon Nexus: 刷新工具面板", "icon": "$(refresh)" }
     ],
     "viewsContainers": {

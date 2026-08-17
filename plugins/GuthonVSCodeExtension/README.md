@@ -19,6 +19,8 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口，不再只是代码补
 
 - 同时列出全部 `PRD <产品名称>`、`PRJ <项目名称>` 及其同步状态。
 - 每个节点绑定自己的 `workspaceKey`，可独立同步全部资料、打开目录、查看索引和维护 Workcopy。
+- 节点显示“数据库”或“SVN”，操作由 workspace summary 的有效 capabilities 生成，不在扩展内猜测配置。
+- SVN 节点提供初始化/刷新稀疏范围、查看状态与差异、本地重建索引、打开对象 Workcopy、预检/写回；不显示数据库拉取、单据类型导出或业务诊断。
 - 不设置当前或默认产品、项目。
 
 ### 维护
@@ -26,6 +28,7 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口，不再只是代码补
 - 检查本地环境。
 - 选择 JSON 定义执行只读源码逻辑排查。
 - 查看 Workcopy 状态、生成差异报告和打包交付物。
+- SVN Workcopy 保存前先做源 hash、BASE revision、JSON Pointer、受控路径及 checkout 外部修改检查；写回后仍由用户审阅并人工执行 `svn commit`。
 
 ### Guthon Bridge
 

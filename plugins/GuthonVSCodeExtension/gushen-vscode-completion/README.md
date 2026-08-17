@@ -11,13 +11,13 @@ It can also run the packaged `GuthonCodeTool` executable. This lets users initia
 Build `dist/GuthonCodeTool` (or `GuthonCodeTool.exe` on Windows) on each target OS with `python scripts/build_guthon_tool.py`, then distribute that executable together with this VSIX. In VS Code, run these commands in order:
 
 1. `Guthon Nexus: 初始化工作区` — choose the executable and a local data directory. It creates missing configuration files from templates without overwriting existing ones.
-2. Fill the generated `<本地数据目录>/config/*.yaml`; each product or project defines its datasource and system aliases.
+2. Fill the generated `<本地数据目录>/config/*.yaml`; each product or project explicitly selects `source_mode: database` or `source_mode: svn`, then defines its datasource and system aliases.
 3. Expand `项目` and choose a `PRD` or `PRJ` workspace.
 4. Run the selected workspace's full synchronization command.
 
 Clicking `Guthon Nexus: 初始化工作区` again after initialization asks whether to switch workspaces. Confirming lets the user select a new local data directory and initializes its missing configuration files; cancelling keeps the current workspace.
 
-Each workspace node can pull all source and rebuild its index, pull source, rebuild the index, export source-index Markdown, and synchronize table schemas, bill types, system scripts, and views. All command output is shown in the `GuthonCodeTool` output channel.
+Database workspace nodes retain source/metadata synchronization. SVN nodes expose sparse init/refresh, status/diff, local scanning, object Workcopy projection, and guarded writeback. The extension never runs `svn commit`. All command output is shown in the `GuthonCodeTool` output channel.
 
 The extension also adds a dedicated `Guthon Nexus` icon to VS Code's left activity bar. Its tree exposes workspace setup, source/index operations, metadata export, environment checks, source diagnosis, and workcopy status/diff/package actions, so colleagues do not need to use the command palette.
 
@@ -38,6 +38,7 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 - Initializes or switches the GuthonCodeTool local workspace.
 - Opens and edits the five local YAML configuration files.
 - Lists all configured product and project workspaces and binds every action to its `workspaceKey`.
+- Builds each workspace menu from the effective database/SVN capabilities returned by the tool.
 - Exports table schemas, bill types, system scripts, views, and source Markdown.
 - Runs environment checks and readonly source diagnosis.
 - Inspects workcopy status, generates diffs, and packages delivery files.

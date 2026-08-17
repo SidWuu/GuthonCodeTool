@@ -146,6 +146,44 @@ async function sendWorkspaceRequest(type, payload) {
   });
 }
 
+async function resolveWorkspaceSummary(tab, target) {
+  const pageOrigin = tab.url ? new URL(tab.url).origin : "";
+  const cachedWorkspaceKey = await GuthonBridgeWorkspace.storedWorkspaceKey(tab.url || pageOrigin);
+  const identity = {
+    pageOrigin,
+    dataSourceId: target.dataSourceId || "",
+    systemId: target.systemId || ""
+  };
+  if (cachedWorkspaceKey) {
+    const result = await chrome.runtime.sendMessage({
+      type: "route-workspace",
+      payload: { ...identity, workspaceKey: cachedWorkspaceKey }
+    });
+    if (result?.ok) return result.workspace;
+  }
+  const route = await chrome.runtime.sendMessage({
+    type: "route-workspace",
+    payload: identity
+  });
+  if (route?.ok) return route.workspace;
+  if (!route?.candidates?.length) return null;
+  const workspaceKey = await GuthonBridgeWorkspace.select(route.candidates, tab.url || pageOrigin);
+  const result = await chrome.runtime.sendMessage({
+    type: "route-workspace",
+    payload: { ...identity, workspaceKey }
+  });
+  return result?.workspace || null;
+}
+
+function applyWorkspaceSourceMode(workspace) {
+  if (workspace?.sourceMode !== "svn") return false;
+  pullPageBtn.hidden = true;
+  pullHubBtn.hidden = true;
+  forceRefreshBtn.hidden = true;
+  setStatus(`当前工作区使用 SVN 源码模式\n请在 Guthon Nexus 中扫描索引、打开 Workcopy 或预检/写回 SVN`);
+  return true;
+}
+
 async function runInMainWorld(tabId, command, payload) {
   try {
     const result = await chrome.tabs.sendMessage(tabId, {
@@ -562,6 +600,10 @@ async function initializePopup() {
             : `函数名：${target.funId}`
       ].join("\n")
     );
+    const workspace = await resolveWorkspaceSummary(tab, target);
+    if (applyWorkspaceSourceMode(workspace)) {
+      return;
+    }
     pullPageBtn.disabled = target.mode === "table-schema" || target.mode === "billtype" || target.mode === "views" || target.mode === "system-scripts";
     pullHubBtn.disabled = false;
     forceRefreshBtn.disabled = target.mode === "table-schema" || target.mode === "billtype" || target.mode === "views";

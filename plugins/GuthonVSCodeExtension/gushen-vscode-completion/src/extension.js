@@ -17,7 +17,7 @@ const {
 } = require('./rules');
 const { createDocumentSelector } = require('./selector');
 const { procedureTargetAt, selectDefinitionPaths } = require('./definition');
-const { prepareWorkspaceSetup } = require('./tool-workspace');
+const { prepareWorkspaceSetup, workspaceActions } = require('./tool-workspace');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 const { resolveDevelopmentRuntime, toolArguments, writeRuntimeDescriptor } = require('./tool-runtime');
 
@@ -37,6 +37,8 @@ const TOOL_COMMANDS = {
   doctor: 'doctor',
   diagnose: 'diagnose',
   workcopy: 'workcopy',
+  createWorkcopy: 'create-workcopy',
+  svn: 'svn',
 };
 const CONFIG_FILES = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'source-tables.yaml', 'sync.yaml'];
 const TOOL_LABELS = {
@@ -53,6 +55,8 @@ const TOOL_LABELS = {
   doctor: '检查本地环境',
   diagnose: '执行源码逻辑排查',
   workcopy: '执行 Workcopy 操作',
+  'create-workcopy': '打开 SVN 对象 Workcopy',
+  svn: '管理 SVN 稀疏范围',
 };
 let toolQueue = Promise.resolve();
 
@@ -317,33 +321,28 @@ class ToolTreeDataProvider {
       const statusLabels = { UNINITIALIZED: '未初始化', PARTIAL: '部分同步', SYNCED: '已同步', FAILED: '同步失败' };
       const workspaces = tool ? await readWorkspaces(tool) : [];
       projects.children = workspaces.map((item) => {
+        const actions = workspaceActions(item);
         const node = new vscode.TreeItem(item.displayName, vscode.TreeItemCollapsibleState.Collapsed);
-        node.description = `${item.id} · ${statusLabels[item.status] || item.status}`;
+        node.description = `${item.id} · ${item.sourceMode === 'svn' ? 'SVN' : '数据库'} · ${statusLabels[item.status] || item.status}`;
         node.iconPath = new vscode.ThemeIcon(item.status === 'SYNCED' ? 'pass-filled' : item.status === 'FAILED' ? 'error' : 'folder');
         const source = new vscode.TreeItem('源码与索引', vscode.TreeItemCollapsibleState.Collapsed);
         source.iconPath = new vscode.ThemeIcon('code');
-        source.children = [
-          toolItem('拉取源码重建索引', 'gushenCompletion.initSourceIndex', 'database', undefined, [item.workspaceKey]),
-          toolItem('拉取源码', 'gushenCompletion.syncWorkspaceSource', 'sync', undefined, [item.workspaceKey]),
-          toolItem('重建索引', 'gushenCompletion.reindexCalls', 'refresh', undefined, [item.workspaceKey]),
-          toolItem('导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book', undefined, [item.workspaceKey]),
-        ];
+        source.children = actions.source.map(([label, command, icon]) =>
+          toolItem(label, command, icon, undefined, [item.workspaceKey]));
         const metadata = new vscode.TreeItem('配置资料', vscode.TreeItemCollapsibleState.Collapsed);
         metadata.iconPath = new vscode.ThemeIcon('server');
-        metadata.children = [
-          toolItem('导出表结构', 'gushenCompletion.exportSchema', 'table', undefined, [item.workspaceKey]),
-          toolItem('导出单据类型', 'gushenCompletion.exportBillTypes', 'list-tree', undefined, [item.workspaceKey]),
-          toolItem('导出系统脚本', 'gushenCompletion.exportSystemScripts', 'file-code', undefined, [item.workspaceKey]),
-          toolItem('导出视图源码', 'gushenCompletion.exportViews', 'eye', undefined, [item.workspaceKey]),
-        ];
+        metadata.children = actions.metadata.map(([label, command, icon]) =>
+          toolItem(label, command, icon, undefined, [item.workspaceKey]));
+        const [syncLabel, syncCommand, syncIcon] = actions.syncAll;
         node.children = [
-          toolItem('同步工作区全部资料', 'gushenCompletion.syncWorkspaceAll', 'cloud-download', undefined, [item.workspaceKey]),
+          toolItem(syncLabel, syncCommand, syncIcon, undefined, [item.workspaceKey]),
           toolItem('打开工作区目录', 'gushenCompletion.openWorkspace', 'folder-opened', undefined, [item.root]),
           source,
-          metadata,
-          toolItem('执行源码逻辑排查', 'gushenCompletion.runDiagnosis', 'search', undefined, [item.workspaceKey]),
-          toolItem('检查或打包 Workcopy', 'gushenCompletion.inspectWorkcopy', 'package', undefined, [item.workspaceKey]),
-        ];
+          actions.metadata.length && metadata,
+          actions.diagnose && toolItem('执行源码逻辑排查', 'gushenCompletion.runDiagnosis', 'search', undefined, [item.workspaceKey]),
+          ...actions.workcopy.map(([label, command, icon]) =>
+            toolItem(label, command, icon, undefined, [item.workspaceKey])),
+        ].filter(Boolean);
         return node;
       });
       if (!projects.children.length) {
@@ -467,6 +466,65 @@ function activate(context) {
         { label: '打包交付物', value: 'package' },
       ], { title: 'Workcopy 操作' });
       if (action) return runTool(TOOL_COMMANDS.workcopy, [action.value, selected[0].fsPath], true, workspaceKey);
+    }),
+    vscode.commands.registerCommand('gushenCompletion.initializeSvn', (workspaceKey) =>
+      runTool(TOOL_COMMANDS.svn, ['init'], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.refreshSvn', (workspaceKey) =>
+      runTool(TOOL_COMMANDS.svn, ['refresh'], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.showSvnStatus', (workspaceKey) =>
+      runTool(TOOL_COMMANDS.svn, ['status', '--diff'], false, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.openSvnWorkcopy', async (workspaceKey) => {
+      const sourceType = await vscode.window.showQuickPick(
+        [
+          { label: '页面', value: 'page' },
+          { label: '过程函数', value: 'procedure' },
+          { label: '系统脚本', value: 'system-script' },
+          { label: '表结构（只读）', value: 'table' },
+          { label: '视图（只读）', value: 'view' },
+        ],
+        { title: '选择 SVN 对象类型' },
+      );
+      if (!sourceType) return;
+      const compoundIdentity = sourceType.value === 'procedure' || sourceType.value === 'system-script';
+      const identity = await vscode.window.showInputBox({
+        prompt: sourceType.value === 'procedure'
+          ? '输入过程包别名'
+          : sourceType.value === 'system-script'
+            ? '输入 SYSTEM_ID'
+            : '输入对象 ID',
+      });
+      if (!identity) return;
+      const args = ['--type', sourceType.value];
+      if (compoundIdentity) {
+        const fun = await vscode.window.showInputBox({
+          prompt: sourceType.value === 'procedure' ? '输入函数 ID' : '输入系统脚本文件名（不含扩展名）',
+        });
+        if (!fun) return;
+        args.push('--alias', identity, '--fun', fun);
+      } else {
+        args.push('--source-id', identity);
+      }
+      return runTool(TOOL_COMMANDS.createWorkcopy, args, false, workspaceKey);
+    }),
+    vscode.commands.registerCommand('gushenCompletion.saveSvnWorkcopy', async (workspaceKey) => {
+      const selected = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        title: '选择 SVN Workcopy 对象目录',
+      });
+      if (!selected) return;
+      const action = await vscode.window.showQuickPick(
+        [
+          { label: '仅预检写回', value: 'check' },
+          { label: '写回本地 SVN working copy', value: 'save' },
+        ],
+        { title: 'SVN Workcopy 操作' },
+      );
+      if (!action) return;
+      const args = ['save-svn', selected[0].fsPath];
+      if (action.value === 'check') args.push('--check');
+      return runTool(TOOL_COMMANDS.workcopy, args, action.value === 'save', workspaceKey);
     }),
     vscode.commands.registerCommand('gushenCompletion.openWorkspace', (workspaceRoot) =>
       vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(workspaceRoot))),

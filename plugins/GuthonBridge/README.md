@@ -17,6 +17,8 @@ Guthon Bridge 是面向 Guthon 在线开发页面的本地辅助扩展，由 Chr
 - 在视图管理页拉取当前数据源的视图源码。
 - 在系统脚本页拉取当前应用系统的选中脚本或全部脚本。
 
+以上源码拉取和数据库资料导出只适用于 `source_mode: database`。Bridge 会先读取工作区摘要；SVN 工作区隐藏页面悬浮按钮和弹窗中的旧拉取入口，旧版扩展直接调用这些接口时，服务端也会返回明确的模式错误。SVN 初始化、刷新、扫描、Workcopy 和写回统一从 Guthon Nexus 操作。
+
 ## 目录
 
 ```text
@@ -33,6 +35,8 @@ plugins/GuthonBridge/
 普通用户在 Guthon Nexus 左侧面板单击“启动 Guthon Bridge”。Nexus 会复用当前运行模式和本地数据目录，并使用 VS Code 自带的 Node 运行环境启动服务，不需要安装 Node.js、设置环境变量或打开终端。发行模式调用已选择的 GuthonCodeTool 应用；调试模式直接调用源码仓库的 `.venv` 和 Python 入口，每次拉取使用最新脚本。切换本地数据目录或运行模式时，运行中的 Bridge 会自动重启。
 
 Bridge 请求携带 `workspaceKey` 时会验证页面身份；未携带时按 `pageOrigin + dataSourceId + systemId` 匹配产品、项目配置。唯一候选直接使用，多个候选由 Chrome 扩展下拉选择，并按 `协议 + 主机 + /guthon` 记住最近一次选择；切换谷神地址或候选失效时重新选择。
+
+工作区摘要包含 `sourceMode` 和服务端计算的 capabilities。前端只按这些能力显示操作；配置关闭后，Bridge/CLI 仍会再次校验，不把前端隐藏当权限边界。
 
 以下命令只用于仓库源码调试：
 
@@ -185,8 +189,11 @@ var/nexus/bridge/manifest.json
 - 本地文件回推到开发平台。
 - 自动签出过程函数。
 - 自动签出页面源码。
+- 由 Bridge 自动执行 `svn commit`。
 
 收到签出或回推命令时，插件会直接返回错误，不调用平台保存接口。
+
+SVN Workcopy 的“写回”只修改受控 working copy 中映射声明的文件，不调用谷神网页保存接口；用户必须审阅 `svn diff` 后人工提交。
 
 ## 开发与验证
 

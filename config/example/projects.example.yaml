@@ -5,6 +5,8 @@ projects:
   demo-project:
     # 项目名称，用作 readonly、workcopy 和数据库快照的目录名。
     name: 示例项目
+    # 每个工作区必须明确选择唯一源码事实来源：database 或 svn。
+    source_mode: database
     # 引用 datasource.yaml 中的数据源标识。
     datasource: demo-project-dev
     # 可选浏览器来源；为空时 Bridge 依赖数据源和系统身份匹配。

@@ -43,6 +43,65 @@ databases:
 
 源码排查脚本只连接同时满足 `environment: test`、`diagnosis.enabled: true` 和 `diagnosis.query_only: true` 的数据源。`databases` 是该测试服务器允许查询的数据库白名单，开发库不配置 `diagnosis`。
 
+## products.yaml / projects.yaml 的源码模式
+
+每个产品、项目都必须显式配置且只能启用一种源码 provider：
+
+```yaml
+products:
+  demo-product:
+    name: 示例产品
+    source_mode: database  # database | svn
+    datasource: demo-product-dev
+```
+
+`database` 保持现有源码表、metadata 导出和业务诊断流程。`svn` 把 `var/checkout/<配置 ID>` 作为唯一源码事实来源，普通扫描不访问数据库；`datasource` 仅在 `system-data.json` 缺失时供 `svn init/refresh` 受控补全系统映射。
+
+SVN 示例：
+
+```yaml
+products:
+  demo-product:
+    name: 示例产品
+    source_mode: svn
+    datasource: demo-product-dev
+    systems:
+      include:
+        system_aliases:
+          - demo.system
+    svn:
+      repository_url: ${DEMO_PRODUCT_SVN_URL}
+      sparse_checkout: true
+      include: [pages, procedures, system-script, tables, views]
+      update_policy: manual
+      no_auth_cache: true
+      username_env: DEMO_SVN_USERNAME
+      password_env: DEMO_SVN_PASSWORD
+      allowed_cert_failures: []
+      capabilities:
+        initialize: true
+        refresh: true
+        system_data_bootstrap: true
+        status: true
+        reindex: true
+        workcopy: true
+        writeback: true
+        commit: false
+```
+
+工作区配置 ID 必须是安全的单级目录名，并在产品/项目之间唯一。`workspace_root` 与 `svn.checkout_root` 必须分离。`username_env`、`password_env` 只保存环境变量名；密码由工具经 stdin 传给 SVN，不出现在 YAML、命令行或日志。未配置密码环境变量时，只能在交互终端按 SVN 提示输入；Nexus/Bridge 的非交互调用会快速失败，不会等待隐藏输入。证书异常默认全部拒绝，确需信任时只能从 `unknown-ca`、`cn-mismatch`、`expired`、`not-yet-valid`、`other` 中显式列出已核对项。`commit` 固定为 `false`，工具不提供自动提交。
+
+首次初始化和日常刷新：
+
+```bash
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- init
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- refresh
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --diff
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --remote
+```
+
+`init/refresh` 自动扫描并重建索引；普通 `reindex` 只扫描本地文件。范围缩小时默认只报告残留目录，明确增加 `--prune` 才会在 working copy 干净时执行受控排除。
+
 ## products.yaml / projects.yaml 中的 systems
 
 每个产品、项目分别配置用于限制同步范围的子系统：
@@ -51,6 +110,7 @@ databases:
 products:
   demo-product:
     name: 示例产品
+    source_mode: database
     datasource: demo-product-dev
     systems:
       include:
@@ -92,7 +152,7 @@ var/workspace/PRD 示例产品/
 var/workspace/PRJ 示例项目/
 ```
 
-每个工作区独立包含 `source/readonly`、`source/workcopy`、`database/{schema,billtype,views}`、`docs` 和 `context/index.db`。`context/state.json` 只有在源码、表结构、单据类型、系统脚本和视图五步成功且配置摘要一致时才显示 `SYNCED`。
+数据库工作区独立包含 `source/readonly`、`source/workcopy`、`database/{schema,billtype,views}`、`docs` 和 `context/index.db`。SVN 工作区只在工具目录保留 `source/workcopy`、`docs` 和 `context/index.db`，源码来自独立的 `var/checkout/<配置 ID>`。状态检查按 provider 的有效步骤计算：数据库为五步，SVN 为本地源码扫描一步。
 
 ## 源码逻辑排查
 
