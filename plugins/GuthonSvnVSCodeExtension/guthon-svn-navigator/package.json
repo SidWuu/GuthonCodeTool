@@ -1,0 +1,317 @@
+{
+  "name": "guthon-svn-navigator",
+  "displayName": "Guthon SVN Navigator",
+  "description": "在 VS Code 中以中文目录浏览谷神 SVN 页面，并快速跳转到页面 JSON 和 GSS 源码。",
+  "version": "0.3.9",
+  "publisher": "guthon-local",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SidWuu/GuthonCodeTool.git",
+    "directory": "plugins/GuthonSvnVSCodeExtension/guthon-svn-navigator"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "guthon",
+    "svn",
+    "gss",
+    "谷神"
+  ],
+  "activationEvents": [
+    "onView:guthonSvnNavigator.pageTree",
+    "workspaceContains:info.json",
+    "workspaceContains:pages/*/index.md",
+    "onLanguage:guthon-gss",
+    "onCommand:guthonSvnNavigator.refresh",
+    "onCommand:guthonSvnNavigator.searchPages",
+    "onCommand:guthonSvnNavigator.openSegment",
+    "onCommand:guthonSvnNavigator.selectRepository",
+    "onCommand:guthonSvnNavigator.updateRepository",
+    "onCommand:guthonSvnNavigator.updateAll",
+    "onCommand:guthonSvnNavigator.showStatus",
+    "onCommand:guthonSvnNavigator.commitChanges",
+    "onCommand:guthonSvnNavigator.openChange",
+    "onCommand:guthonSvnNavigator.openReadableChange",
+    "onCommand:guthonSvnNavigator.showFileHistory",
+    "onCommand:guthonSvnNavigator.refreshSourceControl"
+  ],
+  "main": "./src/extension.js",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/extension.js && node --check src/page-index.js && node --check src/svn-status.js && node --check src/svn-log.js && node --check src/workspace-layout.js",
+    "package": "npx --yes @vscode/vsce package --no-dependencies"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "guthon-gss",
+        "aliases": [
+          "Guthon GSS",
+          "gss"
+        ],
+        "extensions": [
+          ".gss"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "guthon-gss",
+        "scopeName": "source.guthon-gss",
+        "path": "./syntaxes/guthon-gss.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "guthonSvnNavigator.refresh",
+        "title": "Guthon SVN: 刷新中文页面目录",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "guthonSvnNavigator.searchPages",
+        "title": "Guthon SVN: 搜索页面",
+        "icon": "$(search)"
+      },
+      {
+        "command": "guthonSvnNavigator.selectRepository",
+        "title": "Guthon SVN: 选择 SVN 工作副本"
+      },
+      {
+        "command": "guthonSvnNavigator.openPage",
+        "title": "Guthon SVN: 打开页面文件",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "guthonSvnNavigator.openSegment",
+        "title": "Guthon SVN: 打开当前虚拟段",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "guthonSvnNavigator.revealInSource",
+        "title": "Guthon SVN: 在原始 JSON 中定位"
+      },
+      {
+        "command": "guthonSvnNavigator.openIndex",
+        "title": "Guthon SVN: 打开系统页面索引"
+      },
+      {
+        "command": "guthonSvnNavigator.updateRepository",
+        "title": "Guthon SVN: 更新当前存储库",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "guthonSvnNavigator.updateAll",
+        "title": "Guthon SVN: 全量更新项目",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "guthonSvnNavigator.showStatus",
+        "title": "Guthon SVN: 查看工作副本状态"
+      },
+      {
+        "command": "guthonSvnNavigator.commitChanges",
+        "title": "Guthon SVN: 提交工作副本更改",
+        "icon": "$(check)"
+      },
+      {
+        "command": "guthonSvnNavigator.openChange",
+        "title": "Guthon SVN: 查看真实文件差异"
+      },
+      {
+        "command": "guthonSvnNavigator.openReadableChange",
+        "title": "Guthon SVN: 查看脚本/SQL 可读差异"
+      },
+      {
+        "command": "guthonSvnNavigator.showFileHistory",
+        "title": "Guthon SVN: 查看文件 SVN 历史",
+        "icon": "$(history)"
+      },
+      {
+        "command": "guthonSvnNavigator.addUnversionedChange",
+        "title": "Guthon SVN: 加入 SVN",
+        "icon": "$(add)"
+      },
+      {
+        "command": "guthonSvnNavigator.refreshSourceControl",
+        "title": "Guthon SVN: 刷新变更列表",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "guthonSvnNavigator",
+          "title": "Guthon SVN",
+          "icon": "resources/guthon-svn.svg"
+        }
+      ]
+    },
+    "views": {
+      "guthonSvnNavigator": [
+        {
+          "id": "guthonSvnNavigator.pageTree",
+          "name": "中文页面目录"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "guthonSvnNavigator.pageTree",
+        "contents": "未识别到谷神 SVN 项目。支持完整工作副本和多个子目录独立 checkout。\n[选择 SVN 项目目录](command:guthonSvnNavigator.selectRepository)",
+        "when": "!guthonSvnNavigator.hasRepository"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "guthonSvnNavigator.searchPages",
+          "when": "view == guthonSvnNavigator.pageTree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "guthonSvnNavigator.refresh",
+          "when": "view == guthonSvnNavigator.pageTree",
+          "group": "navigation@2"
+        },
+        {
+          "command": "guthonSvnNavigator.updateAll",
+          "when": "view == guthonSvnNavigator.pageTree && guthonSvnNavigator.hasRepository",
+          "group": "navigation@3"
+        },
+        {
+          "command": "guthonSvnNavigator.commitChanges",
+          "when": "view == guthonSvnNavigator.pageTree && guthonSvnNavigator.hasRepository",
+          "group": "navigation@4"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "guthonSvnNavigator.refreshSourceControl",
+          "when": "scmProvider =~ /^guthonSvn/",
+          "group": "navigation@0"
+        },
+        {
+          "command": "guthonSvnNavigator.updateRepository",
+          "when": "scmProvider =~ /^guthonSvn/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "guthonSvnNavigator.commitChanges",
+          "when": "scmProvider =~ /^guthonSvn/",
+          "group": "navigation@2"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "guthonSvnNavigator.addUnversionedChange",
+          "when": "scmProvider =~ /^guthonSvn/ && scmResourceState == guthonSvn.unversioned",
+          "group": "inline@0"
+        },
+        {
+          "command": "guthonSvnNavigator.openReadableChange",
+          "when": "scmProvider =~ /^guthonSvn/",
+          "group": "inline@1"
+        },
+        {
+          "command": "guthonSvnNavigator.openChange",
+          "when": "scmProvider =~ /^guthonSvn/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "guthonSvnNavigator.showFileHistory",
+          "when": "scmProvider =~ /^guthonSvn/",
+          "group": "navigation@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "guthonSvnNavigator.showFileHistory",
+          "when": "resourceScheme == file",
+          "group": "navigation@50"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "guthonSvnNavigator.openPage",
+          "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.page",
+          "group": "inline@1"
+        },
+        {
+          "command": "guthonSvnNavigator.openSegment",
+          "when": "view == guthonSvnNavigator.pageTree && (viewItem == guthonSvn.component || viewItem == guthonSvn.tab-item || viewItem == guthonSvn.control-group || viewItem == guthonSvn.control || viewItem == guthonSvn.button || viewItem == guthonSvn.event || viewItem == guthonSvn.datasource)",
+          "group": "inline@1"
+        },
+        {
+          "command": "guthonSvnNavigator.revealInSource",
+          "when": "view == guthonSvnNavigator.pageTree && (viewItem == guthonSvn.component || viewItem == guthonSvn.tab-item || viewItem == guthonSvn.control-group || viewItem == guthonSvn.control || viewItem == guthonSvn.button || viewItem == guthonSvn.event || viewItem == guthonSvn.datasource)",
+          "group": "navigation@2"
+        },
+        {
+          "command": "guthonSvnNavigator.updateRepository",
+          "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.repository",
+          "group": "inline@1"
+        },
+        {
+          "command": "guthonSvnNavigator.commitChanges",
+          "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.repository",
+          "group": "inline@2"
+        },
+        {
+          "command": "guthonSvnNavigator.showStatus",
+          "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.repository",
+          "group": "svn@1"
+        },
+        {
+          "command": "guthonSvnNavigator.openIndex",
+          "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.system",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Guthon SVN Navigator",
+      "properties": {
+        "guthonSvnNavigator.repositoryRoot": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "谷神 SVN 项目根目录；既可以是完整工作副本，也可以是包含 pages/*、procedures/* 等独立 checkout 的上层目录。"
+        },
+        "guthonSvnNavigator.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "pages/*/index.md 变化时自动刷新中文页面目录。"
+        },
+        "guthonSvnNavigator.showIds": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "在系统节点旁显示 SYSTEM_ID，而不是页面对象数量。"
+        },
+        "guthonSvnNavigator.showMissingPages": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "显示 index.md 中仍存在、但对应 JSON/GSS 文件已经缺失的历史页面节点。"
+        },
+        "guthonSvnNavigator.trustServerCertificate": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "临时信任 SVN 服务器的过期、主机名不匹配或未知颁发者证书；仅在无法修复服务器证书时开启。"
+        }
+      }
+    }
+  }
+}
