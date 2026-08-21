@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { parseSvnStatusXml } = require('../src/svn-status');
+const { parseSvnRemoteStatusXml, parseSvnStatusXml } = require('../src/svn-status');
 
 test('parses SVN XML working copy changes and ignores normal entries', () => {
   const root = path.join('/tmp', 'guthon-svn');
@@ -60,4 +60,26 @@ test('keeps property-only changes as modified entries', () => {
     item: 'modified',
     props: 'modified'
   }]);
+});
+
+test('parses incoming repository changes and the compared revision', () => {
+  const xml = `<status><target path=".">
+    <entry path="pages/SYS/PG-DEMO.json">
+      <wc-status item="normal" props="none" revision="12"/>
+      <repos-status item="modified" props="none"/>
+    </entry>
+    <against revision="18"/>
+  </target></status>`;
+  const entries = parseSvnRemoteStatusXml(xml, '/repo');
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].remoteItem, 'modified');
+  assert.equal(entries[0].againstRevision, '18');
+});
+
+test('keeps SVN changelist names on local changes', () => {
+  const xml = `<status><target path="."><changelist name="年度计划">
+    <entry path="source.gss"><wc-status item="modified" props="none"/></entry>
+  </changelist></target></status>`;
+  const entries = parseSvnStatusXml(xml, '/repo');
+  assert.equal(entries[0].changelist, '年度计划');
 });

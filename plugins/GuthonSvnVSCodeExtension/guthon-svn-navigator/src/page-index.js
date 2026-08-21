@@ -867,6 +867,44 @@ function rewritePageSegment(source, virtualPath, content, filePath = '') {
   };
 }
 
+function jsonNodeAtParts(root, parts) {
+  let node = root;
+  for (const part of parts || []) {
+    if (node?.type === 'object') {
+      node = objectProperty(node, String(part))?.value;
+    } else if (node?.type === 'array' && /^\d+$/.test(String(part))) {
+      node = node.items[Number(part)];
+    } else {
+      return null;
+    }
+    if (!node) return null;
+  }
+  return node;
+}
+
+function jsonStringAtParts(source, parts) {
+  const root = new JsonLocationParser(source).parse();
+  const node = jsonNodeAtParts(root, parts);
+  return node?.type === 'string' ? node.value : null;
+}
+
+function rewriteJsonStringAtParts(source, parts, content) {
+  const text = String(source || '');
+  const root = new JsonLocationParser(text).parse();
+  const node = jsonNodeAtParts(root, parts);
+  if (node?.type !== 'string') {
+    throw new Error(`原 JSON 中找不到可回写的字符串节点：${(parts || []).join(' > ')}`);
+  }
+  const replacement = encodeJsonStringLike(String(content || ''), text.slice(node.start, node.end));
+  const updatedSource = text.slice(0, node.start) + replacement + text.slice(node.end);
+  try {
+    JSON.parse(updatedSource);
+  } catch (error) {
+    throw new SyntaxError(`回写 JSON 失败：${error.message}`);
+  }
+  return updatedSource;
+}
+
 function resolveIndexLink(indexPath, target) {
   let value = String(target || '').trim();
   if (value.startsWith('<') && value.endsWith('>')) {
@@ -905,7 +943,9 @@ function parsePageIndex(markdown, indexPath) {
   const fallbackSystemId = path.basename(path.dirname(indexPath));
   let system = createNode('system', fallbackSystemId, {
     systemId: fallbackSystemId,
-    indexPath
+    indexPath,
+    repositoryRoot: path.dirname(path.dirname(indexPath)),
+    sourceRoot: path.dirname(indexPath)
   });
   const stack = [system];
   let currentMenu = null;
@@ -922,7 +962,8 @@ function parsePageIndex(markdown, indexPath) {
     if (summaryMatch) {
       const directory = createNode('directory', summaryMatch[1].trim(), {
         systemId: system.systemId,
-        indexPath
+        indexPath,
+        repositoryRoot: system.repositoryRoot
       });
       stack[stack.length - 1].children.push(directory);
       stack.push(directory);
@@ -943,6 +984,7 @@ function parsePageIndex(markdown, indexPath) {
       const leaf = createNode('page', parsed.label, {
         systemId: system.systemId,
         indexPath,
+        repositoryRoot: system.repositoryRoot,
         filePath,
         linkTarget: leafMatch[2].trim(),
         pageType: parsed.pageType,
@@ -956,7 +998,8 @@ function parsePageIndex(markdown, indexPath) {
     if (menuMatch) {
       currentMenu = createNode('menu', menuMatch[1].trim(), {
         systemId: system.systemId,
-        indexPath
+        indexPath,
+        repositoryRoot: system.repositoryRoot
       });
       stack[stack.length - 1].children.push(currentMenu);
     }
@@ -1010,5 +1053,7 @@ module.exports = {
   parsePageIndex,
   readProductInfo,
   rewritePageSegment,
+  jsonStringAtParts,
+  rewriteJsonStringAtParts,
   resolveIndexLink
 };

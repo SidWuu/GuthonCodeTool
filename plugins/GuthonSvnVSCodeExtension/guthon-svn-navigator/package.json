@@ -2,7 +2,7 @@
   "name": "guthon-svn-navigator",
   "displayName": "Guthon SVN Navigator",
   "description": "在 VS Code 中以中文目录浏览谷神 SVN 页面，并快速跳转到页面 JSON 和 GSS 源码。",
-  "version": "0.3.9",
+  "version": "0.6.14",
   "publisher": "guthon-local",
   "private": true,
   "repository": {
@@ -34,23 +34,40 @@
     "onCommand:guthonSvnNavigator.refresh",
     "onCommand:guthonSvnNavigator.searchPages",
     "onCommand:guthonSvnNavigator.openSegment",
+    "onCommand:guthonSvnNavigator.openSourceFile",
     "onCommand:guthonSvnNavigator.selectRepository",
+    "onCommand:guthonSvnNavigator.configureSvnExecutable",
+    "onCommand:guthonSvnNavigator.initializeProject",
     "onCommand:guthonSvnNavigator.updateRepository",
     "onCommand:guthonSvnNavigator.updateAll",
     "onCommand:guthonSvnNavigator.showStatus",
+    "onCommand:guthonSvnNavigator.checkSvnStatus",
     "onCommand:guthonSvnNavigator.commitChanges",
     "onCommand:guthonSvnNavigator.openChange",
     "onCommand:guthonSvnNavigator.openReadableChange",
     "onCommand:guthonSvnNavigator.showFileHistory",
-    "onCommand:guthonSvnNavigator.refreshSourceControl"
+    "onCommand:guthonSvnNavigator.refreshSourceControl",
+    "onCommand:guthonSvnNavigator.revertChange",
+    "onCommand:guthonSvnNavigator.revertQuickDiffChange",
+    "onCommand:guthonSvnNavigator.revertReadableDiffBlock",
+    "onCommand:guthonSvnNavigator.refreshRemoteChanges",
+    "onCommand:guthonSvnNavigator.openRemoteChange",
+    "onCommand:guthonSvnNavigator.cleanupRepository",
+    "onCommand:guthonSvnNavigator.resolveConflict",
+    "onCommand:guthonSvnNavigator.setChangelist",
+    "onCommand:guthonSvnNavigator.exportPatch",
+    "onCommand:guthonSvnNavigator.showRepositoryHistory"
   ],
   "main": "./src/extension.js",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/extension.js && node --check src/page-index.js && node --check src/svn-status.js && node --check src/svn-log.js && node --check src/workspace-layout.js",
+    "check": "node --check src/extension.js && node --check src/gss-language.js && node --check src/gss-rules.js && node --check src/page-index.js && node --check src/path-utils.js && node --check src/project-config.js && node --check src/svn-executable.js && node --check src/svn-status.js && node --check src/svn-log.js && node --check src/workspace-layout.js",
     "package": "npx --yes @vscode/vsce package --no-dependencies"
   },
   "contributes": {
+    "configurationDefaults": {
+      "scm.diffDecorations": "all"
+    },
     "languages": [
       {
         "id": "guthon-gss",
@@ -69,22 +86,39 @@
         "language": "guthon-gss",
         "scopeName": "source.guthon-gss",
         "path": "./syntaxes/guthon-gss.tmLanguage.json"
+      },
+      {
+        "scopeName": "guthon-gss.injection",
+        "path": "./syntaxes/guthon-gss.injection.tmLanguage.json",
+        "injectTo": [
+          "source.guthon-gss"
+        ]
       }
     ],
     "commands": [
       {
         "command": "guthonSvnNavigator.refresh",
-        "title": "Guthon SVN: 刷新中文页面目录",
+        "title": "Guthon SVN: 刷新中文源码目录",
         "icon": "$(refresh)"
       },
       {
         "command": "guthonSvnNavigator.searchPages",
-        "title": "Guthon SVN: 搜索页面",
+        "title": "Guthon SVN: 搜索源码对象",
         "icon": "$(search)"
       },
       {
         "command": "guthonSvnNavigator.selectRepository",
-        "title": "Guthon SVN: 选择 SVN 工作副本"
+        "title": "Guthon SVN: 选择当前项目",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "guthonSvnNavigator.configureSvnExecutable",
+        "title": "Guthon SVN: 选择 SVN 命令行程序"
+      },
+      {
+        "command": "guthonSvnNavigator.initializeProject",
+        "title": "Guthon SVN: 初始化配置项目",
+        "icon": "$(new-folder)"
       },
       {
         "command": "guthonSvnNavigator.openPage",
@@ -119,6 +153,11 @@
         "title": "Guthon SVN: 查看工作副本状态"
       },
       {
+        "command": "guthonSvnNavigator.checkSvnStatus",
+        "title": "Guthon SVN: 检查 SVN 状态",
+        "icon": "$(pulse)"
+      },
+      {
         "command": "guthonSvnNavigator.commitChanges",
         "title": "Guthon SVN: 提交工作副本更改",
         "icon": "$(check)"
@@ -142,9 +181,58 @@
         "icon": "$(add)"
       },
       {
+        "command": "guthonSvnNavigator.revertChange",
+        "title": "Guthon SVN: 取消本地更改",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "guthonSvnNavigator.revertQuickDiffChange",
+        "title": "Guthon SVN: 取消当前变更",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "guthonSvnNavigator.revertReadableDiffBlock",
+        "title": "Guthon SVN: 取消当前差异块",
+        "icon": "$(discard)"
+      },
+      {
         "command": "guthonSvnNavigator.refreshSourceControl",
         "title": "Guthon SVN: 刷新变更列表",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "guthonSvnNavigator.refreshRemoteChanges",
+        "title": "Guthon SVN: 检查远程变更",
+        "icon": "$(cloud)"
+      },
+      {
+        "command": "guthonSvnNavigator.openRemoteChange",
+        "title": "Guthon SVN: 查看远程版本差异"
+      },
+      {
+        "command": "guthonSvnNavigator.cleanupRepository",
+        "title": "Guthon SVN: Cleanup 工作副本",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "guthonSvnNavigator.resolveConflict",
+        "title": "Guthon SVN: 处理冲突",
+        "icon": "$(warning)"
+      },
+      {
+        "command": "guthonSvnNavigator.setChangelist",
+        "title": "Guthon SVN: 设置变更集",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "guthonSvnNavigator.exportPatch",
+        "title": "Guthon SVN: 导出真实 SVN Patch",
+        "icon": "$(file-zip)"
+      },
+      {
+        "command": "guthonSvnNavigator.showRepositoryHistory",
+        "title": "Guthon SVN: 搜索提交历史",
+        "icon": "$(history)"
       }
     ],
     "viewsContainers": {
@@ -160,7 +248,7 @@
       "guthonSvnNavigator": [
         {
           "id": "guthonSvnNavigator.pageTree",
-          "name": "中文页面目录"
+          "name": "中文源码目录"
         }
       ]
     },
@@ -179,9 +267,24 @@
           "group": "navigation@1"
         },
         {
+          "command": "guthonSvnNavigator.selectRepository",
+          "when": "view == guthonSvnNavigator.pageTree",
+          "group": "navigation@0"
+        },
+        {
           "command": "guthonSvnNavigator.refresh",
           "when": "view == guthonSvnNavigator.pageTree",
           "group": "navigation@2"
+        },
+        {
+          "command": "guthonSvnNavigator.checkSvnStatus",
+          "when": "view == guthonSvnNavigator.pageTree && guthonSvnNavigator.hasRepository",
+          "group": "navigation@2"
+        },
+        {
+          "command": "guthonSvnNavigator.initializeProject",
+          "when": "view == guthonSvnNavigator.pageTree",
+          "group": "navigation@1"
         },
         {
           "command": "guthonSvnNavigator.updateAll",
@@ -203,12 +306,32 @@
         {
           "command": "guthonSvnNavigator.updateRepository",
           "when": "scmProvider =~ /^guthonSvn/",
-          "group": "navigation@1"
+          "group": "navigation@2"
         },
         {
           "command": "guthonSvnNavigator.commitChanges",
           "when": "scmProvider =~ /^guthonSvn/",
-          "group": "navigation@2"
+          "group": "navigation@3"
+        },
+        {
+          "command": "guthonSvnNavigator.refreshRemoteChanges",
+          "when": "scmProvider =~ /^guthonSvn/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "guthonSvnNavigator.cleanupRepository",
+          "when": "scmProvider =~ /^guthonSvn/",
+          "group": "guthon@1"
+        },
+        {
+          "command": "guthonSvnNavigator.exportPatch",
+          "when": "scmProvider =~ /^guthonSvn/",
+          "group": "guthon@2"
+        },
+        {
+          "command": "guthonSvnNavigator.showRepositoryHistory",
+          "when": "scmProvider =~ /^guthonSvn/",
+          "group": "guthon@3"
         }
       ],
       "scm/resourceState/context": [
@@ -219,18 +342,49 @@
         },
         {
           "command": "guthonSvnNavigator.openReadableChange",
-          "when": "scmProvider =~ /^guthonSvn/",
+          "when": "scmProvider =~ /^guthonSvn/ && scmResourceState =~ /^guthonSvn\\.(modified|added|deleted|replaced|conflicted|missing|obstructed|unversioned|incomplete)$/",
           "group": "inline@1"
         },
         {
+          "command": "guthonSvnNavigator.revertChange",
+          "when": "scmProvider =~ /^guthonSvn/ && (scmResourceState == guthonSvn.modified || scmResourceState == guthonSvn.added || scmResourceState == guthonSvn.deleted || scmResourceState == guthonSvn.replaced || scmResourceState == guthonSvn.missing || scmResourceState == guthonSvn.obstructed || scmResourceState == guthonSvn.incomplete || scmResourceState == guthonSvn.conflicted)",
+          "group": "inline@2"
+        },
+        {
           "command": "guthonSvnNavigator.openChange",
-          "when": "scmProvider =~ /^guthonSvn/",
+          "when": "scmProvider =~ /^guthonSvn/ && scmResourceState =~ /^guthonSvn\\.(modified|added|deleted|replaced|conflicted|missing|obstructed|unversioned|incomplete)$/",
           "group": "navigation@1"
         },
         {
           "command": "guthonSvnNavigator.showFileHistory",
-          "when": "scmProvider =~ /^guthonSvn/",
+          "when": "scmProvider =~ /^guthonSvn/ && scmResourceState =~ /^guthonSvn\\.(modified|added|deleted|replaced|conflicted|missing|obstructed|unversioned|incomplete)$/",
           "group": "navigation@2"
+        },
+        {
+          "command": "guthonSvnNavigator.openRemoteChange",
+          "when": "scmProvider =~ /^guthonSvn/ && scmResourceState =~ /^guthonSvn\\.remote\\./",
+          "group": "inline@0"
+        },
+        {
+          "command": "guthonSvnNavigator.resolveConflict",
+          "when": "scmProvider =~ /^guthonSvn/ && scmResourceState == guthonSvn.conflicted",
+          "group": "inline@0"
+        },
+        {
+          "command": "guthonSvnNavigator.setChangelist",
+          "when": "scmProvider =~ /^guthonSvn/ && (scmResourceState == guthonSvn.modified || scmResourceState == guthonSvn.added || scmResourceState == guthonSvn.deleted || scmResourceState == guthonSvn.replaced || scmResourceState == guthonSvn.missing)",
+          "group": "changes@1"
+        },
+        {
+          "command": "guthonSvnNavigator.exportPatch",
+          "when": "scmProvider =~ /^guthonSvn/ && (scmResourceState == guthonSvn.modified || scmResourceState == guthonSvn.added || scmResourceState == guthonSvn.deleted || scmResourceState == guthonSvn.replaced || scmResourceState == guthonSvn.missing)",
+          "group": "changes@2"
+        }
+      ],
+      "scm/change/title": [
+        {
+          "command": "guthonSvnNavigator.revertQuickDiffChange",
+          "when": "originalResourceScheme == guthon-svn-base"
         }
       ],
       "explorer/context": [
@@ -238,6 +392,35 @@
           "command": "guthonSvnNavigator.showFileHistory",
           "when": "resourceScheme == file",
           "group": "navigation@50"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "guthonSvnNavigator.revertReadableDiffBlock",
+          "when": "resourceScheme == guthon-svn-readable-diff",
+          "group": "inline@0"
+        },
+        {
+          "command": "guthonSvnNavigator.showFileHistory",
+          "when": "resourceScheme == file",
+          "group": "navigation@50"
+        },
+        {
+          "command": "guthonSvnNavigator.revertChange",
+          "when": "resourceScheme == file",
+          "group": "navigation@51"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "guthonSvnNavigator.revertReadableDiffBlock",
+          "when": "resourceScheme == guthon-svn-readable-diff",
+          "group": "navigation@50"
+        },
+        {
+          "command": "guthonSvnNavigator.revertChange",
+          "when": "resourceScheme == file",
+          "group": "navigation@51"
         }
       ],
       "view/item/context": [
@@ -272,6 +455,26 @@
           "group": "svn@1"
         },
         {
+          "command": "guthonSvnNavigator.refreshRemoteChanges",
+          "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.repository",
+          "group": "svn@2"
+        },
+        {
+          "command": "guthonSvnNavigator.cleanupRepository",
+          "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.repository",
+          "group": "svn@3"
+        },
+        {
+          "command": "guthonSvnNavigator.showRepositoryHistory",
+          "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.repository",
+          "group": "svn@4"
+        },
+        {
+          "command": "guthonSvnNavigator.exportPatch",
+          "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.repository",
+          "group": "svn@5"
+        },
+        {
           "command": "guthonSvnNavigator.openIndex",
           "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.system",
           "group": "navigation@1"
@@ -287,11 +490,17 @@
           "scope": "resource",
           "description": "谷神 SVN 项目根目录；既可以是完整工作副本，也可以是包含 pages/*、procedures/* 等独立 checkout 的上层目录。"
         },
+        "guthonSvnNavigator.svnExecutable": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "description": "SVN 命令行程序完整路径。留空时自动扫描 PATH，以及 macOS Homebrew/Xcode 和 Windows TortoiseSVN/SlikSVN 等常见安装位置。"
+        },
         "guthonSvnNavigator.autoRefresh": {
           "type": "boolean",
           "default": true,
           "scope": "resource",
-          "description": "pages/*/index.md 变化时自动刷新中文页面目录。"
+          "description": "页面索引和本地文件变化时自动刷新中文源码目录及 SVN 变更。"
         },
         "guthonSvnNavigator.showIds": {
           "type": "boolean",
