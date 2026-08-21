@@ -2,7 +2,7 @@
   "name": "guthon-svn-navigator",
   "displayName": "Guthon SVN Navigator",
   "description": "在 VS Code 中以中文目录浏览谷神 SVN 页面，并快速跳转到页面 JSON 和 GSS 源码。",
-  "version": "0.6.14",
+  "version": "0.7.10",
   "publisher": "guthon-local",
   "private": true,
   "repository": {
@@ -33,6 +33,11 @@
     "onLanguage:guthon-gss",
     "onCommand:guthonSvnNavigator.refresh",
     "onCommand:guthonSvnNavigator.searchPages",
+    "onCommand:guthonSvnNavigator.openAiIndexMenu",
+    "onCommand:guthonSvnNavigator.rebuildAiIndex",
+    "onCommand:guthonSvnNavigator.rebuildAllAiIndexes",
+    "onCommand:guthonSvnNavigator.searchAiIndex",
+    "onCommand:guthonSvnNavigator.copyAiContext",
     "onCommand:guthonSvnNavigator.openSegment",
     "onCommand:guthonSvnNavigator.openSourceFile",
     "onCommand:guthonSvnNavigator.selectRepository",
@@ -61,7 +66,7 @@
   "main": "./src/extension.js",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/extension.js && node --check src/gss-language.js && node --check src/gss-rules.js && node --check src/page-index.js && node --check src/path-utils.js && node --check src/project-config.js && node --check src/svn-executable.js && node --check src/svn-status.js && node --check src/svn-log.js && node --check src/workspace-layout.js",
+    "check": "node --check src/extension.js && node --check src/ai-index.js && node --check src/source-links.js && node --check src/gss-language.js && node --check src/gss-rules.js && node --check src/page-index.js && node --check src/path-utils.js && node --check src/project-config.js && node --check src/svn-executable.js && node --check src/svn-status.js && node --check src/svn-log.js && node --check src/workspace-layout.js",
     "package": "npx --yes @vscode/vsce package --no-dependencies"
   },
   "contributes": {
@@ -105,6 +110,31 @@
         "command": "guthonSvnNavigator.searchPages",
         "title": "Guthon SVN: 搜索源码对象",
         "icon": "$(search)"
+      },
+      {
+        "command": "guthonSvnNavigator.openAiIndexMenu",
+        "title": "Guthon SVN: AI 索引",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "guthonSvnNavigator.rebuildAiIndex",
+        "title": "Guthon SVN: 重建当前项目 AI 索引",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "guthonSvnNavigator.rebuildAllAiIndexes",
+        "title": "Guthon SVN: 重建全部项目 AI 索引",
+        "icon": "$(layers)"
+      },
+      {
+        "command": "guthonSvnNavigator.searchAiIndex",
+        "title": "Guthon SVN: 搜索 AI 索引并定位",
+        "icon": "$(search)"
+      },
+      {
+        "command": "guthonSvnNavigator.copyAiContext",
+        "title": "Guthon SVN: 复制 AI 上下文",
+        "icon": "$(clippy)"
       },
       {
         "command": "guthonSvnNavigator.selectRepository",
@@ -267,6 +297,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "guthonSvnNavigator.openAiIndexMenu",
+          "when": "view == guthonSvnNavigator.pageTree",
+          "group": "navigation@1"
+        },
+        {
           "command": "guthonSvnNavigator.selectRepository",
           "when": "view == guthonSvnNavigator.pageTree",
           "group": "navigation@0"
@@ -295,6 +330,13 @@
           "command": "guthonSvnNavigator.commitChanges",
           "when": "view == guthonSvnNavigator.pageTree && guthonSvnNavigator.hasRepository",
           "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "guthonSvnNavigator.copyAiContext",
+          "when": "view == guthonSvnNavigator.pageTree && (viewItem == guthonSvn.page || viewItem == guthonSvn.source-file || viewItem == guthonSvn.event || viewItem == guthonSvn.datasource)",
+          "group": "inline@2"
         }
       ],
       "scm/title": [

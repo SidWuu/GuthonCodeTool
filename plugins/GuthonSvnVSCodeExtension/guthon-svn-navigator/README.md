@@ -1,6 +1,8 @@
 # Guthon SVN Navigator
 
-面向谷神 SVN 源码快照的 VS Code 扩展。插件不会改名、移动或复制 SVN 中的业务文件，而是解析页面索引及 `procedures/`、`system-script/`、`tables/`、`views/`，在 VS Code 左侧展示中文源码目录。
+面向谷神 SVN 源码快照的 VS Code 扩展（当前版本 0.7.10）。插件不会改名、移动或复制 SVN 中的业务文件，而是解析页面索引及 `procedures/`、`system-script/`、`tables/`、`views/`，在 VS Code 左侧展示中文源码目录。
+
+插件把一个谷神项目视为一个逻辑项目。`SYS-*` 是系统维度，`0000`、`0008` 等是数据源维度，目录下的页面、过程函数、系统脚本、表和视图共同组成项目源码；它们不是多个项目边界。
 
 ## 功能
 
@@ -26,13 +28,15 @@
 - 文件历史可搜索版本号、作者和提交说明；JSON 页面历史支持“事件脚本与 SQL 可读差异”和“原始源码差异”。
 - 在插件面板中执行 `svn update` 或查看 `svn status`。
 - 为 `.gss` 文件提供与 Guthon VM 对齐的语法高亮、悬浮 API 文档、参数片段和语法快捷补全。
+- 可在项目内生成 AI 索引，帮助 AI 按中文名称、编码、路径和调用关系快速定位源码。
+- GSS、页面事件脚本和 SQL 中识别到过程函数/服务组件调用后，macOS 使用 Cmd+点击、Windows 使用 Ctrl+点击跳转真实源码。
 
 ## 安装
 
 使用 VS Code 的“扩展：从 VSIX 安装...”命令，选择生成的：
 
 ```text
-guthon-svn-navigator-0.6.14.vsix
+  guthon-svn-navigator-0.7.10.vsix
 ```
 
 安装后打开 SVN 工作区目录，左侧活动栏会出现 `Guthon SVN` 图标。
@@ -98,6 +102,68 @@ pages/
 
 ## 使用
 
+### 生成 AI 索引
+
+点击页面树顶部的“AI 索引”按钮，选择“重建当前项目 AI 索引”或“重建全部项目 AI 索引”。索引使用插件自带的 Node.js 代码生成，不依赖 Python，也不需要 SQLite。
+
+每个项目单独生成以下文件；如果项目没有 `docs/`，插件会自动创建目录：
+
+```text
+项目根目录/
+  docs/
+    ai-index/
+      manifest.json       # 项目、生成时间、文件清单和数量
+      objects.jsonl       # 页面、过程函数、系统脚本、表、视图及中文别名
+      relations.jsonl     # 页面/脚本/过程函数与表、视图、过程函数的关系
+      pages/*.md          # 每个页面的结构、事件脚本、SQL 和依赖说明
+```
+
+`objects.jsonl` 和 `relations.jsonl` 使用一行一个 JSON 对象，适合 AI 先读索引再按 `path` 读取真实源码。索引中的路径均相对于项目根目录，项目之间不会互相覆盖。表和视图只生成读取索引，不会改变它们的 JSON，也不会执行索引中提取出的 SQL。
+
+“搜索 AI 索引并定位”支持页面中文名、页面编码、过程函数 `@functionId`、表/视图中文名和编码、系统名、数据源名及路径；选中结果后会展开左侧目录并打开真实文件。对页面、过程函数、系统脚本、表或视图右键“复制 AI 上下文”，可把项目身份、对象路径和已提取关系复制给 AI。
+
+索引是源码的定位投影，不替代 SVN checkout；源码发生较大变化后重新执行“重建 AI 索引”即可。
+
+### 跳转过程函数和服务组件
+
+生成 AI 索引后，编辑器会根据当前文件所属项目读取 `objects.jsonl`。以下调用可以直接跳转：
+
+```gss
+$vs.proc.invoke('com.golden.bdp.gdrm.report.queryFuturesExposureMatch', 'run', $form)
+
+#set($proc = $vs.proc.find('com.golden.bdp.gdrm.common'))
+$proc.setMainState($inputForm)
+
+$vs.proc.runServiceComp('com.golden.bdp.gdrm.project.checkHedgingSetting', $form)
+```
+
+变量名不固定，插件会先识别“变量 = `$vs.proc.find(...)`”的绑定，再让 `$proc`、`$service` 等任意变量名的方法调用跳转到对应过程函数。一个 GSS 文件内如果同一个变量被多次绑定，插件按调用前最近的一次绑定解析，避免把前面的调用错误跳到后面重新绑定的过程包。
+
+服务组件会按当前页面所属系统优先解析。AI 索引存在时优先使用索引；索引未建立、索引未及时更新或目标没有写入索引时，会按真实源码目录兜底查找，因此源码跳转不要求每次都先重建索引。索引主要用于搜索、中文名称展示和调用关系定位。
+
+### 当前 GSS 片段内的方法跳转
+
+页面虚拟脚本、过程函数 GSS 和页面服务组件 GSS 都支持页面/脚本内部的方法调用跳转。方法名不固定，不会把示例名称写死：
+
+```gss
+@buildProjectData($inputForm);
+
+#function buildProjectData($form)
+  ## 当前方法实现
+#end
+```
+
+使用 macOS 的 `Command+点击` 或 Windows 的 `Ctrl+点击`，会跳到当前 GSS 文档中的 `#function buildProjectData` 定义。此类方法只在当前打开的 GSS 文档内解析，不会跨页面、跨虚拟片段或跨其他 GSS 文件寻找同名方法；过程函数和服务组件调用仍按上一节的跨文件规则处理。
+
+跳到方法定义后，定义行上会显示“返回调用位置”CodeLens。点击它会调用 VS Code 的导航历史返回上一次调用位置；也可以使用 VS Code 自带的后退快捷键：macOS 通常为 `Command+[`，Windows 通常为 `Alt+Left`。如果看不到 CodeLens，请打开 VS Code 设置中的 `Editor: Code Lens`。
+
+插件会忽略注释和字符串中的伪调用，例如下面的文本不会生成跳转：
+
+```gss
+// @notAFunction();
+#set($message = "@alsoNotAFunction()")
+```
+
 ### 浏览和打开页面
 
 1. 打开左侧 `Guthon SVN`。
@@ -126,6 +192,29 @@ svn update --ignore-externals -- <工作副本目录>
 ```
 
 完成后中文页面树会自动刷新。SVN 输出位于 VS Code 的 `Guthon SVN` 输出通道。
+
+### SVN 环境诊断
+
+如果“源代码管理”没有显示变更，先在页面树标题栏执行“检查 SVN 状态”。输出会显示：
+
+1. 插件最终使用的 SVN 可执行文件路径。
+2. 当前选中的项目根目录和项目配置。
+3. 自动发现的每个 `.svn` 工作副本目录。
+4. 对每个工作副本实际执行的状态检查及返回结果。
+5. 成功识别到的 `M`、`A`、`D`、冲突和未版本控制文件数量。
+
+插件对分片 checkout 会逐个执行状态检查，不要求外层目录本身存在 `.svn`。例如：
+
+```text
+gmeSvn/
+  pages/SYS-AAAA/.svn/
+  procedures/0000/.svn/
+  system-script/SYS-AAAA/.svn/
+  tables/0000/.svn/
+  views/0000/.svn/
+```
+
+终端中对某个真实文件执行 `svn status "文件路径"` 显示 `M`，说明 SVN 工作副本本身正常；如果插件诊断显示的工作副本路径不是这个文件所属的 `.svn` 子目录，说明项目根目录或配置路径没有选对。Windows 路径大小写差异会自动兼容，目录移动后必须确保目录内的 `.svn` 元数据仍然完整。
 
 ### 查看变更与提交
 
@@ -170,6 +259,29 @@ Windows 示例：
   "guthonSvnNavigator.svnExecutable": "C:\\Program Files\\TortoiseSVN\\bin\\svn.exe"
 }
 ```
+
+### Windows 与 macOS 注意事项
+
+- macOS 常见 SVN 路径为 `/usr/bin/svn`、`/opt/homebrew/bin/svn` 或 `/usr/local/bin/svn`。
+- Windows 常见 SVN 路径为 `C:\Program Files\TortoiseSVN\bin\svn.exe`、SlikSVN、Chocolatey 或 Scoop 安装目录。
+- 插件使用 SVN 命令行，不依赖 `johnstoncode.svn-scm` 等通用 SVN 扩展；通用 SVN 扩展可以禁用。
+- 如果 VS Code 扩展进程的 `PATH` 找不到 SVN，使用“Guthon SVN: 选择 SVN 命令行程序”手动选择 `svn` 或 `svn.exe`。
+- 如果手动选择后提示设置项未注册，插件会把路径保存到插件自己的全局状态中，重启窗口后仍然有效。
+- `svn: E175002: 502 Bad Gateway` 是 SVN 服务端或网关连接问题，不是本地变更检测问题；本地状态仍可以在不访问服务器的情况下检查。
+- `--ignore-externals` 只是不进入 SVN external 指向的外部工作副本，不会忽略当前项目 checkout 内的普通本地修改。
+
+### 常见问题
+
+| 现象 | 处理方式 |
+| --- | --- |
+| 中文源码目录能显示，但“源代码管理”没有变更 | 执行“检查 SVN 状态”，确认诊断中的工作副本路径包含实际修改文件，并点击“刷新变更列表” |
+| 终端有 `M`，插件显示 0 个变更 | 检查当前项目是否选错、工作副本是否被移动后缺少 `.svn`，以及插件诊断中是否使用了正确的 SVN 程序 |
+| 打开项目父目录后没有识别 | 配置 `guthon-projects.yaml` 的项目 `path`，或选择包含所有分片 checkout 的共同上层目录 |
+| 页面虚拟 GSS 能跳，真实 GSS 不能跳 | 安装最新版 VSIX，执行“重新加载窗口”，确认真实文件扩展名是 `.gss`；过程函数/服务组件跳转不需要依赖通用 SVN 扩展 |
+| `@方法()` 没有跳转 | 确认当前文档中存在同名 `#function 方法(...)`，且调用和定义在同一个 GSS 文档内 |
+| 跳转到了后面错误的过程包 | 使用 0.7.8 或更高版本；插件按调用前最近的 `$vs.proc.find(...)` 绑定解析 |
+| 更新时报 502 | 先在终端对同一工作副本执行 `svn info` 或 `svn update`；502 通常需要检查 SVN 网关、服务器和网络 |
+| 初始化或更新覆盖了本地修改 | 插件更新前会检查状态；出现确认提示时不要直接继续，先查看真实 Patch 备份或提交/导出本地修改 |
 
 其他 SVN 源代码管理扩展创建的 `SYS-* pages`、`0008 procedures` 等原始存储库标题无法由本插件改名。若只希望看到中文列表，请在扩展管理中对该通用 SVN 扩展选择“禁用（工作区）”；Guthon SVN 的更新、查看差异和提交功能不受影响。
 

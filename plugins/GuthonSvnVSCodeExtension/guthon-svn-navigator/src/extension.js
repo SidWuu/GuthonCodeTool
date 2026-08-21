@@ -39,6 +39,13 @@ const {
   readProjectConfigurations,
   resolveProjectRoot
 } = require('./project-config');
+const {
+  buildProjectAiIndex,
+  formatAiContext,
+  readProjectAiIndex,
+  searchAiIndex,
+  writeProjectAiIndex
+} = require('./ai-index');
 
 const VIEW_ID = 'guthonSvnNavigator.pageTree';
 const CONFIG_SECTION = 'guthonSvnNavigator';
@@ -1570,6 +1577,142 @@ async function searchPages(provider) {
   else await openSourceFile(entry);
 }
 
+function repositoryForPath(provider, filePath) {
+  if (!filePath) return null;
+  const target = path.resolve(filePath || '');
+  return (provider.repositories || [])
+    .filter((repository) => samePath(repository.root, target) || isPathWithin(repository.root, target))
+    .sort((left, right) => path.resolve(right.root).length - path.resolve(left.root).length)[0] || null;
+}
+
+async function rebuildAiIndexForRepository(repository, output) {
+  if (!repository) return null;
+  output?.appendLine(`\n开始生成 AI 索引：${repository.label}（${repository.root}）`);
+  const index = await buildProjectAiIndex(repository);
+  const indexRoot = await writeProjectAiIndex(repository, index);
+  output?.appendLine(`AI 索引已写入：${indexRoot}`);
+  output?.appendLine(`对象 ${index.objects.length} 个，关系 ${index.relations.length} 条，页面说明 ${index.pageMarkdown.length} 个。`);
+  return { index, indexRoot };
+}
+
+async function rebuildAiIndex(provider, output, allProjects = false) {
+  const repositories = allProjects ? (provider.repositories || []) : provider.visibleRepositories();
+  if (!repositories.length) {
+    vscode.window.showWarningMessage('尚未识别到项目，无法生成 AI 索引。');
+    return;
+  }
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: allProjects ? '正在生成全部项目 AI 索引' : '正在生成当前项目 AI 索引' },
+    async (progress) => {
+      for (let index = 0; index < repositories.length; index += 1) {
+        progress.report({ message: repositories[index].label, increment: (100 / repositories.length) });
+        try {
+          await rebuildAiIndexForRepository(repositories[index], output);
+        } catch (error) {
+          output?.appendLine(`AI 索引失败：${repositories[index].label}：${error.message}`);
+          vscode.window.showErrorMessage(`生成 AI 索引失败：${repositories[index].label}：${error.message}`);
+        }
+      }
+    }
+  );
+  vscode.window.showInformationMessage(`AI 索引生成完成：${allProjects ? `${repositories.length} 个项目` : repositories[0].label}`);
+}
+
+function sourceCategoryForObject(object) {
+  return object.kind === 'procedure' ? 'procedures'
+    : object.kind === 'system-script' ? 'system-script'
+      : object.kind === 'table' ? 'tables'
+        : object.kind === 'view' ? 'views' : '';
+}
+
+async function openAiIndexObject(provider, object) {
+  const repository = (provider.repositories || []).find((item) => item.projectId === object.projectId)
+    || provider.visibleRepositories()[0];
+  if (!repository || !object.path) return;
+  const filePath = path.join(repository.root, object.path);
+  const treeEntry = provider.searchItems.find((entry) => entry.filePath && samePath(entry.filePath, filePath));
+  if (treeEntry && provider.treeView) await provider.treeView.reveal(treeEntry, { expand: true, select: true, focus: true });
+  if (object.kind === 'page') await openPage({ filePath });
+  else await openSourceFile({
+    filePath,
+    repositoryRoot: repository.root,
+    sourceCategory: sourceCategoryForObject(object),
+    sourceId: object.scopeId,
+    objectId: object.objectId,
+    label: object.name
+  });
+}
+
+async function searchAiIndexCommand(provider, output) {
+  const repository = provider.visibleRepositories()[0];
+  if (!repository) {
+    vscode.window.showWarningMessage('尚未识别到当前项目。');
+    return;
+  }
+  let index = await readProjectAiIndex(repository.root);
+  if (!index) {
+    const action = await vscode.window.showInformationMessage(
+      '当前项目还没有 AI 索引。是否现在生成？',
+      '生成索引',
+      '取消'
+    );
+    if (action !== '生成索引') return;
+    index = (await rebuildAiIndexForRepository(repository, output))?.index;
+  }
+  const query = await vscode.window.showInputBox({
+    prompt: `搜索 ${repository.label} 的 AI 索引`,
+    placeHolder: '页面中文名、页面编码、过程函数、表名、视图名、系统或数据源'
+  });
+  if (!query) return;
+  const results = searchAiIndex(index, query);
+  if (!results.length) {
+    vscode.window.showInformationMessage(`没有找到“${query}”对应的索引对象。`);
+    return;
+  }
+  const picked = await vscode.window.showQuickPick(results.map((object) => ({
+    label: `${object.kind} · ${object.name}`,
+    description: object.systemName || object.scopeName || object.projectName,
+    detail: `${object.path}${object.aliases?.length ? ` · 别名：${object.aliases.join('、')}` : ''}`,
+    object
+  })), { placeHolder: '选择要打开的 AI 索引对象', matchOnDescription: true, matchOnDetail: true });
+  if (picked) await openAiIndexObject(provider, picked.object);
+}
+
+async function copyAiContext(provider, element, output) {
+  const filePath = element?.filePath || vscode.window.activeTextEditor?.document?.uri?.fsPath;
+  const repository = repositoryForPath(provider, filePath);
+  if (!repository) {
+    vscode.window.showWarningMessage('找不到当前文件所属的谷神项目。');
+    return;
+  }
+  let index = await readProjectAiIndex(repository.root);
+  if (!index) {
+    const action = await vscode.window.showInformationMessage('当前项目还没有 AI 索引，是否先生成？', '生成索引', '取消');
+    if (action !== '生成索引') return;
+    index = (await rebuildAiIndexForRepository(repository, output))?.index;
+  }
+  const relative = path.relative(repository.root, filePath).replace(/\\/g, '/');
+  const object = index.objects.find((candidate) => candidate.path === relative)
+    || index.objects.find((candidate) => candidate.kind === 'page' && candidate.path === relative);
+  if (!object) {
+    vscode.window.showWarningMessage('当前文件还没有对应的 AI 索引对象，请重新生成索引。');
+    return;
+  }
+  await vscode.env.clipboard.writeText(formatAiContext(index, object, repository.root));
+  vscode.window.showInformationMessage(`已复制 AI 上下文：${object.name}`);
+}
+
+async function openAiIndexMenu(provider, output) {
+  const picked = await vscode.window.showQuickPick([
+    { label: '$(refresh) 重建当前项目 AI 索引', action: 'current' },
+    { label: '$(layers) 重建全部项目 AI 索引', action: 'all' },
+    { label: '$(search) 搜索 AI 索引并定位', action: 'search' }
+  ], { placeHolder: 'AI 索引工具（索引文件会放在每个项目的 docs/ai-index/）' });
+  if (picked?.action === 'current') await rebuildAiIndex(provider, output, false);
+  if (picked?.action === 'all') await rebuildAiIndex(provider, output, true);
+  if (picked?.action === 'search') await searchAiIndexCommand(provider, output);
+}
+
 function runSvn(args, repositoryRoot, output, token) {
   let executable;
   try {
@@ -3084,7 +3227,18 @@ function activate(context) {
   provider.onPageFileChange = (filePath) => segmentProvider.refreshSource(filePath);
   const output = vscode.window.createOutputChannel('Guthon SVN');
   provider.output = output;
-  const gssProviders = createGssLanguageProviders(context);
+  const gssProviders = createGssLanguageProviders(context, {
+    repositoryRootFor: (filePath) => repositoryForPath(provider, filePath)?.root || ''
+  });
+  const sourceLinkSelectors = [
+    { language: 'guthon-gss' },
+    { language: 'javascript' },
+    { language: 'sql' },
+    { language: 'gushen-vm' },
+    // 真实服务组件可能被其他扩展设置成不同的 languageId；按文件类型兜底。
+    { scheme: 'file', pattern: '**/*.gss' },
+    { scheme: VIRTUAL_DOCUMENT_SCHEME, pattern: '**/*.gss' }
+  ];
   sourceControlManager = new SvnSourceControlManager(output);
   provider.onWorkingCopyFileChange = (filePath) => sourceControlManager.scheduleRefreshForPath(filePath);
   sourceControlManager.setRepositories(provider.visibleRepositories());
@@ -3112,6 +3266,11 @@ function activate(context) {
       { language: 'guthon-gss' },
       gssProviders.hover
     ),
+    ...sourceLinkSelectors.flatMap((selector) => [
+      vscode.languages.registerDefinitionProvider(selector, gssProviders.definition),
+      vscode.languages.registerDocumentLinkProvider(selector, gssProviders.documentLinks)
+    ]),
+    vscode.languages.registerCodeLensProvider(sourceLinkSelectors, gssProviders.codeLens),
     vscode.workspace.registerFileSystemProvider(VIRTUAL_DOCUMENT_SCHEME, segmentProvider, {
       isCaseSensitive: true,
       isReadonly: false
@@ -3121,6 +3280,11 @@ function activate(context) {
     vscode.workspace.registerTextDocumentContentProvider(SCM_CHANGE_DOCUMENT_SCHEME, scmChangeProvider),
     vscode.commands.registerCommand('guthonSvnNavigator.refresh', () => provider.refresh()),
     vscode.commands.registerCommand('guthonSvnNavigator.searchPages', () => searchPages(provider)),
+    vscode.commands.registerCommand('guthonSvnNavigator.openAiIndexMenu', () => openAiIndexMenu(provider, output)),
+    vscode.commands.registerCommand('guthonSvnNavigator.rebuildAiIndex', () => rebuildAiIndex(provider, output, false)),
+    vscode.commands.registerCommand('guthonSvnNavigator.rebuildAllAiIndexes', () => rebuildAiIndex(provider, output, true)),
+    vscode.commands.registerCommand('guthonSvnNavigator.searchAiIndex', () => searchAiIndexCommand(provider, output)),
+    vscode.commands.registerCommand('guthonSvnNavigator.copyAiContext', (element) => copyAiContext(provider, element, output)),
     vscode.commands.registerCommand('guthonSvnNavigator.openPage', openPage),
     vscode.commands.registerCommand('guthonSvnNavigator.openSourceFile', openSourceFile),
     vscode.commands.registerCommand('guthonSvnNavigator.openSegment', openSegment),
