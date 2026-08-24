@@ -107,3 +107,22 @@ test('recursively discovers a working copy below an arbitrary directory name', (
 
   assert.deepEqual(discoverWorkingCopyRoots(root), [workingCopy]);
 });
+
+test('does not descend into SVN administrative metadata', (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  directory(path.join(root, '.svn', 'pristine', 'aa', '.svn'));
+  directory(path.join(root, 'pages', 'SYS-DEMO'));
+
+  assert.deepEqual(discoverWorkingCopyRoots(root), [root]);
+});
+
+test('rejects directories without pages before scanning nested folders', (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  directory(path.join(root, 'unrelated', 'archive', '.svn'));
+
+  const layout = describeWorkspace(root);
+  assert.equal(layout.valid, false);
+  assert.deepEqual(layout.workingCopies, []);
+});

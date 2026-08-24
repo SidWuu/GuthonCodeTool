@@ -6,7 +6,7 @@ const { isPathWithin, samePath } = require('./path-utils');
 
 const DIRECT_WORKING_COPIES = ['skill', 'public'];
 const GROUPED_WORKING_COPIES = ['pages', 'procedures', 'system-script', 'tables', 'views'];
-const IGNORED_SCAN_DIRECTORIES = new Set(['.git', '.hg', '.idea', '.vscode', 'node_modules']);
+const IGNORED_SCAN_DIRECTORIES = new Set(['.svn', '.git', '.hg', '.idea', '.vscode', 'node_modules']);
 
 function isWorkingCopyRoot(candidate) {
   return Boolean(candidate) && fs.existsSync(path.join(candidate, '.svn'));
@@ -78,8 +78,13 @@ function discoverProjectRoots(workspaceRoot) {
 
 function describeWorkspace(logicalRoot) {
   const root = path.resolve(logicalRoot);
-  const workingCopies = discoverWorkingCopyRoots(root);
   const hasPages = fs.existsSync(path.join(root, 'pages'));
+  // A Guthon project always has a pages directory. Check that cheap marker
+  // before recursively looking for fragmented working copies. Otherwise an
+  // empty workspace makes the ancestor lookup walk every directory below its
+  // parent (for example the whole Downloads directory) and blocks the
+  // extension host before commands can respond.
+  const workingCopies = hasPages ? discoverWorkingCopyRoots(root) : [];
   return {
     root,
     kind: workingCopies.length === 1 && samePath(workingCopies[0], root) ? 'monolithic' : 'composite',

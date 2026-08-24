@@ -34,6 +34,11 @@ const {
 const { createGssLanguageProviders } = require('./gss-language');
 const { isPathWithin, pathKey, samePath } = require('./path-utils');
 const {
+  buildAiObjectByFilePath,
+  isDeletedOrMissingChange,
+  readableChangeName
+} = require('./scm-display');
+const {
   configuredProjectRootsForPath,
   ensureProjectConfig,
   readProjectConfigurations,
@@ -150,13 +155,6 @@ function svnArgs(args) {
   ];
 }
 
-function expandHome(value) {
-  if (!value) return '';
-  if (value === '~') return os.homedir();
-  if (value.startsWith(`~${path.sep}`)) return path.join(os.homedir(), value.slice(2));
-  return path.resolve(value);
-}
-
 function isRepositoryRoot(candidate) {
   return isLogicalWorkspaceRoot(candidate);
 }
@@ -172,7 +170,7 @@ function discoverRepositoryRoots() {
 
     // 项目配置也是中文源码树的项目来源。SVN SCM 必须优先复用同一批
     // path 映射，避免目录树已显示 gmeSvn、变更检测却仍指向其父目录。
-    const configuredRoots = configuredProjectRootsForPath(startPath).filter(isRepositoryRoot);
+    const configuredRoots = configuredProjectRootsForPath(startPath, { localOnly: true }).filter(isRepositoryRoot);
     if (configuredRoots.length) {
       configuredRoots.forEach((root) => roots.add(root));
       return;
@@ -183,15 +181,12 @@ function discoverRepositoryRoots() {
     const discovered = discoverProjectRoots(startPath);
     if (discovered.length) {
       discovered.forEach((root) => roots.add(root));
-      return;
     }
-    const ancestor = findRepositoryRoot(startPath);
-    if (ancestor) roots.add(ancestor);
   };
 
-  const configured = expandHome(vscode.workspace.getConfiguration(CONFIG_SECTION).get('repositoryRoot', '').trim());
-  addRootsForPath(configured);
-
+  // Keep discovery inside the folders opened in this VS Code window. Looking
+  // upward from an empty workspace can reach Downloads or the home directory
+  // and synchronously scan unrelated projects, blocking the extension host.
   for (const folder of vscode.workspace.workspaceFolders || []) {
     addRootsForPath(folder.uri.fsPath);
   }
@@ -599,25 +594,6 @@ function iconForSourceCategory(sourceCategory) {
   }[sourceCategory] || 'file';
 }
 
-function readableChangeName(repository, entry) {
-  const filePath = path.resolve(entry.filePath);
-  const extension = path.extname(filePath);
-  if (repository.sourceCategory === 'pages') {
-    const page = repository.pageByFilePath?.get(pathKey(filePath));
-    if (page) return `${page.label}（${path.basename(filePath, extension)}）${extension}`;
-    if (path.basename(filePath).toLowerCase() === 'index.md') return '页面索引（index.md）';
-  }
-  const relative = entry.relativePath || path.relative(repository.root, filePath);
-  const kind = {
-    procedures: '过程函数',
-    'system-script': '系统脚本',
-    tables: '数据表',
-    views: '视图'
-  }[repository.sourceCategory];
-  if (kind) return `${kind} · ${relative}`;
-  return relative;
-}
-
 function scmChangeUri(repository, entry, displayName) {
   const extension = path.extname(displayName) || path.extname(entry.filePath);
   const baseName = extension && displayName.endsWith(extension)
@@ -1012,7 +988,8 @@ class GuthonSvnTreeProvider {
   async _refreshOnce(rebuildWatchers) {
     const roots = discoverRepositoryRoots();
     const configured = readProjectConfigurations(
-      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || roots[0] || path.dirname(roots[0] || '')
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || roots[0] || path.dirname(roots[0] || ''),
+      { localOnly: true }
     );
     this.projectConfigurations = configured.projects;
     this.workspaceRoot = configured.workspaceRoot;
@@ -1041,6 +1018,7 @@ class GuthonSvnTreeProvider {
         productId,
         layout: layout.kind,
         workingCopies: layout.workingCopies,
+        aiObjectByFilePath: buildAiObjectByFilePath(root, await readProjectAiIndex(root)),
         systems,
         children: [...systems, ...await buildSourceObjectGroups({ root }, systems, this.metadataCache)]
       };
@@ -1286,6 +1264,50 @@ async function openSegment(element) {
   await vscode.window.showTextDocument(document, { preview: false });
 }
 
+async function selectExistingRepository(provider) {
+  const selected = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: '选择谷神 SVN 项目目录',
+    title: '请选择完整工作副本根目录，或包含 pages/procedures 等分片 checkout 的目录'
+  });
+  if (!selected?.length) return;
+  const selectedPath = selected[0].fsPath;
+  const root = findRepositoryRoot(selectedPath);
+  const projects = readProjectConfigurations(selectedPath, { localOnly: true }).projects;
+  if (!root && !discoverProjectRoots(selectedPath).length && !projects.length) {
+    vscode.window.showErrorMessage('未识别到谷神 SVN 项目：需要已初始化的项目，或包含项目配置的工作区目录。');
+    return;
+  }
+  await vscode.commands.executeCommand('vscode.openFolder', selected[0], false);
+}
+
+async function showProjectNotInitialized(provider) {
+  const hasConfiguration = Boolean(provider.projectConfigurations?.length);
+  const primaryAction = hasConfiguration ? '初始化项目' : '生成配置文件';
+  const action = await vscode.window.showWarningMessage(
+    hasConfiguration
+      ? '当前谷神 SVN 项目尚未初始化，请先完成项目初始化。'
+      : '当前工作区尚未初始化谷神 SVN 项目，请先生成配置文件。',
+    primaryAction,
+    '选择已有 SVN 项目'
+  );
+  if (action === primaryAction) {
+    await initializeProject(provider, provider.output);
+  } else if (action === '选择已有 SVN 项目') {
+    await selectExistingRepository(provider);
+  }
+}
+
+async function refreshProjectTree(provider) {
+  await vscode.window.withProgress({
+    location: vscode.ProgressLocation.Window,
+    title: 'Guthon SVN：正在刷新项目'
+  }, () => provider.refresh());
+  if (!provider.repositories.length) await showProjectNotInitialized(provider);
+}
+
 async function selectRepository(provider) {
   const configuredProjects = provider.projectConfigurations || [];
   if (configuredProjects.length) {
@@ -1330,27 +1352,7 @@ async function selectRepository(provider) {
     if (picked) await provider.setActiveRepository(picked.repository.root);
     return;
   }
-  const selected = await vscode.window.showOpenDialog({
-    canSelectFiles: false,
-    canSelectFolders: true,
-    canSelectMany: false,
-    openLabel: '选择谷神 SVN 项目目录',
-    title: '请选择完整工作副本根目录，或包含 pages/procedures 等分片 checkout 的目录'
-  });
-  if (!selected?.length) return;
-  const selectedPath = selected[0].fsPath;
-  const root = findRepositoryRoot(selectedPath);
-  const projects = readProjectConfigurations(selectedPath).projects;
-  if (!root && !discoverProjectRoots(selectedPath).length && !projects.length) {
-    vscode.window.showErrorMessage('未识别到谷神 SVN 项目：需要已初始化的项目，或包含项目配置的工作区目录。');
-    return;
-  }
-  await vscode.workspace.getConfiguration(CONFIG_SECTION).update(
-    'repositoryRoot',
-    root || selectedPath,
-    vscode.ConfigurationTarget.Workspace
-  );
-  provider.refresh();
+  await showProjectNotInitialized(provider);
 }
 
 function configuredProjectLabel(project) {
@@ -1361,6 +1363,95 @@ function configuredProjectLabel(project) {
 
 function svnUrlForPath(repositoryUrl, relativePath) {
   return `${String(repositoryUrl || '').replace(/\/+$/, '')}/${String(relativePath).replace(/^\/+/, '')}`;
+}
+
+function isPlaceholderUsername(username) {
+  return !username || ['your-svn-user', 'username', 'svn-user'].includes(String(username).trim().toLowerCase());
+}
+
+function isSvnAuthenticationFailure(error) {
+  return /E215004|authentication failed|no more credentials|认证失败|凭据/i.test(String(error?.message || error));
+}
+
+function isSvnAccessForbidden(error) {
+  return /E175013|forbidden|禁止访问|无权访问/i.test(String(error?.message || error));
+}
+
+async function requestSvnCredentials(project, projectRoot, checkoutPaths, output) {
+  let username = String(project.username || '').trim();
+  let usernameWasPrompted = false;
+  if (isPlaceholderUsername(username)) {
+    username = String(await vscode.window.showInputBox({
+      title: `登录 SVN · ${configuredProjectLabel(project)}`,
+      prompt: '请输入 SVN 用户名',
+      placeHolder: 'SVN 用户名',
+      ignoreFocusOut: true
+    }) || '').trim();
+    if (!username) {
+      vscode.window.showInformationMessage('已取消项目初始化：未提供 SVN 用户名。');
+      return null;
+    }
+    usernameWasPrompted = true;
+  }
+
+  const usernameArgs = ['--username', username];
+  const probePath = checkoutPaths
+    .map((item) => String(item || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, ''))
+    .find((item) => item && isPathWithin(projectRoot, path.resolve(projectRoot, item)));
+  const probeUrl = probePath ? svnUrlForPath(project.repositoryUrl, probePath) : project.repositoryUrl;
+  const infoArgs = ['info', '--depth', 'empty', ...usernameArgs, '--', probeUrl];
+  if (!usernameWasPrompted) {
+    try {
+      await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: '正在验证 SVN 登录信息',
+        cancellable: false
+      }, () => runSvnCapture(svnArgs(infoArgs), projectRoot, output));
+      return { username, password: '' };
+    } catch (error) {
+      // Some SVN servers report missing/anonymous credentials as Forbidden
+      // instead of an authentication error. In both cases, ask for a password
+      // once before concluding that the account has no path permission.
+      if (!isSvnAuthenticationFailure(error) && !isSvnAccessForbidden(error)) throw error;
+    }
+  }
+
+  const password = await vscode.window.showInputBox({
+    title: `登录 SVN · ${configuredProjectLabel(project)}`,
+    prompt: `请输入 SVN 用户“${username}”的密码。密码不会写入配置或输出日志。`,
+    placeHolder: 'SVN 密码',
+    password: true,
+    ignoreFocusOut: true
+  });
+  if (password === undefined) {
+    vscode.window.showInformationMessage('已取消项目初始化：未提供 SVN 密码。');
+    return null;
+  }
+
+  try {
+    await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: '正在验证 SVN 用户名和密码',
+      cancellable: false
+    }, () => runSvnCapture(
+      svnArgs(['info', '--depth', 'empty', ...usernameArgs, '--password-from-stdin', '--', probeUrl]),
+      projectRoot,
+      output,
+      undefined,
+      { stdin: password }
+    ));
+    return { username, password };
+  } catch (error) {
+    if (isSvnAuthenticationFailure(error)) {
+      vscode.window.showErrorMessage('SVN 用户名或密码不正确，请确认后重新初始化。');
+      return null;
+    }
+    if (isSvnAccessForbidden(error)) {
+      vscode.window.showErrorMessage(`SVN 登录信息已提交，但账号无权访问初始化路径：${probePath || project.repositoryUrl}`);
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function ensureProjectReadme(projectRoot) {
@@ -1386,6 +1477,33 @@ async function ensureProjectReadme(projectRoot) {
   }
 }
 
+async function createInitialProjectFiles(provider, workspaceRoot, options = { localOnly: true }) {
+  return vscode.window.withProgress({
+    location: vscode.ProgressLocation.Notification,
+    title: '正在创建 Guthon SVN 项目配置',
+    cancellable: false
+  }, async (progress) => {
+    progress.report({ message: '生成 guthon-projects.yaml…' });
+    const configResult = await ensureProjectConfig(workspaceRoot, options);
+    let readmeCreated = false;
+    if (configResult.created) {
+      progress.report({ message: '生成项目使用说明…' });
+      readmeCreated = await ensureProjectReadme(workspaceRoot);
+      progress.report({ message: '刷新项目状态…' });
+      await provider.refresh();
+    }
+    return { ...configResult, readmeCreated };
+  });
+}
+
+async function revealInitialProjectConfig(configResult) {
+  const document = await vscode.workspace.openTextDocument(configResult.configPath);
+  await vscode.window.showTextDocument(document, { preview: false });
+  vscode.window.showInformationMessage(
+    `初始化配置已生成${configResult.readmeCreated ? '，项目说明也已创建' : ''}。请填写 SVN 用户名和项目地址，保存后再次点击“初始化配置项目”。`
+  );
+}
+
 async function initializeProject(provider, output, projectId = '') {
   let projects = provider.projectConfigurations || [];
   const workspaceFolderRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
@@ -1394,13 +1512,9 @@ async function initializeProject(provider, output, projectId = '') {
     && !isLogicalWorkspaceRoot(workspaceFolderRoot);
   if (hasEmptyCurrentWorkspace && path.resolve(provider.workspaceRoot || '') !== path.resolve(workspaceFolderRoot)) {
     try {
-      const localConfig = await ensureProjectConfig(workspaceFolderRoot, { localOnly: true });
+      const localConfig = await createInitialProjectFiles(provider, workspaceFolderRoot, { localOnly: true });
       if (localConfig.created) {
-        const readmeCreated = await ensureProjectReadme(workspaceFolderRoot);
-        await provider.refresh();
-        vscode.window.showInformationMessage(
-          `已在当前工作区生成 ${localConfig.configPath}${readmeCreated ? ' 和插件 README.md' : ''}。请填写 SVN 用户名和项目地址后，再执行初始化。`
-        );
+        await revealInitialProjectConfig(localConfig);
         return;
       }
     } catch (error) {
@@ -1418,17 +1532,13 @@ async function initializeProject(provider, output, projectId = '') {
     }
     let configResult;
     try {
-      configResult = await ensureProjectConfig(workspaceRoot);
+      configResult = await createInitialProjectFiles(provider, workspaceRoot);
     } catch (error) {
       vscode.window.showErrorMessage(`生成 guthon-projects.yaml 失败：${error.message}`);
       return;
     }
     if (configResult.created) {
-      const readmeCreated = await ensureProjectReadme(workspaceRoot);
-      await provider.refresh();
-      vscode.window.showInformationMessage(
-        `已生成 ${configResult.configPath}${readmeCreated ? ' 和插件 README.md' : ''}。请先填写 SVN 用户名和新项目地址，再重新执行初始化。`
-      );
+      await revealInitialProjectConfig(configResult);
       return;
     }
     await provider.refresh();
@@ -1476,6 +1586,14 @@ async function initializeProject(provider, output, projectId = '') {
   if (confirmed !== '开始初始化') return;
   await fs.promises.mkdir(projectRoot, { recursive: true });
   output.show(true);
+  let credentials;
+  try {
+    credentials = await requestSvnCredentials(project, projectRoot, checkoutPaths, output);
+  } catch (error) {
+    vscode.window.showErrorMessage(`连接 SVN 仓库失败：${error.message}`);
+    return;
+  }
+  if (!credentials) return;
   const failures = [];
   await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
@@ -1497,15 +1615,24 @@ async function initializeProject(provider, output, projectId = '') {
       });
       try {
         await fs.promises.mkdir(path.dirname(target), { recursive: true });
-        const usernameArgs = project.username ? ['--username', project.username] : [];
+        const usernameArgs = ['--username', credentials.username];
+        const passwordArgs = credentials.password ? ['--password-from-stdin'] : [];
+        const svnInput = credentials.password ? { stdin: credentials.password } : undefined;
         if (fs.existsSync(path.join(target, '.svn'))) {
-          await runSvn(svnArgs(['update', ...usernameArgs, '--', target]), projectRoot, output, token);
-        } else {
           await runSvn(
-            svnArgs(['checkout', ...usernameArgs, svnUrlForPath(project.repositoryUrl, relativePath), target]),
+            svnArgs(['update', ...usernameArgs, ...passwordArgs, '--', target]),
             projectRoot,
             output,
-            token
+            token,
+            svnInput
+          );
+        } else {
+          await runSvn(
+            svnArgs(['checkout', ...usernameArgs, ...passwordArgs, svnUrlForPath(project.repositoryUrl, relativePath), target]),
+            projectRoot,
+            output,
+            token,
+            svnInput
           );
         }
       } catch (error) {
@@ -1534,13 +1661,17 @@ async function initializeProject(provider, output, projectId = '') {
 async function chooseRepository(provider, placeHolder) {
   const visible = provider.visibleRepositories();
   if (!visible.length) {
-    vscode.window.showWarningMessage('尚未识别到谷神 SVN 工作副本。');
+    await showProjectNotInitialized(provider);
     return null;
   }
   return visible[0];
 }
 
 async function searchPages(provider) {
+  if (!provider.repositories.length) {
+    await showProjectNotInitialized(provider);
+    return;
+  }
   if (!provider.searchItems.length) {
     vscode.window.showWarningMessage('当前 SVN 工作副本没有可搜索的源码对象。');
     return;
@@ -1598,7 +1729,7 @@ async function rebuildAiIndexForRepository(repository, output) {
 async function rebuildAiIndex(provider, output, allProjects = false) {
   const repositories = allProjects ? (provider.repositories || []) : provider.visibleRepositories();
   if (!repositories.length) {
-    vscode.window.showWarningMessage('尚未识别到项目，无法生成 AI 索引。');
+    await showProjectNotInitialized(provider);
     return;
   }
   await vscode.window.withProgress(
@@ -1646,7 +1777,7 @@ async function openAiIndexObject(provider, object) {
 async function searchAiIndexCommand(provider, output) {
   const repository = provider.visibleRepositories()[0];
   if (!repository) {
-    vscode.window.showWarningMessage('尚未识别到当前项目。');
+    await showProjectNotInitialized(provider);
     return;
   }
   let index = await readProjectAiIndex(repository.root);
@@ -1703,6 +1834,10 @@ async function copyAiContext(provider, element, output) {
 }
 
 async function openAiIndexMenu(provider, output) {
+  if (!provider.repositories.length) {
+    await showProjectNotInitialized(provider);
+    return;
+  }
   const picked = await vscode.window.showQuickPick([
     { label: '$(refresh) 重建当前项目 AI 索引', action: 'current' },
     { label: '$(layers) 重建全部项目 AI 索引', action: 'all' },
@@ -1713,7 +1848,7 @@ async function openAiIndexMenu(provider, output) {
   if (picked?.action === 'search') await searchAiIndexCommand(provider, output);
 }
 
-function runSvn(args, repositoryRoot, output, token) {
+function runSvn(args, repositoryRoot, output, token, options = {}) {
   let executable;
   try {
     executable = svnExecutablePath();
@@ -1732,6 +1867,7 @@ function runSvn(args, repositoryRoot, output, token) {
       output.append(text);
     });
     child.on('error', reject);
+    if (Object.hasOwn(options, 'stdin')) child.stdin.end(`${options.stdin}\n`);
     child.on('close', (code, signal) => {
       if (signal) reject(new Error('SVN 命令已取消'));
       else if (code === 0) resolve();
@@ -1758,7 +1894,7 @@ async function runSvnCommit(message, filePaths, repositoryRoot, output, token) {
   }
 }
 
-function runSvnCapture(args, repositoryRoot, output, token) {
+function runSvnCapture(args, repositoryRoot, output, token, options = {}) {
   let executable;
   try {
     executable = svnExecutablePath();
@@ -1782,6 +1918,7 @@ function runSvnCapture(args, repositoryRoot, output, token) {
       output?.append(text);
     });
     child.on('error', reject);
+    if (Object.hasOwn(options, 'stdin')) child.stdin.end(`${options.stdin}\n`);
     child.on('close', (code, signal) => {
       if (signal) reject(new Error('SVN 命令已取消'));
       else if (code === 0) resolve({ stdout, stderr });
@@ -1916,6 +2053,20 @@ class SvnSourceControl {
     });
   }
 
+  async populateSourceIdentities(entries) {
+    await Promise.all((entries || []).map(async (entry) => {
+      const filePath = path.resolve(entry.filePath);
+      if (this.repository.pageByFilePath?.has(pathKey(filePath))) return;
+      if (this.repository.aiObjectByFilePath?.has(pathKey(filePath))) return;
+      if (!SOURCE_OBJECT_META[this.repository.sourceCategory] || !fs.existsSync(filePath)) return;
+      entry.sourceIdentity = await readSourceObjectIdentity(
+        filePath,
+        this.repository.sourceCategory,
+        path.basename(filePath)
+      );
+    }));
+  }
+
   updateChangelistGroups(entries) {
     const byName = new Map();
     for (const entry of entries) {
@@ -1949,6 +2100,7 @@ class SvnSourceControl {
         this.output
       );
       this.entries = parseSvnStatusXml(result.stdout, this.repository.root);
+      await this.populateSourceIdentities(this.entries);
       const regularEntries = this.entries.filter((entry) => (
         entry.item !== 'unversioned' && entry.item !== 'conflicted' && !entry.changelist
       ));
@@ -1991,6 +2143,7 @@ class SvnSourceControl {
         this.output
       );
       this.remoteEntries = parseSvnRemoteStatusXml(result.stdout, this.repository.root);
+      await this.populateSourceIdentities(this.remoteEntries);
       this.remoteChanges.resourceStates = this.statesFor(this.remoteEntries, true);
       return this.remoteEntries;
     } catch (error) {
@@ -2154,7 +2307,7 @@ class SvnBaseContentProvider {
     const logicalRoot = query.get('root') || findRepositoryRoot(filePath) || path.dirname(filePath);
     const root = workingCopyForPath(logicalRoot, filePath) || logicalRoot;
     const revision = query.get('revision') || 'BASE';
-    if (!filePath || !fs.existsSync(filePath)) return '';
+    if (!filePath) return '';
     const result = await runSvnCapture(
       svnArgs(['cat', '-r', revision, '--', filePath]),
       root,
@@ -2215,38 +2368,55 @@ class ScmChangeContentProvider {
     try {
       return await fs.promises.readFile(filePath, 'utf8');
     } catch {
-      return `源文件已不存在：${filePath}`;
+      return '';
     }
   }
 }
 
-async function openChange(entry, readable = false) {
+async function openChange(entry, readable = false, provider = null) {
   if (entry instanceof vscode.Uri) entry = { resourceUri: entry };
   if (entry?.resourceUri && !entry.filePath) {
     const resourceUri = entry.resourceUri;
     const filePath = resourceUri.scheme === SCM_CHANGE_DOCUMENT_SCHEME
       ? new URLSearchParams(resourceUri.query).get('source') || ''
       : resourceUri.fsPath;
-    const logicalRoot = findRepositoryRoot(filePath) || path.dirname(filePath);
+    const repository = provider ? repositoryForPath(provider, filePath) : null;
+    if (provider && !repository) {
+      vscode.window.showWarningMessage('当前文件不属于本次 VS Code 打开的谷神 SVN 项目。');
+      return;
+    }
+    const logicalRoot = repository?.root || findRepositoryRoot(filePath) || path.dirname(filePath);
     entry = {
       filePath,
       relativePath: path.relative(logicalRoot, filePath),
       item: 'modified'
     };
   }
-  if (!entry?.filePath || !fs.existsSync(entry.filePath)) return;
-  const logicalRoot = findRepositoryRoot(entry.filePath) || path.dirname(entry.filePath);
+  if (!entry?.filePath) return;
+  const repository = provider ? repositoryForPath(provider, entry.filePath) : null;
+  if (provider && !repository) {
+    vscode.window.showWarningMessage('当前文件不属于本次 VS Code 打开的谷神 SVN 项目。');
+    return;
+  }
+  const logicalRoot = repository?.root || findRepositoryRoot(entry.filePath) || path.dirname(entry.filePath);
   const root = workingCopyForPath(logicalRoot, entry.filePath) || logicalRoot;
   const isJson = path.extname(entry.filePath).toLowerCase() === '.json';
   const isPageJson = isPageJsonPath(entry.filePath);
   const useReadableProjection = readable && isJson;
+  const deletedOrMissing = isDeletedOrMissingChange(entry, fs.existsSync(entry.filePath));
   const currentUri = useReadableProjection
     ? vscode.Uri.from({
       scheme: READABLE_DIFF_DOCUMENT_SCHEME,
       path: readableDiffPath(entry.filePath),
       query: new URLSearchParams({ file: entry.filePath, root }).toString()
     })
-    : vscode.Uri.file(entry.filePath);
+    : deletedOrMissing
+      ? vscode.Uri.from({
+        scheme: SCM_CHANGE_DOCUMENT_SCHEME,
+        path: `/${safeVirtualName(path.basename(entry.filePath))}`,
+        query: new URLSearchParams({ source: entry.filePath }).toString()
+      })
+      : vscode.Uri.file(entry.filePath);
   if (['unversioned', 'added'].includes(entry.item)) {
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(currentUri), { preview: false });
     return;
@@ -2275,15 +2445,15 @@ async function openChange(entry, readable = false) {
       'vscode.diff',
       baseUri,
       currentUri,
-      `${entry.relativePath}${useReadableProjection ? isPageJson ? '（事件脚本与 SQL 可读差异）' : '（格式化可读差异）' : '（真实文件差异）'}（SVN 基线 ↔ 工作区）`
+      `${entry.relativePath}${deletedOrMissing ? '（已删除）' : ''}${useReadableProjection ? isPageJson ? '（事件脚本与 SQL 可读差异）' : '（格式化可读差异）' : '（真实文件差异）'}（SVN 基线 ↔ 工作区）`
     );
   } catch (error) {
     vscode.window.showErrorMessage(`打开 SVN 差异失败：${error.message}`);
   }
 }
 
-async function openReadableChange(entry) {
-  await openChange(entry, true);
+async function openReadableChange(entry, provider = null) {
+  await openChange(entry, true, provider);
 }
 
 function filePathFromCommandValue(value) {
@@ -2741,14 +2911,14 @@ async function updateRepository(provider, output, element) {
     inspections = await inspectUpdateTargets(repository, targets, output);
   } catch (error) {
     vscode.window.showErrorMessage(`更新前检查失败，已取消更新：${error.message}`);
-    return;
+    return null;
   }
   const conflicts = inspections.flatMap((inspection) => (
     inspection.entries.filter((entry) => entry.item === 'conflicted')
   ));
   if (conflicts.length) {
     vscode.window.showWarningMessage(`检测到 ${conflicts.length} 个未解决冲突，已阻止更新。请先处理冲突或执行 SVN Cleanup。`);
-    return;
+    return null;
   }
   const localChanges = inspections.flatMap((inspection) => inspection.entries);
   if (localChanges.length) {
@@ -2757,7 +2927,7 @@ async function updateRepository(provider, output, element) {
       { modal: true },
       '备份并继续更新'
     );
-    if (confirmed !== '备份并继续更新') return;
+    if (confirmed !== '备份并继续更新') return null;
   }
   let backupDirectory = '';
   try {
@@ -2787,21 +2957,36 @@ async function updateRepository(provider, output, element) {
     });
   } catch (error) {
     vscode.window.showErrorMessage(`SVN 更新前备份失败，已取消更新：${error.message}`);
-    return;
+    return null;
   }
   await provider.refresh();
   const failed = results.filter((result) => !result.ok);
   if (!failed.length && results.length === targets.length) {
     vscode.window.showInformationMessage(`SVN 全量更新完成：${results.length} 个工作副本。${backupDirectory ? ` 更新前 Patch 已保存到 ${backupDirectory}` : ''}`);
+    return provider.repositories.find((item) => samePath(item.root, repository.root)) || repository;
   } else {
     const names = failed.map((result) => path.relative(repository.root, result.target) || path.basename(result.target));
     vscode.window.showWarningMessage(`SVN 全量更新未完全成功：${results.length - failed.length}/${targets.length} 成功。失败：${names.join('、') || '已取消'}；详情见 Guthon SVN 输出。`);
+    return null;
   }
 }
 
 async function updateAll(provider, output) {
   const repository = await chooseRepository(provider, '选择要全量更新的谷神项目');
-  if (repository) await updateRepository(provider, output, repository);
+  if (!repository) return;
+  const updatedRepository = await updateRepository(provider, output, repository);
+  if (!updatedRepository) return;
+  try {
+    await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: `正在为 ${updatedRepository.label} 创建 AI 索引`,
+      cancellable: false
+    }, () => rebuildAiIndexForRepository(updatedRepository, output));
+    vscode.window.showInformationMessage(`全量更新完成，AI 索引已创建：${updatedRepository.label}`);
+  } catch (error) {
+    output?.appendLine(`全量更新后的 AI 索引生成失败：${error.message}`);
+    vscode.window.showWarningMessage(`SVN 全量更新已完成，但 AI 索引生成失败：${error.message}`);
+  }
 }
 
 async function showRepositoryStatus(provider, output, element) {
@@ -3278,7 +3463,7 @@ function activate(context) {
     vscode.workspace.registerTextDocumentContentProvider(SVN_BASE_DOCUMENT_SCHEME, baseContentProvider),
     vscode.workspace.registerTextDocumentContentProvider(READABLE_DIFF_DOCUMENT_SCHEME, readableDiffProvider),
     vscode.workspace.registerTextDocumentContentProvider(SCM_CHANGE_DOCUMENT_SCHEME, scmChangeProvider),
-    vscode.commands.registerCommand('guthonSvnNavigator.refresh', () => provider.refresh()),
+    vscode.commands.registerCommand('guthonSvnNavigator.refresh', () => refreshProjectTree(provider)),
     vscode.commands.registerCommand('guthonSvnNavigator.searchPages', () => searchPages(provider)),
     vscode.commands.registerCommand('guthonSvnNavigator.openAiIndexMenu', () => openAiIndexMenu(provider, output)),
     vscode.commands.registerCommand('guthonSvnNavigator.rebuildAiIndex', () => rebuildAiIndex(provider, output, false)),
@@ -3306,8 +3491,8 @@ function activate(context) {
     vscode.commands.registerCommand('guthonSvnNavigator.setChangelist', (element) => setChangelist(sourceControlManager, element)),
     vscode.commands.registerCommand('guthonSvnNavigator.exportPatch', (element) => exportPatch(sourceControlManager, element)),
     vscode.commands.registerCommand('guthonSvnNavigator.showRepositoryHistory', (element) => showRepositoryHistory(sourceControlManager, element)),
-    vscode.commands.registerCommand('guthonSvnNavigator.openChange', openChange),
-    vscode.commands.registerCommand('guthonSvnNavigator.openReadableChange', openReadableChange),
+    vscode.commands.registerCommand('guthonSvnNavigator.openChange', (entry) => openChange(entry, false, provider)),
+    vscode.commands.registerCommand('guthonSvnNavigator.openReadableChange', (entry) => openReadableChange(entry, provider)),
     vscode.commands.registerCommand('guthonSvnNavigator.showFileHistory', showFileHistory),
     vscode.commands.registerCommand('guthonSvnNavigator.addUnversionedChange', (element) => addUnversionedChange(sourceControlManager, element)),
     vscode.commands.registerCommand('guthonSvnNavigator.revertChange', (element) => revertChange(provider, sourceControlManager, element)),

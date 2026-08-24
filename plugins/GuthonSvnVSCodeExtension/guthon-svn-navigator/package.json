@@ -2,7 +2,7 @@
   "name": "guthon-svn-navigator",
   "displayName": "Guthon SVN Navigator",
   "description": "在 VS Code 中以中文目录浏览谷神 SVN 页面，并快速跳转到页面 JSON 和 GSS 源码。",
-  "version": "0.7.10",
+  "version": "0.7.16",
   "publisher": "guthon-local",
   "private": true,
   "repository": {
@@ -66,7 +66,7 @@
   "main": "./src/extension.js",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/extension.js && node --check src/ai-index.js && node --check src/source-links.js && node --check src/gss-language.js && node --check src/gss-rules.js && node --check src/page-index.js && node --check src/path-utils.js && node --check src/project-config.js && node --check src/svn-executable.js && node --check src/svn-status.js && node --check src/svn-log.js && node --check src/workspace-layout.js",
+    "check": "node --check src/extension.js && node --check src/ai-index.js && node --check src/scm-display.js && node --check src/source-links.js && node --check src/gss-language.js && node --check src/gss-rules.js && node --check src/page-index.js && node --check src/path-utils.js && node --check src/project-config.js && node --check src/svn-executable.js && node --check src/svn-status.js && node --check src/svn-log.js && node --check src/workspace-layout.js",
     "package": "npx --yes @vscode/vsce package --no-dependencies"
   },
   "contributes": {
@@ -194,11 +194,11 @@
       },
       {
         "command": "guthonSvnNavigator.openChange",
-        "title": "Guthon SVN: 查看真实文件差异"
+        "title": "Guthon SVN: 与 SVN 基线对比（原始文件）"
       },
       {
         "command": "guthonSvnNavigator.openReadableChange",
-        "title": "Guthon SVN: 查看脚本/SQL 可读差异"
+        "title": "Guthon SVN: 与 SVN 基线对比（脚本/SQL 可读）"
       },
       {
         "command": "guthonSvnNavigator.showFileHistory",
@@ -285,7 +285,7 @@
     "viewsWelcome": [
       {
         "view": "guthonSvnNavigator.pageTree",
-        "contents": "未识别到谷神 SVN 项目。支持完整工作副本和多个子目录独立 checkout。\n[选择 SVN 项目目录](command:guthonSvnNavigator.selectRepository)",
+        "contents": "当前工作区尚未初始化谷神 SVN 项目。\n[初始化配置项目](command:guthonSvnNavigator.initializeProject) · [选择已有 SVN 项目](command:guthonSvnNavigator.selectRepository)",
         "when": "!guthonSvnNavigator.hasRepository"
       }
     ],
@@ -431,6 +431,16 @@
       ],
       "explorer/context": [
         {
+          "command": "guthonSvnNavigator.openChange",
+          "when": "resourceScheme == file",
+          "group": "navigation@48"
+        },
+        {
+          "command": "guthonSvnNavigator.openReadableChange",
+          "when": "resourceScheme == file && resourceExtname == .json",
+          "group": "navigation@49"
+        },
+        {
           "command": "guthonSvnNavigator.showFileHistory",
           "when": "resourceScheme == file",
           "group": "navigation@50"
@@ -451,6 +461,18 @@
           "command": "guthonSvnNavigator.revertChange",
           "when": "resourceScheme == file",
           "group": "navigation@51"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "guthonSvnNavigator.openChange",
+          "when": "resourceScheme == file",
+          "group": "navigation@48"
+        },
+        {
+          "command": "guthonSvnNavigator.openReadableChange",
+          "when": "resourceScheme == file && resourceExtname == .json",
+          "group": "navigation@49"
         }
       ],
       "editor/title": [
@@ -526,12 +548,6 @@
     "configuration": {
       "title": "Guthon SVN Navigator",
       "properties": {
-        "guthonSvnNavigator.repositoryRoot": {
-          "type": "string",
-          "default": "",
-          "scope": "resource",
-          "description": "谷神 SVN 项目根目录；既可以是完整工作副本，也可以是包含 pages/*、procedures/* 等独立 checkout 的上层目录。"
-        },
         "guthonSvnNavigator.svnExecutable": {
           "type": "string",
           "default": "",

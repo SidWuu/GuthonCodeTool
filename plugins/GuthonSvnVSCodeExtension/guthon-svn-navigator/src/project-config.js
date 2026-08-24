@@ -252,9 +252,10 @@ function parseProjectConfig(text) {
   return projects.filter((project, index, all) => all.findIndex((item) => item.id === project.id) === index);
 }
 
-function findProjectConfigPath(startRoot) {
+function findProjectConfigPath(startRoot, options = {}) {
   let current = path.resolve(startRoot);
-  for (let depth = 0; depth < 3; depth += 1) {
+  const maxDepth = options.localOnly ? 1 : 3;
+  for (let depth = 0; depth < maxDepth; depth += 1) {
     for (const name of PROJECT_CONFIG_NAMES) {
       const candidate = path.join(current, name);
       if (fs.existsSync(candidate)) return candidate;
@@ -283,8 +284,8 @@ async function ensureProjectConfig(workspaceRoot, options = {}) {
   }
 }
 
-function readProjectConfigurations(startRoot) {
-  const configPath = findProjectConfigPath(startRoot);
+function readProjectConfigurations(startRoot, options = {}) {
+  const configPath = findProjectConfigPath(startRoot, options);
   if (!configPath) return { configPath: '', workspaceRoot: path.resolve(startRoot), projects: [] };
   let text = '';
   try {
@@ -306,9 +307,9 @@ function resolveProjectRoot(workspaceRoot, project) {
   return candidate;
 }
 
-function configuredProjectRootsForPath(startRoot) {
+function configuredProjectRootsForPath(startRoot, options = {}) {
   const start = path.resolve(startRoot);
-  const configured = readProjectConfigurations(start);
+  const configured = readProjectConfigurations(start, options);
   return configured.projects
     .map((project) => resolveProjectRoot(configured.workspaceRoot, project))
     .filter((projectRoot) => projectRoot && (

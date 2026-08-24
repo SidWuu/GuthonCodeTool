@@ -8,7 +8,8 @@ const test = require('node:test');
 const {
   DEFAULT_PROJECT_CONFIG_TEMPLATE,
   configuredProjectRootsForPath,
-  parseProjectConfig
+  parseProjectConfig,
+  readProjectConfigurations
 } = require('../src/project-config');
 
 test('default project template preserves the product and uses a non-sensitive SVN username placeholder', () => {
@@ -109,4 +110,20 @@ projects:
   const scsj = path.join(root, 'scsjSvn');
   assert.deepEqual(configuredProjectRootsForPath(root), [gme, scsj]);
   assert.deepEqual(configuredProjectRootsForPath(path.join(gme, 'pages')), [gme]);
+});
+
+test('can restrict project configuration lookup to the opened folder', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-svn-local-config-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, 'guthon-projects.yaml'), `
+version: 2
+projects:
+  parentProject:
+    path: parentProject
+`, 'utf8');
+  const openedFolder = path.join(root, 'empty-workspace');
+  fs.mkdirSync(openedFolder);
+
+  assert.equal(readProjectConfigurations(openedFolder, { localOnly: true }).projects.length, 0);
+  assert.deepEqual(configuredProjectRootsForPath(openedFolder, { localOnly: true }), []);
 });
