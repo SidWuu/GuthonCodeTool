@@ -285,7 +285,8 @@ async function pullCurrentProcedure(root, button = root.querySelector("button"),
     }
 
     let target = inspected.data;
-    if (!target.procedureId) {
+    const pageSource = isModuleRoute() || target.mode === "page-source";
+    if (!pageSource && !target.procedureId) {
       const resolved = await runPageCommand("pullProcedure", {
         procedureKeyword: target.procedureKeyword || target.procedureName || "",
         funId: target.funId || ""
@@ -304,10 +305,10 @@ async function pullCurrentProcedure(root, button = root.querySelector("button"),
       pullResult = await sendWorkspaceRequest(
         "pull-hub-source",
         {
-          sourceType: target.mode === "page-source" ? "page" : "procedure",
-          sourceId: target.mode === "page-source" ? target.pageId || "" : target.procedureId || "",
+          sourceType: pageSource ? "page" : "procedure",
+          sourceId: pageSource ? target.pageId || target.procedureId || "" : target.procedureId || "",
           alias: target.procedureKeyword || target.procedureName || "",
-          funId: target.mode === "page-source" ? "" : target.funId || "",
+          funId: pageSource ? "" : target.funId || "",
           dataSourceId: target.dataSourceId || "",
           systemId: target.systemId || "",
           force

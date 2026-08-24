@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 
-import gusen_hub
+from common import gusen_hub
 
 
 def main(args=None):

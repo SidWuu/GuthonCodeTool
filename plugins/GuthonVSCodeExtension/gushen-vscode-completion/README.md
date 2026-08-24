@@ -10,14 +10,16 @@ It can also run the packaged `GuthonCodeTool` executable. This lets users initia
 
 Build `dist/GuthonCodeTool` (or `GuthonCodeTool.exe` on Windows) on each target OS with `python scripts/build_guthon_tool.py`, then distribute that executable together with this VSIX. In VS Code, run these commands in order:
 
-1. `Guthon Nexus: 初始化工作区` — choose the executable and a local data directory. It creates missing configuration files from templates without overwriting existing ones.
-2. Fill the generated `<本地数据目录>/config/*.yaml`; each product or project explicitly selects `source_mode: database` or `source_mode: svn`, then defines its datasource and system aliases.
+1. `Guthon Nexus: 设置/切换工作空间` — choose the executable and a local data directory. It creates missing configuration files from templates without overwriting existing ones.
+2. Fill the generated `<本地数据目录>/config/*.yaml`; do not add a `source_mode` field. Each product/project defaults to DATABASE and has its own `源码来源：DATABASE/SVN` action. For SVN, select it on that node and place the downloaded `svnCheckoutHere.bat` in the workspace's `context/`; Nexus stores the choice in `context/source-mode.json` and derives the sanitized manifest automatically.
 3. Expand `项目` and choose a `PRD` or `PRJ` workspace.
-4. Run the selected workspace's full synchronization command.
+4. For DATABASE, run the selected workspace's full synchronization command. For SVN, run `从 BAT 检出/更新 SVN`.
 
-Clicking `Guthon Nexus: 初始化工作区` again after initialization asks whether to switch workspaces. Confirming lets the user select a new local data directory and initializes its missing configuration files; cancelling keeps the current workspace.
+After setup, the Nexus tree displays `切换工作空间`. Confirming lets the user select a new local data directory and initializes its missing configuration files; cancelling keeps the current workspace.
 
-Database workspace nodes retain source/metadata synchronization. SVN nodes expose sparse init/refresh, status/diff, local scanning, object Workcopy projection, and guarded writeback. The extension never runs `svn commit`. All command output is shown in the `GuthonCodeTool` output channel.
+Database workspace nodes retain their existing source/metadata synchronization and Workcopy flow. Nexus lists DATABASE and SVN workspaces together; each node changes only its own provider and immediately refreshes the tree. SVN nodes use a reviewed exact-URL manifest, aggregate multiple physical working copies, expose a business source tree and virtual documents that write directly back to the checkout, and register one source-control provider per workspace. When `systems.include.system_aliases` is configured, Nexus intersects the BAT scope with the uniquely mapped `SYSTEM_ID` and `DATA_SOURCE_ID` values before checkout; missing or ambiguous mappings block the operation with an explicit request for the required mapping data. `Ctrl+S` is local-only. `管理本地源码变更` lists Nexus and external modifications, opens native side-by-side diffs, and supports multi-select save/revert. `保存到谷神` is always available in Nexus SVN mode; selections spanning physical working copies are committed in groups and never claim that the later Guthon platform submission is complete.
+
+Each SVN node also provides `设置工作区 SVN 凭据`. One credential is scoped to the configured local data workspace (`toolHome`) and shared by all product and project SVN providers in that workspace. It is stored in VS Code SecretStorage and passed only through the spawned tool environment/password stdin, never through YAML, manifests, arguments, or output logs. Certificate exceptions require an exact host/port SHA-256 pin before the configured SVN exception flags are used.
 
 The extension also adds a dedicated `Guthon Nexus` icon to VS Code's left activity bar. Its tree exposes workspace setup, source/index operations, metadata export, environment checks, source diagnosis, and workcopy status/diff/package actions, so colleagues do not need to use the command palette.
 
@@ -44,6 +46,23 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 - Inspects workcopy status, generates diffs, and packages delivery files.
 - Starts and stops Guthon Bridge without a separate Node.js installation or terminal command.
 - Switches between the packaged application and live Python source development.
+- Lists mixed DATABASE/SVN projects together and lets each project select its own source provider.
+- Aggregates exact-URL SVN working copies into one business source tree and one SCM provider per workspace.
+- Opens SCM changes in VS Code's native side-by-side Diff Editor with an in-memory, read-only SVN BASE on the left and the current working-copy source on the right; it does not create another local source copy.
+- Lists Nexus-managed edits and safe externally modified tracked text files in one change manager. Selected files can be compared, reverted to the local SVN BASE, or saved; conflicts, additions, deletions, untracked files, and property changes remain blocked. Revert does not require a remote-current working copy, while `保存到谷神` still performs the remote out-of-date check.
+- Previews, imports, checks out, and updates a workspace's exact SVN scope directly from `context/svnCheckoutHere.bat` without executing the BAT or persisting its credentials.
+- Loads the SVN tree from the local SQLite index and lazily parses only the selected PAGE file's editable fragments, avoiding a full checkout scan on every tree expansion.
+- Uses normalized SQLite call edges keyed by `source_record_id`, with covering indexes for target-caller and source-outgoing lookups. Existing indexes migrate transactionally and vacuum once on first open; compatibility views keep query/export results unchanged without storing repeated source metadata on every edge.
+- Opens a virtual document with an exact-file SVN status/hash check; browse actions skip unrelated working-copy and private-Git scans.
+- Preserves procedure, system-script, table, and view source directories. PAGE and system-script roots use `$.<Chinese subsystem name>` markers for subsystem labels; PAGE hierarchy and leaf labels come from `index.md`. Procedure leaves show `function package`, while table/view leaves show `object-id Chinese name`.
+- Provides the toolbar action `跳转所选 SVN 原文件`; selecting a module or any child method, field, SQL, or event resolves the owning module's authorized `sourcePath` and reveals the physical file in Explorer. The same action remains available from the context menu, but no longer occupies the end of every source label.
+- Provides `定位当前编辑源码`, which maps the active SVN virtual document or physical checkout file back to its stable Nexus node, expands its parent chain, and selects it. Locating a PAGE fragment parses only that PAGE lazily.
+- Adds native “谷神源码” toolbar actions for locating, jumping, expanding or collapsing the selected node, opening VS Code's directly visible tree find box, and refreshing. Find uses cached nodes with filter + fuzzy defaults, while long source labels use the native horizontal scrollbar (`workbench.list.horizontalScrolling`, user-overridable).
+- Opens PAGE script/SQL/field fragments and procedure/system-script sources as guarded virtual documents without a second code copy.
+- Completes `Ctrl+S` after the guarded single-file write and incremental index update; SCM is updated from that verified result without synchronously rescanning every working copy, and the managed file-watcher event is suppressed to avoid duplicate indexing. Consecutive saves from the same virtual editor keep the provider version stable, while genuine external checkout changes still invalidate it and retain the hash-based overwrite guard.
+- Parses backend code embedded in PAGE `raw.json` `serviceEvents` (including `beforeSaveScript`, `afterSaveScript`, and `beforeSqlSelectScript`) as named `GSS · <component/event>` fragments; these fragments remain minimal JSON Pointer writebacks to the original PAGE file.
+- Associates both current `.gss` files and legacy DATABASE `.vm` projections with VS Code's Java language mode and Java highlighting.
+- Uses the workspace call index for Go to Definition and Find References from SVN virtual documents.
 - Java, JavaScript, and SQL completions from generated local data.
 - Java syntax snippets for Gushen backend script directives.
 - Route-based cross-source completions:

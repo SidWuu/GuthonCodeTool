@@ -5,8 +5,7 @@ products:
   demo-product:
     # 产品名称，用作 readonly、workcopy 和数据库快照的目录名。
     name: 示例产品
-    # 每个工作区必须明确选择唯一源码事实来源：database 或 svn。
-    source_mode: database
+    # 源码来源不写在 YAML；Nexus 项目节点负责选择，未设置时默认 DATABASE。
     # 引用 datasource.yaml 中的数据源标识。
     datasource: demo-product-dev
     # 可选浏览器来源；为空时 Bridge 依赖数据源和系统身份匹配。
@@ -16,31 +15,32 @@ products:
       include:
         system_aliases:
           - demo.system
-    # source_mode 改为 svn 时取消以下配置；checkout/workspace 根目录都有安全默认值，通常无需填写。
+    # 如需 SVN，在 Nexus 的当前产品节点选择 SVN，并把谷神下载的
+    # svnCheckoutHere.bat 放到该工程 context/。
+    # Nexus 会生成同目录脱敏 authorized-scope.json；通常不需要 svn 配置块。
+    # 以下仅用于覆盖默认 checkout 根、共享凭据环境变量名或 capability：
     # svn:
-    #   repository_url: ${DEMO_PRODUCT_SVN_URL}
-    #   sparse_checkout: true
-    #   include:
-    #     - pages
-    #     - procedures
-    #     - system-script
-    #     - tables
-    #     - views
     #   update_policy: manual
     #   no_auth_cache: true
-    #   username_env: DEMO_SVN_USERNAME
-    #   password_env: DEMO_SVN_PASSWORD
+    #   username_env: GUTHON_NEXUS_SVN_USERNAME
+    #   password_env: GUTHON_NEXUS_SVN_PASSWORD
     #   # 仅在已核对证书且确有需要时显式列出；默认不信任任何证书异常。
     #   allowed_cert_failures: []
+    #   # 使用证书异常白名单时必须同时固定管理员独立确认的服务器证书 SHA-256 指纹。
+    #   certificate_pins: {}
     #   capabilities:
     #     initialize: true
     #     refresh: true
-    #     system_data_bootstrap: true
+    #     system_data_bootstrap: false
     #     status: true
     #     reindex: true
-    #     workcopy: true
-    #     writeback: true
+    #     workcopy: false
+    #     writeback: false
     #     commit: false
+    #     browse: true
+    #     edit: true
+    #     history: true
+    #     revert: true
     # 保留项；当前实现根据 products 分组固定判定为 PRODUCT。
     source_layer: PRODUCT
     # 源码包含规则。

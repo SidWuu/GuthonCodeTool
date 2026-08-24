@@ -10,6 +10,8 @@ import hashlib
 import json
 import os
 import re
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -29,7 +31,7 @@ except ImportError:  # pragma: no cover - exercised by Windows builds
 SUPPORTED_INCLUDES = {"pages", "procedures", "system-script", "tables", "views"}
 WRITABLE_INCLUDES = {"pages", "procedures", "system-script"}
 CERT_FAILURES = {"unknown-ca", "cn-mismatch", "expired", "not-yet-valid", "other"}
-SVN_CAPABILITY_DEFAULTS = {
+LEGACY_SVN_CAPABILITY_DEFAULTS = {
     "initialize": True,
     "refresh": True,
     "system_data_bootstrap": True,
@@ -38,13 +40,35 @@ SVN_CAPABILITY_DEFAULTS = {
     "workcopy": True,
     "writeback": True,
     "commit": False,
+    "browse": False,
+    "edit": False,
+    "history": False,
+    "revert": False,
 }
+MANIFEST_SVN_CAPABILITY_DEFAULTS = {
+    "initialize": True,
+    "refresh": True,
+    "system_data_bootstrap": False,
+    "status": True,
+    "reindex": True,
+    "workcopy": False,
+    "writeback": False,
+    "commit": False,
+    "browse": True,
+    "edit": True,
+    "history": True,
+    "revert": True,
+}
+SVN_CAPABILITY_DEFAULTS = LEGACY_SVN_CAPABILITY_DEFAULTS
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ENV_REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+CERT_PIN = re.compile(r"^[0-9a-f]{64}$")
 SCOPE_FILE = "checkout-scope.json"
 SCOPE_VERSION = 2
 EXPECTED_WRITEBACK_FILE = "svn-writeback-state.json"
 MIN_SVN_VERSION = (1, 10)
+NEXUS_SVN_USERNAME_ENV = "GUTHON_NEXUS_SVN_USERNAME"
+NEXUS_SVN_PASSWORD_ENV = "GUTHON_NEXUS_SVN_PASSWORD"
 
 
 def file_hash(path: Path) -> str:
@@ -96,23 +120,48 @@ def expand_config_value(value, label: str, *, allow_missing_env=False) -> str:
     return text
 
 
-def svn_settings(config_id: str, item: dict, var_dir: Path) -> dict:
+def svn_settings(config_id: str, item: dict, var_dir: Path, workspace_dir: Path | None = None) -> dict:
     validate_config_id(config_id)
     svn = item.get("svn") or {}
     if not isinstance(svn, dict):
         raise SystemExit(f"svn must be a mapping for {config_id}")
-    configured = svn.get("capabilities") or {}
+    scope_manifest_value = str(svn.get("scope_manifest") or "").strip()
+    repository_url_value = str(svn.get("repository_url") or "").strip()
+    convention_manifest = not scope_manifest_value and not repository_url_value
+    checkout_layout = str(
+        svn.get("checkout_layout")
+        or ("manifest-working-copies" if scope_manifest_value or convention_manifest else "legacy-sparse")
+    ).strip().lower()
+    if checkout_layout not in {"legacy-sparse", "manifest-working-copies"}:
+        raise SystemExit(f"Unsupported svn.checkout_layout for {config_id}: {checkout_layout}")
+    if checkout_layout == "manifest-working-copies" and not scope_manifest_value and workspace_dir is None:
+        raise SystemExit(
+            f"workspace_dir is required for convention-based manifest-working-copies: {config_id}"
+        )
+    capability_defaults = (
+        MANIFEST_SVN_CAPABILITY_DEFAULTS
+        if checkout_layout == "manifest-working-copies"
+        else LEGACY_SVN_CAPABILITY_DEFAULTS
+    )
+    configured = dict(svn.get("capabilities") or {})
+    # Older configs may still contain this flag. It is intentionally ignored:
+    # manifest-based SVN workspaces always support saving to Guthon.
+    configured.pop("platform_save", None)
     non_boolean = [name for name, value in configured.items() if not isinstance(value, bool)]
     if non_boolean:
         raise SystemExit(f"SVN capabilities must be boolean for {config_id}: {', '.join(sorted(non_boolean))}")
-    unknown = set(configured) - set(SVN_CAPABILITY_DEFAULTS)
+    unknown = set(configured) - set(capability_defaults)
     if unknown:
         raise SystemExit(f"Unknown SVN capabilities for {config_id}: {', '.join(sorted(unknown))}")
-    capabilities = {key: bool(configured.get(key, default)) for key, default in SVN_CAPABILITY_DEFAULTS.items()}
+    capabilities = {key: bool(configured.get(key, default)) for key, default in capability_defaults.items()}
     if capabilities["commit"] or configured.get("commit") is True:
         raise SystemExit(f"svn.capabilities.commit must remain false for {config_id}")
     if capabilities["writeback"] and not all(capabilities[name] for name in ("status", "reindex", "workcopy")):
         raise SystemExit(f"svn.writeback requires status, reindex and workcopy for {config_id}")
+    if capabilities["edit"] and not all(capabilities[name] for name in ("browse", "status", "reindex")):
+        raise SystemExit(f"svn.edit requires browse, status and reindex for {config_id}")
+    if capabilities["revert"] and not all(capabilities[name] for name in ("edit", "status")):
+        raise SystemExit(f"svn.revert requires edit and status for {config_id}")
     includes = svn.get("include") or ["pages", "procedures", "system-script"]
     if isinstance(includes, str):
         includes = [value.strip() for value in includes.strip("[]").split(",") if value.strip()]
@@ -132,7 +181,7 @@ def svn_settings(config_id: str, item: dict, var_dir: Path) -> dict:
     if checkout_path.parent != checkout_root:
         raise SystemExit(f"Invalid SVN checkout path for {config_id}")
     repository_url = expand_config_value(
-        svn.get("repository_url"),
+        repository_url_value,
         f"svn.repository_url for {config_id}",
         allow_missing_env=True,
     ).rstrip("/")
@@ -142,13 +191,47 @@ def svn_settings(config_id: str, item: dict, var_dir: Path) -> dict:
             raise SystemExit(f"Unsupported SVN repository URL scheme for {config_id}")
         if parsed_url.username or parsed_url.password:
             raise SystemExit(f"SVN credentials must not be embedded in repository_url for {config_id}")
-    if not repository_url and capabilities["initialize"]:
+    if not repository_url and capabilities["initialize"] and checkout_layout == "legacy-sparse":
         # Existing working copies remain usable without retaining their URL in YAML.
         if not (checkout_path / ".svn").is_dir():
             raise SystemExit(f"Missing svn.repository_url for {config_id}")
-    sparse_checkout = bool(svn.get("sparse_checkout", True))
-    if not sparse_checkout:
+    sparse_checkout = bool(svn.get("sparse_checkout", checkout_layout == "legacy-sparse"))
+    if checkout_layout == "legacy-sparse" and not sparse_checkout:
         raise SystemExit(f"SVN provider requires sparse_checkout=true for {config_id}")
+    if checkout_layout == "manifest-working-copies" and sparse_checkout:
+        raise SystemExit(f"manifest-working-copies does not use svn.sparse_checkout for {config_id}")
+    scope_manifest_path = None
+    if scope_manifest_value:
+        relative_manifest = Path(scope_manifest_value)
+        if relative_manifest.is_absolute() or ".." in relative_manifest.parts:
+            raise SystemExit(f"svn.scope_manifest must be relative to config for {config_id}")
+        config_root = (var_dir.parent / "config").resolve()
+        scope_manifest_path = (config_root / relative_manifest).resolve()
+        if scope_manifest_path != config_root and config_root not in scope_manifest_path.parents:
+            raise SystemExit(f"svn.scope_manifest escapes config for {config_id}")
+    elif checkout_layout == "manifest-working-copies":
+        context_root = (workspace_dir / "context").resolve()
+        scope_manifest_path = (context_root / "authorized-scope.json").resolve()
+        if context_root not in scope_manifest_path.parents:
+            raise SystemExit(f"Default SVN scope manifest escapes workspace context for {config_id}")
+    checkout_bat_value = str(svn.get("checkout_bat") or "").strip()
+    if checkout_bat_value:
+        if workspace_dir is None:
+            raise SystemExit(f"workspace_dir is required for svn.checkout_bat: {config_id}")
+        configured_bat = Path(checkout_bat_value)
+        if configured_bat.is_absolute() or ".." in configured_bat.parts:
+            raise SystemExit(f"svn.checkout_bat must be relative to the workspace context for {config_id}")
+        context_root = (workspace_dir / "context").resolve()
+        checkout_bat_path = (context_root / configured_bat).resolve()
+        if context_root not in checkout_bat_path.parents:
+            raise SystemExit(f"svn.checkout_bat escapes workspace context for {config_id}")
+    elif workspace_dir is not None:
+        context_root = (workspace_dir / "context").resolve()
+        checkout_bat_path = (context_root / "svnCheckoutHere.bat").resolve()
+        if context_root not in checkout_bat_path.parents:
+            raise SystemExit(f"Default SVN checkout BAT escapes workspace context for {config_id}")
+    else:
+        checkout_bat_path = None
     update_policy = str(svn.get("update_policy") or "manual").strip().lower()
     if update_policy != "manual":
         raise SystemExit(f"svn.update_policy must be manual for {config_id}")
@@ -161,6 +244,29 @@ def svn_settings(config_id: str, item: dict, var_dir: Path) -> dict:
         raise SystemExit(
             f"Unsupported svn.allowed_cert_failures for {config_id}: {', '.join(sorted(invalid_cert_failures))}"
         )
+    certificate_pins = svn.get("certificate_pins") or {}
+    if not isinstance(certificate_pins, dict):
+        raise SystemExit(f"svn.certificate_pins must be a hostname-to-SHA256 mapping for {config_id}")
+    normalized_pins = {}
+    for authority, fingerprint in certificate_pins.items():
+        parsed_authority = urlsplit(f"//{str(authority).strip()}")
+        if (
+            not parsed_authority.hostname
+            or parsed_authority.username
+            or parsed_authority.password
+            or parsed_authority.path not in {"", "/"}
+        ):
+            raise SystemExit(f"Invalid svn.certificate_pins host for {config_id}: {authority}")
+        port = parsed_authority.port or 443
+        key = f"{parsed_authority.hostname.lower()}:{port}"
+        normalized = re.sub(r"[^0-9A-Fa-f]", "", str(fingerprint)).lower()
+        if not CERT_PIN.fullmatch(normalized):
+            raise SystemExit(f"Invalid SHA256 certificate pin for {config_id}: {authority}")
+        if key in normalized_pins:
+            raise SystemExit(f"Duplicate SVN certificate pin for {config_id}: {key}")
+        normalized_pins[key] = normalized
+    if allowed_cert_failures and not normalized_pins:
+        raise SystemExit(f"svn.allowed_cert_failures requires svn.certificate_pins for {config_id}")
     return {
         "repositoryUrl": repository_url,
         "checkoutRoot": checkout_root,
@@ -168,11 +274,16 @@ def svn_settings(config_id: str, item: dict, var_dir: Path) -> dict:
         "capabilities": capabilities,
         "includes": includes,
         "sparseCheckout": sparse_checkout,
+        "checkoutLayout": checkout_layout,
+        "scopeManifestPath": scope_manifest_path,
+        "scopeManifestConvention": convention_manifest,
+        "checkoutBatPath": checkout_bat_path,
         "updatePolicy": update_policy,
         "usernameEnv": str(svn.get("username_env") or "").strip(),
         "passwordEnv": str(svn.get("password_env") or "").strip(),
         "noAuthCache": bool(svn.get("no_auth_cache", True)),
         "allowedCertFailures": allowed_cert_failures,
+        "certificatePins": normalized_pins,
     }
 
 
@@ -218,17 +329,88 @@ def operation_lock(workspace: dict, action: str, shared=False):
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
+@lru_cache(maxsize=32)
+def _server_certificate_sha256(hostname: str, port: int) -> str:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    try:
+        with socket.create_connection((hostname, port), timeout=10) as connection:
+            with context.wrap_socket(connection, server_hostname=hostname) as tls:
+                certificate = tls.getpeercert(binary_form=True)
+    except (OSError, ssl.SSLError) as error:
+        raise SystemExit(f"Unable to read SVN TLS certificate for {hostname}:{port}: {error}") from error
+    if not certificate:
+        raise SystemExit(f"SVN server did not provide a TLS certificate: {hostname}:{port}")
+    return hashlib.sha256(certificate).hexdigest()
+
+
+def _remote_urls(args, cwd: Path | None = None) -> list[str]:
+    urls = []
+    local_candidates = []
+    for raw_value in args:
+        value = str(raw_value)
+        parsed = urlsplit(value)
+        if parsed.scheme and parsed.hostname:
+            urls.append(value)
+            continue
+        if value.startswith("-"):
+            continue
+        candidate = Path(value)
+        if not candidate.is_absolute() and cwd:
+            candidate = cwd / candidate
+        if candidate.exists():
+            local_candidates.append(candidate)
+    if urls:
+        return list(dict.fromkeys(urls))
+    for candidate in local_candidates:
+        result = run_svn(["info", "--show-item", "url", str(candidate)], check=False)
+        url = result.stdout.strip() if result.returncode == 0 else ""
+        if url:
+            urls.append(url)
+    return list(dict.fromkeys(urls))
+
+
+def _verify_pinned_certificates(args, settings: dict, cwd: Path | None = None) -> None:
+    failures = settings.get("allowedCertFailures") or []
+    if not failures:
+        return
+    urls = _remote_urls(args, cwd)
+    if not urls:
+        raise SystemExit("Unable to determine the SVN server before applying certificate exceptions")
+    pins = settings.get("certificatePins") or {}
+    for url in urls:
+        parsed = urlsplit(url)
+        if parsed.scheme.lower() != "https":
+            continue
+        hostname = (parsed.hostname or "").lower()
+        port = parsed.port or 443
+        key = f"{hostname}:{port}"
+        expected = pins.get(key)
+        if not expected:
+            raise SystemExit(f"Missing pinned SVN certificate for {key}")
+        actual = _server_certificate_sha256(hostname, port)
+        if actual != expected:
+            raise SystemExit(
+                f"SVN certificate pin mismatch for {key}; expected {expected}, received {actual}"
+            )
+
+
 def _svn_auth(settings: dict) -> tuple[list[str], str | None, bool]:
     args = []
     if settings.get("noAuthCache", True):
         args.append("--no-auth-cache")
     username_env = settings.get("usernameEnv") or ""
+    if not username_env and os.environ.get(NEXUS_SVN_USERNAME_ENV):
+        username_env = NEXUS_SVN_USERNAME_ENV
     if username_env:
         username = os.environ.get(username_env, "").strip()
         if not username:
             raise SystemExit(f"SVN username environment variable is empty: {username_env}")
         args.extend(["--username", username])
     password_env = settings.get("passwordEnv") or ""
+    if not password_env and os.environ.get(NEXUS_SVN_PASSWORD_ENV):
+        password_env = NEXUS_SVN_PASSWORD_ENV
     password = None
     if password_env:
         password = os.environ.get(password_env)
@@ -264,7 +446,32 @@ def run_svn(args, cwd: Path | None = None, check=True, input_text=None, show_std
     return result
 
 
+def run_svn_binary(args, cwd: Path | None = None, check=True) -> subprocess.CompletedProcess:
+    """Run a local SVN command without decoding its stdout.
+
+    Source files may be UTF-8, GB18030, or BOM-prefixed Unicode.  Commands such
+    as ``svn cat`` therefore have to return bytes so the shared source decoder
+    can apply the same lossless rules used for the working copy.
+    """
+
+    try:
+        result = subprocess.run(
+            ["svn", *map(str, args)],
+            cwd=str(cwd) if cwd else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        raise SystemExit("SVN client is not installed or not on PATH") from error
+    if check and result.returncode:
+        message = (result.stderr or result.stdout).decode("utf-8", errors="replace").strip()
+        raise SystemExit(message or f"svn command failed: {' '.join(map(str, args))}")
+    return result
+
+
 def run_remote_svn(args, settings: dict, cwd: Path | None = None, check=True) -> subprocess.CompletedProcess:
+    _verify_pinned_certificates(args, settings, cwd)
     auth_args, password_input, interactive = _svn_auth(settings)
     return run_svn(
         [*args, *auth_args],
@@ -318,15 +525,7 @@ def svn_info(path: Path) -> dict:
     }
 
 
-def svn_status(checkout_path: Path, include_diff=False, remote=False, settings=None) -> dict:
-    info = svn_info(checkout_path)
-    status_args = ["status", "--xml"]
-    if remote:
-        status_args.append("--show-updates")
-        result = run_remote_svn([*status_args, str(checkout_path)], settings or {})
-    else:
-        result = run_svn([*status_args, str(checkout_path)])
-    root = ET.fromstring(result.stdout)
+def _status_changes(root: ET.Element, checkout_path: Path) -> tuple[list[dict], list[dict]]:
     changes = []
     remote_changes = []
     for entry in root.findall(".//entry"):
@@ -357,6 +556,29 @@ def svn_status(checkout_path: Path, include_diff=False, remote=False, settings=N
             "switched": switched,
             "copied": copied,
         })
+    return changes, remote_changes
+
+
+def svn_path_changes(checkout_path: Path, source_path: Path) -> list[dict]:
+    checkout_root = checkout_path.resolve()
+    target = source_path.resolve()
+    if target != checkout_root and checkout_root not in target.parents:
+        raise SystemExit(f"SVN status target escaped its working copy: {source_path}")
+    result = run_svn(["status", "--xml", "--depth", "empty", str(target)])
+    changes, _remote_changes = _status_changes(ET.fromstring(result.stdout), checkout_root)
+    return changes
+
+
+def svn_status(checkout_path: Path, include_diff=False, remote=False, settings=None) -> dict:
+    info = svn_info(checkout_path)
+    status_args = ["status", "--xml"]
+    if remote:
+        status_args.append("--show-updates")
+        result = run_remote_svn([*status_args, str(checkout_path)], settings or {})
+    else:
+        result = run_svn([*status_args, str(checkout_path)])
+    root = ET.fromstring(result.stdout)
+    changes, remote_changes = _status_changes(root, checkout_path)
     summary = run_svn(["diff", "--summarize", str(checkout_path)]).stdout.splitlines()
     svn_version = working_copy_version(checkout_path)
     output = {

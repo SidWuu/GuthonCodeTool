@@ -10,7 +10,7 @@ import re
 import sys
 from pathlib import Path
 
-import gusen_hub
+from common import gusen_hub
 
 
 ROOT = gusen_hub.ROOT

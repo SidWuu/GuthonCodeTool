@@ -745,6 +745,8 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(html.includes('src="workspace-selection.js"'), true);
   assert.equal(html.includes('href="bridge.css"'), true);
   assert.equal(runHubPullScript.includes("resolveCurrentTarget"), false);
+  assert.equal(runHubPullScript.includes('const pageSource = isModuleUrl((await getActiveTab()).url) || target.mode === "page-source";'), true);
+  assert.equal(script.includes('mode: isModuleUrl(tab.url) ? "page-source" : result.data.mode || "procedure"'), true);
   assert.equal(html.includes("closeBtn"), true);
   assert.equal(script.includes("window.close()"), true);
 });
@@ -1004,7 +1006,9 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("installFloatingDrag"), false);
   assert.equal(contentScript.includes("pullCurrentProcedure(root, sourceButton)"), true);
   assert.equal(contentScript.includes('isModuleRoute() ? "inspect-hub-source" : "inspectCurrentProcedure"'), true);
-  assert.equal(contentScript.includes('sourceType: target.mode === "page-source" ? "page" : "procedure"'), true);
+  assert.equal(contentScript.includes('const pageSource = isModuleRoute() || target.mode === "page-source";'), true);
+  assert.equal(contentScript.includes('if (!pageSource && !target.procedureId)'), true);
+  assert.equal(contentScript.includes('sourceType: pageSource ? "page" : "procedure"'), true);
   assert.equal(contentScript.includes('runPageCommand("collectModuleCopyText")'), true);
   assert.equal(contentScript.includes("collectModulePageFields"), false);
   assert.equal(contentScript.includes("guthon-bridge-copy-overlay"), true);

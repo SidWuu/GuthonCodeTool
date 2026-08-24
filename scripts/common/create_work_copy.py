@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from gusen_hub import create_work_copy
+from common.gusen_hub import create_work_copy
 
 
 if __name__ == "__main__":

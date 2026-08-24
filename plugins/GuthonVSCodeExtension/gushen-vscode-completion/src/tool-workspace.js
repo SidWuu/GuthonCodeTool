@@ -6,17 +6,17 @@ async function prepareWorkspaceSetup(config, window, configurationTarget) {
   if (!toolHome || !fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'))) return 'setup';
 
   const confirmed = await window.showWarningMessage(
-    `当前工作区已初始化：${toolHome}\n是否切换工作区？`,
+    `当前工作空间已设置：${toolHome}\n是否切换工作空间？`,
     { modal: true },
-    '切换工作区'
+    '切换工作空间'
   );
-  if (confirmed !== '切换工作区') return undefined;
+  if (confirmed !== '切换工作空间') return undefined;
 
   const selected = await window.showOpenDialog({
     canSelectFiles: false,
     canSelectFolders: true,
     canSelectMany: false,
-    title: '选择新的 GuthonCodeTool 本地数据目录',
+    title: '选择新的 GuthonCodeTool 本地数据工作空间',
   });
   if (!selected) return undefined;
 
@@ -29,19 +29,17 @@ function workspaceActions(item) {
   if (item.sourceMode === 'svn') {
     return {
       source: [
-        capability('svn.initialize') && ['初始化 SVN 稀疏范围', 'gushenCompletion.initializeSvn', 'repo-clone'],
-        capability('svn.refresh') && ['刷新 SVN 稀疏范围', 'gushenCompletion.refreshSvn', 'repo-sync'],
-        capability('svn.status') && ['查看 SVN 状态与差异', 'gushenCompletion.showSvnStatus', 'diff'],
+        capability('svn.initialize') && ['从 BAT 同步授权并检出/更新', 'gushenCompletion.initializeSvn', 'repo-clone'],
         capability('svn.reindex') && ['扫描/重建本地 SVN 索引', 'gushenCompletion.reindexCalls', 'refresh'],
+        capability('svn.refresh') && ['更新指定 SVN working copy', 'gushenCompletion.refreshSvn', 'repo-sync'],
+        capability('svn.browse') && ['查看谷神同步源码', 'gushenCompletion.focusSvnSource', 'list-tree'],
+        capability('svn.status') && ['管理本地源码变更', 'gushenCompletion.manageSvnChanges', 'source-control'],
         ['导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book'],
       ].filter(Boolean),
-      workcopy: [
-        capability('svn.workcopy') && ['打开对象 Workcopy', 'gushenCompletion.openSvnWorkcopy', 'go-to-file'],
-        capability('svn.writeback') && ['预检/写回 SVN', 'gushenCompletion.saveSvnWorkcopy', 'save'],
-      ].filter(Boolean),
+      workcopy: [],
       metadata: [],
       diagnose: false,
-      syncAll: ['扫描本地 SVN 全部资料', 'gushenCompletion.syncWorkspaceAll', 'database'],
+      syncAll: undefined,
     };
   }
   return {

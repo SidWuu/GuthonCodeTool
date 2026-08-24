@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import shutil
@@ -21,15 +22,15 @@ CONFIG_FILES = (
     "sync.yaml",
 )
 SCRIPT_COMMANDS = {
-    "doctor": ("doctor", "main"),
-    "export-schema": ("export_table_schema_sql", "main"),
-    "export-bill-type": ("export_bill_type_sql", "main"),
-    "export-view": ("export_view_sql", "main"),
-    "export-system-script": ("export_system_script_sql", "main"),
-    "query": ("query_hub_context", "main"),
-    "diagnose": ("run_source_diagnosis", "main"),
-    "create-workcopy": ("gusen_hub", "create_work_copy"),
-    "workcopy": ("gusen_hub", "work_copy_cli"),
+    "doctor": ("common.doctor", "main"),
+    "export-schema": ("providers.database.export_table_schema_sql", "main"),
+    "export-bill-type": ("providers.database.export_bill_type_sql", "main"),
+    "export-view": ("providers.database.export_view_sql", "main"),
+    "export-system-script": ("providers.database.export_system_script_sql", "main"),
+    "query": ("common.query_hub_context", "main"),
+    "diagnose": ("providers.database.run_source_diagnosis", "main"),
+    "create-workcopy": ("common.gusen_hub", "create_work_copy"),
+    "workcopy": ("common.gusen_hub", "work_copy_cli"),
 }
 COMMAND_STEPS = {
     "sync-source-all": "source",
@@ -38,6 +39,18 @@ COMMAND_STEPS = {
     "export-bill-type": "billType",
     "export-system-script": "systemScripts",
     "export-view": "views",
+}
+SVN_BROWSE_ACTIONS = {
+    "catalog",
+    "fragments",
+    "read",
+    "status",
+    "scm-status",
+    "diff",
+    "history",
+    "definition",
+    "callers",
+    "scope-preview",
 }
 GLOBAL_COMMANDS = {"setup", "doctor", "route", "workspaces", "self-test"}
 DATABASE_ONLY_COMMANDS = {
@@ -69,6 +82,12 @@ def setup_config(home: Path) -> list[Path]:
     return created
 
 
+def _auto_add_operation_enabled(command: str, extra_args: list[str]) -> bool:
+    if command == "source-mode":
+        return False
+    return not (command == "svn" and extra_args and extra_args[0] in SVN_BROWSE_ACTIONS)
+
+
 def run(command: str, home: Path, extra_args: list[str], selected_workspace=None) -> int:
     os.environ["GUTHON_HOME"] = str(home)
     if command == "self-test":
@@ -82,8 +101,25 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
         print(f"配置目录已准备：{home / 'config'}")
         print("已创建：" + ("、".join(path.name for path in created) or "无（保留现有配置）"))
         return 0
+    if command == "import-svn-scope":
+        if not selected_workspace:
+            raise SystemExit("Missing --workspace. Use products.<product_id> or projects.<project_id>.")
+        import_parser = argparse.ArgumentParser(prog="guthon_tool.py import-svn-scope")
+        import_parser.add_argument("--bat", required=True, help="path to the checkout BAT downloaded from Guthon")
+        import_parser.add_argument("--output", required=True, help="target authorized-scope.json path")
+        import_parser.add_argument("--replace", action="store_true", help="replace an existing changed manifest")
+        parsed = import_parser.parse_args(extra_args)
+        from providers.svn.scope_import import build_manifest, read_bat, write_manifest
 
-    import gusen_hub
+        result = build_manifest(read_bat(Path(parsed.bat).expanduser().resolve()), selected_workspace)
+        output_path = Path(parsed.output).expanduser()
+        if not output_path.is_absolute():
+            output_path = home / output_path
+        summary = write_manifest(output_path.resolve(), result, replace=parsed.replace)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+
+    from common import gusen_hub
 
     if command == "workspaces":
         config = gusen_hub.load_config()
@@ -109,8 +145,9 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
             "use the local SVN index or an explicit database workspace"
         )
     auto_add_git = bool((config.get("sync", {}).get("rules") or {}).get("pull_auto_add_git"))
+    auto_add_operation = auto_add_git and _auto_add_operation_enabled(command, extra_args)
     before = set()
-    if workspace and auto_add_git:
+    if workspace and auto_add_operation:
         workspace_prefix = gusen_hub.workspace_var_prefix(workspace)
         if workspace_prefix:
             before = gusen_hub.untracked_files(pathspec=[workspace_prefix])
@@ -134,12 +171,107 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
         raise
     finally:
         os.environ.pop("GUTHON_DEFER_GIT_ADD", None)
-    if workspace and command not in {"init", "reindex", "export-markdown", "workcopy", "create-workcopy"}:
+    if (
+        workspace
+        and auto_add_operation
+        and command not in {"init", "reindex", "export-markdown", "workcopy", "create-workcopy", "source-mode"}
+    ):
         gusen_hub.auto_add_operation_files(config, before, workspace)
     return result_code
 
 
+def _reindex_svn(gusen_hub, config, workspace) -> dict:
+    conn = gusen_hub.connect_index(workspace["indexPath"])
+    try:
+        result = gusen_hub.index_svn_workspace(conn, config, workspace)
+    finally:
+        conn.close()
+    if result.get("failures"):
+        raise SystemExit(f"SVN scan failed; existing index preserved: {result['errors']}")
+    return result
+
+
+def _reindex_svn_files(gusen_hub, config, workspace, source_paths: list[str]) -> list[dict]:
+    connection = gusen_hub.connect_index(workspace["indexPath"])
+    try:
+        results = [
+            gusen_hub.index_svn_workspace_file(connection, config, workspace, source_path)
+            for source_path in dict.fromkeys(source_paths)
+        ]
+    finally:
+        connection.close()
+    return results
+
+
+def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str] | None:
+    """Return exact changed source paths, or None when a full scan is safer."""
+
+    from providers.svn.nexus.manifest import load_authorized_scope
+
+    entries = {entry.id: entry for entry in load_authorized_scope(workspace).entries}
+    allowed_suffixes = {
+        "pages": {".json", ".gss"},
+        "procedures": {".gss"},
+        "system-script": {".gss", ".js", ".vm", ".sql"},
+        "tables": {".json"},
+        "views": {".json"},
+    }
+    logical_paths = []
+    merge_local = refresh_result.get("action") == "refreshed-with-local-merge"
+    for updated in refresh_result.get("updated") or []:
+        entry = entries.get(updated.get("id"))
+        if entry is None:
+            return None
+        changes = list((updated.get("before") or {}).get("remoteChanges") or [])
+        if merge_local:
+            changes.extend((updated.get("before") or {}).get("changes") or [])
+            changes.extend((updated.get("after") or {}).get("changes") or [])
+        for change in changes:
+            relative = Path(str(change.get("path") or "").replace("\\", "/")).as_posix().lstrip("/")
+            target = (entry.root / relative).resolve()
+            if (
+                not relative
+                or relative == "."
+                or entry.root.resolve() not in target.parents
+                or not target.is_file()
+                or target.suffix.lower() not in allowed_suffixes.get(entry.category, set())
+            ):
+                return None
+            logical_paths.append(f"{entry.local_subdir}/{relative}")
+    return list(dict.fromkeys(logical_paths))
+
+
+def _reindex_svn_refresh(gusen_hub, config, workspace, refresh_result: dict) -> dict:
+    paths = _manifest_refresh_paths(workspace, refresh_result)
+    if paths is None:
+        return _reindex_svn(gusen_hub, config, workspace)
+    files = _reindex_svn_files(gusen_hub, config, workspace, paths)
+    return {
+        "mode": "svn-incremental-refresh",
+        "workspaceKey": workspace["workspaceKey"],
+        "changed": sum(item.get("changed", 0) for item in files),
+        "failures": sum(item.get("failures", 0) for item in files),
+        "files": files,
+    }
+
+
 def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
+    if command == "source-mode":
+        parser = argparse.ArgumentParser(prog="guthon_tool.py source-mode")
+        parser.add_argument("action", choices=["get", "set"])
+        parser.add_argument("--mode", choices=["database", "svn"])
+        parsed = parser.parse_args(extra_args)
+        if parsed.action == "get":
+            if parsed.mode:
+                raise SystemExit("source-mode get does not accept --mode")
+            result = gusen_hub.workspace_summary(config, workspace)
+        else:
+            if not parsed.mode:
+                raise SystemExit("source-mode set requires --mode database|svn")
+            result, updated = gusen_hub.change_workspace_source_mode(config, workspace, parsed.mode)
+            result["workspace"] = gusen_hub.workspace_summary(config, updated)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
     if command == "workspace-summary":
         if extra_args:
             raise SystemExit("workspace-summary does not accept extra arguments")
@@ -149,44 +281,282 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         from providers.svn import checkout
 
         svn_parser = argparse.ArgumentParser(prog="guthon_tool.py svn")
-        svn_parser.add_argument("action", choices=["init", "refresh", "status"])
+        svn_parser.add_argument(
+            "action",
+            choices=[
+                "init",
+                "scope-preview",
+                "sync-from-bat",
+                "refresh",
+                "status",
+                "catalog",
+                "fragments",
+                "read",
+                "write",
+                "scm-status",
+                "diff",
+                "history",
+                "revert-preview",
+                "revert",
+                "platform-save-preview",
+                "platform-save",
+                "definition",
+                "callers",
+                "reindex-file",
+            ],
+        )
         svn_parser.add_argument("--prune", action="store_true", help="exclude paths removed from the configured sparse scope")
+        svn_parser.add_argument(
+            "--accept-scope-change",
+            action="store_true",
+            help="accept the reviewed workspace BAT as the new exact authorization manifest",
+        )
         svn_parser.add_argument("--diff", action="store_true", help="include full svn diff in status output")
         svn_parser.add_argument("--remote", action="store_true", help="contact the repository and report out-of-date paths")
+        svn_parser.add_argument(
+            "--merge-local",
+            action="store_true",
+            help="explicitly allow native SVN update/merge when the selected working copy has local changes",
+        )
+        svn_parser.add_argument(
+            "--working-copy",
+            action="append",
+            default=[],
+            help="limit a manifest refresh to an exact scope entry id; repeat to select multiple entries",
+        )
+        svn_parser.add_argument(
+            "--source-type",
+            choices=["page", "procedure", "system-script", "table", "view", "skill", "public"],
+        )
+        svn_parser.add_argument("--source-id")
+        svn_parser.add_argument("--fun-id", default="")
+        svn_parser.add_argument("--json-pointer", default="")
+        svn_parser.add_argument("--session")
+        svn_parser.add_argument("--document")
+        svn_parser.add_argument("--path")
+        svn_parser.add_argument("--limit", type=int, default=20)
+        svn_parser.add_argument("--selection-token")
+        svn_parser.add_argument("--candidate", action="append", default=[])
+        svn_parser.add_argument("--alias")
         parsed = svn_parser.parse_args(extra_args)
+        manifest_layout = workspace["svn"].get("checkoutLayout") == "manifest-working-copies"
+        if manifest_layout and parsed.prune:
+            raise SystemExit("--prune is only available for the legacy sparse SVN layout")
+        if not manifest_layout and (parsed.merge_local or parsed.working_copy):
+            raise SystemExit("--merge-local and --working-copy require manifest-working-copies")
         bootstrap = lambda: gusen_hub.bootstrap_system_data(config, workspace)
-        if parsed.action == "init":
-            result = checkout.initialize(workspace, gusen_hub.CONFIG_DIR, bootstrap)
-            conn = gusen_hub.connect_index(workspace["indexPath"])
-            try:
-                result["reindex"] = gusen_hub.index_svn_workspace(conn, config, workspace)
-            finally:
-                conn.close()
-            if result["reindex"].get("failures"):
-                raise SystemExit(f"SVN scan failed; existing index preserved: {result['reindex']['errors']}")
+        if parsed.action == "scope-preview":
+            if not manifest_layout:
+                raise SystemExit("svn scope-preview requires manifest-working-copies")
+            from providers.svn.nexus import bootstrap as nexus_bootstrap
+
+            result = nexus_bootstrap.preview(workspace)
+        elif parsed.action == "sync-from-bat":
+            if not manifest_layout:
+                raise SystemExit("svn sync-from-bat requires manifest-working-copies")
+            from providers.svn.nexus import bootstrap as nexus_bootstrap
+            from providers.svn.nexus import workspace as nexus_workspace
+            from providers.svn.nexus.manifest import load_authorized_scope
+
+            manifest_path = workspace["svn"].get("scopeManifestPath")
+            had_working_copies = False
+            if manifest_path and manifest_path.is_file():
+                old_scope = load_authorized_scope(workspace)
+                had_working_copies = any((entry.root / ".svn").is_dir() for entry in old_scope.entries)
+                if had_working_copies:
+                    current = nexus_workspace.status(workspace)
+                    if not current["status"]["clean"] and not parsed.merge_local:
+                        raise SystemExit(
+                            "SVN BAT sync is blocked by local changes; review them first or explicitly allow merge-local"
+                        )
+            scope_import = nexus_bootstrap.import_scope(
+                workspace,
+                accept_scope_change=parsed.accept_scope_change,
+            )
+            initialized = nexus_workspace.initialize(workspace)
+            refreshed = (
+                nexus_workspace.refresh(workspace, merge_local=parsed.merge_local)
+                if had_working_copies
+                else None
+            )
+            initialized_scope = initialized.get("scope") or {}
+            refreshed_status = (refreshed or {}).get("status") or {}
+            result = {
+                "ok": True,
+                "action": "updated-from-bat" if had_working_copies else "checked-out-from-bat",
+                "scopeImport": scope_import,
+                "workingCopies": len(initialized_scope.get("workingCopies") or []),
+                "clean": bool((refreshed_status or initialized_scope).get("clean")),
+                "updated": len((refreshed or {}).get("updated") or []),
+                "reindex": _reindex_svn(gusen_hub, config, workspace),
+            }
+            gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
+        elif parsed.action == "init":
+            if manifest_layout:
+                from providers.svn.nexus import workspace as nexus_workspace
+
+                result = nexus_workspace.initialize(workspace)
+            else:
+                result = checkout.initialize(workspace, gusen_hub.CONFIG_DIR, bootstrap)
+            result["reindex"] = _reindex_svn(gusen_hub, config, workspace)
             gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
         elif parsed.action == "refresh":
-            result = checkout.refresh(workspace, gusen_hub.CONFIG_DIR, bootstrap, prune=parsed.prune)
-            conn = gusen_hub.connect_index(workspace["indexPath"])
-            try:
-                result["reindex"] = gusen_hub.index_svn_workspace(conn, config, workspace)
-            finally:
-                conn.close()
-            if result["reindex"].get("failures"):
-                raise SystemExit(f"SVN scan failed; existing index preserved: {result['reindex']['errors']}")
+            if manifest_layout:
+                from providers.svn.nexus import workspace as nexus_workspace
+
+                result = nexus_workspace.refresh(
+                    workspace,
+                    merge_local=parsed.merge_local,
+                    working_copy_ids=parsed.working_copy,
+                )
+            else:
+                result = checkout.refresh(workspace, gusen_hub.CONFIG_DIR, bootstrap, prune=parsed.prune)
+            result["reindex"] = (
+                _reindex_svn_refresh(gusen_hub, config, workspace, result)
+                if manifest_layout
+                else _reindex_svn(gusen_hub, config, workspace)
+            )
             gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
-        else:
+        elif parsed.action == "status":
             checkout.require_capability(workspace, "status")
-            with checkout.operation_lock(workspace, "status", shared=True):
-                result = {
-                    "ok": True,
-                    "status": checkout.svn_status(
-                        workspace["checkoutPath"],
-                        include_diff=parsed.diff,
-                        remote=parsed.remote,
-                        settings=workspace["svn"],
-                    ),
-                }
+            if manifest_layout:
+                from providers.svn.nexus import workspace as nexus_workspace
+
+                result = nexus_workspace.status(workspace, include_diff=parsed.diff, remote=parsed.remote)
+            else:
+                with checkout.operation_lock(workspace, "status", shared=True):
+                    result = {
+                        "ok": True,
+                        "status": checkout.svn_status(
+                            workspace["checkoutPath"],
+                            include_diff=parsed.diff,
+                            remote=parsed.remote,
+                            settings=workspace["svn"],
+                        ),
+                    }
+        elif parsed.action == "catalog":
+            checkout.require_capability(workspace, "browse")
+            if not manifest_layout:
+                raise SystemExit("svn catalog requires manifest-working-copies")
+            from providers.svn.nexus import index_queries
+
+            result = index_queries.catalog(workspace)
+        elif parsed.action == "fragments":
+            if not manifest_layout:
+                raise SystemExit("svn fragments requires manifest-working-copies")
+            if not parsed.source_type or not parsed.source_id:
+                raise SystemExit("svn fragments requires --source-type and --source-id")
+            from providers.svn.nexus import documents
+
+            result = documents.fragments(
+                workspace,
+                source_type=parsed.source_type,
+                source_id=parsed.source_id,
+                fun_id=parsed.fun_id,
+            )
+        elif parsed.action == "read":
+            if not manifest_layout:
+                raise SystemExit("svn read requires manifest-working-copies")
+            if not parsed.source_type or not parsed.source_id:
+                raise SystemExit("svn read requires --source-type and --source-id")
+            from providers.svn.nexus import documents
+
+            result = documents.read(
+                workspace,
+                source_type=parsed.source_type,
+                source_id=parsed.source_id,
+                fun_id=parsed.fun_id,
+                json_pointer=parsed.json_pointer,
+            )
+        elif parsed.action == "write":
+            if not manifest_layout:
+                raise SystemExit("svn write requires manifest-working-copies")
+            if not parsed.session or not parsed.document:
+                raise SystemExit("svn write requires --session and --document")
+            try:
+                payload = json.load(sys.stdin)
+            except json.JSONDecodeError as error:
+                raise SystemExit("svn write requires a JSON stdin payload") from error
+            if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
+                raise SystemExit("svn write stdin must contain a text content field")
+            from providers.svn.nexus import documents
+
+            result = documents.write(
+                workspace,
+                session_id=parsed.session,
+                document_id=parsed.document,
+                content=payload["content"],
+            )
+            if result.get("changed"):
+                result["reindex"] = _reindex_svn_files(gusen_hub, config, workspace, [result["sourcePath"]])
+        elif parsed.action in {"definition", "callers"}:
+            if not manifest_layout:
+                raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
+            if not parsed.alias or not parsed.fun_id:
+                raise SystemExit(f"svn {parsed.action} requires --alias and --fun-id")
+            from providers.svn.nexus import index_queries
+
+            result = (
+                index_queries.definition(workspace, alias=parsed.alias, fun_id=parsed.fun_id)
+                if parsed.action == "definition"
+                else index_queries.callers(workspace, alias=parsed.alias, fun_id=parsed.fun_id, limit=parsed.limit)
+            )
+        elif parsed.action == "reindex-file":
+            if not manifest_layout or not parsed.path:
+                raise SystemExit("svn reindex-file requires manifest-working-copies and --path")
+            indexed = _reindex_svn_files(gusen_hub, config, workspace, [parsed.path])
+            result = {
+                "ok": True,
+                "workspaceKey": workspace["workspaceKey"],
+                "sourcePath": parsed.path,
+                "reindex": indexed,
+                "stale": bool(indexed and indexed[0].get("failures")),
+            }
+        else:
+            if not manifest_layout:
+                raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
+            from providers.svn.nexus import scm
+
+            if parsed.action == "scm-status":
+                result = scm.status(workspace, remote=parsed.remote)
+            elif parsed.action == "diff":
+                if not parsed.path:
+                    raise SystemExit("svn diff requires --path")
+                result = scm.diff(workspace, logical_path=parsed.path)
+            elif parsed.action == "history":
+                if not parsed.path:
+                    raise SystemExit("svn history requires --path")
+                result = scm.history(workspace, logical_path=parsed.path, limit=parsed.limit)
+            elif parsed.action in {"revert-preview", "platform-save-preview"}:
+                if not parsed.session:
+                    raise SystemExit(f"svn {parsed.action} requires --session")
+                action = "revert" if parsed.action == "revert-preview" else "platform-save"
+                result = scm.preview(workspace, action=action, session_id=parsed.session)
+            elif parsed.action == "revert":
+                if not parsed.session or not parsed.selection_token:
+                    raise SystemExit("svn revert requires --session and --selection-token")
+                result = scm.revert(
+                    workspace,
+                    session_id=parsed.session,
+                    selection_token=parsed.selection_token,
+                    candidate_ids=parsed.candidate,
+                )
+                result["reindex"] = _reindex_svn_files(gusen_hub, config, workspace, result["files"])
+            else:
+                if not parsed.session or not parsed.selection_token:
+                    raise SystemExit("svn platform-save requires --session and --selection-token")
+                try:
+                    payload = json.load(sys.stdin)
+                except json.JSONDecodeError as error:
+                    raise SystemExit("svn platform-save requires a JSON stdin payload") from error
+                result = scm.platform_save(
+                    workspace,
+                    session_id=parsed.session,
+                    selection_token=parsed.selection_token,
+                    candidate_ids=parsed.candidate,
+                    message=(payload or {}).get("message") if isinstance(payload, dict) else "",
+                )
+                result["reindex"] = _reindex_svn_files(gusen_hub, config, workspace, result["files"])
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     if command == "init":
@@ -223,13 +593,13 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
     if command == "export-markdown":
         if extra_args:
             raise SystemExit("export-markdown does not accept extra arguments")
-        import export_hub_markdown
+        from common import export_hub_markdown
 
         export_hub_markdown.main()
         return 0
     if command in SCRIPT_COMMANDS:
         module_name, function_name = SCRIPT_COMMANDS[command]
-        module = __import__(module_name)
+        module = importlib.import_module(module_name)
         result = getattr(module, function_name)(extra_args)
         return int(result) if isinstance(result, (bool, int)) else 0
     if command == "sync-all":
@@ -239,10 +609,10 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             gusen_hub.update_workspace_state(config, workspace, full_sync=True)
             print(f"SVN 工作区本地扫描、索引和资料摘要完成：{workspace['workspaceKey']}")
             return 0
-        import export_bill_type_sql
-        import export_system_script_sql
-        import export_table_schema_sql
-        import export_view_sql
+        from providers.database import export_bill_type_sql
+        from providers.database import export_system_script_sql
+        from providers.database import export_table_schema_sql
+        from providers.database import export_view_sql
 
         expected_digest = gusen_hub.workspace_config_digest(config, workspace)
         steps = (
@@ -276,7 +646,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("setup", "workspaces", "workspace-summary", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
+        choices=("setup", "import-svn-scope", "workspaces", "workspace-summary", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
     )
     parser.add_argument("--home", required=True, help="Directory that stores local config and private source data")
     parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")

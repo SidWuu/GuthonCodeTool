@@ -11,7 +11,7 @@ def main(args=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", required=True)
     parsed = parser.parse_args(args)
-    return guthon_tool.run("sync-all", Path(__file__).resolve().parents[1], [], parsed.workspace)
+    return guthon_tool.run("sync-all", Path(__file__).resolve().parents[2], [], parsed.workspace)
 
 
 if __name__ == "__main__":

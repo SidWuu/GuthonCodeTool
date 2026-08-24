@@ -10,8 +10,8 @@ import re
 import sys
 from pathlib import Path
 
-import gusen_hub
-from export_table_schema_sql import normalize_data_source_ids
+from common import gusen_hub
+from providers.database.export_table_schema_sql import normalize_data_source_ids
 
 
 ROOT = gusen_hub.ROOT

@@ -47,7 +47,7 @@ test('updates toolHome after an initialized workspace switch is confirmed', asyn
     update: async (...args) => updates.push(args),
   };
   const window = {
-    showWarningMessage: async () => '切换工作区',
+    showWarningMessage: async () => '切换工作空间',
     showOpenDialog: async () => [{ fsPath: '/new/tool/home' }],
   };
 
@@ -61,9 +61,11 @@ test('SVN workspace actions come only from effective capabilities', () => {
     sourceMode: 'svn',
     capabilities: {
       'svn.initialize': true,
-      'svn.refresh': false,
+      'svn.refresh': true,
       'svn.status': true,
       'svn.reindex': true,
+      'svn.browse': true,
+      'svn.revert': true,
       'svn.workcopy': true,
       'svn.writeback': false,
     },
@@ -71,19 +73,36 @@ test('SVN workspace actions come only from effective capabilities', () => {
 
   assert.deepEqual(actions.source.map((item) => item[1]), [
     'gushenCompletion.initializeSvn',
-    'gushenCompletion.showSvnStatus',
     'gushenCompletion.reindexCalls',
+    'gushenCompletion.refreshSvn',
+    'gushenCompletion.focusSvnSource',
+    'gushenCompletion.manageSvnChanges',
     'gushenCompletion.exportMarkdown',
   ]);
-  assert.deepEqual(actions.workcopy.map((item) => item[1]), ['gushenCompletion.openSvnWorkcopy']);
+  assert.deepEqual(actions.workcopy, []);
   assert.deepEqual(actions.metadata, []);
   assert.equal(actions.diagnose, false);
+  assert.equal(actions.syncAll, undefined);
 });
 
 test('database workspace keeps pull, metadata and diagnosis actions', () => {
   const actions = workspaceActions({ sourceMode: 'database', capabilities: {} });
 
-  assert.equal(actions.source[0][1], 'gushenCompletion.initSourceIndex');
-  assert.equal(actions.metadata.length, 4);
-  assert.equal(actions.diagnose, true);
+  assert.deepEqual(actions, {
+    source: [
+      ['拉取源码重建索引', 'gushenCompletion.initSourceIndex', 'database'],
+      ['拉取源码', 'gushenCompletion.syncWorkspaceSource', 'sync'],
+      ['重建索引', 'gushenCompletion.reindexCalls', 'refresh'],
+      ['导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book'],
+    ],
+    workcopy: [['检查或打包 Workcopy', 'gushenCompletion.inspectWorkcopy', 'package']],
+    metadata: [
+      ['导出表结构', 'gushenCompletion.exportSchema', 'table'],
+      ['导出单据类型', 'gushenCompletion.exportBillTypes', 'list-tree'],
+      ['导出系统脚本', 'gushenCompletion.exportSystemScripts', 'file-code'],
+      ['导出视图源码', 'gushenCompletion.exportViews', 'eye'],
+    ],
+    diagnose: true,
+    syncAll: ['同步工作区全部资料', 'gushenCompletion.syncWorkspaceAll', 'cloud-download'],
+  });
 });

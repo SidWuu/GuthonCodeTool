@@ -210,7 +210,7 @@ async function resolveCurrentTarget() {
     throw new Error(result?.message || "未识别到当前过程函数");
   }
   const target = {
-    mode: result.data.mode || "procedure",
+    mode: isModuleUrl(tab.url) ? "page-source" : result.data.mode || "procedure",
     pageId: result.data.pageId || "",
     pageVersion: result.data.pageVersion || "",
     procedureKeyword: result.data.procedureKeyword || result.data.procedureName || "",
@@ -233,7 +233,7 @@ async function resolveHubSourceTarget() {
     throw new Error(result?.message || "未识别到源码表查询条件");
   }
   const target = {
-    mode: result.data.mode || "procedure",
+    mode: isModuleUrl(tab.url) ? "page-source" : result.data.mode || "procedure",
     pageId: result.data.pageId || "",
     procedureId: result.data.procedureId || "",
     procedureKeyword: result.data.procedureKeyword || result.data.procedureName || "",
@@ -395,11 +395,12 @@ async function runHubPull(force = false, pullAllSystemScripts = false) {
       }
     );
   }
+  const pageSource = isModuleUrl((await getActiveTab()).url) || target.mode === "page-source";
   const payload = {
-    sourceType: target.mode === "page-source" ? "page" : "procedure",
-    sourceId: target.mode === "page-source" ? target.pageId || "" : target.procedureId || "",
+    sourceType: pageSource ? "page" : "procedure",
+    sourceId: pageSource ? target.pageId || target.procedureId || "" : target.procedureId || "",
     alias: target.procedureKeyword || "",
-    funId: target.mode === "page-source" ? "" : target.funId || "",
+    funId: pageSource ? "" : target.funId || "",
     dataSourceId: target.dataSourceId || "",
     systemId: target.systemId || "",
     force

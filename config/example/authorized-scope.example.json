@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "workspaceKey": "products.demo-product",
+  "entries": [
+    {
+      "id": "pages-SYS-XXXX",
+      "category": "pages",
+      "url": "https://svn.example.invalid/repository/exact-authorized-path/pages/SYS-XXXX",
+      "localSubdir": "pages/SYS-XXXX",
+      "writable": true
+    },
+    {
+      "id": "procedures-DS-XXXX",
+      "category": "procedures",
+      "url": "https://svn.example.invalid/repository/exact-authorized-path/procedures/DS-XXXX",
+      "localSubdir": "procedures/DS-XXXX",
+      "writable": true
+    }
+  ]
+}

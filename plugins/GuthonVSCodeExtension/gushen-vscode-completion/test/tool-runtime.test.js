@@ -65,5 +65,7 @@ test('Nexus lists every configured workspace and binds commands to workspaceKey'
   assert.equal(extension.includes("readWorkspaces(tool)"), true);
   assert.equal(extension.includes("item.displayName"), true);
   assert.equal(extension.includes("[item.workspaceKey]"), true);
+  assert.equal(extension.includes("gushenCompletion.selectWorkspaceSourceMode"), true);
+  assert.equal(extension.includes("sourceModeView"), false);
   assert.equal(extension.includes("syncActive"), false);
 });

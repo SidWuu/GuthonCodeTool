@@ -154,7 +154,7 @@ def _scan_page_gss(path, checkout_path, system_id, data_source_id, names, revisi
             "source_name": header.get("pageName") or names.get(relative_in_system, alias),
             "system_id": system_id,
             "data_source_id": data_source_id,
-            "scripts": [{"script_type": "compScript", "json_path": "", "content": text}],
+            "scripts": [{"script_type": "gss", "json_path": "", "content": text}],
         }
     )
     return result

@@ -21,7 +21,7 @@ from providers.svn import checkout as svn_checkout
 
 # Packaged launches set GUTHON_HOME so config and private source data stay outside
 # the application install directory. Source checkouts keep their current root.
-ROOT = Path(os.environ.get("GUTHON_HOME") or Path(__file__).resolve().parents[1]).expanduser().resolve()
+ROOT = Path(os.environ.get("GUTHON_HOME") or Path(__file__).resolve().parents[2]).expanduser().resolve()
 CONFIG_DIR = ROOT / "config"
 VAR_DIR = ROOT / "var"
 PAGE_SOURCE_TYPE = "page"
@@ -35,6 +35,9 @@ WORK_COPY_COMPARE_EXCLUDED_FILES = WORK_COPY_MANAGED_FILES | {"meta.json"}
 WORKSPACE_ENV = "GUTHON_WORKSPACE"
 WORKSPACE_STEPS = ("source", "schema", "billType", "systemScripts", "views")
 SVN_SOURCE_TYPES = {PAGE_SOURCE_TYPE, PROCEDURE_SOURCE_TYPE, "system-script", "table", "view"}
+SOURCE_MODES = {"database", "svn"}
+SOURCE_MODE_FILE = "source-mode.json"
+SOURCE_MODE_VERSION = 1
 
 
 def workspace_steps(workspace):
@@ -69,6 +72,89 @@ def set_workspace(value):
     os.environ[WORKSPACE_ENV] = workspace_key(value)
 
 
+def workspace_source_mode_path(workspace_root: Path) -> Path:
+    return workspace_root / "context" / SOURCE_MODE_FILE
+
+
+def read_workspace_source_mode(workspace_root: Path, key: str, item: dict) -> tuple[str, str]:
+    """Read the workspace-local provider choice without coupling it to project YAML."""
+
+    path = workspace_source_mode_path(workspace_root)
+    if path.is_file():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise SystemExit(f"Invalid source mode file for {key}: {path}: {error}") from error
+        if not isinstance(payload, dict) or payload.get("version") != SOURCE_MODE_VERSION:
+            raise SystemExit(f"Invalid source mode version for {key}: {path}")
+        if payload.get("workspaceKey") != key:
+            raise SystemExit(f"source mode workspaceKey mismatch for {key}: {path}")
+        mode = str(payload.get("sourceMode") or "").strip().lower()
+        if mode not in SOURCE_MODES:
+            raise SystemExit(f"sourceMode must be database or svn for {key}: {path}")
+        return mode, "workspace-context"
+
+    # Temporary read compatibility for existing installations. Nexus writes the
+    # project-local context file and all distributed YAML templates omit this key.
+    legacy_mode = str(item.get("source_mode") or "").strip().lower()
+    if legacy_mode:
+        if legacy_mode not in SOURCE_MODES:
+            raise SystemExit(f"source_mode must be database or svn for {key}")
+        return legacy_mode, "legacy-config"
+    return "database", "default"
+
+
+def write_workspace_source_mode(workspace: dict, source_mode: str) -> dict:
+    mode = str(source_mode or "").strip().lower()
+    if mode not in SOURCE_MODES:
+        raise SystemExit("source mode must be database or svn")
+    path = workspace_source_mode_path(workspace["root"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": SOURCE_MODE_VERSION,
+        "workspaceKey": workspace["workspaceKey"],
+        "sourceMode": mode,
+    }
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temp_path.replace(path)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+    return {
+        "ok": True,
+        "workspaceKey": workspace["workspaceKey"],
+        "sourceMode": mode,
+        "sourceModeSource": "workspace-context",
+        "sourceModePath": str(path),
+    }
+
+
+def change_workspace_source_mode(config: dict, workspace: dict, source_mode: str) -> tuple[dict, dict]:
+    """Persist a provider choice and roll it back if the target provider is invalid."""
+
+    path = workspace_source_mode_path(workspace["root"])
+    previous = path.read_bytes() if path.is_file() else None
+    result = write_workspace_source_mode(workspace, source_mode)
+    try:
+        updated = resolve_workspace(config, workspace["workspaceKey"])
+    except BaseException:
+        if previous is None:
+            path.unlink(missing_ok=True)
+        else:
+            temp_path = path.with_name(f".{path.name}.{os.getpid()}.rollback.tmp")
+            try:
+                temp_path.write_bytes(previous)
+                temp_path.replace(path)
+            finally:
+                temp_path.unlink(missing_ok=True)
+        raise
+    return result, updated
+
+
 def list_workspaces(config):
     workspaces = []
     seen_names = {"products": set(), "projects": set()}
@@ -89,9 +175,6 @@ def list_workspaces(config):
                 raise SystemExit(f"Duplicate {kind} display name: {name}")
             seen_names[kind].add(name)
             key = f"{kind}.{item_id}"
-            source_mode = str(item.get("source_mode") or "").strip().lower()
-            if source_mode not in {"database", "svn"}:
-                raise SystemExit(f"source_mode must be database or svn for {key}")
             configured_workspace_root = item.get("workspace_root")
             workspace_root_value = (
                 svn_checkout.expand_config_value(configured_workspace_root, f"workspace_root for {key}")
@@ -103,11 +186,14 @@ def list_workspaces(config):
             if resolved_workspace_root in {Path("/").resolve(), Path.home().resolve()}:
                 raise SystemExit(f"Unsafe workspace_root for {key}: {workspace_root}")
             root = workspace_root / path_part(f"{prefix} {name}")
+            source_mode, source_mode_source = read_workspace_source_mode(root, key, item)
+            svn = svn_checkout.svn_settings(item_id, item, VAR_DIR, root) if source_mode == "svn" else None
             datasource_name = str(item.get("datasource") or "").strip()
             datasource = (config.get("datasource", {}).get("datasource") or {}).get(datasource_name)
-            if not datasource:
+            manifest_layout = bool(svn and svn.get("checkoutLayout") == "manifest-working-copies")
+            if not datasource and not (manifest_layout and not datasource_name):
                 raise SystemExit(f"Unknown datasource for {key}: {datasource_name}")
-            svn = svn_checkout.svn_settings(item_id, item, VAR_DIR) if source_mode == "svn" else None
+            datasource = datasource or {}
             resolved_checkout_root = svn["checkoutRoot"].resolve() if svn else None
             if svn and (
                 resolved_checkout_root == resolved_workspace_root
@@ -123,7 +209,7 @@ def list_workspaces(config):
                     if str(value).strip()
                 )
             )
-            if source_mode == "svn" and not aliases:
+            if source_mode == "svn" and not aliases and not manifest_layout:
                 raise SystemExit(f"SVN workspace requires systems.include.system_aliases: {key}")
             workspaces.append(
                 {
@@ -139,6 +225,8 @@ def list_workspaces(config):
                     "datasourceName": datasource_name,
                     "datasource": datasource,
                     "sourceMode": source_mode,
+                    "sourceModeSource": source_mode_source,
+                    "sourceModePath": workspace_source_mode_path(root),
                     "capabilities": capabilities,
                     "svn": svn,
                     "checkoutPath": svn["checkoutPath"] if svn else None,
@@ -152,6 +240,7 @@ def list_workspaces(config):
                     },
                     "pageOrigins": [str(value).rstrip("/") for value in item.get("page_origins") or [] if str(value).strip()],
                     "config": item,
+                    "configDir": CONFIG_DIR,
                     "root": root,
                     "docsDir": root / "docs",
                     "sourceDir": root / "source",
@@ -164,7 +253,32 @@ def list_workspaces(config):
                     "logsDir": root / "context" / "logs",
                 }
             )
+    _validate_svn_workspace_boundaries(workspaces)
     return workspaces
+
+
+def _validate_svn_workspace_boundaries(workspaces):
+    managed_paths = []
+    for workspace in workspaces:
+        if workspace.get("sourceMode") != "svn":
+            continue
+        if workspace["svn"].get("checkoutLayout") == "manifest-working-copies":
+            from providers.svn.nexus.manifest import load_authorized_scope
+
+            manifest_path = workspace["svn"].get("scopeManifestPath")
+            if not manifest_path or not manifest_path.is_file():
+                continue
+            paths = [(entry.root.resolve(), entry.id) for entry in load_authorized_scope(workspace).entries]
+        else:
+            paths = [(workspace["checkoutPath"].resolve(), "legacy-sparse")]
+        for path, entry_id in paths:
+            for other_path, other_workspace_key, other_entry_id in managed_paths:
+                if path == other_path or path in other_path.parents or other_path in path.parents:
+                    raise SystemExit(
+                        "SVN working-copy paths overlap across workspaces: "
+                        f"{workspace['workspaceKey']}/{entry_id} and {other_workspace_key}/{other_entry_id}"
+                    )
+            managed_paths.append((path, workspace["workspaceKey"], entry_id))
 
 
 def resolve_workspace(config, value=None):
@@ -182,26 +296,47 @@ def current_workspace(config=None):
 def ensure_workspace_structure(workspace):
     paths = [
         workspace["docsDir"],
-        workspace["workcopyDir"],
         workspace["contextDir"],
         workspace["logsDir"],
     ]
     if workspace.get("sourceMode") == "database":
         paths.extend(
             [
+                workspace["workcopyDir"],
                 workspace["readonlyDir"],
                 workspace["databaseDir"] / "schema",
                 workspace["databaseDir"] / "billtype",
                 workspace["databaseDir"] / "views",
             ]
         )
+    elif workspace["svn"].get("checkoutLayout") == "legacy-sparse":
+        paths.append(workspace["workcopyDir"])
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)
 
 
 def workspace_config_digest(config, workspace):
+    workspace_config = dict(workspace["config"])
+    workspace_config.pop("source_mode", None)
     payload = {
-        "workspace": workspace["config"],
+        "workspace": workspace_config,
+        "sourceMode": workspace["sourceMode"],
+        "datasource": workspace["datasource"],
+        "rules": config.get("sync", {}).get("rules") or {},
+        "sourceTables": config.get("source_tables") or {},
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def legacy_workspace_config_digest(config, workspace):
+    """Recognize state written before provider selection moved out of YAML."""
+
+    workspace_config = dict(workspace["config"])
+    workspace_config["source_mode"] = workspace["sourceMode"]
+    payload = {
+        "workspace": workspace_config,
         "datasource": workspace["datasource"],
         "rules": config.get("sync", {}).get("rules") or {},
         "sourceTables": config.get("source_tables") or {},
@@ -218,15 +353,19 @@ def load_workspace_state(config, workspace):
     except (OSError, json.JSONDecodeError):
         state = {}
     digest = workspace_config_digest(config, workspace)
+    digest_matches = state.get("configDigest") in {
+        digest,
+        legacy_workspace_config_digest(config, workspace),
+    }
     steps = state.get("steps") if isinstance(state.get("steps"), dict) else {}
-    all_synced = state.get("configDigest") == digest and all(
+    all_synced = digest_matches and all(
         (steps.get(step) or {}).get("status") == "SUCCESS" for step in workspace_steps(workspace)
     )
     if not state:
         status = "UNINITIALIZED"
     elif all_synced:
         status = "SYNCED"
-    elif state.get("configDigest") == digest and state.get("lastFailure"):
+    elif digest_matches and state.get("lastFailure"):
         status = "FAILED"
     else:
         status = "PARTIAL"
@@ -264,7 +403,7 @@ def update_workspace_state(config, workspace, step=None, status=None, error="", 
 
 def workspace_summary(config, workspace):
     state = load_workspace_state(config, workspace)
-    return {
+    summary = {
         "workspaceKey": workspace["workspaceKey"],
         "type": workspace["type"],
         "id": workspace["id"],
@@ -272,6 +411,8 @@ def workspace_summary(config, workspace):
         "displayName": workspace["displayName"],
         "root": str(workspace["root"]),
         "sourceMode": workspace["sourceMode"],
+        "sourceModeSource": workspace["sourceModeSource"],
+        "sourceModePath": str(workspace["sourceModePath"]),
         "providerSourceRoot": str(workspace["providerSourceRoot"]),
         "checkoutPath": str(workspace["checkoutPath"]) if workspace.get("checkoutPath") else "",
         "capabilities": workspace["capabilities"],
@@ -280,6 +421,31 @@ def workspace_summary(config, workspace):
         "steps": state["steps"],
         "lastFailure": state["lastFailure"],
     }
+    if workspace.get("sourceMode") == "svn" and workspace["svn"].get("checkoutLayout") == "manifest-working-copies":
+        from providers.svn.nexus.workspace import load_state
+
+        checkout_state = load_state(workspace, required=False)
+        summary["checkoutLayout"] = "manifest-working-copies"
+        manifest_path = workspace["svn"].get("scopeManifestPath")
+        checkout_bat_path = workspace["svn"].get("checkoutBatPath")
+        summary["scopeManifestPath"] = str(manifest_path) if manifest_path else ""
+        summary["scopeManifestReady"] = bool(manifest_path and manifest_path.is_file())
+        summary["checkoutBatPath"] = str(checkout_bat_path) if checkout_bat_path else ""
+        summary["checkoutBatReady"] = bool(checkout_bat_path and checkout_bat_path.is_file())
+        summary["svnCredentialsRequired"] = True
+        summary["workingCopies"] = [
+            {
+                "id": item.get("id") or "",
+                "root": item.get("root") or "",
+                "localSubdir": item.get("localSubdir") or "",
+                "category": item.get("category") or "",
+                "scopeEntryId": item.get("id") or "",
+                "revision": item.get("revision") or "",
+                "clean": bool(item.get("clean")),
+            }
+            for item in checkout_state.get("workingCopies") or []
+        ]
+    return summary
 
 
 def source_dir(workspace=None) -> Path:
@@ -628,9 +794,11 @@ def connect_index(index_db: Path) -> sqlite3.Connection:
     index_db.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(index_db)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS gusen_source_record (
+            record_id INTEGER,
             source_layer TEXT NOT NULL,
             product_id TEXT NOT NULL,
             project_id TEXT NOT NULL DEFAULT '',
@@ -651,44 +819,23 @@ def connect_index(index_db: Path) -> sqlite3.Connection:
             PRIMARY KEY (source_layer, product_id, project_id, source_table, source_id, fun_id)
         );
         CREATE TABLE IF NOT EXISTS gusen_invoke_call (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_layer TEXT NOT NULL,
-            product_id TEXT NOT NULL,
-            project_id TEXT NOT NULL DEFAULT '',
-            source_table TEXT NOT NULL,
-            source_id TEXT NOT NULL,
-            source_alias_id TEXT NOT NULL,
-            fun_id TEXT NOT NULL DEFAULT '',
-            source_name TEXT,
+            id INTEGER PRIMARY KEY,
+            source_record_id INTEGER NOT NULL,
             script_type TEXT,
             json_path TEXT,
             line_no INTEGER,
             target_alias_id TEXT,
             target_fun_id TEXT,
-            invoke_expr TEXT,
-            invoke_type TEXT,
-            confidence TEXT,
-            update_time TEXT,
-            indexed_time TEXT
+            invoke_type TEXT
         );
         CREATE TABLE IF NOT EXISTS gusen_dynamic_call (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_layer TEXT NOT NULL,
-            product_id TEXT NOT NULL,
-            project_id TEXT NOT NULL DEFAULT '',
-            source_table TEXT NOT NULL,
-            source_id TEXT NOT NULL,
-            source_alias_id TEXT NOT NULL,
-            fun_id TEXT NOT NULL DEFAULT '',
-            source_name TEXT,
+            id INTEGER PRIMARY KEY,
+            source_record_id INTEGER NOT NULL,
             script_type TEXT,
             json_path TEXT,
             line_no INTEGER,
             invoke_expr TEXT,
-            reason TEXT,
-            confidence TEXT,
-            update_time TEXT,
-            indexed_time TEXT
+            reason TEXT
         );
         CREATE TABLE IF NOT EXISTS gusen_sync_state (
             state_key TEXT PRIMARY KEY,
@@ -698,6 +845,7 @@ def connect_index(index_db: Path) -> sqlite3.Connection:
     )
     source_columns = {row["name"] for row in conn.execute("PRAGMA table_info(gusen_source_record)")}
     migrations = {
+        "record_id": "INTEGER",
         "provider": "TEXT NOT NULL DEFAULT 'database'",
         "source_path": "TEXT",
         "source_hash": "TEXT",
@@ -705,13 +853,143 @@ def connect_index(index_db: Path) -> sqlite3.Connection:
         "json_pointer": "TEXT",
         "system_id": "TEXT",
         "data_source_id": "TEXT",
+        "working_copy_id": "TEXT",
+        "scope_entry_id": "TEXT",
     }
     for name, definition in migrations.items():
         if name not in source_columns:
             conn.execute(f"ALTER TABLE gusen_source_record ADD COLUMN {name} {definition}")
+    conn.execute("UPDATE gusen_source_record SET record_id=rowid WHERE record_id IS NULL")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS gusen_source_record_id_idx "
+        "ON gusen_source_record(record_id)"
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS gusen_source_record_id_insert
+        AFTER INSERT ON gusen_source_record
+        WHEN NEW.record_id IS NULL
+        BEGIN
+            UPDATE gusen_source_record SET record_id=NEW.rowid WHERE rowid=NEW.rowid;
+        END
+        """
+    )
+    conn.commit()
+    call_schema_migrated = _migrate_call_index_schema(conn)
     conn.execute("DROP TABLE IF EXISTS gusen_effective_source")
     conn.commit()
+    if call_schema_migrated:
+        conn.execute("VACUUM")
     return conn
+
+
+def _migrate_call_index_schema(conn):
+    """Normalize repeated source metadata out of call-edge rows."""
+
+    invoke_columns = {row["name"] for row in conn.execute("PRAGMA table_info(gusen_invoke_call)")}
+    dynamic_columns = {row["name"] for row in conn.execute("PRAGMA table_info(gusen_dynamic_call)")}
+    try:
+        conn.execute("BEGIN")
+        if "source_record_id" not in invoke_columns:
+            conn.execute("ALTER TABLE gusen_invoke_call RENAME TO gusen_invoke_call_legacy")
+            conn.execute(
+                """
+                CREATE TABLE gusen_invoke_call (
+                    id INTEGER PRIMARY KEY,
+                    source_record_id INTEGER NOT NULL,
+                    script_type TEXT,
+                    json_path TEXT,
+                    line_no INTEGER,
+                    target_alias_id TEXT,
+                    target_fun_id TEXT,
+                    invoke_type TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO gusen_invoke_call(
+                    id, source_record_id, script_type, json_path, line_no,
+                    target_alias_id, target_fun_id, invoke_type
+                )
+                SELECT c.id, s.record_id, c.script_type, c.json_path, c.line_no,
+                       c.target_alias_id, c.target_fun_id, c.invoke_type
+                FROM gusen_invoke_call_legacy c
+                JOIN gusen_source_record s
+                  ON s.source_layer=c.source_layer AND s.product_id=c.product_id
+                 AND s.project_id=c.project_id AND s.source_table=c.source_table
+                 AND s.source_id=c.source_id AND s.fun_id=c.fun_id
+                """
+            )
+            conn.execute("DROP TABLE gusen_invoke_call_legacy")
+        if "source_record_id" not in dynamic_columns:
+            conn.execute("ALTER TABLE gusen_dynamic_call RENAME TO gusen_dynamic_call_legacy")
+            conn.execute(
+                """
+                CREATE TABLE gusen_dynamic_call (
+                    id INTEGER PRIMARY KEY,
+                    source_record_id INTEGER NOT NULL,
+                    script_type TEXT,
+                    json_path TEXT,
+                    line_no INTEGER,
+                    invoke_expr TEXT,
+                    reason TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO gusen_dynamic_call(
+                    id, source_record_id, script_type, json_path, line_no, invoke_expr, reason
+                )
+                SELECT c.id, s.record_id, c.script_type, c.json_path, c.line_no, c.invoke_expr, c.reason
+                FROM gusen_dynamic_call_legacy c
+                JOIN gusen_source_record s
+                  ON s.source_layer=c.source_layer AND s.product_id=c.product_id
+                 AND s.project_id=c.project_id AND s.source_table=c.source_table
+                 AND s.source_id=c.source_id AND s.fun_id=c.fun_id
+                """
+            )
+            conn.execute("DROP TABLE gusen_dynamic_call_legacy")
+        for statement in (
+            "CREATE INDEX IF NOT EXISTS gusen_invoke_target_idx "
+            "ON gusen_invoke_call(target_alias_id, target_fun_id, source_record_id, line_no)",
+            "CREATE INDEX IF NOT EXISTS gusen_invoke_source_idx "
+            "ON gusen_invoke_call(source_record_id, line_no)",
+            "CREATE INDEX IF NOT EXISTS gusen_dynamic_source_idx "
+            "ON gusen_dynamic_call(source_record_id, line_no)",
+            "CREATE INDEX IF NOT EXISTS gusen_source_alias_lookup_idx "
+            "ON gusen_source_record(source_alias_id, fun_id, status, product_id)",
+            "CREATE INDEX IF NOT EXISTS gusen_source_object_lookup_idx "
+            "ON gusen_source_record(product_id, source_id, fun_id, source_layer, project_id)",
+            """
+            CREATE VIEW IF NOT EXISTS gusen_invoke_call_detail AS
+            SELECT c.id, c.source_record_id,
+                   s.source_layer, s.product_id, s.project_id, s.source_table, s.source_id,
+                   s.source_alias_id, s.fun_id, s.source_name,
+                   c.script_type, c.json_path, c.line_no,
+                   c.target_alias_id, c.target_fun_id, c.invoke_type,
+                   'HIGH' AS confidence, s.update_time, s.indexed_time
+            FROM gusen_invoke_call c
+            JOIN gusen_source_record s ON s.record_id=c.source_record_id
+            """,
+            """
+            CREATE VIEW IF NOT EXISTS gusen_dynamic_call_detail AS
+            SELECT c.id, c.source_record_id,
+                   s.source_layer, s.product_id, s.project_id, s.source_table, s.source_id,
+                   s.source_alias_id, s.fun_id, s.source_name,
+                   c.script_type, c.json_path, c.line_no, c.invoke_expr, c.reason,
+                   'LOW' AS confidence, s.update_time, s.indexed_time
+            FROM gusen_dynamic_call c
+            JOIN gusen_source_record s ON s.record_id=c.source_record_id
+            """,
+        ):
+            conn.execute(statement)
+        conn.commit()
+        return "source_record_id" not in invoke_columns or "source_record_id" not in dynamic_columns
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def find_source_candidates(conn, product_id, keyword, limit=10):
@@ -735,7 +1013,7 @@ def query_source_context(conn, product_id, source_id, fun_id="", limit=20):
     limit = max(1, min(int(limit), 20))
     source = conn.execute(
         """
-        SELECT * FROM gusen_source_record
+        SELECT record_id AS source_record_id, * FROM gusen_source_record
         WHERE product_id=? AND source_id=? AND fun_id=?
         ORDER BY source_layer, project_id
         LIMIT 1
@@ -744,23 +1022,30 @@ def query_source_context(conn, product_id, source_id, fun_id="", limit=20):
     ).fetchone()
     if not source:
         raise ValueError(f"Source not found: product={product_id}, sourceId={source_id}, funId={fun_id}")
-    identity = (source["source_layer"], source["product_id"], source["project_id"], source["source_table"], source["source_id"], source["fun_id"])
     outgoing = conn.execute(
         """
-        SELECT source_table, source_id, source_alias_id, fun_id, script_type, json_path, line_no,
-               target_alias_id, target_fun_id, invoke_type, confidence
+        SELECT ? AS source_table, ? AS source_id, ? AS source_alias_id, ? AS fun_id,
+               script_type, json_path, line_no, target_alias_id, target_fun_id,
+               invoke_type, 'HIGH' AS confidence
         FROM gusen_invoke_call
-        WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
+        WHERE source_record_id=?
         ORDER BY line_no
         LIMIT ?
         """,
-        (*identity, limit),
+        (
+            source["source_table"],
+            source["source_id"],
+            source["source_alias_id"],
+            source["fun_id"],
+            source["source_record_id"],
+            limit,
+        ),
     ).fetchall()
     incoming = conn.execute(
         """
         SELECT source_layer, source_table, source_id, source_alias_id, fun_id, script_type, json_path, line_no,
                invoke_type, confidence
-        FROM gusen_invoke_call
+        FROM gusen_invoke_call_detail
         WHERE product_id=? AND target_alias_id=? AND target_fun_id=?
         ORDER BY source_layer, source_alias_id, fun_id, line_no
         LIMIT ?
@@ -769,15 +1054,17 @@ def query_source_context(conn, product_id, source_id, fun_id="", limit=20):
     ).fetchall()
     dynamic = conn.execute(
         """
-        SELECT script_type, json_path, line_no, invoke_expr, reason, confidence
+        SELECT script_type, json_path, line_no, invoke_expr, reason, 'LOW' AS confidence
         FROM gusen_dynamic_call
-        WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
+        WHERE source_record_id=?
         ORDER BY line_no
         LIMIT ?
         """,
-        (*identity, limit),
+        (source["source_record_id"], limit),
     ).fetchall()
-    return {"source": source, "outgoing": outgoing, "incoming": incoming, "dynamic": dynamic}
+    source_payload = dict(source)
+    source_payload.pop("source_record_id", None)
+    return {"source": source_payload, "outgoing": outgoing, "incoming": incoming, "dynamic": dynamic}
 
 
 def query_incoming_callers(conn, product_id, target_alias_id, target_fun_id, limit=100):
@@ -786,7 +1073,7 @@ def query_incoming_callers(conn, product_id, target_alias_id, target_fun_id, lim
         """
         SELECT source_layer, project_id, source_table, source_id, source_alias_id, fun_id,
                source_name, script_type, json_path, line_no, invoke_type, confidence
-        FROM gusen_invoke_call
+        FROM gusen_invoke_call_detail
         WHERE product_id=? AND target_alias_id=? AND target_fun_id=?
         ORDER BY source_table, source_alias_id, fun_id, line_no
         LIMIT ?
@@ -1086,11 +1373,9 @@ def run_sync_once(args=None):
     conn = connect_index(index_path)
     if workspace.get("sourceMode") == "svn":
         if parsed.init_only:
-            export_status(conn, {"mode": "init-only", "workspaceKey": workspace["workspaceKey"], "provider": "svn", "changed": 0, "failures": 0})
             export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
             return
         result = index_svn_workspace(conn, cfg, workspace)
-        export_status(conn, result)
         export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
         append_pull_log(
             "source",
@@ -1103,12 +1388,10 @@ def run_sync_once(args=None):
             raise SystemExit(f"SVN scan completed with {result['failures']} scoped path errors")
         return result
     if parsed.init_only:
-        export_status(conn, {"mode": "init-only", "workspaceKey": workspace["workspaceKey"], "changed": 0, "candidates": 0, "failures": 0})
         export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
         return
     if parsed.reindex_calls:
         indexed = reindex_local_calls(conn)
-        export_status(conn, {"mode": "reindex-calls", "workspaceKey": workspace["workspaceKey"], "changed": indexed, "failures": 0})
         export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
         return
 
@@ -1144,7 +1427,6 @@ def run_sync_once(args=None):
     conn.commit()
     if full_rebuild:
         stats["reindexed"] = reindex_local_calls(conn)
-    export_status(conn, stats)
     export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
     append_pull_log(
         "source",
@@ -1169,15 +1451,110 @@ def _indexed_path(path: Path) -> str:
         return str(path.resolve())
 
 
-def index_svn_workspace(conn, cfg, workspace):
-    from providers.svn import scanner
+def _delete_call_index(conn, identity):
+    source_ids = (
+        "SELECT record_id FROM gusen_source_record "
+        "WHERE source_layer=? AND product_id=? AND project_id=? "
+        "AND source_table=? AND source_id=? AND fun_id=?"
+    )
+    conn.execute(
+        f"DELETE FROM gusen_invoke_call WHERE source_record_id IN ({source_ids})",
+        identity,
+    )
+    conn.execute(
+        f"DELETE FROM gusen_dynamic_call WHERE source_record_id IN ({source_ids})",
+        identity,
+    )
 
+
+def _delete_svn_index_item(conn, workspace, row):
+    identity = (
+        workspace["layer"],
+        workspace["productId"],
+        workspace["projectId"],
+        row["source_table"],
+        row["source_id"],
+        row["fun_id"] or "",
+    )
+    _delete_call_index(conn, identity)
+    conn.execute(
+        "DELETE FROM gusen_source_record WHERE source_layer=? AND product_id=? AND project_id=? "
+        "AND source_table=? AND source_id=? AND fun_id=?",
+        identity,
+    )
+
+
+def _insert_svn_index_item(conn, workspace, item, indexed_time):
+    local_path = Path(item.get("local_path") or workspace["checkoutPath"] / item["source_path"])
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO gusen_source_record(
+            source_layer, product_id, project_id, source_table, source_id, source_alias_id, fun_id,
+            source_name, version_mac, update_time, check_out_user_id, check_out_date, check_in_date,
+            change_key, local_path, status, indexed_time, provider, source_path, source_hash,
+            svn_revision, json_pointer, system_id, data_source_id, working_copy_id, scope_entry_id
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            workspace["layer"],
+            workspace["productId"],
+            workspace["projectId"],
+            item["source_table"],
+            item["source_id"],
+            item["source_alias_id"],
+            item.get("fun_id") or "",
+            item.get("source_name") or "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            item["change_key"],
+            str(local_path.resolve()),
+            item["status"],
+            indexed_time,
+            "svn",
+            item["source_path"],
+            item["source_hash"],
+            item["svn_revision"],
+            "",
+            item.get("system_id") or "",
+            item.get("data_source_id") or "",
+            item.get("working_copy_id") or "",
+            item.get("scope_entry_id") or "",
+        ),
+    )
+    for script in item.get("scripts") or []:
+        if script.get("script_type") == "fields":
+            continue
+        index_calls(
+            conn,
+            item,
+            workspace["layer"],
+            workspace["productId"],
+            workspace["projectId"],
+            script["script_type"],
+            local_path,
+            script["content"],
+            json_path=script.get("json_path") or item["source_path"],
+        )
+
+
+def index_svn_workspace(conn, cfg, workspace):
     svn_checkout.require_capability(workspace, "reindex")
-    scope = svn_checkout.load_scope(workspace)
-    with svn_checkout.operation_lock(workspace, "scan", shared=True):
-        svn_checkout.verify_repository_fingerprint(workspace, scope.get("repositoryFingerprint") or "")
-        scan = scanner.scan(workspace["checkoutPath"], scope)
-    scan["errors"] = [*svn_checkout.validate_expected_changes(workspace, scan["status"]), *scan["errors"]]
+    if workspace["svn"].get("checkoutLayout") == "manifest-working-copies":
+        from providers.svn.nexus import catalog
+
+        with svn_checkout.operation_lock(workspace, "manifest-scan", shared=True):
+            scan = catalog.scan(workspace)
+    else:
+        from providers.svn import scanner
+
+        scope = svn_checkout.load_scope(workspace)
+        with svn_checkout.operation_lock(workspace, "scan", shared=True):
+            svn_checkout.verify_repository_fingerprint(workspace, scope.get("repositoryFingerprint") or "")
+            scan = scanner.scan(workspace["checkoutPath"], scope)
+        scan["errors"] = [*svn_checkout.validate_expected_changes(workspace, scan["status"]), *scan["errors"]]
     if scan["errors"]:
         return {
             "mode": "svn-scan",
@@ -1193,73 +1570,17 @@ def index_svn_workspace(conn, cfg, workspace):
             "checkoutClean": scan["status"]["clean"],
             "checkoutChanges": scan["status"]["changes"],
         }
-    layer = workspace["layer"]
-    product_id = workspace["productId"]
-    project_id = workspace["projectId"]
     conn.execute("DELETE FROM gusen_invoke_call")
     conn.execute("DELETE FROM gusen_dynamic_call")
     conn.execute("DELETE FROM gusen_source_record")
     indexed_time = _now()
     for item in scan["objects"]:
-        local_path = workspace["checkoutPath"] / item["source_path"]
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO gusen_source_record(
-                source_layer, product_id, project_id, source_table, source_id, source_alias_id, fun_id,
-                source_name, version_mac, update_time, check_out_user_id, check_out_date, check_in_date,
-                change_key, local_path, status, indexed_time, provider, source_path, source_hash,
-                svn_revision, json_pointer, system_id, data_source_id
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                layer,
-                product_id,
-                project_id,
-                item["source_table"],
-                item["source_id"],
-                item["source_alias_id"],
-                item.get("fun_id") or "",
-                item.get("source_name") or "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                item["change_key"],
-                str(local_path.resolve()),
-                item["status"],
-                indexed_time,
-                "svn",
-                item["source_path"],
-                item["source_hash"],
-                item["svn_revision"],
-                "",
-                item.get("system_id") or "",
-                item.get("data_source_id") or "",
-            ),
-        )
-        for script in item.get("scripts") or []:
-            index_calls(
-                conn,
-                item,
-                layer,
-                product_id,
-                project_id,
-                script["script_type"],
-                local_path,
-                script["content"],
-                indexed_time,
-                json_path=script.get("json_path") or item["source_path"],
-            )
+        _insert_svn_index_item(conn, workspace, item, indexed_time)
     conn.execute(
         "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
         ("svn_revision", scan["revision"]),
     )
     conn.commit()
-    if workspace["type"] == "product":
-        export_product_docs(conn, product_id, workspace)
-    else:
-        export_project_docs(conn, project_id, workspace)
     return {
         "mode": "svn-scan",
         "provider": "svn",
@@ -1272,6 +1593,81 @@ def index_svn_workspace(conn, cfg, workspace):
         "errors": scan["errors"],
         "checkoutClean": scan["status"]["clean"],
         "checkoutChanges": scan["status"]["changes"],
+    }
+
+
+def index_svn_workspace_file(conn, cfg, workspace, source_path):
+    """Atomically replace one physical file's objects and outgoing call edges."""
+
+    from providers.svn.nexus import catalog
+
+    svn_checkout.require_capability(workspace, "reindex")
+    if workspace["svn"].get("checkoutLayout") != "manifest-working-copies":
+        raise SystemExit("Incremental SVN indexing requires manifest-working-copies")
+    with svn_checkout.operation_lock(workspace, "manifest-scan-file", shared=True):
+        scanned = catalog.scan_file(workspace, source_path)
+    if scanned["errors"]:
+        conn.execute(
+            "UPDATE gusen_source_record SET status='STALE', indexed_time=? "
+            "WHERE provider='svn' AND source_path=?",
+            (_now(), scanned["path"]),
+        )
+        conn.commit()
+        return {
+            "mode": "svn-incremental-scan",
+            "provider": "svn",
+            "workspaceKey": workspace["workspaceKey"],
+            "sourcePath": scanned["path"],
+            "changed": 0,
+            "failures": len(scanned["errors"]),
+            "errors": scanned["errors"],
+            "indexPreserved": True,
+        }
+    existing = conn.execute(
+        "SELECT source_table, source_id, fun_id FROM gusen_source_record "
+        "WHERE provider='svn' AND source_path=?",
+        (scanned["path"],),
+    ).fetchall()
+    item = scanned["object"]
+    if item:
+        collision = conn.execute(
+            """
+            SELECT source_path FROM gusen_source_record
+            WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=? AND source_path<>?
+            LIMIT 1
+            """,
+            (item["source_table"], item["source_id"], item.get("fun_id") or "", scanned["path"]),
+        ).fetchone()
+        if collision:
+            return {
+                "mode": "svn-incremental-scan",
+                "provider": "svn",
+                "workspaceKey": workspace["workspaceKey"],
+                "sourcePath": scanned["path"],
+                "changed": 0,
+                "failures": 1,
+                "errors": [{"path": scanned["path"], "error": f"duplicate object identity also used by {collision['source_path']}"}],
+                "indexPreserved": True,
+            }
+    try:
+        conn.execute("BEGIN")
+        for row in existing:
+            _delete_svn_index_item(conn, workspace, row)
+        if item:
+            _insert_svn_index_item(conn, workspace, item, _now())
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {
+        "mode": "svn-incremental-scan",
+        "provider": "svn",
+        "workspaceKey": workspace["workspaceKey"],
+        "sourcePath": scanned["path"],
+        "changed": 1,
+        "failures": 0,
+        "errors": [],
+        "indexPreserved": False,
     }
 
 
@@ -1367,6 +1763,15 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
         if old_path != local_path:
             remove_source_path(old_path)
     indexed_time = _now()
+    identity = (
+        layer,
+        product_id,
+        project_id,
+        row["source_table"],
+        row["source_id"],
+        row["fun_id"] or "",
+    )
+    _delete_call_index(conn, identity)
     conn.execute(
         """
         INSERT OR REPLACE INTO gusen_source_record(
@@ -1395,16 +1800,8 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
             indexed_time,
         ),
     )
-    conn.execute(
-        "DELETE FROM gusen_invoke_call WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
-        (layer, product_id, project_id, row["source_table"], row["source_id"], row["fun_id"] or ""),
-    )
-    conn.execute(
-        "DELETE FROM gusen_dynamic_call WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
-        (layer, product_id, project_id, row["source_table"], row["source_id"], row["fun_id"] or ""),
-    )
     for script_type, script_path, content in scripts:
-        index_calls(conn, row, layer, product_id, project_id, script_type, script_path, content, indexed_time)
+        index_calls(conn, row, layer, product_id, project_id, script_type, script_path, content)
     return True
 
 
@@ -1438,14 +1835,7 @@ def reconcile_deleted_pages(conn, layer, product_id, project_id, current_page_id
         if row["local_path"]:
             remove_source_path(ROOT / row["local_path"])
         identity = (layer, product_id, project_id, PAGE_SOURCE_TYPE, row["source_id"], "")
-        conn.execute(
-            "DELETE FROM gusen_invoke_call WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
-            identity,
-        )
-        conn.execute(
-            "DELETE FROM gusen_dynamic_call WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
-            identity,
-        )
+        _delete_call_index(conn, identity)
         conn.execute(
             "DELETE FROM gusen_source_record WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
             identity,
@@ -1635,8 +2025,29 @@ CALL_PATTERNS = [
 PROC_FIND = re.compile(r"#set\s*\(\s*\$(\w+)\s*=\s*\$vs\.proc\.find\(\s*['\"]([^'\"]+)['\"]\s*\)")
 
 
-def index_calls(conn, row, layer, product_id, project_id, script_type, script_path, content, indexed_time, json_path=None):
+def index_calls(conn, row, layer, product_id, project_id, script_type, script_path, content, json_path=None):
     stored_path = json_path or _indexed_path(script_path)
+    source_record = conn.execute(
+        """
+        SELECT record_id AS source_record_id
+        FROM gusen_source_record
+        WHERE source_layer=? AND product_id=? AND project_id=?
+          AND source_table=? AND source_id=? AND fun_id=?
+        """,
+        (
+            layer,
+            product_id,
+            project_id,
+            row["source_table"],
+            row["source_id"],
+            row["fun_id"] or "",
+        ),
+    ).fetchone()
+    if source_record is None:
+        raise ValueError(
+            f"Call index source record is missing: {row['source_table']}/{row['source_id']}/{row['fun_id'] or ''}"
+        )
+    source_record_id = source_record["source_record_id"]
     bindings = {}
     for line_no, line in enumerate(content.splitlines(), 1):
         find = PROC_FIND.search(line)
@@ -1645,31 +2056,64 @@ def index_calls(conn, row, layer, product_id, project_id, script_type, script_pa
         for var, alias in bindings.items():
             match = re.search(rf"\${re.escape(var)}\.([A-Za-z_][A-Za-z0-9_]*)\(", line)
             if match:
-                _insert_call(conn, row, layer, product_id, project_id, script_type, stored_path, line_no, alias, match.group(1), line, "proc_find_call", indexed_time)
+                _insert_call(
+                    conn, source_record_id, script_type, stored_path, line_no,
+                    alias, match.group(1), "proc_find_call",
+                )
         for invoke_type, pattern in CALL_PATTERNS:
             match = pattern.search(line)
             if not match:
                 continue
             target_alias = match.group(1)
             target_fun = match.group(2) if invoke_type == "proc_invoke" and len(match.groups()) > 1 else ""
-            _insert_call(conn, row, layer, product_id, project_id, script_type, stored_path, line_no, target_alias, target_fun, line, invoke_type, indexed_time)
+            _insert_call(
+                conn, source_record_id, script_type, stored_path, line_no,
+                target_alias, target_fun, invoke_type,
+            )
         if "$vs.proc.invoke(" in line and not re.search(r"\$vs\.proc\.invoke\(\s*['\"]", line):
             conn.execute(
                 """
-                INSERT INTO gusen_dynamic_call(source_layer, product_id, project_id, source_table, source_id, source_alias_id, fun_id, source_name, script_type, json_path, line_no, invoke_expr, reason, confidence, update_time, indexed_time)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                INSERT INTO gusen_dynamic_call(
+                    source_record_id, script_type, json_path, line_no, invoke_expr, reason
+                ) VALUES(?,?,?,?,?,?)
                 """,
-                (layer, product_id, project_id, row["source_table"], row["source_id"], _source_alias_id(row), row["fun_id"] or "", row["source_name"], script_type, stored_path, line_no, line.strip(), "目标过程别名或函数名来自变量", "LOW", _str(row.get("update_time")), indexed_time),
+                (
+                    source_record_id,
+                    script_type,
+                    stored_path,
+                    line_no,
+                    line.strip(),
+                    "目标过程别名或函数名来自变量",
+                ),
             )
 
 
-def _insert_call(conn, row, layer, product_id, project_id, script_type, json_path, line_no, target_alias, target_fun, expr, invoke_type, indexed_time):
+def _insert_call(
+    conn,
+    source_record_id,
+    script_type,
+    json_path,
+    line_no,
+    target_alias,
+    target_fun,
+    invoke_type,
+):
     conn.execute(
         """
-        INSERT INTO gusen_invoke_call(source_layer, product_id, project_id, source_table, source_id, source_alias_id, fun_id, source_name, script_type, json_path, line_no, target_alias_id, target_fun_id, invoke_expr, invoke_type, confidence, update_time, indexed_time)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO gusen_invoke_call(
+            source_record_id, script_type, json_path, line_no,
+            target_alias_id, target_fun_id, invoke_type
+        ) VALUES(?,?,?,?,?,?,?)
         """,
-        (layer, product_id, project_id, row["source_table"], row["source_id"], _source_alias_id(row), row["fun_id"] or "", row["source_name"], script_type, str(json_path), line_no, target_alias, target_fun, expr.strip(), invoke_type, "HIGH", _str(row.get("update_time")), indexed_time),
+        (
+            source_record_id,
+            script_type,
+            str(json_path),
+            line_no,
+            target_alias,
+            target_fun,
+            invoke_type,
+        ),
     )
 
 
@@ -1699,7 +2143,6 @@ def reindex_local_calls(conn):
                 script_type,
                 script_path,
                 content,
-                _now(),
             )
             indexed += 1
     conn.commit()
@@ -1725,7 +2168,7 @@ def export_product_docs(conn, product_id, workspace=None):
     )
     calls = conn.execute(
         """
-        SELECT * FROM gusen_invoke_call
+        SELECT * FROM gusen_invoke_call_detail
         WHERE source_layer='PRODUCT' AND product_id=?
         ORDER BY source_table, source_alias_id, fun_id, line_no
         """,
@@ -1739,7 +2182,7 @@ def export_product_docs(conn, product_id, workspace=None):
     )
     dynamic_calls = conn.execute(
         """
-        SELECT * FROM gusen_dynamic_call
+        SELECT * FROM gusen_dynamic_call_detail
         WHERE source_layer='PRODUCT' AND product_id=?
         ORDER BY source_table, source_alias_id, fun_id, line_no
         """,
@@ -1767,7 +2210,7 @@ def export_project_docs(conn, project_id, workspace=None):
         calls.extend(
             conn.execute(
                 """
-                SELECT * FROM gusen_invoke_call
+                SELECT * FROM gusen_invoke_call_detail
                 WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
                 ORDER BY source_alias_id, fun_id, line_no
                 """,
@@ -1782,15 +2225,6 @@ def export_project_docs(conn, project_id, workspace=None):
             ).fetchall()
         )
     _write_table(out / "invoke-index.md", "项目调用索引", ["来源层", "来源类型", "来源别名", "来源函数", "脚本位置", "行号", "调用类型", "目标别名", "目标函数", "置信度"], [[c["source_layer"], c["source_table"], c["source_alias_id"], c["fun_id"], c["script_type"], c["line_no"], c["invoke_type"], c["target_alias_id"], c["target_fun_id"], c["confidence"]] for c in calls])
-
-
-def export_status(conn, stats):
-    out = current_workspace()["contextDir"]
-    out.mkdir(parents=True, exist_ok=True)
-    lines = ["# 谷神源码 Hub 同步状态", "", f"- 最近生成时间：{_now()}"]
-    for key, value in stats.items():
-        lines.append(f"- {key}: {value}")
-    (out / "source-sync-status.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def export_knowledge_readme(conn, index_db, active):
@@ -1818,7 +2252,7 @@ def export_knowledge_readme(conn, index_db, active):
         "",
         "其中 `command` 和 `home` 读取自 `var/nexus/tool-runtime.json`；该文件由 Guthon Nexus 按当前发行或调试模式生成。PAGE 没有函数名时删除 `--fun` 及其值。",
         "",
-        "全量 Markdown 仅在显式运行 `scripts/export_hub_markdown.py` 时生成；默认使用上述 SQLite 局部查询。",
+        "全量 Markdown 仅在显式运行统一 CLI 的 `export-markdown` 时生成；默认使用上述 SQLite 局部查询。",
     ]
     path = out / "README.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2403,7 +2837,7 @@ def pull_source_to_work_copy(payload: dict):
     if workspace.get("sourceMode") == "svn":
         if payload.get("client") == "bridge-legacy-pull":
             raise SystemExit(
-                "pullHubSource is unavailable in SVN source mode; use the indexed SVN Workcopy action"
+                "pullHubSource is unavailable in SVN source mode; use the Guthon Nexus SVN source tree"
             )
         svn_checkout.require_capability(workspace, "workcopy")
         source_type = payload.get("sourceType") or ""

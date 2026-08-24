@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 from common.page_projection import pointer_value, replace_json_strings, text_hash
-from common.source_format import encode_source_exact, read_projection
+from common.source_format import encode_source_exact, merge_preserving_generated_header, read_projection
 from providers.svn.checkout import (
     EXPECTED_WRITEBACK_FILE,
     atomic_json,
@@ -285,10 +285,15 @@ def _prepare(workspace: dict, workcopy_path: Path) -> dict:
         if len(meta.get("mappings") or []) != 1:
             raise SystemExit("Whole-file SVN objects must have exactly one projection mapping")
         projection = read_projection(projection_file(target, meta["mappings"][0]["projectionPath"]))
-        marker = "--$$$--end-line--$$$--"
-        if marker in source_text_value and source_text_value.partition(marker)[0] != projection.partition(marker)[0]:
-            raise SystemExit("The generated Guthon identity header must not be edited")
-        after_bytes = encode_source_text(projection, meta["format"])
+        try:
+            merged = merge_preserving_generated_header(source_text_value, projection, meta["format"])
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
+        after_bytes = (
+            encode_source_exact(merged, meta["format"])
+            if merged is not None
+            else encode_source_text(projection, meta["format"])
+        )
     before_lines = source_text_value.splitlines(keepends=True)
     after_lines = source_text(after_bytes)[0].splitlines(keepends=True)
     diff = "".join(

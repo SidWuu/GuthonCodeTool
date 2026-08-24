@@ -5,8 +5,7 @@ projects:
   demo-project:
     # 项目名称，用作 readonly、workcopy 和数据库快照的目录名。
     name: 示例项目
-    # 每个工作区必须明确选择唯一源码事实来源：database 或 svn。
-    source_mode: database
+    # 源码来源不写在 YAML；Nexus 项目节点负责选择，未设置时默认 DATABASE。
     # 引用 datasource.yaml 中的数据源标识。
     datasource: demo-project-dev
     # 可选浏览器来源；为空时 Bridge 依赖数据源和系统身份匹配。
@@ -16,6 +15,26 @@ projects:
       include:
         system_aliases:
           - demo.system
+    # SVN 项目无需在 YAML 增加模式字段；在 Nexus 的当前项目节点选择 SVN，
+    # 再把 svnCheckoutHere.bat 放入工程 context/。
+    # 以下 svn 块仅用于覆盖 checkout 根、共享凭据环境变量名或 capability：
+    # svn:
+    #   update_policy: manual
+    #   no_auth_cache: true
+    #   username_env: GUTHON_NEXUS_SVN_USERNAME
+    #   password_env: GUTHON_NEXUS_SVN_PASSWORD
+    #   # 仅在证书暂时无法修复时使用；异常白名单必须与精确 SHA-256 指纹同时配置。
+    #   allowed_cert_failures: []
+    #   certificate_pins: {}
+    #   capabilities:
+    #     initialize: true
+    #     refresh: true
+    #     status: true
+    #     reindex: true
+    #     browse: true
+    #     edit: true
+    #     history: true
+    #     revert: true
     # 项目继承的产品 ID，对应 products.yaml 中的键名。
     product_id: demo-product
     # 保留项；当前实现根据 projects 分组固定判定为 PROJECT。

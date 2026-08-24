@@ -43,19 +43,22 @@ databases:
 
 源码排查脚本只连接同时满足 `environment: test`、`diagnosis.enabled: true` 和 `diagnosis.query_only: true` 的数据源。`databases` 是该测试服务器允许查询的数据库白名单，开发库不配置 `diagnosis`。
 
-## products.yaml / projects.yaml 的源码模式
+## 每个产品/项目的源码来源
 
-每个产品、项目都必须显式配置且只能启用一种源码 provider：
+`products.yaml`、`projects.yaml` 不配置 `source_mode`。Nexus 会在全部产品和项目节点下显示
+`源码来源：DATABASE/SVN`；选择结果写入该工作区自己的 `context/source-mode.json`。未选择时默认 DATABASE，
+同一个产品/项目同一时刻仍只启用一种源码 provider。
 
 ```yaml
 products:
   demo-product:
     name: 示例产品
-    source_mode: database  # database | svn
     datasource: demo-product-dev
 ```
 
-`database` 保持现有源码表、metadata 导出和业务诊断流程。`svn` 把 `var/checkout/<配置 ID>` 作为唯一源码事实来源，普通扫描不访问数据库；`datasource` 仅在 `system-data.json` 缺失时供 `svn init/refresh` 受控补全系统映射。
+`database` 保持现有源码表、metadata 导出和业务诊断流程。新 `svn` 模式由审阅后的授权清单声明全部精确 URL，
+把 `var/checkout/<配置 ID>` 下的一个或多个物理 working copy 聚合为唯一源码事实来源；不再依赖 datasource 或
+系统别名扩大范围，也不生成额外 readonly/workcopy 代码副本。
 
 SVN 示例：
 
@@ -63,44 +66,55 @@ SVN 示例：
 products:
   demo-product:
     name: 示例产品
-    source_mode: svn
-    datasource: demo-product-dev
-    systems:
-      include:
-        system_aliases:
-          - demo.system
-    svn:
-      repository_url: ${DEMO_PRODUCT_SVN_URL}
-      sparse_checkout: true
-      include: [pages, procedures, system-script, tables, views]
-      update_policy: manual
-      no_auth_cache: true
-      username_env: DEMO_SVN_USERNAME
-      password_env: DEMO_SVN_PASSWORD
-      allowed_cert_failures: []
-      capabilities:
-        initialize: true
-        refresh: true
-        system_data_bootstrap: true
-        status: true
-        reindex: true
-        workcopy: true
-        writeback: true
-        commit: false
 ```
 
-工作区配置 ID 必须是安全的单级目录名，并在产品/项目之间唯一。`workspace_root` 与 `svn.checkout_root` 必须分离。`username_env`、`password_env` 只保存环境变量名；密码由工具经 stdin 传给 SVN，不出现在 YAML、命令行或日志。未配置密码环境变量时，只能在交互终端按 SVN 提示输入；Nexus/Bridge 的非交互调用会快速失败，不会等待隐藏输入。证书异常默认全部拒绝，确需信任时只能从 `unknown-ca`、`cn-mismatch`、`expired`、`not-yet-valid`、`other` 中显式列出已核对项。`commit` 固定为 `false`，工具不提供自动提交。
+在 Nexus 的该产品节点选择 SVN，再把谷神平台下载的 `svnCheckoutHere.bat` 放到该工程的 `context/`。Nexus 自动使用
+`context/authorized-scope.json` 和 `var/checkout/<配置 ID>`，因此通常不需要配置 `svn.scope_manifest`、
+`checkout_layout` 或 `checkout_root`。工作区配置 ID 仍须在产品/项目之间唯一。
+
+Nexus 的“从 BAT 检出/更新 SVN”会先显示清单条目及增删改数量，确认后再写入脱敏清单、检出或更新。等价 CLI：
+
+```bash
+.venv/bin/python scripts/guthon_tool.py source-mode --home . --workspace products.demo-product -- set --mode svn
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- scope-preview
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-bat --accept-scope-change
+```
+
+配置了 `systems.include.system_aliases` 时，BAT 仍是授权上限，但实际清单只保留这些别名经当前 datasource 的
+`config/system-data.json` 唯一映射出的范围：`pages/system-script` 使用 `SYSTEM_ID`，
+`procedures/tables/views` 使用 `DATA_SOURCE_ID`，`skill/public` 作为公共目录保留。映射缺失或有歧义时会在检出前
+阻断，并要求为每个别名提供 `SYSTEM_ALIAS_ID`、`SYSTEM_ID`、`DATA_SOURCE_ID` 及所属 datasource；映射 ID 不在 BAT
+中时则要求提供同一产品、同一账号最新下载的 BAT，或说明对应源码分类确实不存在。
+
+导入器支持 UTF-8、UTF-16 和 GB18030 BAT，只接受字面量精确 URL 和安全的相对检出目录；会忽略 `rem`、`echo`
+中的命令以及 `--username`、`--password` 等认证参数。变量 URL、绝对目标目录、重复/重叠 URL、重复/重叠本地目录
+或无法识别的业务分类都会阻止生成。BAT 不会被执行，凭据不会进入清单、日志或公开配置，移出清单的旧 working
+copy 也不会自动删除。
+
+仅在需要覆盖默认 checkout 根、共享凭据环境变量名或调整非核心高级能力时增加 `svn:` 块。BAT 多 working-copy 模式
+默认读取 `GUTHON_NEXUS_SVN_USERNAME` 和 `GUTHON_NEXUS_SVN_PASSWORD`，不需要每个产品或项目重复配置；
+`username_env`、`password_env` 仅用于特殊覆盖且只保存环境变量名。密码由工具经 stdin 传给 SVN。证书异常默认全部
+拒绝。Nexus 的 BAT 多 working-copy SVN 模式固定支持“保存到谷神”，不再使用 `platform_save` capability 开关；
+保存仍需经过文件选择、内容哈希复核、远程最新状态检查和提交说明确认。
+
+证书暂时无法修复时，`allowed_cert_failures` 必须与 `certificate_pins` 同时配置；pin 是管理员通过独立渠道确认的
+服务器叶证书 SHA-256。工具先读取实时证书并核对主机、端口和指纹，匹配后才向 SVN 客户端传递精确异常列表；
+指纹变化立即阻断。Nexus 的“设置工作区 SVN 凭据”以当前 `toolHome` 为作用域保存一套共享用户名和密码；该本地
+数据工作区内的所有产品和项目共用。凭据存入 VS Code SecretStorage，运行时仅通过子进程环境和密码 stdin 传递，
+不写入 YAML、授权清单、命令参数或日志。
 
 首次初始化和日常刷新：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- init
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-bat --accept-scope-change
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- refresh
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --diff
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --remote
 ```
 
-`init/refresh` 自动扫描并重建索引；普通 `reindex` 只扫描本地文件。范围缩小时默认只报告残留目录，明确增加 `--prune` 才会在 working copy 干净时执行受控排除。
+`sync-from-bat` 首次检出 BAT 中的每个精确 URL，后续更新现有 working copy 并全量建索引；`refresh` 可用重复的 `--working-copy <entry-id>` 精确选择物理
+working copy，有本地修改时必须显式增加 `--merge-local`。普通 `reindex` 只扫描本地文件。新清单布局不接受
+`--prune`，范围变更必须先审阅清单和本地目录，工具不会自动删除旧 checkout。
 
 ## products.yaml / projects.yaml 中的 systems
 
@@ -110,7 +124,6 @@ products:
 products:
   demo-product:
     name: 示例产品
-    source_mode: database
     datasource: demo-product-dev
     systems:
       include:
@@ -152,7 +165,10 @@ var/workspace/PRD 示例产品/
 var/workspace/PRJ 示例项目/
 ```
 
-数据库工作区独立包含 `source/readonly`、`source/workcopy`、`database/{schema,billtype,views}`、`docs` 和 `context/index.db`。SVN 工作区只在工具目录保留 `source/workcopy`、`docs` 和 `context/index.db`，源码来自独立的 `var/checkout/<配置 ID>`。状态检查按 provider 的有效步骤计算：数据库为五步，SVN 为本地源码扫描一步。
+数据库工作区独立包含 `source/readonly`、`source/workcopy`、`database/{schema,billtype,views}`、`docs` 和
+`context/index.db`。SVN 新模式不创建 readonly/workcopy 代码目录，源码来自独立的
+`var/checkout/<配置 ID>/<entry.localSubdir>`，编辑会话只在 `context` 保存身份、hash、revision 和格式元数据，
+不保存源码正文。状态检查按 provider 的有效步骤计算：数据库为五步，SVN 为本地源码扫描一步。
 
 ## 源码逻辑排查
 
@@ -160,7 +176,8 @@ var/workspace/PRJ 示例项目/
 
 ```bash
 cp config/example/source-diagnosis.example.json var/diagnosis/cases/<排查名称>.json
-.venv/bin/python scripts/run_source_diagnosis.py var/diagnosis/cases/<排查名称>.json
+.venv/bin/python scripts/guthon_tool.py diagnose --home . \
+  --workspace products.demo-product -- var/diagnosis/cases/<排查名称>.json
 ```
 
 排查定义中的 `database` 指定默认数据库；某一步需要查询另一个数据库时，在该步骤增加同名 `database` 覆盖。数据库必须存在于数据源的 `databases` 白名单中，脚本不会执行 `USE`。

@@ -2,7 +2,7 @@
 import argparse
 import json
 
-import gusen_hub
+from common import gusen_hub
 
 
 def _rows(rows):

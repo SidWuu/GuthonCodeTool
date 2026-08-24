@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import gusen_hub
+from common import gusen_hub
 
 
 ROOT = gusen_hub.ROOT
