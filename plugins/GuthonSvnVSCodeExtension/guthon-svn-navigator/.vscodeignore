@@ -1,5 +1,5 @@
 .git/**
 .vscode/**
 test/**
-*.vsix
+*.vsix*
 node_modules/**

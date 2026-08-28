@@ -15,6 +15,13 @@ const {
   shouldProvideApiCompletions,
 } = require('./gss-rules');
 const { readProjectAiIndex } = require('./ai-index');
+const { discoverProjectLayout } = require('./project-layout');
+const {
+  inheritCalls,
+  inheritanceParentPath,
+  isInheritanceParent,
+  isSupportedInheritancePath
+} = require('./gss-inheritance');
 const {
   extractPageFunctionReferences,
   extractSourceReferences,
@@ -70,8 +77,7 @@ function sourcePathForDocument(document) {
 }
 
 function isGssDocument(document) {
-  return (document?.uri?.scheme === 'file' || document?.uri?.scheme === 'guthon-page-segment')
-    && document.uri.path.toLowerCase().endsWith('.gss');
+  return Boolean(document?.uri?.path?.toLowerCase().endsWith('.gss'));
 }
 
 async function readSourceIndex(root) {
@@ -126,18 +132,12 @@ async function walkFiles(directory, output = []) {
 
 async function fallbackSourceObject(root, reference) {
   if (!root || !reference?.name) return null;
+  const layout = discoverProjectLayout(root);
   if (reference.kind === 'procedure' && reference.member) {
     const namespace = String(reference.name).trim().replace(/\\/g, '.').split('.').filter(Boolean);
     const member = String(reference.member).trim();
-    const proceduresRoot = path.join(root, 'procedures');
-    let scopes = [];
-    try {
-      scopes = (await fs.promises.readdir(proceduresRoot, { withFileTypes: true }))
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => entry.name);
-    } catch { return null; }
-    for (const scope of scopes) {
-      const filePath = path.join(proceduresRoot, scope, ...namespace, `${member}.gss`);
+    for (const scope of layout.sourceRoots.procedures || []) {
+      const filePath = path.join(scope.root, ...namespace, `${member}.gss`);
       if (!fs.existsSync(filePath)) continue;
       return {
         kind: 'procedure',
@@ -148,7 +148,8 @@ async function fallbackSourceObject(root, reference) {
     }
   }
   if (reference.kind === 'system-script') {
-    const pageFiles = await walkFiles(path.join(root, 'pages'));
+    const pageFiles = [];
+    for (const pageRoot of layout.pageRoots || []) await walkFiles(pageRoot.root, pageFiles);
     const target = String(reference.name).trim().toLocaleLowerCase('zh-CN');
     for (const filePath of pageFiles) {
       if (path.extname(filePath).toLowerCase() !== '.gss') continue;
@@ -162,7 +163,7 @@ async function fallbackSourceObject(root, reference) {
         kind: 'service-component',
         objectId: reference.name,
         name: source.match(/^\s*\*\s*@pageName\s+([^\r\n]*)$/mi)?.[1]?.trim() || reference.name,
-        systemId: relative.match(/^pages\/([^/]+)\//)?.[1] || '',
+        systemId: relative.match(/^systems\/([^/]+)\/pages\//)?.[1] || '',
         path: relative
       };
     }
@@ -173,6 +174,22 @@ async function fallbackSourceObject(root, reference) {
 function sourceLinkProvider(options = {}) {
   const repositoryRootFor = options.repositoryRootFor || (() => '');
 
+  function inheritanceLocation(document, offset) {
+    const sourcePath = sourcePathForDocument(document);
+    if (!sourcePath || isInheritanceParent(sourcePath) || !isSupportedInheritancePath(sourcePath)) return null;
+    const call = inheritCalls(document.getText()).find((candidate) => (
+      offset >= candidate.nameStart && offset <= candidate.nameEnd
+      || offset >= candidate.start && offset <= candidate.end
+    ));
+    if (!call) return null;
+    const parentPath = inheritanceParentPath(sourcePath);
+    if (!parentPath || !fs.existsSync(parentPath)) return null;
+    const uri = options.inheritanceUriFor
+      ? options.inheritanceUriFor(parentPath, sourcePath)
+      : vscode.Uri.file(parentPath);
+    return { call, location: new vscode.Location(uri, new vscode.Position(0, 0)) };
+  }
+
   async function resolveReference(document, reference) {
     const sourcePath = sourcePathForDocument(document);
     const root = repositoryRootFor(sourcePath);
@@ -182,7 +199,7 @@ function sourceLinkProvider(options = {}) {
     if (!root) return null;
     if (reference?.kind === 'system-script' && sourcePath) {
       const relative = path.relative(root, sourcePath).replace(/\\/g, '/');
-      const systemId = relative.match(/^pages\/([^/]+)\//)?.[1] || '';
+      const systemId = relative.match(/^systems\/([^/]+)\/pages\//)?.[1] || '';
       if (systemId) reference = { ...reference, systemId };
     }
     const index = await readSourceIndex(root);
@@ -210,6 +227,8 @@ function sourceLinkProvider(options = {}) {
     definition: {
       async provideDefinition(document, position) {
         if (isGssDocument(document)) {
+          const inherited = inheritanceLocation(document, document.offsetAt(position));
+          if (inherited) return inherited.location;
           const pageFunctions = extractPageFunctionReferences(document.getText());
           const pageReference = pageFunctionReferenceAtOffset(
             pageFunctions,
@@ -242,6 +261,18 @@ function sourceLinkProvider(options = {}) {
       async provideDocumentLinks(document) {
         const references = extractSourceReferences(document.getText());
         const links = [];
+        if (isGssDocument(document)) {
+          for (const call of inheritCalls(document.getText())) {
+            const inherited = inheritanceLocation(document, call.nameStart);
+            if (!inherited) continue;
+            const link = new vscode.DocumentLink(
+              new vscode.Range(document.positionAt(call.nameStart), document.positionAt(call.nameEnd)),
+              inherited.location.uri
+            );
+            link.tooltip = '只读查看父级继承实现';
+            links.push(link);
+          }
+        }
         for (const reference of references) {
           const resolved = await resolveReference(document, reference);
           if (!resolved) continue;

@@ -4,6 +4,14 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { collectPages, parsePageComponents } = require('./page-index');
+const {
+  inheritCalls,
+  inheritanceParentPath,
+  inspectInheritance,
+  isInheritanceParent,
+  materializeInheritance
+} = require('./gss-inheritance');
+const { discoverProjectLayout } = require('./project-layout');
 
 const INDEX_DIRECTORY = path.join('docs', 'ai-index');
 const INDEX_FILES = {
@@ -44,55 +52,6 @@ function safeFileName(value) {
     .slice(0, 80) || 'object';
 }
 
-function scalar(value) {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
-    return text.slice(1, -1).replace(/\\([\\"'])/g, '$1');
-  }
-  return text;
-}
-
-function projectDictionary(root, project) {
-  const result = { dataSources: new Map(), systems: new Map() };
-  const candidates = [];
-  let current = path.resolve(root);
-  for (let depth = 0; depth < 3; depth += 1) {
-    for (const name of ['guthon-projects.yaml', '谷神项目配置.yaml', '谷神项目编码字典.yaml']) {
-      candidates.push(path.join(current, name), path.join(current, 'docs', name));
-    }
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  const dictionaryPath = candidates.find((candidate) => fs.existsSync(candidate));
-  if (!dictionaryPath) return result;
-  let source = '';
-  try { source = fs.readFileSync(dictionaryPath, 'utf8'); } catch { return result; }
-  const projectId = String(project?.projectId || project?.id || '').trim();
-  if (projectId) {
-    const marker = new RegExp(`^\\s{2}${projectId}:\\s*$`, 'm');
-    const match = marker.exec(source);
-    if (match) {
-      const start = match.index;
-      const next = source.slice(start + match[0].length).search(/^\s{2}[A-Za-z0-9_-]+:\s*$/m);
-      source = source.slice(start, next < 0 ? source.length : start + match[0].length + next);
-    }
-  }
-  let dataSourceId = '';
-  let systemId = '';
-  for (const line of source.split(/\r?\n/)) {
-    const data = line.match(/^\s*-\s+data_source_id:\s*(.+?)\s*$/);
-    if (data) { dataSourceId = scalar(data[1]); systemId = ''; continue; }
-    const dataName = line.match(/^\s+data_source_name:\s*(.+?)\s*$/);
-    if (dataName && dataSourceId) result.dataSources.set(dataSourceId, scalar(dataName[1]));
-    const system = line.match(/^\s*-\s+system_id:\s*(.+?)\s*$/);
-    if (system) { systemId = scalar(system[1]); continue; }
-    const systemName = line.match(/^\s+system_name:\s*(.+?)\s*$/);
-    if (systemName && systemId) result.systems.set(systemId, scalar(systemName[1]));
-  }
-  return result;
-}
 
 async function walkFiles(directory, output = []) {
   let entries;
@@ -154,11 +113,6 @@ function pageServiceComponentName(filePath, content, objectId) {
     || path.basename(filePath, path.extname(filePath));
 }
 
-function scopeNames(category, scopeId, dictionary, systems) {
-  return category === 'system-script'
-    ? (systems.get(scopeId) || dictionary.systems.get(scopeId) || scopeId)
-    : (dictionary.dataSources.get(scopeId) || scopeId);
-}
 
 function addAliases(record, values) {
   const aliases = new Set(record.aliases || []);
@@ -196,7 +150,9 @@ function extractProcedureReferences(text) {
 function genericPageDetails(source) {
   const scripts = [];
   const sqls = [];
+  const dataSourceScripts = [];
   const components = [];
+  const dataSourceMode = (value) => String(value?.dsType ?? '').trim() === '1' ? 'script' : 'sql';
   function visit(value, pointer = '$', context = {}) {
     if (Array.isArray(value)) {
       value.forEach((child, index) => visit(child, `${pointer}/${index}`, context));
@@ -209,6 +165,22 @@ function genericPageDetails(source) {
     };
     for (const [key, child] of Object.entries(value)) {
       const childPointer = `${pointer}/${key}`;
+      if (key === 'datasource' && child && typeof child === 'object' && !Array.isArray(child)) {
+        const mode = dataSourceMode(child);
+        const sourceKey = mode === 'script' ? 'script' : 'sql';
+        if (typeof child[sourceKey] === 'string' && child[sourceKey].trim()) {
+          const entry = {
+            pointer: `${childPointer}/${sourceKey}`,
+            component: nextContext.name,
+            text: child[sourceKey],
+            dataSourceType: child.dsType ?? '',
+            mode
+          };
+          if (mode === 'script') dataSourceScripts.push(entry);
+          else sqls.push(entry);
+        }
+        continue;
+      }
       if (typeof child === 'string' && child.trim()) {
         if (key === 'sql' || key === 'SQL' || key === 'querySql') {
           sqls.push({ pointer: childPointer, component: nextContext.name, text: child });
@@ -220,7 +192,7 @@ function genericPageDetails(source) {
     }
   }
   let json;
-  try { json = JSON.parse(source); } catch { return { scripts, sqls, components }; }
+  try { json = JSON.parse(source); } catch { return { scripts, sqls, dataSourceScripts, components }; }
   visit(json);
   try {
     const tree = parsePageComponents(source);
@@ -238,13 +210,14 @@ function genericPageDetails(source) {
   return {
     scripts,
     sqls,
+    dataSourceScripts,
     components: [...new Map(components.map((item) => [`${item.label}\n${item.path}`, item])).values()]
   };
 }
 
-function pageRecord(repository, page, dictionary) {
+function pageRecord(repository, page, layout) {
   const pagePath = page.filePath ? relativePath(repository.root, page.filePath) : '';
-  const systemName = dictionary.systems.get(page.systemId) || page.systemId || '';
+  const systemName = layout.systemNames.get(page.systemId) || page.systemId || '';
   const record = {
     projectId: repository.projectId,
     projectName: repository.label,
@@ -275,10 +248,45 @@ function makeRelation(source, targetKind, targetId, relation, evidence, extra = 
   };
 }
 
+async function effectiveInheritedSource(root, filePath, source) {
+  if (isInheritanceParent(filePath)) return { skip: true, source };
+  const parentPath = inheritanceParentPath(filePath);
+  const parentExists = Boolean(parentPath && fs.existsSync(parentPath));
+  if (!parentExists && !inheritCalls(source).length) return { skip: false, source, inheritance: null };
+  let parentSource = '';
+  if (parentExists) {
+    try { parentSource = await fs.promises.readFile(parentPath, 'utf8'); } catch { parentSource = ''; }
+  }
+  const inspected = inspectInheritance(filePath, source, parentSource, parentExists);
+  if (!inspected) return { skip: false, source, inheritance: null };
+  const parentRelativePath = relativePath(root, inspected.parentPath);
+  const inheritance = {
+    state: inspected.state,
+    parentPath: parentRelativePath,
+    parentReadOnly: true,
+    resolvable: inspected.resolvable
+  };
+  if (inspected.reason) inheritance.reason = inspected.reason;
+  let effectiveSource = source;
+  if (inspected.state === 'active') {
+    effectiveSource = materializeInheritance(filePath, source, parentSource).content;
+  }
+  return {
+    skip: false,
+    source: effectiveSource,
+    inheritance,
+    parentFileName: path.basename(inspected.parentPath),
+    parentRelativePath,
+    effectiveSourcePaths: inspected.state === 'active'
+      ? [relativePath(root, filePath), parentRelativePath]
+      : [relativePath(root, filePath)]
+  };
+}
+
 async function buildProjectAiIndex(repository) {
   const root = path.resolve(repository.root);
-  const dictionary = projectDictionary(root, repository);
-  const systems = new Map((repository.systems || []).map((system) => [system.systemId, system.label]));
+  const layout = repository.layoutData || discoverProjectLayout(root);
+  const systems = layout.systemNames;
   const objects = [];
   const relations = [];
   const pageDetails = new Map();
@@ -287,10 +295,13 @@ async function buildProjectAiIndex(repository) {
 
   const addServiceComponent = async (filePath, systemId = '', parentPage = null) => {
     const normalizedFilePath = path.resolve(filePath);
+    if (isInheritanceParent(normalizedFilePath)) return;
     if (indexedServiceComponentPaths.has(normalizedFilePath)) return;
     indexedServiceComponentPaths.add(normalizedFilePath);
     let componentSource = '';
     try { componentSource = await fs.promises.readFile(normalizedFilePath, 'utf8'); } catch { return; }
+    const inherited = await effectiveInheritedSource(root, normalizedFilePath, componentSource);
+    const effectiveSource = inherited.source;
     const objectId = pageServiceComponentId(normalizedFilePath, componentSource);
     const headerPageId = componentSource.match(/^\s*\*\s*@pageId\s+([^\r\n]*)$/mi)?.[1]?.trim() || '';
     const componentRecord = {
@@ -301,28 +312,44 @@ async function buildProjectAiIndex(repository) {
       name: pageServiceComponentName(normalizedFilePath, componentSource, objectId),
       aliases: [],
       systemId,
-      systemName: systems.get(systemId) || dictionary.systems.get(systemId) || '',
+      systemName: systems.get(systemId) || '',
       pageId: parentPage?.objectId || headerPageId,
       pageName: parentPage?.name || '',
       path: relativePath(root, normalizedFilePath),
       readOnly: false
     };
-    addAliases(componentRecord, [objectId, path.basename(normalizedFilePath), componentRecord.pageName, systemId]);
+    if (inherited.inheritance) {
+      componentRecord.inheritance = inherited.inheritance;
+      componentRecord.effectiveSourcePaths = inherited.effectiveSourcePaths;
+    }
+    addAliases(componentRecord, [
+      objectId,
+      path.basename(normalizedFilePath),
+      componentRecord.pageName,
+      systemId,
+      inherited.parentFileName,
+      inherited.parentRelativePath
+    ]);
     objects.push(componentRecord);
     sourceContents.set(`${componentRecord.kind}:${componentRecord.objectId}:${componentRecord.path}`, {
       record: componentRecord,
-      source: componentSource
+      source: effectiveSource
     });
-    for (const componentReference of extractProcedureReferences(componentSource)) {
+    if (inherited.inheritance?.state === 'active') {
+      relations.push(makeRelation(componentRecord, 'inherit-source', inherited.parentRelativePath, 'inherits', '@inherit()', { unresolved: false, readOnly: true }));
+    } else if (['missing-parent', 'invalid-parent'].includes(inherited.inheritance?.state)) {
+      relations.push(makeRelation(componentRecord, 'inherit-source', inherited.parentRelativePath, 'inherits', '@inherit()', { unresolved: true, readOnly: true }));
+    }
+    for (const componentReference of extractProcedureReferences(effectiveSource)) {
       relations.push(makeRelation(componentRecord, 'procedure', componentReference.name, 'calls', componentReference.evidence, { unresolved: true }));
     }
-    for (const componentReference of extractSqlReferences(componentSource)) {
+    for (const componentReference of extractSqlReferences(effectiveSource)) {
       relations.push(makeRelation(componentRecord, 'table-or-view', componentReference.name, 'uses', componentReference.evidence, { unresolved: true }));
     }
   };
 
   for (const page of collectPages(repository.systems || [])) {
-    const record = pageRecord(repository, page, dictionary);
+    const record = pageRecord(repository, page, layout);
     objects.push(record);
     if (!page.filePath || !fs.existsSync(page.filePath)) continue;
     let source = '';
@@ -338,42 +365,50 @@ async function buildProjectAiIndex(repository) {
     }
 
     // 页面目录下的独立 .gss 文件就是页面服务组件。它们不属于
-    // system-script/，但页面中的 runServiceComp 会直接调用这些对象。
+    // systems/*/pages 下的独立 .gss 文件就是页面服务组件。
     let siblings = [];
     try {
       siblings = await fs.promises.readdir(path.dirname(page.filePath), { withFileTypes: true });
     } catch {
       siblings = [];
     }
-    for (const sibling of siblings.filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === '.gss')) {
+    for (const sibling of siblings.filter((entry) => entry.isFile()
+      && path.extname(entry.name).toLowerCase() === '.gss'
+      && !isInheritanceParent(entry.name))) {
       await addServiceComponent(path.join(path.dirname(page.filePath), sibling.name), page.systemId || '', record);
     }
   }
 
-  // 服务组件可能与页面 JSON 不在同一个分片目录，统一扫描 pages 下的所有 .gss。
-  for (const filePath of await walkFiles(path.join(root, 'pages'))) {
-    if (path.extname(filePath).toLowerCase() !== '.gss') continue;
-    const relative = relativePath(root, filePath);
-    const systemId = relative.match(/^pages\/([^/]+)\//)?.[1] || '';
-    await addServiceComponent(filePath, systemId);
+  // 服务组件可能与页面 JSON 不在同一个目录，统一扫描新式 systems/*/pages。
+  for (const pageRoot of layout.pageRoots) {
+    for (const filePath of await walkFiles(pageRoot.root)) {
+      if (path.extname(filePath).toLowerCase() !== '.gss') continue;
+      if (isInheritanceParent(filePath)) continue;
+      await addServiceComponent(filePath, pageRoot.id);
+    }
   }
 
   for (const category of SOURCE_CATEGORIES) {
-    const categoryRoot = path.join(root, category);
-    if (!fs.existsSync(categoryRoot)) continue;
-    const scopes = (await fs.promises.readdir(categoryRoot, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory() && !IGNORED_NAMES.has(entry.name))
-      .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+    const scopes = layout.sourceRoots[category] || [];
     for (const scope of scopes) {
-      const scopeId = scope.name;
-      const scopeName = scopeNames(category, scopeId, dictionary, systems);
-      for (const filePath of await walkFiles(path.join(categoryRoot, scopeId))) {
+      if (!fs.existsSync(scope.root)) continue;
+      const scopeId = scope.id;
+      const scopeName = scope.name;
+      for (const filePath of await walkFiles(scope.root)) {
         const extension = path.extname(filePath).toLowerCase();
         if (!['.gss', '.vm', '.js', '.json', '.sql', '.txt'].includes(extension)) continue;
+        if (category === 'procedures' && isInheritanceParent(filePath)) continue;
         let source = '';
         try { source = await fs.promises.readFile(filePath, 'utf8'); } catch { continue; }
-        const objectId = sourceObjectId(category, filePath, source);
-        const name = sourceObjectName(category, filePath, source, objectId);
+        const inherited = category === 'procedures'
+          ? await effectiveInheritedSource(root, filePath, source)
+          : { source, inheritance: null };
+        const effectiveSource = inherited.source;
+        const indexedIdentity = category === 'procedures'
+          ? layout.procedureIndexes.get(scopeId)?.get(path.resolve(filePath))
+          : null;
+        const objectId = indexedIdentity?.objectId || sourceObjectId(category, filePath, source);
+        const name = indexedIdentity?.name || sourceObjectName(category, filePath, source, objectId);
         const objectKind = category === 'procedures' ? 'procedure'
           : category === 'system-script' ? 'system-script'
             : category === 'tables' ? 'table' : 'view';
@@ -386,18 +421,35 @@ async function buildProjectAiIndex(repository) {
           aliases: [],
           scopeId,
           scopeName,
+          ...(category === 'system-script' ? { systemId: scopeId } : { dataSourceId: scopeId }),
           path: relativePath(root, filePath),
           readOnly: category === 'tables' || category === 'views'
         };
-        addAliases(record, [objectId, path.basename(filePath), scopeId, scopeName]);
+        if (inherited.inheritance) {
+          record.inheritance = inherited.inheritance;
+          record.effectiveSourcePaths = inherited.effectiveSourcePaths;
+        }
+        addAliases(record, [
+          objectId,
+          path.basename(filePath),
+          scopeId,
+          scopeName,
+          inherited.parentFileName,
+          inherited.parentRelativePath
+        ]);
         objects.push(record);
-        sourceContents.set(`${record.kind}:${record.objectId}:${record.path}`, { record, source });
+        sourceContents.set(`${record.kind}:${record.objectId}:${record.path}`, { record, source: effectiveSource });
+        if (inherited.inheritance?.state === 'active') {
+          relations.push(makeRelation(record, 'inherit-source', inherited.parentRelativePath, 'inherits', '@inherit()', { unresolved: false, readOnly: true }));
+        } else if (['missing-parent', 'invalid-parent'].includes(inherited.inheritance?.state)) {
+          relations.push(makeRelation(record, 'inherit-source', inherited.parentRelativePath, 'inherits', '@inherit()', { unresolved: true, readOnly: true }));
+        }
         if (category === 'procedures' || category === 'system-script') {
-          for (const reference of extractProcedureReferences(source)) {
+          for (const reference of extractProcedureReferences(effectiveSource)) {
             relations.push(makeRelation(record, 'procedure', reference.name, 'calls', reference.evidence, { unresolved: true }));
           }
         }
-        for (const reference of extractSqlReferences(source)) {
+        for (const reference of extractSqlReferences(effectiveSource)) {
           relations.push(makeRelation(record, 'table-or-view', reference.name, 'uses', reference.evidence, { unresolved: true }));
         }
       }
@@ -425,7 +477,7 @@ async function buildProjectAiIndex(repository) {
   const pages = objects.filter((object) => object.kind === 'page');
   const pageMarkdown = [];
   for (const page of pages) {
-    const details = pageDetails.get(page.objectId) || { scripts: [], sqls: [], components: [] };
+    const details = pageDetails.get(page.objectId) || { scripts: [], sqls: [], dataSourceScripts: [], components: [] };
     const pageRelations = relations.filter((relation) => relation.from === `page:${page.objectId}`);
     const lines = [
       `# 页面：${page.name}`,
@@ -442,6 +494,9 @@ async function buildProjectAiIndex(repository) {
       '## 事件脚本',
       ...(details.scripts.length ? details.scripts.map((script) => `- ${script.event} · ${script.component || '页面'} · ${script.pointer}`) : ['- 无']),
       '',
+      '## 数据源脚本（GSS）',
+      ...(details.dataSourceScripts.length ? details.dataSourceScripts.map((script) => `- ${script.component || '数据源'} · \`${script.pointer}\``) : ['- 无']),
+      '',
       '## 数据源 SQL',
       ...(details.sqls.length ? details.sqls.map((sql) => `- ${sql.component || '数据源'} · \`${sql.pointer}\``) : ['- 无']),
       '',
@@ -455,9 +510,15 @@ async function buildProjectAiIndex(repository) {
   }
 
   const generatedAt = new Date().toISOString();
+  const inheritanceStates = objects.reduce((counts, object) => {
+    const state = object.inheritance?.state;
+    if (state) counts[state] = (counts[state] || 0) + 1;
+    return counts;
+  }, {});
   return {
     manifest: {
-      schemaVersion: 1,
+      schemaVersion: 3,
+      layout: 'systems-datasources',
       generatedAt,
       projectId: repository.projectId,
       projectName: repository.label,
@@ -465,7 +526,14 @@ async function buildProjectAiIndex(repository) {
       indexDirectory: INDEX_DIRECTORY,
       files: INDEX_FILES,
       pagesDirectory: normalizePath(path.join(INDEX_DIRECTORY, 'pages')),
-      counts: { objects: objects.length, relations: relations.length, pages: pages.length },
+      counts: {
+        objects: objects.length,
+        relations: relations.length,
+        pages: pages.length,
+        inheritedObjects: inheritanceStates.active || 0,
+        overriddenObjects: inheritanceStates.overridden || 0,
+        inheritanceWarnings: (inheritanceStates['missing-parent'] || 0) + (inheritanceStates['invalid-parent'] || 0)
+      },
       objectKinds: [...new Set(objects.map((object) => object.kind))].sort()
     },
     objects,
@@ -505,6 +573,7 @@ async function readProjectAiIndex(root) {
   };
   try {
     const manifest = JSON.parse(await fs.promises.readFile(path.join(indexRoot, INDEX_FILES.manifest), 'utf8'));
+    if (manifest.layout !== 'systems-datasources' || manifest.schemaVersion < 3) return null;
     return { manifest, objects: await readJsonLines(INDEX_FILES.objects), relations: await readJsonLines(INDEX_FILES.relations) };
   } catch { return null; }
 }
@@ -535,6 +604,9 @@ function formatAiContext(index, object, root) {
     object.systemName ? `- 系统：${object.systemName}（${object.systemId || '-'}）` : '',
     object.scopeName ? `- 数据源/归属：${object.scopeName}（${object.scopeId || '-'}）` : '',
     object.aiMarkdown ? `- 页面结构索引：${path.join(root || '.', object.aiMarkdown)}` : '',
+    object.inheritance ? `- 继承状态：${object.inheritance.state}` : '',
+    object.inheritance?.parentPath ? `- 父级实现（只读）：${root ? path.join(root, object.inheritance.parentPath) : object.inheritance.parentPath}` : '',
+    object.effectiveSourcePaths?.length ? `- 有效源码：${object.effectiveSourcePaths.map((sourcePath) => root ? path.join(root, sourcePath) : sourcePath).join('、')}` : '',
     '',
     '## 关系',
     ...(relations.length ? relations.map((relation) => `- ${relation.relation}: ${relation.from} -> ${relation.to}${relation.unresolved ? '（待确认）' : ''}`) : ['- 无']),

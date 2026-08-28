@@ -273,6 +273,11 @@ function buttonNodes(arrayNode, filePath, parentPath) {
   });
 }
 
+function dataSourceMode(value) {
+  if (!value || typeof value !== 'object') return 'sql';
+  return String(value.dsType ?? '').trim() === '1' ? 'script' : 'sql';
+}
+
 function buildComponent(componentNode, filePath, parentPath, index) {
   const component = componentNode.value || {};
   const type = String(component.type || 'component');
@@ -295,12 +300,24 @@ function buildComponent(componentNode, filePath, parentPath, index) {
   }));
 
   const datasourceNode = objectProperty(componentNode, 'datasource')?.value;
-  const sqlNode = objectProperty(datasourceNode, 'sql')?.value;
-  if (sqlNode && typeof sqlNode.value === 'string' && sqlNode.value.trim()) {
-    children.push(locatedNode('datasource', '数据源 SQL', filePath, sqlNode, {
-      description: datasourceNode.value?.saveTableId || '',
-      virtualPath: `${virtualPath}/datasource/sql`
-    }));
+  const datasource = datasourceNode?.value;
+  const mode = dataSourceMode(datasource);
+  const sourceKey = mode === 'script' ? 'script' : 'sql';
+  const sourceNode = objectProperty(datasourceNode, sourceKey)?.value;
+  if (sourceNode && typeof sourceNode.value === 'string' && sourceNode.value.trim()) {
+    children.push(locatedNode(
+      'datasource',
+      mode === 'script' ? '数据源脚本（GSS）' : '数据源 SQL',
+      filePath,
+      sourceNode,
+      {
+        description: [datasource?.saveTableId, mode === 'script' ? 'GSS' : 'SQL'].filter(Boolean).join(' · '),
+        dataSourceMode: mode,
+        dataSourceType: datasource?.dsType ?? '',
+        sourceKey,
+        virtualPath: `${virtualPath}/datasource/${sourceKey}`
+      }
+    ));
   }
 
   return locatedNode('component', COMPONENT_LABELS[type] || '组件', filePath, componentNode, {
@@ -702,7 +719,10 @@ const READABLE_SERVICE_SCRIPT_KEYS = new Set([
   'complateSaveScript'
 ]);
 
-function formatReadableScript(key, value) {
+function formatReadableScript(key, value, options = {}) {
+  if (options.sourceKind === 'datasource' && options.dataSourceMode === 'script') {
+    return formatServiceScript(value).replace(/\n$/, '');
+  }
   if (key === 'sql') return String(value || '').replace(/\r\n?/g, '\n').trim();
   const formatter = READABLE_SERVICE_SCRIPT_KEYS.has(key) ? formatServiceScript : formatJavaScript;
   return formatter(value).replace(/\n$/, '');
@@ -721,6 +741,21 @@ function collectReadablePageScripts(value, parts = [], runtime = 'pageEvents', o
         ? 'pageEvents'
         : runtime;
     const nextParts = [...parts, key];
+    if (key === 'datasource' && child && typeof child === 'object' && !Array.isArray(child)) {
+      const mode = dataSourceMode(child);
+      const sourceKey = mode === 'script' ? 'script' : 'sql';
+      if (typeof child[sourceKey] === 'string') {
+        output.push({
+          key: sourceKey,
+          parts: [...nextParts, sourceKey],
+          runtime: mode === 'script' ? 'GSS' : 'SQL',
+          source: child[sourceKey],
+          sourceKind: 'datasource',
+          dataSourceMode: mode
+        });
+      }
+      continue;
+    }
     if (readableScriptKey(key) && typeof child === 'string') {
       output.push({
         key,
@@ -743,7 +778,7 @@ function formatReadablePageScripts(source) {
   const lines = [];
   for (const script of scripts) {
     lines.push(`// ===== ${script.parts.join(' > ')} · ${script.runtime} =====`);
-    lines.push(formatReadableScript(script.key, script.source) || '// （空脚本）');
+    lines.push(formatReadableScript(script.key, script.source, script) || '// （空脚本）');
     lines.push('');
   }
   return `${lines.join('\n').trimEnd()}\n`;
@@ -849,7 +884,7 @@ function rewritePageSegment(source, virtualPath, content, filePath = '') {
   if (!node) throw new Error(`原 JSON 中找不到虚拟节点：${virtualPath}`);
   const isFieldCollection = node.kind === 'control-group' && node.virtualPath.endsWith('/fields');
   if (node.kind !== 'event' && node.kind !== 'datasource' && !isFieldCollection) {
-    throw new Error('目前只允许回写脚本、数据源 SQL 和字段集合；组件或按钮请在原始 JSON 中修改。');
+    throw new Error('目前只允许回写脚本、数据源 SQL/GSS 和字段集合；组件或按钮请在原始 JSON 中修改。');
   }
   const replacement = serializeEditedSegment(source, node, content);
   const updatedSource = source.slice(0, node.offset)
@@ -920,9 +955,15 @@ function resolveIndexLink(indexPath, target) {
     return null;
   }
 
-  const systemRoot = path.resolve(path.dirname(indexPath));
-  const resolved = path.resolve(systemRoot, value);
-  const relative = path.relative(systemRoot, resolved);
+  const pagesRoot = path.resolve(path.dirname(indexPath));
+  // 新式索引中的链接通常包含 SYS-*/pages/ 前缀，但 index.md 本身已经
+  // 位于该 pages 目录下。去掉前缀后再解析，避免得到 pages/SYS-*/pages/...。
+  const systemId = path.basename(path.dirname(pagesRoot));
+  const prefix = `${systemId}/pages/`;
+  if (value.startsWith(prefix)) value = value.slice(prefix.length);
+  else if (value.startsWith('pages/')) value = value.slice('pages/'.length);
+  const resolved = path.resolve(pagesRoot, value);
+  const relative = path.relative(pagesRoot, resolved);
   if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     return null;
   }
@@ -940,12 +981,13 @@ function parseLeafLabel(rawLabel) {
 }
 
 function parsePageIndex(markdown, indexPath) {
-  const fallbackSystemId = path.basename(path.dirname(indexPath));
+  const pagesRoot = path.dirname(indexPath);
+  const fallbackSystemId = path.basename(path.dirname(pagesRoot));
   let system = createNode('system', fallbackSystemId, {
     systemId: fallbackSystemId,
     indexPath,
-    repositoryRoot: path.dirname(path.dirname(indexPath)),
-    sourceRoot: path.dirname(indexPath)
+    repositoryRoot: path.dirname(path.dirname(path.dirname(pagesRoot))),
+    sourceRoot: pagesRoot
   });
   const stack = [system];
   let currentMenu = null;
@@ -1008,12 +1050,23 @@ function parsePageIndex(markdown, indexPath) {
   return system;
 }
 
-function loadPageIndexes(pagesRoot) {
-  if (!fs.existsSync(pagesRoot)) return [];
-  return fs.readdirSync(pagesRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(pagesRoot, entry.name, 'index.md'))
-    .filter((indexPath) => fs.existsSync(indexPath))
+function loadPageIndexes(pagesRoots) {
+  const roots = Array.isArray(pagesRoots) ? pagesRoots : [pagesRoots];
+  const indexPaths = roots.flatMap((pagesRoot) => {
+    if (!pagesRoot || !fs.existsSync(pagesRoot)) return [];
+    const direct = path.join(pagesRoot, 'index.md');
+    if (fs.existsSync(direct)) return [direct];
+    try {
+      return fs.readdirSync(pagesRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(pagesRoot, entry.name, 'index.md'))
+        .filter((indexPath) => fs.existsSync(indexPath));
+    } catch {
+      return [];
+    }
+  });
+  return indexPaths
+    .filter((indexPath, index, all) => all.indexOf(indexPath) === index)
     .map((indexPath) => parsePageIndex(fs.readFileSync(indexPath, 'utf8'), indexPath))
     .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
 }

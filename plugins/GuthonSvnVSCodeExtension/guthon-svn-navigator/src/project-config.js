@@ -4,97 +4,30 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { isPathWithin, samePath } = require('./path-utils');
 
-const PROJECT_CONFIG_NAMES = ['guthon-projects.yaml', '谷神项目配置.yaml', '谷神项目编码字典.yaml'];
-const PROJECT_PATH_KEYS = new Set(['pages', 'procedures', 'system-script', 'system_script', 'tables', 'views', 'skill', 'public']);
+const PROJECT_CONFIG_NAMES = ['guthon-projects.yaml'];
 const DEFAULT_PROJECT_CONFIG_TEMPLATE = `version: 2
 
-# 使用英文配置字段；data_source_name 和 system_name 保留平台业务显示名称。
-# username 只填写 SVN 用户名，不要填写密码或手机号。
+# 所有项目共用一个 SVN 用户名；密码不写入配置。
+username: "your-svn-user"
+
 projects:
+  # 新式分片 SVN：每个 checkout_paths 都是项目内的独立工作副本。
   gmeSvn:
     name: 期现产品
     path: gmeSvn
-    repository_url: "https://source.steel56.com.cn/gss/product/1305773397847855104/SYS-A7EE-D0E8-BE614B80"
-    username: "your-svn-user"
+    repository_url: "https://source.example/project"
     checkout_paths:
       - skill
       - public
-      - pages/SYS-A7EE-D0E8-BE614B80
-      - pages/SYS-6DB9-0A85-52DE4A3D
-      - pages/SYS-BBD8-26A8-B8194BC7
-      - pages/SYS-DD01-06B1-6B6C4E52
-      - procedures/0000
-      - procedures/0008
-      - procedures/0015
-      - system-script/SYS-A7EE-D0E8-BE614B80
-      - system-script/SYS-6DB9-0A85-52DE4A3D
-      - system-script/SYS-BBD8-26A8-B8194BC7
-      - system-script/SYS-DD01-06B1-6B6C4E52
-      - tables/0000
-      - tables/0008
-      - tables/0015
-      - views/0000
-      - views/0008
-      - views/0015
-    data_sources:
-      - data_source_id: "0000"
-        data_source_name: "主数据源"
-        source_paths:
-          procedures: "procedures/0000"
-          tables: "tables/0000"
-          views: "views/0000"
-        systems:
-          - system_id: "SYS-A7EE-D0E8-BE614B80"
-            system_name: "主数据"
-            system_alias_id: "com.golden.basic"
-            source_paths:
-              pages: "pages/SYS-A7EE-D0E8-BE614B80"
-              page_index: "pages/SYS-A7EE-D0E8-BE614B80/index.md"
-              system_script: "system-script/SYS-A7EE-D0E8-BE614B80"
-      - data_source_id: "0008"
-        data_source_name: "贸易系统"
-        source_paths:
-          procedures: "procedures/0008"
-          tables: "tables/0008"
-          views: "views/0008"
-        systems:
-          - system_id: "SYS-6DB9-0A85-52DE4A3D"
-            system_name: "国际贸易"
-            system_alias_id: "com.golden.bdp.itsdp"
-            source_paths:
-              pages: "pages/SYS-6DB9-0A85-52DE4A3D"
-              page_index: "pages/SYS-6DB9-0A85-52DE4A3D/index.md"
-              system_script: "system-script/SYS-6DB9-0A85-52DE4A3D"
-          - system_id: "SYS-BBD8-26A8-B8194BC7"
-            system_name: "国内贸易"
-            system_alias_id: "com.golden.bdp.sdp"
-            source_paths:
-              pages: "pages/SYS-BBD8-26A8-B8194BC7"
-              page_index: "pages/SYS-BBD8-26A8-B8194BC7/index.md"
-              system_script: "system-script/SYS-BBD8-26A8-B8194BC7"
-      - data_source_id: "0015"
-        data_source_name: "风险管理"
-        source_paths:
-          procedures: "procedures/0015"
-          tables: "tables/0015"
-          views: "views/0015"
-        systems:
-          - system_id: "SYS-DD01-06B1-6B6C4E52"
-            system_name: "风险管理"
-            system_alias_id: "com.golden.bdp.gdrm"
-            source_paths:
-              pages: "pages/SYS-DD01-06B1-6B6C4E52"
-              page_index: "pages/SYS-DD01-06B1-6B6C4E52/index.md"
-              system_script: "system-script/SYS-DD01-06B1-6B6C4E52"
+      - systems/SYS-XXXX
+      - datasources/0000
 
-  # 新项目请复制下面的配置，并填写真实 SVN 地址和 checkout 路径。
-  # scsjSvn:
-  #   name: scsjSvn
-  #   path: scsjSvn
-  #   repository_url: "https://source.example/svn/project"
-  #   username: "your-svn-user"
-  #   checkout_paths:
-  #     - pages/SYS-EXAMPLE
+  # 新式整项目 SVN：不填写 checkout_paths，整个项目根目录只 checkout 一次。
+  # 根目录应直接包含 systems/、datasources/、public/ 和 skill/。
+  newProject:
+    name: 新项目
+    path: newProject
+    repository_url: "https://source.example/new-project"
 `;
 
 function stripComment(value) {
@@ -141,14 +74,14 @@ function addPath(project, value) {
   if (!project.checkoutPaths.includes(normalized)) project.checkoutPaths.push(normalized);
 }
 
-function newProject(id) {
+function newProject(id, defaults = {}) {
   return {
     id: String(id || '').trim(),
     name: '',
     path: '',
     repositoryUrl: '',
     checkoutRoot: '',
-    username: '',
+    username: String(defaults.username || '').trim(),
     checkoutPaths: [],
   };
 }
@@ -166,17 +99,15 @@ function assignProjectValue(project, key, value) {
     svn_url: 'repositoryUrl',
     repository_url: 'repositoryUrl',
     checkout_root: 'checkoutRoot',
-    username: 'username',
   };
   if (aliases[normalizedKey]) {
     project[aliases[normalizedKey]] = String(parsed || '').trim();
     return;
   }
-  if (normalizedKey === 'checkout_paths' || normalizedKey === 'paths' || normalizedKey === 'include') {
+  if (normalizedKey === 'checkout_paths') {
     if (Array.isArray(parsed)) parsed.forEach((item) => addPath(project, item));
     return;
   }
-  if (PROJECT_PATH_KEYS.has(normalizedKey) && typeof parsed === 'string') addPath(project, parsed);
 }
 
 function parseProjectConfig(text) {
@@ -187,7 +118,7 @@ function parseProjectConfig(text) {
   let current = null;
   let currentIndent = -1;
   let listSection = '';
-  let legacyProject = null;
+  let sharedUsername = '';
 
   const finishCurrent = () => {
     if (!current || !current.id) return;
@@ -208,12 +139,9 @@ function parseProjectConfig(text) {
       projectsIndent = indent;
       continue;
     }
-    if (indent === 0 && keyValue?.[1] === 'project' && keyValue[2]) {
-      finishCurrent();
-      legacyProject = newProject(scalar(keyValue[2]));
-      current = legacyProject;
-      currentIndent = -1;
-      inProjects = false;
+    if (indent === 0 && keyValue?.[1] === 'username' && keyValue[2]) {
+      sharedUsername = String(scalar(keyValue[2]) || '').trim();
+      if (current && !current.username) current.username = sharedUsername;
       continue;
     }
 
@@ -222,7 +150,9 @@ function parseProjectConfig(text) {
       const listProject = line.match(/^-\s*(?:id|project_id):\s*(.+)$/);
       if (mappingProject || listProject) {
         finishCurrent();
-        current = newProject(mappingProject ? mappingProject[1] : scalar(listProject[1]));
+        current = newProject(mappingProject ? mappingProject[1] : scalar(listProject[1]), {
+          username: sharedUsername,
+        });
         currentIndent = indent;
         listSection = '';
         if (listProject) currentIndent = indent;
@@ -239,16 +169,14 @@ function parseProjectConfig(text) {
     if (!keyValue) continue;
     const key = keyValue[1];
     const value = keyValue[2] || '';
-    if (value) assignProjectValue(current, key, value);
-    else if (['checkout_paths', 'paths', 'include'].includes(key.replace(/-/g, '_'))) listSection = key;
+    if (value) {
+      const projectLevel = inProjects && indent === currentIndent + 2;
+      if (projectLevel) assignProjectValue(current, key, value);
+    }
+    else if (key.replace(/-/g, '_') === 'checkout_paths') listSection = key;
     else listSection = '';
   }
   finishCurrent();
-  if (legacyProject && !projects.includes(legacyProject)) {
-    legacyProject.path = legacyProject.path || legacyProject.id;
-    legacyProject.name = legacyProject.name || legacyProject.id;
-    projects.push(legacyProject);
-  }
   return projects.filter((project, index, all) => all.findIndex((item) => item.id === project.id) === index);
 }
 
@@ -307,6 +235,12 @@ function resolveProjectRoot(workspaceRoot, project) {
   return candidate;
 }
 
+function projectCheckoutMode(project) {
+  return Array.isArray(project?.checkoutPaths) && project.checkoutPaths.length
+    ? 'composite'
+    : 'monolithic';
+}
+
 function configuredProjectRootsForPath(startRoot, options = {}) {
   const start = path.resolve(startRoot);
   const configured = readProjectConfigurations(start, options);
@@ -326,6 +260,7 @@ module.exports = {
   ensureProjectConfig,
   findProjectConfigPath,
   parseProjectConfig,
+  projectCheckoutMode,
   readProjectConfigurations,
   resolveProjectRoot,
 };

@@ -66,6 +66,7 @@ function parseEntries(xml, repositoryRoot) {
       againstRevision,
       changelist: changelistAt(source, match.index),
       locked: status.locked === 'true',
+      wcLocked: status['wc-locked'] === 'true',
       switched: status.switched === 'true'
     });
   }
@@ -86,4 +87,14 @@ function parseSvnRemoteStatusXml(xml, repositoryRoot) {
   return entries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
-module.exports = { parseSvnRemoteStatusXml, parseSvnStatusXml };
+function parseSvnWorkingCopyHealthXml(xml, repositoryRoot) {
+  return parseEntries(xml, repositoryRoot).filter((entry) => (
+    entry.item === 'incomplete' || entry.locked || entry.wcLocked
+  ));
+}
+
+module.exports = {
+  parseSvnRemoteStatusXml,
+  parseSvnStatusXml,
+  parseSvnWorkingCopyHealthXml
+};

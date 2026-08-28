@@ -35,9 +35,9 @@ $vs.proc.runServiceComp('com.demo.auditService', $form);
 test('resolves a variable-bound procedure and an indexed service component', () => {
   const index = {
     objects: [
-      { kind: 'procedure', objectId: 'checkMainState', name: '检查主表状态', aliases: [], path: 'procedures/0015/com/golden/bdp/gdrm/common/checkMainState.gss' },
+      { kind: 'procedure', objectId: 'checkMainState', name: '检查主表状态', aliases: [], path: 'datasources/0015/procedures/com/golden/bdp/gdrm/common/checkMainState.gss' },
       { kind: 'procedure', objectId: 'com.demo.common', name: '公共过程', aliases: [] },
-      { kind: 'service-component', objectId: 'com.demo.auditService', name: '审计服务', aliases: [], path: 'pages/SYS-DEMO/1/2/com.demo.auditService.gss', systemId: 'SYS-DEMO' },
+      { kind: 'service-component', objectId: 'com.demo.auditService', name: '审计服务', aliases: [], path: 'systems/SYS-DEMO/pages/1/2/com.demo.auditService.gss', systemId: 'SYS-DEMO' },
       { kind: 'system-script', objectId: 'com.demo.auditService', name: '审计服务', aliases: [] }
     ]
   };

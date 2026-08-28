@@ -9,110 +9,98 @@ const {
   DEFAULT_PROJECT_CONFIG_TEMPLATE,
   configuredProjectRootsForPath,
   parseProjectConfig,
+  projectCheckoutMode,
   readProjectConfigurations
 } = require('../src/project-config');
 
-test('default project template preserves the product and uses a non-sensitive SVN username placeholder', () => {
+test('default template contains only the new layout examples', () => {
   const projects = parseProjectConfig(DEFAULT_PROJECT_CONFIG_TEMPLATE);
-
-  assert.equal(projects.length, 1);
-  assert.equal(projects[0].id, 'gmeSvn');
-  assert.equal(projects[0].name, '期现产品');
+  assert.deepEqual(projects.map((project) => project.id), ['gmeSvn', 'newProject']);
   assert.equal(projects[0].username, 'your-svn-user');
-  assert.ok(!DEFAULT_PROJECT_CONFIG_TEMPLATE.includes('17634542953'));
-  assert.match(DEFAULT_PROJECT_CONFIG_TEMPLATE, /scsjSvn/);
+  assert.equal(projectCheckoutMode(projects[0]), 'composite');
+  assert.equal(projectCheckoutMode(projects[1]), 'monolithic');
+  assert.ok(DEFAULT_PROJECT_CONFIG_TEMPLATE.includes('systems/SYS-XXXX'));
+  assert.ok(DEFAULT_PROJECT_CONFIG_TEMPLATE.includes('datasources/0000'));
+  assert.equal(DEFAULT_PROJECT_CONFIG_TEMPLATE.includes('data_sources'), false);
+  assert.equal(DEFAULT_PROJECT_CONFIG_TEMPLATE.includes('source_paths'), false);
+  assert.equal(DEFAULT_PROJECT_CONFIG_TEMPLATE.includes('17634542953'), false);
 });
 
-test('parses multiple named projects and checkout paths', () => {
+test('parses new composite and monolithic projects with one shared username', () => {
   const projects = parseProjectConfig(`
 version: 2
+username: shared-svn-user
 projects:
   gmeSvn:
     name: 谷神贸易风险
     path: gmeSvn
     repository_url: https://source.example/gss/product/gme
-    username: demo
     checkout_paths:
       - skill
-      - pages/SYS-DEMO
-      - procedures/0000
-  scsjSvn:
-    name: 四川数据
-    path: scsjSvn
-    svn:
-      repository_url: https://source.example/gss/product/scsj
-    checkout_paths: [pages/SYS-SCSJ, tables/0000]
+      - systems/SYS-DEMO
+      - datasources/0000
+  newProject:
+    name: 整项目
+    path: newProject
+    repository_url: https://source.example/gss/product/new
 `);
-
-  assert.deepEqual(projects, [
-    {
-      id: 'gmeSvn',
-      name: '谷神贸易风险',
-      path: 'gmeSvn',
-      repositoryUrl: 'https://source.example/gss/product/gme',
-      checkoutRoot: '',
-      username: 'demo',
-      checkoutPaths: ['skill', 'pages/SYS-DEMO', 'procedures/0000']
-    },
-    {
-      id: 'scsjSvn',
-      name: '四川数据',
-      path: 'scsjSvn',
-      repositoryUrl: 'https://source.example/gss/product/scsj',
-      checkoutRoot: '',
-      username: '',
-      checkoutPaths: ['pages/SYS-SCSJ', 'tables/0000']
-    }
+  assert.deepEqual(projects.map((project) => [project.id, project.username, project.checkoutPaths]), [
+    ['gmeSvn', 'shared-svn-user', ['skill', 'systems/SYS-DEMO', 'datasources/0000']],
+    ['newProject', 'shared-svn-user', []]
   ]);
+  assert.equal(projectCheckoutMode(projects[0]), 'composite');
+  assert.equal(projectCheckoutMode(projects[1]), 'monolithic');
 });
 
-test('keeps compatibility with the old single-project dictionary', () => {
+test('empty checkout_paths is monolithic and has no implicit paths', () => {
   const projects = parseProjectConfig(`
-project: gmeSvn
+version: 2
+projects:
+  project:
+    path: project
+    repository_url: https://source.example/project
+    checkout_paths: []
+`);
+  assert.equal(projects.length, 1);
+  assert.deepEqual(projects[0].checkoutPaths, []);
+  assert.equal(projectCheckoutMode(projects[0]), 'monolithic');
+});
+
+test('removed data_sources, source_paths and legacy single-project blocks are ignored', () => {
+  const projects = parseProjectConfig(`
 version: 1
+project: legacy
 data_sources:
   - data_source_id: "0000"
     source_paths:
       procedures: procedures/0000
-      tables: tables/0000
-      views: views/0000
-    systems:
-      - system_id: SYS-DEMO
-        source_paths:
-          pages: pages/SYS-DEMO
-          system_script: system-script/SYS-DEMO
+projects:
+  current:
+    path: current
+    repository_url: https://source.example/current
 `);
-
-  assert.equal(projects.length, 1);
-  assert.equal(projects[0].id, 'gmeSvn');
-  assert.deepEqual(projects[0].checkoutPaths, [
-    'procedures/0000',
-    'tables/0000',
-    'views/0000',
-    'pages/SYS-DEMO',
-    'system-script/SYS-DEMO'
-  ]);
+  assert.deepEqual(projects.map((project) => project.id), ['current']);
+  assert.deepEqual(projects[0].checkoutPaths, []);
 });
 
-test('maps an opened parent or project folder to the configured project paths', (t) => {
+test('maps opened folders to configured project roots', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-project-config-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(path.join(root, 'guthon-projects.yaml'), `
 version: 2
 projects:
-  gmeSvn:
-    path: gmeSvn
-  scsjSvn:
-    path: scsjSvn
+  first:
+    path: first
+  second:
+    path: second
 `, 'utf8');
-
-  const gme = path.join(root, 'gmeSvn');
-  const scsj = path.join(root, 'scsjSvn');
-  assert.deepEqual(configuredProjectRootsForPath(root), [gme, scsj]);
-  assert.deepEqual(configuredProjectRootsForPath(path.join(gme, 'pages')), [gme]);
+  const first = path.join(root, 'first');
+  const second = path.join(root, 'second');
+  assert.deepEqual(configuredProjectRootsForPath(root), [first, second]);
+  assert.deepEqual(configuredProjectRootsForPath(path.join(first, 'systems')), [first]);
 });
 
-test('can restrict project configuration lookup to the opened folder', (t) => {
+test('local-only lookup does not read a parent configuration', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-svn-local-config-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(path.join(root, 'guthon-projects.yaml'), `
@@ -123,7 +111,6 @@ projects:
 `, 'utf8');
   const openedFolder = path.join(root, 'empty-workspace');
   fs.mkdirSync(openedFolder);
-
   assert.equal(readProjectConfigurations(openedFolder, { localOnly: true }).projects.length, 0);
   assert.deepEqual(configuredProjectRootsForPath(openedFolder, { localOnly: true }), []);
 });

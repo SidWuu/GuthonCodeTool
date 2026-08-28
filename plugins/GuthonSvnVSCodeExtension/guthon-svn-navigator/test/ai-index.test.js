@@ -5,12 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const {
-  buildProjectAiIndex,
-  readProjectAiIndex,
-  searchAiIndex,
-  writeProjectAiIndex
-} = require('../src/ai-index');
+const { buildProjectAiIndex, readProjectAiIndex, searchAiIndex, writeProjectAiIndex } = require('../src/ai-index');
+const { discoverProjectLayout } = require('../src/project-layout');
+const { loadPageIndexes } = require('../src/page-index');
 
 function write(root, relative, content) {
   const filePath = path.join(root, relative);
@@ -18,84 +15,105 @@ function write(root, relative, content) {
   fs.writeFileSync(filePath, content, 'utf8');
 }
 
-test('generates a project-local multi-object AI index without requiring docs first', async (t) => {
+test('indexes only the new systems and datasources layout', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-ai-index-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-
-  write(root, 'guthon-projects.yaml', `
-projects:
-  demo:
-    name: 演示项目
-    data_sources:
-      - data_source_id: "0000"
-        data_source_name: "主数据"
-        systems:
-          - system_id: SYS-DEMO
-            system_name: "风险管理"
-`);
-  write(root, 'pages/SYS-DEMO/index.md', `### 🌏 风险管理 (SYS-DEMO)
+  write(root, 'systems/SYS-DEMO/$.风险管理/.keep', '');
+  write(root, 'systems/SYS-DEMO/pages/index.md', `### 🌏 风险管理 (SYS-DEMO)
 - [🏠 策略方案](8/6/PG-DEMO.json)
 `);
-  write(root, 'pages/SYS-DEMO/8/6/PG-DEMO.json', JSON.stringify({
-    views: { rows: [{ component: { pageEvents: { onClickScript: "gUtil.request('com.demo.queryRisk', param);" }, datasource: { sql: 'SELECT * FROM RM_PROJECT_RISK' } } }] }
+  write(root, 'systems/SYS-DEMO/pages/8/6/PG-DEMO.json', JSON.stringify({
+    views: { rows: [
+      { component: { pageEvents: { onClickScript: "gUtil.request('com.demo.queryRisk', param);" }, datasource: { sql: 'SELECT * FROM RM_PROJECT_RISK' } } },
+      { component: { name: 'scriptTable', datasource: { dsType: 1, script: "#set($rows = $vs.dbTools.list('SELECT * FROM RM_SCRIPT_DS'));" } } }
+    ] }
   }));
-  write(root, 'pages/SYS-DEMO/8/6/com.demo.auditService.gss', `/**
+  write(root, 'systems/SYS-DEMO/pages/8/6/com.demo.auditService.gss', `/**
  * @pageAliasId com.demo.auditService
  * @pageName 审计服务
  */
 `);
-  write(root, 'procedures/0000/com.demo.queryRisk.gss', `/**
+  write(root, 'datasources/0000/$.主数据源/.keep', '');
+  write(root, 'datasources/0000/procedures/index.md', `### 主数据源 (0000)
+- [⚡ com.demo.queryRisk - 查询风险](com/demo/queryRisk.gss)
+- [⚡ inheritedRisk - 继承风险查询](com/demo/inheritedRisk.gss)
+- [⚡ overriddenRisk - 已覆盖风险查询](com/demo/overriddenRisk.gss)
+- [⚡ missingRisk - 缺失继承源](com/demo/missingRisk.gss)
+`);
+  write(root, 'datasources/0000/procedures/com/demo/queryRisk.gss', `/**
  * @functionId com.demo.queryRisk
  * @description 查询风险
  */
 #set($rows = $vs.dbTools.list('SELECT * FROM RM_PROJECT_RISK'))
 `);
-  write(root, 'system-script/SYS-DEMO/init.gss', "gUtil.request('com.demo.queryRisk', param);");
-  write(root, 'tables/0000/RM_PROJECT_RISK.json', JSON.stringify({ tableId: 'RM_PROJECT_RISK', tableName: '策略风险表' }));
-  write(root, 'views/0000/RM_PROJECT_RISK_VIEW.json', JSON.stringify({ viewId: 'RM_PROJECT_RISK_VIEW', viewName: '策略风险视图' }));
+  write(root, 'datasources/0000/procedures/com/demo/inheritedRisk.gss', `/**
+ * @functionId inheritedRisk
+ * @description 继承风险查询
+ */
+@inherit();
+$vs.proc.invoke('com.demo.child', 'afterRun');
+`);
+  write(root, 'datasources/0000/procedures/com/demo/inheritedRisk.inherit.gss', `/**
+ * @functionId inheritedRisk
+ * @description 继承风险查询
+ */
+$vs.proc.invoke('com.demo.parent', 'run');
+#set($rows = $vs.dbTools.list('SELECT * FROM RM_INHERITED_RISK'))
+`);
+  write(root, 'datasources/0000/procedures/com/demo/overriddenRisk.gss', `/**
+ * @functionId overriddenRisk
+ * @description 已覆盖风险查询
+ */
+#set($rows = $vs.dbTools.list('SELECT * FROM RM_CHILD_ONLY'))
+`);
+  write(root, 'datasources/0000/procedures/com/demo/overriddenRisk.inherit.gss', `/** parent */
+#set($rows = $vs.dbTools.list('SELECT * FROM RM_UNUSED_PARENT'))
+`);
+  write(root, 'datasources/0000/procedures/com/demo/missingRisk.gss', `/**
+ * @functionId missingRisk
+ * @description 缺失继承源
+ */
+@inherit();
+`);
+  write(root, 'systems/SYS-DEMO/system-script/init.gss', "gUtil.request('com.demo.queryRisk', param);");
+  write(root, 'datasources/0000/tables/RM_PROJECT_RISK.json', JSON.stringify({ tableId: 'RM_PROJECT_RISK', tableName: '策略风险表' }));
+  write(root, 'datasources/0000/views/RM_PROJECT_RISK_VIEW.json', JSON.stringify({ viewId: 'RM_PROJECT_RISK_VIEW', viewName: '策略风险视图' }));
 
-  const repository = {
-    root,
-    projectId: 'demo',
-    label: '演示项目',
-    systems: [{
-      kind: 'system',
-      systemId: 'SYS-DEMO',
-      label: '风险管理',
-      indexPath: path.join(root, 'pages/SYS-DEMO/index.md'),
-      repositoryRoot: root,
-      children: [{
-        kind: 'page',
-        label: '策略方案',
-        pageType: '主页面',
-        systemId: 'SYS-DEMO',
-        filePath: path.join(root, 'pages/SYS-DEMO/8/6/PG-DEMO.json'),
-        indexPath: path.join(root, 'pages/SYS-DEMO/index.md'),
-        linkTarget: '8/6/PG-DEMO.json',
-        children: []
-      }]
-    }]
-  };
+  const layout = discoverProjectLayout(root);
+  const systems = loadPageIndexes(layout.pageRoots.map((entry) => entry.root));
+  const repository = { root, projectId: 'demo', label: '演示项目', layoutData: layout, systems };
   const index = await buildProjectAiIndex(repository);
 
-  assert.equal(fs.existsSync(path.join(root, 'docs')), false);
-  assert.equal(index.manifest.projectId, 'demo');
-  assert.deepEqual(new Set(index.objects.map((object) => object.kind)), new Set(['page', 'procedure', 'service-component', 'system-script', 'table', 'view']));
+  assert.equal(index.manifest.schemaVersion, 3);
+  assert.equal(index.manifest.layout, 'systems-datasources');
+  assert.deepEqual(new Set(index.objects.map((object) => object.kind)), new Set([
+    'page', 'procedure', 'service-component', 'system-script', 'table', 'view'
+  ]));
   assert.ok(index.objects.some((object) => object.kind === 'service-component' && object.objectId === 'com.demo.auditService'));
-  assert.ok(index.objects.some((object) => object.name === '策略风险表' && object.aliases.includes('RM_PROJECT_RISK')));
-  assert.ok(index.objects.some((object) => object.name === '查询风险' && object.kind === 'procedure'));
-  assert.ok(index.relations.some((relation) => relation.relation === 'calls' && relation.unresolved === false));
-  assert.ok(index.relations.some((relation) => relation.relation === 'uses' && relation.unresolved === false));
+  assert.ok(index.objects.some((object) => object.name === '策略风险表' && object.dataSourceId === '0000'));
+  assert.ok(index.objects.some((object) => object.name === '查询风险' && object.path.startsWith('datasources/0000/procedures/')));
+  assert.ok(index.objects.some((object) => object.kind === 'page' && object.path.startsWith('systems/SYS-DEMO/pages/')));
+  const inherited = index.objects.find((object) => object.objectId === 'inheritedRisk');
+  assert.equal(inherited.inheritance.state, 'active');
+  assert.deepEqual(inherited.effectiveSourcePaths, [
+    'datasources/0000/procedures/com/demo/inheritedRisk.gss',
+    'datasources/0000/procedures/com/demo/inheritedRisk.inherit.gss'
+  ]);
+  assert.equal(index.objects.some((object) => object.path.endsWith('.inherit.gss')), false);
+  assert.ok(index.relations.some((relation) => relation.from === 'procedure:inheritedRisk' && relation.relation === 'inherits'));
+  assert.ok(index.relations.some((relation) => relation.from === 'procedure:inheritedRisk' && relation.to.includes('com.demo.parent')));
+  assert.ok(index.relations.some((relation) => relation.from === 'procedure:inheritedRisk' && relation.to.includes('RM_INHERITED_RISK')));
+  assert.equal(index.manifest.counts.inheritedObjects, 1);
+  assert.equal(index.manifest.counts.overriddenObjects, 1);
+  assert.equal(index.manifest.counts.inheritanceWarnings, 1);
+  assert.equal(index.objects.find((object) => object.objectId === 'overriddenRisk').inheritance.state, 'overridden');
+  assert.equal(index.objects.find((object) => object.objectId === 'missingRisk').inheritance.state, 'missing-parent');
 
   const indexRoot = await writeProjectAiIndex(repository, index);
   assert.equal(indexRoot, path.join(root, 'docs/ai-index'));
-  assert.equal(fs.existsSync(path.join(indexRoot, 'manifest.json')), true);
-  assert.equal(fs.existsSync(path.join(indexRoot, 'objects.jsonl')), true);
-  assert.equal(fs.existsSync(path.join(indexRoot, 'relations.jsonl')), true);
-  assert.equal(fs.readdirSync(path.join(indexRoot, 'pages')).length, 1);
-
   const loaded = await readProjectAiIndex(root);
   assert.equal(loaded.objects.length, index.objects.length);
   assert.equal(searchAiIndex(loaded, '策略风险表')[0].kind, 'table');
-  assert.equal(searchAiIndex(loaded, 'SYS-DEMO')[0].kind, 'page');
+  assert.equal(searchAiIndex(loaded, '风险管理')[0].systemId, 'SYS-DEMO');
+  assert.equal(searchAiIndex(loaded, 'inheritedRisk.inherit.gss')[0].objectId, 'inheritedRisk');
 });

@@ -2,7 +2,7 @@
   "name": "guthon-svn-navigator",
   "displayName": "Guthon SVN Navigator",
   "description": "在 VS Code 中以中文目录浏览谷神 SVN 页面，并快速跳转到页面 JSON 和 GSS 源码。",
-  "version": "0.7.16",
+  "version": "0.7.23",
   "publisher": "guthon-local",
   "private": true,
   "repository": {
@@ -29,7 +29,8 @@
   "activationEvents": [
     "onView:guthonSvnNavigator.pageTree",
     "workspaceContains:info.json",
-    "workspaceContains:pages/*/index.md",
+    "workspaceContains:systems/*/pages/index.md",
+    "workspaceContains:datasources/*/procedures/index.md",
     "onLanguage:guthon-gss",
     "onCommand:guthonSvnNavigator.refresh",
     "onCommand:guthonSvnNavigator.searchPages",
@@ -38,6 +39,8 @@
     "onCommand:guthonSvnNavigator.rebuildAllAiIndexes",
     "onCommand:guthonSvnNavigator.searchAiIndex",
     "onCommand:guthonSvnNavigator.copyAiContext",
+    "onCommand:guthonSvnNavigator.openInheritanceSource",
+    "onCommand:guthonSvnNavigator.materializeInheritance",
     "onCommand:guthonSvnNavigator.openSegment",
     "onCommand:guthonSvnNavigator.openSourceFile",
     "onCommand:guthonSvnNavigator.selectRepository",
@@ -66,7 +69,7 @@
   "main": "./src/extension.js",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/extension.js && node --check src/ai-index.js && node --check src/scm-display.js && node --check src/source-links.js && node --check src/gss-language.js && node --check src/gss-rules.js && node --check src/page-index.js && node --check src/path-utils.js && node --check src/project-config.js && node --check src/svn-executable.js && node --check src/svn-status.js && node --check src/svn-log.js && node --check src/workspace-layout.js",
+    "check": "node --check src/extension.js && node --check src/ai-index.js && node --check src/gss-inheritance.js && node --check src/scm-display.js && node --check src/source-links.js && node --check src/gss-language.js && node --check src/gss-rules.js && node --check src/page-index.js && node --check src/path-utils.js && node --check src/project-config.js && node --check src/project-layout.js && node --check src/svn-backup.js && node --check src/svn-executable.js && node --check src/svn-status.js && node --check src/svn-log.js && node --check src/workspace-layout.js",
     "package": "npx --yes @vscode/vsce package --no-dependencies"
   },
   "contributes": {
@@ -263,6 +266,16 @@
         "command": "guthonSvnNavigator.showRepositoryHistory",
         "title": "Guthon SVN: 搜索提交历史",
         "icon": "$(history)"
+      },
+      {
+        "command": "guthonSvnNavigator.openInheritanceSource",
+        "title": "Guthon SVN: 只读查看继承父级",
+        "icon": "$(lock)"
+      },
+      {
+        "command": "guthonSvnNavigator.materializeInheritance",
+        "title": "Guthon SVN: 展开继承到子文件",
+        "icon": "$(replace-all)"
       }
     ],
     "viewsContainers": {
@@ -330,13 +343,6 @@
           "command": "guthonSvnNavigator.commitChanges",
           "when": "view == guthonSvnNavigator.pageTree && guthonSvnNavigator.hasRepository",
           "group": "navigation@4"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "guthonSvnNavigator.copyAiContext",
-          "when": "view == guthonSvnNavigator.pageTree && (viewItem == guthonSvn.page || viewItem == guthonSvn.source-file || viewItem == guthonSvn.event || viewItem == guthonSvn.datasource)",
-          "group": "inline@2"
         }
       ],
       "scm/title": [
@@ -444,6 +450,11 @@
           "command": "guthonSvnNavigator.showFileHistory",
           "when": "resourceScheme == file",
           "group": "navigation@50"
+        },
+        {
+          "command": "guthonSvnNavigator.materializeInheritance",
+          "when": "resourceScheme == file && resourceExtname == .gss",
+          "group": "navigation@47"
         }
       ],
       "editor/context": [
@@ -461,6 +472,11 @@
           "command": "guthonSvnNavigator.revertChange",
           "when": "resourceScheme == file",
           "group": "navigation@51"
+        },
+        {
+          "command": "guthonSvnNavigator.materializeInheritance",
+          "when": "resourceScheme == file && resourceExtname == .gss",
+          "group": "navigation@49"
         }
       ],
       "editor/title/context": [
@@ -488,6 +504,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "guthonSvnNavigator.copyAiContext",
+          "when": "view == guthonSvnNavigator.pageTree && (viewItem == guthonSvn.page || viewItem == guthonSvn.source-file || viewItem == guthonSvn.event || viewItem == guthonSvn.datasource)",
+          "group": "inline@2"
+        },
+        {
+          "command": "guthonSvnNavigator.materializeInheritance",
+          "when": "view == guthonSvnNavigator.pageTree && (viewItem == guthonSvn.page || viewItem == guthonSvn.source-file)",
+          "group": "navigation@3"
+        },
         {
           "command": "guthonSvnNavigator.openPage",
           "when": "view == guthonSvnNavigator.pageTree && viewItem == guthonSvn.page",

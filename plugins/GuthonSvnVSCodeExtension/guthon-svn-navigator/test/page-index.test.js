@@ -233,6 +233,35 @@ test('renders only page scripts as readable multiline diff text', () => {
   assert.doesNotMatch(readable, /\\n/);
 });
 
+test('treats dsType 1 data sources as GSS instead of SQL', () => {
+  const source = JSON.stringify({
+    views: {
+      rows: [{
+        component: {
+          type: 'table-main',
+          name: 'scriptTable',
+          datasource: {
+            dsType: 1,
+            script: '#set($rows = $vs.dbTools.list("select 1"));\nreturn $rows;',
+            sql: 'SELECT SHOULD_NOT_BE_USED FROM TEST'
+          }
+        }
+      }]
+    }
+  });
+  const components = parsePageComponents(source, '/tmp/PG-SCRIPT-DS.json');
+  const datasource = components[0].children.find((node) => node.kind === 'datasource');
+  assert.equal(datasource.label, '数据源脚本（GSS）');
+  assert.equal(datasource.dataSourceMode, 'script');
+  assert.equal(datasource.dataSourceType, 1);
+  assert.match(datasource.virtualPath, /datasource\/script$/);
+  assert.equal(extractPageSegment(source, datasource), '#set($rows = $vs.dbTools.list("select 1"));\nreturn $rows;\n');
+  const readable = formatReadablePageScripts(source);
+  assert.match(readable, /datasource > script · GSS/);
+  assert.match(readable, /#set\(\$rows = \$vs\.dbTools\.list\("select 1"\)\);/);
+  assert.doesNotMatch(readable, /SHOULD_NOT_BE_USED/);
+});
+
 test('rewrites only the selected JSON script block', () => {
   const source = JSON.stringify({
     views: {

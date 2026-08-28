@@ -51,6 +51,45 @@ test('prefers the page record when a service component has two index records', (
   assert.equal(map.get(pathKey(path.join(root, relativePath))).kind, 'page');
 });
 
+test('uses the Chinese page name for a new systems child checkout', () => {
+  const root = path.resolve('/project');
+  const filePath = path.join(root, 'systems', 'SYS-DEMO', 'pages', 'E', 'EPG.json');
+  const repository = {
+    root: path.join(root, 'systems', 'SYS-DEMO'),
+    logicalRoot: root,
+    sourceCategory: 'systems',
+    pageByFilePath: new Map([[pathKey(filePath), { label: '入库验收单' }]])
+  };
+  assert.equal(
+    readableChangeName(repository, {
+      filePath,
+      relativePath: path.join('pages', 'E', 'EPG.json')
+    }),
+    '入库验收单（EPG）.json'
+  );
+});
+
+test('includes the owning module for a main page change', () => {
+  const root = path.resolve('/project');
+  const filePath = path.join(root, 'systems', 'SYS-DEMO', 'pages', '8', 'PG-MAIN.json');
+  const repository = {
+    root: path.join(root, 'systems', 'SYS-DEMO'),
+    logicalRoot: root,
+    sourceCategory: 'systems',
+    pageByFilePath: new Map([[
+      pathKey(filePath),
+      { label: '主页面', pageType: '主页面', breadcrumb: '策略方案 / 主页面' }
+    ]])
+  };
+  assert.equal(
+    readableChangeName(repository, {
+      filePath,
+      relativePath: path.join('pages', '8', 'PG-MAIN.json')
+    }),
+    '策略方案 · 主页面（PG-MAIN）.json'
+  );
+});
+
 test('detects an absent working file as a deleted-style comparison', () => {
   assert.equal(isDeletedOrMissingChange({ item: 'modified' }, false), true);
   assert.equal(isDeletedOrMissingChange({ item: 'modified' }, true), false);

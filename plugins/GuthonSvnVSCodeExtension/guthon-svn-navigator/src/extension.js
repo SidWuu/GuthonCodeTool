@@ -20,9 +20,14 @@ const {
   rewritePageSegment,
   rewriteJsonStringAtParts
 } = require('./page-index');
-const { parseSvnRemoteStatusXml, parseSvnStatusXml } = require('./svn-status');
+const {
+  parseSvnRemoteStatusXml,
+  parseSvnStatusXml,
+  parseSvnWorkingCopyHealthXml
+} = require('./svn-status');
 const { parseSvnLogXml } = require('./svn-log');
 const { resolveSvnExecutable } = require('./svn-executable');
+const { backupWorkingCopyFiles } = require('./svn-backup');
 const {
   describeWorkspace,
   discoverWorkingCopyRoots,
@@ -32,6 +37,14 @@ const {
   workingCopyForPath
 } = require('./workspace-layout');
 const { createGssLanguageProviders } = require('./gss-language');
+const { discoverProjectLayout } = require('./project-layout');
+const {
+  inheritanceChildPath,
+  inspectInheritanceFile,
+  isInheritanceParent,
+  isSupportedInheritancePath,
+  materializeInheritance
+} = require('./gss-inheritance');
 const { isPathWithin, pathKey, samePath } = require('./path-utils');
 const {
   buildAiObjectByFilePath,
@@ -41,6 +54,7 @@ const {
 const {
   configuredProjectRootsForPath,
   ensureProjectConfig,
+  projectCheckoutMode,
   readProjectConfigurations,
   resolveProjectRoot
 } = require('./project-config');
@@ -58,6 +72,7 @@ const VIRTUAL_DOCUMENT_SCHEME = 'guthon-page-segment';
 const SVN_BASE_DOCUMENT_SCHEME = 'guthon-svn-base';
 const READABLE_DIFF_DOCUMENT_SCHEME = 'guthon-svn-readable-diff';
 const SCM_CHANGE_DOCUMENT_SCHEME = 'guthon-svn-change';
+const INHERITANCE_DOCUMENT_SCHEME = 'guthon-inherit';
 const VIRTUAL_NODE_KINDS = new Set([
   'component',
   'tab-item',
@@ -155,6 +170,17 @@ function svnArgs(args) {
   ];
 }
 
+function svnErrorDescription(error) {
+  const message = String(error?.message || error || '').trim();
+  if (/\b502\b|Bad Gateway|E175002/i.test(message)) {
+    return `${message}\nSVN 网关暂时不可用（HTTP 502）。本地已下载内容会保留，请稍后再次执行更新，插件会继续恢复未完成的工作副本。`;
+  }
+  if (/working copy.*locked|locked.*working copy|E155004|W155037/i.test(message)) {
+    return `${message}\n工作副本被 SVN 锁定，请执行 SVN Cleanup 后重试。`;
+  }
+  return message;
+}
+
 function isRepositoryRoot(candidate) {
   return isLogicalWorkspaceRoot(candidate);
 }
@@ -205,147 +231,28 @@ function svnTargets(repository) {
   return targets.length ? targets : [repository.root];
 }
 
-function yamlScalar(value) {
-  return String(value || '').trim().replace(/^['\"]|['\"]$/g, '');
-}
-
-function selectProjectDictionaryBlock(source, projectId) {
-  const lines = source.split(/\r?\n/);
-  const projectsIndex = lines.findIndex((line) => line.trim() === 'projects:');
-  if (projectsIndex === -1) return source;
-  const expected = String(projectId || '').trim();
-  let start = -1;
-  let headerIndent = -1;
-  for (let index = projectsIndex + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!line.trim()) continue;
-    const indent = line.match(/^\s*/)[0].length;
-    const mapping = line.trim().match(/^([A-Za-z0-9][A-Za-z0-9._-]*):\s*$/);
-    const list = line.trim().match(/^-\s*(?:id|project_id):\s*(.+)$/);
-    const id = mapping ? mapping[1] : list ? yamlScalar(list[1]) : '';
-    if (indent <= 0) break;
-    if (id === expected) {
-      start = index;
-      headerIndent = indent;
-      break;
-    }
-  }
-  if (start === -1) return source;
-  let end = lines.length;
-  for (let index = start + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!line.trim()) continue;
-    const indent = line.match(/^\s*/)[0].length;
-    const isSibling = indent === headerIndent && (
-      /^([A-Za-z0-9][A-Za-z0-9._-]*):\s*$/.test(line.trim())
-      || /^-\s*(?:id|project_id):\s*/.test(line.trim())
-    );
-    if (isSibling) {
-      end = index;
-      break;
-    }
-  }
-  return lines.slice(start, end).join('\n');
-}
-
-function readProjectCodeDictionary(root, projectId = path.basename(path.resolve(root))) {
-  const dictionary = {
-    dataSources: new Map(),
-    systems: new Map(),
-    systemOrder: new Map()
-  };
-  let source = '';
-  let current = path.resolve(root);
-  for (let depth = 0; depth < 3 && current; depth += 1) {
-    const candidates = [
-      path.join(current, 'docs', 'guthon-projects.yaml'),
-      path.join(current, 'docs', '谷神项目配置.yaml'),
-      path.join(current, 'docs', '谷神项目编码字典.yaml'),
-      path.join(current, 'guthon-projects.yaml'),
-      path.join(current, '谷神项目配置.yaml'),
-      path.join(current, '谷神项目编码字典.yaml')
-    ];
-    const dictionaryPath = candidates.find((candidate) => fs.existsSync(candidate));
-    if (dictionaryPath) {
-      try {
-        source = fs.readFileSync(dictionaryPath, 'utf8');
-      } catch {
-        source = '';
-      }
-      if (source) break;
-    }
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  if (!source) return dictionary;
-  source = selectProjectDictionaryBlock(source, projectId);
-
-  let currentDataSource = null;
-  let dataSourceOrder = -1;
-  let systemOrder = 0;
-  for (const line of source.split(/\r?\n/)) {
-    const dataSourceMatch = line.match(/^\s*-\s+data_source_id:\s*(.+?)\s*$/);
-    if (dataSourceMatch) {
-      currentDataSource = yamlScalar(dataSourceMatch[1]);
-      dataSourceOrder += 1;
-      systemOrder = 0;
-      continue;
-    }
-    const dataSourceNameMatch = line.match(/^\s*data_source_name:\s*(.+?)\s*$/);
-    if (dataSourceNameMatch && currentDataSource) {
-      dictionary.dataSources.set(currentDataSource, yamlScalar(dataSourceNameMatch[1]));
-      continue;
-    }
-    const systemIdMatch = line.match(/^\s*-\s+system_id:\s*(.+?)\s*$/);
-    if (systemIdMatch) {
-      dictionary.currentSystemId = yamlScalar(systemIdMatch[1]);
-      dictionary.systemOrder.set(dictionary.currentSystemId, `${String(dataSourceOrder).padStart(4, '0')}:${String(systemOrder).padStart(4, '0')}`);
-      systemOrder += 1;
-      continue;
-    }
-    const systemNameMatch = line.match(/^\s*system_name:\s*(.+?)\s*$/);
-    if (systemNameMatch && dictionary.currentSystemId) {
-      dictionary.systems.set(dictionary.currentSystemId, yamlScalar(systemNameMatch[1]));
-    }
-  }
-  delete dictionary.currentSystemId;
-  return dictionary;
-}
-
-function workingCopyDescriptor(logicalRepository, workingCopy, dictionary) {
+function workingCopyDescriptor(logicalRepository, workingCopy) {
   const relative = path.relative(logicalRepository.root, workingCopy);
-  const [category, id] = relative.split(path.sep);
-  const pageSystems = new Map((logicalRepository.children || [])
-    .map((system) => [system.systemId, system.label]));
-  const systemName = pageSystems.get(id) || dictionary.systems.get(id) || id;
-  const dataSourceName = dictionary.dataSources.get(id) || id;
-  const categories = {
-    pages: '页面',
-    procedures: '过程函数',
-    'system-script': '系统脚本',
-    tables: '数据表',
-    views: '视图'
-  };
-  if (category === 'pages' || category === 'system-script') {
-    return { category, id, label: `${systemName} · ${categories[category]}` };
-  }
-  if (categories[category]) {
-    return { category, id, label: `${dataSourceName} · ${categories[category]}` };
-  }
+  const normalized = relative.replace(/\\/g, '/').replace(/^\.\//, '');
+  const layout = logicalRepository.layoutData || discoverProjectLayout(logicalRepository.root);
+  const systemMatch = normalized.match(/^systems\/([^/]+)$/);
+  if (systemMatch) return { category: 'systems', id: systemMatch[1], label: `${layout.systemNames.get(systemMatch[1]) || systemMatch[1]} · 系统源码` };
+  const dataSourceMatch = normalized.match(/^datasources\/([^/]+)$/);
+  if (dataSourceMatch) return { category: 'datasources', id: dataSourceMatch[1], label: `${layout.dataSourceNames.get(dataSourceMatch[1]) || dataSourceMatch[1]} · 数据源源码` };
+  if (!normalized || normalized === '.') return { category: 'project', id: '', label: '完整项目' };
+  const [category] = normalized.split('/');
   if (category === 'public') return { category, id: '', label: '公共资源' };
   if (category === 'skill') return { category, id: '', label: '技能资源' };
-  return { category, id, label: path.basename(workingCopy) };
+  return { category, id: '', label: path.basename(workingCopy) };
 }
 
 function sourceControlRepositories(repositories) {
   return repositories.flatMap((logicalRepository) => {
-    const dictionary = readProjectCodeDictionary(logicalRepository.root, logicalRepository.projectId);
     const pages = new Map(collectPages(logicalRepository.children || [])
       .filter((page) => page.filePath)
       .map((page) => [pathKey(page.filePath), page]));
     return (logicalRepository.workingCopies || []).map((workingCopy) => {
-      const descriptor = workingCopyDescriptor(logicalRepository, workingCopy, dictionary);
+      const descriptor = workingCopyDescriptor(logicalRepository, workingCopy);
       return {
         ...logicalRepository,
         root: workingCopy,
@@ -461,8 +368,10 @@ async function sourceObjectFileEntries(directory, meta, metadataCache, parentPat
         });
         continue;
       }
+      if (meta.sourceCategory === 'procedures' && isInheritanceParent(filePath)) continue;
       const identity = await metadataCache?.read(filePath, meta.sourceCategory, entry.name)
         || await readSourceObjectIdentity(filePath, meta.sourceCategory, entry.name);
+      const inheritance = meta.sourceCategory === 'procedures' ? inspectInheritanceFile(filePath) : null;
       result.push({
         kind: 'source-file',
         label: identity.label,
@@ -473,13 +382,62 @@ async function sourceObjectFileEntries(directory, meta, metadataCache, parentPat
         objectId: identity.objectId,
         fileName: entry.name,
         relativePath,
+        inheritance,
         children: []
       });
+      if (inheritance?.parentPath && fs.existsSync(inheritance.parentPath)) {
+        result.push({
+          kind: 'inherit-source',
+          label: `父级实现｜${identity.label}`,
+          filePath: inheritance.parentPath,
+          childPath: filePath,
+          repositoryRoot: meta.repositoryRoot,
+          sourceCategory: meta.sourceCategory,
+          sourceId: meta.sourceId,
+          objectId: identity.objectId,
+          inheritance,
+          children: []
+        });
+      }
     }
     return result;
   } catch {
     return [];
   }
+}
+
+function inheritanceStateLabel(inheritance) {
+  if (!inheritance) return '';
+  if (inheritance.state === 'active') return '继承中';
+  if (inheritance.state === 'overridden') return '已覆盖';
+  if (inheritance.state === 'missing-parent') return '继承源缺失';
+  return '继承异常';
+}
+
+function decoratePageInheritance(nodes) {
+  const output = [];
+  for (const node of nodes || []) {
+    if (node.children?.length) node.children = decoratePageInheritance(node.children);
+    if (node.kind === 'page' && node.filePath && path.extname(node.filePath).toLowerCase() === '.gss'
+      && !isInheritanceParent(node.filePath)) {
+      node.inheritance = inspectInheritanceFile(node.filePath);
+    }
+    output.push(node);
+    if (node.kind === 'page' && node.inheritance?.parentPath && fs.existsSync(node.inheritance.parentPath)) {
+      output.push({
+        kind: 'inherit-source',
+        label: `父级实现｜${node.label}`,
+        filePath: node.inheritance.parentPath,
+        childPath: node.filePath,
+        repositoryRoot: node.repositoryRoot,
+        systemId: node.systemId,
+        objectId: node.objectId,
+        inheritance: node.inheritance,
+        children: []
+      });
+    }
+  }
+  return output;
 }
 
 async function readSourceObjectIdentity(filePath, sourceCategory, fallbackName) {
@@ -517,27 +475,20 @@ async function readSourceObjectIdentity(filePath, sourceCategory, fallbackName) 
 }
 
 async function buildSourceObjectGroups(logicalRepository, systems, metadataCache) {
-  const dictionary = readProjectCodeDictionary(logicalRepository.root, logicalRepository.projectId);
-  const systemNames = new Map((systems || []).map((system) => [system.systemId, system.label]));
+  const layout = logicalRepository.layoutData || discoverProjectLayout(logicalRepository.root);
   const groups = [];
   for (const [sourceCategory, categoryMeta] of Object.entries(SOURCE_OBJECT_META)) {
-    const root = path.join(logicalRepository.root, sourceCategory);
-    const scopeIds = fs.existsSync(root)
-      ? fs.readdirSync(root, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && entry.name !== '.svn')
-        .map((entry) => entry.name)
-        .sort((left, right) => left.localeCompare(right, 'zh-CN'))
-      : [];
+    const scopeEntries = layout.sourceRoots[sourceCategory] || [];
+    const root = sourceCategory === 'system-script' ? layout.systemsRoot : layout.dataSourcesRoot;
     const scopes = [];
-    for (const sourceId of scopeIds) {
-      const scopeName = sourceCategory === 'system-script'
-        ? (systemNames.get(sourceId) || dictionary.systems.get(sourceId) || sourceId)
-        : (dictionary.dataSources.get(sourceId) || sourceId);
-      const sourceRoot = path.join(root, sourceId);
+    for (const scope of scopeEntries) {
+      if (!fs.existsSync(scope.root)) continue;
+      const sourceId = scope.id;
+      const sourceRoot = scope.root;
       const meta = { sourceCategory, sourceId, repositoryRoot: logicalRepository.root };
       scopes.push({
         kind: 'source-scope',
-        label: `${scopeName}（${sourceId}）`,
+        label: `${scope.name}（${sourceId}）`,
         description: categoryMeta.scopeLabel,
         icon: categoryMeta.icon,
         sourceCategory,
@@ -638,8 +589,9 @@ function isJsonPage(element) {
 }
 
 function isPageJsonPath(filePath) {
-  return path.extname(filePath).toLowerCase() === '.json'
-    && filePath.split(path.sep).includes('pages');
+  const normalized = String(filePath || '').replace(/\\/g, '/');
+  return path.extname(normalized).toLowerCase() === '.json'
+    && /(?:^|\/)systems\/[^/]+\/pages\//i.test(normalized);
 }
 
 function readableDiffPath(filePath) {
@@ -652,7 +604,7 @@ function iconForVirtualNode(element) {
   if (element.kind === 'control') return element.description?.includes('隐藏') ? 'eye-closed' : 'symbol-field';
   if (element.kind === 'button') return 'symbol-event';
   if (element.kind === 'event') return element.description === 'serviceEvents' ? 'server-process' : 'symbol-event';
-  if (element.kind === 'datasource') return 'database';
+  if (element.kind === 'datasource') return element.dataSourceMode === 'script' ? 'server-process' : 'database';
   if (element.kind === 'tab-item') return 'folder-library';
   if (element.componentType === 'search-box') return 'filter';
   if (element.componentType === 'table-main' || element.componentType === 'table-item') return 'table';
@@ -670,7 +622,11 @@ function safeVirtualName(value) {
 }
 
 function virtualDocumentType(element) {
-  if (element.kind === 'datasource') return { extension: 'sql', language: 'sql' };
+  if (element.kind === 'datasource') {
+    return element.dataSourceMode === 'script'
+      ? { extension: 'gss', language: 'guthon-gss' }
+      : { extension: 'sql', language: 'sql' };
+  }
   if (element.kind === 'event') {
     return element.description === 'serviceEvents'
       ? { extension: 'gss', language: 'guthon-gss' }
@@ -923,7 +879,7 @@ class GuthonSvnTreeProvider {
     if (!vscode.workspace.getConfiguration(CONFIG_SECTION).get('autoRefresh', true)) return;
     for (const repository of this.repositories) {
       const watcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(repository.root, 'pages/*/index.md')
+        new vscode.RelativePattern(repository.root, 'systems/*/pages/index.md')
       );
       const refresh = () => this._scheduleRefresh(false);
       watcher.onDidCreate(refresh);
@@ -932,7 +888,7 @@ class GuthonSvnTreeProvider {
       this.watchers.push(watcher);
 
       const pageWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(repository.root, 'pages/**/*.json')
+        new vscode.RelativePattern(repository.root, 'systems/*/pages/**/*.json')
       );
       const refreshPage = (uri) => {
         this.pageStructureCache.delete(uri.fsPath);
@@ -1000,15 +956,17 @@ class GuthonSvnTreeProvider {
       const projectConfig = configured.projects.find((project) => (
         samePath(resolveProjectRoot(configured.workspaceRoot, project), root)
       ));
-      let systems = loadPageIndexes(path.join(root, 'pages'));
-      const dictionary = readProjectCodeDictionary(root, projectConfig?.id);
+      const layoutData = discoverProjectLayout(root);
+      let systems = loadPageIndexes(layoutData.pageRoots.map((entry) => entry.root));
+      const systemOrder = new Map(layoutData.systems.map((entry, index) => [entry.id, index]));
       systems.sort((left, right) => (
-        (dictionary.systemOrder.get(left.systemId) || `9999:${left.systemId}`)
-          .localeCompare(dictionary.systemOrder.get(right.systemId) || `9999:${right.systemId}`)
+        (systemOrder.get(left.systemId) ?? Number.MAX_SAFE_INTEGER)
+          - (systemOrder.get(right.systemId) ?? Number.MAX_SAFE_INTEGER)
       ));
       if (!vscode.workspace.getConfiguration(CONFIG_SECTION).get('showMissingPages', false)) {
         systems = removeMissingPages(systems);
       }
+      systems = decoratePageInheritance(systems);
       const repository = {
         kind: 'repository',
         label: projectConfig?.name || (productId ? `谷神产品 ${productId}` : path.basename(root)),
@@ -1017,10 +975,11 @@ class GuthonSvnTreeProvider {
         infoPath,
         productId,
         layout: layout.kind,
+        layoutData,
         workingCopies: layout.workingCopies,
         aiObjectByFilePath: buildAiObjectByFilePath(root, await readProjectAiIndex(root)),
         systems,
-        children: [...systems, ...await buildSourceObjectGroups({ root }, systems, this.metadataCache)]
+        children: [...systems, ...await buildSourceObjectGroups({ root, layoutData }, systems, this.metadataCache)]
       };
       for (const system of systems) system.repositoryRoot = root;
       repositories.push(repository);
@@ -1049,7 +1008,7 @@ class GuthonSvnTreeProvider {
       const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
       item.iconPath = new vscode.ThemeIcon('info');
       item.command = { command: 'guthonSvnNavigator.selectRepository', title: '选择 SVN 工作副本' };
-      item.tooltip = '点击选择旧式单工作副本，或包含多个独立 checkout 的谷神项目目录';
+      item.tooltip = '点击选择新式整项目工作副本，或包含多个独立 checkout 的谷神项目目录';
       return item;
     }
 
@@ -1102,27 +1061,50 @@ class GuthonSvnTreeProvider {
       item.resourceUri = element.sourceRoot ? vscode.Uri.file(element.sourceRoot) : undefined;
       item.description = `${countSourceFiles(element)} 项`;
     } else if (element.kind === 'source-file') {
-      item.iconPath = new vscode.ThemeIcon(iconForSourceCategory(element.sourceCategory));
+      const inheritanceWarning = ['missing-parent', 'invalid-parent'].includes(element.inheritance?.state);
+      item.iconPath = new vscode.ThemeIcon(inheritanceWarning ? 'warning' : iconForSourceCategory(element.sourceCategory));
       item.resourceUri = vscode.Uri.file(element.filePath);
-      item.description = element.sourceCategory === 'tables'
+      const baseDescription = element.sourceCategory === 'tables'
         ? '表结构 JSON（只读）'
         : element.sourceCategory === 'views'
           ? '视图定义 JSON（只读）'
           : element.sourceCategory === 'procedures'
             ? '过程函数'
             : '系统脚本';
-      item.tooltip = `${element.filePath}\n${element.objectId || element.sourceId}`;
+      item.description = element.inheritance
+        ? `${baseDescription} · 子级 · ${inheritanceStateLabel(element.inheritance)}`
+        : baseDescription;
+      item.tooltip = `${element.filePath}\n${element.objectId || element.sourceId}${element.inheritance?.reason ? `\n${element.inheritance.reason}` : ''}`;
       item.command = {
         command: 'guthonSvnNavigator.openSourceFile',
         title: '打开源码对象',
         arguments: [element]
       };
+    } else if (element.kind === 'inherit-source') {
+      const inheritanceWarning = element.inheritance?.state === 'invalid-parent';
+      item.iconPath = new vscode.ThemeIcon(inheritanceWarning ? 'warning' : 'lock');
+      item.description = element.inheritance?.state === 'active'
+        ? '只读 · 当前继承源'
+        : element.inheritance?.state === 'invalid-parent'
+          ? '只读 · 继承源异常'
+          : '只读参考 · 未启用';
+      item.tooltip = `${element.filePath}\n父级实现只读；需要修改时请在子文件执行“展开继承到子文件”。${element.inheritance?.reason ? `\n${element.inheritance.reason}` : ''}`;
+      item.command = {
+        command: 'guthonSvnNavigator.openInheritanceSource',
+        title: '只读查看父级实现',
+        arguments: [element]
+      };
     } else if (element.kind === 'page') {
       const missing = !element.filePath || !fs.existsSync(element.filePath);
-      item.iconPath = new vscode.ThemeIcon(missing ? 'warning' : iconForPageType(element.pageType));
-      item.description = missing ? `缺失 · ${element.pageType}` : element.pageType;
+      const inheritanceWarning = ['missing-parent', 'invalid-parent'].includes(element.inheritance?.state);
+      item.iconPath = new vscode.ThemeIcon(missing || inheritanceWarning ? 'warning' : iconForPageType(element.pageType));
+      item.description = missing
+        ? `缺失 · ${element.pageType}`
+        : element.inheritance
+          ? `${element.pageType} · 子级 · ${inheritanceStateLabel(element.inheritance)}`
+          : element.pageType;
       item.resourceUri = element.filePath ? vscode.Uri.file(element.filePath) : undefined;
-      item.tooltip = `${missing ? '索引目标文件缺失\n' : ''}${element.pageType}：${element.label}\n${element.filePath || element.linkTarget}`;
+      item.tooltip = `${missing ? '索引目标文件缺失\n' : ''}${element.pageType}：${element.label}\n${element.filePath || element.linkTarget}${element.inheritance?.reason ? `\n${element.inheritance.reason}` : ''}`;
       if (!isJsonPage(element)) {
         item.command = {
           command: 'guthonSvnNavigator.openPage',
@@ -1193,6 +1175,7 @@ class GuthonSvnTreeProvider {
   nodeId(element) {
     if (element.kind === 'repository') return `repository:${element.root}`;
     if (element.kind === 'page') return `page:${element.filePath || element.linkTarget}`;
+    if (element.kind === 'inherit-source') return `inherit-source:${element.filePath}`;
     if (element.virtualPath) return `virtual:${element.filePath}:${element.virtualPath}`;
     if (element.filePath) return `${element.kind}:${element.filePath}:${element.offset || 0}`;
     return `${element.kind}:${element.indexPath || ''}:${element.systemId || ''}:${element.label}`;
@@ -1236,6 +1219,97 @@ async function openSourceFile(element) {
   );
 }
 
+function inheritanceDocumentUri(parentPath, childPath = '') {
+  return vscode.Uri.from({
+    scheme: INHERITANCE_DOCUMENT_SCHEME,
+    path: `/${safeVirtualName(path.basename(parentPath))}`,
+    query: new URLSearchParams({ source: parentPath, child: childPath }).toString()
+  });
+}
+
+async function openInheritanceSource(element) {
+  const parentPath = element instanceof vscode.Uri
+    ? element.fsPath
+    : element?.filePath || '';
+  const childPath = element?.childPath || inheritanceChildPath(parentPath);
+  if (!parentPath || !isInheritanceParent(parentPath) || !fs.existsSync(parentPath)) {
+    vscode.window.showErrorMessage(`父级继承文件不存在：${parentPath || '未知路径'}`);
+    return;
+  }
+  await vscode.window.showTextDocument(
+    await vscode.workspace.openTextDocument(inheritanceDocumentUri(parentPath, childPath)),
+    { preview: false }
+  );
+}
+
+function commandFilePath(value) {
+  if (value instanceof vscode.Uri) return value.fsPath;
+  if (value?.childPath) return value.childPath;
+  if (value?.filePath) return value.filePath;
+  return vscode.window.activeTextEditor?.document?.uri?.scheme === 'file'
+    ? vscode.window.activeTextEditor.document.uri.fsPath
+    : '';
+}
+
+async function materializeInheritanceCommand(provider, value) {
+  let childPath = commandFilePath(value);
+  if (isInheritanceParent(childPath)) childPath = inheritanceChildPath(childPath);
+  if (!childPath || path.extname(childPath).toLowerCase() !== '.gss' || !fs.existsSync(childPath)) {
+    vscode.window.showErrorMessage('请选择存在继承关系的过程函数或服务组件子文件。');
+    return;
+  }
+  if (!isSupportedInheritancePath(childPath)) {
+    vscode.window.showErrorMessage('继承展开只支持 datasources/*/procedures/ 过程函数和 systems/*/pages/ 服务组件 GSS。');
+    return;
+  }
+  const repository = repositoryForPath(provider, childPath);
+  if (!repository) {
+    vscode.window.showErrorMessage('当前 GSS 文件不属于已选择的谷神项目。');
+    return;
+  }
+  const parentPath = childPath.slice(0, -'.gss'.length) + '.inherit.gss';
+  if (!fs.existsSync(parentPath)) {
+    vscode.window.showErrorMessage(`继承源不存在，无法展开：${parentPath}`);
+    return;
+  }
+  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(childPath));
+  let result;
+  try {
+    result = materializeInheritance(
+      childPath,
+      document.getText(),
+      await fs.promises.readFile(parentPath, 'utf8')
+    );
+  } catch (error) {
+    vscode.window.showErrorMessage(`无法展开继承：${error.message}`);
+    return;
+  }
+  const confirmed = await vscode.window.showWarningMessage(
+    `确认将父级实现展开到子文件吗？\n项目：${repository.label}\n子文件：${childPath}\n父级（只读）：${parentPath}`,
+    { modal: true },
+    '展开继承并编辑'
+  );
+  if (confirmed !== '展开继承并编辑') return;
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(
+    document.uri,
+    new vscode.Range(
+      document.positionAt(result.replacement.start),
+      document.positionAt(result.replacement.end)
+    ),
+    result.replacement.text
+  );
+  if (!await vscode.workspace.applyEdit(edit)) {
+    vscode.window.showErrorMessage('展开继承失败，子文件没有发生变化。');
+    return;
+  }
+  const editor = await vscode.window.showTextDocument(document, { preview: false });
+  const position = document.positionAt(result.replacement.start);
+  editor.selection = new vscode.Selection(position, position);
+  editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+  vscode.window.showInformationMessage('继承实现已展开到子文件。请检查并保存，然后重建当前项目 AI 索引。');
+}
+
 async function openSegment(element) {
   if (!element?.filePath || !element?.virtualPath || !fs.existsSync(element.filePath)) {
     vscode.window.showErrorMessage('无法打开页面片段：原始文件或节点路径不存在。');
@@ -1270,7 +1344,7 @@ async function selectExistingRepository(provider) {
     canSelectFolders: true,
     canSelectMany: false,
     openLabel: '选择谷神 SVN 项目目录',
-    title: '请选择完整工作副本根目录，或包含 pages/procedures 等分片 checkout 的目录'
+    title: '请选择完整项目根目录，或包含 systems/datasources 等分片 checkout 的目录'
   });
   if (!selected?.length) return;
   const selectedPath = selected[0].fsPath;
@@ -1377,7 +1451,7 @@ function isSvnAccessForbidden(error) {
   return /E175013|forbidden|禁止访问|无权访问/i.test(String(error?.message || error));
 }
 
-async function requestSvnCredentials(project, projectRoot, checkoutPaths, output) {
+async function requestSvnCredentials(project, projectRoot, checkoutPaths, output, options = {}) {
   let username = String(project.username || '').trim();
   let usernameWasPrompted = false;
   if (isPlaceholderUsername(username)) {
@@ -1395,10 +1469,11 @@ async function requestSvnCredentials(project, projectRoot, checkoutPaths, output
   }
 
   const usernameArgs = ['--username', username];
-  const probePath = checkoutPaths
+  const configuredProbePath = checkoutPaths
     .map((item) => String(item || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, ''))
     .find((item) => item && isPathWithin(projectRoot, path.resolve(projectRoot, item)));
-  const probeUrl = probePath ? svnUrlForPath(project.repositoryUrl, probePath) : project.repositoryUrl;
+  const probePath = options.probeUrl ? '' : configuredProbePath;
+  const probeUrl = options.probeUrl || (probePath ? svnUrlForPath(project.repositoryUrl, probePath) : project.repositoryUrl);
   const infoArgs = ['info', '--depth', 'empty', ...usernameArgs, '--', probeUrl];
   if (!usernameWasPrompted) {
     try {
@@ -1505,6 +1580,8 @@ async function revealInitialProjectConfig(configResult) {
 }
 
 async function initializeProject(provider, output, projectId = '') {
+  // 配置文件可能刚刚在编辑器中保存；初始化不能继续使用刷新前缓存的项目地址。
+  await provider.refresh(false);
   let projects = provider.projectConfigurations || [];
   const workspaceFolderRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
   const hasEmptyCurrentWorkspace = workspaceFolderRoot
@@ -1570,16 +1647,38 @@ async function initializeProject(provider, output, projectId = '') {
     vscode.window.showErrorMessage(`项目“${configuredProjectLabel(project)}”缺少有效的 path 或 repository_url 配置。`);
     return;
   }
-  const checkoutPaths = [...new Set([
-    ...project.checkoutPaths,
-    ...(project.checkoutPaths.length ? [] : ['skill', 'public'])
-  ])];
-  if (!checkoutPaths.length) {
-    vscode.window.showErrorMessage(`项目“${configuredProjectLabel(project)}”没有配置 checkout_paths 或源码路径。`);
-    return;
+  output.appendLine(`\n初始化项目：${configuredProjectLabel(project)}`);
+  output.appendLine(`项目 SVN 地址：${project.repositoryUrl}`);
+  const checkoutMode = projectCheckoutMode(project);
+  const checkoutPaths = [...new Set(project.checkoutPaths || [])];
+  const isMonolithic = checkoutMode === 'monolithic';
+  if (isMonolithic && fs.existsSync(projectRoot)) {
+    // 初始化安全校验不能依赖 systems/ 或 datasources/ 是否已经存在；即使项目尚未完整下载，
+    // 也要识别根 .svn 与下级分片 .svn 的混合结构。
+    const existingWorkingCopies = discoverWorkingCopyRoots(projectRoot);
+    const nestedWorkingCopies = existingWorkingCopies.filter((workingCopy) => (
+      !samePath(workingCopy, projectRoot)
+    ));
+    if (nestedWorkingCopies.length) {
+      vscode.window.showErrorMessage(
+        `项目目录“${projectRoot}”已经包含分片 SVN 工作副本，不能再按整项目模式 checkout。请清理分片目录，或在配置中补充 checkout_paths。`
+      );
+      return;
+    }
+    if (!fs.existsSync(path.join(projectRoot, '.svn'))) {
+      const existingEntries = fs.readdirSync(projectRoot).filter((entry) => entry !== '.DS_Store');
+      if (existingEntries.length) {
+        vscode.window.showErrorMessage(
+          `整项目 checkout 已停止：目录“${projectRoot}”已存在但不是 SVN 工作副本，且目录非空。请选择空目录，或在配置中补充 checkout_paths。`
+        );
+        return;
+      }
+    }
   }
   const confirmed = await vscode.window.showWarningMessage(
-    `确认初始化“${configuredProjectLabel(project)}”吗？\n目录：${projectRoot}\n将根据配置拉取 ${checkoutPaths.length} 个 SVN 工作副本。`,
+    isMonolithic
+      ? `确认初始化“${configuredProjectLabel(project)}”吗？\n目录：${projectRoot}\n将初始化一个完整 SVN 项目工作副本。`
+      : `确认初始化“${configuredProjectLabel(project)}”吗？\n目录：${projectRoot}\n将初始化 ${checkoutPaths.length} 个 SVN 子工作副本。`,
     { modal: true },
     '开始初始化'
   );
@@ -1588,13 +1687,92 @@ async function initializeProject(provider, output, projectId = '') {
   output.show(true);
   let credentials;
   try {
-    credentials = await requestSvnCredentials(project, projectRoot, checkoutPaths, output);
+    credentials = await requestSvnCredentials(
+      project,
+      projectRoot,
+      checkoutPaths,
+      output,
+      isMonolithic ? { probeUrl: project.repositoryUrl } : {}
+    );
   } catch (error) {
     vscode.window.showErrorMessage(`连接 SVN 仓库失败：${error.message}`);
     return;
   }
   if (!credentials) return;
+  const usernameArgs = ['--username', credentials.username];
+  const passwordArgs = credentials.password ? ['--password-from-stdin'] : [];
+  const svnInput = credentials.password ? { stdin: credentials.password } : undefined;
   const failures = [];
+  if (isMonolithic) {
+    const rootSvn = fs.existsSync(path.join(projectRoot, '.svn'));
+    if (rootSvn) {
+      try {
+        const info = await runSvnCapture(
+          svnArgs(['info', '--show-item', 'url', ...usernameArgs, ...passwordArgs, '--', projectRoot]),
+          projectRoot,
+          output,
+          undefined,
+          svnInput
+        );
+        const actualUrl = info.stdout.trim().replace(/\/+$/, '');
+        const expectedUrl = String(project.repositoryUrl).trim().replace(/\/+$/, '');
+        if (!actualUrl || actualUrl !== expectedUrl) {
+          vscode.window.showErrorMessage(
+            `整项目 checkout 已停止：已有 SVN 工作副本地址与配置不一致。\n当前：${actualUrl || '无法读取'}\n配置：${expectedUrl}`
+          );
+          return;
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(`无法核对已有整项目 SVN 工作副本地址：${error.message}`);
+        return;
+      }
+    }
+    try {
+      await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: `正在初始化 ${configuredProjectLabel(project)}`,
+        cancellable: true
+      }, async (progress, token) => {
+        progress.report({ message: rootSvn ? '更新完整项目工作副本' : 'checkout 完整项目工作副本' });
+        if (rootSvn) {
+          await prepareWorkingCopyForUpdate(projectRoot, output, token);
+          await runSvn(
+            svnArgs(['update', ...usernameArgs, ...passwordArgs, '--', projectRoot]),
+            projectRoot,
+            output,
+            token,
+            svnInput
+          );
+        } else {
+          await runSvn(
+            svnArgs(['checkout', ...usernameArgs, ...passwordArgs, project.repositoryUrl, projectRoot]),
+            projectRoot,
+            output,
+            token,
+            svnInput
+          );
+        }
+      });
+    } catch (error) {
+      output.appendLine(`[初始化失败] .：${svnErrorDescription(error)}`);
+      failures.push({ relativePath: '.', error });
+    }
+    let readmeCreated = false;
+    try {
+      readmeCreated = await ensureProjectReadme(provider.workspaceRoot || workspaceFolderRoot || projectRoot);
+    } catch (error) {
+      output.appendLine(`生成 README.md 失败：${error.message}`);
+    }
+    await provider.refresh();
+    const initialized = provider.repositories.find((repository) => samePath(repository.root, projectRoot));
+    if (initialized) await provider.setActiveRepository(projectRoot);
+    if (failures.length) {
+      vscode.window.showWarningMessage(`完整项目初始化失败：${svnErrorDescription(failures[0].error)}。${readmeCreated ? '插件 README.md 已生成。' : ''}详情见 Guthon SVN 输出。`);
+    } else {
+      vscode.window.showInformationMessage(`完整项目初始化完成：${configuredProjectLabel(project)}${readmeCreated ? '，插件 README.md 已生成' : ''}`);
+    }
+    return;
+  }
   await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
     title: `正在初始化 ${configuredProjectLabel(project)}`,
@@ -1615,10 +1793,8 @@ async function initializeProject(provider, output, projectId = '') {
       });
       try {
         await fs.promises.mkdir(path.dirname(target), { recursive: true });
-        const usernameArgs = ['--username', credentials.username];
-        const passwordArgs = credentials.password ? ['--password-from-stdin'] : [];
-        const svnInput = credentials.password ? { stdin: credentials.password } : undefined;
         if (fs.existsSync(path.join(target, '.svn'))) {
+          await prepareWorkingCopyForUpdate(target, output, token);
           await runSvn(
             svnArgs(['update', ...usernameArgs, ...passwordArgs, '--', target]),
             projectRoot,
@@ -1636,6 +1812,7 @@ async function initializeProject(provider, output, projectId = '') {
           );
         }
       } catch (error) {
+        output.appendLine(`[初始化失败] ${relativePath}：${svnErrorDescription(error)}`);
         failures.push({ relativePath, error });
       }
     }
@@ -1651,8 +1828,9 @@ async function initializeProject(provider, output, projectId = '') {
   await provider.refresh();
   const initialized = provider.repositories.find((repository) => samePath(repository.root, projectRoot));
   if (initialized) await provider.setActiveRepository(projectRoot);
-  if (failures.length) {
-    vscode.window.showWarningMessage(`项目初始化完成，但 ${failures.length}/${checkoutPaths.length} 个路径失败：${failures.map((item) => item.relativePath).join('、')}。${readmeCreated ? '插件 README.md 已生成。' : ''}详情见 Guthon SVN 输出。`);
+    if (failures.length) {
+      const hasGatewayFailure = failures.some((item) => /\b502\b|Bad Gateway|E175002/i.test(String(item.error?.message || '')));
+      vscode.window.showWarningMessage(`项目初始化完成，但 ${failures.length}/${checkoutPaths.length} 个路径失败：${failures.map((item) => item.relativePath).join('、')}。${hasGatewayFailure ? '检测到 SVN 网关 502，请稍后重新初始化或执行更新。' : ''}${readmeCreated ? '插件 README.md 已生成。' : ''}详情见 Guthon SVN 输出。`);
   } else {
     vscode.window.showInformationMessage(`项目初始化完成：${configuredProjectLabel(project)}${readmeCreated ? '，插件 README.md 已生成' : ''}`);
   }
@@ -2373,6 +2551,18 @@ class ScmChangeContentProvider {
   }
 }
 
+class InheritanceContentProvider {
+  dispose() {}
+
+  async provideTextDocumentContent(uri) {
+    const parentPath = new URLSearchParams(uri.query).get('source') || '';
+    if (!parentPath || !isInheritanceParent(parentPath) || !fs.existsSync(parentPath)) {
+      return '父级继承文件不存在。';
+    }
+    return fs.promises.readFile(parentPath, 'utf8');
+  }
+}
+
 async function openChange(entry, readable = false, provider = null) {
   if (entry instanceof vscode.Uri) entry = { resourceUri: entry };
   if (entry?.resourceUri && !entry.filePath) {
@@ -2488,7 +2678,7 @@ async function chooseHistoryDiffMode(filePath, title) {
   if (path.extname(filePath).toLowerCase() === '.json') {
     choices.push({
       label: '事件脚本与 SQL 可读差异',
-      detail: '展开页面事件和数据源 SQL，不改变原始 JSON',
+      detail: '展开页面事件、数据源 SQL 和 GSS，不改变原始 JSON',
       readable: true
     });
   }
@@ -2862,12 +3052,46 @@ async function inspectUpdateTargets(repository, targets, output, token) {
       output,
       token
     );
-    inspections.push({ target, entries: parseSvnStatusXml(result.stdout, target) });
+    inspections.push({
+      target,
+      entries: parseSvnStatusXml(result.stdout, target),
+      health: parseSvnWorkingCopyHealthXml(result.stdout, target)
+    });
   }
   return inspections;
 }
 
-async function backupUpdatePatches(provider, repository, inspections, output, token) {
+/**
+ * A checkout interrupted by a gateway timeout can leave .svn in an
+ * incomplete and locked state.  SVN will not resume such a working copy
+ * until cleanup has been run.  Cleanup is deliberately limited to SVN's
+ * administrative locks; it does not remove unversioned files or local edits.
+ */
+async function prepareWorkingCopyForUpdate(target, output, token, inspection) {
+  let health = inspection?.health;
+  if (!health) {
+    const result = await runSvnCapture(
+      svnArgs(['status', '--xml', '--ignore-externals', '--', target]),
+      target,
+      output,
+      token
+    );
+    health = parseSvnWorkingCopyHealthXml(result.stdout, target);
+  }
+  if (!health.length) return false;
+  output.appendLine(
+    `[自动恢复] 检测到不完整或被锁定的 SVN 工作副本，先执行 cleanup：${target}`
+  );
+  await runSvn(
+    svnArgs(['cleanup', '--', '.']),
+    target,
+    output,
+    token
+  );
+  return true;
+}
+
+async function backupUpdateFiles(provider, repository, inspections) {
   const changed = inspections.filter((inspection) => (
     inspection.entries.some((entry) => !['unversioned', 'conflicted'].includes(entry.item))
   ));
@@ -2880,22 +3104,7 @@ async function backupUpdatePatches(provider, repository, inspections, output, to
     stamp
   );
   await fs.promises.mkdir(backupDirectory, { recursive: true });
-  for (const inspection of changed) {
-    const paths = inspection.entries
-      .filter((entry) => !['unversioned', 'conflicted'].includes(entry.item))
-      .map((entry) => entry.filePath);
-    const result = await runSvnCapture(
-      svnArgs(['diff', '--', ...paths]),
-      inspection.target,
-      output,
-      token
-    );
-    const relative = path.relative(repository.logicalRoot || repository.root, inspection.target)
-      || path.basename(inspection.target);
-    const patchPath = path.join(backupDirectory, `${safePathPart(relative)}.patch`);
-    await fs.promises.writeFile(patchPath, result.stdout, 'utf8');
-  }
-  return backupDirectory;
+  return backupWorkingCopyFiles({ backupDirectory, repository, inspections: changed });
 }
 
 async function updateRepository(provider, output, element) {
@@ -2920,10 +3129,13 @@ async function updateRepository(provider, output, element) {
     vscode.window.showWarningMessage(`检测到 ${conflicts.length} 个未解决冲突，已阻止更新。请先处理冲突或执行 SVN Cleanup。`);
     return null;
   }
-  const localChanges = inspections.flatMap((inspection) => inspection.entries);
+  // incomplete/wc-locked is SVN administrative state, not a user edit.  Do
+  // not ask the user to back it up; cleanup below will repair it automatically.
+  const localChanges = inspections.flatMap((inspection) => inspection.entries
+    .filter((entry) => entry.item !== 'incomplete'));
   if (localChanges.length) {
     const confirmed = await vscode.window.showWarningMessage(
-      `更新前检测到 ${localChanges.length} 个本地变更。插件会先备份已纳入 SVN 的真实 Patch，再执行更新；未纳入版本控制的文件不会被修改。`,
+      `更新前检测到 ${localChanges.length} 个本地变更。插件会先备份真实文件快照，再执行更新；未纳入版本控制的文件不会被修改。`,
       { modal: true },
       '备份并继续更新'
     );
@@ -2937,8 +3149,8 @@ async function updateRepository(provider, output, element) {
       cancellable: true
     }, async (progress, token) => {
       if (localChanges.length) {
-        progress.report({ message: '正在备份本地 SVN Patch' });
-        backupDirectory = await backupUpdatePatches(provider, repository, inspections, output, token);
+        progress.report({ message: '正在备份本地文件快照' });
+        backupDirectory = await backupUpdateFiles(provider, repository, inspections);
       }
       for (let index = 0; index < targets.length; index += 1) {
         if (token.isCancellationRequested) break;
@@ -2948,9 +3160,12 @@ async function updateRepository(provider, output, element) {
           increment: 100 / targets.length
         });
         try {
+          const inspection = inspections.find((candidate) => samePath(candidate.target, target));
+          await prepareWorkingCopyForUpdate(target, output, token, inspection);
           await runSvn(svnArgs(['update', '--ignore-externals', '--', target]), target, output, token);
           results.push({ target, ok: true });
         } catch (error) {
+          output.appendLine(`[更新失败] ${path.relative(repository.root, target) || path.basename(target)}：${svnErrorDescription(error)}`);
           results.push({ target, ok: false, error });
         }
       }
@@ -2962,11 +3177,14 @@ async function updateRepository(provider, output, element) {
   await provider.refresh();
   const failed = results.filter((result) => !result.ok);
   if (!failed.length && results.length === targets.length) {
-    vscode.window.showInformationMessage(`SVN 全量更新完成：${results.length} 个工作副本。${backupDirectory ? ` 更新前 Patch 已保存到 ${backupDirectory}` : ''}`);
+    vscode.window.showInformationMessage(`SVN 全量更新完成：${results.length} 个工作副本。${backupDirectory ? ` 更新前文件快照已保存到 ${backupDirectory}` : ''}`);
     return provider.repositories.find((item) => samePath(item.root, repository.root)) || repository;
   } else {
     const names = failed.map((result) => path.relative(repository.root, result.target) || path.basename(result.target));
-    vscode.window.showWarningMessage(`SVN 全量更新未完全成功：${results.length - failed.length}/${targets.length} 成功。失败：${names.join('、') || '已取消'}；详情见 Guthon SVN 输出。`);
+    const hasGatewayFailure = failed.some((result) => /\b502\b|Bad Gateway|E175002/i.test(String(result.error?.message || '')));
+    vscode.window.showWarningMessage(
+      `SVN 全量更新未完全成功：${results.length - failed.length}/${targets.length} 成功。失败：${names.join('、') || '已取消'}。${hasGatewayFailure ? '检测到 SVN 网关 502，请稍后重试。' : ''}详情见 Guthon SVN 输出。`
+    );
     return null;
   }
 }
@@ -3409,11 +3627,13 @@ function activate(context) {
   const baseContentProvider = new SvnBaseContentProvider();
   const readableDiffProvider = new ReadableDiffContentProvider();
   const scmChangeProvider = new ScmChangeContentProvider();
+  const inheritanceContentProvider = new InheritanceContentProvider();
   provider.onPageFileChange = (filePath) => segmentProvider.refreshSource(filePath);
   const output = vscode.window.createOutputChannel('Guthon SVN');
   provider.output = output;
   const gssProviders = createGssLanguageProviders(context, {
-    repositoryRootFor: (filePath) => repositoryForPath(provider, filePath)?.root || ''
+    repositoryRootFor: (filePath) => repositoryForPath(provider, filePath)?.root || '',
+    inheritanceUriFor: inheritanceDocumentUri
   });
   const sourceLinkSelectors = [
     { language: 'guthon-gss' },
@@ -3422,7 +3642,8 @@ function activate(context) {
     { language: 'gushen-vm' },
     // 真实服务组件可能被其他扩展设置成不同的 languageId；按文件类型兜底。
     { scheme: 'file', pattern: '**/*.gss' },
-    { scheme: VIRTUAL_DOCUMENT_SCHEME, pattern: '**/*.gss' }
+    { scheme: VIRTUAL_DOCUMENT_SCHEME, pattern: '**/*.gss' },
+    { scheme: INHERITANCE_DOCUMENT_SCHEME, pattern: '**/*.gss' }
   ];
   sourceControlManager = new SvnSourceControlManager(output);
   provider.onWorkingCopyFileChange = (filePath) => sourceControlManager.scheduleRefreshForPath(filePath);
@@ -3438,6 +3659,7 @@ function activate(context) {
     baseContentProvider,
     readableDiffProvider,
     scmChangeProvider,
+    inheritanceContentProvider,
     sourceControlManager,
     vscode.window.registerFileDecorationProvider(sourceControlManager),
     output,
@@ -3463,6 +3685,7 @@ function activate(context) {
     vscode.workspace.registerTextDocumentContentProvider(SVN_BASE_DOCUMENT_SCHEME, baseContentProvider),
     vscode.workspace.registerTextDocumentContentProvider(READABLE_DIFF_DOCUMENT_SCHEME, readableDiffProvider),
     vscode.workspace.registerTextDocumentContentProvider(SCM_CHANGE_DOCUMENT_SCHEME, scmChangeProvider),
+    vscode.workspace.registerTextDocumentContentProvider(INHERITANCE_DOCUMENT_SCHEME, inheritanceContentProvider),
     vscode.commands.registerCommand('guthonSvnNavigator.refresh', () => refreshProjectTree(provider)),
     vscode.commands.registerCommand('guthonSvnNavigator.searchPages', () => searchPages(provider)),
     vscode.commands.registerCommand('guthonSvnNavigator.openAiIndexMenu', () => openAiIndexMenu(provider, output)),
@@ -3472,6 +3695,8 @@ function activate(context) {
     vscode.commands.registerCommand('guthonSvnNavigator.copyAiContext', (element) => copyAiContext(provider, element, output)),
     vscode.commands.registerCommand('guthonSvnNavigator.openPage', openPage),
     vscode.commands.registerCommand('guthonSvnNavigator.openSourceFile', openSourceFile),
+    vscode.commands.registerCommand('guthonSvnNavigator.openInheritanceSource', openInheritanceSource),
+    vscode.commands.registerCommand('guthonSvnNavigator.materializeInheritance', (element) => materializeInheritanceCommand(provider, element)),
     vscode.commands.registerCommand('guthonSvnNavigator.openSegment', openSegment),
     vscode.commands.registerCommand('guthonSvnNavigator.revealInSource', openPage),
     vscode.commands.registerCommand('guthonSvnNavigator.openIndex', (element) => openPage({ filePath: element?.indexPath })),
@@ -3498,7 +3723,25 @@ function activate(context) {
     vscode.commands.registerCommand('guthonSvnNavigator.revertChange', (element) => revertChange(provider, sourceControlManager, element)),
     vscode.commands.registerCommand('guthonSvnNavigator.revertQuickDiffChange', (resourceUri, changes, changeIndex) => revertQuickDiffChange(provider, sourceControlManager, resourceUri, changes, changeIndex)),
     vscode.commands.registerCommand('guthonSvnNavigator.revertReadableDiffBlock', () => revertReadableDiffBlock(provider, sourceControlManager, readableDiffProvider)),
-    vscode.workspace.onDidSaveTextDocument((document) => sourceControlManager.scheduleRefreshForPath(document.uri.fsPath)),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      sourceControlManager.scheduleRefreshForPath(document.uri.fsPath);
+      if (document.uri.scheme === 'file' && path.extname(document.uri.fsPath).toLowerCase() === '.gss') {
+        void provider.refresh(false);
+      }
+    }),
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      if (document.uri.scheme !== 'file' || !isInheritanceParent(document.uri.fsPath)) return;
+      const childPath = inheritanceChildPath(document.uri.fsPath);
+      void vscode.window.showWarningMessage(
+        '当前文件是只读继承源（.inherit.gss），禁止直接修改。需要定制逻辑时，请展开到子文件后修改。',
+        '只读查看',
+        '打开子文件'
+      ).then((action) => {
+        if (action === '只读查看') return openInheritanceSource({ filePath: document.uri.fsPath, childPath });
+        if (action === '打开子文件' && fs.existsSync(childPath)) return openSourceFile({ filePath: childPath });
+        return undefined;
+      });
+    }),
     vscode.workspace.onDidCreateFiles((event) => event.files.forEach((uri) => sourceControlManager.scheduleRefreshForPath(uri.fsPath))),
     vscode.workspace.onDidDeleteFiles((event) => event.files.forEach((uri) => sourceControlManager.scheduleRefreshForPath(uri.fsPath))),
     vscode.workspace.onDidRenameFiles((event) => event.files.forEach((file) => {

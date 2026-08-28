@@ -45,12 +45,32 @@ function appendExtension(label, filePath) {
   return `${label}${extension}`;
 }
 
+function pageDisplayName(page) {
+  const label = String(page?.label || '').trim();
+  // index.md records the menu path in breadcrumb.  A main page is usually
+  // named only “主页面”, so include its owning module to distinguish pages
+  // with the same generic name in the SCM change list.
+  if (page?.pageType === '主页面' && page?.breadcrumb) {
+    const breadcrumb = String(page.breadcrumb).trim();
+    if (breadcrumb) return breadcrumb.replace(/\s*\/\s*/g, ' · ');
+  }
+  return label;
+}
+
 function readableChangeName(repository, entry) {
   const filePath = path.resolve(entry.filePath);
   const extension = path.extname(filePath);
-  if (repository.sourceCategory === 'pages') {
+  const relative = (entry.relativePath || path.relative(repository.logicalRoot || repository.root, filePath))
+    .replace(/\\/g, '/');
+  // SCM controls for the new layout are rooted at systems/<systemId>, so the
+  // status entry is relative to that child checkout as pages/... rather than
+  // to the logical project as systems/<systemId>/pages/....
+  const isPagePath = repository.sourceCategory === 'pages'
+    || /^systems\/[^/]+\/pages\//i.test(relative)
+    || (repository.sourceCategory === 'systems' && /^pages\//i.test(relative));
+  if (isPagePath) {
     const page = repository.pageByFilePath?.get(pathKey(filePath));
-    if (page) return `${page.label}（${path.basename(filePath, extension)}）${extension}`;
+    if (page) return `${pageDisplayName(page)}（${path.basename(filePath, extension)}）${extension}`;
     if (path.basename(filePath).toLowerCase() === 'index.md') return '页面索引（index.md）';
   }
   const indexedName = indexedObjectDisplayName(
@@ -59,7 +79,6 @@ function readableChangeName(repository, entry) {
   );
   if (indexedName) return indexedName;
   if (entry.sourceIdentity?.label) return appendExtension(entry.sourceIdentity.label, filePath);
-  const relative = entry.relativePath || path.relative(repository.root, filePath);
   const kind = {
     procedures: '过程函数',
     'system-script': '系统脚本',
