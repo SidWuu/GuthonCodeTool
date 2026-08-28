@@ -1,86 +1,9 @@
 {
-  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "Guthon GSS",
   "scopeName": "source.guthon-gss",
   "patterns": [
-    { "include": "#comments" },
-    { "include": "#strings" },
-    { "include": "#directives" },
-    { "include": "#variables" },
-    { "include": "#keywords" },
-    { "include": "#numbers" }
-  ],
-  "repository": {
-    "comments": {
-      "patterns": [
-        {
-          "name": "comment.block.guthon-gss",
-          "begin": "/\\*",
-          "end": "\\*/"
-        },
-        {
-          "name": "comment.line.double-slash.guthon-gss",
-          "match": "//.*$"
-        },
-        {
-          "name": "comment.block.velocity.guthon-gss",
-          "begin": "#\\*",
-          "end": "\\*#"
-        }
-      ]
-    },
-    "strings": {
-      "patterns": [
-        {
-          "name": "string.quoted.double.guthon-gss",
-          "begin": "\"",
-          "end": "\"",
-          "patterns": [
-            { "name": "constant.character.escape.guthon-gss", "match": "\\\\." },
-            { "include": "#variables" }
-          ]
-        },
-        {
-          "name": "string.quoted.single.guthon-gss",
-          "begin": "'",
-          "end": "'",
-          "patterns": [
-            { "name": "constant.character.escape.guthon-gss", "match": "\\\\." }
-          ]
-        }
-      ]
-    },
-    "directives": {
-      "patterns": [
-        {
-          "name": "keyword.control.directive.guthon-gss",
-          "match": "#(?:set|if|elseif|else|end|foreach|break|stop|macro|parse|include|evaluate)\\b"
-        }
-      ]
-    },
-    "variables": {
-      "patterns": [
-        {
-          "name": "variable.other.guthon-gss",
-          "match": "\\$!?\\{?[A-Za-z_][A-Za-z0-9_.]*\\}?"
-        }
-      ]
-    },
-    "keywords": {
-      "patterns": [
-        {
-          "name": "keyword.control.guthon-gss",
-          "match": "\\b(?:return|true|false|null|new)\\b"
-        }
-      ]
-    },
-    "numbers": {
-      "patterns": [
-        {
-          "name": "constant.numeric.guthon-gss",
-          "match": "(?<![A-Za-z_])\\d+(?:\\.\\d+)?"
-        }
-      ]
+    {
+      "include": "source.java"
     }
-  }
+  ]
 }

@@ -4,7 +4,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { parseSvnStatusXml } = require('../src/svn-status');
+const {
+  parseSvnRemoteStatusXml,
+  parseSvnStatusXml,
+  parseSvnWorkingCopyHealthXml
+} = require('../src/svn-status');
 
 test('parses SVN XML working copy changes and ignores normal entries', () => {
   const root = path.join('/tmp', 'guthon-svn');
@@ -60,4 +64,49 @@ test('keeps property-only changes as modified entries', () => {
     item: 'modified',
     props: 'modified'
   }]);
+});
+
+test('parses incoming repository changes and the compared revision', () => {
+  const xml = `<status><target path=".">
+    <entry path="pages/SYS/PG-DEMO.json">
+      <wc-status item="normal" props="none" revision="12"/>
+      <repos-status item="modified" props="none"/>
+    </entry>
+    <against revision="18"/>
+  </target></status>`;
+  const entries = parseSvnRemoteStatusXml(xml, '/repo');
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].remoteItem, 'modified');
+  assert.equal(entries[0].againstRevision, '18');
+});
+
+test('keeps SVN changelist names on local changes', () => {
+  const xml = `<status><target path="."><changelist name="年度计划">
+    <entry path="source.gss"><wc-status item="modified" props="none"/></entry>
+  </changelist></target></status>`;
+  const entries = parseSvnStatusXml(xml, '/repo');
+  assert.equal(entries[0].changelist, '年度计划');
+});
+
+test('detects interrupted and locked working copies separately from user changes', () => {
+  const root = path.join('/tmp', 'guthon-svn-incomplete');
+  const xml = `<status><target path=".">
+    <entry path="."><wc-status item="incomplete" revision="2789" wc-locked="true"/></entry>
+    <entry path="pages/SYS/PG-DEMO.json"><wc-status item="normal" props="none"/></entry>
+  </target></status>`;
+  const health = parseSvnWorkingCopyHealthXml(xml, root);
+  assert.equal(health.length, 1);
+  assert.equal(health[0].item, 'incomplete');
+  assert.equal(health[0].wcLocked, true);
+  assert.deepEqual(parseSvnStatusXml(xml, root).map((entry) => entry.item), ['incomplete']);
+});
+
+test('detects a working-copy lock even when the status item is normal', () => {
+  const xml = `<status><target path=".">
+    <entry path="."><wc-status item="normal" props="none" wc-locked="true"/></entry>
+  </target></status>`;
+  const health = parseSvnWorkingCopyHealthXml(xml, '/repo');
+  assert.equal(health.length, 1);
+  assert.equal(health[0].item, 'normal');
+  assert.equal(health[0].wcLocked, true);
 });

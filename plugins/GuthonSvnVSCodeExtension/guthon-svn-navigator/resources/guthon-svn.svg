@@ -1,4 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <path fill="currentColor" d="M4 3h11l5 5v13H4V3zm2 2v14h12V9h-4V5H6zm3 6h6v2H9v-2zm0 4h6v2H9v-2z"/>
-  <path fill="currentColor" d="M2 7h2v10H2V7zm18 3h2v8h-2v-8z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-label="Guthon SVN">
+  <defs>
+    <linearGradient id="guthonGradient" x1="12" y1="8" x2="52" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffd52f"/>
+      <stop offset="0.42" stop-color="#ff9b1b"/>
+      <stop offset="0.78" stop-color="#f04755"/>
+      <stop offset="1" stop-color="#d72c83"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#guthonGradient)" fill-rule="evenodd" d="M32 4C16.54 4 4 16.54 4 32s12.54 28 28 28c8.24 0 15.64-3.56 20.76-9.24V32H32v10h10.78A14 14 0 1 1 46 32h14C60 16.54 47.46 4 32 4Zm0 12a16 16 0 1 0 16 16H36v-4h12A16 16 0 0 0 32 16Z"/>
+  <path fill="url(#guthonGradient)" d="M31 28h28v12H31z"/>
 </svg>

@@ -10,8 +10,10 @@ const {
   formatJavaScript,
   formatReadablePageScripts,
   formatServiceScript,
+  jsonStringAtParts,
   parsePageComponents,
   rewritePageSegment,
+  rewriteJsonStringAtParts,
   parsePageIndex,
   resolveIndexLink
 } = require('../src/page-index');
@@ -229,6 +231,58 @@ test('renders only page scripts as readable multiline diff text', () => {
   assert.match(readable, /select \*\nfrom RM_FUTURES_PROJECT/);
   assert.doesNotMatch(readable, /"views"/);
   assert.doesNotMatch(readable, /\\n/);
+});
+
+test('treats dsType 1 data sources as GSS instead of SQL', () => {
+  const source = JSON.stringify({
+    views: {
+      rows: [{
+        component: {
+          type: 'table-main',
+          name: 'scriptTable',
+          datasource: {
+            dsType: 1,
+            script: '#set($rows = $vs.dbTools.list("select 1"));\nreturn $rows;',
+            sql: 'SELECT SHOULD_NOT_BE_USED FROM TEST'
+          }
+        }
+      }]
+    }
+  });
+  const components = parsePageComponents(source, '/tmp/PG-SCRIPT-DS.json');
+  const datasource = components[0].children.find((node) => node.kind === 'datasource');
+  assert.equal(datasource.label, '数据源脚本（GSS）');
+  assert.equal(datasource.dataSourceMode, 'script');
+  assert.equal(datasource.dataSourceType, 1);
+  assert.match(datasource.virtualPath, /datasource\/script$/);
+  assert.equal(extractPageSegment(source, datasource), '#set($rows = $vs.dbTools.list("select 1"));\nreturn $rows;\n');
+  const readable = formatReadablePageScripts(source);
+  assert.match(readable, /datasource > script · GSS/);
+  assert.match(readable, /#set\(\$rows = \$vs\.dbTools\.list\("select 1"\)\);/);
+  assert.doesNotMatch(readable, /SHOULD_NOT_BE_USED/);
+});
+
+test('rewrites only the selected JSON script block', () => {
+  const source = JSON.stringify({
+    views: {
+      rows: [{
+        component: {
+          pageEvents: {
+            onClickScript: 'old script',
+            onOpenScript: 'keep script'
+          }
+        }
+      }]
+    },
+    other: 'keep'
+  });
+  const parts = ['views', 'rows', '0', 'component', 'pageEvents', 'onClickScript'];
+  assert.equal(jsonStringAtParts(source, parts), 'old script');
+  const updated = rewriteJsonStringAtParts(source, parts, 'new script');
+  const parsed = JSON.parse(updated);
+  assert.equal(jsonStringAtParts(updated, parts), 'new script');
+  assert.equal(parsed.views.rows[0].component.pageEvents.onOpenScript, 'keep script');
+  assert.equal(parsed.other, 'keep');
 });
 
 test('reports malformed JSON instead of returning a misleading component tree', () => {
