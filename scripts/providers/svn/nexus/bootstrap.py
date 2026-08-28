@@ -1,30 +1,30 @@
-"""Bootstrap a Nexus SVN authorization manifest from the workspace BAT."""
+"""Bootstrap a Nexus SVN authorization manifest from the workspace checkout script."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from providers.svn.checkout import resolve_cached_scope
-from providers.svn.scope_import import ImportResult, build_manifest, read_bat, write_manifest
+from providers.svn.checkout import resolve_configured_scope
+from providers.svn.scope_import import ImportResult, build_manifest, read_checkout_script, write_manifest
 
 
 COMMON_CATEGORIES = {"skill", "public"}
-SYSTEM_CATEGORIES = {"pages", "system-script"}
-DATA_SOURCE_CATEGORIES = {"procedures", "tables", "views"}
+SYSTEM_CATEGORIES = {"systems", "pages", "system-script"}
+DATA_SOURCE_CATEGORIES = {"datasources", "procedures", "tables", "views"}
 
 
 def _paths(workspace: dict) -> tuple[Path, Path]:
     settings = workspace.get("svn") or {}
     if settings.get("checkoutLayout") != "manifest-working-copies":
-        raise SystemExit("Workspace BAT bootstrap requires manifest-working-copies")
-    bat_path = settings.get("checkoutBatPath")
+        raise SystemExit("Workspace checkout-script bootstrap requires manifest-working-copies")
+    script_path = settings.get("checkoutScriptPath")
     manifest_path = settings.get("scopeManifestPath")
-    if not isinstance(bat_path, Path):
-        raise SystemExit(f"Missing SVN checkout BAT path for {workspace['workspaceKey']}")
+    if not isinstance(script_path, Path):
+        raise SystemExit(f"Missing SVN checkout script path for {workspace['workspaceKey']}")
     if not isinstance(manifest_path, Path):
         raise SystemExit(f"Missing SVN scope manifest path for {workspace['workspaceKey']}")
-    return bat_path, manifest_path
+    return script_path, manifest_path
 
 
 def _existing_manifest(path: Path) -> object:
@@ -40,17 +40,17 @@ def _mapping_error(workspace: dict, scope: dict) -> str:
     details = []
     if scope["missingAliases"]:
         details.append(f"未找到别名：{', '.join(scope['missingAliases'])}")
-    if scope["duplicateAliases"]:
-        details.append(f"存在多组映射：{', '.join(scope['duplicateAliases'])}")
+    if scope["invalidAliases"]:
+        details.append(f"映射格式无效：{', '.join(scope['invalidAliases'])}")
     if not scope["systemIds"]:
         details.append("未得到 SYSTEM_ID")
     if not scope["dataSourceIds"]:
         details.append("未得到 DATA_SOURCE_ID")
     return (
-        f"无法把 {workspace['workspaceKey']} 的 systems.include.system_aliases 映射到 SVN 范围"
-        f"（datasource={workspace.get('datasourceName') or '<未配置>'}；{'；'.join(details)}）。"
-        "请为每个别名提供唯一的 SYSTEM_ALIAS_ID、SYSTEM_ID、DATA_SOURCE_ID，以及这些映射所属的 datasource；"
-        "随后更新 config/system-data.json 再重试。"
+        f"无法把 {workspace['workspaceKey']} 的 systems.include.mappings 映射到 SVN 范围"
+        f"（{'；'.join(details)}）。"
+        "请在 products.yaml 或 projects.yaml 的 systems.include.mappings 中，"
+        "为每个别名配置 system_id 和 data_source_id。"
     )
 
 
@@ -58,13 +58,7 @@ def _filter_to_configured_systems(workspace: dict, result: ImportResult) -> Impo
     aliases = workspace.get("systemAliases") or []
     if not aliases:
         return result
-    config_dir = workspace.get("configDir")
-    if not isinstance(config_dir, Path):
-        raise SystemExit(
-            f"无法读取 {workspace['workspaceKey']} 的系统映射。请提供 config/system-data.json，"
-            "其中每个已配置别名包含唯一的 SYSTEM_ALIAS_ID、SYSTEM_ID、DATA_SOURCE_ID 和 datasource。"
-        )
-    scope = resolve_cached_scope(config_dir, workspace.get("datasourceName") or "", aliases)
+    scope = resolve_configured_scope(workspace)
     if not scope["complete"] or not scope["systemIds"] or not scope["dataSourceIds"]:
         raise SystemExit(_mapping_error(workspace, scope))
 
@@ -86,8 +80,8 @@ def _filter_to_configured_systems(workspace: dict, result: ImportResult) -> Impo
         if missing_data_source_ids:
             missing.append(f"DATA_SOURCE_ID={','.join(missing_data_source_ids)}")
         raise SystemExit(
-            f"BAT 无法覆盖 {workspace['workspaceKey']} 已配置子系统的 SVN 范围：{'；'.join(missing)}。"
-            "请提供同一谷神产品、同一账号最新下载的 svnCheckoutHere.bat；"
+            f"签出脚本无法覆盖 {workspace['workspaceKey']} 已配置子系统的 SVN 范围：{'；'.join(missing)}。"
+            "请提供同一谷神产品、同一账号最新下载的 svnCheckoutHere.sh；"
             "若这些 ID 确实没有源码目录，请同时说明缺少的是 pages、system-script、procedures、tables 还是 views。"
         )
 
@@ -123,20 +117,20 @@ def _filter_to_configured_systems(workspace: dict, result: ImportResult) -> Impo
     )
 
 
-def _build_workspace_manifest(workspace: dict, bat_path: Path) -> ImportResult:
-    parsed = build_manifest(read_bat(bat_path), workspace["workspaceKey"])
+def _build_workspace_manifest(workspace: dict, script_path: Path) -> ImportResult:
+    parsed = build_manifest(read_checkout_script(script_path), workspace["workspaceKey"])
     return _filter_to_configured_systems(workspace, parsed)
 
 
 def preview(workspace: dict) -> dict:
-    """Return a credential-free BAT/manifest change summary without writing files."""
+    """Return a credential-free script/manifest change summary without writing files."""
 
-    bat_path, manifest_path = _paths(workspace)
-    if not bat_path.is_file():
+    script_path, manifest_path = _paths(workspace)
+    if not script_path.is_file():
         raise SystemExit(
-            f"Missing svnCheckoutHere.bat for {workspace['workspaceKey']}: {bat_path}"
+            f"Missing SVN checkout script for {workspace['workspaceKey']}: {script_path}"
         )
-    result = _build_workspace_manifest(workspace, bat_path)
+    result = _build_workspace_manifest(workspace, script_path)
     previous = _existing_manifest(manifest_path)
     old_entries = {
         str(entry.get("id") or ""): entry
@@ -149,7 +143,8 @@ def preview(workspace: dict) -> dict:
     return {
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
-        "batPath": str(bat_path),
+        "scriptPath": str(script_path),
+        "batPath": str(script_path),
         "manifestPath": str(manifest_path),
         "commands": result.command_count,
         "entries": len(new_entries),
@@ -164,12 +159,12 @@ def preview(workspace: dict) -> dict:
 
 
 def import_scope(workspace: dict, *, accept_scope_change: bool = False) -> dict:
-    """Write the sanitized manifest; BAT credentials are never persisted."""
+    """Write the sanitized manifest; script credentials are never persisted."""
 
-    bat_path, manifest_path = _paths(workspace)
-    if not bat_path.is_file():
+    script_path, manifest_path = _paths(workspace)
+    if not script_path.is_file():
         raise SystemExit(
-            f"Missing svnCheckoutHere.bat for {workspace['workspaceKey']}: {bat_path}"
+            f"Missing SVN checkout script for {workspace['workspaceKey']}: {script_path}"
         )
-    result = _build_workspace_manifest(workspace, bat_path)
+    result = _build_workspace_manifest(workspace, script_path)
     return write_manifest(manifest_path, result, replace=accept_scope_change)

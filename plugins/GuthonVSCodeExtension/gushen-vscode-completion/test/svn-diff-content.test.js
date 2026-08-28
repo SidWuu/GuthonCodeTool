@@ -38,3 +38,29 @@ test('opens SVN BASE and working copy in the native VS Code diff editor', async 
   assert.notEqual(calls[0][1].toString(), calls[0][2].toString());
   provider.dispose();
 });
+
+test('prefers PAGE readable projections while retaining an explicit raw diff', async () => {
+  const calls = [];
+  const vscode = {
+    Uri: { from: fakeUri },
+    commands: { executeCommand: async (...args) => calls.push(args) },
+  };
+  const provider = new SvnDiffContentProvider({ vscode });
+  const result = {
+    workspaceKey: 'products.demo',
+    path: 'systems/SYS-1/pages/PG-1.json',
+    baseContent: '{"raw":1}',
+    workingContent: '{"raw":2}',
+    readableBaseContent: '# PAGE 可读源码\nold();\n',
+    readableWorkingContent: '# PAGE 可读源码\nnew();\n',
+  };
+
+  await showSvnDiff(vscode, provider, result);
+  await showSvnDiff(vscode, provider, result, { raw: true });
+
+  assert.match(calls[0][3], /PAGE 可读源码/);
+  assert.equal(provider.provideTextDocumentContent(calls[0][1]), result.readableBaseContent);
+  assert.doesNotMatch(calls[1][3], /PAGE 可读源码/);
+  assert.equal(provider.provideTextDocumentContent(calls[1][1]), result.baseContent);
+  provider.dispose();
+});

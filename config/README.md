@@ -1,6 +1,6 @@
 # 配置说明
 
-YAML 配置文件首行说明各自用途；`system-data.json` 是工具自动生成的缓存。
+YAML 配置文件首行说明各自用途；`system-data.json` 只是在 DATABASE 拉取时自动生成的本地缓存，SVN 不读取它。
 
 复制模板后再填写真实配置：
 
@@ -68,33 +68,33 @@ products:
     name: 示例产品
 ```
 
-在 Nexus 的该产品节点选择 SVN，再把谷神平台下载的 `svnCheckoutHere.bat` 放到该工程的 `context/`。Nexus 自动使用
+在 Nexus 的该产品节点选择 SVN，再把谷神平台下载的 `svnCheckoutHere.sh` 放到该工程的 `context/`。Nexus 自动使用
 `context/authorized-scope.json` 和 `var/checkout/<配置 ID>`，因此通常不需要配置 `svn.scope_manifest`、
 `checkout_layout` 或 `checkout_root`。工作区配置 ID 仍须在产品/项目之间唯一。
 
-Nexus 的“从 BAT 检出/更新 SVN”会先显示清单条目及增删改数量，确认后再写入脱敏清单、检出或更新。等价 CLI：
+Nexus 的“从签出脚本检出/更新 SVN”会先显示清单条目及增删改数量，确认后再写入脱敏清单、检出或更新。等价 CLI：
 
 ```bash
 .venv/bin/python scripts/guthon_tool.py source-mode --home . --workspace products.demo-product -- set --mode svn
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- scope-preview
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-bat --accept-scope-change
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-script --accept-scope-change
 ```
 
-配置了 `systems.include.system_aliases` 时，BAT 仍是授权上限，但实际清单只保留这些别名经当前 datasource 的
-`config/system-data.json` 唯一映射出的范围：`pages/system-script` 使用 `SYSTEM_ID`，
-`procedures/tables/views` 使用 `DATA_SOURCE_ID`，`skill/public` 作为公共目录保留。映射缺失或有歧义时会在检出前
-阻断，并要求为每个别名提供 `SYSTEM_ALIAS_ID`、`SYSTEM_ID`、`DATA_SOURCE_ID` 及所属 datasource；映射 ID 不在 BAT
-中时则要求提供同一产品、同一账号最新下载的 BAT，或说明对应源码分类确实不存在。
+配置了 `systems.include.mappings` 时，签出脚本仍是授权上限，但实际清单只保留该映射明确声明的范围：
+`systems/<SYSTEM_ID>` 聚合 `pages` 与 `system-script`，
+`datasources/<DATA_SOURCE_ID>` 聚合 `procedures`、`tables` 与 `views`，`skill/public` 作为公共目录保留。映射缺失或格式无效时会在检出前
+阻断，并要求为每个别名提供 `system_id` 和 `data_source_id`；映射 ID 不在签出脚本
+中时则要求提供同一产品、同一账号最新下载的脚本，或说明对应源码分类确实不存在。
 
-导入器支持 UTF-8、UTF-16 和 GB18030 BAT，只接受字面量精确 URL 和安全的相对检出目录；会忽略 `rem`、`echo`
+导入器支持 UTF-8/UTF-16/GB18030 BAT 和 UTF-8 shell 脚本，只接受字面量精确 URL 和安全的相对检出目录；会忽略 `rem`、`echo` 与 shell 注释
 中的命令以及 `--username`、`--password` 等认证参数。变量 URL、绝对目标目录、重复/重叠 URL、重复/重叠本地目录
-或无法识别的业务分类都会阻止生成。BAT 不会被执行，凭据不会进入清单、日志或公开配置，移出清单的旧 working
+或无法识别的业务分类都会阻止生成。签出脚本不会被执行，凭据不会进入清单、日志或公开配置，移出清单的旧 working
 copy 也不会自动删除。
 
-仅在需要覆盖默认 checkout 根、共享凭据环境变量名或调整非核心高级能力时增加 `svn:` 块。BAT 多 working-copy 模式
+仅在需要覆盖默认 checkout 根、共享凭据环境变量名或调整非核心高级能力时增加 `svn:` 块。签出脚本多 working-copy 模式
 默认读取 `GUTHON_NEXUS_SVN_USERNAME` 和 `GUTHON_NEXUS_SVN_PASSWORD`，不需要每个产品或项目重复配置；
 `username_env`、`password_env` 仅用于特殊覆盖且只保存环境变量名。密码由工具经 stdin 传给 SVN。证书异常默认全部
-拒绝。Nexus 的 BAT 多 working-copy SVN 模式固定支持“保存到谷神”，不再使用 `platform_save` capability 开关；
+拒绝。Nexus 的多 working-copy SVN 模式固定支持“保存到谷神”，不再使用 `platform_save` capability 开关；
 保存仍需经过文件选择、内容哈希复核、远程最新状态检查和提交说明确认。
 
 证书暂时无法修复时，`allowed_cert_failures` 必须与 `certificate_pins` 同时配置；pin 是管理员通过独立渠道确认的
@@ -106,13 +106,13 @@ copy 也不会自动删除。
 首次初始化和日常刷新：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-bat --accept-scope-change
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-script --accept-scope-change
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- refresh
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --diff
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --remote
 ```
 
-`sync-from-bat` 首次检出 BAT 中的每个精确 URL，后续更新现有 working copy 并全量建索引；`refresh` 可用重复的 `--working-copy <entry-id>` 精确选择物理
+`sync-from-script` 首次检出签出脚本中筛选后的每个精确 URL，全部仓库使用同一份工作区认证；后续更新现有 working copy 并全量建索引。`sync-from-bat` 保留为兼容别名。`refresh` 可用重复的 `--working-copy <entry-id>` 精确选择物理
 working copy，有本地修改时必须显式增加 `--merge-local`。普通 `reindex` 只扫描本地文件。新清单布局不接受
 `--prune`，范围变更必须先审阅清单和本地目录，工具不会自动删除旧 checkout。
 
@@ -127,8 +127,10 @@ products:
     datasource: demo-product-dev
     systems:
       include:
-        system_aliases:
-          - demo.system
+        mappings:
+          demo.system:
+            system_id: SYS-DEMO
+            data_source_id: "0000"
     page_origins: []
 ```
 
@@ -136,9 +138,11 @@ products:
 
 过程函数按 `source-tables.yaml` 中配置的数据源字段过滤。
 
-源码、表结构和单据类型拉取会在各自 datasource 的 `gd_system` 中按别名反查系统与数据源 ID。每个 datasource 只在首次使用或别名变化时查询，结果写入 `config/system-data.json`；删除该文件可强制重建缓存。
+DATABASE 的源码、表结构和单据类型拉取会在各自 datasource 的 `gd_system` 中按别名反查系统与数据源 ID。每个 datasource 只在首次使用或别名变化时查询，结果写入 `config/system-data.json`；删除该文件可强制重建缓存。
 
-如果多个子系统共用同一个数据源 ID，过程函数只存一份。根目录使用 `system_aliases` 中第一个匹配子系统的名称，后续重复子系统的 `procedure` 目录会链接到第一个目录。
+SVN 不读取 `system-data.json`。产品和项目分别在 `mappings` 中维护自己的映射；alias 直接作为键，每项只有一对一的 `system_id`、`data_source_id`。项目的 `DATA_SOURCE_ID` 可能与产品不同，必须按该项目的签出脚本或平台信息配置。`data_source_id` 应写成字符串，避免 `0000` 被 YAML 解析为数字。
+
+如果多个子系统共用同一个数据源 ID，过程函数只存一份。DATABASE 根目录使用 `mappings` 中第一个匹配子系统的名称，后续重复子系统的 `procedure` 目录会链接到第一个目录。
 
 ## source-tables.yaml
 

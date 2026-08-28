@@ -56,6 +56,29 @@ test('loads page fragments independently from the catalog', async () => {
   ]);
 });
 
+test('passes exact-path and working-copy SVN refresh selections without credentials in arguments', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    getEnvironment: async () => ({ GUTHON_NEXUS_SVN_PASSWORD: 'secret' }),
+    spawnProcess: fakeSpawn(calls, { ok: true, updated: [] }),
+  });
+  await client.refresh('products.demo', {
+    sourcePath: 'pages/SYS-1/PG-1.json',
+    mergeLocal: true,
+  });
+  await client.refresh('products.demo', {
+    workingCopyIds: ['pages-SYS-1', 'procedures-DS-1'],
+  });
+  assert.deepEqual(calls[0].args.slice(-3), [
+    '--path', 'pages/SYS-1/PG-1.json', '--merge-local',
+  ]);
+  assert.equal(calls[0].args.includes('secret'), false);
+  assert.deepEqual(calls[1].args.slice(-4), [
+    '--working-copy', 'pages-SYS-1', '--working-copy', 'procedures-DS-1',
+  ]);
+});
+
 test('decodes UTF-8 output only after joining process chunks', async () => {
   const client = new SvnBackendClient({
     getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),

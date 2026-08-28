@@ -1,0 +1,7 @@
+{
+  "name": "Guthon GSS",
+  "scopeName": "source.guthon-gss",
+  "patterns": [
+    { "include": "source.java" }
+  ]
+}

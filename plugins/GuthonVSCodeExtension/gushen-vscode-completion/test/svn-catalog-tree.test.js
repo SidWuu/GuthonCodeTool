@@ -2,11 +2,30 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   buildSourceTree,
+  CATEGORY_ICONS,
   fragmentLabel,
   groupCatalog,
   objectLabel,
+  SOURCE_ICONS,
   SvnCatalogTreeProvider,
 } = require('../src/svn/catalog-tree');
+
+test('uses distinct icons for SVN business categories and source types', () => {
+  assert.deepEqual(CATEGORY_ICONS, {
+    pages: 'layout',
+    procedures: 'symbol-method',
+    'system-script': 'terminal',
+    tables: 'table',
+    views: 'eye',
+    skill: 'book',
+    public: 'folder-library',
+  });
+  assert.equal(SOURCE_ICONS.page, 'preview');
+  assert.equal(SOURCE_ICONS.procedure, 'symbol-method');
+  assert.equal(SOURCE_ICONS['system-script'], 'terminal');
+  assert.equal(SOURCE_ICONS.table, 'table');
+  assert.equal(SOURCE_ICONS.view, 'eye');
+});
 
 test('groups SVN objects by business category without grouping by physical working copy', () => {
   const groups = groupCatalog([
@@ -52,6 +71,37 @@ test('keeps indexed source directories and sorts folders before leaves', () => {
   assert.equal(tree[0].children[0].children[0].label, 'pkg');
   assert.equal(tree[0].children[0].children[0].children[0].label, 'save demo.pkg');
   assert.equal(tree[1].label, 'run root');
+});
+
+test('orders PAGE and procedure folders and leaves by index.md position', () => {
+  const tree = buildSourceTree([
+    {
+      sourceType: 'page', sourceId: 'PG-A', sourceAliasId: 'a', funId: '',
+      treePath: ['示例系统', '后出现模块'], treeLabel: '字母靠前页面', treeOrder: [0, 30],
+    },
+    {
+      sourceType: 'page', sourceId: 'PG-B', sourceAliasId: 'b', funId: '',
+      treePath: ['示例系统', '先出现模块'], treeLabel: '字母靠后页面', treeOrder: [0, 10],
+    },
+    {
+      sourceType: 'page', sourceId: 'PG-C', sourceAliasId: 'c', funId: '',
+      treePath: ['示例系统'], treeLabel: '中间页面', treeOrder: [0, 20],
+    },
+    {
+      sourceType: 'page', sourceId: 'PG-Z', sourceAliasId: 'z', funId: '',
+      treePath: ['示例系统', '先出现模块'], treeLabel: '第一项', treeOrder: [0, 11],
+    },
+  ]);
+
+  assert.deepEqual(tree[0].children.map((item) => item.label), [
+    '先出现模块',
+    '中间页面',
+    '后出现模块',
+  ]);
+  assert.deepEqual(tree[0].children[0].children.map((item) => item.label), [
+    '字母靠后页面',
+    '第一项',
+  ]);
 });
 
 test('keeps a lazy PAGE leaf expandable before its fragments are loaded', async () => {

@@ -105,13 +105,18 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
         if not selected_workspace:
             raise SystemExit("Missing --workspace. Use products.<product_id> or projects.<project_id>.")
         import_parser = argparse.ArgumentParser(prog="guthon_tool.py import-svn-scope")
-        import_parser.add_argument("--bat", required=True, help="path to the checkout BAT downloaded from Guthon")
+        source = import_parser.add_mutually_exclusive_group(required=True)
+        source.add_argument("--script", help="path to svnCheckoutHere.sh or svnCheckoutHere.bat")
+        source.add_argument("--bat", help="legacy alias for a checkout BAT path")
         import_parser.add_argument("--output", required=True, help="target authorized-scope.json path")
         import_parser.add_argument("--replace", action="store_true", help="replace an existing changed manifest")
         parsed = import_parser.parse_args(extra_args)
-        from providers.svn.scope_import import build_manifest, read_bat, write_manifest
+        from providers.svn.scope_import import build_manifest, read_checkout_script, write_manifest
 
-        result = build_manifest(read_bat(Path(parsed.bat).expanduser().resolve()), selected_workspace)
+        result = build_manifest(
+            read_checkout_script(Path(parsed.script or parsed.bat).expanduser().resolve()),
+            selected_workspace,
+        )
         output_path = Path(parsed.output).expanduser()
         if not output_path.is_absolute():
             output_path = home / output_path
@@ -206,7 +211,7 @@ def _reindex_svn_files(gusen_hub, config, workspace, source_paths: list[str]) ->
 def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str] | None:
     """Return exact changed source paths, or None when a full scan is safer."""
 
-    from providers.svn.nexus.manifest import load_authorized_scope
+    from providers.svn.nexus.manifest import load_authorized_scope, source_category
 
     entries = {entry.id: entry for entry in load_authorized_scope(workspace).entries}
     allowed_suffixes = {
@@ -222,6 +227,24 @@ def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str] 
         entry = entries.get(updated.get("id"))
         if entry is None:
             return None
+        explicit_paths = list(updated.get("paths") or [])
+        if explicit_paths:
+            for logical_path in explicit_paths:
+                prefix = entry.local_subdir + "/"
+                if not str(logical_path).startswith(prefix):
+                    return None
+                relative = str(logical_path)[len(prefix):]
+                target = (entry.root / relative).resolve()
+                category = source_category(entry, relative)
+                if (
+                    not relative
+                    or relative == "."
+                    or entry.root.resolve() not in target.parents
+                    or target.suffix.lower() not in allowed_suffixes.get(category, set())
+                ):
+                    return None
+                logical_paths.append(str(logical_path))
+            continue
         changes = list((updated.get("before") or {}).get("remoteChanges") or [])
         if merge_local:
             changes.extend((updated.get("before") or {}).get("changes") or [])
@@ -234,7 +257,7 @@ def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str] 
                 or relative == "."
                 or entry.root.resolve() not in target.parents
                 or not target.is_file()
-                or target.suffix.lower() not in allowed_suffixes.get(entry.category, set())
+                or target.suffix.lower() not in allowed_suffixes.get(source_category(entry, relative), set())
             ):
                 return None
             logical_paths.append(f"{entry.local_subdir}/{relative}")
@@ -286,6 +309,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             choices=[
                 "init",
                 "scope-preview",
+                "sync-from-script",
                 "sync-from-bat",
                 "refresh",
                 "status",
@@ -309,7 +333,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         svn_parser.add_argument(
             "--accept-scope-change",
             action="store_true",
-            help="accept the reviewed workspace BAT as the new exact authorization manifest",
+            help="accept the reviewed workspace checkout script as the new exact authorization manifest",
         )
         svn_parser.add_argument("--diff", action="store_true", help="include full svn diff in status output")
         svn_parser.add_argument("--remote", action="store_true", help="contact the repository and report out-of-date paths")
@@ -344,16 +368,16 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             raise SystemExit("--prune is only available for the legacy sparse SVN layout")
         if not manifest_layout and (parsed.merge_local or parsed.working_copy):
             raise SystemExit("--merge-local and --working-copy require manifest-working-copies")
-        bootstrap = lambda: gusen_hub.bootstrap_system_data(config, workspace)
+        bootstrap = None
         if parsed.action == "scope-preview":
             if not manifest_layout:
                 raise SystemExit("svn scope-preview requires manifest-working-copies")
             from providers.svn.nexus import bootstrap as nexus_bootstrap
 
             result = nexus_bootstrap.preview(workspace)
-        elif parsed.action == "sync-from-bat":
+        elif parsed.action in {"sync-from-script", "sync-from-bat"}:
             if not manifest_layout:
-                raise SystemExit("svn sync-from-bat requires manifest-working-copies")
+                raise SystemExit("svn sync-from-script requires manifest-working-copies")
             from providers.svn.nexus import bootstrap as nexus_bootstrap
             from providers.svn.nexus import workspace as nexus_workspace
             from providers.svn.nexus.manifest import load_authorized_scope
@@ -367,7 +391,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     current = nexus_workspace.status(workspace)
                     if not current["status"]["clean"] and not parsed.merge_local:
                         raise SystemExit(
-                            "SVN BAT sync is blocked by local changes; review them first or explicitly allow merge-local"
+                            "SVN checkout-script sync is blocked by local changes; review them first or explicitly allow merge-local"
                         )
             scope_import = nexus_bootstrap.import_scope(
                 workspace,
@@ -383,7 +407,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             refreshed_status = (refreshed or {}).get("status") or {}
             result = {
                 "ok": True,
-                "action": "updated-from-bat" if had_working_copies else "checked-out-from-bat",
+                "action": "updated-from-script" if had_working_copies else "checked-out-from-script",
                 "scopeImport": scope_import,
                 "workingCopies": len(initialized_scope.get("workingCopies") or []),
                 "clean": bool((refreshed_status or initialized_scope).get("clean")),
@@ -402,14 +426,19 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
         elif parsed.action == "refresh":
             if manifest_layout:
+                if parsed.path and parsed.working_copy:
+                    raise SystemExit("svn refresh accepts --path or --working-copy, not both")
                 from providers.svn.nexus import workspace as nexus_workspace
 
                 result = nexus_workspace.refresh(
                     workspace,
                     merge_local=parsed.merge_local,
                     working_copy_ids=parsed.working_copy,
+                    logical_paths=[parsed.path] if parsed.path else None,
                 )
             else:
+                if parsed.path:
+                    raise SystemExit("svn refresh --path requires manifest-working-copies")
                 result = checkout.refresh(workspace, gusen_hub.CONFIG_DIR, bootstrap, prune=parsed.prune)
             result["reindex"] = (
                 _reindex_svn_refresh(gusen_hub, config, workspace, result)

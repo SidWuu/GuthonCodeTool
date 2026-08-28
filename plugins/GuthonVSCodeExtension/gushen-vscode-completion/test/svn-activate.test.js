@@ -2,12 +2,26 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   activeSourceIdentity,
+  nexusCandidateIds,
   referenceTarget,
   resolveSourcePath,
   runFocusedTreeCommand,
   selectCandidates,
   sourceModuleElement,
 } = require('../src/svn/activate');
+
+test('all and single submit selections include Nexus-managed candidates only', () => {
+  const preview = {
+    candidates: [
+      { id: 'nexus-a', path: 'pages/a.json', sessionManaged: true },
+      { id: 'external', path: 'pages/b.json', sessionManaged: false },
+      { id: 'nexus-c', path: 'procedures/c.gss', sessionManaged: true },
+    ],
+  };
+  assert.deepEqual(nexusCandidateIds(preview), ['nexus-a', 'nexus-c']);
+  assert.deepEqual(nexusCandidateIds(preview, 'procedures/c.gss'), ['nexus-c']);
+  assert.deepEqual(nexusCandidateIds(preview, 'pages/b.json'), []);
+});
 
 test('multi-selection can span physical working copies', async () => {
   const calls = [];
@@ -81,6 +95,12 @@ test('opens native tree search after focusing the SVN source view', async () => 
   assert.equal(manifest.contributes.configurationDefaults['workbench.list.horizontalScrolling'], true);
   assert.equal(manifest.contributes.configurationDefaults['workbench.list.defaultFindMode'], 'filter');
   assert.equal(manifest.contributes.configurationDefaults['workbench.list.defaultFindMatchType'], 'fuzzy');
+  const resourceMenus = manifest.contributes.menus['scm/resourceState/context'];
+  assert(resourceMenus.some((item) => item.command === 'gushenCompletion.saveSingleSvnNexusChange'));
+  assert(resourceMenus.some((item) => item.command === 'gushenCompletion.updateSingleSvnChange'));
+  const groupMenus = manifest.contributes.menus['scm/resourceGroup/context'];
+  assert(groupMenus.some((item) => item.command === 'gushenCompletion.saveAllSvnNexusChanges'));
+  assert(groupMenus.some((item) => item.command === 'gushenCompletion.updateAllSvnChanges'));
 });
 
 test('maps the active virtual editor back to its Nexus source identity', () => {

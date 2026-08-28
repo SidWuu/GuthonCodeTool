@@ -51,7 +51,7 @@ context/
 ```text
 docs/                        当前产品或项目的业务文档
 context/
-├── svnCheckoutHere.bat      谷神平台下载的精确授权输入
+├── svnCheckoutHere.sh       谷神平台下载的精确授权输入（旧 .bat 兼容）
 ├── authorized-scope.json    脱敏授权上限
 ├── checkout-scope.json      多 working copy 运行清单
 ├── source-mode.json         当前源码模式

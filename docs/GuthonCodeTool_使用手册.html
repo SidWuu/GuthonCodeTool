@@ -169,7 +169,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="1-准备与下载">1. 准备与下载</h2>
-<p>开始前准备 VS Code、Chrome、产品/项目配置和公司提供的 AI 规范文件。DATABASE 模式需要数据库只读连接；SVN 模式需要 SVN 1.10+ 客户端、谷神平台下载的 <code>svnCheckoutHere.bat</code>、相应权限和工作空间共享 SVN 凭据，日常无需手工配置仓库根地址。</p>
+<p>开始前准备 VS Code、Chrome、产品/项目配置和公司提供的 AI 规范文件。DATABASE 模式需要数据库只读连接；SVN 模式需要 SVN 1.10+ 客户端、谷神平台下载的 <code>svnCheckoutHere.sh</code>、相应权限和工作空间共享 SVN 凭据，日常无需手工配置仓库根地址；旧 <code>.bat</code> 签出脚本仍兼容。</p>
 <p>打开 <a href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">GitHub Releases</a> 或 
   <a href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Releases</a>
   ，在同一个版本下载：</p>
@@ -246,8 +246,8 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射，通常直接使用公司提供版本；真实表名和字段名只保存在本机配置中。</li>
 <li><code>sync.yaml</code>：全局同步窗口、未签入源码用户白名单和自动暂存规则，不设置当前或默认工作区。</li>
 </ul>
-<p>Nexus 同时展示全部产品和项目。每个产品或项目节点单独设置“源码来源：DATABASE/SVN”，结果保存在该工程 <code>context/source-mode.json</code>；未设置时默认 DATABASE。选择 SVN 后，把谷神平台下载的 <code>svnCheckoutHere.bat</code> 放入该工程的 <code>context/</code>。Nexus 的“从 BAT 检出/更新 SVN”会先显示精确地址数量及增删改统计，确认后生成同目录 <code>authorized-scope.json</code> 并检出或更新。工具只解析 BAT，不执行 BAT；用户名、密码和原检出绝对路径不会写入清单、日志或公开配置。</p>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/var/workspace/&lt;PRD或PRJ 工程&gt;/context/svnCheckoutHere.bat
+<p>Nexus 同时展示全部产品和项目。每个产品或项目节点单独设置“源码来源：DATABASE/SVN”，结果保存在该工程 <code>context/source-mode.json</code>；未设置时默认 DATABASE。选择 SVN 后，把谷神平台下载的 <code>svnCheckoutHere.sh</code> 放入该工程的 <code>context/</code>。Nexus 的“从签出脚本检出/更新 SVN”会先显示精确地址数量及增删改统计，确认后生成同目录 <code>authorized-scope.json</code> 并检出或更新。工具只解析脚本，不执行脚本；脚本中的全部仓库使用同一份工作区认证，用户名、密码和原检出绝对路径不会写入清单、日志或公开配置。</p>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/var/workspace/&lt;PRD或PRJ 工程&gt;/context/svnCheckoutHere.sh
         ↓ Nexus 预览并确认
 &lt;本地数据目录&gt;/var/workspace/&lt;PRD或PRJ 工程&gt;/context/authorized-scope.json
         ↓ 受控检出/更新
@@ -256,11 +256,14 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
   &lt;产品ID&gt;:
     name: &lt;产品名称&gt;
     datasource: &lt;数据源键&gt;
-    systems:
-      include:
-        system_aliases:
-          - &lt;子系统别名&gt;
-    page_origins: []</code></pre></div>
+	    systems:
+	      include:
+	        mappings:
+	          demo.system:
+	            system_id: SYS-DEMO
+	            data_source_id: &quot;0000&quot;
+	    page_origins: []</code></pre></div>
+	<p><code>mappings</code> 的键就是系统 alias，每项只保留一对一的 <code>system_id</code>、<code>data_source_id</code>。SVN 用它筛选签出脚本；DATABASE 仍按 alias 查询，并把结果缓存在本机 <code>system-data.json</code>。产品和项目必须分别配置自己的映射，项目的数据源 ID 不得直接复用产品值。</p>
 <p>将内部 AI 规范保持原目录层级复制到本地数据目录，至少包括：</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/var/AGENTS.md
 &lt;本地数据目录&gt;/var/docs/GUSHEN_DEVELOPMENT_BASELINE.md
@@ -277,10 +280,10 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>确认产品、项目各自的数据源和子系统范围正确。</li>
 <li>点击“维护 → 检查本地环境”，确认输出没有 FAIL。</li>
 <li>展开“项目”，确认产品显示为 <code>PRD</code>、项目显示为 <code>PRJ</code>。</li>
-	<li>在每个产品或项目节点选择“源码来源：DATABASE / SVN”；DATABASE 节点点击“同步工作区全部资料”，SVN 节点点击“从 BAT 检出/更新 SVN”。</li>
+	<li>在每个产品或项目节点选择“源码来源：DATABASE / SVN”；DATABASE 节点点击“同步工作区全部资料”，SVN 节点点击“从签出脚本检出/更新 SVN”。</li>
 	<li>数据库模式检查源码、表结构、单据类型、系统脚本和视图五步；SVN 模式检查 checkout 范围与本地索引结果。</li>
 </ol>
-<p>数据库模式按五步计算状态；SVN 从工作区 BAT 派生脱敏授权清单，按精确 URL 检出多个 working copy 并建立索引，后续同一入口更新全部授权范围；普通“扫描/重建本地 SVN 索引”不会联网更新。</p>
+<p>数据库模式按五步计算状态；SVN 从工作区签出脚本派生脱敏授权清单，按 <code>systems/&lt;SYSTEM_ID&gt;</code>、<code>datasources/&lt;DATA_SOURCE_ID&gt;</code> 等精确 URL 检出多个 working copy 并建立索引；页面与过程函数目录名称分别来自 <code>pages/index.md</code>、<code>procedures/index.md</code>。后续同一入口用同一份认证更新全部授权范围；普通“扫描/重建本地 SVN 索引”不会联网更新。</p>
 <p>DATABASE 日常只修改 <code>source/workcopy</code>。SVN 不生成额外代码副本：资源管理器保留 <code>var/checkout/&lt;配置 ID&gt;</code> 原始目录供查看，日常从“谷神源码”编辑并回写同一原文件；直接编辑原文件会被标记为外部修改并交给变更管理器进行安全检查。</p>
 </section>
 
@@ -323,34 +326,36 @@ VS Code / AI 只分析和修改 Workcopy
         ↓
 再次拉取，确认 readonly 与 Workcopy 无差异</code></pre></div>
 <h3>SVN 模式</h3>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>将谷神下载的 svnCheckoutHere.bat 放入工程 context/
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>将谷神下载的 svnCheckoutHere.sh 放入工程 context/
         ↓
-在目标产品或项目节点选择“源码来源：SVN”并点击“从 BAT 检出/更新 SVN”
+在目标产品或项目节点选择“源码来源：SVN”并点击“从签出脚本检出/更新 SVN”
         ↓
 Nexus 把授权清单中的多个 working copy 聚合为“谷神源码”和一个 SCM 项目
         ↓
 打开 PAGE 脚本/SQL/字段或过程函数虚拟文档，Ctrl+S 回写原 checkout
         ↓
-在 SCM 用原生双栏视图比较只读 SVN BASE 与当前源码，并查看历史；有远程更新时按实际 working copy 更新/合并
+在 SCM 用原生双栏视图比较只读 SVN BASE 与当前源码，并查看历史；可全部或逐文件提交 Nexus 修改、更新远程变更
         ↓
 勾选同一 working copy 中的部分物理文件，点击“保存到谷神”
         ↓
 确认 SVN revision 与“待平台提交”，再在谷神平台最终提交</code></pre></div>
 <ol>
 <li>开始开发前，从“项目”树确定目标产品或项目。</li>
-<li>DATABASE 执行“同步工作区全部资料”并确认五步状态；SVN 执行“从 BAT 检出/更新 SVN”并确认授权范围和索引状态。</li>
+<li>DATABASE 执行“同步工作区全部资料”并确认五步状态；SVN 执行“从签出脚本检出/更新 SVN”并确认授权范围和索引状态。</li>
 <li>DATABASE 可继续在谷神页面使用 Bridge 拉取 Workcopy；SVN 从“谷神源码”进入，不再通过 Bridge 拉取。</li>
 <li>使用 VS Code 源代码管理查看项目级变更；底层多个 working copy 会按实际文件身份路由。</li>
 <li><code>var</code> Git 只管理配置、上下文、索引资料和 DATABASE 工作区；根级 <code>var/checkout/</code> 已被 Git 忽略，SVN 源码差异、更新、放弃和提交只在 Nexus SCM 中处理，禁止使用 <code>git add -f</code> 纳入 checkout。</li>
 <li>“谷神源码”树从本地 SVN 索引快速加载，只在展开单个 PAGE 时解析其分块；刷新树不会隐式扫描整个 checkout。</li>
-<li>PAGE 和系统脚本的 <code>$.&lt;中文子系统名&gt;</code> 只用作中文分组；PAGE 再按 <code>index.md</code> 中文层级展示，过程函数、系统脚本、表和视图保留原源码目录层级。</li>
-<li>PAGE 的前端事件、字段、SQL 和 GSS 后端事件可按分块打开并保存；<code>.gss</code> 与兼容保留的 <code>.vm</code> 都使用 Java 高亮，GSS 服务组件的自动生成身份头不可修改。</li>
+<li>PAGE 和系统脚本的 <code>$.&lt;中文子系统名&gt;</code> 只用作中文分组；PAGE 与过程函数的目录、菜单/过程包和叶子严格按各自 <code>index.md</code> 的出现顺序展示，未编入索引的对象排在后面；系统脚本、表和视图保留原源码目录层级。</li>
+<li>PAGE 的前端事件、字段、SQL 和 GSS 后端事件可按分块打开并保存；<code>.gss</code> 使用独立 Guthon GSS 语言，在 Java 语法上补充 Velocity/GSS 指令和变量高亮并保留 Nexus 补全/跳转，兼容保留的 <code>.vm</code> 仍使用 Java。GSS 服务组件的自动生成身份头不可修改。</li>
 <li>选中“谷神源码”模块或其方法、字段、SQL、事件等任意子节点后点击顶部“跳转”，均可在资源管理器中显示所属模块的物理源码。</li>
 <li>打开 SVN 虚拟分块或 checkout 物理文件后点击顶部“定位”，Nexus 会自动展开父级并选中对应源码节点；定位 PAGE 分块只解析目标页面。</li>
 <li>“谷神源码”视图顶部另提供展开所选、收缩所选、搜索和刷新；搜索按钮直接显示 VS Code 原生树搜索框，默认按模糊过滤当前缓存节点，不重新扫描 checkout。长名称超过视图宽度时可使用底部水平滚动条。</li>
 <li>SVN 虚拟文档支持调用索引的转到定义和查找引用；动态调用仍需人工确认。</li>
 <li><code>Ctrl+S</code> 只写回目标文件并更新其索引；同一虚拟文档可连续修改和保存，真实外部变化仍会触发比较/覆盖保护。</li>
-<li>点击 SCM 变更会打开与 Git 一致的 VS Code 原生双栏差异编辑器：左侧是扩展内存中的只读 SVN BASE，右侧是当前 working copy；保留源码语法高亮，不生成 BASE 临时文件。</li>
+<li>SCM 变更名称来自本地 SQLite 索引和 <code>index.md</code> 业务目录；点击 PAGE 变更默认打开脚本、SQL、字段的可读双栏差异，右键仍可查看精确原始 JSON。左侧是内存中的只读 SVN BASE，右侧是当前 working copy，不生成 BASE 临时文件。</li>
+<li>SCM 云图标显式检查远端并显示独立“远程变更”组；普通本地刷新不联网。更新遇到 SVN <code>incomplete</code> 或 working-copy 管理锁时仅执行标准 <code>svn cleanup</code> 后复检，不删除未跟踪文件或还原本地修改。</li>
+<li>SCM 顶部以及“Nexus 修改”“远程变更”分组提供全部提交/更新，每个 Nexus 修改和远程变更行提供单文件提交/更新。单文件更新仅作用于授权清单解析出的精确物理路径；该文件同时有本地修改时，必须确认使用 SVN 原生合并，Nexus 不自动解决冲突。</li>
 <li>“管理本地源码变更”同时列出 Nexus 编辑和安全的外部已跟踪文本修改；可查看差异、多选或全选保存和撤销。冲突、新增、删除、未跟踪和属性变化会明确阻断。</li>
 <li>撤销按本地 SVN BASE 回退已选择文件，不要求 working copy 与远端最新 revision 一致；“保存到谷神”仍会执行远端过期检查。</li>
 <li>完成本地验证后保存到谷神；看到 revision 后仍需在谷神平台完成最终提交。</li>

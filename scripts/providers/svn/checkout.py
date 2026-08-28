@@ -34,7 +34,6 @@ CERT_FAILURES = {"unknown-ca", "cn-mismatch", "expired", "not-yet-valid", "other
 LEGACY_SVN_CAPABILITY_DEFAULTS = {
     "initialize": True,
     "refresh": True,
-    "system_data_bootstrap": True,
     "status": True,
     "reindex": True,
     "workcopy": True,
@@ -48,7 +47,6 @@ LEGACY_SVN_CAPABILITY_DEFAULTS = {
 MANIFEST_SVN_CAPABILITY_DEFAULTS = {
     "initialize": True,
     "refresh": True,
-    "system_data_bootstrap": False,
     "status": True,
     "reindex": True,
     "workcopy": False,
@@ -214,24 +212,30 @@ def svn_settings(config_id: str, item: dict, var_dir: Path, workspace_dir: Path 
         scope_manifest_path = (context_root / "authorized-scope.json").resolve()
         if context_root not in scope_manifest_path.parents:
             raise SystemExit(f"Default SVN scope manifest escapes workspace context for {config_id}")
-    checkout_bat_value = str(svn.get("checkout_bat") or "").strip()
-    if checkout_bat_value:
+    checkout_script_value = str(svn.get("checkout_script") or "").strip()
+    legacy_checkout_bat = str(svn.get("checkout_bat") or "").strip()
+    if checkout_script_value and legacy_checkout_bat:
+        raise SystemExit(f"Configure only svn.checkout_script for {config_id}; checkout_bat is the legacy alias")
+    configured_checkout_script = checkout_script_value or legacy_checkout_bat
+    if configured_checkout_script:
         if workspace_dir is None:
-            raise SystemExit(f"workspace_dir is required for svn.checkout_bat: {config_id}")
-        configured_bat = Path(checkout_bat_value)
-        if configured_bat.is_absolute() or ".." in configured_bat.parts:
-            raise SystemExit(f"svn.checkout_bat must be relative to the workspace context for {config_id}")
+            raise SystemExit(f"workspace_dir is required for svn.checkout_script: {config_id}")
+        configured_script = Path(configured_checkout_script)
+        if configured_script.is_absolute() or ".." in configured_script.parts:
+            raise SystemExit(f"svn.checkout_script must be relative to the workspace context for {config_id}")
         context_root = (workspace_dir / "context").resolve()
-        checkout_bat_path = (context_root / configured_bat).resolve()
-        if context_root not in checkout_bat_path.parents:
-            raise SystemExit(f"svn.checkout_bat escapes workspace context for {config_id}")
+        checkout_script_path = (context_root / configured_script).resolve()
+        if context_root not in checkout_script_path.parents:
+            raise SystemExit(f"svn.checkout_script escapes workspace context for {config_id}")
     elif workspace_dir is not None:
         context_root = (workspace_dir / "context").resolve()
-        checkout_bat_path = (context_root / "svnCheckoutHere.bat").resolve()
-        if context_root not in checkout_bat_path.parents:
-            raise SystemExit(f"Default SVN checkout BAT escapes workspace context for {config_id}")
+        shell_script = (context_root / "svnCheckoutHere.sh").resolve()
+        legacy_bat = (context_root / "svnCheckoutHere.bat").resolve()
+        checkout_script_path = shell_script if shell_script.is_file() or not legacy_bat.is_file() else legacy_bat
+        if context_root not in checkout_script_path.parents:
+            raise SystemExit(f"Default SVN checkout script escapes workspace context for {config_id}")
     else:
-        checkout_bat_path = None
+        checkout_script_path = None
     update_policy = str(svn.get("update_policy") or "manual").strip().lower()
     if update_policy != "manual":
         raise SystemExit(f"svn.update_policy must be manual for {config_id}")
@@ -277,7 +281,7 @@ def svn_settings(config_id: str, item: dict, var_dir: Path, workspace_dir: Path 
         "checkoutLayout": checkout_layout,
         "scopeManifestPath": scope_manifest_path,
         "scopeManifestConvention": convention_manifest,
-        "checkoutBatPath": checkout_bat_path,
+        "checkoutScriptPath": checkout_script_path,
         "updatePolicy": update_policy,
         "usernameEnv": str(svn.get("username_env") or "").strip(),
         "passwordEnv": str(svn.get("password_env") or "").strip(),
@@ -536,6 +540,7 @@ def _status_changes(root: ET.Element, checkout_path: Path) -> tuple[list[dict], 
         switched = wc.get("switched", "false") == "true" if wc is not None else False
         copied = wc.get("copied", "false") == "true" if wc is not None else False
         tree_conflicted = wc.get("tree-conflicted", "false") == "true" if wc is not None else False
+        wc_locked = wc.get("wc-locked", "false") == "true" if wc is not None else False
         raw_path = Path(entry.get("path") or "")
         try:
             relative = raw_path.resolve().relative_to(checkout_path.resolve()).as_posix()
@@ -545,7 +550,7 @@ def _status_changes(root: ET.Element, checkout_path: Path) -> tuple[list[dict], 
         repos_props = repos.get("props", "") if repos is not None else ""
         if repos_item not in {"", "none", "normal"} or repos_props not in {"", "none", "normal"}:
             remote_changes.append({"path": relative, "item": repos_item, "properties": repos_props})
-        if item in {"", "normal", "none", "ignored", "external"} and props in {"", "normal", "none"} and not (switched or copied or tree_conflicted):
+        if item in {"", "normal", "none", "ignored", "external"} and props in {"", "normal", "none"} and not (switched or copied or tree_conflicted or wc_locked):
             continue
         changes.append({
             "path": relative,
@@ -555,6 +560,7 @@ def _status_changes(root: ET.Element, checkout_path: Path) -> tuple[list[dict], 
             "treeConflicted": tree_conflicted,
             "switched": switched,
             "copied": copied,
+            "wcLocked": wc_locked,
         })
     return changes, remote_changes
 
@@ -608,58 +614,52 @@ def _values(record: dict, *keys) -> set[str]:
     return output
 
 
-def _cache_records(config_dir: Path, datasource_name: str) -> tuple[list[dict], str]:
-    path = config_dir / "system-data.json"
-    try:
-        cache = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return [], ""
-    entry = ((cache.get("datasources") or {}).get(datasource_name) or {}) if isinstance(cache, dict) else {}
-    records = entry.get("systems") or []
-    return ([record for record in records if isinstance(record, dict)], file_hash(path))
+def resolve_configured_scope(workspace: dict) -> dict:
+    """Resolve SVN IDs only from the selected workspace's YAML mapping."""
 
-
-def resolve_cached_scope(config_dir: Path, datasource_name: str, aliases: list[str]) -> dict:
-    records, mapping_hash = _cache_records(config_dir, datasource_name)
-    selected = []
+    aliases = workspace.get("systemAliases") or []
+    mappings = workspace.get("systemMappings") or {}
     missing = []
-    duplicates = []
+    invalid = []
+    selected = []
     for alias in aliases:
-        matches = [record for record in records if alias in _values(record, "SYSTEM_ALIAS_ID", "systemAliasId")]
-        identities = {
-            (
-                tuple(sorted(_values(record, "SYSTEM_ID", "systemId", "id"))),
-                tuple(sorted(_values(record, "DATA_SOURCE_ID", "DATA_SOURCE_IDS", "dataSourceId", "dataSourceIds"))),
-            )
-            for record in matches
-        }
-        if not matches:
+        mapping = mappings.get(alias)
+        if not isinstance(mapping, dict):
             missing.append(alias)
-        elif len(identities) != 1:
-            duplicates.append(alias)
-        else:
-            selected.append(matches[0])
+            continue
+        system_id = mapping.get("system_id")
+        data_source_id = mapping.get("data_source_id")
+        if (
+            not isinstance(system_id, str)
+            or not system_id.strip()
+            or not isinstance(data_source_id, str)
+            or not data_source_id.strip()
+        ):
+            invalid.append(alias)
+            continue
+        selected.append({
+            "systemAlias": alias,
+            "systemId": system_id.strip(),
+            "dataSourceId": data_source_id.strip(),
+        })
     system_ids = set()
     data_source_ids = set()
     system_names = {}
     system_names_by_data_source = {}
     data_source_ids_by_system = {}
-    for record in selected:
-        ids = _values(record, "SYSTEM_ID", "systemId", "id")
-        data_ids = _values(record, "DATA_SOURCE_ID", "DATA_SOURCE_IDS", "dataSourceId", "dataSourceIds")
-        aliases_for_record = _values(record, "SYSTEM_ALIAS_ID", "systemAliasId")
-        name = next(iter(_values(record, "SYSTEM_NAME", "systemName", "name")), "") or next(iter(aliases_for_record), "")
-        system_ids.update(ids)
-        data_source_ids.update(data_ids)
-        system_names.update({system_id: name for system_id in ids})
-        for system_id in ids:
-            data_source_ids_by_system.setdefault(system_id, set()).update(data_ids)
-        for data_source_id in data_ids:
-            system_names_by_data_source.setdefault(data_source_id, name)
+    for mapping in selected:
+        system_id = mapping["systemId"]
+        data_id = mapping["dataSourceId"]
+        name = mapping["systemAlias"]
+        system_ids.add(system_id)
+        data_source_ids.add(data_id)
+        system_names[system_id] = name
+        data_source_ids_by_system[system_id] = {data_id}
+        system_names_by_data_source.setdefault(data_id, name)
     return {
-        "complete": not missing and not duplicates and bool(aliases),
+        "complete": not missing and not invalid and bool(aliases),
         "missingAliases": missing,
-        "duplicateAliases": duplicates,
+        "invalidAliases": invalid,
         "systemIds": sorted(system_ids),
         "dataSourceIds": sorted(data_source_ids),
         "systemNames": system_names,
@@ -667,13 +667,13 @@ def resolve_cached_scope(config_dir: Path, datasource_name: str, aliases: list[s
         "dataSourceIdsBySystem": {
             system_id: sorted(values) for system_id, values in data_source_ids_by_system.items()
         },
-        "mappingHash": mapping_hash,
+        "mappingHash": json_hash(selected) if selected else "",
     }
 
 
-def scope_manifest(workspace: dict, config_dir: Path) -> dict:
+def scope_manifest(workspace: dict, _config_dir: Path | None = None) -> dict:
     aliases = workspace.get("systemAliases") or []
-    scope = resolve_cached_scope(config_dir, workspace.get("datasourceName") or "", aliases)
+    scope = resolve_configured_scope(workspace)
     includes = workspace["svn"]["includes"]
     mapping_errors = []
     if {"pages", "system-script"}.intersection(includes) and not scope["systemIds"]:
@@ -702,7 +702,7 @@ def scope_manifest(workspace: dict, config_dir: Path) -> dict:
         "paths": sorted(dict.fromkeys(paths)),
         "mappingHash": scope["mappingHash"],
         "missingAliases": scope["missingAliases"],
-        "duplicateAliases": scope["duplicateAliases"],
+        "invalidAliases": scope["invalidAliases"],
         "mappingErrors": mapping_errors,
         "complete": scope["complete"] and not mapping_errors,
     }
@@ -761,15 +761,12 @@ def _clear_expected_changes(workspace: dict) -> None:
 
 def _ensure_scope(workspace: dict, config_dir: Path, bootstrap=None) -> dict:
     manifest = scope_manifest(workspace, config_dir)
-    if not manifest["complete"] and bootstrap and workspace["svn"]["capabilities"].get("system_data_bootstrap"):
-        bootstrap()
-        manifest = scope_manifest(workspace, config_dir)
     if not manifest["complete"]:
         problems = []
         if manifest["missingAliases"]:
             problems.append("missing aliases: " + ", ".join(manifest["missingAliases"]))
-        if manifest["duplicateAliases"]:
-            problems.append("duplicate aliases: " + ", ".join(manifest["duplicateAliases"]))
+        if manifest["invalidAliases"]:
+            problems.append("invalid aliases: " + ", ".join(manifest["invalidAliases"]))
         problems.extend(manifest.get("mappingErrors") or [])
         raise SystemExit("Cannot resolve SVN sparse scope (" + "; ".join(problems) + ")")
     return manifest

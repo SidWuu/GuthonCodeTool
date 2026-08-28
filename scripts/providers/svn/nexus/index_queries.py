@@ -7,12 +7,15 @@ import sqlite3
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
-from .manifest import load_authorized_scope
+from .manifest import load_authorized_scope, source_relative_path
 
 
 SUMMARY = re.compile(r"<summary>\s*(?P<label>.*?)\s*</summary>", re.IGNORECASE)
 PAGE_MENU = re.compile(r"^\s*-\s*📄\s*(?P<label>.*?)\s*$")
-PAGE_LINK = re.compile(r"^\s*-\s*\[(?P<label>[^]]+)]\((?P<path>[^)]+)\)")
+PAGE_LINK = re.compile(r"^\s*-\s*\[(?P<label>.+)]\((?P<path>[^)]+)\)\s*$")
+PROCEDURE_PACKAGE = re.compile(
+    r"^\s*-\s*📦\s*(?P<alias>.*?)\s*-\s*\[(?P<source_id>[^]]+)]\s*\[(?P<label>[^]]*)]"
+)
 SOURCE_ICONS = ("📂", "⭐", "📄", "🏠", "📦", "🧊", "🔰", "⚡", "📊", "🐳", "🌏")
 
 
@@ -34,15 +37,44 @@ def _display_label(value: str) -> str:
     return label
 
 
-def _page_index_locations(path: Path) -> dict[str, dict]:
+def _index_target(entry, target: str, category: str) -> str:
+    normalized = PurePosixPath(target)
+    if normalized.is_absolute() or ".." in normalized.parts:
+        return ""
+    parts = normalized.parts
+    identity = Path(entry.local_subdir).name
+    if category == "pages":
+        if len(parts) >= 2 and parts[:2] == (identity, "pages"):
+            parts = parts[2:]
+        elif parts and parts[0] == "pages":
+            parts = parts[1:]
+        if entry.category == "systems":
+            parts = ("pages", *parts)
+    elif category == "procedures":
+        if parts and parts[0] == "procedures":
+            parts = parts[1:]
+        if entry.category == "datasources":
+            parts = ("procedures", *parts)
+    return PurePosixPath(*parts).as_posix() if parts else ""
+
+
+def _page_index_path(entry) -> Path:
+    return entry.root / "pages/index.md" if entry.category == "systems" else entry.root / "index.md"
+
+
+def _procedure_index_path(entry) -> Path:
+    return entry.root / "procedures/index.md" if entry.category == "datasources" else entry.root / "index.md"
+
+
+def _page_index_locations(entry) -> dict[str, dict]:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = _page_index_path(entry).read_text(encoding="utf-8").splitlines()
     except (FileNotFoundError, OSError, UnicodeDecodeError):
         return {}
     directories = []
     current_menu = ""
     locations = {}
-    for line in lines:
+    for order, line in enumerate(lines):
         summary = SUMMARY.search(line)
         if summary:
             label = _display_label(summary.group("label"))
@@ -63,10 +95,7 @@ def _page_index_locations(path: Path) -> dict[str, dict]:
         if not link:
             continue
         target = unquote(link.group("path").split("#", 1)[0].split("?", 1)[0]).replace("\\", "/")
-        normalized = PurePosixPath(target)
-        if normalized.is_absolute() or ".." in normalized.parts:
-            continue
-        relative = normalized.as_posix().lstrip("./")
+        relative = _index_target(entry, target, "pages")
         if not relative:
             continue
         locations.setdefault(
@@ -74,17 +103,59 @@ def _page_index_locations(path: Path) -> dict[str, dict]:
             {
                 "directories": [*directories, *([current_menu] if current_menu else [])],
                 "label": _display_label(link.group("label")),
+                "order": order,
             },
         )
     return locations
 
 
-def _system_name(entry) -> str:
+def _procedure_index_locations(entry) -> dict[str, dict]:
+    try:
+        lines = _procedure_index_path(entry).read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, OSError, UnicodeDecodeError):
+        return {}
+    package_alias = ""
+    package_label = ""
+    locations = {}
+    for order, line in enumerate(lines):
+        package = PROCEDURE_PACKAGE.match(line)
+        if package:
+            package_alias = package.group("alias").strip()
+            description = package.group("label").strip()
+            package_label = f"{package_alias} · {description}" if description else package_alias
+            continue
+        link = PAGE_LINK.match(line)
+        if not link or not package_alias:
+            continue
+        target = unquote(link.group("path").split("#", 1)[0].split("?", 1)[0]).replace("\\", "/")
+        relative = _index_target(entry, target, "procedures")
+        if not relative:
+            continue
+        label = _display_label(link.group("label"))
+        function_id, separator, description = label.partition(" - ")
+        locations.setdefault(
+            relative,
+            {
+                "directories": [package_label],
+                "label": f"{function_id} · {description}" if separator and description else label,
+                "order": order,
+            },
+        )
+    return locations
+
+
+def _entry_name(entry) -> str:
     try:
         markers = sorted(child.name[2:] for child in entry.root.iterdir() if child.name.startswith("$.") and child.name[2:])
     except OSError:
         markers = []
     return markers[0] if markers else Path(entry.local_subdir).name
+
+
+def _system_name(entry) -> str:
+    """Compatibility alias for legacy page-tree tests and callers."""
+
+    return _entry_name(entry)
 
 
 def _relative_source_path(entry, source_path: str) -> PurePosixPath | None:
@@ -96,7 +167,18 @@ def _relative_source_path(entry, source_path: str) -> PurePosixPath | None:
         return None
 
 
-def _tree_metadata(entry, row: dict, page_locations: dict[str, dict], system_name: str) -> tuple[list[str], str]:
+def _tree_metadata(
+    entry,
+    row: dict,
+    page_locations: dict[str, dict],
+    procedure_locations: dict[str, dict] | str | None = None,
+    entry_name: str | None = None,
+) -> tuple[list[str], str]:
+    if isinstance(procedure_locations, str) and entry_name is None:
+        entry_name = procedure_locations
+        procedure_locations = {}
+    procedure_locations = procedure_locations or {}
+    entry_name = entry_name if entry_name is not None else _entry_name(entry)
     relative = _relative_source_path(entry, row["source_path"])
     if relative is None:
         return [], row.get("source_name") or row["source_id"]
@@ -107,18 +189,26 @@ def _tree_metadata(entry, row: dict, page_locations: dict[str, dict], system_nam
             label = location["label"]
             if relative.suffix.lower() == ".gss":
                 label = f"GSS · {label}"
-            return [system_name, *location["directories"]], label
-        return [system_name, "未编入 index.md", *relative.parts[:-1]], row.get("source_name") or row["source_id"]
+            return [entry_name, *location["directories"]], label
+        fallback = source_relative_path(entry, relative)
+        return [entry_name, "未编入 index.md", *fallback.parts[:-1]], row.get("source_name") or row["source_id"]
     if source_type == "system-script":
-        return [system_name, *relative.parts[:-1]], relative.name
-    entry_parts = PurePosixPath(entry.local_subdir).parts
-    physical_directories = [*entry_parts[1:], *relative.parts[:-1]]
+        source_relative = source_relative_path(entry, relative)
+        return [entry_name, *source_relative.parts[:-1]], source_relative.name
+    source_relative = source_relative_path(entry, relative)
+    logical_entry_name = entry_name or Path(entry.local_subdir).name
     if source_type == "procedure":
-        return physical_directories, f"{row['fun_id']} {row['source_alias_id']}".strip()
+        location = procedure_locations.get(relative.as_posix())
+        if location:
+            return [logical_entry_name, *location["directories"]], location["label"]
+        directories = [logical_entry_name, *source_relative.parts[:-1]]
+        if getattr(entry, "category", "") == "datasources":
+            directories.insert(1, "未编入 index.md")
+        return directories, f"{row['fun_id']} {row['source_alias_id']}".strip()
     if source_type in {"table", "view"}:
         identity = row["source_id"]
         name = row.get("source_name") or ""
-        return physical_directories, f"{identity} {name}".strip() if name != identity else identity
+        return [logical_entry_name, *source_relative.parts[:-1]], f"{identity} {name}".strip() if name != identity else identity
     return [*relative.parts[:-1]], relative.name
 
 
@@ -139,6 +229,7 @@ def _catalog_fragments(row: dict):
 def catalog(workspace: dict) -> dict:
     scope = load_authorized_scope(workspace)
     entries = {entry.id: entry for entry in scope.entries}
+    entry_orders = {entry.id: order for order, entry in enumerate(scope.entries)}
     connection = _connection(workspace)
     try:
         rows = [
@@ -156,11 +247,14 @@ def catalog(workspace: dict) -> dict:
     finally:
         connection.close()
     page_locations = {}
-    system_names = {}
+    procedure_locations = {}
+    entry_names = {}
     for entry in scope.entries:
-        system_names[entry.id] = _system_name(entry)
-        if entry.category == "pages":
-            page_locations[entry.id] = _page_index_locations(entry.root / "index.md")
+        entry_names[entry.id] = _entry_name(entry)
+        if entry.category in {"systems", "pages"}:
+            page_locations[entry.id] = _page_index_locations(entry)
+        if entry.category in {"datasources", "procedures"}:
+            procedure_locations[entry.id] = _procedure_index_locations(entry)
     objects = []
     counts = {}
     for row in rows:
@@ -171,9 +265,17 @@ def catalog(workspace: dict) -> dict:
             entry,
             row,
             page_locations.get(entry.id) or {},
-            system_names[entry.id],
+            procedure_locations.get(entry.id) or {},
+            entry_names[entry.id],
         )
         source_type = row["source_table"]
+        relative = _relative_source_path(entry, row["source_path"])
+        location = None
+        if relative is not None:
+            if source_type == "page":
+                location = (page_locations.get(entry.id) or {}).get(relative.as_posix())
+            elif source_type == "procedure":
+                location = (procedure_locations.get(entry.id) or {}).get(relative.as_posix())
         counts[source_type] = counts.get(source_type, 0) + 1
         objects.append({
             "sourceType": source_type,
@@ -187,6 +289,13 @@ def catalog(workspace: dict) -> dict:
             "status": row["status"],
             "treePath": directories,
             "treeLabel": label,
+            "treeOrder": (
+                [entry_orders[entry.id], location["order"]]
+                if location
+                else [entry_orders[entry.id], 1_000_000]
+                if source_type in {"page", "procedure"}
+                else None
+            ),
             "fragments": _catalog_fragments(row),
         })
     return {

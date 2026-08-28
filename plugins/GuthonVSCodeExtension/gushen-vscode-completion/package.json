@@ -15,6 +15,7 @@
   ],
   "activationEvents": [
     "onLanguage:java",
+    "onLanguage:guthon-gss",
     "onLanguage:javascript",
     "onLanguage:sql",
     "onCommand:gushenCompletion.setupTool",
@@ -30,11 +31,17 @@
     "onCommand:gushenCompletion.searchSvnSource",
     "onCommand:gushenCompletion.refreshSvnSourceView",
     "onCommand:gushenCompletion.refreshSvnScm",
+    "onCommand:gushenCompletion.refreshSvnRemoteChanges",
     "onCommand:gushenCompletion.showSvnDiff",
+    "onCommand:gushenCompletion.showSvnRawDiff",
     "onCommand:gushenCompletion.showSvnHistory",
     "onCommand:gushenCompletion.manageSvnChanges",
     "onCommand:gushenCompletion.revertSvnChanges",
     "onCommand:gushenCompletion.saveSvnToGuthon",
+    "onCommand:gushenCompletion.saveAllSvnNexusChanges",
+    "onCommand:gushenCompletion.saveSingleSvnNexusChange",
+    "onCommand:gushenCompletion.updateAllSvnChanges",
+    "onCommand:gushenCompletion.updateSingleSvnChange",
     "onFileSystem:guthon-svn-edit",
     "onCommand:gushenCompletion.startBridge",
     "onCommand:gushenCompletion.stopBridge",
@@ -69,8 +76,26 @@
     },
     "languages": [
       {
+        "id": "guthon-gss",
+        "aliases": ["Guthon GSS", "gss"],
+        "extensions": [".gss"],
+        "configuration": "./language-configuration.json"
+      },
+      {
         "id": "java",
-        "extensions": [".gss", ".vm"]
+        "extensions": [".vm"]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "guthon-gss",
+        "scopeName": "source.guthon-gss",
+        "path": "./syntaxes/guthon-gss.tmLanguage.json"
+      },
+      {
+        "scopeName": "guthon-gss.injection",
+        "path": "./syntaxes/guthon-gss.injection.tmLanguage.json",
+        "injectTo": ["source.guthon-gss"]
       }
     ],
     "configuration": {
@@ -119,11 +144,17 @@
       { "command": "gushenCompletion.searchSvnSource", "title": "Guthon Nexus: 搜索谷神源码", "icon": "$(search)" },
       { "command": "gushenCompletion.refreshSvnSourceView", "title": "Guthon Nexus: 刷新谷神源码", "icon": "$(refresh)" },
       { "command": "gushenCompletion.refreshSvnScm", "title": "Guthon Nexus: 刷新 SVN 变更", "icon": "$(refresh)" },
+      { "command": "gushenCompletion.refreshSvnRemoteChanges", "title": "Guthon Nexus: 检查 SVN 远程变更", "icon": "$(cloud-download)" },
       { "command": "gushenCompletion.showSvnDiff", "title": "Guthon Nexus: 查看 SVN 差异" },
+      { "command": "gushenCompletion.showSvnRawDiff", "title": "Guthon Nexus: 查看 SVN 原始文件差异" },
       { "command": "gushenCompletion.showSvnHistory", "title": "Guthon Nexus: 查看 SVN 历史", "icon": "$(history)" },
       { "command": "gushenCompletion.manageSvnChanges", "title": "Guthon Nexus: 管理本地源码变更", "icon": "$(source-control)" },
       { "command": "gushenCompletion.revertSvnChanges", "title": "Guthon Nexus: 放弃 SVN 本地修改", "icon": "$(discard)" },
       { "command": "gushenCompletion.saveSvnToGuthon", "title": "Guthon Nexus: 保存到谷神", "icon": "$(cloud-upload)" },
+      { "command": "gushenCompletion.saveAllSvnNexusChanges", "title": "Guthon Nexus: 提交全部 Nexus 修改", "icon": "$(cloud-upload)" },
+      { "command": "gushenCompletion.saveSingleSvnNexusChange", "title": "Guthon Nexus: 提交此 Nexus 修改", "icon": "$(cloud-upload)" },
+      { "command": "gushenCompletion.updateAllSvnChanges", "title": "Guthon Nexus: 更新全部远程变更", "icon": "$(cloud-download)" },
+      { "command": "gushenCompletion.updateSingleSvnChange", "title": "Guthon Nexus: 更新此远程变更", "icon": "$(cloud-download)" },
       { "command": "gushenCompletion.startBridge", "title": "Guthon Nexus: 启动 Guthon Bridge" },
       { "command": "gushenCompletion.stopBridge", "title": "Guthon Nexus: 停止 Guthon Bridge" },
       { "command": "gushenCompletion.initSourceIndex", "title": "Guthon Nexus: 拉取源码重建索引" },
@@ -141,7 +172,7 @@
       { "command": "gushenCompletion.runDoctor", "title": "Guthon Nexus: 检查本地环境" },
       { "command": "gushenCompletion.runDiagnosis", "title": "Guthon Nexus: 执行源码逻辑排查" },
       { "command": "gushenCompletion.inspectWorkcopy", "title": "Guthon Nexus: 检查或打包 Workcopy" },
-      { "command": "gushenCompletion.initializeSvn", "title": "Guthon Nexus: 从工作区 BAT 检出/更新 SVN" },
+      { "command": "gushenCompletion.initializeSvn", "title": "Guthon Nexus: 从工作区签出脚本检出/更新 SVN" },
       { "command": "gushenCompletion.refreshSvn", "title": "Guthon Nexus: 更新指定 SVN working copy" },
       { "command": "gushenCompletion.showSvnStatus", "title": "Guthon Nexus: 查看 SVN 状态与差异" },
       { "command": "gushenCompletion.refreshToolView", "title": "Guthon Nexus: 刷新工具面板", "icon": "$(refresh)" }
@@ -172,10 +203,20 @@
       ],
       "scm/title": [
         { "command": "gushenCompletion.refreshSvnScm", "when": "scmProvider =~ /^guthon-svn-/", "group": "navigation@1" },
-        { "command": "gushenCompletion.refreshSvn", "when": "scmProvider =~ /^guthon-svn-/", "group": "navigation@2" }
+        { "command": "gushenCompletion.refreshSvnRemoteChanges", "when": "scmProvider =~ /^guthon-svn-/", "group": "navigation@2" },
+        { "command": "gushenCompletion.saveAllSvnNexusChanges", "when": "scmProvider =~ /^guthon-svn-/", "group": "navigation@3" },
+        { "command": "gushenCompletion.updateAllSvnChanges", "when": "scmProvider =~ /^guthon-svn-/", "group": "navigation@4" },
+        { "command": "gushenCompletion.refreshSvn", "when": "scmProvider =~ /^guthon-svn-/", "group": "1_workspace@1" }
+      ],
+      "scm/resourceGroup/context": [
+        { "command": "gushenCompletion.saveAllSvnNexusChanges", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceGroup == local", "group": "inline@1" },
+        { "command": "gushenCompletion.updateAllSvnChanges", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceGroup == remote", "group": "inline@1" }
       ],
       "scm/resourceState/context": [
-        { "command": "gushenCompletion.showSvnHistory", "when": "scmProvider =~ /^guthon-svn-/", "group": "inline@1" }
+        { "command": "gushenCompletion.saveSingleSvnNexusChange", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.LOCAL_MODIFIED", "group": "inline@1" },
+        { "command": "gushenCompletion.updateSingleSvnChange", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.REMOTE", "group": "inline@1" },
+        { "command": "gushenCompletion.showSvnHistory", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState != guthonSvn.REMOTE", "group": "navigation@1" },
+        { "command": "gushenCompletion.showSvnRawDiff", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState != guthonSvn.REMOTE", "group": "navigation@2" }
       ]
     }
   },

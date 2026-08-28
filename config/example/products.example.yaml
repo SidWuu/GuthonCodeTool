@@ -13,10 +13,12 @@ products:
     # 当前工作区独立的子系统范围。
     systems:
       include:
-        system_aliases:
-          - demo.system
+        mappings:
+          demo.system:
+            system_id: SYS-DEMO
+            data_source_id: "0000"
     # 如需 SVN，在 Nexus 的当前产品节点选择 SVN，并把谷神下载的
-    # svnCheckoutHere.bat 放到该工程 context/。
+    # svnCheckoutHere.sh 放到该工程 context/（旧 .bat 仍兼容）。
     # Nexus 会生成同目录脱敏 authorized-scope.json；通常不需要 svn 配置块。
     # 以下仅用于覆盖默认 checkout 根、共享凭据环境变量名或 capability：
     # svn:
@@ -31,7 +33,6 @@ products:
     #   capabilities:
     #     initialize: true
     #     refresh: true
-    #     system_data_bootstrap: false
     #     status: true
     #     reindex: true
     #     workcopy: false

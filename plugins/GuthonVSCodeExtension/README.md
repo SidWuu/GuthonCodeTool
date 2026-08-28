@@ -22,12 +22,11 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口。它把工作空间设
 - 同时列出全部 `PRD <产品名称>`、`PRJ <项目名称>` 及其同步状态。
 - 每个节点绑定自己的 `workspaceKey`。DATABASE 节点可独立同步全部资料、执行只读源码排查和维护 Workcopy；SVN 节点按授权清单管理 checkout、索引和本地源码变更。
 - 节点显示“数据库”或“SVN”，操作由 workspace summary 的有效 capabilities 生成，不在扩展内猜测配置。
-- SVN 工程不在 YAML 配置模式；在目标节点选择 SVN，并把谷神下载的 `svnCheckoutHere.bat` 放入工程 `context/`；“从 BAT
-  检出/更新 SVN”先展示脱敏范围统计，确认后生成同目录授权清单并处理全部 working copy，不执行 BAT 或持久化凭据。
-- SVN 节点按授权清单初始化或更新多个精确 URL working copy，在“谷神源码”中按业务分类展示 PAGE、过程函数、
-  系统脚本、表和视图；PAGE 脚本/SQL/字段以及过程源码通过虚拟文档编辑并直接回写原 checkout。
-- 每个 SVN workspace 在 VS Code 源代码管理中只显示一个逻辑项目，内部聚合多个 working copy，提供 diff、历史、
-  更新、按物理文件部分保存和放弃修改。
+- SVN 工程不在 YAML 配置模式；在目标节点选择 SVN，并把谷神下载的 `svnCheckoutHere.sh` 放入工程 `context/`；“从签出脚本
+  检出/更新 SVN”先展示脱敏范围统计，确认后生成同目录授权清单并使用同一次认证处理全部 working copy，不执行脚本或持久化凭据；旧 `.bat` 仍兼容。
+- SVN 节点按授权清单初始化或更新多个精确 URL working copy；物理目录按 `systems/<SYSTEM_ID>` 和 `datasources/<DATA_SOURCE_ID>` 聚合，在“谷神源码”中按业务分类展示 PAGE、过程函数、
+  系统脚本、表和视图；页面与过程函数的名称、目录及显示顺序分别来自 `pages/index.md`、`procedures/index.md`，PAGE 脚本/SQL/字段以及过程源码通过虚拟文档编辑并直接回写原 checkout。未编入索引的对象稳定排在已索引内容之后。
+- 每个 SVN workspace 在 VS Code 源代码管理中只显示一个逻辑项目，内部聚合多个 working copy，提供基于 `index.md` 中文名称的本地/远程变更、PAGE 可读/原始 diff、历史、全部/单文件提交与更新、按物理文件部分保存和放弃修改。
 - 不设置当前或默认产品、项目。
 
 ### 维护
@@ -37,7 +36,10 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口。它把工作空间设
 只读源码逻辑排查和 Workcopy 状态、差异、交付物操作位于对应 DATABASE 项目节点。SVN 的 `Ctrl+S` 只写本地
 checkout；“管理本地源码变更”统一提供类 Git 差异、多选/全选保存和撤销。“保存到谷神”是 SVN 模式固定能力，
 跨 working copy 时分组提交并产生多个 revision；成功后仍显示“待平台提交”。冲突、新增、删除、未跟踪和属性变化
-仅展示并阻止保存或撤销。
+仅展示并阻止保存或撤销。SCM 顶部、Nexus 修改组和远程变更组可执行全部操作；每个 Nexus 修改/远程文件行可
+单独提交或更新。单文件更新只作用于该授权物理路径，同文件有本地修改时必须显式确认 SVN 原生合并。
+
+`.gss` 注册为独立的 Guthon GSS 语言，继承 Java 语法并补充 Velocity/GSS 指令和变量高亮，继续复用 Nexus 的 API 补全、悬停、转到定义和查找引用；旧 `.vm` 保持 Java 兼容。更新遇到 SVN `incomplete` 或 working-copy 管理锁时，仅执行标准 `svn cleanup` 后重新检查，不删除未跟踪文件、不还原本地修改。
 
 ### Guthon Bridge
 

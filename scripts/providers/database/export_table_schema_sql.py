@@ -220,7 +220,7 @@ def resolve_data_source_ids(conn, datasource_name, requested=None):
     requested_ids = normalize_data_source_ids(requested) if requested else []
     outside = [data_source_id for data_source_id in requested_ids if data_source_id not in allowed]
     if outside:
-        raise SystemExit(f"Data source IDs are outside configured system_aliases: {','.join(outside)}")
+        raise SystemExit(f"Data source IDs are outside configured mappings: {','.join(outside)}")
     return requested_ids or allowed
 
 

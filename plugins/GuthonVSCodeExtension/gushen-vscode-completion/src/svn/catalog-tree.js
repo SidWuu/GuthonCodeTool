@@ -8,6 +8,26 @@ const CATEGORY_LABELS = {
   public: 'Public',
 };
 
+const CATEGORY_ICONS = {
+  pages: 'layout',
+  procedures: 'symbol-method',
+  'system-script': 'terminal',
+  tables: 'table',
+  views: 'eye',
+  skill: 'book',
+  public: 'folder-library',
+};
+
+const SOURCE_ICONS = {
+  page: 'preview',
+  procedure: 'symbol-method',
+  'system-script': 'terminal',
+  table: 'table',
+  view: 'eye',
+  skill: 'book',
+  public: 'file-code',
+};
+
 function groupCatalog(objects) {
   const grouped = new Map();
   for (const object of objects || []) {
@@ -50,9 +70,27 @@ function objectLabel(object) {
     : identity;
 }
 
-function sortTreeNodes(left, right) {
+function compareTreeOrder(left, right) {
+  const leftOrder = Array.isArray(left.sortOrder) ? left.sortOrder : null;
+  const rightOrder = Array.isArray(right.sortOrder) ? right.sortOrder : null;
+  if (leftOrder && rightOrder) {
+    const length = Math.max(leftOrder.length, rightOrder.length);
+    for (let index = 0; index < length; index += 1) {
+      const difference = (leftOrder[index] ?? Number.MAX_SAFE_INTEGER)
+        - (rightOrder[index] ?? Number.MAX_SAFE_INTEGER);
+      if (difference) return difference;
+    }
+  } else if (leftOrder || rightOrder) {
+    return leftOrder ? -1 : 1;
+  }
   if (left.kind !== right.kind) return left.kind === 'directory' ? -1 : 1;
   return left.label.localeCompare(right.label, 'zh-CN');
+}
+
+function earlierTreeOrder(left, right) {
+  if (!Array.isArray(left)) return right;
+  if (!Array.isArray(right)) return left;
+  return compareTreeOrder({ sortOrder: left }, { sortOrder: right }) <= 0 ? left : right;
 }
 
 function buildSourceTree(objects) {
@@ -64,13 +102,17 @@ function buildSourceTree(objects) {
       if (!segment) continue;
       let directory = parent.directories.get(segment);
       if (!directory) {
-        directory = { kind: 'directory', label: segment, children: [], directories: new Map() };
+        directory = {
+          kind: 'directory', label: segment, children: [], directories: new Map(), sortOrder: undefined,
+        };
         parent.directories.set(segment, directory);
         parent.children.push(directory);
       }
       parent = directory;
     }
-    parent.children.push({ kind: 'source', label: objectLabel(object), object });
+    parent.children.push({
+      kind: 'source', label: objectLabel(object), object, sortOrder: object.treeOrder,
+    });
   }
   const finalize = (node) => {
     for (const child of node.children) {
@@ -78,8 +120,9 @@ function buildSourceTree(objects) {
         finalize(child);
         delete child.directories;
       }
+      node.sortOrder = earlierTreeOrder(node.sortOrder, child.sortOrder);
     }
-    node.children.sort(sortTreeNodes);
+    node.children.sort(compareTreeOrder);
   };
   finalize(root);
   return root.children;
@@ -150,7 +193,7 @@ class SvnCatalogTreeProvider {
       label: child.label,
       description: object.status === 'OK' ? undefined : object.status,
       tooltip: `${object.sourcePath}\n${workspaceKey}`,
-      icon: object.sourceType === 'table' ? 'table' : object.sourceType === 'view' ? 'eye' : 'file-code',
+      icon: SOURCE_ICONS[object.sourceType] || 'file-code',
       object,
       workspaceKey,
       parent,
@@ -192,11 +235,7 @@ class SvnCatalogTreeProvider {
         ...category,
         workspaceKey: element.workspace.workspaceKey,
         description: String(category.count),
-        icon: category.category === 'pages'
-          ? 'layout'
-          : category.category === 'procedures'
-            ? 'symbol-method'
-            : 'folder',
+        icon: CATEGORY_ICONS[category.category] || 'folder',
         parent: element,
       };
       categoryElement.children = this._decorateChildren(
@@ -320,7 +359,10 @@ class SvnCatalogTreeProvider {
 
 module.exports = {
   buildSourceTree,
+  compareTreeOrder,
+  CATEGORY_ICONS,
   CATEGORY_LABELS,
+  SOURCE_ICONS,
   SvnCatalogTreeProvider,
   fragmentLabel,
   groupCatalog,

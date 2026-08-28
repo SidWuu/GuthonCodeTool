@@ -71,7 +71,7 @@ def normalize_script_types(value):
 def select_configured_ids(configured, requested, label):
     outside = [item for item in requested if item not in configured]
     if outside:
-        raise ValueError(f"{label} are outside configured system_aliases: {','.join(outside)}")
+        raise ValueError(f"{label} are outside configured mappings: {','.join(outside)}")
     return requested or configured
 
 
@@ -240,7 +240,7 @@ def export_system_scripts(
     system_by_id = {str(row.get("system_id") or ""): row for row in systems if row.get("system_id")}
     missing_system_ids = [system_id for system_id in system_ids if system_id not in system_by_id]
     if missing_system_ids:
-        raise ValueError(f"System IDs are outside configured system_aliases: {','.join(missing_system_ids)}")
+        raise ValueError(f"System IDs are outside configured mappings: {','.join(missing_system_ids)}")
     scripts = fetch_scripts(conn, mapping, system_by_id, script_types)
     if script_types and not scripts:
         raise ValueError(f"System script source not found. script_types={','.join(map(str, script_types))}")

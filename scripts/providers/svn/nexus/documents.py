@@ -26,7 +26,7 @@ from providers.svn.checkout import atomic_json, file_hash, operation_lock, requi
 
 from .catalog import header_fields, scan
 from . import index_queries
-from .manifest import load_authorized_scope
+from .manifest import load_authorized_scope, source_path_writable
 
 
 SESSION_VERSION = 1
@@ -247,7 +247,7 @@ def _session_change_errors(entry, session: dict, logical_path: str) -> list[str]
         safe = (
             change.get("item") == "modified"
             and change.get("properties") in {"", "normal", "none"}
-            and not any(change.get(key) for key in ("treeConflicted", "switched", "copied"))
+            and not any(change.get(key) for key in ("treeConflicted", "switched", "copied", "wcLocked"))
             and path.is_file()
             and record.get("expectedCurrentHash") == file_hash(path)
         )
@@ -277,9 +277,10 @@ def read(
         external = bool(_session_change_errors(entry, session, item["source_path"]))
         if known_file and known_file.get("expectedCurrentHash") != file_hash(path):
             external = True
+        relative_path = PurePosixPath(item["source_path"]).relative_to(PurePosixPath(entry.local_subdir))
         editable = bool(
             workspace["capabilities"].get("svn.edit")
-            and entry.writable
+            and source_path_writable(entry, relative_path)
             and item["source_table"] in {"page", "procedure", "system-script"}
             and not external
         )
@@ -338,7 +339,7 @@ def read(
                 if fragment_type == "page-sql" or json_pointer.lower().endswith("sql")
                 else "javascript"
                 if fragment_type in {"page-js", "page-string"}
-                else "java"
+                else "guthon-gss"
             ),
             "editable": editable,
             "externalModified": external,
@@ -385,7 +386,10 @@ def write(workspace: dict, *, session_id: str, document_id: str, content: str) -
         if item["source_path"] != document["sourcePath"]:
             raise SystemExit("SVN object path changed after the virtual document was opened")
         entry = _entry(workspace, file_record["scopeEntryId"])
-        if entry is None or not entry.writable:
+        if entry is None:
+            raise SystemExit("SVN object is no longer writable in the authorization scope")
+        relative_path = PurePosixPath(item["source_path"]).relative_to(PurePosixPath(entry.local_subdir))
+        if not source_path_writable(entry, relative_path):
             raise SystemExit("SVN object is no longer writable in the authorization scope")
         path = Path(item["local_path"])
         current_hash = file_hash(path)

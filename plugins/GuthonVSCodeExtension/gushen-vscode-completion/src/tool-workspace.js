@@ -29,7 +29,7 @@ function workspaceActions(item) {
   if (item.sourceMode === 'svn') {
     return {
       source: [
-        capability('svn.initialize') && ['从 BAT 同步授权并检出/更新', 'gushenCompletion.initializeSvn', 'repo-clone'],
+        capability('svn.initialize') && ['从签出脚本同步授权并检出/更新', 'gushenCompletion.initializeSvn', 'repo-clone'],
         capability('svn.reindex') && ['扫描/重建本地 SVN 索引', 'gushenCompletion.reindexCalls', 'refresh'],
         capability('svn.refresh') && ['更新指定 SVN working copy', 'gushenCompletion.refreshSvn', 'repo-sync'],
         capability('svn.browse') && ['查看谷神同步源码', 'gushenCompletion.focusSvnSource', 'list-tree'],

@@ -11,7 +11,13 @@ from common.page_projection import extract_page_fields, extract_page_scripts
 from common.source_format import decode_source
 from providers.svn.checkout import file_hash, run_svn, svn_path_changes, svn_status
 
-from .manifest import ScopeEntry, load_authorized_scope
+from .manifest import (
+    ScopeEntry,
+    load_authorized_scope,
+    source_category,
+    source_path_writable,
+    source_relative_path,
+)
 
 
 HEADER_FIELD = re.compile(r"(?m)^\s*\*\s*@(?P<key>[A-Za-z]+)\s+(?P<value>.*?)\s*$")
@@ -138,7 +144,7 @@ def _procedure_object(entry: ScopeEntry, path: Path, revisions: dict, changes: d
     result = _base_object(entry, path, "procedure", revisions, changes)
     text = decode_source(path.read_bytes())[0]
     header = header_fields(text)
-    relative = path.relative_to(entry.root).with_suffix("")
+    relative = source_relative_path(entry, path.relative_to(entry.root)).with_suffix("")
     package = header.get("packageId") or ".".join(relative.parts[:-1])
     function_id = header.get("functionId") or relative.name
     result.update(
@@ -171,8 +177,14 @@ def _system_script_object(entry: ScopeEntry, path: Path, revisions: dict, change
     return result
 
 
-def _metadata_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) -> dict:
-    kind = "table" if entry.category == "tables" else "view"
+def _metadata_object(
+    entry: ScopeEntry,
+    path: Path,
+    revisions: dict,
+    changes: dict,
+    category: str,
+) -> dict:
+    kind = "table" if category == "tables" else "view"
     result = _base_object(entry, path, kind, revisions, changes)
     data = json.loads(decode_source(path.read_bytes())[0])
     id_key = "tableId" if kind == "table" else "viewId"
@@ -212,15 +224,17 @@ def _generic_read_only_object(entry: ScopeEntry, path: Path, revisions: dict, ch
 
 
 def _object_for_file(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) -> dict | None:
+    relative = path.relative_to(entry.root)
+    category = source_category(entry, relative)
     suffix = path.suffix.lower()
-    if entry.category == "pages" and suffix in {".json", ".gss"}:
+    if category == "pages" and suffix in {".json", ".gss"}:
         return _page_object(entry, path, revisions, changes)
-    if entry.category == "procedures" and suffix == ".gss":
+    if category == "procedures" and suffix == ".gss":
         return _procedure_object(entry, path, revisions, changes)
-    if entry.category == "system-script" and suffix in TEXT_SUFFIXES:
+    if category == "system-script" and suffix in TEXT_SUFFIXES:
         return _system_script_object(entry, path, revisions, changes)
-    if entry.category in {"tables", "views"} and suffix == ".json":
-        return _metadata_object(entry, path, revisions, changes)
+    if category in {"tables", "views"} and suffix == ".json":
+        return _metadata_object(entry, path, revisions, changes, category)
     if entry.category in {"skill", "public"} and suffix in GENERIC_TEXT_SUFFIXES:
         return _generic_read_only_object(entry, path, revisions, changes)
     return None
@@ -248,14 +262,15 @@ def scan(workspace: dict) -> dict:
             if not path.is_file() or ".svn" in path.parts:
                 continue
             relative = path.relative_to(entry.root).as_posix()
+            logical_category = source_category(entry, relative) or entry.category
             modules.append(
                 {
                     "scopeEntryId": entry.id,
                     "workingCopyId": entry.id,
-                    "category": entry.category,
+                    "category": logical_category,
                     "path": _logical_path(entry, path),
                     "relativePath": relative,
-                    "writable": entry.writable,
+                    "writable": source_path_writable(entry, relative),
                     "status": "SVN_DIRTY" if relative in change_map else "OK",
                 }
             )

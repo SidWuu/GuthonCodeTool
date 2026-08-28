@@ -1,4 +1,4 @@
-"""Convert exact SVN checkout commands from a platform BAT into a scope manifest."""
+"""Convert exact SVN checkout commands from a platform script into a scope manifest."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from .nexus.manifest import (
 
 
 CHECKOUT_ACTIONS = {"checkout", "co"}
-WRITABLE_CATEGORIES = {"pages", "procedures", "system-script"}
+WRITABLE_CATEGORIES = {"systems", "datasources", "pages", "procedures", "system-script"}
 OPTIONS_WITH_VALUES = {
     "--changelist",
     "--config-dir",
@@ -65,22 +65,28 @@ class ImportResult:
     duplicate_count: int
 
 
-def read_bat(path: Path) -> str:
+def read_checkout_script(path: Path) -> str:
     try:
         content = path.read_bytes()
     except OSError as error:
-        raise SystemExit(f"Cannot read SVN checkout BAT: {path}") from error
+        raise SystemExit(f"Cannot read SVN checkout script: {path}") from error
     if content.startswith((b"\xff\xfe", b"\xfe\xff")):
         try:
             return content.decode("utf-16")
         except UnicodeDecodeError as error:
-            raise SystemExit(f"Cannot decode SVN checkout BAT: {path}") from error
+            raise SystemExit(f"Cannot decode SVN checkout script: {path}") from error
     for encoding in ("utf-8-sig", "gb18030"):
         try:
             return content.decode(encoding)
         except UnicodeDecodeError:
             continue
-    raise SystemExit(f"Cannot decode SVN checkout BAT as UTF-8 or GB18030: {path}")
+    raise SystemExit(f"Cannot decode SVN checkout script as UTF-8 or GB18030: {path}")
+
+
+def read_bat(path: Path) -> str:
+    """Compatibility alias for callers that still provide a Windows BAT."""
+
+    return read_checkout_script(path)
 
 
 def _logical_lines(text: str):
@@ -90,7 +96,7 @@ def _logical_lines(text: str):
         line = physical.rstrip()
         if not buffered:
             start_line = line_number
-        continued = bool(re.search(r"(?<!\^)\^$", line))
+        continued = bool(re.search(r"(?<!\^)\^$|(?<!\\)\\$", line))
         buffered += line[:-1] + " " if continued else line
         if not continued:
             yield start_line, buffered
@@ -116,7 +122,7 @@ def _statements(line: str):
             current.append(char)
             index += 1
             continue
-        if char in {"&", "|"}:
+        if char in {"&", "|", ";"}:
             statement = "".join(current).strip()
             if statement:
                 yield statement
@@ -175,7 +181,7 @@ def _parse_statement(statement: str, line_number: int) -> ParsedCheckout | None:
     if not tokens:
         return None
     first = tokens[0].lstrip("@").casefold()
-    if first in {"rem", "echo", "::"} or first.startswith("::"):
+    if first in {"rem", "echo", "::", "#"} or first.startswith(("::", "#")):
         return None
     svn_index = next((index for index, token in enumerate(tokens) if _is_svn_executable(token)), None)
     if svn_index is None or svn_index + 1 >= len(tokens):
@@ -219,7 +225,7 @@ def _parse_statement(statement: str, line_number: int) -> ParsedCheckout | None:
     return ParsedCheckout(line=line_number, url=url, local_subdir=local_subdir, category=category)
 
 
-def parse_bat(text: str) -> tuple[list[ParsedCheckout], int]:
+def parse_checkout_script(text: str) -> tuple[list[ParsedCheckout], int]:
     parsed = []
     exact_seen = set()
     duplicate_count = 0
@@ -235,9 +241,15 @@ def parse_bat(text: str) -> tuple[list[ParsedCheckout], int]:
             exact_seen.add(exact_key)
             parsed.append(checkout)
     if not parsed:
-        raise SystemExit("No executable SVN checkout commands were found in the BAT")
+        raise SystemExit("No executable SVN checkout commands were found in the script")
     _validate_checkouts(parsed)
     return parsed, duplicate_count
+
+
+def parse_bat(text: str) -> tuple[list[ParsedCheckout], int]:
+    """Compatibility alias for callers that still refer to the BAT parser."""
+
+    return parse_checkout_script(text)
 
 
 def _url_identity(url: str) -> tuple[str, str, PurePosixPath]:
@@ -291,7 +303,7 @@ def build_manifest(text: str, workspace_key: str) -> ImportResult:
     workspace_key = str(workspace_key or "").strip()
     if not re.fullmatch(r"(?:products|projects)\.[A-Za-z0-9][A-Za-z0-9._-]*", workspace_key):
         raise SystemExit("workspaceKey must be products.<id> or projects.<id>")
-    checkouts, duplicate_count = parse_bat(text)
+    checkouts, duplicate_count = parse_checkout_script(text)
     used_ids = set()
     entries = [
         {
@@ -346,7 +358,7 @@ def write_manifest(path: Path, result: ImportResult, replace: bool = False) -> d
             added, removed, modified = _change_counts(previous, result.manifest)
             raise SystemExit(
                 f"Scope manifest differs: added={added}, removed={removed}, modified={modified}. "
-                f"Review the BAT and rerun with --replace: {path}"
+                f"Review the checkout script and rerun with --replace: {path}"
             )
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")

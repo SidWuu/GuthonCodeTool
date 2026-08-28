@@ -6,10 +6,12 @@ import datetime as dt
 import difflib
 import json
 import os
+import sqlite3
 import tempfile
 import uuid
 from pathlib import Path
 
+from common.page_projection import extract_page_fields, extract_page_scripts
 from providers.svn.checkout import (
     atomic_json,
     file_hash,
@@ -24,7 +26,13 @@ from providers.svn.checkout import (
 from common.source_format import decode_source
 
 from .documents import load_session, session_path
-from .manifest import ScopeEntry, load_authorized_scope
+from .manifest import (
+    ScopeEntry,
+    load_authorized_scope,
+    resolve_authorized_path,
+    source_category,
+    source_path_writable,
+)
 
 
 TOKEN_VERSION = 1
@@ -33,27 +41,70 @@ TOKEN_FILE = "svn-selection-token.json"
 PLATFORM_STATE_FILE = "svn-platform-save-state.json"
 
 
+def _page_projection(text: str) -> str:
+    """Render PAGE JSON as stable script/SQL/field sections for human diffing."""
+
+    data = json.loads(text)
+    if isinstance(data, str):
+        data = json.loads(data)
+    if not isinstance(data, dict):
+        raise ValueError("PAGE JSON root must be an object")
+    sections = ["# PAGE 可读源码"]
+    for field in extract_page_scripts(data):
+        script_type = "GSS" if field.script_type == "vm" else field.script_type.upper()
+        sections.extend(
+            [
+                "",
+                f"## {script_type} · {field.display_name}",
+                f"@json-pointer {field.json_pointer}",
+                field.original_value,
+            ]
+        )
+    for field in extract_page_fields(data):
+        sections.extend(
+            [
+                "",
+                f"## 字段 · {field['label']}",
+                f"@json-pointer {field['json_pointer']}",
+                field["content"],
+            ]
+        )
+    return "\n".join(sections).rstrip() + "\n"
+
+
+def _catalog_by_path(workspace: dict) -> dict[str, dict]:
+    if not workspace["indexPath"].is_file():
+        return {}
+    try:
+        from .index_queries import catalog
+
+        return {item["sourcePath"]: item for item in catalog(workspace)["objects"]}
+    except (OSError, sqlite3.Error, SystemExit):
+        # SCM status remains available even when the derived index is missing or stale.
+        return {}
+
+
+def _change_metadata(indexed: dict[str, dict], logical_path: str) -> dict:
+    item = indexed.get(logical_path)
+    if not item:
+        return {}
+    return {
+        "sourceType": item.get("sourceType") or "",
+        "sourceId": item.get("sourceId") or "",
+        "sourceName": item.get("sourceName") or "",
+        "funId": item.get("funId") or "",
+        "treePath": item.get("treePath") or [],
+        "treeLabel": item.get("treeLabel") or "",
+    }
+
+
 def _logical_path(entry: ScopeEntry, relative: str) -> str:
     normalized = Path(relative).as_posix().lstrip("/")
     return f"{entry.local_subdir}/{normalized}" if normalized not in {"", "."} else entry.local_subdir
 
 
 def _entry_and_path(workspace: dict, logical_path: str) -> tuple[ScopeEntry, Path, str]:
-    scope = load_authorized_scope(workspace)
-    normalized = Path(str(logical_path or "").replace("\\", "/")).as_posix().lstrip("/")
-    matches = []
-    for entry in scope.entries:
-        prefix = entry.local_subdir
-        if normalized == prefix:
-            matches.append((entry, entry.root, "."))
-        elif normalized.startswith(prefix + "/"):
-            relative = normalized[len(prefix) + 1:]
-            target = (entry.root / relative).resolve()
-            if target == entry.root.resolve() or entry.root.resolve() in target.parents:
-                matches.append((entry, target, relative))
-    if len(matches) != 1:
-        raise SystemExit(f"Path is outside or ambiguous in the authorized SVN scope: {logical_path}")
-    return matches[0]
+    return resolve_authorized_path(load_authorized_scope(workspace), logical_path)
 
 
 def _safe_session_change(change: dict, entry: ScopeEntry, session: dict) -> tuple[bool, str, dict]:
@@ -63,7 +114,7 @@ def _safe_session_change(change: dict, entry: ScopeEntry, session: dict) -> tupl
     safe = (
         change.get("item") == "modified"
         and change.get("properties") in {"", "normal", "none"}
-        and not any(change.get(key) for key in ("treeConflicted", "switched", "copied"))
+        and not any(change.get(key) for key in ("treeConflicted", "switched", "copied", "wcLocked"))
         and path.is_file()
         and record.get("state") == "LOCAL_MODIFIED"
         and record.get("expectedCurrentHash") == file_hash(path)
@@ -85,7 +136,9 @@ def status(workspace: dict, *, remote=False) -> dict:
     scope = load_authorized_scope(workspace)
     session = load_session(workspace)
     changes = []
+    remote_changes = []
     working_copies = []
+    indexed = _catalog_by_path(workspace)
     for entry in scope.entries:
         current = svn_status(entry.root, remote=remote, settings=workspace["svn"])
         working_copies.append(
@@ -104,9 +157,10 @@ def status(workspace: dict, *, remote=False) -> dict:
             conflicted = bool(change.get("treeConflicted") or change.get("item") == "conflicted")
             untracked = change.get("item") == "unversioned"
             selectable = bool(
-                change.get("item") == "modified"
+                source_path_writable(entry, change["path"])
+                and change.get("item") == "modified"
                 and change.get("properties") in {"", "normal", "none"}
-                and not any(change.get(key) for key in ("treeConflicted", "switched", "copied"))
+                and not any(change.get(key) for key in ("treeConflicted", "switched", "copied", "wcLocked"))
                 and path.is_file()
             )
             state = (
@@ -131,6 +185,20 @@ def status(workspace: dict, *, remote=False) -> dict:
                     "diffable": path.is_file(),
                     "selectable": selectable,
                     "sourceHash": file_hash(path) if selectable else "",
+                    **_change_metadata(indexed, logical_path),
+                }
+            )
+        for change in current.get("remoteChanges") or []:
+            logical_path = _logical_path(entry, change["path"])
+            remote_changes.append(
+                {
+                    "workingCopyId": entry.id,
+                    "scopeEntryId": entry.id,
+                    "category": entry.category,
+                    "path": logical_path,
+                    "item": change.get("item") or "",
+                    "properties": change.get("properties") or "",
+                    **_change_metadata(indexed, logical_path),
                 }
             )
     return {
@@ -140,6 +208,8 @@ def status(workspace: dict, *, remote=False) -> dict:
         "clean": not changes,
         "workingCopies": working_copies,
         "changes": changes,
+        "remoteChecked": bool(remote),
+        "remoteChanges": remote_changes,
         "groups": {
             state: [change for change in changes if change["state"] == state]
             for state in ("LOCAL_MODIFIED", "EXTERNAL_MODIFIED", "CONFLICT", "UNTRACKED")
@@ -169,6 +239,15 @@ def diff(workspace: dict, *, logical_path: str) -> dict:
         working_bytes = path.read_bytes()
     base_content = decode_source(base_bytes)[0]
     working_content = decode_source(working_bytes)[0]
+    readable_base = ""
+    readable_working = ""
+    if path.suffix.lower() == ".json" and source_category(entry, relative) == "pages":
+        try:
+            readable_base = _page_projection(base_content)
+            readable_working = _page_projection(working_content)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            readable_base = ""
+            readable_working = ""
     output = "".join(
         difflib.unified_diff(
             base_content.splitlines(keepends=True),
@@ -184,6 +263,8 @@ def diff(workspace: dict, *, logical_path: str) -> dict:
         "path": logical_path,
         "baseContent": base_content,
         "workingContent": working_content,
+        "readableBaseContent": readable_base,
+        "readableWorkingContent": readable_working,
         "diff": output,
     }
 
@@ -326,12 +407,13 @@ def _revalidate_selected(
         change = changes_by_path.get(relative)
         safe = (
             candidate_entry.id == entry.id
+            and source_path_writable(candidate_entry, relative)
             and path.is_file()
             and candidate["sourceHash"] == file_hash(path)
             and change
             and change.get("item") == "modified"
             and change.get("properties") in {"", "normal", "none"}
-            and not any(change.get(key) for key in ("treeConflicted", "switched", "copied"))
+            and not any(change.get(key) for key in ("treeConflicted", "switched", "copied", "wcLocked"))
         )
         if not safe:
             raise SystemExit(f"Selected SVN file changed after preview: {candidate['path']}")

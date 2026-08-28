@@ -3,6 +3,7 @@ const test = require('node:test');
 const {
   decodeIdentity,
   documentExtension,
+  documentFilename,
   encodeIdentity,
   SvnVirtualFileSystem,
 } = require('../src/svn/virtual-fs');
@@ -26,16 +27,25 @@ test('selects a readable virtual filename extension', () => {
   assert.equal(documentExtension({ sourceType: 'page', jsonPointer: '/views/0/fields' }), 'json');
   assert.equal(documentExtension({ sourceType: 'procedure' }), 'gss');
   assert.equal(documentExtension({ sourceType: 'public' }), 'txt');
+  assert.equal(documentExtension({ sourceType: 'public', sourceId: 'public:bill-types.json' }), 'json');
+  assert.equal(documentExtension({ sourceType: 'public', sourceId: 'public:module-comps.json' }), 'json');
+  assert.equal(documentExtension({ sourceType: 'skill', sourceId: 'skill:README.md' }), 'md');
+  assert.equal(
+    documentFilename({ sourceType: 'public', sourceId: 'public:bill-types.json' }),
+    'public_bill-types.json'
+  );
   assert.equal(documentExtension({ sourceType: 'page', jsonPointer: '/events/onClickScript' }), 'js');
   assert.equal(documentExtension({ sourceType: 'page', fragmentType: 'gss' }), 'gss');
   assert.equal(documentExtension({ sourceType: 'page', fragmentType: 'vm' }), 'gss');
 });
 
-test('associates both GSS and legacy VM files with the Java language', () => {
+test('registers a dedicated GSS language while retaining legacy VM as Java', () => {
   const manifest = require('../package.json');
+  const gss = manifest.contributes.languages.find((language) => language.id === 'guthon-gss');
   const java = manifest.contributes.languages.find((language) => language.id === 'java');
-  assert.deepEqual(java.extensions, ['.gss', '.vm']);
-  assert.equal(Object.hasOwn(manifest.contributes, 'grammars'), false);
+  assert.deepEqual(gss.extensions, ['.gss']);
+  assert.deepEqual(java.extensions, ['.vm']);
+  assert.equal(manifest.contributes.grammars.length, 2);
 });
 
 test('accepts VS Code create-and-overwrite flags only for an existing backend object', async () => {

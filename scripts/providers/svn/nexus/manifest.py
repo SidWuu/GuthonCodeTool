@@ -14,6 +14,8 @@ SCHEMA_VERSION = 1
 STATE_VERSION = 3
 SAFE_ENTRY_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SUPPORTED_CATEGORIES = {
+    "systems",
+    "datasources",
     "pages",
     "procedures",
     "system-script",
@@ -22,6 +24,46 @@ SUPPORTED_CATEGORIES = {
     "skill",
     "public",
 }
+
+WRITABLE_SOURCE_CATEGORIES = {"pages", "procedures", "system-script"}
+WRITABLE_SOURCE_SUFFIXES = {
+    "pages": {".json", ".gss"},
+    "procedures": {".gss"},
+    "system-script": {".gss", ".js", ".vm", ".sql"},
+}
+
+
+def source_category(entry: "ScopeEntry", relative_path: object) -> str:
+    """Return the logical source category inside one physical working copy."""
+
+    relative = PurePosixPath(str(relative_path or "").replace("\\", "/"))
+    if entry.category == "systems":
+        return relative.parts[0] if relative.parts and relative.parts[0] in {"pages", "system-script"} else ""
+    if entry.category == "datasources":
+        return relative.parts[0] if relative.parts and relative.parts[0] in {"procedures", "tables", "views"} else ""
+    return entry.category
+
+
+def source_relative_path(entry: "ScopeEntry", relative_path: object) -> PurePosixPath:
+    """Strip the aggregate source directory while preserving legacy layouts."""
+
+    relative = PurePosixPath(str(relative_path or "").replace("\\", "/"))
+    if getattr(entry, "category", "") in {"systems", "datasources"} and relative.parts:
+        return PurePosixPath(*relative.parts[1:])
+    return relative
+
+
+def source_path_writable(entry: "ScopeEntry", relative_path: object) -> bool:
+    """Apply logical object write rules to mixed aggregate working copies."""
+
+    relative = PurePosixPath(str(relative_path or "").replace("\\", "/"))
+    category = source_category(entry, relative)
+    return bool(
+        entry.writable
+        and category in WRITABLE_SOURCE_CATEGORIES
+        and relative.suffix.lower() in WRITABLE_SOURCE_SUFFIXES[category]
+        and relative.name.casefold() != "index.md"
+    )
 
 
 @dataclass(frozen=True)
@@ -135,7 +177,10 @@ def load_authorized_scope(workspace: dict) -> AuthorizedScope:
         if any(scope_paths_overlap(posix_subdir, existing) for existing in subdirs):
             raise SystemExit(f"Overlapping SVN scope localSubdir: {local_subdir}")
         subdirs.append(posix_subdir)
-        writable = raw.get("writable", category in {"pages", "procedures", "system-script"})
+        writable = raw.get(
+            "writable",
+            category in {"systems", "datasources", "pages", "procedures", "system-script"},
+        )
         if not isinstance(writable, bool):
             raise SystemExit(f"writable must be boolean for scope entry {entry_id}")
         entries.append(
@@ -172,3 +217,34 @@ def load_authorized_scope(workspace: dict) -> AuthorizedScope:
         entries=tuple(entries),
         digest=digest,
     )
+
+
+def resolve_authorized_path(
+    scope: AuthorizedScope,
+    logical_path: object,
+) -> tuple[ScopeEntry, Path, str]:
+    """Resolve one logical checkout path without escaping or crossing scope entries."""
+
+    text = str(logical_path or "").strip().replace("\\", "/")
+    normalized_path = PurePosixPath(text)
+    if (
+        not text
+        or normalized_path.is_absolute()
+        or any(part in {"", ".."} for part in normalized_path.parts)
+    ):
+        raise SystemExit(f"Unsafe SVN scope path: {logical_path}")
+    normalized = normalized_path.as_posix()
+    matches = []
+    for entry in scope.entries:
+        prefix = entry.local_subdir
+        if normalized == prefix:
+            matches.append((entry, entry.root, "."))
+        elif normalized.startswith(prefix + "/"):
+            relative = normalized[len(prefix) + 1:]
+            target = (entry.root / relative).resolve()
+            root = entry.root.resolve()
+            if target == root or root in target.parents:
+                matches.append((entry, target, relative))
+    if len(matches) != 1:
+        raise SystemExit(f"Path is outside or ambiguous in the authorized SVN scope: {logical_path}")
+    return matches[0]

@@ -33,7 +33,7 @@ const {
   requireCredentials,
 } = require('./svn/credentials');
 
-const SUPPORTED_LANGUAGES = ['java', 'javascript', 'sql'];
+const SUPPORTED_LANGUAGES = ['java', 'guthon-gss', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled', 'guthon-svn-edit'];
 const TOOL_COMMANDS = {
   setup: 'setup',
@@ -122,7 +122,8 @@ function createProvider(context) {
         return [];
       }
       const rules = loadRules(context);
-      const route = resolveRoute(rules, document.languageId, currentWord);
+      const languageId = document.languageId === 'guthon-gss' ? 'java' : document.languageId;
+      const route = resolveRoute(rules, languageId, currentWord);
       const items = filterItems(data, route, currentWord);
       const range = completionRange(document, position, currentWord);
 
@@ -156,7 +157,8 @@ function createHoverProvider(context) {
       );
       if (!range) return undefined;
 
-      const items = findHoverItems(data, document.languageId, document.getText(range));
+      const languageId = document.languageId === 'guthon-gss' ? 'java' : document.languageId;
+      const items = findHoverItems(data, languageId, document.getText(range));
       if (!items.length) return undefined;
 
       const documentation = [...new Set(items.map(itemDocumentation))].join('\n\n---\n\n');
@@ -406,7 +408,7 @@ function activate(context) {
     '.'
   );
   const definitionDisposable = vscode.languages.registerDefinitionProvider(
-    createDocumentSelector(['java'], ['file', 'untitled']),
+    createDocumentSelector(['java', 'guthon-gss'], ['file', 'untitled']),
     createDefinitionProvider()
   );
   const hoverDisposable = vscode.languages.registerHoverProvider(
@@ -505,17 +507,18 @@ function activate(context) {
       toolView.refresh();
       await svnServices.refresh();
       if (selected === 'svn') {
-        const batPath = path.join(workspaceRoot, 'context', 'svnCheckoutHere.bat');
-        if (!fs.existsSync(batPath)) {
+        const scriptPath = path.join(workspaceRoot, 'context', 'svnCheckoutHere.sh');
+        const legacyBatPath = path.join(workspaceRoot, 'context', 'svnCheckoutHere.bat');
+        if (!fs.existsSync(scriptPath) && !fs.existsSync(legacyBatPath)) {
           return vscode.window.showWarningMessage(
-            `已将 ${workspaceKey} 设为 SVN；请先把谷神下载的 svnCheckoutHere.bat 放入项目 context 目录。`
+            `已将 ${workspaceKey} 设为 SVN；请先把谷神下载的 svnCheckoutHere.sh 放入项目 context 目录。`
           );
         }
         const action = await vscode.window.showInformationMessage(
           `已将 ${workspaceKey} 设为 SVN。`,
-          '从 BAT 检出/更新'
+          '从签出脚本检出/更新'
         );
-        if (action === '从 BAT 检出/更新') {
+        if (action === '从签出脚本检出/更新') {
           return vscode.commands.executeCommand('gushenCompletion.initializeSvn', workspaceKey);
         }
         return undefined;
@@ -601,21 +604,21 @@ function activate(context) {
       try {
         preview = await svnServices.backend.scopePreview(workspaceKey);
       } catch (error) {
-        return vscode.window.showErrorMessage(`无法解析工作区 svnCheckoutHere.bat：${error.message}`);
+        return vscode.window.showErrorMessage(`无法解析工作区 SVN 签出脚本：${error.message}`);
       }
       const changeSummary = `新增 ${preview.added}、移除 ${preview.removed}、变更 ${preview.modified}`;
       const scopeSummary = preview.excludedBySystemAliases
-        ? `BAT 共 ${preview.commands} 个地址，按 systems.include.system_aliases 保留 ${preview.entries} 个、排除 ${preview.excludedBySystemAliases} 个`
-        : `BAT 共 ${preview.commands} 个地址，保留 ${preview.entries} 个`;
+        ? `签出脚本共 ${preview.commands} 个地址，按 systems.include.mappings 保留 ${preview.entries} 个、排除 ${preview.excludedBySystemAliases} 个`
+        : `签出脚本共 ${preview.commands} 个地址，保留 ${preview.entries} 个`;
       const confirmed = await vscode.window.showWarningMessage(
-        `将从当前工程 context/svnCheckoutHere.bat 生成检出范围：${scopeSummary}（${changeSummary}），随后检出或更新筛选后的 working copy。BAT 不会被执行，凭据不会写入授权清单。`,
+        `将从当前工程 context 下的 SVN 签出脚本生成检出范围：${scopeSummary}（${changeSummary}），随后使用同一次认证检出或更新筛选后的 working copy。签出脚本不会被执行，凭据不会写入授权清单。`,
         { modal: true },
         '检出/更新'
       );
       if (confirmed !== '检出/更新') return false;
       if (await runTool(
         TOOL_COMMANDS.svn,
-        ['sync-from-bat', '--accept-scope-change'],
+        ['sync-from-script', '--accept-scope-change'],
         false,
         workspaceKey,
         environment
@@ -642,7 +645,10 @@ function activate(context) {
           true,
           workspaceKey,
           await svnEnvironment(workspaceKey)
-        )) await svnServices.refresh();
+        )) {
+          svnServices.scm.clearRemote(workspaceKey);
+          await svnServices.refresh();
+        }
         return;
       }
       const current = await svnServices.backend.scmStatus(workspaceKey, true);
@@ -673,6 +679,7 @@ function activate(context) {
         workspaceKey,
         await svnEnvironment(workspaceKey)
       )) {
+        svnServices.scm.clearRemote(workspaceKey);
         await svnServices.refresh();
         toolView.refresh();
       }

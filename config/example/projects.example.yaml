@@ -13,10 +13,13 @@ projects:
     # 当前工作区独立的子系统范围。
     systems:
       include:
-        system_aliases:
-          - demo.system
+        # 必须使用该项目自己的 ID，不得复制产品的数据源 ID。
+        mappings:
+          demo.system:
+            system_id: SYS-DEMO
+            data_source_id: "0001"
     # SVN 项目无需在 YAML 增加模式字段；在 Nexus 的当前项目节点选择 SVN，
-    # 再把 svnCheckoutHere.bat 放入工程 context/。
+    # 再把 svnCheckoutHere.sh 放入工程 context/（旧 .bat 仍兼容）。
     # 以下 svn 块仅用于覆盖 checkout 根、共享凭据环境变量名或 capability：
     # svn:
     #   update_policy: manual

@@ -79,6 +79,14 @@ class SvnBackendClient {
     return this.run(workspaceKey, ['scm-status', ...(remote ? ['--remote'] : [])]);
   }
 
+  refresh(workspaceKey, { sourcePath = '', workingCopyIds = [], mergeLocal = false } = {}) {
+    const args = ['refresh'];
+    if (sourcePath) args.push('--path', sourcePath);
+    for (const workingCopyId of workingCopyIds) args.push('--working-copy', workingCopyId);
+    if (mergeLocal) args.push('--merge-local');
+    return this.run(workspaceKey, args);
+  }
+
   diff(workspaceKey, sourcePath) {
     return this.run(workspaceKey, ['diff', '--path', sourcePath]);
   }

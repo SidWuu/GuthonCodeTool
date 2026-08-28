@@ -1,0 +1,23 @@
+{
+  "name": "Guthon GSS Injection",
+  "scopeName": "guthon-gss.injection",
+  "injectionSelector": "L:source.guthon-gss -comment",
+  "patterns": [
+    {
+      "name": "keyword.control.guthon-vm",
+      "match": "#(?:set|if|elseif|else|end|foreach|while|continue|break|try|catch|finally|function|stop|macro|define|include|parse|evaluate)\\b"
+    },
+    {
+      "name": "variable.language.guthon-vm",
+      "match": "\\$!?(?:vs\\b|\\{vs\\})"
+    },
+    {
+      "name": "variable.other.guthon-vm",
+      "match": "\\$!?(?:\\{[A-Za-z_][A-Za-z0-9_]*\\}|[A-Za-z_][A-Za-z0-9_]*)"
+    },
+    {
+      "name": "variable.parameter.guthon-vm",
+      "match": "#\\{[A-Za-z_][A-Za-z0-9_.]*\\}"
+    }
+  ]
+}

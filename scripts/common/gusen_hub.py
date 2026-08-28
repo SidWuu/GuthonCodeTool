@@ -202,15 +202,12 @@ def list_workspaces(config):
             ):
                 raise SystemExit(f"checkout_root and workspace_root must be separate for {key}")
             capabilities = _svn_capabilities(svn) if svn else _database_capabilities()
-            aliases = list(
-                dict.fromkeys(
-                    str(value).strip()
-                    for value in ((item.get("systems") or {}).get("include") or {}).get("system_aliases", [])
-                    if str(value).strip()
-                )
-            )
+            system_mappings = ((item.get("systems") or {}).get("include") or {}).get("mappings") or {}
+            if not isinstance(system_mappings, dict):
+                raise SystemExit(f"systems.include.mappings must be a mapping: {key}")
+            aliases = [str(alias).strip() for alias in system_mappings if str(alias).strip()]
             if source_mode == "svn" and not aliases and not manifest_layout:
-                raise SystemExit(f"SVN workspace requires systems.include.system_aliases: {key}")
+                raise SystemExit(f"SVN workspace requires systems.include.mappings: {key}")
             workspaces.append(
                 {
                     "workspaceKey": key,
@@ -232,6 +229,7 @@ def list_workspaces(config):
                     "checkoutPath": svn["checkoutPath"] if svn else None,
                     "providerSourceRoot": svn["checkoutPath"] if svn else root / "source" / "readonly",
                     "systemAliases": aliases,
+                    "systemMappings": system_mappings,
                     "systems": item.get("systems") or {},
                     "sourceScope": {
                         "include": item.get("include") or {},
@@ -427,11 +425,14 @@ def workspace_summary(config, workspace):
         checkout_state = load_state(workspace, required=False)
         summary["checkoutLayout"] = "manifest-working-copies"
         manifest_path = workspace["svn"].get("scopeManifestPath")
-        checkout_bat_path = workspace["svn"].get("checkoutBatPath")
+        checkout_script_path = workspace["svn"].get("checkoutScriptPath")
         summary["scopeManifestPath"] = str(manifest_path) if manifest_path else ""
         summary["scopeManifestReady"] = bool(manifest_path and manifest_path.is_file())
-        summary["checkoutBatPath"] = str(checkout_bat_path) if checkout_bat_path else ""
-        summary["checkoutBatReady"] = bool(checkout_bat_path and checkout_bat_path.is_file())
+        summary["checkoutScriptPath"] = str(checkout_script_path) if checkout_script_path else ""
+        summary["checkoutScriptReady"] = bool(checkout_script_path and checkout_script_path.is_file())
+        # Compatibility for clients released before checkout scripts became platform-neutral.
+        summary["checkoutBatPath"] = summary["checkoutScriptPath"]
+        summary["checkoutBatReady"] = summary["checkoutScriptReady"]
         summary["svnCredentialsRequired"] = True
         summary["workingCopies"] = [
             {
@@ -577,13 +578,10 @@ def load_config():
 
 def system_aliases(config: dict, workspace=None):
     workspace = workspace or resolve_workspace(config)
-    return list(
-        dict.fromkeys(
-            str(item).strip()
-            for item in (workspace.get("systems", {}).get("include") or {}).get("system_aliases", [])
-            if str(item).strip()
-        )
-    )
+    mappings = workspace.get("systemMappings")
+    if mappings is None:
+        mappings = (workspace.get("systems", {}).get("include") or {}).get("mappings") or {}
+    return [str(alias).strip() for alias in mappings if str(alias).strip()]
 
 
 def _build_system_scope(records, selected):
@@ -659,7 +657,7 @@ def resolve_system_scope(conn, config: dict, datasource_name: str, workspace=Non
                 for row in cur.fetchall()
             ]
         if not records:
-            raise SystemExit(f"No gd_system rows match systems.include.system_aliases for {workspace['workspaceKey']}")
+            raise SystemExit(f"No gd_system rows match systems.include.mappings for {workspace['workspaceKey']}")
         cache["datasources"][datasource_name] = {"system_aliases": selected, "systems": records}
         cache["generated_at"] = _now()
         cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -673,7 +671,7 @@ def resolve_system_scope(conn, config: dict, datasource_name: str, workspace=Non
 
 
 def bootstrap_system_data(config: dict, workspace) -> dict:
-    """Refresh one datasource's static system mapping for SVN init/refresh only."""
+    """Refresh one database datasource's cached system mapping."""
 
     datasource_name = workspace["datasourceName"]
     with db_connect(workspace["datasource"]) as conn:

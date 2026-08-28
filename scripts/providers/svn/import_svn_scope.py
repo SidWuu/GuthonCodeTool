@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate an authorized SVN scope manifest from a Guthon platform checkout BAT."""
+"""Generate an authorized SVN scope manifest from a Guthon checkout script."""
 
 from __future__ import annotations
 
@@ -7,12 +7,14 @@ import argparse
 import json
 from pathlib import Path
 
-from providers.svn.scope_import import build_manifest, read_bat, write_manifest
+from providers.svn.scope_import import build_manifest, read_checkout_script, write_manifest
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bat", required=True, help="Path to svnCheckoutHere.bat downloaded from Guthon")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--script", help="Path to svnCheckoutHere.sh or svnCheckoutHere.bat")
+    source.add_argument("--bat", help="Legacy alias for a svnCheckoutHere.bat path")
     parser.add_argument("--workspace", required=True, help="Exact workspace key: products.<id> or projects.<id>")
     parser.add_argument("--output", required=True, help="Target authorized-scope.json path")
     parser.add_argument(
@@ -21,9 +23,9 @@ def main(argv=None) -> int:
         help="atomically replace an existing manifest after reviewing the reported scope change",
     )
     args = parser.parse_args(argv)
-    bat_path = Path(args.bat).expanduser().resolve()
+    script_path = Path(args.script or args.bat).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
-    result = build_manifest(read_bat(bat_path), args.workspace)
+    result = build_manifest(read_checkout_script(script_path), args.workspace)
     summary = write_manifest(output_path, result, replace=args.replace)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

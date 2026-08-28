@@ -1,4 +1,11 @@
 const SCHEME = 'guthon-svn-edit';
+const GENERIC_SOURCE_EXTENSIONS = new Set(['json', 'md', 'txt', 'yaml', 'yml', 'gss', 'js', 'vm', 'sql']);
+
+function sourceIdExtension(identity) {
+  const match = String(identity.sourceId || '').match(/\.([A-Za-z0-9]+)$/);
+  const extension = match?.[1]?.toLowerCase() || '';
+  return GENERIC_SOURCE_EXTENSIONS.has(extension) ? extension : '';
+}
 
 function documentExtension(identity) {
   const pointer = identity.jsonPointer || '';
@@ -8,12 +15,20 @@ function documentExtension(identity) {
   if (identity.fragmentType === 'js') return 'js';
   if (identity.sourceType === 'procedure' || identity.sourceType === 'system-script') return 'gss';
   if (identity.sourceType === 'table' || identity.sourceType === 'view') return 'json';
-  if (identity.sourceType === 'skill' || identity.sourceType === 'public') return 'txt';
+  if (identity.sourceType === 'skill' || identity.sourceType === 'public') {
+    return sourceIdExtension(identity) || 'txt';
+  }
   return 'js';
 }
 
 function safeName(value) {
   return String(value || 'source').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '') || 'source';
+}
+
+function documentFilename(identity) {
+  const name = safeName(identity.funId || identity.sourceId);
+  const extension = documentExtension(identity);
+  return name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`;
 }
 
 function encodeIdentity(identity) {
@@ -48,11 +63,10 @@ class SvnVirtualFileSystem {
   }
 
   uriFor(identity) {
-    const name = safeName(identity.funId || identity.sourceId);
     return this.vscode.Uri.from({
       scheme: SCHEME,
       authority: identity.workspaceKey,
-      path: `/${name}.${documentExtension(identity)}`,
+      path: `/${documentFilename(identity)}`,
       query: encodeIdentity(identity),
     });
   }
@@ -159,5 +173,6 @@ module.exports = {
   SvnVirtualFileSystem,
   decodeIdentity,
   documentExtension,
+  documentFilename,
   encodeIdentity,
 };
