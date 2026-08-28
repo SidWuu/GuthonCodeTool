@@ -508,10 +508,10 @@ function activate(context) {
       await svnServices.refresh();
       if (selected === 'svn') {
         const scriptPath = path.join(workspaceRoot, 'context', 'svnCheckoutHere.sh');
-        const legacyBatPath = path.join(workspaceRoot, 'context', 'svnCheckoutHere.bat');
-        if (!fs.existsSync(scriptPath) && !fs.existsSync(legacyBatPath)) {
+        const batScriptPath = path.join(workspaceRoot, 'context', 'svnCheckoutHere.bat');
+        if (!fs.existsSync(scriptPath) && !fs.existsSync(batScriptPath)) {
           return vscode.window.showWarningMessage(
-            `已将 ${workspaceKey} 设为 SVN；请先把谷神下载的 svnCheckoutHere.sh 放入项目 context 目录。`
+            `已将 ${workspaceKey} 设为 SVN；请把谷神下载的 svnCheckoutHere.sh（macOS/Linux）或 svnCheckoutHere.bat（Windows）放入项目 context 目录。`
           );
         }
         const action = await vscode.window.showInformationMessage(

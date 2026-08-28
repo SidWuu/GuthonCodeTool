@@ -14,7 +14,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--script", help="Path to svnCheckoutHere.sh or svnCheckoutHere.bat")
-    source.add_argument("--bat", help="Legacy alias for a svnCheckoutHere.bat path")
+    source.add_argument("--bat", help="Windows-specific alias for a svnCheckoutHere.bat path")
     parser.add_argument("--workspace", required=True, help="Exact workspace key: products.<id> or projects.<id>")
     parser.add_argument("--output", required=True, help="Target authorized-scope.json path")
     parser.add_argument(

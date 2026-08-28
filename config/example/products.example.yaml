@@ -18,7 +18,7 @@ products:
             system_id: SYS-DEMO
             data_source_id: "0000"
     # 如需 SVN，在 Nexus 的当前产品节点选择 SVN，并把谷神下载的
-    # svnCheckoutHere.sh 放到该工程 context/（旧 .bat 仍兼容）。
+    # macOS/Linux 放 svnCheckoutHere.sh，Windows 放 svnCheckoutHere.bat；两者均为正式支持格式。
     # Nexus 会生成同目录脱敏 authorized-scope.json；通常不需要 svn 配置块。
     # 以下仅用于覆盖默认 checkout 根、共享凭据环境变量名或 capability：
     # svn:

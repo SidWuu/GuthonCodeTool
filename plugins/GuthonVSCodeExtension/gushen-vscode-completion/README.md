@@ -11,7 +11,7 @@ It can also run the packaged `GuthonCodeTool` executable. This lets users initia
 Build `dist/GuthonCodeTool` (or `GuthonCodeTool.exe` on Windows) on each target OS with `python scripts/build_guthon_tool.py`, then distribute that executable together with this VSIX. In VS Code, run these commands in order:
 
 1. `Guthon Nexus: 设置/切换工作空间` — choose the executable and a local data directory. It creates missing configuration files from templates without overwriting existing ones.
-2. Fill the generated `<本地数据目录>/config/*.yaml`; do not add a `source_mode` field. Each product/project defaults to DATABASE and has its own `源码来源：DATABASE/SVN` action. For SVN, select it on that node and place the downloaded `svnCheckoutHere.sh` in the workspace's `context/`; Nexus stores the choice in `context/source-mode.json` and derives the sanitized manifest automatically. Legacy `.bat` files remain supported.
+2. Fill the generated `<本地数据目录>/config/*.yaml`; do not add a `source_mode` field. Each product/project defaults to DATABASE and has its own `源码来源：DATABASE/SVN` action. For SVN, select it on that node and place the downloaded `svnCheckoutHere.sh` (macOS/Linux) or `svnCheckoutHere.bat` (Windows) in the workspace's `context/`; Nexus stores the choice in `context/source-mode.json` and derives the sanitized manifest automatically. Both script formats are first-class supported inputs for their operating systems.
 3. Expand `项目` and choose a `PRD` or `PRJ` workspace.
 4. For DATABASE, run the selected workspace's full synchronization command. For SVN, run `从签出脚本检出/更新 SVN`.
 
@@ -53,11 +53,11 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 - Checks remote status only on the explicit cloud action and preserves it in a separate SCM group until the working copy is updated. An update repairs only SVN `incomplete`/working-copy administrative locks with standard `svn cleanup`; it never removes unversioned files or reverts edits.
 - Adds SCM toolbar/group actions for all Nexus submits and all remote updates, plus inline actions for one Nexus-managed file or one remote file. Exact-file updates are constrained to the authorized manifest path, require the row to remain a current remote change, and explicitly confirm native SVN merge when that same file is locally modified.
 - Lists Nexus-managed edits and safe externally modified tracked text files in one change manager. Selected files can be compared, reverted to the local SVN BASE, or saved; conflicts, additions, deletions, untracked files, and property changes remain blocked. Revert does not require a remote-current working copy, while `保存到谷神` still performs the remote out-of-date check.
-- Previews, imports, checks out, and updates a workspace's exact SVN scope directly from `context/svnCheckoutHere.sh` without executing the script or persisting its credentials; legacy `.bat` input remains supported.
+- Previews, imports, checks out, and updates a workspace's exact SVN scope from `context/svnCheckoutHere.sh` on macOS/Linux or `context/svnCheckoutHere.bat` on Windows without executing the script or persisting its credentials.
 - Loads the SVN tree from the local SQLite index and lazily parses only the selected PAGE file's editable fragments, avoiding a full checkout scan on every tree expansion.
 - Uses normalized SQLite call edges keyed by `source_record_id`, with covering indexes for target-caller and source-outgoing lookups. Existing indexes migrate transactionally and vacuum once on first open; compatibility views keep query/export results unchanged without storing repeated source metadata on every edge.
 - Opens a virtual document with an exact-file SVN status/hash check; browse actions skip unrelated working-copy and private-Git scans.
-- Preserves aggregate `systems/<SYSTEM_ID>` and `datasources/<DATA_SOURCE_ID>` working copies. System and datasource roots use `$.<Chinese name>` markers; PAGE and procedure hierarchy, leaf labels, and sibling order come from `pages/index.md` and `procedures/index.md`. Unindexed objects follow indexed entries. Table/view leaves show `object-id Chinese name`.
+- Preserves aggregate `systems/<SYSTEM_ID>` and `datasources/<DATA_SOURCE_ID>` working copies. System and datasource roots use `$.<Chinese name>` markers. Every subsystem follows the procedure datasource group order; systems sharing one datasource use `systems.include.mappings` declaration order as the stable tie-breaker. PAGE and procedure hierarchy, leaf labels, and sibling order come from `pages/index.md` and `procedures/index.md`. Unindexed objects follow indexed entries. Table/view leaves show `object-id Chinese name`.
 - Provides the toolbar action `跳转所选 SVN 原文件`; selecting a module or any child method, field, SQL, or event resolves the owning module's authorized `sourcePath` and reveals the physical file in Explorer. The same action remains available from the context menu, but no longer occupies the end of every source label.
 - Provides `定位当前编辑源码`, which maps the active SVN virtual document or physical checkout file back to its stable Nexus node, expands its parent chain, and selects it. Locating a PAGE fragment parses only that PAGE lazily.
 - Adds native “谷神源码” toolbar actions for locating, jumping, expanding or collapsing the selected node, opening VS Code's directly visible tree find box, and refreshing. Find uses cached nodes with filter + fuzzy defaults, while long source labels use the native horizontal scrollbar (`workbench.list.horizontalScrolling`, user-overridable).
@@ -158,5 +158,7 @@ npm run package
 Install the packaged extension:
 
 ```bash
-code --install-extension GuthonCodeTool-vscode.vsix --force
+code --install-extension guthon-nexus-vscode.vsix --force
 ```
+
+The extension identifier is `gushen-local.guthon-nexus-vscode`. Its current major release line starts at `2.0.0`; after each substantial feature or architecture change, increment the minor version by `0.1` (`2.0.0` → `2.1.0`) before packaging. Fix-only changes increment the patch version when a separately versioned package is required.

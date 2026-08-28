@@ -120,7 +120,7 @@ products:
 ```
 
 SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 SVN，再把谷神平台下载的
-`svnCheckoutHere.sh` 放入该工程的 `context/`。Nexus 的“从签出脚本检出/更新 SVN”会先显示脱敏的范围变更统计，
+`svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`（Windows）放入该工程的 `context/`。Nexus 的“从签出脚本检出/更新 SVN”会先显示脱敏的范围变更统计，
 确认后生成同目录 `authorized-scope.json`，再检出或更新授权 working copy：
 
 ```bash
@@ -132,7 +132,7 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 .venv/bin/python scripts/guthon_tool.py reindex --home . --workspace products.demo-product
 ```
 
-签出脚本只作为精确授权证据，工具不会执行它；脚本中的全部仓库复用工作区共享认证，用户名、密码和原检出绝对路径不会进入生成清单、日志或公开配置。旧 `svnCheckoutHere.bat` 与 `sync-from-bat` 仍作为兼容入口。
+签出脚本只作为精确授权证据，工具不会执行它；脚本中的全部仓库复用工作区共享认证，用户名、密码和原检出绝对路径不会进入生成清单、日志或公开配置。`.sh` 与 `.bat` 分别面向不同操作系统，均为正式支持的签出文件；`sync-from-bat` 是 Windows BAT 的命令入口。
 已有清单发生变化时，Nexus 会在执行前显示新增、移除和变更数量。移出新清单的旧 working copy 不会自动删除。
 `import-svn-scope` 仍保留为高级手工入口，但日常不再要求配置 `svn.scope_manifest`。
 
@@ -198,7 +198,7 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
    保留“发行模式 / 调试模式”。
 5. DATABASE 项目继续执行同步、诊断和 Workcopy；SVN 项目从“谷神源码”虚拟编辑，并在单一 SCM 项目中查看
    本地/远程变更，执行全部或单文件提交/更新、部分保存或放弃修改。PAGE 默认以脚本、SQL、字段的可读投影打开 VS Code 双栏 Diff，
-   同时保留原始 JSON 差异入口；页面与过程函数的目录、叶子顺序及 SCM 名称复用各自 `index.md`，`.gss` 使用独立 Guthon GSS 高亮与既有补全。
+   同时保留原始 JSON 差异入口；所有子系统按过程函数数据源分组顺序排列，共用数据源时按 `systems.include.mappings` 声明顺序排列；页面与过程函数的目录、叶子顺序及 SCM 名称复用各自 `index.md`，`.gss` 使用独立 Guthon GSS 高亮与既有补全。
 6. 需要网页功能时从 Nexus 启动 Guthon Bridge。
 
 维护者可切换到调试模式并选择本仓库；Nexus 会直接调用 `.venv` 和 `scripts/guthon_tool.py`。当前运行模式写入：

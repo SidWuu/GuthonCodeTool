@@ -1,8 +1,8 @@
 {
-  "name": "gushen-vscode-completion",
+  "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon workspace, source sync, metadata export, workcopy tools, API completions, hover documentation, and source navigation.",
-  "version": "0.1.0",
+  "version": "2.0.2",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,
@@ -223,7 +223,7 @@
   "scripts": {
     "build:data": "node scripts/build-data.mjs",
     "build:bridge": "node scripts/build-bridge.mjs",
-    "package": "npm run build:bridge && vsce package --allow-missing-repository --skip-license --out GuthonCodeTool-vscode.vsix",
+    "package": "npm run build:bridge && vsce package --allow-missing-repository --skip-license --out guthon-nexus-vscode.vsix",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {}

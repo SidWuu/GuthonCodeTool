@@ -104,6 +104,24 @@ test('orders PAGE and procedure folders and leaves by index.md position', () => 
   ]);
 });
 
+test('uses labels as a stable fallback when descendants share one index position', () => {
+  const tree = buildSourceTree([
+    {
+      sourceType: 'procedure', sourceId: 'demo.pkg#beta', sourceAliasId: 'demo.pkg', funId: 'beta',
+      treePath: ['示例数据源', 'demo.pkg'], treeLabel: 'beta · 后项', treeOrder: [0, 10],
+    },
+    {
+      sourceType: 'procedure', sourceId: 'demo.pkg#alpha', sourceAliasId: 'demo.pkg', funId: 'alpha',
+      treePath: ['示例数据源', 'demo.pkg'], treeLabel: 'alpha · 前项', treeOrder: [0, 10],
+    },
+  ]);
+
+  assert.deepEqual(
+    tree[0].children[0].children.map((item) => item.label),
+    ['alpha · 前项', 'beta · 后项']
+  );
+});
+
 test('keeps a lazy PAGE leaf expandable before its fragments are loaded', async () => {
   const fragmentCalls = [];
   const provider = new SvnCatalogTreeProvider({

@@ -158,6 +158,40 @@ def _system_name(entry) -> str:
     return _entry_name(entry)
 
 
+def _subsystem_tree_orders(workspace: dict, scope) -> dict[str, list[int]]:
+    """Align every subsystem-backed tree with the procedure datasource order."""
+
+    entries = list(scope.entries)
+    entry_orders = {entry.id: order for order, entry in enumerate(entries)}
+    datasource_orders = {
+        Path(entry.local_subdir).name: entry_orders[entry.id]
+        for entry in entries
+        if entry.category in {"datasources", "procedures"}
+    }
+    system_orders = {}
+    mappings = workspace.get("systemMappings") or {}
+    for alias_order, alias in enumerate(workspace.get("systemAliases") or []):
+        mapping = mappings.get(alias)
+        if not isinstance(mapping, dict):
+            continue
+        system_id = str(mapping.get("system_id") or "").strip()
+        datasource_id = str(mapping.get("data_source_id") or "").strip()
+        datasource_order = datasource_orders.get(datasource_id)
+        if system_id and datasource_order is not None:
+            system_orders[system_id] = [datasource_order, alias_order]
+
+    orders = {}
+    for entry in entries:
+        identity = Path(entry.local_subdir).name
+        if entry.category in {"systems", "pages", "system-script"} and identity in system_orders:
+            orders[entry.id] = system_orders[identity]
+        elif entry.category in {"datasources", "procedures", "tables", "views"} and identity in datasource_orders:
+            orders[entry.id] = [datasource_orders[identity]]
+        else:
+            orders[entry.id] = [entry_orders[entry.id]]
+    return orders
+
+
 def _relative_source_path(entry, source_path: str) -> PurePosixPath | None:
     logical = PurePosixPath(str(source_path or ""))
     prefix = PurePosixPath(entry.local_subdir)
@@ -229,7 +263,7 @@ def _catalog_fragments(row: dict):
 def catalog(workspace: dict) -> dict:
     scope = load_authorized_scope(workspace)
     entries = {entry.id: entry for entry in scope.entries}
-    entry_orders = {entry.id: order for order, entry in enumerate(scope.entries)}
+    subsystem_orders = _subsystem_tree_orders(workspace, scope)
     connection = _connection(workspace)
     try:
         rows = [
@@ -290,11 +324,11 @@ def catalog(workspace: dict) -> dict:
             "treePath": directories,
             "treeLabel": label,
             "treeOrder": (
-                [entry_orders[entry.id], location["order"]]
+                [*subsystem_orders[entry.id], location["order"]]
                 if location
-                else [entry_orders[entry.id], 1_000_000]
+                else [*subsystem_orders[entry.id], 1_000_000]
                 if source_type in {"page", "procedure"}
-                else None
+                else subsystem_orders[entry.id]
             ),
             "fragments": _catalog_fragments(row),
         })

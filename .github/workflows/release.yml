@@ -8,6 +8,7 @@ on:
       - "scripts/**"
       - "config/example/**"
       - "plugins/GuthonBridge/**"
+      - "plugins/GuthonSvnVSCodeExtension/**"
       - "plugins/GuthonVSCodeExtension/**"
       - ".github/workflows/release.yml"
   workflow_dispatch:
@@ -70,16 +71,28 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Test and package VS Code extension
+      - name: Test and package Guthon Nexus
         working-directory: plugins/GuthonVSCodeExtension/gushen-vscode-completion
         run: |
           npm test
           npm run build:bridge
-          npm version "0.1.${GITHUB_RUN_NUMBER}" --no-git-tag-version
           npx --yes @vscode/vsce@3.9.2 package \
             --allow-missing-repository \
             --skip-license \
-            --out ../../../GuthonCodeTool-vscode.vsix
+            --out ../../../guthon-nexus-vscode.vsix
+
+      - name: Test and package Guthon SVN Navigator
+        working-directory: plugins/GuthonSvnVSCodeExtension/guthon-svn-navigator
+        run: |
+          npm test
+          npm run check
+          npx --yes @vscode/vsce@3.9.2 package \
+            --no-dependencies \
+            --skip-license \
+            --out ../../../guthon-svn-navigator-vscode.vsix
+
+      - name: Prepare Release VSIX names
+        run: mv guthon-nexus-vscode.vsix guthon-nexus-all-in-one-vscode.vsix
 
       - name: Test Bridge
         working-directory: plugins/GuthonBridge
@@ -95,7 +108,8 @@ jobs:
         with:
           name: release-plugins
           path: |
-            GuthonCodeTool-vscode.vsix
+            guthon-nexus-all-in-one-vscode.vsix
+            guthon-svn-navigator-vscode.vsix
             GuthonCodeTool-chrome.zip
           if-no-files-found: error
 
@@ -116,17 +130,23 @@ jobs:
 
       - name: Verify release assets
         run: |
-          test "$(find release -maxdepth 1 -type f | wc -l)" -eq 4
+          test "$(find release -maxdepth 1 -type f | wc -l)" -eq 5
           find release -maxdepth 1 -type f -printf '%f\n' | sort
 
       - name: Generate Chinese release notes
         run: |
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" \
+            --jq .commit.message > commit-notes.md
+          sed -i -E \
+            -e '1s/^\[build\][[:space:]]*//' \
+            -e '/^[[:space:]]*\[build\][[:space:]]*$/d' \
+            commit-notes.md
           gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
             -f tag_name="$RELEASE_TAG" \
             -f target_commitish="$GITHUB_SHA" \
             --jq .body > generated-notes.md
           sed -i \
-            -e 's/^## What'\''s Changed$/## 本次变更/' \
+            -e 's/^## What'\''s Changed$/## GitHub 自动汇总/' \
             -e 's/^## New Contributors$/## 新贡献者/' \
             -e 's/^\*\*Full Changelog\*\*:/\*\*完整变更记录\*\*:/' \
             generated-notes.md
@@ -136,9 +156,14 @@ jobs:
             echo "## 下载内容"
             echo
             echo "- Windows x64 应用：\`GuthonCodeTool-windows-x64.exe\`"
-            echo "- macOS Apple Silicon 应用：\`GuthonCodeTool-macos-arm64.zip\`"
-            echo "- Guthon Nexus：\`GuthonCodeTool-vscode.vsix\`"
+            echo "- macOS M1 及后续型号应用：\`GuthonCodeTool-macos-arm64.zip\`"
+            echo "- Guthon Nexus All-in-One（DATABASE/SVN 双模式）：\`guthon-nexus-all-in-one-vscode.vsix\`"
+            echo "- Guthon SVN Navigator（仅 SVN）：\`guthon-svn-navigator-vscode.vsix\`"
             echo "- Guthon Bridge：\`GuthonCodeTool-chrome.zip\`"
+            echo
+            echo "## 本次变更"
+            echo
+            cat commit-notes.md
             echo
             cat generated-notes.md
           } > release-notes.md

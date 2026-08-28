@@ -22,10 +22,10 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口。它把工作空间设
 - 同时列出全部 `PRD <产品名称>`、`PRJ <项目名称>` 及其同步状态。
 - 每个节点绑定自己的 `workspaceKey`。DATABASE 节点可独立同步全部资料、执行只读源码排查和维护 Workcopy；SVN 节点按授权清单管理 checkout、索引和本地源码变更。
 - 节点显示“数据库”或“SVN”，操作由 workspace summary 的有效 capabilities 生成，不在扩展内猜测配置。
-- SVN 工程不在 YAML 配置模式；在目标节点选择 SVN，并把谷神下载的 `svnCheckoutHere.sh` 放入工程 `context/`；“从签出脚本
-  检出/更新 SVN”先展示脱敏范围统计，确认后生成同目录授权清单并使用同一次认证处理全部 working copy，不执行脚本或持久化凭据；旧 `.bat` 仍兼容。
+- SVN 工程不在 YAML 配置模式；在目标节点选择 SVN，并把谷神下载的 `svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`（Windows）放入工程 `context/`；“从签出脚本
+  检出/更新 SVN”先展示脱敏范围统计，确认后生成同目录授权清单并使用同一次认证处理全部 working copy，不执行脚本或持久化凭据；两种文件均为正式支持格式。
 - SVN 节点按授权清单初始化或更新多个精确 URL working copy；物理目录按 `systems/<SYSTEM_ID>` 和 `datasources/<DATA_SOURCE_ID>` 聚合，在“谷神源码”中按业务分类展示 PAGE、过程函数、
-  系统脚本、表和视图；页面与过程函数的名称、目录及显示顺序分别来自 `pages/index.md`、`procedures/index.md`，PAGE 脚本/SQL/字段以及过程源码通过虚拟文档编辑并直接回写原 checkout。未编入索引的对象稳定排在已索引内容之后。
+  系统脚本、表和视图；所有子系统按过程函数数据源分组顺序排列，共用数据源时按 `systems.include.mappings` 声明顺序排列；页面与过程函数的名称、目录及显示顺序分别来自 `pages/index.md`、`procedures/index.md`，PAGE 脚本/SQL/字段以及过程源码通过虚拟文档编辑并直接回写原 checkout。未编入索引的对象稳定排在已索引内容之后。
 - 每个 SVN workspace 在 VS Code 源代码管理中只显示一个逻辑项目，内部聚合多个 working copy，提供基于 `index.md` 中文名称的本地/远程变更、PAGE 可读/原始 diff、历史、全部/单文件提交与更新、按物理文件部分保存和放弃修改。
 - 不设置当前或默认产品、项目。
 
@@ -94,10 +94,10 @@ $proc.函数名($参数)
 
 ## 安装方式
 
-从 [GuthonCodeTool Releases](https://github.com/SidWuu/GuthonCodeTool/releases) 下载 `GuthonCodeTool-vscode.vsix` 后安装：
+从 [GuthonCodeTool Releases](https://github.com/SidWuu/GuthonCodeTool/releases) 下载双模式全功能扩展 `guthon-nexus-all-in-one-vscode.vsix` 后安装：
 
 ```bash
-code --install-extension /path/to/GuthonCodeTool-vscode.vsix --force
+code --install-extension /path/to/guthon-nexus-all-in-one-vscode.vsix --force
 ```
 
 安装后在 VS Code 中执行：
@@ -115,7 +115,7 @@ Shell Command: Install 'code' command in PATH
 也可以在 VS Code 扩展面板右上角菜单中选择 `Install from VSIX...`，然后选择：
 
 ```text
-下载的 GuthonCodeTool-vscode.vsix 文件
+下载的 guthon-nexus-all-in-one-vscode.vsix 文件
 ```
 
 ## 重新打包
@@ -125,8 +125,12 @@ Shell Command: Install 'code' command in PATH
 ```bash
 cd plugins/GuthonVSCodeExtension/gushen-vscode-completion
 npm run package
-code --install-extension GuthonCodeTool-vscode.vsix --force
+code --install-extension guthon-nexus-vscode.vsix --force
 ```
+
+扩展标识为 `gushen-local.guthon-nexus-vscode`，当前版本线从 `2.0.0` 开始。以后每次大功能或架构调整完成后，
+次版本号增加 `0.1`，例如 `2.0.0 → 2.1.0`；仅修复问题且需要单独发包时增加补丁版本。发布工作流直接使用
+`package.json` 中维护的版本，不再按 CI 运行次数覆盖版本号。
 
 ## 修改补全规则
 
@@ -197,7 +201,7 @@ cd plugins/GuthonVSCodeExtension/gushen-vscode-completion
 npm run build:data -- /path/to/api-docs
 npm test
 npm run package
-code --install-extension GuthonCodeTool-vscode.vsix --force
+code --install-extension guthon-nexus-vscode.vsix --force
 ```
 
 `/path/to/api-docs` 目录需要包含 `java.md`、`javascript.md` 和 `sql.md`。

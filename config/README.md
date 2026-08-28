@@ -68,7 +68,7 @@ products:
     name: 示例产品
 ```
 
-在 Nexus 的该产品节点选择 SVN，再把谷神平台下载的 `svnCheckoutHere.sh` 放到该工程的 `context/`。Nexus 自动使用
+在 Nexus 的该产品节点选择 SVN，再把谷神平台下载的 `svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`（Windows）放到该工程的 `context/`。两种文件均为正式支持格式。Nexus 自动使用
 `context/authorized-scope.json` 和 `var/checkout/<配置 ID>`，因此通常不需要配置 `svn.scope_manifest`、
 `checkout_layout` 或 `checkout_root`。工作区配置 ID 仍须在产品/项目之间唯一。
 
@@ -112,7 +112,7 @@ copy 也不会自动删除。
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --remote
 ```
 
-`sync-from-script` 首次检出签出脚本中筛选后的每个精确 URL，全部仓库使用同一份工作区认证；后续更新现有 working copy 并全量建索引。`sync-from-bat` 保留为兼容别名。`refresh` 可用重复的 `--working-copy <entry-id>` 精确选择物理
+`sync-from-script` 首次检出签出脚本中筛选后的每个精确 URL，全部仓库使用同一份工作区认证；后续更新现有 working copy 并全量建索引。`sync-from-bat` 是 Windows BAT 的命令入口。`refresh` 可用重复的 `--working-copy <entry-id>` 精确选择物理
 working copy，有本地修改时必须显式增加 `--merge-local`。普通 `reindex` 只扫描本地文件。新清单布局不接受
 `--prune`，范围变更必须先审阅清单和本地目录，工具不会自动删除旧 checkout。
 

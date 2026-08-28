@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="GuthonCodeTool macOS 与 Windows 从零安装、初始化、日常工作流、平台差异和常见问题"/>
+<meta name="description" content="GuthonCodeTool macOS M1 及后续型号与 Windows 安装、初始化和日常操作步骤"/>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233c5ddd'/%3E%3Cpath d='M18 19h28v8H27v10h15v8H18z' fill='white'/%3E%3C/svg%3E">
 <title>GuthonCodeTool 使用手册</title>
 <style>
@@ -119,7 +119,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <div class="progress" id="progress"></div>
 <header class="hero">
   <div class="hero-inner">
-    <span class="eyebrow"><span class="eyebrow-dot"></span>macOS &amp; Windows</span>
+    <span class="eyebrow"><span class="eyebrow-dot"></span>macOS M1 及后续型号 &amp; Windows</span>
     <h1>GuthonCodeTool<br>使用手册</h1>
     <p>面向第一次使用和日常开发，按同一套 VS Code 操作完成下载、初始化、同步、Bridge 安装、Workcopy 开发与升级。</p>
     <div class="hero-meta"><span>从零开始</span><span>跨平台共用</span><span>日常工作流</span><span>常见问题</span></div>
@@ -159,24 +159,24 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <article class="overview-card"><div class="overview-number">02</div><h3>初始化</h3><p>在 VS Code 侧边栏选择应用和本地数据目录。</p></article>
 <article class="overview-card"><div class="overview-number">03</div><h3>配置</h3><p>填写五个 YAML，并放入公司提供的 AI 规范。</p></article>
 <article class="overview-card"><div class="overview-number">04</div><h3>同步</h3><p>在项目树选择产品或项目，独立同步全部资料。</p></article>
-<article class="overview-card"><div class="overview-number">05</div><h3>开发</h3><p>DATABASE 修改 Workcopy；SVN 从“谷神源码”直接回写 checkout。</p></article>
+<article class="overview-card"><div class="overview-number">05</div><h3>开发</h3><p>DATABASE 修改 Workcopy；SVN 直接从“谷神源码”打开和保存。</p></article>
 <article class="overview-card"><div class="overview-number">06</div><h3>交付</h3><p>检查差异；SVN 保存到谷神后仍在平台最终提交。</p></article>
 </div>
 <aside class="notice"><div class="notice-icon">i</div><div>
-<p>macOS 与 Windows 的 VS Code 操作、配置结构和日常工作流相同；只有应用文件名和系统安全提示不同。</p>
+<p>macOS M1 及后续型号与 Windows 的 VS Code 操作相同；只有下载的应用和 SVN 签出文件不同。</p>
 <p>普通使用不需要克隆仓库、安装 Python、安装 Node.js 或创建虚拟环境。</p>
 </div></aside>
 
 <section class="wiki-section">
 <h2 id="1-准备与下载">1. 准备与下载</h2>
-<p>开始前准备 VS Code、Chrome、产品/项目配置和公司提供的 AI 规范文件。DATABASE 模式需要数据库只读连接；SVN 模式需要 SVN 1.10+ 客户端、谷神平台下载的 <code>svnCheckoutHere.sh</code>、相应权限和工作空间共享 SVN 凭据，日常无需手工配置仓库根地址；旧 <code>.bat</code> 签出脚本仍兼容。</p>
+<p>开始前准备 VS Code、Chrome、产品/项目配置和公司提供的 AI 规范文件。DATABASE 模式还需要数据库只读账号；SVN 模式还需要 SVN 1.10+ 客户端、SVN 账号以及谷神平台下载的签出文件：macOS/Linux 使用 <code>svnCheckoutHere.sh</code>，Windows 使用 <code>svnCheckoutHere.bat</code>。两种文件均为正式支持格式。</p>
 <p>打开 <a href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">GitHub Releases</a> 或 
   <a href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Releases</a>
   ，在同一个版本下载：</p>
 <ul>
-<li>macOS Apple Silicon：<code>GuthonCodeTool-macos-arm64.zip</code></li>
+<li>macOS M1 及后续型号：<code>GuthonCodeTool-macos-arm64.zip</code></li>
 <li>Windows x64：<code>GuthonCodeTool-windows-x64.exe</code></li>
-<li>VS Code 扩展 Guthon Nexus：<code>GuthonCodeTool-vscode.vsix</code></li>
+<li>VS Code 双模式全功能扩展 Guthon Nexus All-in-One：<code>guthon-nexus-all-in-one-vscode.vsix</code></li>
 <li>Chrome 扩展 Guthon Bridge：<code>GuthonCodeTool-chrome.zip</code></li>
 <li>内部配置文件和 AI 规范：从<a href="./docs" target="_blank" rel="noopener">公司内部文档入口</a>获取。</li>
 </ul>
@@ -190,7 +190,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h2 id="2-安装应用和-vs-code-扩展">2. 安装应用和 VS Code 扩展</h2>
 <h3 id="2-1-macos">2.1 macOS</h3>
 <ol>
-<li>确认 Mac 为 Apple 芯片：菜单“关于本机”中的芯片应为 M1、M2、M3、M4 或后续型号。</li>
+<li>确认 Mac 为 M1 或后续型号：可在“关于本机”中查看。</li>
 <li>解压 <code>GuthonCodeTool-macos-arm64.zip</code>，将其中的 <code>GuthonCodeTool</code> 放入固定应用目录。</li>
 <li>如果文件没有执行权限，在终端执行：</li>
 </ol>
@@ -206,7 +206,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <ol>
 <li>打开 VS Code 的“扩展”面板。</li>
 <li>点击右上角 <code>...</code>，选择“从 VSIX 安装...”。</li>
-<li>选择 <code>GuthonCodeTool-vscode.vsix</code>。</li>
+<li>选择 <code>guthon-nexus-all-in-one-vscode.vsix</code>。</li>
 <li>安装后执行“Developer: Reload Window”或重新启动 VS Code。</li>
 <li>确认左侧活动栏出现“Guthon Nexus”图标。</li>
 </ol>
@@ -222,9 +222,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>选择长期保存私有数据的本地数据目录；可以选择空目录。</li>
 <li>等待输出面板显示 <code>GuthonCodeTool 完成：setup</code>。</li>
 </ol>
-<p>工作空间已设置后，该入口自动改为“切换工作空间”。确认后选择新的本地数据目录，工具会在新目录创建缺失配置；取消确认或目录选择时继续使用原工作空间。切换不会删除、迁移或修改旧工作空间。</p>
-<p>普通用户保持“工作区 → 运行模式：发行模式”。需要随时修改 Python 脚本的维护者可单击该项切换为“调试模式”，首次选择 GuthonCodeTool 源码仓库根目录；仓库必须存在 <code>.venv</code> 和 <code>scripts/guthon_tool.py</code>。之后 Nexus 面板操作和 Bridge 拉取都会直接运行最新源码，无需重新构建应用。切回发行模式不会改变本地数据目录。</p>
-<p>调试模式统一从 <code>scripts/guthon_tool.py</code> 进入；双模式共享实现位于 <code>scripts/common/</code>，数据库实现位于 <code>scripts/providers/database/</code>，SVN 实现位于 <code>scripts/providers/svn/</code>。不要直接调用旧的 scripts 根目录导出或拉取脚本路径。</p>
+<p>设置后，入口会变为“切换工作空间”。普通用户保持“发行模式”即可；只有工具维护人员才需要使用“调试模式”。切换工作空间不会删除原目录。</p>
 <p>设置工作空间会创建缺失的五个配置模板，不会覆盖已经存在的配置。完成后目录为：</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/
 ├── config/
@@ -240,30 +238,31 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h2 id="4-填写配置和放置-ai-规范">4. 填写配置和放置 AI 规范</h2>
 <p>在“Guthon Nexus → 工作区 → 配置文件”中单击文件名即可编辑。优先使用公司提供的真实配置；不要把数据库密码、源码或配置提交到公开仓库。</p>
 <ul>
-<li><code>datasource.yaml</code>：数据库连接。配置引用环境变量时，必须在启动 VS Code 前设置对应变量，并重启 VS Code。</li>
-<li><code>products.yaml</code>：产品 ID、名称、datasource、子系统别名和可选页面来源；不配置源码模式。</li>
-<li><code>projects.yaml</code>：项目 ID、名称、datasource、继承产品、子系统别名和可选页面来源；不配置源码模式。</li>
-<li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射，通常直接使用公司提供版本；真实表名和字段名只保存在本机配置中。</li>
-<li><code>sync.yaml</code>：全局同步窗口、未签入源码用户白名单和自动暂存规则，不设置当前或默认工作区。</li>
+<li><code>datasource.yaml</code>：填数据库连接；只用 SVN 时按公司模板保留。</li>
+<li><code>products.yaml</code>：填产品和子系统映射。</li>
+<li><code>projects.yaml</code>：填项目、所属产品和子系统映射。</li>
+<li><code>source-tables.yaml</code>：直接使用公司提供的文件。</li>
+<li><code>sync.yaml</code>：直接使用公司提供的文件，有特殊要求时再修改。</li>
 </ul>
-<p>Nexus 同时展示全部产品和项目。每个产品或项目节点单独设置“源码来源：DATABASE/SVN”，结果保存在该工程 <code>context/source-mode.json</code>；未设置时默认 DATABASE。选择 SVN 后，把谷神平台下载的 <code>svnCheckoutHere.sh</code> 放入该工程的 <code>context/</code>。Nexus 的“从签出脚本检出/更新 SVN”会先显示精确地址数量及增删改统计，确认后生成同目录 <code>authorized-scope.json</code> 并检出或更新。工具只解析脚本，不执行脚本；脚本中的全部仓库使用同一份工作区认证，用户名、密码和原检出绝对路径不会写入清单、日志或公开配置。</p>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/var/workspace/&lt;PRD或PRJ 工程&gt;/context/svnCheckoutHere.sh
-        ↓ Nexus 预览并确认
-&lt;本地数据目录&gt;/var/workspace/&lt;PRD或PRJ 工程&gt;/context/authorized-scope.json
-        ↓ 受控检出/更新
-&lt;本地数据目录&gt;/var/checkout/&lt;配置ID&gt;/...</code></pre></div>
+<p>SVN 用户按下面操作：</p>
+<ol>
+<li>在目标产品或项目上选择“源码来源：SVN”。</li>
+<li>将 <code>svnCheckoutHere.sh</code>（macOS/Linux）或 <code>svnCheckoutHere.bat</code>（Windows）放到该工程的 <code>context/</code> 目录。</li>
+<li>点击“设置工作区 SVN 凭据”，输入同一份 SVN 账号密码。</li>
+<li>点击“从签出脚本检出/更新 SVN”，核对范围后确认。</li>
+</ol>
 <div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" type="button">复制</button><pre><code>products:
   &lt;产品ID&gt;:
     name: &lt;产品名称&gt;
     datasource: &lt;数据源键&gt;
-	    systems:
-	      include:
-	        mappings:
-	          demo.system:
-	            system_id: SYS-DEMO
-	            data_source_id: &quot;0000&quot;
-	    page_origins: []</code></pre></div>
-	<p><code>mappings</code> 的键就是系统 alias，每项只保留一对一的 <code>system_id</code>、<code>data_source_id</code>。SVN 用它筛选签出脚本；DATABASE 仍按 alias 查询，并把结果缓存在本机 <code>system-data.json</code>。产品和项目必须分别配置自己的映射，项目的数据源 ID 不得直接复用产品值。</p>
+    systems:
+      include:
+        mappings:
+          demo.system:
+            system_id: SYS-DEMO
+            data_source_id: &quot;0000&quot;
+    page_origins: []</code></pre></div>
+<p>每个子系统只需填公司提供的 <code>system_id</code> 和 <code>data_source_id</code>。产品和项目要分别填写；不确定时请向配置管理人员确认，不要猜测或复制其他项目的 ID。</p>
 <p>将内部 AI 规范保持原目录层级复制到本地数据目录，至少包括：</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/var/AGENTS.md
 &lt;本地数据目录&gt;/var/docs/GUSHEN_DEVELOPMENT_BASELINE.md
@@ -281,10 +280,9 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>点击“维护 → 检查本地环境”，确认输出没有 FAIL。</li>
 <li>展开“项目”，确认产品显示为 <code>PRD</code>、项目显示为 <code>PRJ</code>。</li>
 	<li>在每个产品或项目节点选择“源码来源：DATABASE / SVN”；DATABASE 节点点击“同步工作区全部资料”，SVN 节点点击“从签出脚本检出/更新 SVN”。</li>
-	<li>数据库模式检查源码、表结构、单据类型、系统脚本和视图五步；SVN 模式检查 checkout 范围与本地索引结果。</li>
+	<li>等待输出面板显示“完成”；如果显示 FAIL，先按提示修正后再重试。</li>
 </ol>
-<p>数据库模式按五步计算状态；SVN 从工作区签出脚本派生脱敏授权清单，按 <code>systems/&lt;SYSTEM_ID&gt;</code>、<code>datasources/&lt;DATA_SOURCE_ID&gt;</code> 等精确 URL 检出多个 working copy 并建立索引；页面与过程函数目录名称分别来自 <code>pages/index.md</code>、<code>procedures/index.md</code>。后续同一入口用同一份认证更新全部授权范围；普通“扫描/重建本地 SVN 索引”不会联网更新。</p>
-<p>DATABASE 日常只修改 <code>source/workcopy</code>。SVN 不生成额外代码副本：资源管理器保留 <code>var/checkout/&lt;配置 ID&gt;</code> 原始目录供查看，日常从“谷神源码”编辑并回写同一原文件；直接编辑原文件会被标记为外部修改并交给变更管理器进行安全检查。</p>
+<p>看到“完成”且项目树中没有红色错误即表示初始化成功。DATABASE 后续从 Workcopy 开发；SVN 后续从“谷神源码”开发。</p>
 </section>
 
 <section class="wiki-section">
@@ -304,71 +302,38 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>单击“启动 Guthon Bridge”。Nexus 自动使用初始化时选择的应用和本地数据目录。</li>
 <li>面板显示“运行中 · 127.0.0.1:17361”后即可使用；单击“停止 Guthon Bridge”可关闭服务。</li>
 </ol>
-<p>Bridge 服务已经包含在 VSIX 中，由 Guthon Nexus 使用 VS Code 自带的 Node 运行时启动。普通用户无需安装 Node.js、设置环境变量或保持终端窗口运行。Bridge 会按请求中的 <code>workspaceKey</code> 或页面身份匹配产品、项目；多个候选时 Chrome 会要求本次选择。也可以打开 <a href="http://127.0.0.1:17361/health" target="_blank" rel="noopener">http://127.0.0.1:17361/health</a>，看到 <code>{"ok":true}</code> 即表示服务正常。</p>
-<p>数据库工作区继续显示网页源码拉取和 metadata 导出。SVN 工作区隐藏这些旧入口，服务端也拒绝旧版扩展的直接调用；请在 Nexus 中执行 checkout 初始化/更新、虚拟编辑和 SCM 操作。Bridge 继续保留页面身份路由、复制字段和字段平移等能力。</p>
-<p>升级到该方式后，不要再同时从终端执行旧的 <code>npm run start:bridge</code>。如果输出出现 <code>EADDRINUSE 127.0.0.1:17361</code>，说明已有 Bridge 占用端口；先关闭原终端中的服务，再回到 Guthon Nexus 启动。</p>
+<p>普通用户不需要安装 Node.js 或打开终端。若 Bridge 无法使用，先点击“停止 Guthon Bridge”，再重新启动；仍失败时查看“输出 → Guthon Bridge”中的第一条错误。</p>
 </section>
 
 <section class="wiki-section">
 <h2 id="7-日常工作流">7. 日常工作流</h2>
 <h3>数据库模式</h3>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>在“项目”树选择数据库 PRD 或 PRJ
-        ↓
-同步该工作区全部资料
-        ↓
-启动 Bridge，从谷神页面拉取目标 Workcopy
-        ↓
-VS Code / AI 只分析和修改 Workcopy
-        ↓
-“检查或打包 Workcopy”生成状态和差异
-        ↓
-人工复制回谷神平台并测试、提交、签入
-        ↓
-再次拉取，确认 readonly 与 Workcopy 无差异</code></pre></div>
-<h3>SVN 模式</h3>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>将谷神下载的 svnCheckoutHere.sh 放入工程 context/
-        ↓
-在目标产品或项目节点选择“源码来源：SVN”并点击“从签出脚本检出/更新 SVN”
-        ↓
-Nexus 把授权清单中的多个 working copy 聚合为“谷神源码”和一个 SCM 项目
-        ↓
-打开 PAGE 脚本/SQL/字段或过程函数虚拟文档，Ctrl+S 回写原 checkout
-        ↓
-在 SCM 用原生双栏视图比较只读 SVN BASE 与当前源码，并查看历史；可全部或逐文件提交 Nexus 修改、更新远程变更
-        ↓
-勾选同一 working copy 中的部分物理文件，点击“保存到谷神”
-        ↓
-确认 SVN revision 与“待平台提交”，再在谷神平台最终提交</code></pre></div>
 <ol>
-<li>开始开发前，从“项目”树确定目标产品或项目。</li>
-<li>DATABASE 执行“同步工作区全部资料”并确认五步状态；SVN 执行“从签出脚本检出/更新 SVN”并确认授权范围和索引状态。</li>
-<li>DATABASE 可继续在谷神页面使用 Bridge 拉取 Workcopy；SVN 从“谷神源码”进入，不再通过 Bridge 拉取。</li>
-<li>使用 VS Code 源代码管理查看项目级变更；底层多个 working copy 会按实际文件身份路由。</li>
-<li><code>var</code> Git 只管理配置、上下文、索引资料和 DATABASE 工作区；根级 <code>var/checkout/</code> 已被 Git 忽略，SVN 源码差异、更新、放弃和提交只在 Nexus SCM 中处理，禁止使用 <code>git add -f</code> 纳入 checkout。</li>
-<li>“谷神源码”树从本地 SVN 索引快速加载，只在展开单个 PAGE 时解析其分块；刷新树不会隐式扫描整个 checkout。</li>
-<li>PAGE 和系统脚本的 <code>$.&lt;中文子系统名&gt;</code> 只用作中文分组；PAGE 与过程函数的目录、菜单/过程包和叶子严格按各自 <code>index.md</code> 的出现顺序展示，未编入索引的对象排在后面；系统脚本、表和视图保留原源码目录层级。</li>
-<li>PAGE 的前端事件、字段、SQL 和 GSS 后端事件可按分块打开并保存；<code>.gss</code> 使用独立 Guthon GSS 语言，在 Java 语法上补充 Velocity/GSS 指令和变量高亮并保留 Nexus 补全/跳转，兼容保留的 <code>.vm</code> 仍使用 Java。GSS 服务组件的自动生成身份头不可修改。</li>
-<li>选中“谷神源码”模块或其方法、字段、SQL、事件等任意子节点后点击顶部“跳转”，均可在资源管理器中显示所属模块的物理源码。</li>
-<li>打开 SVN 虚拟分块或 checkout 物理文件后点击顶部“定位”，Nexus 会自动展开父级并选中对应源码节点；定位 PAGE 分块只解析目标页面。</li>
-<li>“谷神源码”视图顶部另提供展开所选、收缩所选、搜索和刷新；搜索按钮直接显示 VS Code 原生树搜索框，默认按模糊过滤当前缓存节点，不重新扫描 checkout。长名称超过视图宽度时可使用底部水平滚动条。</li>
-<li>SVN 虚拟文档支持调用索引的转到定义和查找引用；动态调用仍需人工确认。</li>
-<li><code>Ctrl+S</code> 只写回目标文件并更新其索引；同一虚拟文档可连续修改和保存，真实外部变化仍会触发比较/覆盖保护。</li>
-<li>SCM 变更名称来自本地 SQLite 索引和 <code>index.md</code> 业务目录；点击 PAGE 变更默认打开脚本、SQL、字段的可读双栏差异，右键仍可查看精确原始 JSON。左侧是内存中的只读 SVN BASE，右侧是当前 working copy，不生成 BASE 临时文件。</li>
-<li>SCM 云图标显式检查远端并显示独立“远程变更”组；普通本地刷新不联网。更新遇到 SVN <code>incomplete</code> 或 working-copy 管理锁时仅执行标准 <code>svn cleanup</code> 后复检，不删除未跟踪文件或还原本地修改。</li>
-<li>SCM 顶部以及“Nexus 修改”“远程变更”分组提供全部提交/更新，每个 Nexus 修改和远程变更行提供单文件提交/更新。单文件更新仅作用于授权清单解析出的精确物理路径；该文件同时有本地修改时，必须确认使用 SVN 原生合并，Nexus 不自动解决冲突。</li>
-<li>“管理本地源码变更”同时列出 Nexus 编辑和安全的外部已跟踪文本修改；可查看差异、多选或全选保存和撤销。冲突、新增、删除、未跟踪和属性变化会明确阻断。</li>
-<li>撤销按本地 SVN BASE 回退已选择文件，不要求 working copy 与远端最新 revision 一致；“保存到谷神”仍会执行远端过期检查。</li>
-<li>完成本地验证后保存到谷神；看到 revision 后仍需在谷神平台完成最终提交。</li>
+<li>在“项目”树选择目标 PRD 或 PRJ。</li>
+<li>点击“同步工作区全部资料”。</li>
+<li>需要网页拉取时启动 Bridge，再从谷神页面拉取 Workcopy。</li>
+<li>只修改 Workcopy，完成后点击“检查或打包 Workcopy”。</li>
+<li>将确认后的内容复制回谷神平台，测试并提交。</li>
 </ol>
-<p><code>sync.yaml</code> 的 <code>rules.pull_diff_check</code> 缺省为 <code>true</code>：直接比较 readonly 与 workcopy，存在差异时保留 workcopy 并生成差异报告。设为 <code>false</code> 时直接覆盖 readonly/workcopy。</p>
-<p>DATABASE 不自动回写平台。SVN 的 <code>Ctrl+S</code> 只写本地 checkout；“管理本地源码变更”支持类 Git 差异、多选/全选保存和撤销。“保存到谷神”是 SVN 模式固定能力，跨 working copy 时分组执行 <code>svn commit</code>，仍不等于谷神平台最终提交。</p>
+<h3>SVN 模式</h3>
+<ol>
+<li>开始开发前，点击“从签出脚本检出/更新 SVN”。</li>
+<li>从“谷神源码”打开 PAGE、过程函数或系统脚本。</li>
+<li>修改后按 <code>Ctrl+S</code>（macOS 为 <code>Cmd+S</code>）保存到本地。</li>
+<li>在 VS Code“源代码管理”中点击文件查看差异。</li>
+<li>提交全部修改时点击分组上的提交按钮；只提交一个文件时点击该文件行的提交按钮。</li>
+<li>更新全部或单个远端变更时，在“远程变更”分组使用对应的更新按钮。</li>
+<li>看到 SVN revision 后，再到谷神平台完成最终提交。</li>
+</ol>
+<aside class="notice"><div class="notice-icon">!</div><div><p><code>Ctrl+S</code>/<code>Cmd+S</code> 只保存到本地；出现冲突时不要强制提交，先联系负责人处理。SVN 提交成功也不等于谷神平台已最终提交。</p></div></aside>
+<p>“谷神源码”已按业务分组和 <code>index.md</code> 顺序排列，普通用户无需手工整理目录。可使用视图顶部的定位、跳转、搜索和刷新按钮。</p>
 </section>
 
 <section class="wiki-section">
 <h2 id="8-系统差异和解决步骤">8. 系统差异和解决步骤</h2>
 <h3>macOS</h3>
 <ul>
-<li>当前只提供 Apple Silicon 应用，Intel Mac 暂不支持。</li>
+<li>当前支持 M1 及后续型号，Intel Mac 不支持。</li>
 <li>应用没有执行权限：执行 <code>chmod +x</code> 后重新选择应用。</li>
 <li>Gatekeeper 阻止：确认下载来源后，在“隐私与安全性”中选择“仍要打开”。</li>
 <li>终端设置的数据库环境变量未被 VS Code 读取：从同一终端启动 VS Code，或按公司方式配置用户环境后重启 VS Code。</li>
@@ -393,8 +358,7 @@ Nexus 把授权清单中的多个 working copy 聚合为“谷神源码”和一
 <li>替换 Bridge 前备份自己的 <code>extension/host-config.js</code>，然后重新加载 Chrome 扩展。</li>
 <li>运行“检查本地环境”，再选择一个产品和一个项目分别执行完整同步。</li>
 </ol>
-<p>升级时不要删除本地数据目录。配置、AI 规范、readonly、Workcopy、SQLite 和日志都保存在该目录，与应用版本分离。</p>
-<p>迁移电脑时，应安全复制整个本地数据目录，再在新电脑执行一次“设置工作空间”选择新应用和该目录；数据库凭据和系统环境变量需按公司要求重新配置。</p>
+<p>升级时不要删除“本地数据目录”。迁移电脑时，先安全复制整个本地数据目录，再在新电脑重新执行“设置工作空间”。</p>
 </section>
 
 <section class="wiki-section">
@@ -404,7 +368,7 @@ Nexus 把授权清单中的多个 working copy 聚合为“谷神源码”和一
 <h3>点击功能后提示启动失败</h3>
 <p>重新执行“设置/切换工作空间”，选择未改名、未移动且属于当前系统的应用。macOS 同时检查执行权限。</p>
 <h3>项目树没有显示某个产品或项目</h3>
-<p>检查 <code>products.yaml</code> 或 <code>projects.yaml</code> 的键、名称和 datasource，然后刷新 Nexus。每个节点独立绑定 <code>workspaceKey</code>，不会共享默认工作区。</p>
+<p>打开 <code>products.yaml</code> 或 <code>projects.yaml</code>，检查 ID、名称和 datasource 是否填写正确，保存后点击 Nexus 刷新。</p>
 <h3>Bridge 显示无法连接</h3>
 <ol>
 <li>确认 Guthon Nexus 面板显示 Bridge“运行中”。</li>
@@ -414,9 +378,9 @@ Nexus 把授权清单中的多个 working copy 聚合为“谷神源码”和一
 <li>重新加载 Chrome 扩展并刷新谷神页面。</li>
 </ol>
 <h3>Workcopy 与 readonly 不一致</h3>
-<p>查看 <code>diff.md</code> 确认需要保留的内容。工具将 readonly 与 workcopy 的任何差异都视为需要保留；需要接受 readonly 覆盖时，将 <code>pull_diff_check</code> 设为 <code>false</code> 后重新拉取。</p>
+<p>先打开 <code>diff.md</code> 确认需要保留的内容。不确定时不要覆盖，请联系负责人处理。</p>
 <h3>SVN SCM 显示“外部修改”</h3>
-<p>这表示 checkout 原文件在 Nexus 编辑会话外发生变化。先在“管理本地源码变更”中审阅 diff；安全的已跟踪文本修改可以继续选择保存或撤销。冲突、新增、删除、未跟踪和属性变化不会被自动接管，必须先在物理 working copy 中处理。</p>
+<p>点击“管理本地源码变更”查看差异，再选择保存或撤销。如果显示冲突、新增或删除，不要强制操作，请联系负责人处理。</p>
 <h3>验收清单</h3>
 <ul>
 <li><label class="check-item"><input type="checkbox" disabled><span>应用、VSIX 和 Bridge 来自同一个 Release。</span></label></li>
@@ -425,8 +389,8 @@ Nexus 把授权清单中的多个 working copy 聚合为“谷神源码”和一
 <li><label class="check-item"><input type="checkbox" disabled><span>AI 规范已放入本地数据目录的 <code>var/</code>。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>环境检查没有 FAIL，项目树同时显示 PRD、PRJ，两个样例均完整同步成功。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>Bridge 健康检查返回 <code>{"ok":true}</code>。</span></label></li>
-<li><label class="check-item"><input type="checkbox" disabled><span>DATABASE 能拉取 Workcopy；SVN 能从 Nexus 打开虚拟分块并在 SCM 查看差异。</span></label></li>
-<li><label class="check-item"><input type="checkbox" disabled><span>SVN 多 working copy 只显示一个 SCM 项目，部分保存不会跨 working copy 伪装原子提交。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>DATABASE 能拉取 Workcopy；SVN 能从“谷神源码”打开文件并在“源代码管理”查看差异。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>SVN 可以查看差异，并能分别执行全部或单文件提交/更新。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>已明确 SVN revision 仍需在谷神平台最终提交。</span></label></li>
 </ul>
 </section>
@@ -436,7 +400,7 @@ Nexus 把授权清单中的多个 working copy 聚合为“谷神源码”和一
   <button class="round-btn" id="themeToggle" type="button" title="切换明暗主题" aria-label="切换明暗主题">◐</button>
   <button class="round-btn" id="backTop" type="button" title="返回顶部" aria-label="返回顶部">↑</button>
 </div>
-<footer class="footer">GuthonCodeTool 使用手册 · macOS 与 Windows 共用</footer>
+<footer class="footer">GuthonCodeTool 使用手册 · macOS M1 及后续型号与 Windows 共用</footer>
 <script>
 const root=document.documentElement;
 const savedTheme=localStorage.getItem("guthon-wiki-theme");

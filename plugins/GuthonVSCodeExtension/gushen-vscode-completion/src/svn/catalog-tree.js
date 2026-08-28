@@ -53,44 +53,52 @@ function groupCatalog(objects) {
 }
 
 function objectLabel(object) {
-  if (object.treeLabel) return object.treeLabel;
+  if (object.treeLabel) return String(object.treeLabel);
   if (object.sourceType === 'procedure') {
-    return `${object.funId || object.sourceId} ${object.sourceAliasId || ''}`.trim();
+    return `${object.funId || object.sourceId || ''} ${object.sourceAliasId || ''}`.trim()
+      || '未命名过程函数';
   }
   if (object.sourceType === 'table' || object.sourceType === 'view') {
     return object.sourceName && object.sourceName !== object.sourceId
       ? `${object.sourceId} ${object.sourceName}`
-      : object.sourceId;
+      : String(object.sourceId || object.sourceName || '未命名源码');
   }
   const identity = object.funId
     ? `${object.sourceAliasId}.${object.funId}`
     : object.sourceAliasId || object.sourceId;
-  return object.sourceName && object.sourceName !== identity
+  const label = object.sourceName && object.sourceName !== identity
     ? `${object.sourceName}  ${identity}`
     : identity;
+  return String(label || '未命名源码');
+}
+
+function compareSortOrder(leftOrder, rightOrder) {
+  const normalizedLeft = Array.isArray(leftOrder) ? leftOrder : null;
+  const normalizedRight = Array.isArray(rightOrder) ? rightOrder : null;
+  if (normalizedLeft && normalizedRight) {
+    const length = Math.max(normalizedLeft.length, normalizedRight.length);
+    for (let index = 0; index < length; index += 1) {
+      const difference = (normalizedLeft[index] ?? Number.MAX_SAFE_INTEGER)
+        - (normalizedRight[index] ?? Number.MAX_SAFE_INTEGER);
+      if (difference) return difference;
+    }
+  } else if (normalizedLeft || normalizedRight) {
+    return normalizedLeft ? -1 : 1;
+  }
+  return 0;
 }
 
 function compareTreeOrder(left, right) {
-  const leftOrder = Array.isArray(left.sortOrder) ? left.sortOrder : null;
-  const rightOrder = Array.isArray(right.sortOrder) ? right.sortOrder : null;
-  if (leftOrder && rightOrder) {
-    const length = Math.max(leftOrder.length, rightOrder.length);
-    for (let index = 0; index < length; index += 1) {
-      const difference = (leftOrder[index] ?? Number.MAX_SAFE_INTEGER)
-        - (rightOrder[index] ?? Number.MAX_SAFE_INTEGER);
-      if (difference) return difference;
-    }
-  } else if (leftOrder || rightOrder) {
-    return leftOrder ? -1 : 1;
-  }
+  const orderDifference = compareSortOrder(left?.sortOrder, right?.sortOrder);
+  if (orderDifference) return orderDifference;
   if (left.kind !== right.kind) return left.kind === 'directory' ? -1 : 1;
-  return left.label.localeCompare(right.label, 'zh-CN');
+  return String(left?.label || '').localeCompare(String(right?.label || ''), 'zh-CN');
 }
 
 function earlierTreeOrder(left, right) {
   if (!Array.isArray(left)) return right;
   if (!Array.isArray(right)) return left;
-  return compareTreeOrder({ sortOrder: left }, { sortOrder: right }) <= 0 ? left : right;
+  return compareSortOrder(left, right) <= 0 ? left : right;
 }
 
 function buildSourceTree(objects) {

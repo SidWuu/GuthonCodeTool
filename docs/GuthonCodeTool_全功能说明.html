@@ -202,7 +202,7 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
 <p><code>scripts/build_guthon_tool.py</code> 使用 PyInstaller <code>--onefile</code>，内置配置模板和运行所需 Python 模块。构建必须在目标系统执行：Windows 生成 EXE，macOS 生成 ARM64 Mach-O。</p>
 <ul>
 <li>Windows 发行物：<code>GuthonCodeTool-windows-x64.exe</code>。</li>
-<li>macOS 发行物：<code>GuthonCodeTool-macos-arm64.zip</code>，当前只支持 Apple Silicon。</li>
+<li>macOS 发行物：<code>GuthonCodeTool-macos-arm64.zip</code>，支持 M1 及后续型号。</li>
 <li>应用本身不保存用户配置，升级时直接替换应用文件即可。</li>
 </ul>
 <p>Guthon Nexus 默认使用发行模式调用应用。维护者可切换到调试模式，直接运行源码仓库的虚拟环境和 Python 入口；面板命令与 Bridge 请求都会在每次执行时加载最新脚本，因此日常修改无需重建应用。切换模式不会改变本地数据目录。</p>
@@ -240,7 +240,7 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
             ├── database/{schema,billtype,views}/ # 仅 DATABASE
             └── context/{README.md,source-mode.json,index.db,state.json,logs}/</code></pre></div>
 <p><code>PRD</code>、<code>PRJ</code> 只控制目录和 Nexus 展示顺序，真实身份始终来自配置中的 <code>workspaceKey</code>。</p>
-<p>Nexus 同时展示全部产品和项目；每个节点的“源码来源：DATABASE/SVN”只切换当前工作区，并把结果写入该工程 <code>context/source-mode.json</code>。YAML 不配置模式，未设置时默认 DATABASE。SVN 工作区把谷神下载的 <code>svnCheckoutHere.sh</code> 放入该工程 <code>context/</code>，并在对应产品或项目的 <code>systems.include.mappings</code> 中维护 alias、SYSTEM_ID 与 DATA_SOURCE_ID 的一对一关系；项目不得复用产品的数据源 ID。Nexus 据此预览范围并生成脱敏清单、用同一份工作区认证检出或更新脚本中的仓库；旧 <code>.bat</code> 仍兼容，高级路径和 capability 才需要 <code>svn:</code> 配置。SVN 不创建 readonly 和 database 镜像，checkout 与 workspace 分离，签出脚本不会被执行，凭据不会写入清单、YAML 或日志。</p>
+<p>Nexus 同时展示全部产品和项目；每个节点的“源码来源：DATABASE/SVN”只切换当前工作区，并把结果写入该工程 <code>context/source-mode.json</code>。YAML 不配置模式，未设置时默认 DATABASE。SVN 工作区在 macOS/Linux 使用谷神下载的 <code>svnCheckoutHere.sh</code>，Windows 使用 <code>svnCheckoutHere.bat</code>，两种文件均为正式支持格式。对应产品或项目的 <code>systems.include.mappings</code> 维护 alias、SYSTEM_ID 与 DATA_SOURCE_ID 的一对一关系；项目不得复用产品的数据源 ID。Nexus 据此预览范围并生成脱敏清单、用同一份工作区认证检出或更新脚本中的仓库。SVN 不创建 readonly 和 database 镜像，checkout 与 workspace 分离，签出脚本不会被执行，凭据不会写入清单、YAML 或日志。</p>
 <p><code>scripts/providers/svn/import_svn_scope.py</code> 与打包工具的 <code>import-svn-scope</code> 命令负责把谷神平台下载的 checkout shell/BAT 脚本转换为授权清单。它支持 shell 的反斜杠续行和 BAT 的插入符续行，只接受字面量精确 URL 与安全相对目录，忽略认证参数且不执行脚本、SVN checkout 或旧 working copy 清理；变量、绝对目录、URL/目录重叠和未知分类会阻断。已有清单不同必须显式 <code>--replace</code> 原子替换。</p>
 </section>
 

@@ -230,8 +230,8 @@ def svn_settings(config_id: str, item: dict, var_dir: Path, workspace_dir: Path 
     elif workspace_dir is not None:
         context_root = (workspace_dir / "context").resolve()
         shell_script = (context_root / "svnCheckoutHere.sh").resolve()
-        legacy_bat = (context_root / "svnCheckoutHere.bat").resolve()
-        checkout_script_path = shell_script if shell_script.is_file() or not legacy_bat.is_file() else legacy_bat
+        bat_script = (context_root / "svnCheckoutHere.bat").resolve()
+        checkout_script_path = shell_script if shell_script.is_file() or not bat_script.is_file() else bat_script
         if context_root not in checkout_script_path.parents:
             raise SystemExit(f"Default SVN checkout script escapes workspace context for {config_id}")
     else:
