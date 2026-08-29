@@ -257,9 +257,10 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
 <h3 id="5-2-过程函数导出">5.2 过程函数导出</h3>
 <p>过程函数保存到 <code>{子系统}/procedure/{过程别名}/{函数名}/source.vm</code>。项目继承标记使用配置映射的产品脚本；多个子系统共用数据源时只保存一份实体源码，其余目录使用链接。</p>
 <h3 id="5-3-调用索引">5.3 调用索引</h3>
-<p>每个工作区使用自己的 <code>context/index.db</code>。索引记录源码对象、静态调用和低置信动态调用；Nexus 的 SVN 虚拟文档使用它提供 F12/转到定义和查找引用，AI 仍以显式 <code>workspaceKey</code> 查询局部上下文。</p>
+<p>每个工作区使用自己的 <code>context/index.db</code>。索引记录源码对象、静态调用、低置信动态调用、PAGE 片段定位、字段与表列映射、单据路由、表读写及条件/赋值/异常事实；Nexus 的 SVN 虚拟文档使用它提供 F12/转到定义和查找引用，AI 仍以显式 <code>workspaceKey</code> 查询局部上下文。</p>
 <p>调用边表只保存 <code>source_record_id</code>、目标身份和脚本定位字段，来源产品、项目、对象身份、名称和时间由源码主表按显式唯一整数 <code>record_id</code> 关联，不依赖可能被 SQLite 整理改写的隐式 rowid，也不再逐边重复。目标覆盖索引用于调用方查询，来源索引用于被调用关系和增量重建；兼容视图维持原查询与导出字段。旧索引首次连接时事务迁移并整理空闲页，无需删除本地索引。</p>
-<p>SVN PAGE、过程函数、系统脚本、表和视图直接从授权 checkout 派生索引。虚拟保存、原文件变化、revert 和 commit 按物理文件增量刷新；update 无法安全识别结构变化时退回全量扫描。索引只保存派生身份与关系，不保存第二份可编辑源码。</p>
+<p>SVN PAGE、过程函数、系统脚本、表和视图直接从授权 checkout 流式派生索引。虚拟保存、原文件变化、revert 和 commit 按物理文件增量刷新；update 无法安全识别结构变化时退回全量扫描。全量扫描在单事务内完成，失败回滚并保留旧索引。索引只保存有界证据、hash、真实相对路径、JSON Pointer 和关系，不保存第二份可编辑源码，也不建立源码全文倒排。</p>
+<p>AI 查询分两步：<code>svn facts</code> 按关键词、表或源码身份返回少量事实；<code>svn explain</code> 按表或单据号返回写入位置、控制条件和有界调用者链，并用 continuation token 续查。默认结果不携带完整源码，事实不足或实际修改前才按返回的路径和片段读取 checkout。</p>
 <p>“谷神源码”的 catalog 只读取该 SQLite 索引，展开单个 PAGE 时才懒解析目标 JSON 的方法、事件、字段和 SQL。PAGE/系统脚本根目录的 <code>$.&lt;中文子系统名&gt;</code> 作为中文分组；PAGE 层级及末级名使用 <code>index.md</code>，过程函数、系统脚本、表和视图保留原源码目录。全量 <code>source-index.md</code>、<code>invoke-index.md</code> 和 <code>dynamic-invoke-points.md</code> 只在显式执行 <code>export-markdown</code> 时生成，不属于普通扫描和运行时查询链路。</p>
 </section>
 

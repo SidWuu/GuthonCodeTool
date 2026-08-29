@@ -160,11 +160,26 @@ def main(argv=None):
     config = gusen_hub.load_config()
     if args.workspace:
         gusen_hub.set_workspace(args.workspace)
-    output_dir = Path(args.output_dir) if args.output_dir else gusen_hub.resolve_workspace(config)["databaseDir"] / "billtype"
+    workspace = gusen_hub.resolve_workspace(config)
+    output_dir = Path(args.output_dir) if args.output_dir else workspace["databaseDir"] / "billtype"
     datasource_name, datasource = gusen_hub.resolve_datasource(config, args.datasource)
     with gusen_hub.db_connect(datasource) as conn:
         data_source_ids = resolve_data_source_ids(conn, datasource_name, requested_data_source_ids)
         summary = export_bill_types(conn, output_dir, data_source_ids=data_source_ids, bill_type_codes=bill_type_codes)
+    from common import source_facts
+
+    payloads = []
+    for path in sorted(output_dir.glob("*.json")):
+        try:
+            payloads.append(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    index = gusen_hub.connect_index(workspace["indexPath"])
+    try:
+        summary["indexed_bill_route_count"] = source_facts.replace_workspace_bill_routes(index, payloads)
+        index.commit()
+    finally:
+        index.close()
     result = {"ok": True, **summary, "outputDir": str(output_dir)}
     gusen_hub.append_pull_log(
         "billtype",

@@ -118,6 +118,7 @@ def _scan_page_json(path, checkout_path, system_id, data_source_id, names, revis
                         "script_type": field.key,
                         "json_path": field.json_pointer,
                         "content": field.effective_value,
+                        "label": field.display_name,
                     }
                     for field in fields
                 ],

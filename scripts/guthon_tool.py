@@ -50,6 +50,8 @@ SVN_BROWSE_ACTIONS = {
     "history",
     "definition",
     "callers",
+    "facts",
+    "explain",
     "scope-preview",
 }
 GLOBAL_COMMANDS = {"setup", "doctor", "route", "workspaces", "self-test"}
@@ -326,6 +328,8 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 "platform-save",
                 "definition",
                 "callers",
+                "facts",
+                "explain",
                 "reindex-file",
             ],
         )
@@ -362,6 +366,15 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         svn_parser.add_argument("--selection-token")
         svn_parser.add_argument("--candidate", action="append", default=[])
         svn_parser.add_argument("--alias")
+        svn_parser.add_argument("--keyword", default="")
+        svn_parser.add_argument("--table", default="")
+        svn_parser.add_argument("--bill-type", default="")
+        svn_parser.add_argument("--data-source-id", default="")
+        svn_parser.add_argument("--operation", default="WRITE")
+        svn_parser.add_argument("--fact-limit", type=int, default=4)
+        svn_parser.add_argument("--caller-depth", type=int, default=2)
+        svn_parser.add_argument("--continuation", type=int, default=0)
+        svn_parser.add_argument("--include-details", action="store_true")
         parsed = svn_parser.parse_args(extra_args)
         manifest_layout = workspace["svn"].get("checkoutLayout") == "manifest-working-copies"
         if manifest_layout and parsed.prune:
@@ -530,6 +543,37 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 if parsed.action == "definition"
                 else index_queries.callers(workspace, alias=parsed.alias, fun_id=parsed.fun_id, limit=parsed.limit)
             )
+        elif parsed.action in {"facts", "explain"}:
+            if not manifest_layout:
+                raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
+            from providers.svn.nexus import index_queries
+
+            if parsed.action == "facts":
+                if not (parsed.keyword or parsed.table or parsed.source_id):
+                    raise SystemExit("svn facts requires --keyword, --table, or --source-id")
+                result = index_queries.facts(
+                    workspace,
+                    keyword=parsed.keyword,
+                    table_name=parsed.table,
+                    source_id=parsed.source_id or "",
+                    limit=parsed.limit if "--limit" in extra_args else 3,
+                    continuation=parsed.continuation,
+                )
+            else:
+                if not (parsed.table or parsed.bill_type):
+                    raise SystemExit("svn explain requires --table or --bill-type")
+                result = index_queries.explain(
+                    workspace,
+                    table_name=parsed.table,
+                    bill_type_code=parsed.bill_type,
+                    data_source_id=parsed.data_source_id,
+                    operation=parsed.operation,
+                    limit=parsed.limit if "--limit" in extra_args else 1,
+                    fact_limit=parsed.fact_limit,
+                    caller_depth=parsed.caller_depth,
+                    continuation=parsed.continuation,
+                    include_details=parsed.include_details,
+                )
         elif parsed.action == "reindex-file":
             if not manifest_layout or not parsed.path:
                 raise SystemExit("svn reindex-file requires manifest-working-copies and --path")

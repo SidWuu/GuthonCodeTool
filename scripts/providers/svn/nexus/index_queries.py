@@ -7,6 +7,8 @@ import sqlite3
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
+from common import source_facts
+
 from .manifest import load_authorized_scope, source_relative_path
 
 
@@ -433,3 +435,61 @@ def callers(workspace: dict, *, alias: str, fun_id: str, limit=100) -> dict:
         "target": {"alias": alias, "funId": fun_id},
         "callers": [dict(row) for row in rows],
     }
+
+
+def facts(
+    workspace: dict,
+    *,
+    keyword: str = "",
+    table_name: str = "",
+    source_id: str = "",
+    limit: int = 3,
+    continuation: int = 0,
+) -> dict:
+    connection = _connection(workspace)
+    try:
+        result = source_facts.query_facts(
+            connection,
+            workspace["productId"],
+            keyword=keyword,
+            table_name=table_name,
+            source_id=source_id,
+            limit=limit,
+            offset=continuation,
+        )
+    finally:
+        connection.close()
+    return {"ok": True, "workspaceKey": workspace["workspaceKey"], **result}
+
+
+def explain(
+    workspace: dict,
+    *,
+    table_name: str = "",
+    bill_type_code: str = "",
+    data_source_id: str = "",
+    operation: str = "WRITE",
+    limit: int = 1,
+    fact_limit: int = 4,
+    caller_depth: int = 2,
+    continuation: int = 0,
+    include_details: bool = False,
+) -> dict:
+    connection = _connection(workspace)
+    try:
+        result = source_facts.explain_table(
+            connection,
+            workspace["productId"],
+            table_name=table_name,
+            bill_type_code=bill_type_code,
+            data_source_id=data_source_id,
+            operation=operation,
+            limit=limit,
+            offset=continuation,
+            fact_limit=fact_limit,
+            caller_depth=caller_depth,
+            include_details=include_details,
+        )
+    finally:
+        connection.close()
+    return {"ok": True, "workspaceKey": workspace["workspaceKey"], **result}

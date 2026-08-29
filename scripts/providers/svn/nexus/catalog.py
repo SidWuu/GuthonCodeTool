@@ -121,6 +121,7 @@ def _page_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) 
                     "script_type": field.key,
                     "json_path": field.json_pointer,
                     "content": field.effective_value,
+                    "label": field.display_name,
                 }
                 for field in extract_page_scripts(data)
             ],
@@ -240,8 +241,14 @@ def _object_for_file(entry: ScopeEntry, path: Path, revisions: dict, changes: di
     return None
 
 
-def scan(workspace: dict) -> dict:
-    """Read every authorized working copy without updating or writing source files."""
+def scan(
+    workspace: dict,
+    *,
+    on_object=None,
+    collect_objects: bool = True,
+    collect_modules: bool = True,
+) -> dict:
+    """Read authorized files; optionally stream each parsed object to an index writer."""
 
     scope = load_authorized_scope(workspace)
     objects = []
@@ -249,6 +256,8 @@ def scan(workspace: dict) -> dict:
     errors = []
     status_records = []
     revisions = []
+    counts = {}
+    identities = {}
     for entry in scope.entries:
         if not (entry.root / ".svn").is_dir():
             errors.append({"scopeEntryId": entry.id, "path": entry.local_subdir, "error": "missing working copy"})
@@ -263,43 +272,47 @@ def scan(workspace: dict) -> dict:
                 continue
             relative = path.relative_to(entry.root).as_posix()
             logical_category = source_category(entry, relative) or entry.category
-            modules.append(
-                {
-                    "scopeEntryId": entry.id,
-                    "workingCopyId": entry.id,
-                    "category": logical_category,
-                    "path": _logical_path(entry, path),
-                    "relativePath": relative,
-                    "writable": source_path_writable(entry, relative),
-                    "status": "SVN_DIRTY" if relative in change_map else "OK",
-                }
-            )
+            if collect_modules:
+                modules.append(
+                    {
+                        "scopeEntryId": entry.id,
+                        "workingCopyId": entry.id,
+                        "category": logical_category,
+                        "path": _logical_path(entry, path),
+                        "relativePath": relative,
+                        "writable": source_path_writable(entry, relative),
+                        "status": "SVN_DIRTY" if relative in change_map else "OK",
+                    }
+                )
             try:
                 item = _object_for_file(entry, path, revision_map, change_map)
                 if item:
-                    objects.append(item)
+                    counts[item["source_table"]] = counts.get(item["source_table"], 0) + 1
+                    identity = (item["source_table"], item["source_id"], item.get("fun_id") or "")
+                    previous = identities.get(identity)
+                    if previous:
+                        previous_path = previous["source_path"] if isinstance(previous, dict) else previous
+                        item["status"] = "IDENTITY_AMBIGUOUS"
+                        if isinstance(previous, dict):
+                            previous["status"] = "IDENTITY_AMBIGUOUS"
+                        errors.append(
+                            {
+                                "scopeEntryId": item["scope_entry_id"],
+                                "path": item["source_path"],
+                                "error": f"duplicate object identity also used by {previous_path}",
+                            }
+                        )
+                    else:
+                        identities[identity] = item if collect_objects else item["source_path"]
+                    if collect_objects:
+                        objects.append(item)
+                    if on_object is not None:
+                        on_object(item)
             except Exception as error:
                 errors.append(
                     {"scopeEntryId": entry.id, "path": _logical_path(entry, path), "error": str(error)}
                 )
 
-    counts = {}
-    identities = {}
-    for item in objects:
-        counts[item["source_table"]] = counts.get(item["source_table"], 0) + 1
-        identity = (item["source_table"], item["source_id"], item.get("fun_id") or "")
-        if identity in identities:
-            item["status"] = "IDENTITY_AMBIGUOUS"
-            identities[identity]["status"] = "IDENTITY_AMBIGUOUS"
-            errors.append(
-                {
-                    "scopeEntryId": item["scope_entry_id"],
-                    "path": item["source_path"],
-                    "error": f"duplicate object identity also used by {identities[identity]['source_path']}",
-                }
-            )
-        else:
-            identities[identity] = item
     all_changes = [
         {"workingCopyId": record["id"], **change}
         for record in status_records

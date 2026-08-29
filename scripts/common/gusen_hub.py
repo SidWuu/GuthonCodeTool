@@ -16,6 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from common import source_facts
+from common.source_format import decode_source
 from providers.svn import checkout as svn_checkout
 
 
@@ -853,6 +855,12 @@ def connect_index(index_db: Path) -> sqlite3.Connection:
         "data_source_id": "TEXT",
         "working_copy_id": "TEXT",
         "scope_entry_id": "TEXT",
+        "file_size": "INTEGER",
+        "mtime_ns": "INTEGER",
+        "diagnostic_code": "TEXT",
+        "diagnostic_message": "TEXT",
+        "parser_version": "TEXT",
+        "last_seen_time": "TEXT",
     }
     for name, definition in migrations.items():
         if name not in source_columns:
@@ -872,6 +880,7 @@ def connect_index(index_db: Path) -> sqlite3.Connection:
         END
         """
     )
+    source_facts.setup_schema(conn)
     conn.commit()
     call_schema_migrated = _migrate_call_index_schema(conn)
     conn.execute("DROP TABLE IF EXISTS gusen_effective_source")
@@ -895,6 +904,7 @@ def _migrate_call_index_schema(conn):
                 CREATE TABLE gusen_invoke_call (
                     id INTEGER PRIMARY KEY,
                     source_record_id INTEGER NOT NULL,
+                    source_fragment_id INTEGER,
                     script_type TEXT,
                     json_path TEXT,
                     line_no INTEGER,
@@ -927,6 +937,7 @@ def _migrate_call_index_schema(conn):
                 CREATE TABLE gusen_dynamic_call (
                     id INTEGER PRIMARY KEY,
                     source_record_id INTEGER NOT NULL,
+                    source_fragment_id INTEGER,
                     script_type TEXT,
                     json_path TEXT,
                     line_no INTEGER,
@@ -949,6 +960,8 @@ def _migrate_call_index_schema(conn):
                 """
             )
             conn.execute("DROP TABLE gusen_dynamic_call_legacy")
+        conn.execute("DROP VIEW IF EXISTS gusen_invoke_call_detail")
+        conn.execute("DROP VIEW IF EXISTS gusen_dynamic_call_detail")
         for statement in (
             "CREATE INDEX IF NOT EXISTS gusen_invoke_target_idx "
             "ON gusen_invoke_call(target_alias_id, target_fun_id, source_record_id, line_no)",
@@ -960,9 +973,11 @@ def _migrate_call_index_schema(conn):
             "ON gusen_source_record(source_alias_id, fun_id, status, product_id)",
             "CREATE INDEX IF NOT EXISTS gusen_source_object_lookup_idx "
             "ON gusen_source_record(product_id, source_id, fun_id, source_layer, project_id)",
+            "CREATE INDEX IF NOT EXISTS gusen_source_physical_lookup_idx "
+            "ON gusen_source_record(provider, scope_entry_id, source_path, status)",
             """
-            CREATE VIEW IF NOT EXISTS gusen_invoke_call_detail AS
-            SELECT c.id, c.source_record_id,
+            CREATE VIEW gusen_invoke_call_detail AS
+            SELECT c.id, c.source_record_id, c.source_fragment_id,
                    s.source_layer, s.product_id, s.project_id, s.source_table, s.source_id,
                    s.source_alias_id, s.fun_id, s.source_name,
                    c.script_type, c.json_path, c.line_no,
@@ -972,8 +987,8 @@ def _migrate_call_index_schema(conn):
             JOIN gusen_source_record s ON s.record_id=c.source_record_id
             """,
             """
-            CREATE VIEW IF NOT EXISTS gusen_dynamic_call_detail AS
-            SELECT c.id, c.source_record_id,
+            CREATE VIEW gusen_dynamic_call_detail AS
+            SELECT c.id, c.source_record_id, c.source_fragment_id,
                    s.source_layer, s.product_id, s.project_id, s.source_table, s.source_id,
                    s.source_alias_id, s.fun_id, s.source_name,
                    c.script_type, c.json_path, c.line_no, c.invoke_expr, c.reason,
@@ -1455,6 +1470,11 @@ def _delete_call_index(conn, identity):
         "WHERE source_layer=? AND product_id=? AND project_id=? "
         "AND source_table=? AND source_id=? AND fun_id=?"
     )
+    record_ids = [
+        int(row["record_id"])
+        for row in conn.execute(source_ids, identity).fetchall()
+        if row["record_id"] is not None
+    ]
     conn.execute(
         f"DELETE FROM gusen_invoke_call WHERE source_record_id IN ({source_ids})",
         identity,
@@ -1463,6 +1483,8 @@ def _delete_call_index(conn, identity):
         f"DELETE FROM gusen_dynamic_call WHERE source_record_id IN ({source_ids})",
         identity,
     )
+    for record_id in record_ids:
+        source_facts.clear_source_details(conn, record_id)
 
 
 def _delete_svn_index_item(conn, workspace, row):
@@ -1490,8 +1512,9 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
             source_layer, product_id, project_id, source_table, source_id, source_alias_id, fun_id,
             source_name, version_mac, update_time, check_out_user_id, check_out_date, check_in_date,
             change_key, local_path, status, indexed_time, provider, source_path, source_hash,
-            svn_revision, json_pointer, system_id, data_source_id, working_copy_id, scope_entry_id
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            svn_revision, json_pointer, system_id, data_source_id, working_copy_id, scope_entry_id,
+            file_size, mtime_ns, diagnostic_code, diagnostic_message, parser_version, last_seen_time
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             workspace["layer"],
@@ -1520,8 +1543,43 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
             item.get("data_source_id") or "",
             item.get("working_copy_id") or "",
             item.get("scope_entry_id") or "",
+            local_path.stat().st_size,
+            local_path.stat().st_mtime_ns,
+            "" if item["status"] == "OK" else item["status"],
+            "",
+            "source-facts-v1",
+            indexed_time,
         ),
     )
+    source_record = conn.execute(
+        "SELECT record_id FROM gusen_source_record WHERE provider='svn' AND source_path=? "
+        "AND source_table=? AND source_id=? AND fun_id=?",
+        (item["source_path"], item["source_table"], item["source_id"], item.get("fun_id") or ""),
+    ).fetchone()
+    if source_record is None:
+        raise ValueError(f"SVN source record was not inserted: {item['source_path']}")
+    source_record_id = int(source_record["record_id"])
+    page_data = None
+    public_data = None
+    if local_path.suffix.lower() == ".json":
+        try:
+            parsed = json.loads(decode_source(local_path.read_bytes())[0])
+            parsed = json.loads(parsed) if isinstance(parsed, str) else parsed
+            if item["source_table"] == "page" and isinstance(parsed, dict):
+                page_data = parsed
+            elif item["source_table"] == "public":
+                public_data = parsed
+        except (OSError, json.JSONDecodeError):
+            pass
+    detail_index = source_facts.index_source_details(
+        conn,
+        source_record_id,
+        item,
+        list(item.get("scripts") or []),
+        page_data=page_data,
+        public_data=public_data,
+    )
+    fragments = detail_index["fragments"]
     for script in item.get("scripts") or []:
         if script.get("script_type") == "fields":
             continue
@@ -1535,7 +1593,28 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
             local_path,
             script["content"],
             json_path=script.get("json_path") or item["source_path"],
+            source_fragment_id=fragments.get(script.get("json_path") or ""),
         )
+
+
+def _cleanup_database_source_after_svn_index(workspace):
+    """Remove an inactive DATABASE mirror only after a successful SVN index build."""
+
+    source_root = (workspace["root"] / "source").resolve()
+    readonly = workspace["readonlyDir"]
+    workcopy = workspace["workcopyDir"]
+    expected = {source_root / "readonly", source_root / "workcopy"}
+    actual = {readonly.resolve(), workcopy.resolve()}
+    if actual != expected or readonly.is_symlink() or workcopy.is_symlink():
+        return {"status": "BLOCKED", "reason": "unexpected or symbolic DATABASE source path"}
+    if workcopy.is_dir() and any(path.is_file() or path.is_symlink() for path in workcopy.rglob("*")):
+        return {"status": "BLOCKED", "reason": "DATABASE workcopy contains files"}
+    removed = []
+    for path in (readonly, workcopy):
+        if path.is_dir():
+            shutil.rmtree(path)
+            removed.append(str(path))
+    return {"status": "REMOVED" if removed else "NOT_NEEDED", "paths": removed}
 
 
 def index_svn_workspace(conn, cfg, workspace):
@@ -1544,7 +1623,30 @@ def index_svn_workspace(conn, cfg, workspace):
         from providers.svn.nexus import catalog
 
         with svn_checkout.operation_lock(workspace, "manifest-scan", shared=True):
-            scan = catalog.scan(workspace)
+            indexed_time = _now()
+            try:
+                conn.execute("BEGIN")
+                conn.execute("DELETE FROM gusen_invoke_call")
+                conn.execute("DELETE FROM gusen_dynamic_call")
+                source_facts.clear_all_details(conn)
+                conn.execute("DELETE FROM gusen_source_record")
+                scan = catalog.scan(
+                    workspace,
+                    on_object=lambda item: _insert_svn_index_item(conn, workspace, item, indexed_time),
+                    collect_objects=False,
+                    collect_modules=False,
+                )
+                if scan["errors"]:
+                    conn.rollback()
+                else:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+                        ("svn_revision", scan["revision"]),
+                    )
+                    conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
     else:
         from providers.svn import scanner
 
@@ -1560,7 +1662,7 @@ def index_svn_workspace(conn, cfg, workspace):
             "workspaceKey": workspace["workspaceKey"],
             "revision": scan["revision"],
             "changed": 0,
-            "candidates": len(scan["objects"]),
+            "candidates": sum(scan["counts"].values()),
             "counts": scan["counts"],
             "failures": len(scan["errors"]),
             "errors": scan["errors"],
@@ -1568,29 +1670,37 @@ def index_svn_workspace(conn, cfg, workspace):
             "checkoutClean": scan["status"]["clean"],
             "checkoutChanges": scan["status"]["changes"],
         }
-    conn.execute("DELETE FROM gusen_invoke_call")
-    conn.execute("DELETE FROM gusen_dynamic_call")
-    conn.execute("DELETE FROM gusen_source_record")
-    indexed_time = _now()
-    for item in scan["objects"]:
-        _insert_svn_index_item(conn, workspace, item, indexed_time)
-    conn.execute(
-        "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
-        ("svn_revision", scan["revision"]),
-    )
-    conn.commit()
+    if workspace["svn"].get("checkoutLayout") != "manifest-working-copies":
+        try:
+            conn.execute("BEGIN")
+            conn.execute("DELETE FROM gusen_invoke_call")
+            conn.execute("DELETE FROM gusen_dynamic_call")
+            source_facts.clear_all_details(conn)
+            conn.execute("DELETE FROM gusen_source_record")
+            indexed_time = _now()
+            for item in scan["objects"]:
+                _insert_svn_index_item(conn, workspace, item, indexed_time)
+            conn.execute(
+                "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+                ("svn_revision", scan["revision"]),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     return {
         "mode": "svn-scan",
         "provider": "svn",
         "workspaceKey": workspace["workspaceKey"],
         "revision": scan["revision"],
-        "changed": len(scan["objects"]),
-        "candidates": len(scan["objects"]),
+        "changed": sum(scan["counts"].values()),
+        "candidates": sum(scan["counts"].values()),
         "counts": scan["counts"],
         "failures": len(scan["errors"]),
         "errors": scan["errors"],
         "checkoutClean": scan["status"]["clean"],
         "checkoutChanges": scan["status"]["changes"],
+        "providerCleanup": _cleanup_database_source_after_svn_index(workspace),
     }
 
 
@@ -1798,8 +1908,39 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
             indexed_time,
         ),
     )
-    for script_type, script_path, content in scripts:
-        index_calls(conn, row, layer, product_id, project_id, script_type, script_path, content)
+    source_record = conn.execute(
+        """
+        SELECT record_id FROM gusen_source_record
+        WHERE source_layer=? AND product_id=? AND project_id=?
+          AND source_table=? AND source_id=? AND fun_id=?
+        """,
+        identity,
+    ).fetchone()
+    if source_record is None:
+        raise ValueError(f"Database source record was not inserted: {identity}")
+    detail_scripts, page_data = _database_index_payload(row, local_path, scripts)
+    detail_index = source_facts.index_source_details(
+        conn,
+        int(source_record["record_id"]),
+        row,
+        detail_scripts,
+        page_data=page_data,
+    )
+    for script in detail_scripts:
+        if script.get("script_type") == "fields":
+            continue
+        index_calls(
+            conn,
+            row,
+            layer,
+            product_id,
+            project_id,
+            script["script_type"],
+            script.get("path") or local_path,
+            script["content"],
+            json_path=script.get("json_path"),
+            source_fragment_id=detail_index["fragments"].get(script.get("json_path") or ""),
+        )
     return True
 
 
@@ -1898,6 +2039,58 @@ def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, ch
         script_path.write_text(content, encoding="utf-8")
         scripts = [("procedure_script", script_path, content)]
     return base, status, scripts
+
+
+def _database_index_payload(row, local_path, scripts):
+    """Return stable virtual fragments for DATABASE and the already parsed PAGE value."""
+
+    if row["source_table"] != PAGE_SOURCE_TYPE:
+        return (
+            [
+                {
+                    "script_type": script_type,
+                    "json_path": "",
+                    "content": content,
+                    "label": row.get("source_name") or row.get("fun_id") or row.get("source_id") or "",
+                    "path": script_path,
+                }
+                for script_type, script_path, content in scripts
+            ],
+            None,
+        )
+    raw_path = local_path / "raw.json"
+    if not raw_path.is_file():
+        return [], None
+    try:
+        from common.page_projection import extract_page_fields, extract_page_scripts
+
+        page_data = json.loads(raw_path.read_text(encoding="utf-8"))
+        page_data = json.loads(page_data) if isinstance(page_data, str) else page_data
+        if not isinstance(page_data, dict):
+            return [], None
+        fragments = [
+            {
+                "script_type": field.key,
+                "json_path": field.json_pointer,
+                "content": field.effective_value,
+                "label": field.display_name,
+                "path": raw_path,
+            }
+            for field in extract_page_scripts(page_data)
+        ]
+        fragments.extend(
+            {
+                "script_type": field["script_type"],
+                "json_path": field["json_pointer"],
+                "content": field["content"],
+                "label": field["label"],
+                "path": raw_path,
+            }
+            for field in extract_page_fields(page_data)
+        )
+        return fragments, page_data
+    except (OSError, json.JSONDecodeError):
+        return [], None
 
 
 SCRIPT_KEYS = {
@@ -2023,7 +2216,18 @@ CALL_PATTERNS = [
 PROC_FIND = re.compile(r"#set\s*\(\s*\$(\w+)\s*=\s*\$vs\.proc\.find\(\s*['\"]([^'\"]+)['\"]\s*\)")
 
 
-def index_calls(conn, row, layer, product_id, project_id, script_type, script_path, content, json_path=None):
+def index_calls(
+    conn,
+    row,
+    layer,
+    product_id,
+    project_id,
+    script_type,
+    script_path,
+    content,
+    json_path=None,
+    source_fragment_id=None,
+):
     stored_path = json_path or _indexed_path(script_path)
     source_record = conn.execute(
         """
@@ -2055,7 +2259,7 @@ def index_calls(conn, row, layer, product_id, project_id, script_type, script_pa
             match = re.search(rf"\${re.escape(var)}\.([A-Za-z_][A-Za-z0-9_]*)\(", line)
             if match:
                 _insert_call(
-                    conn, source_record_id, script_type, stored_path, line_no,
+                    conn, source_record_id, source_fragment_id, script_type, stored_path, line_no,
                     alias, match.group(1), "proc_find_call",
                 )
         for invoke_type, pattern in CALL_PATTERNS:
@@ -2065,18 +2269,19 @@ def index_calls(conn, row, layer, product_id, project_id, script_type, script_pa
             target_alias = match.group(1)
             target_fun = match.group(2) if invoke_type == "proc_invoke" and len(match.groups()) > 1 else ""
             _insert_call(
-                conn, source_record_id, script_type, stored_path, line_no,
+                conn, source_record_id, source_fragment_id, script_type, stored_path, line_no,
                 target_alias, target_fun, invoke_type,
             )
         if "$vs.proc.invoke(" in line and not re.search(r"\$vs\.proc\.invoke\(\s*['\"]", line):
             conn.execute(
                 """
                 INSERT INTO gusen_dynamic_call(
-                    source_record_id, script_type, json_path, line_no, invoke_expr, reason
-                ) VALUES(?,?,?,?,?,?)
+                    source_record_id, source_fragment_id, script_type, json_path, line_no, invoke_expr, reason
+                ) VALUES(?,?,?,?,?,?,?)
                 """,
                 (
                     source_record_id,
+                    source_fragment_id,
                     script_type,
                     stored_path,
                     line_no,
@@ -2089,6 +2294,7 @@ def index_calls(conn, row, layer, product_id, project_id, script_type, script_pa
 def _insert_call(
     conn,
     source_record_id,
+    source_fragment_id,
     script_type,
     json_path,
     line_no,
@@ -2099,12 +2305,13 @@ def _insert_call(
     conn.execute(
         """
         INSERT INTO gusen_invoke_call(
-            source_record_id, script_type, json_path, line_no,
+            source_record_id, source_fragment_id, script_type, json_path, line_no,
             target_alias_id, target_fun_id, invoke_type
-        ) VALUES(?,?,?,?,?,?,?)
+        ) VALUES(?,?,?,?,?,?,?,?)
         """,
         (
             source_record_id,
+            source_fragment_id,
             script_type,
             str(json_path),
             line_no,
@@ -2118,29 +2325,42 @@ def _insert_call(
 def reindex_local_calls(conn):
     conn.execute("DELETE FROM gusen_invoke_call")
     conn.execute("DELETE FROM gusen_dynamic_call")
+    source_facts.clear_all_details(conn, preserve_external_bill_routes=True)
     indexed = 0
     rows = conn.execute("SELECT * FROM gusen_source_record WHERE status='OK' ORDER BY local_path").fetchall()
     for row in rows:
         base = ROOT / row["local_path"]
         if row["source_table"] == PAGE_SOURCE_TYPE:
-            scripts = [
+            written_scripts = [
                 (path.stem, path, path.read_text(encoding="utf-8"))
                 for path in sorted((base / "scripts").glob("*"))
                 if path.is_file()
             ]
         else:
             path = base / "source.vm"
-            scripts = [("procedure_script", path, path.read_text(encoding="utf-8"))] if path.is_file() else []
-        for script_type, script_path, content in scripts:
+            written_scripts = [("procedure_script", path, path.read_text(encoding="utf-8"))] if path.is_file() else []
+        scripts, page_data = _database_index_payload(dict(row), base, written_scripts)
+        details = source_facts.index_source_details(
+            conn,
+            int(row["record_id"]),
+            dict(row),
+            scripts,
+            page_data=page_data,
+        )
+        for script in scripts:
+            if script.get("script_type") == "fields":
+                continue
             index_calls(
                 conn,
                 dict(row),
                 row["source_layer"],
                 row["product_id"],
                 row["project_id"],
-                script_type,
-                script_path,
-                content,
+                script["script_type"],
+                script.get("path") or base,
+                script["content"],
+                json_path=script.get("json_path"),
+                source_fragment_id=details["fragments"].get(script.get("json_path") or ""),
             )
             indexed += 1
     conn.commit()

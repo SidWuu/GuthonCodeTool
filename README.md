@@ -8,8 +8,8 @@ GuthonCodeTool 是谷神低代码开发平台的本地开发工具集。每个�
 
 - 产品、项目各自拥有完整工作区，使用稳定键 `products.<id>`、`projects.<id>` 路由。
 - 数据库模式把页面、过程函数和系统脚本同步到 readonly；SVN 模式按授权清单检出一个或多个精确 URL，不复制第二份 readonly/workcopy 源码。
-- 每个工作区拥有独立 SQLite 源码与调用索引；调用边以源码记录整数 ID 关联，按目标和来源建立覆盖索引，避免在
-  每条边中重复存储产品、项目、源码身份、名称和时间字段。
+- 每个工作区拥有独立 SQLite 轻量事实索引；除调用关系外，还记录 PAGE 片段定位、字段到表列映射、单据路由、
+  表读写和条件/赋值/异常事实，不保存第二份完整源码，也不建立膨胀的源码全文倒排。
 - SVN 模式由 Nexus 的“谷神源码”聚合展示源码，并为每个工作区注册一个 SCM provider；支持 PAGE 分块、过程函数、系统脚本虚拟编辑并直接回写 checkout，表和视图保持只读。
 - 数据库模式一次执行源码、表结构、单据类型、系统脚本、视图五步同步。
 - Guthon Nexus 同时展示并操作多个产品、项目。
@@ -130,6 +130,8 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- refresh
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --diff
 .venv/bin/python scripts/guthon_tool.py reindex --home . --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- facts --keyword 保存失败
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- explain --table T_ORDER
 ```
 
 签出脚本只作为精确授权证据，工具不会执行它；脚本中的全部仓库复用工作区共享认证，用户名、密码和原检出绝对路径不会进入生成清单、日志或公开配置。`.sh` 与 `.bat` 分别面向不同操作系统，均为正式支持的签出文件；`sync-from-bat` 是 Windows BAT 的命令入口。
@@ -138,6 +140,8 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 
 `svn init` 会全量建立索引；`svn refresh` 按更新结果增量刷新，遇到目录级新增/删除等无法安全定位的结构变化时
 退回全量扫描。普通浏览、虚拟编辑、SCM 和调用查询只使用本地 working copy，不查询源码数据库。
+AI 排查时优先使用 <code>svn facts</code> 定位事实，使用 <code>svn explain</code> 按表或单据号返回有界写入链；结果直接携带
+SVN 相对路径、PAGE JSON Pointer、行号、控制条件和调用者，只有事实不足或实际修改前才读取对应局部源码。
 
 Windows PowerShell 使用 `.\.venv\Scripts\python.exe`，其余参数不变。
 
