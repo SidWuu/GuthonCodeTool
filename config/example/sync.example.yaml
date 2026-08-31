@@ -1,4 +1,8 @@
-# 全局同步窗口和安全规则。
+# 公共 SVN 登录、全局同步窗口和安全规则。
+svn:
+  # Nexus 内全部产品和项目共用的 SVN 用户名；密码在 Nexus 中输入后由 SVN 系统凭据存储。
+  username: ""
+
 sync:
   # 轮询间隔秒数，供外部定时同步任务使用。
   interval_seconds: 600

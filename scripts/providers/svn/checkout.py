@@ -10,10 +10,7 @@ import hashlib
 import json
 import os
 import re
-import socket
-import ssl
 import subprocess
-import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
@@ -30,7 +27,7 @@ except ImportError:  # pragma: no cover - exercised by Windows builds
 
 SUPPORTED_INCLUDES = {"pages", "procedures", "system-script", "tables", "views"}
 WRITABLE_INCLUDES = {"pages", "procedures", "system-script"}
-CERT_FAILURES = {"unknown-ca", "cn-mismatch", "expired", "not-yet-valid", "other"}
+TRUSTED_CERT_FAILURES = "expired,cn-mismatch,unknown-ca,not-yet-valid,other"
 LEGACY_SVN_CAPABILITY_DEFAULTS = {
     "initialize": True,
     "refresh": True,
@@ -60,13 +57,10 @@ MANIFEST_SVN_CAPABILITY_DEFAULTS = {
 SVN_CAPABILITY_DEFAULTS = LEGACY_SVN_CAPABILITY_DEFAULTS
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ENV_REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
-CERT_PIN = re.compile(r"^[0-9a-f]{64}$")
 SCOPE_FILE = "checkout-scope.json"
 SCOPE_VERSION = 2
 EXPECTED_WRITEBACK_FILE = "svn-writeback-state.json"
 MIN_SVN_VERSION = (1, 10)
-NEXUS_SVN_USERNAME_ENV = "GUTHON_NEXUS_SVN_USERNAME"
-NEXUS_SVN_PASSWORD_ENV = "GUTHON_NEXUS_SVN_PASSWORD"
 
 
 def file_hash(path: Path) -> str:
@@ -118,12 +112,21 @@ def expand_config_value(value, label: str, *, allow_missing_env=False) -> str:
     return text
 
 
-def svn_settings(config_id: str, item: dict, var_dir: Path, workspace_dir: Path | None = None) -> dict:
+def svn_settings(
+    config_id: str,
+    item: dict,
+    var_dir: Path,
+    workspace_dir: Path | None = None,
+    shared_svn: dict | None = None,
+) -> dict:
     validate_config_id(config_id)
     svn = item.get("svn") or {}
     if not isinstance(svn, dict):
         raise SystemExit(f"svn must be a mapping for {config_id}")
     scope_manifest_value = str(svn.get("scope_manifest") or "").strip()
+    # ``repository_url`` remains the legacy sparse checkout root. Compact
+    # manifest configs use ``svn.url`` and expand child paths separately.
+    scope_root_value = str(svn.get("url") or svn.get("scope_url") or "").strip()
     repository_url_value = str(svn.get("repository_url") or "").strip()
     convention_manifest = not scope_manifest_value and not repository_url_value
     checkout_layout = str(
@@ -189,6 +192,17 @@ def svn_settings(config_id: str, item: dict, var_dir: Path, workspace_dir: Path 
             raise SystemExit(f"Unsupported SVN repository URL scheme for {config_id}")
         if parsed_url.username or parsed_url.password:
             raise SystemExit(f"SVN credentials must not be embedded in repository_url for {config_id}")
+    scope_root_url = expand_config_value(
+        scope_root_value,
+        f"svn.url for {config_id}",
+        allow_missing_env=True,
+    ).rstrip("/")
+    if scope_root_url:
+        parsed_url = urlsplit(scope_root_url)
+        if parsed_url.scheme not in {"http", "https", "svn", "svn+ssh", "file"}:
+            raise SystemExit(f"Unsupported SVN URL scheme for {config_id}")
+        if parsed_url.username or parsed_url.password:
+            raise SystemExit(f"SVN credentials must not be embedded in svn.url for {config_id}")
     if not repository_url and capabilities["initialize"] and checkout_layout == "legacy-sparse":
         # Existing working copies remain usable without retaining their URL in YAML.
         if not (checkout_path / ".svn").is_dir():
@@ -212,6 +226,21 @@ def svn_settings(config_id: str, item: dict, var_dir: Path, workspace_dir: Path 
         scope_manifest_path = (context_root / "authorized-scope.json").resolve()
         if context_root not in scope_manifest_path.parents:
             raise SystemExit(f"Default SVN scope manifest escapes workspace context for {config_id}")
+    scope_config_value = str(svn.get("scope_config") or svn.get("scope_file") or "").strip()
+    scope_entries = svn.get("scope")
+    if scope_entries is None:
+        scope_entries = svn.get("entries")
+    if scope_entries is not None and not isinstance(scope_entries, list):
+        raise SystemExit(f"svn.scope/entries must be a list for {config_id}")
+    scope_config_path = None
+    if scope_config_value:
+        config_root = (var_dir.parent / "config").resolve()
+        configured_scope = Path(scope_config_value)
+        if configured_scope.is_absolute() or ".." in configured_scope.parts:
+            raise SystemExit(f"svn.scope_config must be relative to the config directory for {config_id}")
+        scope_config_path = (config_root / configured_scope).resolve()
+        if config_root not in scope_config_path.parents:
+            raise SystemExit(f"svn.scope_config escapes the config directory for {config_id}")
     checkout_script_value = str(svn.get("checkout_script") or "").strip()
     legacy_checkout_bat = str(svn.get("checkout_bat") or "").strip()
     if checkout_script_value and legacy_checkout_bat:
@@ -239,40 +268,22 @@ def svn_settings(config_id: str, item: dict, var_dir: Path, workspace_dir: Path 
     update_policy = str(svn.get("update_policy") or "manual").strip().lower()
     if update_policy != "manual":
         raise SystemExit(f"svn.update_policy must be manual for {config_id}")
-    allowed_cert_failures = svn.get("allowed_cert_failures") or []
-    if isinstance(allowed_cert_failures, str):
-        allowed_cert_failures = [value.strip() for value in allowed_cert_failures.split(",") if value.strip()]
-    allowed_cert_failures = list(dict.fromkeys(map(str, allowed_cert_failures)))
-    invalid_cert_failures = set(allowed_cert_failures) - CERT_FAILURES
-    if invalid_cert_failures:
+    legacy_auth_keys = {"username_env", "password_env", "no_auth_cache"} & set(svn)
+    if legacy_auth_keys:
         raise SystemExit(
-            f"Unsupported svn.allowed_cert_failures for {config_id}: {', '.join(sorted(invalid_cert_failures))}"
+            "SVN 登录已统一使用 sync.yaml 的 svn.username；请删除产品/项目中的旧配置："
+            + ", ".join(sorted(legacy_auth_keys))
         )
-    certificate_pins = svn.get("certificate_pins") or {}
-    if not isinstance(certificate_pins, dict):
-        raise SystemExit(f"svn.certificate_pins must be a hostname-to-SHA256 mapping for {config_id}")
-    normalized_pins = {}
-    for authority, fingerprint in certificate_pins.items():
-        parsed_authority = urlsplit(f"//{str(authority).strip()}")
-        if (
-            not parsed_authority.hostname
-            or parsed_authority.username
-            or parsed_authority.password
-            or parsed_authority.path not in {"", "/"}
-        ):
-            raise SystemExit(f"Invalid svn.certificate_pins host for {config_id}: {authority}")
-        port = parsed_authority.port or 443
-        key = f"{parsed_authority.hostname.lower()}:{port}"
-        normalized = re.sub(r"[^0-9A-Fa-f]", "", str(fingerprint)).lower()
-        if not CERT_PIN.fullmatch(normalized):
-            raise SystemExit(f"Invalid SHA256 certificate pin for {config_id}: {authority}")
-        if key in normalized_pins:
-            raise SystemExit(f"Duplicate SVN certificate pin for {config_id}: {key}")
-        normalized_pins[key] = normalized
-    if allowed_cert_failures and not normalized_pins:
-        raise SystemExit(f"svn.allowed_cert_failures requires svn.certificate_pins for {config_id}")
+    shared_username = ""
+    if shared_svn is not None:
+        if not isinstance(shared_svn, dict):
+            raise SystemExit("sync.yaml 的 svn 必须是对象")
+        shared_username = str(shared_svn.get("username") or "").strip()
+        if not shared_username:
+            raise SystemExit("未配置公共 SVN 用户名：请设置 sync.yaml 的 svn.username")
     return {
         "repositoryUrl": repository_url,
+        "scopeRootUrl": scope_root_url,
         "checkoutRoot": checkout_root,
         "checkoutPath": checkout_path,
         "capabilities": capabilities,
@@ -280,14 +291,13 @@ def svn_settings(config_id: str, item: dict, var_dir: Path, workspace_dir: Path 
         "sparseCheckout": sparse_checkout,
         "checkoutLayout": checkout_layout,
         "scopeManifestPath": scope_manifest_path,
+        "scopeConfigPath": scope_config_path,
+        "scopeConfigExplicit": bool(scope_config_value),
+        "scopeEntries": scope_entries,
         "scopeManifestConvention": convention_manifest,
         "checkoutScriptPath": checkout_script_path,
         "updatePolicy": update_policy,
-        "usernameEnv": str(svn.get("username_env") or "").strip(),
-        "passwordEnv": str(svn.get("password_env") or "").strip(),
-        "noAuthCache": bool(svn.get("no_auth_cache", True)),
-        "allowedCertFailures": allowed_cert_failures,
-        "certificatePins": normalized_pins,
+        "username": shared_username,
     }
 
 
@@ -333,101 +343,19 @@ def operation_lock(workspace: dict, action: str, shared=False):
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
-@lru_cache(maxsize=32)
-def _server_certificate_sha256(hostname: str, port: int) -> str:
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
-    try:
-        with socket.create_connection((hostname, port), timeout=10) as connection:
-            with context.wrap_socket(connection, server_hostname=hostname) as tls:
-                certificate = tls.getpeercert(binary_form=True)
-    except (OSError, ssl.SSLError) as error:
-        raise SystemExit(f"Unable to read SVN TLS certificate for {hostname}:{port}: {error}") from error
-    if not certificate:
-        raise SystemExit(f"SVN server did not provide a TLS certificate: {hostname}:{port}")
-    return hashlib.sha256(certificate).hexdigest()
-
-
-def _remote_urls(args, cwd: Path | None = None) -> list[str]:
-    urls = []
-    local_candidates = []
-    for raw_value in args:
-        value = str(raw_value)
-        parsed = urlsplit(value)
-        if parsed.scheme and parsed.hostname:
-            urls.append(value)
-            continue
-        if value.startswith("-"):
-            continue
-        candidate = Path(value)
-        if not candidate.is_absolute() and cwd:
-            candidate = cwd / candidate
-        if candidate.exists():
-            local_candidates.append(candidate)
-    if urls:
-        return list(dict.fromkeys(urls))
-    for candidate in local_candidates:
-        result = run_svn(["info", "--show-item", "url", str(candidate)], check=False)
-        url = result.stdout.strip() if result.returncode == 0 else ""
-        if url:
-            urls.append(url)
-    return list(dict.fromkeys(urls))
-
-
-def _verify_pinned_certificates(args, settings: dict, cwd: Path | None = None) -> None:
-    failures = settings.get("allowedCertFailures") or []
-    if not failures:
-        return
-    urls = _remote_urls(args, cwd)
-    if not urls:
-        raise SystemExit("Unable to determine the SVN server before applying certificate exceptions")
-    pins = settings.get("certificatePins") or {}
-    for url in urls:
-        parsed = urlsplit(url)
-        if parsed.scheme.lower() != "https":
-            continue
-        hostname = (parsed.hostname or "").lower()
-        port = parsed.port or 443
-        key = f"{hostname}:{port}"
-        expected = pins.get(key)
-        if not expected:
-            raise SystemExit(f"Missing pinned SVN certificate for {key}")
-        actual = _server_certificate_sha256(hostname, port)
-        if actual != expected:
-            raise SystemExit(
-                f"SVN certificate pin mismatch for {key}; expected {expected}, received {actual}"
-            )
-
-
-def _svn_auth(settings: dict) -> tuple[list[str], str | None, bool]:
+def _svn_auth(settings: dict, *, password_from_stdin=False) -> list[str]:
     args = []
-    if settings.get("noAuthCache", True):
-        args.append("--no-auth-cache")
-    username_env = settings.get("usernameEnv") or ""
-    if not username_env and os.environ.get(NEXUS_SVN_USERNAME_ENV):
-        username_env = NEXUS_SVN_USERNAME_ENV
-    if username_env:
-        username = os.environ.get(username_env, "").strip()
-        if not username:
-            raise SystemExit(f"SVN username environment variable is empty: {username_env}")
+    username = str(settings.get("username") or "").strip()
+    if username:
         args.extend(["--username", username])
-    password_env = settings.get("passwordEnv") or ""
-    if not password_env and os.environ.get(NEXUS_SVN_PASSWORD_ENV):
-        password_env = NEXUS_SVN_PASSWORD_ENV
-    password = None
-    if password_env:
-        password = os.environ.get(password_env)
-        if password is None or password == "":
-            raise SystemExit(f"SVN password environment variable is empty: {password_env}")
+    if password_from_stdin:
         args.append("--password-from-stdin")
-    cert_failures = settings.get("allowedCertFailures") or []
-    if cert_failures:
-        args.extend(["--trust-server-cert-failures", ",".join(cert_failures)])
-    interactive = sys.stdin.isatty() and password is None
-    if not interactive or cert_failures:
-        args.append("--non-interactive")
-    return args, f"{password}\n" if password is not None else None, interactive
+    return [
+        *args,
+        "--non-interactive",
+        "--trust-server-cert",
+        f"--trust-server-cert-failures={TRUSTED_CERT_FAILURES}",
+    ]
 
 
 def run_svn(args, cwd: Path | None = None, check=True, input_text=None, show_stderr=False) -> subprocess.CompletedProcess:
@@ -474,15 +402,19 @@ def run_svn_binary(args, cwd: Path | None = None, check=True) -> subprocess.Comp
     return result
 
 
-def run_remote_svn(args, settings: dict, cwd: Path | None = None, check=True) -> subprocess.CompletedProcess:
-    _verify_pinned_certificates(args, settings, cwd)
-    auth_args, password_input, interactive = _svn_auth(settings)
+def run_remote_svn(
+    args,
+    settings: dict,
+    cwd: Path | None = None,
+    check=True,
+    password: str | None = None,
+) -> subprocess.CompletedProcess:
+    auth_args = _svn_auth(settings, password_from_stdin=password is not None)
     return run_svn(
         [*args, *auth_args],
         cwd=cwd,
         check=check,
-        input_text=password_input,
-        show_stderr=interactive,
+        input_text=f"{password}\n" if password is not None else None,
     )
 
 

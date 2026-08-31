@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Callable
 
 from providers.svn.checkout import (
     atomic_json,
@@ -21,7 +22,16 @@ from .manifest import (
     ScopeEntry,
     load_authorized_scope,
     resolve_authorized_path,
+    scope_entry_label,
 )
+
+
+ProgressCallback = Callable[[str], None] | None
+
+
+def _progress(callback: ProgressCallback, message: str) -> None:
+    if callback is not None:
+        callback(message)
 
 
 def state_path(workspace: dict) -> Path:
@@ -102,9 +112,20 @@ def _state(workspace: dict, scope: AuthorizedScope, records: list[dict]) -> dict
     }
 
 
-def _status(workspace: dict, scope: AuthorizedScope, *, include_diff=False, remote=False) -> dict:
+def _status(
+    workspace: dict,
+    scope: AuthorizedScope,
+    *,
+    include_diff=False,
+    remote=False,
+    on_progress: ProgressCallback = None,
+    phase="状态汇总",
+) -> dict:
     records = []
-    for entry in scope.entries:
+    total = len(scope.entries)
+    for index, entry in enumerate(scope.entries, 1):
+        label = scope_entry_label(workspace, entry)
+        _progress(on_progress, f"[{index}/{total}] {label}｜{phase}｜检查 working copy")
         info = _validate_existing(entry)
         current = svn_status(
             entry.root,
@@ -114,31 +135,58 @@ def _status(workspace: dict, scope: AuthorizedScope, *, include_diff=False, remo
         )
         records.append(_entry_record(entry, info, current))
         records[-1]["status"] = current
+        _progress(
+            on_progress,
+            f"[{index}/{total}] {label}｜{phase}｜完成 · r{info.get('revision') or '-'} · "
+            f"{'干净' if current.get('clean') else '有本地修改'}",
+        )
     state = _state(workspace, scope, records)
     state["clean"] = all(record["clean"] for record in records)
     return state
 
 
-def initialize(workspace: dict) -> dict:
+def initialize(workspace: dict, *, on_progress: ProgressCallback = None) -> dict:
     require_capability(workspace, "initialize")
     scope = load_authorized_scope(workspace)
     with operation_lock(workspace, "manifest-init"):
         records = []
-        for entry in scope.entries:
+        total = len(scope.entries)
+        for index, entry in enumerate(scope.entries, 1):
+            label = scope_entry_label(workspace, entry)
+            action = "校验已有 working copy" if (entry.root / ".svn").is_dir() else "执行 SVN checkout"
+            _progress(on_progress, f"[{index}/{total}] {label}｜初始化｜{action}")
             info = _checkout_entry(workspace, entry)
+            _progress(on_progress, f"[{index}/{total}] {label}｜初始化｜检查本地状态")
             current = svn_status(entry.root)
             records.append(_entry_record(entry, info, current))
+            _progress(
+                on_progress,
+                f"[{index}/{total}] {label}｜初始化｜完成 · r{info.get('revision') or '-'} · "
+                f"{'干净' if current.get('clean') else '有本地修改'}",
+            )
         state = _state(workspace, scope, records)
         state["clean"] = all(record["clean"] for record in records)
         atomic_json(state_path(workspace), state)
         return {"ok": True, "action": "initialized", "scope": state}
 
 
-def status(workspace: dict, *, include_diff=False, remote=False) -> dict:
+def status(
+    workspace: dict,
+    *,
+    include_diff=False,
+    remote=False,
+    on_progress: ProgressCallback = None,
+) -> dict:
     require_capability(workspace, "status")
     scope = load_authorized_scope(workspace)
     with operation_lock(workspace, "manifest-status", shared=True):
-        state = _status(workspace, scope, include_diff=include_diff, remote=remote)
+        state = _status(
+            workspace,
+            scope,
+            include_diff=include_diff,
+            remote=remote,
+            on_progress=on_progress,
+        )
         atomic_json(state_path(workspace), state)
         return {"ok": True, "status": state}
 
@@ -149,6 +197,7 @@ def refresh(
     merge_local=False,
     working_copy_ids: list[str] | None = None,
     logical_paths: list[str] | None = None,
+    on_progress: ProgressCallback = None,
 ) -> dict:
     require_capability(workspace, "refresh")
     scope = load_authorized_scope(workspace)
@@ -169,10 +218,16 @@ def refresh(
         selected = set(exact_targets)
     with operation_lock(workspace, "manifest-refresh"):
         updated = []
+        candidates = [entry for entry in scope.entries if not selected or entry.id in selected]
+        total = len(candidates)
+        progress_index = 0
         for entry in scope.entries:
             _validate_existing(entry)
             if selected and entry.id not in selected:
                 continue
+            progress_index += 1
+            label = scope_entry_label(workspace, entry)
+            _progress(on_progress, f"[{progress_index}/{total}] {label}｜更新｜检查远程状态")
             before = svn_status(entry.root, remote=True, settings=workspace["svn"])
             cleanup_performed = any(
                 change.get("item") == "incomplete" or change.get("wcLocked")
@@ -181,6 +236,10 @@ def refresh(
             if cleanup_performed:
                 # Repair only SVN administrative locks/incomplete state.  Do not
                 # remove unversioned files, revert edits, or break locks.
+                _progress(
+                    on_progress,
+                    f"[{progress_index}/{total}] {label}｜更新｜清理 SVN working copy 锁",
+                )
                 run_svn(["cleanup", "--", str(entry.root)])
                 _validate_existing(entry)
                 before = svn_status(entry.root, remote=True, settings=workspace["svn"])
@@ -204,7 +263,9 @@ def refresh(
                     f"{', '.join(overlapping_local)}; use the explicit merge-local action"
                 )
             update_paths = [target for target, _relative, _logical in targets] or [entry.root]
-            run_remote_svn(["update", *map(str, update_paths)], workspace["svn"])
+            _progress(on_progress, f"[{progress_index}/{total}] {label}｜更新｜执行 SVN update")
+            update_result = run_remote_svn(["update", *map(str, update_paths)], workspace["svn"])
+            _progress(on_progress, f"[{progress_index}/{total}] {label}｜更新｜检查更新后状态")
             after = svn_status(entry.root)
             updated.append(
                 {
@@ -215,7 +276,15 @@ def refresh(
                     "paths": [logical for _target, _relative, logical in targets],
                 }
             )
-        state = _status(workspace, scope)
+            update_summary = next(
+                (line.strip() for line in reversed(update_result.stdout.splitlines()) if line.strip()),
+                "SVN update 完成",
+            )
+            _progress(
+                on_progress,
+                f"[{progress_index}/{total}] {label}｜更新｜完成 · {update_summary}",
+            )
+        state = _status(workspace, scope, on_progress=on_progress, phase="更新汇总")
         atomic_json(state_path(workspace), state)
         return {
             "ok": True,

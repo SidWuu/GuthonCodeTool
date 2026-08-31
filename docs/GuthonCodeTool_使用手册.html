@@ -169,7 +169,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="1-准备与下载">1. 准备与下载</h2>
-<p>开始前准备 VS Code、Chrome、产品/项目配置和公司提供的 AI 规范文件。DATABASE 模式还需要数据库只读账号；SVN 模式还需要 SVN 1.10+ 客户端、SVN 账号以及谷神平台下载的签出文件：macOS/Linux 使用 <code>svnCheckoutHere.sh</code>，Windows 使用 <code>svnCheckoutHere.bat</code>。两种文件均为正式支持格式。</p>
+<p>开始前准备 VS Code、Chrome、产品/项目配置和公司提供的 AI 规范文件。DATABASE 模式还需要数据库只读账号；SVN 模式还需要 SVN 1.10+ 客户端、SVN 账号以及 <code>config/products.yaml</code> 或 <code>config/projects.yaml</code> 对应条目的紧凑 <code>svn.url</code>/<code>svn.scope</code> 配置。<code>systems</code>、<code>datasources</code> 会从 <code>systems.include.mappings</code> 拼接；省略 scope 时只检出映射目录。首次没有配置时，可使用谷神平台下载的 <code>svnCheckoutHere.sh</code> 或 <code>svnCheckoutHere.bat</code> 一次性导入，Nexus 不会执行脚本。</p>
 <p>打开 <a href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">GitHub Releases</a> 或 
   <a href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Releases</a>
   ，在同一个版本下载：</p>
@@ -247,10 +247,15 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <p>SVN 用户按下面操作：</p>
 <ol>
 <li>在目标产品或项目上选择“源码来源：SVN”。</li>
-<li>将 <code>svnCheckoutHere.sh</code>（macOS/Linux）或 <code>svnCheckoutHere.bat</code>（Windows）放到该工程的 <code>context/</code> 目录。</li>
-<li>点击“设置工作区 SVN 凭据”，输入同一份 SVN 账号密码。</li>
-<li>点击“从签出脚本检出/更新 SVN”，核对范围后确认。</li>
+<li>在对应的 <code>products.yaml</code> 或 <code>projects.yaml</code> 的 <code>svn.url</code>/<code>svn.scope</code> 中维护紧凑范围；也可使用“导入 SVN checkout 配置”选择 <code>.sh/.bat</code> 或粘贴 checkout 内容，Nexus 会写入共享根地址和分类并保留原有手工配置。展开后的实际清单保存在工作区 <code>context/authorized-scope.json</code>，仅供程序使用。</li>
+<li>在 <code>sync.yaml</code> 的 <code>svn.username</code> 填写公共用户名。</li>
+<li>点击“设置工作区 SVN 登录”，输入一次公共密码；Nexus 会让 SVN auth cache/系统钥匙串保存。</li>
+<li>点击“从 SVN 范围配置检出/更新”，核对范围后确认；也可以直接在配置中追加 URL 和相对目录。</li>
 </ol>
+<p>项目若只有一个包含全部权限目录的根 checkout 地址，建议在该项目 <code>svn.url</code> 配合分类 <code>scope</code>；旧配置也可在 <code>svn.scope</code> 中使用
+<code>checkoutPaths</code> 列出要检出的 <code>skill</code>、<code>public</code>、<code>systems/&lt;SYSTEM_ID&gt;</code> 和
+<code>datasources/&lt;DATA_SOURCE_ID&gt;</code>；粘贴单根命令时 Nexus 也会按当前映射自动展开。</p>
+<p>用户名在公共 <code>sync.yaml</code> 配置一次，全部产品和项目共用，不需要分别写入产品/项目 YAML。密码只通过 stdin 临时交给 SVN，Nexus、YAML 和 VS Code SecretStorage 都不保存；检出、更新、远程检查和提交读取 SVN 系统凭据。内部 HTTPS 自签证书以非交互方式直接信任。</p>
 <div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" type="button">复制</button><pre><code>products:
   &lt;产品ID&gt;:
     name: &lt;产品名称&gt;
@@ -279,7 +284,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>确认产品、项目各自的数据源和子系统范围正确。</li>
 <li>点击“维护 → 检查本地环境”，确认输出没有 FAIL。</li>
 <li>展开“项目”，确认产品显示为 <code>PRD</code>、项目显示为 <code>PRJ</code>。</li>
-	<li>在每个产品或项目节点选择“源码来源：DATABASE / SVN”；DATABASE 节点点击“同步工作区全部资料”，SVN 节点点击“从签出脚本检出/更新 SVN”。</li>
+	<li>在每个产品或项目节点选择“源码来源：DATABASE / SVN”；DATABASE 节点点击“同步工作区全部资料”，SVN 节点点击“从 SVN 范围配置检出/更新”。</li>
 	<li>等待输出面板显示“完成”；如果显示 FAIL，先按提示修正后再重试。</li>
 </ol>
 <p>看到“完成”且项目树中没有红色错误即表示初始化成功。DATABASE 后续从 Workcopy 开发；SVN 后续从“谷神源码”开发。</p>
@@ -317,11 +322,12 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 </ol>
 <h3>SVN 模式</h3>
 <ol>
-<li>开始开发前，点击“从签出脚本检出/更新 SVN”。</li>
+	<li>开始开发前，点击“从 SVN 范围配置检出/更新”。输出标签会实时显示每个子系统 working copy 当前正在执行的授权、checkout/update、状态检查或索引步骤。</li>
+	<li>手动执行“扫描/重建本地 SVN 索引”时，输出标签同样会显示授权范围、每个 working copy 的状态/版本/解析步骤和事务结果；同一工作区的重复重建点击会直接忽略。</li>
 <li>从“谷神源码”打开 PAGE、过程函数或系统脚本。</li>
 <li>修改后按 <code>Ctrl+S</code>（macOS 为 <code>Cmd+S</code>）保存到本地。</li>
-<li>在 VS Code“源代码管理”中点击文件查看差异。</li>
-<li>提交全部修改时点击分组上的提交按钮；只提交一个文件时点击该文件行的提交按钮。</li>
+<li>在“谷神源码”树查看带 <code>M</code> 和修改色的文件及父目录；打开文件后，行号槽、整行背景和概览标尺会按 SVN BASE 高亮新增、修改与删除位置。在 VS Code“源代码管理”中点击文件可继续查看双栏完整差异。</li>
+<li>提交全部修改时点击分组上的提交按钮；只提交一个文件时点击该文件行的提交按钮。SCM 顶部的 SVN 提交说明可选，留空可直接保存。</li>
 <li>更新全部或单个远端变更时，在“远程变更”分组使用对应的更新按钮。</li>
 <li>看到 SVN revision 后，再到谷神平台完成最终提交。</li>
 </ol>

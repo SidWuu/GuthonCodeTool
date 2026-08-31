@@ -47,7 +47,7 @@ test('SCM always exposes save-to-Guthon in Nexus SVN mode', () => {
   assert.equal(record.groups.LOCAL_MODIFIED.guthonWorkspaceKey, 'projects.demo');
   assert.equal(record.groups.REMOTE.guthonWorkspaceKey, 'projects.demo');
   assert.equal(record.sourceControl.acceptInputCommand.command, 'gushenCompletion.saveSvnToGuthon');
-  assert.match(record.sourceControl.inputBox.placeholder, /保存到谷神/);
+  assert.match(record.sourceControl.inputBox.placeholder, /提交说明（可选）/);
 
   manager.ensure(workspace());
   assert.equal(record.sourceControl.acceptInputCommand.command, 'gushenCompletion.saveSvnToGuthon');

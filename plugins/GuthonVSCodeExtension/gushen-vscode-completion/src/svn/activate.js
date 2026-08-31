@@ -6,6 +6,7 @@ const { decodeIdentity, SCHEME, SvnVirtualFileSystem } = require('./virtual-fs')
 const { procedureTargetAt } = require('../definition');
 const { SvnSourceWatcher } = require('./source-watcher');
 const { DIFF_SCHEME, SvnDiffContentProvider, showSvnDiff } = require('./diff-content');
+const { SvnLineDecorationManager } = require('./line-decorations');
 
 async function selectCandidates(vscode, preview, title) {
   const selected = await vscode.window.showQuickPick(
@@ -102,11 +103,16 @@ function activeSourceIdentity(workspaces, document) {
   return undefined;
 }
 
-function activateSvn({ vscode, context, getTool, getEnvironment, listSvnWorkspaces, onToolTreeChanged }) {
-  const backend = new SvnBackendClient({ getTool, getEnvironment });
-  const scm = new SvnScmManager({ vscode, backend });
+function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeChanged }) {
+  const backend = new SvnBackendClient({ getTool });
   const catalogTree = new SvnCatalogTreeProvider({ vscode, backend, listSvnWorkspaces });
+  const scm = new SvnScmManager({
+    vscode,
+    backend,
+    onStatusChanged: (workspaceKey, status) => catalogTree.setStatus(workspaceKey, status),
+  });
   const diffContent = new SvnDiffContentProvider({ vscode });
+  const lineDecorations = new SvnLineDecorationManager({ vscode });
   async function refreshWorkspaceScm(workspaceKey) {
     const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
     if (!workspace) return undefined;
@@ -134,6 +140,10 @@ function activateSvn({ vscode, context, getTool, getEnvironment, listSvnWorkspac
   const virtualFs = new SvnVirtualFileSystem({
     vscode,
     backend,
+    onLoaded: (uri, value) => lineDecorations.update(uri, value.lineChanges),
+    onInvalidated: (workspaceKey, preserveUri) => (
+      lineDecorations.clearWorkspace(workspaceKey, preserveUri)
+    ),
     onWillSave: (workspaceKey, sourcePath) => sourceWatcher?.suppress(workspaceKey, sourcePath),
     onSaved: (workspaceKey, result, uri) => {
       catalogTree.refresh(workspaceKey);
@@ -169,6 +179,7 @@ function activateSvn({ vscode, context, getTool, getEnvironment, listSvnWorkspac
   const treeView = vscode.window.createTreeView('gushenCompletion.svnSourceView', {
     treeDataProvider: catalogTree,
   });
+  const fileDecorationRegistration = vscode.window.registerFileDecorationProvider(catalogTree);
   const fileSystemRegistration = vscode.workspace.registerFileSystemProvider(SCHEME, virtualFs, {
     isCaseSensitive: true,
     isReadonly: false,
@@ -247,20 +258,14 @@ function activateSvn({ vscode, context, getTool, getEnvironment, listSvnWorkspac
   };
   const completePlatformSave = async (workspaceKey, preview, candidateIds) => {
     const workingCopyCount = selectedWorkingCopyCount(preview, candidateIds);
-    const message = scm.inputMessage(workspaceKey) || await vscode.window.showInputBox({
-      title: '保存到谷神（SVN提交）',
-      prompt: '输入 SVN 提交说明',
-      ignoreFocusOut: true,
-      validateInput: (value) => value.trim() ? undefined : '提交说明不能为空',
-    });
-    if (!message?.trim()) return undefined;
+    const message = (scm.inputMessage(workspaceKey) || '').trim();
     const confirmed = await vscode.window.showWarningMessage(
       `将保存 ${candidateIds.length} 个文件，分为 ${workingCopyCount} 次 SVN 提交；谷神平台仍需最终提交。`,
       { modal: true },
       '保存到谷神'
     );
     if (confirmed !== '保存到谷神') return undefined;
-    const result = await backend.platformSave(workspaceKey, preview, candidateIds, message.trim());
+    const result = await backend.platformSave(workspaceKey, preview, candidateIds, message);
     scm.clearInput(workspaceKey);
     catalogTree.refresh(workspaceKey);
     virtualFs.invalidate(workspaceKey);
@@ -500,6 +505,7 @@ function activateSvn({ vscode, context, getTool, getEnvironment, listSvnWorkspac
   const disposable = {
     dispose() {
       treeView.dispose();
+      fileDecorationRegistration.dispose();
       fileSystemRegistration.dispose();
       diffContentRegistration.dispose();
       definitionRegistration.dispose();
@@ -507,6 +513,7 @@ function activateSvn({ vscode, context, getTool, getEnvironment, listSvnWorkspac
       for (const command of commands) command.dispose();
       virtualFs.dispose();
       diffContent.dispose();
+      lineDecorations.dispose();
       sourceWatcher.dispose();
       catalogTree.dispose();
       scm.dispose();

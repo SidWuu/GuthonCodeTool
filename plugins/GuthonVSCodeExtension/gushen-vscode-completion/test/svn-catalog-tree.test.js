@@ -227,3 +227,80 @@ test('locates an active virtual fragment through stable parent nodes', async () 
   assert.equal(provider.getParent(fragment), fragment.parent);
   assert.equal(fragment.parent.parent.label, '示例目录');
 });
+
+test('decorates modified SVN sources and their parent directories', async () => {
+  class EventEmitter {
+    constructor() { this.event = () => {}; }
+    fire() {}
+    dispose() {}
+  }
+  class ThemeColor { constructor(id) { this.id = id; } }
+  class FileDecoration {
+    constructor(badge, tooltip, color) { Object.assign(this, { badge, tooltip, color }); }
+  }
+  class TreeItem { constructor(label) { this.label = label; } }
+  const Uri = {
+    from(value) {
+      return { ...value, toString: () => JSON.stringify(value) };
+    },
+  };
+  const provider = new SvnCatalogTreeProvider({
+    vscode: {
+      EventEmitter,
+      FileDecoration,
+      ThemeColor,
+      ThemeIcon: class ThemeIcon {},
+      TreeItem,
+      TreeItemCollapsibleState: { None: 0, Collapsed: 1 },
+      Uri,
+    },
+    backend: {},
+    listSvnWorkspaces: async () => [],
+  });
+  const [directory] = provider._decorateChildren([{
+    kind: 'directory',
+    label: '贸易系统',
+    children: [{
+      kind: 'source',
+      label: '保存',
+      object: {
+        sourceType: 'procedure', sourceId: 'demo#save', funId: 'save',
+        sourcePath: 'datasources/DS-1/procedures/demo/save.gss', fragments: [], status: 'OK',
+      },
+    }],
+  }], undefined, 'products.demo');
+  provider.setStatus('products.demo', {
+    changes: [{ path: directory.children[0].object.sourcePath, state: 'LOCAL_MODIFIED' }],
+  });
+
+  const sourceItem = provider.getTreeItem(directory.children[0]);
+  const directoryItem = provider.getTreeItem(directory);
+  assert.equal(provider.provideFileDecoration(sourceItem.resourceUri).badge, 'M');
+  assert.equal(provider.provideFileDecoration(directoryItem.resourceUri).badge, 'M');
+  assert.equal(
+    provider.provideFileDecoration(sourceItem.resourceUri).color.id,
+    'gitDecoration.modifiedResourceForeground'
+  );
+  provider.dispose();
+});
+
+test('decorates only changed fragments and clears cached file states on refresh', () => {
+  const provider = new SvnCatalogTreeProvider({
+    vscode: { EventEmitter: class { constructor() { this.event = () => {}; } fire() {} dispose() {} } },
+    backend: {},
+    listSvnWorkspaces: async () => [],
+  });
+  const object = { sourcePath: 'pages/SYS-1/PG-1.json' };
+  const parent = { kind: 'object', object };
+  const unchanged = { kind: 'fragment', parent, fragment: { status: 'OK' } };
+  const changed = { kind: 'fragment', parent, fragment: { status: 'SVN_DIRTY' } };
+
+  assert.equal(provider._elementState(unchanged), '');
+  assert.equal(provider._elementState(changed), 'SVN_DIRTY');
+  provider.setStatus('products.demo', {
+    changes: [{ path: object.sourcePath, state: 'LOCAL_MODIFIED' }],
+  });
+  provider.refresh('products.demo');
+  assert.equal(provider.changeStates.has('products.demo'), false);
+  provider.dispose();
+});

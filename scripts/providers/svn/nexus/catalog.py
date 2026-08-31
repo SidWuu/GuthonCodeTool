@@ -14,6 +14,7 @@ from providers.svn.checkout import file_hash, run_svn, svn_path_changes, svn_sta
 from .manifest import (
     ScopeEntry,
     load_authorized_scope,
+    scope_entry_label,
     source_category,
     source_path_writable,
     source_relative_path,
@@ -247,6 +248,7 @@ def scan(
     on_object=None,
     collect_objects: bool = True,
     collect_modules: bool = True,
+    on_progress=None,
 ) -> dict:
     """Read authorized files; optionally stream each parsed object to an index writer."""
 
@@ -258,15 +260,33 @@ def scan(
     revisions = []
     counts = {}
     identities = {}
-    for entry in scope.entries:
+    total = len(scope.entries)
+    for index, entry in enumerate(scope.entries, 1):
+        label = scope_entry_label(workspace, entry)
+        if on_progress is not None:
+            on_progress(f"[{index}/{total}] {label}｜索引｜扫描 working copy")
+        before_count = sum(counts.values())
+        before_errors = len(errors)
         if not (entry.root / ".svn").is_dir():
             errors.append({"scopeEntryId": entry.id, "path": entry.local_subdir, "error": "missing working copy"})
+            if on_progress is not None:
+                on_progress(f"[{index}/{total}] {label}｜索引｜失败 · working copy 不存在")
             continue
+        if on_progress is not None:
+            on_progress(f"[{index}/{total}] {label}｜索引｜读取 SVN 状态")
         current = svn_status(entry.root)
         status_records.append({"id": entry.id, "status": current})
         revisions.append(f"{entry.id}:{current.get('revision') or ''}")
+        if on_progress is not None:
+            on_progress(
+                f"[{index}/{total}] {label}｜索引｜读取 SVN 版本 · "
+                f"r{current.get('revision') or '-'} · 文件变更 {len(current.get('changes') or [])}"
+            )
+            on_progress(f"[{index}/{total}] {label}｜索引｜读取文件版本信息")
         revision_map = _revision_map(entry.root)
         change_map = {change["path"]: change for change in current.get("changes") or []}
+        if on_progress is not None:
+            on_progress(f"[{index}/{total}] {label}｜索引｜解析授权文件")
         for path in sorted(entry.root.rglob("*")):
             if not path.is_file() or ".svn" in path.parts:
                 continue
@@ -312,6 +332,11 @@ def scan(
                 errors.append(
                     {"scopeEntryId": entry.id, "path": _logical_path(entry, path), "error": str(error)}
                 )
+        if on_progress is not None:
+            on_progress(
+                f"[{index}/{total}] {label}｜索引｜完成 · "
+                f"对象 {sum(counts.values()) - before_count} · 错误 {len(errors) - before_errors}"
+            )
 
     all_changes = [
         {"workingCopyId": record["id"], **change}

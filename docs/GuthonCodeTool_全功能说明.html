@@ -143,7 +143,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <li>工具负责读取、整理和索引源码；DATABASE 生成安全 Workcopy，SVN 由 Nexus 提供受控虚拟编辑。</li>
 <li>每个工作区显式选择 database 或 svn provider；SVN 只有用户执行初始化后才按授权清单中的精确 URL 检出。</li>
 <li>DATABASE 开发只修改 <code>source/workcopy</code>；SVN 不生成额外代码副本，虚拟文档直接回写授权 checkout 原文件。</li>
-<li>SVN 的“管理本地源码变更”提供类 Git 差异、多选/全选保存和撤销；SCM 支持全部/单文件提交 Nexus 修改和更新远程变更。“保存到谷神”固定可用，跨 working copy 分组执行精确文件 <code>svn commit</code>，成功仍表示“待谷神平台最终提交”。</li>
+<li>SVN 的“管理本地源码变更”提供类 Git 差异、多选/全选保存和撤销；SCM 支持全部/单文件提交 Nexus 修改和更新远程变更。“保存到谷神”固定可用，SVN 提交说明可选，跨 working copy 分组执行精确文件 <code>svn commit</code>，成功仍表示“待谷神平台最终提交”。检出/更新和手动重建索引在输出标签逐项显示每个子系统 working copy 的授权、checkout/update、状态检查、解析和索引事务步骤；同一工作区的重复重建点击会直接忽略；“谷神源码”树高亮本地修改文件及父目录，虚拟编辑器按 SVN BASE 在行号槽、整行背景和概览标尺标出新增、修改与删除位置。公共用户名读取 <code>sync.yaml</code> 的 <code>svn.username</code>；Nexus 输入密码后只通过 stdin 交给 SVN auth cache/系统钥匙串保存。内部 HTTPS 自签证书由非交互命令直接信任。</li>
 <li>数据库连接、源码、业务文档和运行索引均为本地私有内容，不进入公开仓库或 Release。</li>
 <li>Python 脚本继续作为开发与测试入口；普通用户只使用打包应用、VSIX 和 Bridge。</li>
 </ul>
@@ -184,7 +184,7 @@ Chrome 扩展 ──HTTP──▶ Bridge ─────┘
 workspaces            列出全部产品、项目和同步状态
 route                 按 Bridge 页面身份解析工作区
 workspace-summary     返回源码模式和有效 capabilities
-svn                   从签出脚本管理精确授权 working copy，或执行更新、状态与差异操作
+svn                   从 products/projects.yaml 的 svn.url/scope 管理精确授权 working copy，或执行更新、状态与差异操作
 sync-source-all       拉取所有源码并重建索引
 sync-source           拉取显式工作区源码
 sync-all              依次同步源码、表结构、单据类型、系统脚本和视图
@@ -216,7 +216,7 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
 <li><code>products.yaml</code>：产品名称、数据源、子系统范围、可选页面来源和可选 SVN 契约；不配置源码模式。</li>
 <li><code>projects.yaml</code>：项目名称、数据源、继承产品、子系统范围、可选页面来源和可选 SVN 契约；不配置源码模式。</li>
 <li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射；公开模板只保留占位符，真实表名和字段名由内部配置提供。</li>
-<li><code>sync.yaml</code>：全局同步窗口、未签入源码白名单和拉取规则，不保存当前或默认工作区。</li>
+<li><code>sync.yaml</code>：公共 SVN 用户名、全局同步窗口、未签入源码白名单和拉取规则，不保存当前或默认工作区。</li>
 </ul>
 <p><code>setup</code> 只补齐缺失文件，不覆盖用户配置。产品和项目在 <code>systems.include.mappings</code> 中以 alias 为键，每项只配置一对一的 <code>system_id</code>、<code>data_source_id</code>。DATABASE 查询结果缓存到 <code>config/system-data.json</code>；SVN 不读取该缓存。</p>
 <h3 id="4-2-目录契约">4.2 目录契约</h3>
@@ -240,13 +240,13 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
             ├── database/{schema,billtype,views}/ # 仅 DATABASE
             └── context/{README.md,source-mode.json,index.db,state.json,logs}/</code></pre></div>
 <p><code>PRD</code>、<code>PRJ</code> 只控制目录和 Nexus 展示顺序，真实身份始终来自配置中的 <code>workspaceKey</code>。</p>
-<p>Nexus 同时展示全部产品和项目；每个节点的“源码来源：DATABASE/SVN”只切换当前工作区，并把结果写入该工程 <code>context/source-mode.json</code>。YAML 不配置模式，未设置时默认 DATABASE。SVN 工作区在 macOS/Linux 使用谷神下载的 <code>svnCheckoutHere.sh</code>，Windows 使用 <code>svnCheckoutHere.bat</code>，两种文件均为正式支持格式。对应产品或项目的 <code>systems.include.mappings</code> 维护 alias、SYSTEM_ID 与 DATA_SOURCE_ID 的一对一关系；项目不得复用产品的数据源 ID。Nexus 据此预览范围并生成脱敏清单、用同一份工作区认证检出或更新脚本中的仓库。SVN 不创建 readonly 和 database 镜像，checkout 与 workspace 分离，签出脚本不会被执行，凭据不会写入清单、YAML 或日志。</p>
-<p><code>scripts/providers/svn/import_svn_scope.py</code> 与打包工具的 <code>import-svn-scope</code> 命令负责把谷神平台下载的 checkout shell/BAT 脚本转换为授权清单。它支持 shell 的反斜杠续行和 BAT 的插入符续行，只接受字面量精确 URL 与安全相对目录，忽略认证参数且不执行脚本、SVN checkout 或旧 working copy 清理；变量、绝对目录、URL/目录重叠和未知分类会阻断。已有清单不同必须显式 <code>--replace</code> 原子替换。</p>
+<p>Nexus 同时展示全部产品和项目；每个节点的“源码来源：DATABASE/SVN”只切换当前工作区，并把结果写入该工程 <code>context/source-mode.json</code>。YAML 不配置模式，未设置时默认 DATABASE。SVN 工作区以 <code>config/products.yaml</code> 或 <code>config/projects.yaml</code> 对应条目的紧凑 <code>svn.url</code>/<code>svn.scope</code> 作为可编辑配置；<code>systems</code>、<code>datasources</code> 从 <code>systems.include.mappings</code> 拼接 ID，省略 scope 时只检出映射目录。程序把展开后的精确清单写入工作区 <code>context/authorized-scope.json</code> 供内部操作，旧的逐条条目和 <code>checkoutPaths</code> 仍兼容。Nexus 的“导入 SVN checkout 配置”可选择 <code>.sh/.bat</code> 或粘贴 checkout 内容，写入共享根地址和分类并保留原有手工配置；脚本只作为一次性导入来源，不会被执行。SVN 不创建 readonly 和 database 镜像，checkout 与 workspace 分离，凭据不会写入范围配置、清单、YAML 或日志。</p>
+<p><code>scripts/providers/svn/import_svn_scope.py</code> 与打包工具的 <code>import-svn-scope</code> 命令仍兼容把 checkout shell/BAT 转换为授权清单。它支持 shell 的反斜杠续行和 BAT 的插入符续行，只接受字面量精确 URL 与安全相对目录，忽略认证参数且不执行脚本、SVN checkout 或旧 working copy 清理；变量、绝对目录、URL/目录重叠和未知分类会阻断。已有配置可手动追加条目，执行“从 SVN 范围配置检出/更新”后会按新增、移除和变更统计更新清单。</p>
 </section>
 
 <section class="section">
 <h2 id="5-源码同步与索引">5. 源码同步与索引</h2>
-<p><code>scripts/common/gusen_hub.py</code> 是工作区路由与索引的共享实现；<code>scripts/providers/database/</code> 保存数据库源码、metadata 导出和只读诊断，<code>scripts/providers/svn/</code> 保存授权清单、working copy、虚拟编辑和 SCM。数据库 provider 按 datasource 查询源码表并维护 readonly；SVN provider 按 <code>authorized-scope.json</code> 聚合 <code>systems/&lt;SYSTEM_ID&gt;</code> 与 <code>datasources/&lt;DATA_SOURCE_ID&gt;</code> 等精确 URL working copy，读取 <code>pages/index.md</code> 与 <code>procedures/index.md</code> 构建业务目录，并以文件 hash、BASE revision、scope entry、源路径和 JSON Pointer 建立同一套对象/调用索引。</p>
+<p><code>scripts/common/gusen_hub.py</code> 是工作区路由与索引的共享实现；<code>scripts/providers/database/</code> 保存数据库源码、metadata 导出和只读诊断，<code>scripts/providers/svn/</code> 保存授权清单、范围配置、working copy、虚拟编辑和 SCM。数据库 provider 按 datasource 查询源码表并维护 readonly；SVN provider 先读取 <code>products.yaml/projects.yaml</code> 中可手动编辑的紧凑 <code>svn.url</code>/<code>svn.scope</code>（首次可由 checkout shell/BAT 或粘贴内容导入），按 <code>systems.include.mappings</code> 展开并生成工作区 context 下的 <code>authorized-scope.json</code>，再聚合 <code>systems/&lt;SYSTEM_ID&gt;</code> 与 <code>datasources/&lt;DATA_SOURCE_ID&gt;</code> 等精确 URL working copy，读取 <code>pages/index.md</code> 与 <code>procedures/index.md</code> 构建业务目录，并以文件 hash、BASE revision、scope entry、源路径和 JSON Pointer 建立同一套对象/调用索引。</p>
 <h3 id="5-1-page-导出">5.1 PAGE 导出</h3>
 <p>PAGE 保存到 <code>{子系统}/page/{模型序号}_{模型}/{模块序号}_{模块}/{页面名 页面ID}</code>。完整 JSON 写入 <code>raw.json</code>，页面脚本、SQL、事件和组件脚本拆入 <code>scripts/</code>。</p>
 <ul>

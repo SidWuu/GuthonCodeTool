@@ -292,7 +292,12 @@ class _JsonStringLocator:
         return cursor
 
 
-def replace_json_strings(text: str, replacements: dict[str, str], expected: dict[str, str] | None = None) -> str:
+def replace_json_strings(
+    text: str,
+    replacements: dict[str, str],
+    expected: dict[str, str] | None = None,
+    encoded_replacements: dict[str, str] | None = None,
+) -> str:
     """Replace only selected JSON string tokens, preserving all unrelated bytes."""
 
     spans = _JsonStringLocator(text).locate()
@@ -303,12 +308,27 @@ def replace_json_strings(text: str, replacements: dict[str, str], expected: dict
         start, end, current = spans[pointer]
         if expected is not None and pointer in expected and current != expected[pointer]:
             raise ValueError(f"JSON Pointer value changed: {pointer}")
-        edits.append((start, end, json.dumps(new_value, ensure_ascii=False)))
+        edits.append(
+            (
+                start,
+                end,
+                (encoded_replacements or {}).get(pointer)
+                or json.dumps(new_value, ensure_ascii=False),
+            )
+        )
     output = text
     for start, end, token in sorted(edits, reverse=True):
         output = output[:start] + token + output[end:]
     json.loads(output)
     return output
+
+
+def json_string_token(text: str, json_pointer: str) -> str | None:
+    """Return the original encoded JSON string token at a pointer."""
+
+    spans = _JsonStringLocator(text).locate()
+    span = spans.get(json_pointer)
+    return text[span[0]:span[1]] if span else None
 
 
 class _JsonValueLocator:

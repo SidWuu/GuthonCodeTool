@@ -189,7 +189,17 @@ def list_workspaces(config):
                 raise SystemExit(f"Unsafe workspace_root for {key}: {workspace_root}")
             root = workspace_root / path_part(f"{prefix} {name}")
             source_mode, source_mode_source = read_workspace_source_mode(root, key, item)
-            svn = svn_checkout.svn_settings(item_id, item, VAR_DIR, root) if source_mode == "svn" else None
+            svn = svn_checkout.svn_settings(
+                item_id,
+                item,
+                VAR_DIR,
+                root,
+                (config.get("sync", {}).get("svn") or {}),
+            ) if source_mode == "svn" else None
+            if svn and svn.get("scopeConfigPath") is None:
+                svn["scopeConfigPath"] = (
+                    CONFIG_DIR / ("products.yaml" if kind == "products" else "projects.yaml")
+                ).resolve()
             datasource_name = str(item.get("datasource") or "").strip()
             datasource = (config.get("datasource", {}).get("datasource") or {}).get(datasource_name)
             manifest_layout = bool(svn and svn.get("checkoutLayout") == "manifest-working-copies")
@@ -428,14 +438,24 @@ def workspace_summary(config, workspace):
         summary["checkoutLayout"] = "manifest-working-copies"
         manifest_path = workspace["svn"].get("scopeManifestPath")
         checkout_script_path = workspace["svn"].get("checkoutScriptPath")
+        scope_config_path = workspace["svn"].get("scopeConfigPath")
+        scope_entries = workspace["svn"].get("scopeEntries")
         summary["scopeManifestPath"] = str(manifest_path) if manifest_path else ""
         summary["scopeManifestReady"] = bool(manifest_path and manifest_path.is_file())
+        summary["scopeConfigPath"] = str(scope_config_path) if scope_config_path else ""
+        summary["scopeConfigReady"] = bool(
+            workspace["svn"].get("scopeRootUrl")
+            or scope_entries is not None
+            or (workspace["svn"].get("scopeConfigExplicit") and scope_config_path and scope_config_path.is_file())
+        )
+        summary["scopeRootUrl"] = workspace["svn"].get("scopeRootUrl") or ""
         summary["checkoutScriptPath"] = str(checkout_script_path) if checkout_script_path else ""
         summary["checkoutScriptReady"] = bool(checkout_script_path and checkout_script_path.is_file())
         # Compatibility for clients released before checkout scripts became platform-neutral.
         summary["checkoutBatPath"] = summary["checkoutScriptPath"]
         summary["checkoutBatReady"] = summary["checkoutScriptReady"]
-        summary["svnCredentialsRequired"] = True
+        summary["svnLoginRequired"] = True
+        summary["svnUsernameSource"] = "sync.yaml"
         summary["workingCopies"] = [
             {
                 "id": item.get("id") or "",
@@ -517,7 +537,14 @@ def _parse_tiny_yaml(text: str):
         if item.startswith("- "):
             if not isinstance(parent, list):
                 raise ValueError(f"List item has no list parent: {line}")
-            parent.append(_scalar(item[2:]))
+            value = item[2:].strip()
+            key, separator, raw_value = value.partition(":")
+            if separator and key.strip() and raw_value.strip():
+                child = {key.strip(): _scalar(raw_value.strip())}
+                parent.append(child)
+                stack.append((indent, child))
+            else:
+                parent.append(_scalar(value))
             continue
         key, _, raw_value = item.partition(":")
         key = key.strip()
@@ -544,6 +571,8 @@ def _scalar(value: str):
         return []
     if value == "{}":
         return {}
+    if value.startswith("[") and value.endswith("]"):
+        return [_scalar(part.strip()) for part in value[1:-1].split(",") if part.strip()]
     if value in ("true", "True"):
         return True
     if value in ("false", "False"):
@@ -1367,7 +1396,7 @@ LIMIT 1
     raise SystemExit(f"Unsupported sourceType: {source_type}")
 
 
-def run_sync_once(args=None):
+def run_sync_once(args=None, on_progress=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace")
     mode = parser.add_mutually_exclusive_group()
@@ -1388,8 +1417,12 @@ def run_sync_once(args=None):
         if parsed.init_only:
             export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
             return
-        result = index_svn_workspace(conn, cfg, workspace)
+        result = index_svn_workspace(conn, cfg, workspace, on_progress=on_progress)
+        if on_progress is not None:
+            on_progress(f"{workspace.get('displayName') or workspace['workspaceKey']}｜索引｜生成索引说明文档")
         export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
+        if on_progress is not None:
+            on_progress(f"{workspace.get('displayName') or workspace['workspaceKey']}｜索引｜重建流程完成")
         append_pull_log(
             "source",
             "local-svn-scan",
@@ -1617,45 +1650,66 @@ def _cleanup_database_source_after_svn_index(workspace):
     return {"status": "REMOVED" if removed else "NOT_NEEDED", "paths": removed}
 
 
-def index_svn_workspace(conn, cfg, workspace):
+def index_svn_workspace(conn, cfg, workspace, on_progress=None):
     svn_checkout.require_capability(workspace, "reindex")
+    progress_label = workspace.get("displayName") or workspace["workspaceKey"]
+
+    def progress(message: str) -> None:
+        if on_progress is not None:
+            on_progress(f"{progress_label}｜索引｜{message}")
+
+    progress("开始重建本地 SVN 索引")
     if workspace["svn"].get("checkoutLayout") == "manifest-working-copies":
         from providers.svn.nexus import catalog
 
-        with svn_checkout.operation_lock(workspace, "manifest-scan", shared=True):
+        scope = catalog.load_authorized_scope(workspace)
+        progress(f"读取授权范围 · {len(scope.entries)} 个 working copy")
+        progress("检查索引操作锁")
+        with svn_checkout.operation_lock(workspace, "manifest-scan"):
             indexed_time = _now()
             try:
+                progress("开始索引事务")
                 conn.execute("BEGIN")
                 conn.execute("DELETE FROM gusen_invoke_call")
                 conn.execute("DELETE FROM gusen_dynamic_call")
                 source_facts.clear_all_details(conn)
                 conn.execute("DELETE FROM gusen_source_record")
+                progress("清理旧索引完成，开始扫描授权 working copy")
                 scan = catalog.scan(
                     workspace,
                     on_object=lambda item: _insert_svn_index_item(conn, workspace, item, indexed_time),
                     collect_objects=False,
                     collect_modules=False,
+                    on_progress=on_progress,
                 )
                 if scan["errors"]:
+                    progress(f"扫描发现 {len(scan['errors'])} 个错误，回滚并保留旧索引")
                     conn.rollback()
                 else:
+                    progress("扫描完成，写入 SVN 版本状态")
                     conn.execute(
                         "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
                         ("svn_revision", scan["revision"]),
                     )
                     conn.commit()
+                    progress("索引事务已提交")
             except Exception:
                 conn.rollback()
+                progress("索引事务异常，已回滚并保留旧索引")
                 raise
     else:
         from providers.svn import scanner
 
         scope = svn_checkout.load_scope(workspace)
-        with svn_checkout.operation_lock(workspace, "scan", shared=True):
+        progress("读取 SVN 范围配置")
+        progress("检查索引操作锁")
+        with svn_checkout.operation_lock(workspace, "scan"):
+            progress("扫描 SVN checkout")
             svn_checkout.verify_repository_fingerprint(workspace, scope.get("repositoryFingerprint") or "")
             scan = scanner.scan(workspace["checkoutPath"], scope)
         scan["errors"] = [*svn_checkout.validate_expected_changes(workspace, scan["status"]), *scan["errors"]]
     if scan["errors"]:
+        progress(f"重建失败 · {len(scan['errors'])} 个错误 · 旧索引已保留")
         return {
             "mode": "svn-scan",
             "provider": "svn",
@@ -1672,6 +1726,7 @@ def index_svn_workspace(conn, cfg, workspace):
         }
     if workspace["svn"].get("checkoutLayout") != "manifest-working-copies":
         try:
+            progress("开始写入扫描结果")
             conn.execute("BEGIN")
             conn.execute("DELETE FROM gusen_invoke_call")
             conn.execute("DELETE FROM gusen_dynamic_call")
@@ -1685,9 +1740,16 @@ def index_svn_workspace(conn, cfg, workspace):
                 ("svn_revision", scan["revision"]),
             )
             conn.commit()
+            progress("扫描结果事务已提交")
         except Exception:
             conn.rollback()
+            progress("扫描结果事务异常，已回滚并保留旧索引")
             raise
+    scope_count = len(scope.entries) if hasattr(scope, "entries") else 1
+    progress(
+        f"重建完成 · working copy {scope_count} 个 · "
+        f"索引对象 {sum(scan['counts'].values())} 个"
+    )
     return {
         "mode": "svn-scan",
         "provider": "svn",

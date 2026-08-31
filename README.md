@@ -94,10 +94,10 @@ products:
     page_origins: []
 ```
 
-`mappings` 的键就是系统 alias，每项只配置一对一的 `system_id`、`data_source_id`。SVN 用它筛选签出脚本；DATABASE 仍按 alias 查询并使用本地 `system-data.json` 缓存。项目必须配置自己的数据源 ID，不能复用产品值。
+`mappings` 的键就是系统 alias，每项只配置一对一的 `system_id`、`data_source_id`。SVN 用它筛选范围配置（首次可由签出脚本导入）；DATABASE 仍按 alias 查询并使用本地 `system-data.json` 缓存。项目必须配置自己的数据源 ID，不能复用产品值。
 
 产品/项目 YAML 不设置源码模式。Nexus 在每个项目节点单独选择 DATABASE/SVN，选择结果写入该工作区
-`context/source-mode.json`，缺失时默认 DATABASE。`sync.yaml` 只保存全局同步窗口和安全规则，不包含当前或默认工作区。
+`context/source-mode.json`，缺失时默认 DATABASE。`sync.yaml` 保存公共 SVN 用户名、全局同步窗口和安全规则，不包含当前或默认工作区。
 完整格式见 [config/README.md](config/README.md)。
 
 ## CLI
@@ -119,12 +119,15 @@ products:
 .venv/bin/python scripts/guthon_tool.py export-markdown --home . --workspace products.demo-product
 ```
 
-SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 SVN，再把谷神平台下载的
-`svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`（Windows）放入该工程的 `context/`。Nexus 的“从签出脚本检出/更新 SVN”会先显示脱敏的范围变更统计，
-确认后生成同目录 `authorized-scope.json`，再检出或更新授权 working copy：
+SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 SVN，紧凑范围配置直接写在已有的
+`config/products.yaml`（项目写在 `config/projects.yaml`）对应条目的 `svn.url`/`svn.scope` 下，可手动编辑。
+`svn.url` 是公共根地址；`systems`、`datasources` 会从 `systems.include.mappings` 拼接 ID。省略 `scope` 时只检出这两类映射目录。
+首次没有 `svn.url` 时，也可把谷神平台下载的 `svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`
+（Windows）放入工程 `context/`，Nexus 只解析一次其中的 checkout 命令；脚本不会被执行。之后检出/更新以配置为准：
 
 ```bash
 .venv/bin/python scripts/guthon_tool.py source-mode --home . --workspace products.demo-product -- set --mode svn
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- scope-import  # JSON stdin: {"text":"...","source":"script"}
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- scope-preview
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-script --accept-scope-change
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- refresh
@@ -134,8 +137,8 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- explain --table T_ORDER
 ```
 
-签出脚本只作为精确授权证据，工具不会执行它；脚本中的全部仓库复用工作区共享认证，用户名、密码和原检出绝对路径不会进入生成清单、日志或公开配置。`.sh` 与 `.bat` 分别面向不同操作系统，均为正式支持的签出文件；`sync-from-bat` 是 Windows BAT 的命令入口。
-已有清单发生变化时，Nexus 会在执行前显示新增、移除和变更数量。移出新清单的旧 working copy 不会自动删除。
+配置变更会在执行前显示新增、移除和变更数量，确认后将展开结果写入工作区 `context/authorized-scope.json` 并检出/更新；该 JSON 仅供程序使用。
+旧的逐条 `svn.scope`/`checkoutPaths` 写法仍兼容。用户名只在本地 <code>sync.yaml</code> 配置，密码只由 SVN 系统凭据存储；二者都不会进入配置清单、日志或参数。旧的 `sync-from-script`、`sync-from-bat` 命令仍兼容，另提供 `sync-from-config` 别名。移出配置的旧 working copy 不会自动删除。
 `import-svn-scope` 仍保留为高级手工入口，但日常不再要求配置 `svn.scope_manifest`。
 
 `svn init` 会全量建立索引；`svn refresh` 按更新结果增量刷新，遇到目录级新增/删除等无法安全定位的结构变化时
@@ -185,8 +188,11 @@ SVN 工作区的 `sync-all` 只扫描本地 SVN 范围并更新索引和摘要�
 - `rules.pull_diff_check` 缺省为 `true`，再次拉取会直接比较 readonly 与 workcopy，存在差异时保留 workcopy 并生成差异报告；设为 `false` 会直接覆盖 readonly/workcopy。
 - SVN 的“管理本地源码变更”列出 Nexus 与外部产生的本地修改，支持类 Git 差异、多选/全选保存和撤销；跨
   working copy 时按组依次执行并产生多个 revision。“保存到谷神”是 SVN 模式核心能力，提交成功仅表示谷神草稿
-  已保存，仍需在谷神平台执行最终提交。SCM 顶部和分组提供“提交全部 Nexus 修改 / 更新全部远程变更”，每个
-  Nexus 修改和远程变更行也提供单文件提交/更新；单文件更新只执行授权范围内的精确路径。
+  已保存，仍需在谷神平台执行最终提交。SVN 提交说明可选，SCM 顶部和分组提供“提交全部 Nexus 修改 / 更新全部远程变更”，每个
+  Nexus 修改和远程变更行也提供单文件提交/更新；单文件更新只执行授权范围内的精确路径。检出/更新会在输出标签逐项显示
+  每个子系统 working copy 的授权、checkout/update、状态检查和索引步骤；“谷神源码”树用 SVN 状态装饰修改文件及父目录，
+  打开虚拟源码后按 SVN BASE 在行号槽、整行背景和概览标尺高亮新增、修改与删除位置。
+  手动重建本地 SVN 索引同样逐阶段输出；同一工作区的相同操作进行中再次点击会直接忽略。
 - 数据库模式不自动回写谷神平台，交付内容仍由人工复制、保存、提交和签入。
 
 目标对象明确时，DATABASE 可通过 Bridge 拉取，SVN 可直接从 Nexus 的“谷神源码”打开；不需要先执行全量同步。目标不明确或需要影响分析时，再查询该工作区的局部索引。

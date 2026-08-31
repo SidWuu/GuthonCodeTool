@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import difflib
 import json
 import os
 import tempfile
@@ -12,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from common.page_projection import (
     extract_page_fields,
     extract_page_scripts,
+    json_string_token,
     pointer_value,
     replace_json_strings,
     replace_json_value,
@@ -22,7 +24,14 @@ from common.source_format import (
     encode_source_exact,
     merge_preserving_generated_header,
 )
-from providers.svn.checkout import atomic_json, file_hash, operation_lock, require_capability, svn_path_changes
+from providers.svn.checkout import (
+    atomic_json,
+    file_hash,
+    operation_lock,
+    require_capability,
+    run_svn_binary,
+    svn_path_changes,
+)
 
 from .catalog import header_fields, scan
 from . import index_queries
@@ -97,8 +106,8 @@ def _resolve_object(workspace: dict, source_type: str, source_id: str, fun_id: s
     return matches[0]
 
 
-def _page_scripts(path: Path) -> tuple[list[dict], bool]:
-    data = json.loads(decode_source(path.read_bytes())[0])
+def _page_scripts_text(text: str) -> tuple[list[dict], bool]:
+    data = json.loads(text)
     double_encoded = isinstance(data, str)
     if double_encoded:
         data = json.loads(data)
@@ -138,6 +147,10 @@ def _page_scripts(path: Path) -> tuple[list[dict], bool]:
         ],
         double_encoded,
     )
+
+
+def _page_scripts(path: Path) -> tuple[list[dict], bool]:
+    return _page_scripts_text(decode_source(path.read_bytes())[0])
 
 
 def _object_scripts(item: dict) -> tuple[list[dict], bool]:
@@ -200,11 +213,106 @@ def _document_content(item: dict, json_pointer: str) -> tuple[str, str]:
     return text, "whole-file"
 
 
+def _content_at_pointer(text: str, json_pointer: str, fragment_type: str) -> str:
+    if not json_pointer:
+        return text
+    data = json.loads(text)
+    if isinstance(data, str):
+        data = json.loads(data)
+    value = pointer_value(data, json_pointer)
+    if fragment_type == "page-fields" or not isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    return value
+
+
+def _base_document_content(path: Path, json_pointer: str, fragment_type: str) -> str:
+    text = _base_source_text(path)
+    if text is None:
+        return ""
+    try:
+        return _content_at_pointer(text, json_pointer, fragment_type)
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return ""
+
+
+def _base_source_text(path: Path) -> str | None:
+    result = run_svn_binary(["cat", "-r", "BASE", "--", str(path)], check=False)
+    if result.returncode:
+        return None
+    return decode_source(result.stdout)[0]
+
+
+def _base_json_string_token(text: str, json_pointer: str) -> str | None:
+    try:
+        return json_string_token(text, json_pointer)
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def line_changes(base_content: str, working_content: str) -> list[dict]:
+    """Return zero-based working-document line ranges relative to SVN BASE."""
+
+    base_lines = str(base_content or "").splitlines()
+    working_lines = str(working_content or "").splitlines()
+    changes = []
+    matcher = difflib.SequenceMatcher(None, base_lines, working_lines, autojunk=False)
+    for operation, base_start, base_end, working_start, working_end in matcher.get_opcodes():
+        if operation == "equal":
+            continue
+        if operation == "insert":
+            changes.append({
+                "type": "added",
+                "startLine": working_start,
+                "endLine": max(working_start, working_end - 1),
+            })
+            continue
+        if operation == "replace" and working_start < working_end:
+            changes.append({
+                "type": "modified",
+                "startLine": working_start,
+                "endLine": working_end - 1,
+                "deletedLines": base_end - base_start,
+            })
+            continue
+        anchor = max(0, min(working_start, max(0, len(working_lines) - 1)))
+        changes.append({
+            "type": "deleted",
+            "startLine": anchor,
+            "endLine": anchor,
+            "deletedLines": base_end - base_start,
+        })
+    return changes
+
+
 def fragments(workspace: dict, *, source_type: str, source_id: str, fun_id: str = "") -> dict:
     require_capability(workspace, "browse")
     with operation_lock(workspace, "document-fragments", shared=True):
         item = _resolve_object(workspace, source_type, source_id, fun_id)
         scripts, double_encoded = _object_scripts(item)
+        base_scripts = {}
+        base_result = run_svn_binary(["cat", "-r", "BASE", "--", str(item["local_path"])], check=False)
+        if not base_result.returncode:
+            try:
+                base_text = decode_source(base_result.stdout)[0]
+                base_path = Path(item["local_path"])
+                if item["source_table"] == "page" and base_path.suffix.lower() == ".json":
+                    parsed, _double_encoded = _page_scripts_text(base_text)
+                elif item["source_table"] == "view" and base_path.suffix.lower() == ".json":
+                    data = json.loads(base_text)
+                    value = data.get("viewSql") if isinstance(data, dict) else None
+                    parsed = (
+                        [{"json_path": "/viewSql", "content": value}]
+                        if isinstance(value, str)
+                        else []
+                    )
+                else:
+                    parsed = [{"json_path": scripts[0].get("json_path") if scripts else "", "content": base_text}]
+                base_scripts = {
+                    str(script.get("json_path") or ""): script.get("content")
+                    for script in parsed
+                }
+            except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+                base_scripts = {}
         return {
             "ok": True,
             "workspaceKey": workspace["workspaceKey"],
@@ -218,6 +326,12 @@ def fragments(workspace: dict, *, source_type: str, source_id: str, fun_id: str 
                     "scriptType": script.get("script_type") or "",
                     "jsonPointer": script.get("json_path") or "",
                     "label": script.get("label") or "",
+                    "status": (
+                        "SVN_DIRTY"
+                        if str(script.get("json_path") or "") in base_scripts
+                        and script.get("content") != base_scripts[str(script.get("json_path") or "")]
+                        else "OK"
+                    ),
                 }
                 for script in scripts
             ],
@@ -272,6 +386,7 @@ def read(
             raise SystemExit(f"SVN object is outside the current authorization scope: {item['source_path']}")
         path = Path(item["local_path"])
         content, fragment_type = _document_content(item, json_pointer)
+        base_content = _base_document_content(path, json_pointer, fragment_type)
         session = load_session(workspace)
         known_file = session["files"].get(item["source_path"])
         external = bool(_session_change_errors(entry, session, item["source_path"]))
@@ -343,7 +458,10 @@ def read(
             ),
             "editable": editable,
             "externalModified": external,
+            "sourcePath": item["source_path"],
             "content": content,
+            "baseContent": base_content,
+            "lineChanges": line_changes(base_content, content),
         }
 
 
@@ -403,6 +521,15 @@ def write(workspace: dict, *, session_id: str, document_id: str, content: str) -
         if detected_format != file_record.get("format"):
             raise SystemExit("SVN source encoding or newline format changed")
         pointer = document.get("jsonPointer") or ""
+        fragment_type = document.get("fragmentType") or ""
+        base_source_text = _base_source_text(path)
+        if base_source_text is None:
+            base_content = ""
+        else:
+            try:
+                base_content = _content_at_pointer(base_source_text, pointer, fragment_type)
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                base_content = ""
         if document.get("fragmentType") in {
             "page-string",
             "page-js",
@@ -437,7 +564,17 @@ def write(workspace: dict, *, session_id: str, document_id: str, content: str) -
             else:
                 if not isinstance(current_value, str):
                     raise SystemExit(f"PAGE JSON Pointer is no longer a string: {pointer}")
-                after_text = replace_json_strings(source_text, {pointer: content}, {pointer: current_value})
+                encoded_replacements = {}
+                if base_source_text is not None and content == base_content:
+                    base_token = _base_json_string_token(base_source_text, pointer)
+                    if base_token:
+                        encoded_replacements[pointer] = base_token
+                after_text = replace_json_strings(
+                    source_text,
+                    {pointer: content},
+                    {pointer: current_value},
+                    encoded_replacements,
+                )
             after_bytes = encode_source_exact(after_text, detected_format)
             parsed_after = json.loads(after_text)
             if str(parsed_after.get("pageId") or item["source_id"]) != item["source_id"]:
@@ -460,8 +597,44 @@ def write(workspace: dict, *, session_id: str, document_id: str, content: str) -
                 if merged is not None
                 else encode_source(content, detected_format)
             )
+        current_line_changes = line_changes(base_content, content)
+        base_bytes = (
+            encode_source_exact(base_source_text, detected_format)
+            if base_source_text is not None
+            else None
+        )
         if after_bytes == source_bytes:
-            return {"ok": True, "changed": False, "sourcePath": item["source_path"]}
+            file_record["expectedCurrentHash"] = file_hash(path)
+            file_record["state"] = "EDITING"
+            document["expectedDocumentHash"] = _text_hash(content)
+            atomic_json(session_path(workspace), session)
+            return {
+                "ok": True,
+                "changed": False,
+                "sourcePath": item["source_path"],
+                "baseContent": base_content,
+                "lineChanges": current_line_changes,
+            }
+        if base_bytes is not None and after_bytes == base_bytes:
+            _atomic_write(path, after_bytes)
+            after_hash = file_hash(path)
+            file_record["expectedCurrentHash"] = after_hash
+            file_record["state"] = "EDITING"
+            document["expectedDocumentHash"] = _text_hash(content)
+            atomic_json(session_path(workspace), session)
+            return {
+                "ok": True,
+                "changed": False,
+                "workspaceKey": workspace["workspaceKey"],
+                "sessionId": session["sessionId"],
+                "documentId": document_id,
+                "sourcePath": item["source_path"],
+                "workingCopyId": entry.id,
+                "sourceHash": after_hash,
+                "status": "OK",
+                "baseContent": base_content,
+                "lineChanges": current_line_changes,
+            }
         _atomic_write(path, after_bytes)
         after_hash = file_hash(path)
         relative = _relative_in_entry(entry, path)
@@ -491,4 +664,6 @@ def write(workspace: dict, *, session_id: str, document_id: str, content: str) -
             "workingCopyId": entry.id,
             "sourceHash": after_hash,
             "status": "LOCAL_MODIFIED",
+            "baseContent": base_content,
+            "lineChanges": current_line_changes,
         }

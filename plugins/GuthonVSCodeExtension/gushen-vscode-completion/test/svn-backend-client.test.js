@@ -22,14 +22,11 @@ test('routes SVN backend calls through the selected packaged runtime and workspa
   const calls = [];
   const client = new SvnBackendClient({
     getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
-    getEnvironment: async () => ({ GUTHON_NEXUS_SVN_PASSWORD: 'secret' }),
     spawnProcess: fakeSpawn(calls, { ok: true, modules: [] }),
   });
   await client.catalog('projects.demo');
   assert.deepEqual(calls[0].args, ['svn', '--home', '/home', '--workspace', 'projects.demo', '--', 'catalog']);
   assert.equal(calls[0].options.shell, false);
-  assert.equal(calls[0].options.env.GUTHON_NEXUS_SVN_PASSWORD, 'secret');
-  assert.equal(calls[0].args.includes('secret'), false);
 });
 
 test('passes virtual source text only through stdin', async () => {
@@ -41,6 +38,19 @@ test('passes virtual source text only through stdin', async () => {
   await client.write('projects.demo', 'session', 'document', 'secret source');
   assert.equal(calls[0].args.includes('secret source'), false);
   assert.deepEqual(JSON.parse(calls[0].input), { content: 'secret source' });
+});
+
+test('passes an empty optional SVN commit message through stdin', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls),
+  });
+  await client.platformSave('projects.demo', {
+    sessionId: 'session',
+    selectionToken: 'token',
+  }, ['candidate'], '');
+  assert.deepEqual(JSON.parse(calls[0].input), { message: '' });
 });
 
 test('loads page fragments independently from the catalog', async () => {
@@ -56,11 +66,10 @@ test('loads page fragments independently from the catalog', async () => {
   ]);
 });
 
-test('passes exact-path and working-copy SVN refresh selections without credentials in arguments', async () => {
+test('passes exact-path and working-copy SVN refresh selections', async () => {
   const calls = [];
   const client = new SvnBackendClient({
     getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
-    getEnvironment: async () => ({ GUTHON_NEXUS_SVN_PASSWORD: 'secret' }),
     spawnProcess: fakeSpawn(calls, { ok: true, updated: [] }),
   });
   await client.refresh('products.demo', {
@@ -73,7 +82,6 @@ test('passes exact-path and working-copy SVN refresh selections without credenti
   assert.deepEqual(calls[0].args.slice(-3), [
     '--path', 'pages/SYS-1/PG-1.json', '--merge-local',
   ]);
-  assert.equal(calls[0].args.includes('secret'), false);
   assert.deepEqual(calls[1].args.slice(-4), [
     '--working-copy', 'pages-SYS-1', '--working-copy', 'procedures-DS-1',
   ]);
@@ -112,4 +120,34 @@ test('previews the workspace BAT scope without passing source URLs through argum
   assert.deepEqual(calls[0].args, [
     'svn', '--home', '/home', '--workspace', 'products.demo', '--', 'scope-preview',
   ]);
+});
+
+test('imports pasted SVN scope through stdin without exposing URLs in arguments', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls, { ok: true, added: 2 }),
+  });
+  await client.scopeImport('projects.demo', 'svn checkout https://example.invalid/repo/skill skill', 'script');
+  assert.deepEqual(calls[0].args.slice(-2), ['--', 'scope-import']);
+  assert.deepEqual(JSON.parse(calls[0].input), {
+    text: 'svn checkout https://example.invalid/repo/skill skill',
+    source: 'script',
+  });
+  assert.equal(calls[0].args.includes('example.invalid'), false);
+});
+
+test('passes the one-time SVN password only through stdin for native caching', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls, { ok: true, action: 'authentication-cached' }),
+  });
+
+  await client.cacheAuthentication('products.demo', 'demo-password');
+  assert.deepEqual(calls[0].args, [
+    'svn', '--home', '/home', '--workspace', 'products.demo', '--', 'auth-cache',
+  ]);
+  assert.equal(calls[0].args.includes('demo-password'), false);
+  assert.deepEqual(JSON.parse(calls[0].input), { password: 'demo-password' });
 });

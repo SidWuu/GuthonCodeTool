@@ -72,6 +72,7 @@ test('SVN workspace actions come only from effective capabilities', () => {
   });
 
   assert.deepEqual(actions.source.map((item) => item[1]), [
+    'gushenCompletion.importSvnScope',
     'gushenCompletion.initializeSvn',
     'gushenCompletion.reindexCalls',
     'gushenCompletion.refreshSvn',

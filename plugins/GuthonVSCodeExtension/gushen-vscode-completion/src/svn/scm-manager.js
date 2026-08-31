@@ -44,9 +44,10 @@ function changeUri(vscode, workspaceKey, change) {
 }
 
 class SvnScmManager {
-  constructor({ vscode, backend }) {
+  constructor({ vscode, backend, onStatusChanged }) {
     this.vscode = vscode;
     this.backend = backend;
+    this.onStatusChanged = onStatusChanged;
     this.providers = new Map();
   }
 
@@ -73,7 +74,7 @@ class SvnScmManager {
 
   _configure(record, workspace) {
     record.workspace = workspace;
-    record.sourceControl.inputBox.placeholder = '输入保存到谷神的 SVN 提交说明';
+    record.sourceControl.inputBox.placeholder = 'SVN 提交说明（可选）';
     record.sourceControl.acceptInputCommand = {
       command: 'gushenCompletion.saveSvnToGuthon',
       title: '保存到谷神',
@@ -121,6 +122,7 @@ class SvnScmManager {
       },
     }));
     record.sourceControl.count = (value.changes?.length || 0) + remoteChanges.length;
+    this.onStatusChanged?.(record.workspace.workspaceKey, record.status);
     return record.status;
   }
 
@@ -215,6 +217,7 @@ class SvnScmManager {
     record.groups.REMOTE.resourceStates = [];
     if (record.status) record.status = { ...record.status, remoteChanges: [] };
     record.sourceControl.count = record.status?.changes?.length || 0;
+    this.onStatusChanged?.(workspaceKey, record.status);
   }
 
   dispose() {

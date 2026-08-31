@@ -1,37 +1,26 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const {
-  PASSWORD_ENV,
-  USERNAME_ENV,
-  credentialEnvironment,
-  promptAndStoreCredentials,
-} = require('../src/svn/credentials');
+const { clearLegacyCredentials, promptForPassword } = require('../src/svn/credentials');
 
-function memorySecrets() {
-  const values = new Map();
-  return {
-    values,
-    get: async (key) => values.get(key),
-    store: async (key, value) => values.set(key, value),
-  };
-}
-
-test('stores one shared SVN credential per local data workspace', async () => {
-  const secrets = memorySecrets();
-  const answers = ['demo-user', 'demo-password'];
+test('prompts for a transient SVN password without owning credential storage', async () => {
   const calls = [];
   const window = {
     showInputBox: async (options) => {
       calls.push(options);
-      return answers.shift();
+      return 'demo-password';
     },
   };
-  const environment = await promptAndStoreCredentials(window, secrets, '/tool-home-a');
-  assert.deepEqual(environment, {
-    [USERNAME_ENV]: 'demo-user',
-    [PASSWORD_ENV]: 'demo-password',
-  });
-  assert.equal(calls[1].password, true);
-  assert.deepEqual(await credentialEnvironment(secrets, '/tool-home-a'), environment);
-  assert.deepEqual(await credentialEnvironment(secrets, '/tool-home-b'), {});
+
+  assert.equal(await promptForPassword(window), 'demo-password');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].password, true);
+  assert.match(calls[0].prompt, /stdin.*SVN 系统保存/);
+});
+
+test('removes legacy Nexus username and password secrets', async () => {
+  const deleted = [];
+  await clearLegacyCredentials({ delete: async (key) => deleted.push(key) }, '/tool-home');
+  assert.equal(deleted.length, 2);
+  assert.ok(deleted.some((key) => key.includes('.username.')));
+  assert.ok(deleted.some((key) => key.includes('.password.')));
 });

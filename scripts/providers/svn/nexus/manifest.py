@@ -94,6 +94,38 @@ class AuthorizedScope:
     digest: str
 
 
+def scope_entry_label(workspace: dict, entry: ScopeEntry) -> str:
+    """Return a business label for one physical SVN working copy."""
+
+    identity = Path(entry.local_subdir).name
+    aliases = []
+    for alias, mapping in (workspace.get("systemMappings") or {}).items():
+        if not isinstance(mapping, dict):
+            continue
+        expected = (
+            mapping.get("system_id")
+            if entry.category in {"systems", "pages", "system-script"}
+            else mapping.get("data_source_id")
+            if entry.category in {"datasources", "procedures", "tables", "views"}
+            else None
+        )
+        if str(expected or "").strip() == identity:
+            aliases.append(str(alias))
+    business_name = " / ".join(aliases) or identity
+    category = {
+        "systems": "系统源码",
+        "datasources": "数据源源码",
+        "pages": "页面源码",
+        "procedures": "过程函数源码",
+        "system-script": "系统脚本源码",
+        "tables": "表结构",
+        "views": "视图源码",
+        "skill": "Skill",
+        "public": "公共源码",
+    }.get(entry.category, entry.category)
+    return f"{business_name} · {category} · {entry.id}"
+
+
 def normalize_scope_url(raw_url: object, entry_id: str) -> str:
     text = str(raw_url or "").strip().rstrip("/")
     parsed = urlsplit(text)

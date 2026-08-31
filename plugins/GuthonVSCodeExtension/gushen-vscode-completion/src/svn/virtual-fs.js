@@ -52,11 +52,13 @@ function decodeIdentity(uri) {
 }
 
 class SvnVirtualFileSystem {
-  constructor({ vscode, backend, onSaved, onWillSave }) {
+  constructor({ vscode, backend, onLoaded, onSaved, onWillSave, onInvalidated }) {
     this.vscode = vscode;
     this.backend = backend;
     this.onSaved = onSaved;
     this.onWillSave = onWillSave;
+    this.onLoaded = onLoaded;
+    this.onInvalidated = onInvalidated;
     this.changed = new vscode.EventEmitter();
     this.onDidChangeFile = this.changed.event;
     this.cache = new Map();
@@ -81,6 +83,7 @@ class SvnVirtualFileSystem {
     const value = await this.backend.read(identity.workspaceKey, identity);
     const record = { identity, value, updatedAt: Date.now() };
     this.cache.set(key, record);
+    this.onLoaded?.(uri, value);
     return record;
   }
 
@@ -128,7 +131,10 @@ class SvnVirtualFileSystem {
       text
     );
     record.value.content = text;
+    record.value.baseContent = result.baseContent ?? record.value.baseContent;
+    record.value.lineChanges = result.lineChanges || [];
     this.cache.set(key, record);
+    this.onLoaded?.(uri, record.value);
     // This write originated from the open VS Code document.  Advancing mtime
     // or firing an external-change event here makes the next save look stale.
     // Checkout changes made outside this provider still flow through
@@ -160,6 +166,7 @@ class SvnVirtualFileSystem {
         uri,
       })));
     }
+    this.onInvalidated?.(workspaceKey, preserveUri);
   }
 
   dispose() {

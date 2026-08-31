@@ -203,6 +203,24 @@ def _relative_source_path(entry, source_path: str) -> PurePosixPath | None:
         return None
 
 
+def _page_index_location(entry, relative: PurePosixPath, locations: dict[str, dict]) -> dict | None:
+    location = locations.get(relative.as_posix())
+    if location:
+        return location
+
+    # Current checkouts use two hexadecimal shard directories (for example
+    # pages/1/4/PG-....json), while the platform-generated index.md retains
+    # the legacy one-shard link (4/PG-....json). Match that documented link
+    # without changing the source path used for file operations.
+    parts = relative.parts
+    shard_offset = 1 if getattr(entry, "category", "") == "systems" and parts[:1] == ("pages",) else 0
+    shards = parts[shard_offset:shard_offset + 2]
+    if len(shards) == 2 and all(re.fullmatch(r"[0-9A-Fa-f]", shard) for shard in shards):
+        legacy = PurePosixPath(*parts[:shard_offset], *parts[shard_offset + 1:])
+        return locations.get(legacy.as_posix())
+    return None
+
+
 def _tree_metadata(
     entry,
     row: dict,
@@ -220,14 +238,16 @@ def _tree_metadata(
         return [], row.get("source_name") or row["source_id"]
     source_type = row["source_table"]
     if source_type == "page":
-        location = page_locations.get(relative.as_posix())
+        location = _page_index_location(entry, relative, page_locations)
         if location:
             label = location["label"]
             if relative.suffix.lower() == ".gss":
                 label = f"GSS · {label}"
             return [entry_name, *location["directories"]], label
-        fallback = source_relative_path(entry, relative)
-        return [entry_name, "未编入 index.md", *fallback.parts[:-1]], row.get("source_name") or row["source_id"]
+        # PAGE files are physically sharded below pages/0..F. Those storage
+        # directories are not business navigation and must not leak into the
+        # Nexus tree when a page is absent from pages/index.md.
+        return [entry_name, "未编入 index.md"], row.get("source_name") or row["source_id"]
     if source_type == "system-script":
         source_relative = source_relative_path(entry, relative)
         return [entry_name, *source_relative.parts[:-1]], source_relative.name
@@ -309,7 +329,7 @@ def catalog(workspace: dict) -> dict:
         location = None
         if relative is not None:
             if source_type == "page":
-                location = (page_locations.get(entry.id) or {}).get(relative.as_posix())
+                location = _page_index_location(entry, relative, page_locations.get(entry.id) or {})
             elif source_type == "procedure":
                 location = (procedure_locations.get(entry.id) or {}).get(relative.as_posix())
         counts[source_type] = counts.get(source_type, 0) + 1

@@ -53,6 +53,7 @@ SVN_BROWSE_ACTIONS = {
     "facts",
     "explain",
     "scope-preview",
+    "auth-cache",
 }
 GLOBAL_COMMANDS = {"setup", "doctor", "route", "workspaces", "self-test"}
 DATABASE_ONLY_COMMANDS = {
@@ -110,15 +111,25 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
         source = import_parser.add_mutually_exclusive_group(required=True)
         source.add_argument("--script", help="path to svnCheckoutHere.sh or svnCheckoutHere.bat")
         source.add_argument("--bat", help="legacy alias for a checkout BAT path")
+        source.add_argument("--config", help="path to an editable svn-scope.yaml/json configuration")
         import_parser.add_argument("--output", required=True, help="target authorized-scope.json path")
         import_parser.add_argument("--replace", action="store_true", help="replace an existing changed manifest")
         parsed = import_parser.parse_args(extra_args)
-        from providers.svn.scope_import import build_manifest, read_checkout_script, write_manifest
-
-        result = build_manifest(
-            read_checkout_script(Path(parsed.script or parsed.bat).expanduser().resolve()),
-            selected_workspace,
+        from providers.svn.scope_import import (
+            build_manifest,
+            build_manifest_from_config,
+            read_checkout_script,
+            write_manifest,
         )
+
+        source_path = Path(parsed.config or parsed.script or parsed.bat).expanduser().resolve()
+        if parsed.config:
+            try:
+                result = build_manifest_from_config(source_path.read_text(encoding="utf-8"), selected_workspace)
+            except (OSError, UnicodeDecodeError) as error:
+                raise SystemExit(f"Cannot read SVN scope configuration: {source_path}") from error
+        else:
+            result = build_manifest(read_checkout_script(source_path), selected_workspace)
         output_path = Path(parsed.output).expanduser()
         if not output_path.is_absolute():
             output_path = home / output_path
@@ -187,10 +198,14 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
     return result_code
 
 
-def _reindex_svn(gusen_hub, config, workspace) -> dict:
+def _svn_progress(message: str) -> None:
+    print(f"[SVN] {message}", file=sys.stderr, flush=True)
+
+
+def _reindex_svn(gusen_hub, config, workspace, on_progress=None) -> dict:
     conn = gusen_hub.connect_index(workspace["indexPath"])
     try:
-        result = gusen_hub.index_svn_workspace(conn, config, workspace)
+        result = gusen_hub.index_svn_workspace(conn, config, workspace, on_progress=on_progress)
     finally:
         conn.close()
     if result.get("failures"):
@@ -310,9 +325,12 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             "action",
             choices=[
                 "init",
+                "auth-cache",
                 "scope-preview",
+                "scope-import",
                 "sync-from-script",
                 "sync-from-bat",
+                "sync-from-config",
                 "refresh",
                 "status",
                 "catalog",
@@ -382,51 +400,128 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         if not manifest_layout and (parsed.merge_local or parsed.working_copy):
             raise SystemExit("--merge-local and --working-copy require manifest-working-copies")
         bootstrap = None
-        if parsed.action == "scope-preview":
+        if parsed.action == "auth-cache":
+            if not manifest_layout:
+                raise SystemExit("svn auth-cache requires manifest-working-copies")
+            try:
+                payload = json.load(sys.stdin)
+            except json.JSONDecodeError as error:
+                raise SystemExit("svn auth-cache requires a JSON stdin payload") from error
+            if not isinstance(payload, dict) or not isinstance(payload.get("password"), str):
+                raise SystemExit("svn auth-cache stdin must contain a password field")
+            from providers.svn.nexus import bootstrap as nexus_bootstrap
+
+            result = nexus_bootstrap.cache_authentication(workspace, payload["password"])
+        elif parsed.action == "scope-preview":
             if not manifest_layout:
                 raise SystemExit("svn scope-preview requires manifest-working-copies")
             from providers.svn.nexus import bootstrap as nexus_bootstrap
 
             result = nexus_bootstrap.preview(workspace)
-        elif parsed.action in {"sync-from-script", "sync-from-bat"}:
+        elif parsed.action == "scope-import":
             if not manifest_layout:
-                raise SystemExit("svn sync-from-script requires manifest-working-copies")
+                raise SystemExit("svn scope-import requires manifest-working-copies")
+            try:
+                payload = json.load(sys.stdin)
+            except json.JSONDecodeError as error:
+                raise SystemExit("svn scope-import requires a JSON stdin payload") from error
+            if not isinstance(payload, dict):
+                raise SystemExit("svn scope-import stdin must contain text or file")
+            from providers.svn.scope_import import (
+                build_manifest_from_workspace_input,
+                merge_scope_config,
+                parse_scope_input,
+                read_checkout_script,
+            )
+
+            source_kind = str(payload.get("source") or "script")
+            if isinstance(payload.get("file"), str) and payload["file"].strip():
+                source_path = Path(payload["file"]).expanduser().resolve()
+                parsed_scope = build_manifest_from_workspace_input(
+                    read_checkout_script(source_path), workspace
+                )
+            elif isinstance(payload.get("text"), str):
+                parsed_scope = (
+                    parse_scope_input(payload["text"], workspace["workspaceKey"], source_kind)
+                    if source_kind.casefold() in {"config", "yaml", "json"}
+                    else build_manifest_from_workspace_input(payload["text"], workspace)
+                )
+            else:
+                raise SystemExit("svn scope-import stdin must contain text or file")
+            config_path = workspace.get("svn", {}).get("scopeConfigPath")
+            if not config_path:
+                raise SystemExit(
+                    "SVN workspace configuration path is unavailable; use products.yaml/projects.yaml"
+                )
+            result = merge_scope_config(
+                config_path,
+                workspace["workspaceKey"],
+                parsed_scope,
+                workspace,
+            )
+            result["source"] = source_kind
+        elif parsed.action in {"sync-from-script", "sync-from-bat", "sync-from-config"}:
+            if not manifest_layout:
+                raise SystemExit("svn scope sync requires manifest-working-copies")
             from providers.svn.nexus import bootstrap as nexus_bootstrap
             from providers.svn.nexus import workspace as nexus_workspace
             from providers.svn.nexus.manifest import load_authorized_scope
 
             manifest_path = workspace["svn"].get("scopeManifestPath")
             had_working_copies = False
+            _svn_progress(f"{workspace['displayName']}｜授权范围｜检查现有 working copy")
             if manifest_path and manifest_path.is_file():
                 old_scope = load_authorized_scope(workspace)
                 had_working_copies = any((entry.root / ".svn").is_dir() for entry in old_scope.entries)
                 if had_working_copies:
-                    current = nexus_workspace.status(workspace)
+                    current = nexus_workspace.status(workspace, on_progress=_svn_progress)
                     if not current["status"]["clean"] and not parsed.merge_local:
                         raise SystemExit(
-                            "SVN checkout-script sync is blocked by local changes; review them first or explicitly allow merge-local"
+                            "SVN scope sync is blocked by local changes; review them first or explicitly allow merge-local"
                         )
+            _svn_progress(f"{workspace['displayName']}｜授权范围｜读取可编辑范围配置（无配置时导入签出脚本）")
             scope_import = nexus_bootstrap.import_scope(
                 workspace,
                 accept_scope_change=parsed.accept_scope_change,
             )
-            initialized = nexus_workspace.initialize(workspace)
+            _svn_progress(
+                f"{workspace['displayName']}｜授权范围｜完成 · working copy {scope_import.get('entries', 0)}"
+            )
+            initialized = nexus_workspace.initialize(workspace, on_progress=_svn_progress)
             refreshed = (
-                nexus_workspace.refresh(workspace, merge_local=parsed.merge_local)
+                nexus_workspace.refresh(
+                    workspace,
+                    merge_local=parsed.merge_local,
+                    on_progress=_svn_progress,
+                )
                 if had_working_copies
                 else None
             )
             initialized_scope = initialized.get("scope") or {}
             refreshed_status = (refreshed or {}).get("status") or {}
+            source_label = "script" if scope_import.get("source") == "script" else "config"
             result = {
                 "ok": True,
-                "action": "updated-from-script" if had_working_copies else "checked-out-from-script",
+                "action": (
+                    f"updated-from-{source_label}" if had_working_copies
+                    else f"checked-out-from-{source_label}"
+                ),
                 "scopeImport": scope_import,
                 "workingCopies": len(initialized_scope.get("workingCopies") or []),
                 "clean": bool((refreshed_status or initialized_scope).get("clean")),
                 "updated": len((refreshed or {}).get("updated") or []),
-                "reindex": _reindex_svn(gusen_hub, config, workspace),
+                "reindex": _reindex_svn(
+                    gusen_hub,
+                    config,
+                    workspace,
+                    on_progress=_svn_progress,
+                ),
             }
+            _svn_progress(
+                f"{workspace['displayName']}｜完成｜"
+                f"{'更新' if had_working_copies else '检出'} {result['workingCopies']} 个 working copy · "
+                f"索引对象 {result['reindex'].get('changed', 0)}"
+            )
             gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
         elif parsed.action == "init":
             if manifest_layout:
@@ -651,7 +746,10 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         print(f"工作区{verb}完成：{workspace['workspaceKey']}")
         return 0
     if command == "reindex":
-        gusen_hub.run_sync_once(["--reindex-calls"])
+        gusen_hub.run_sync_once(
+            ["--reindex-calls"],
+            on_progress=_svn_progress if workspace["sourceMode"] == "svn" else None,
+        )
         if workspace["sourceMode"] == "svn":
             gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
         print("本地索引重建完成")

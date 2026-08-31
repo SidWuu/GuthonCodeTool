@@ -493,8 +493,6 @@ def platform_save(
     message: str,
 ) -> dict:
     commit_message = str(message or "").strip()
-    if not commit_message:
-        raise SystemExit("SVN commit message must not be empty")
     with operation_lock(workspace, "manifest-platform-save"):
         token_path, selected = _load_selection(
             workspace,

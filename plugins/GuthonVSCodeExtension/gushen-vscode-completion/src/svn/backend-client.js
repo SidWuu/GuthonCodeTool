@@ -2,21 +2,19 @@ const { spawn } = require('node:child_process');
 const { toolArguments } = require('../tool-runtime');
 
 class SvnBackendClient {
-  constructor({ getTool, getEnvironment = async () => ({}), spawnProcess = spawn }) {
+  constructor({ getTool, spawnProcess = spawn }) {
     this.getTool = getTool;
-    this.getEnvironment = getEnvironment;
     this.spawnProcess = spawnProcess;
   }
 
   async run(workspaceKey, args, input) {
     const tool = await this.getTool();
     if (!tool) throw new Error('请先配置 GuthonCodeTool 运行模式和本地数据目录');
-    const environment = await this.getEnvironment(workspaceKey);
     return new Promise((resolve, reject) => {
       const child = this.spawnProcess(
         tool.toolPath,
         toolArguments(tool, 'svn', args, workspaceKey),
-        { shell: false, env: { ...process.env, ...environment } }
+        { shell: false, env: process.env }
       );
       const stdoutChunks = [];
       const stderrChunks = [];
@@ -58,6 +56,18 @@ class SvnBackendClient {
 
   scopePreview(workspaceKey) {
     return this.run(workspaceKey, ['scope-preview']);
+  }
+
+  scopeImport(workspaceKey, text, source = 'script') {
+    return this.run(workspaceKey, ['scope-import'], { text, source });
+  }
+
+  scopeImportFile(workspaceKey, filePath) {
+    return this.run(workspaceKey, ['scope-import'], { file: filePath, source: 'script' });
+  }
+
+  cacheAuthentication(workspaceKey, password) {
+    return this.run(workspaceKey, ['auth-cache'], { password });
   }
 
   read(workspaceKey, identity) {

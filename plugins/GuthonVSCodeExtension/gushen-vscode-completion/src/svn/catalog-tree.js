@@ -157,18 +157,34 @@ class SvnCatalogTreeProvider {
     this.listSvnWorkspaces = listSvnWorkspaces;
     this.changed = new vscode.EventEmitter();
     this.onDidChangeTreeData = this.changed.event;
+    this.decorationChanged = new vscode.EventEmitter();
+    this.onDidChangeFileDecorations = this.decorationChanged.event;
     this.catalogs = new Map();
     this.workspaceNodes = null;
     this.objectElements = new Map();
     this.sourcePathElements = new Map();
+    this.changeStates = new Map();
+    this.decorationElements = new Map();
+  }
+
+  setStatus(workspaceKey, status) {
+    this.changeStates.set(
+      workspaceKey,
+      new Map((status?.changes || []).map((change) => [change.path, change.state || 'EXTERNAL_MODIFIED']))
+    );
+    this.changed.fire();
+    this.decorationChanged.fire();
   }
 
   refresh(workspaceKey) {
     if (workspaceKey) this.catalogs.delete(workspaceKey);
     else this.catalogs.clear();
+    if (workspaceKey) this.changeStates.delete(workspaceKey);
+    else this.changeStates.clear();
     this.workspaceNodes = null;
     this.objectElements.clear();
     this.sourcePathElements.clear();
+    this.decorationElements.clear();
     this.changed.fire();
   }
 
@@ -212,6 +228,56 @@ class SvnCatalogTreeProvider {
     this.objectElements.set(this._objectKey(workspaceKey, object), element);
     this.sourcePathElements.set(`${workspaceKey}\n${object.sourcePath}`, element);
     return element;
+  }
+
+  _elementState(element) {
+    if (!element) return '';
+    if (element.kind === 'fragment') {
+      const state = element.fragment?.status;
+      return state && state !== 'OK' ? state : '';
+    }
+    const sourcePath = element.object?.sourcePath;
+    if (sourcePath) return this.changeStates.get(element.workspaceKey)?.get(sourcePath) || '';
+    const children = element.children || [];
+    const states = children.map((child) => this._elementState(child)).filter(Boolean);
+    if (states.includes('CONFLICT')) return 'CONFLICT';
+    if (states.includes('UNTRACKED')) return 'UNTRACKED';
+    return states[0] || '';
+  }
+
+  _treeUri(element) {
+    const segments = [];
+    let current = element;
+    while (current) {
+      segments.push(current.object?.sourcePath || current.label || current.kind);
+      current = current.parent;
+    }
+    const uri = this.vscode.Uri.from({
+      scheme: 'guthon-svn-tree',
+      authority: element.workspaceKey || element.workspace?.workspaceKey || '',
+      path: `/${segments.reverse().map((value) => encodeURIComponent(String(value))).join('/')}`,
+    });
+    this.decorationElements.set(uri.toString(), element);
+    return uri;
+  }
+
+  provideFileDecoration(uri) {
+    const element = this.decorationElements.get(uri.toString());
+    const state = this._elementState(element);
+    if (!state) return undefined;
+    const conflict = state === 'CONFLICT';
+    const untracked = state === 'UNTRACKED';
+    return new this.vscode.FileDecoration(
+      conflict ? '!' : untracked ? '?' : 'M',
+      conflict ? 'SVN 冲突' : untracked ? 'SVN 未跟踪' : 'SVN 本地修改',
+      new this.vscode.ThemeColor(
+        conflict
+          ? 'gitDecoration.conflictingResourceForeground'
+          : untracked
+            ? 'gitDecoration.untrackedResourceForeground'
+            : 'gitDecoration.modifiedResourceForeground'
+      )
+    );
   }
 
   _decorateChildren(children, parent, workspaceKey) {
@@ -264,6 +330,7 @@ class SvnCatalogTreeProvider {
     item.description = element.description;
     item.tooltip = element.tooltip;
     item.iconPath = new this.vscode.ThemeIcon(element.icon || 'file-code');
+    item.resourceUri = this._treeUri(element);
     if (['document', 'object', 'fragment'].includes(element.kind)) item.contextValue = 'guthonSvnSource';
     if (element.command) item.command = element.command;
     return item;
@@ -362,6 +429,8 @@ class SvnCatalogTreeProvider {
 
   dispose() {
     this.changed.dispose();
+    this.decorationChanged.dispose();
+    this.decorationElements.clear();
   }
 }
 

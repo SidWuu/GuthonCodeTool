@@ -27,11 +27,7 @@ const {
 } = require('./source-mode');
 const { readWorkspaces } = require('./workspace-registry');
 const { activateSvn } = require('./svn/activate');
-const {
-  credentialEnvironment,
-  promptAndStoreCredentials,
-  requireCredentials,
-} = require('./svn/credentials');
+const { clearLegacyCredentials, promptForPassword } = require('./svn/credentials');
 
 const SUPPORTED_LANGUAGES = ['java', 'guthon-gss', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled', 'guthon-svn-edit'];
@@ -71,6 +67,7 @@ const TOOL_LABELS = {
   'source-mode': '设置项目源码来源',
 };
 let toolQueue = Promise.resolve();
+const activeToolRuns = new Set();
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -215,21 +212,35 @@ async function configuredTool() {
   return tool;
 }
 
-async function runTool(command, extraArgs = [], askForConfirmation = true, workspaceKey = '', environment = {}) {
+async function runTool(command, extraArgs = [], askForConfirmation = true, workspaceKey = '') {
   const label = TOOL_LABELS[command] || command;
+  const runKey = `${command}::${workspaceKey || ''}`;
+  if (activeToolRuns.has(runKey)) {
+    const output = vscode.window.createOutputChannel('GuthonCodeTool');
+    output.show(true);
+    output.appendLine(`已有${label}正在执行：${workspaceKey || '当前工作区'}，本次点击已忽略。`);
+    return false;
+  }
+  activeToolRuns.add(runKey);
   if (askForConfirmation) {
     const confirmed = await vscode.window.showWarningMessage(`确认${label}？`, { modal: true }, '执行');
-    if (confirmed !== '执行') return false;
+    if (confirmed !== '执行') {
+      activeToolRuns.delete(runKey);
+      return false;
+    }
   }
   const tool = await configuredTool();
-  if (!tool) return false;
+  if (!tool) {
+    activeToolRuns.delete(runKey);
+    return false;
+  }
   const output = vscode.window.createOutputChannel('GuthonCodeTool');
   output.show(true);
   const execute = () => new Promise((resolve) => {
     output.appendLine(`运行：${command}${workspaceKey ? ` · ${workspaceKey}` : ''}（${tool.mode === 'development' ? '调试模式' : '发行模式'}）`);
     const child = spawn(tool.toolPath, toolArguments(tool, command, extraArgs, workspaceKey), {
       shell: false,
-      env: { ...process.env, ...environment },
+      env: process.env,
     });
     child.stdout.on('data', (data) => output.append(data.toString()));
     child.stderr.on('data', (data) => output.append(data.toString()));
@@ -246,7 +257,7 @@ async function runTool(command, extraArgs = [], askForConfirmation = true, works
   });
   const pending = toolQueue.then(execute, execute);
   toolQueue = pending.catch(() => false);
-  return pending;
+  return pending.finally(() => activeToolRuns.delete(runKey));
 }
 
 function configuredToolFromSettings() {
@@ -352,12 +363,20 @@ class ToolTreeDataProvider {
             [item.workspaceKey, item.sourceMode, item.root]
           ),
           item.sourceMode === 'svn' && toolItem(
-            '设置工作区 SVN 凭据',
+            '设置工作区 SVN 登录',
             'gushenCompletion.setSvnCredentials',
             'key',
             '当前本地数据工作区内所有产品和项目共用',
+            [item.workspaceKey],
           ),
           syncItem,
+          item.sourceMode === 'svn' && item.scopeConfigPath && toolItem(
+            '编辑 SVN 范围配置',
+            'gushenCompletion.editSvnScope',
+            'edit',
+            item.scopeConfigReady ? item.scopeConfigPath : '在现有 products/projects.yaml 增加 svn.scope',
+            [item.workspaceKey]
+          ),
           toolItem('打开工作区目录', 'gushenCompletion.openWorkspace', 'folder-opened', undefined, [item.root]),
           source,
           actions.metadata.length && metadata,
@@ -433,28 +452,40 @@ function activate(context) {
     if (!tool) return [];
     return filterWorkspacesBySourceMode(await readWorkspaces(tool), 'svn');
   };
-  const svnCredentialScope = () => vscode.workspace
-    .getConfiguration('gushenCompletion')
-    .get('toolHome', '');
-  const svnEnvironment = () => credentialEnvironment(context.secrets, svnCredentialScope());
+  const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
+  void clearLegacyCredentials(context.secrets, toolHome).catch(() => {});
   const svnServices = activateSvn({
     vscode,
     context,
     getTool: async () => configuredToolFromSettings(),
-    getEnvironment: svnEnvironment,
     listSvnWorkspaces,
     onToolTreeChanged: () => toolView.refresh(),
   });
   const toolCommands = [
-    vscode.commands.registerCommand('gushenCompletion.setSvnCredentials', async () => {
-      const environment = await promptAndStoreCredentials(
-        vscode.window,
-        context.secrets,
-        svnCredentialScope()
+    vscode.commands.registerCommand('gushenCompletion.setSvnCredentials', async (workspaceKey) => {
+      let selectedWorkspaceKey = typeof workspaceKey === 'string' ? workspaceKey : '';
+      if (!selectedWorkspaceKey) {
+        const selected = await vscode.window.showQuickPick(
+          (await listSvnWorkspaces()).map((item) => ({
+            label: item.displayName,
+            description: item.workspaceKey,
+            workspaceKey: item.workspaceKey,
+          })),
+          { title: '选择用于保存公共 SVN 登录的工作区' }
+        );
+        if (!selected) return;
+        selectedWorkspaceKey = selected.workspaceKey;
+      }
+      const password = await promptForPassword(vscode.window);
+      if (!password) return;
+      try {
+        await svnServices.backend.cacheAuthentication(selectedWorkspaceKey, password);
+      } catch (error) {
+        return vscode.window.showErrorMessage(`SVN 登录保存失败：${error.message}`);
+      }
+      return vscode.window.showInformationMessage(
+        '已由 SVN 系统保存公共密码；用户名读取自 sync.yaml'
       );
-      if (!environment) return;
-      await svnServices.refresh();
-      return vscode.window.showInformationMessage('已安全保存当前本地数据工作区共用的 SVN 凭据');
     }),
     vscode.commands.registerCommand('gushenCompletion.selectWorkspaceSourceMode', async (
       workspaceKey,
@@ -596,36 +627,101 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.initializeSvn', async (workspaceKey) => {
       const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
       if (!workspace) return vscode.window.showErrorMessage(`未找到 SVN 项目：${workspaceKey}`);
-      const environment = workspace.svnCredentialsRequired
-        ? await requireCredentials(vscode.window, context.secrets, svnCredentialScope())
-        : await svnEnvironment(workspaceKey);
-      if (workspace.svnCredentialsRequired && !environment) return false;
+      const hasScopeConfig = Boolean(workspace.scopeConfigReady);
+      const hasCheckoutScript = Boolean(workspace.checkoutScriptReady);
+      if (!hasScopeConfig && !hasCheckoutScript) {
+        return vscode.window.showWarningMessage(
+          `未找到 SVN 范围配置：${workspace.scopeConfigPath || 'config/products.yaml/projects.yaml'}。请先在对应文件的 svn.scope 中配置，或使用“导入 SVN checkout 配置”选择 .sh/.bat/粘贴内容。`
+        );
+      }
       let preview;
       try {
         preview = await svnServices.backend.scopePreview(workspaceKey);
       } catch (error) {
-        return vscode.window.showErrorMessage(`无法解析工作区 SVN 签出脚本：${error.message}`);
+        return vscode.window.showErrorMessage(`无法解析工作区 SVN 范围配置：${error.message}`);
       }
       const changeSummary = `新增 ${preview.added}、移除 ${preview.removed}、变更 ${preview.modified}`;
       const scopeSummary = preview.excludedBySystemAliases
-        ? `签出脚本共 ${preview.commands} 个地址，按 systems.include.mappings 保留 ${preview.entries} 个、排除 ${preview.excludedBySystemAliases} 个`
-        : `签出脚本共 ${preview.commands} 个地址，保留 ${preview.entries} 个`;
+        ? `${preview.source === 'config' ? '范围配置' : '签出脚本'}共 ${preview.commands} 个地址，按 systems.include.mappings 保留 ${preview.entries} 个、排除 ${preview.excludedBySystemAliases} 个`
+        : `${preview.source === 'config' ? '范围配置' : '签出脚本'}共 ${preview.commands} 个地址，保留 ${preview.entries} 个`;
       const confirmed = await vscode.window.showWarningMessage(
-        `将从当前工程 context 下的 SVN 签出脚本生成检出范围：${scopeSummary}（${changeSummary}），随后使用同一次认证检出或更新筛选后的 working copy。签出脚本不会被执行，凭据不会写入授权清单。`,
+        `将使用当前工程的 SVN ${preview.source === 'config' ? '范围配置（products.yaml/projects.yaml 的 svn.scope）' : '签出脚本（可复制到现有配置的 svn.scope）'}：${scopeSummary}（${changeSummary}），随后使用同一次认证检出或更新筛选后的 working copy。配置只保存 URL 和相对目录，不保存凭据。`,
         { modal: true },
         '检出/更新'
       );
       if (confirmed !== '检出/更新') return false;
       if (await runTool(
         TOOL_COMMANDS.svn,
-        ['sync-from-script', '--accept-scope-change'],
+        ['sync-from-config', '--accept-scope-change'],
         false,
-        workspaceKey,
-        environment
+        workspaceKey
       )) {
         await svnServices.refresh();
         toolView.refresh();
       }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.importSvnScope', async (workspaceKey) => {
+      const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
+      if (!workspace) return vscode.window.showErrorMessage(`未找到 SVN 项目：${workspaceKey}`);
+      const choice = await vscode.window.showQuickPick([
+        { label: '选择 svnCheckoutHere.sh/.bat', value: 'file' },
+        { label: '粘贴 checkout 命令或地址', value: 'paste' },
+      ], { title: '导入 SVN 范围到 products/projects.yaml 的 svn.scope' });
+      if (!choice) return;
+      let result;
+      try {
+        if (choice.value === 'file') {
+          const selected = await vscode.window.showOpenDialog({
+            canSelectFiles: true,
+            canSelectFolders: false,
+            canSelectMany: false,
+            filters: { 'SVN checkout 文件': ['sh', 'bat'], '所有文件': ['*'] },
+            title: '选择谷神 SVN checkout 文件',
+          });
+          if (!selected) return;
+          result = await svnServices.backend.scopeImportFile(workspaceKey, selected[0].fsPath);
+        } else {
+          const document = await vscode.workspace.openTextDocument({
+            language: 'shellscript',
+            content: '# 请在此粘贴 svn checkout 命令或 <url> <localSubdir>，然后点击“解析当前内容”。\n',
+          });
+          await vscode.window.showTextDocument(document, { preview: false });
+          const confirmed = await vscode.window.showInformationMessage(
+            '请把 checkout 命令粘贴到临时编辑器，完成后继续。',
+            { modal: true },
+            '解析当前内容'
+          );
+          if (confirmed !== '解析当前内容') return;
+          result = await svnServices.backend.scopeImport(workspaceKey, document.getText(), 'script');
+        }
+      } catch (error) {
+        return vscode.window.showErrorMessage(`导入 SVN 范围失败：${error.message}`);
+      }
+      const message = result.added
+        ? `已向 ${result.output} 添加 ${result.added} 个 SVN 范围条目，重复 ${result.duplicatesSkipped || 0} 个。请检查配置后执行“从 SVN 范围配置检出/更新”。`
+        : `没有新增 SVN 范围条目（重复 ${result.duplicatesSkipped || 0} 个）。`;
+      vscode.window.showInformationMessage(message);
+      await svnServices.refresh();
+      toolView.refresh();
+      return result;
+    }),
+    vscode.commands.registerCommand('gushenCompletion.editSvnScope', async (workspaceKey) => {
+      const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
+      if (!workspace?.scopeConfigPath) return vscode.window.showErrorMessage('无法解析 SVN 范围配置路径');
+      const file = workspace.scopeConfigPath;
+      if (!fs.existsSync(file)) {
+        if (['products.yaml', 'projects.yaml'].includes(path.basename(file))) {
+          return vscode.window.showErrorMessage(`缺少工作区配置文件：${file}，请先执行设置工作空间`);
+        }
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(
+          file,
+          '# 请在当前产品/项目的 svn.scope 下维护 SVN 范围。\n',
+          'utf8'
+        );
+        return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
+      }
+      return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
     }),
     vscode.commands.registerCommand('gushenCompletion.refreshSvn', async (workspaceValue) => {
       const providerId = workspaceValue?.id || workspaceValue?.sourceControl?.id || '';
@@ -643,8 +739,7 @@ function activate(context) {
           TOOL_COMMANDS.svn,
           ['refresh'],
           true,
-          workspaceKey,
-          await svnEnvironment(workspaceKey)
+          workspaceKey
         )) {
           svnServices.scm.clearRemote(workspaceKey);
           await svnServices.refresh();
@@ -676,8 +771,7 @@ function activate(context) {
         TOOL_COMMANDS.svn,
         args,
         true,
-        workspaceKey,
-        await svnEnvironment(workspaceKey)
+        workspaceKey
       )) {
         svnServices.scm.clearRemote(workspaceKey);
         await svnServices.refresh();
