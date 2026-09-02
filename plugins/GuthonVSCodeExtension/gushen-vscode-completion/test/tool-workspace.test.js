@@ -75,7 +75,6 @@ test('SVN workspace actions come only from effective capabilities', () => {
     'gushenCompletion.importSvnScope',
     'gushenCompletion.initializeSvn',
     'gushenCompletion.reindexCalls',
-    'gushenCompletion.refreshSvn',
     'gushenCompletion.focusSvnSource',
     'gushenCompletion.manageSvnChanges',
     'gushenCompletion.exportMarkdown',

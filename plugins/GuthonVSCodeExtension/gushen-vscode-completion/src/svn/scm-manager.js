@@ -1,11 +1,21 @@
-const GROUPS = {
+const CHANGE_STATES = {
   LOCAL_MODIFIED: { id: 'local', label: 'Nexus 修改', icon: 'edit' },
   EXTERNAL_MODIFIED: { id: 'external', label: '其他本地修改', icon: 'diff-modified' },
   CONFLICT: { id: 'conflict', label: '冲突/阻断', icon: 'warning' },
   UNTRACKED: { id: 'untracked', label: '未跟踪文件', icon: 'question' },
   REMOTE: { id: 'remote', label: '远程变更', icon: 'cloud-download' },
 };
-const LOCAL_STATES = Object.keys(GROUPS).filter((state) => state !== 'REMOTE');
+const LOCAL_STATES = Object.keys(CHANGE_STATES).filter((state) => state !== 'REMOTE');
+const CHANGE_DIFF_STATUSES = {
+  added: { id: 'ADDED', label: '新增', icon: 'diff-added' },
+  unversioned: { id: 'ADDED', label: '新增', icon: 'diff-added' },
+  deleted: { id: 'DELETED', label: '删除', icon: 'diff-removed' },
+  modified: { id: 'MODIFIED', label: '修改', icon: 'diff-modified' },
+};
+
+function changeDiffStatus(change) {
+  return CHANGE_DIFF_STATUSES[change?.item] || CHANGE_DIFF_STATUSES.modified;
+}
 
 function appendExtension(label, sourcePath) {
   const extension = String(sourcePath || '').match(/\.[A-Za-z0-9]+$/)?.[0] || '';
@@ -32,8 +42,12 @@ function changeDisplayName(change) {
   return appendExtension(label || fallback, change.path);
 }
 
-function changeUri(vscode, workspaceKey, change) {
+function changeUri(vscode, workspaceKey, change, state = '') {
   const params = new URLSearchParams({ path: change.path });
+  if (state) params.set('state', state);
+  for (const key of ['workingCopyId', 'sourceType', 'sourceId', 'funId', 'jsonPointer']) {
+    if (change[key]) params.set(key, change[key]);
+  }
   const displayName = changeDisplayName(change).replace(/[\\/]+/g, ' · ');
   return vscode.Uri.from({
     scheme: 'guthon-svn-change',
@@ -44,29 +58,27 @@ function changeUri(vscode, workspaceKey, change) {
 }
 
 class SvnScmManager {
-  constructor({ vscode, backend, onStatusChanged }) {
+  constructor({ vscode, backend, onStatusChanged, quickDiffProvider }) {
     this.vscode = vscode;
     this.backend = backend;
     this.onStatusChanged = onStatusChanged;
+    this.quickDiffProvider = quickDiffProvider;
     this.providers = new Map();
   }
 
   _create(workspace) {
-    const rootUri = workspace.checkoutPath ? this.vscode.Uri.file(workspace.checkoutPath) : undefined;
+    const rootUri = this.quickDiffProvider
+      ? undefined
+      : workspace.checkoutPath ? this.vscode.Uri.file(workspace.checkoutPath) : undefined;
     const sourceControl = this.vscode.scm.createSourceControl(
       `guthon-svn-${workspace.workspaceKey}`,
       `${workspace.displayName} · 谷神 SVN 源码变更`,
+      // The editor documents are guthon-svn-edit URIs, while external changes
+      // use file URIs. An unscoped SCM provider lets Quick Diff handle both;
+      // the provider itself restricts the URI to this workspace's checkout.
       rootUri
     );
-    const groups = Object.fromEntries(
-      Object.entries(GROUPS).map(([state, definition]) => [
-        state,
-        sourceControl.createResourceGroup(definition.id, definition.label),
-      ])
-    );
-    for (const group of Object.values(groups)) group.guthonWorkspaceKey = workspace.workspaceKey;
-    const record = { workspace, sourceControl, groups, status: undefined };
-    groups.REMOTE.hideWhenEmpty = true;
+    const record = { workspace, sourceControl, groups: new Map(), status: undefined };
     this._configure(record, workspace);
     this.providers.set(workspace.workspaceKey, record);
     return record;
@@ -74,12 +86,60 @@ class SvnScmManager {
 
   _configure(record, workspace) {
     record.workspace = workspace;
+    this.quickDiffProvider?.setWorkspace?.(workspace);
+    if (this.quickDiffProvider) record.sourceControl.quickDiffProvider = this.quickDiffProvider;
+    record.sourceControl.guthonWorkspaceKey = workspace.workspaceKey;
     record.sourceControl.inputBox.placeholder = 'SVN 提交说明（可选）';
     record.sourceControl.acceptInputCommand = {
       command: 'gushenCompletion.saveSvnToGuthon',
       title: '保存到谷神',
       arguments: [workspace.workspaceKey],
     };
+    this._syncGroups(record, workspace.sourceControlGroups || []);
+  }
+
+  _syncGroups(record, definitions, workingCopies = []) {
+    const normalized = (definitions || []).filter((definition) => (
+      definition?.id && definition?.label
+    ));
+    if (!normalized.length) {
+      normalized.push({
+        id: 'all',
+        label: '全部源码',
+        workingCopyIds: (workingCopies || []).map((item) => item.id).filter(Boolean),
+      });
+    }
+    const expected = new Set(normalized.map((definition) => definition.id));
+    for (const [groupId, group] of record.groups) {
+      if (!expected.has(groupId)) {
+        group.dispose?.();
+        record.groups.delete(groupId);
+      }
+    }
+    for (const definition of normalized) {
+      let group = record.groups.get(definition.id);
+      if (group && group.guthonLabel !== definition.label) {
+        group.dispose?.();
+        record.groups.delete(definition.id);
+        group = undefined;
+      }
+      if (!group) {
+        group = record.sourceControl.createResourceGroup(definition.id, definition.label);
+        record.groups.set(definition.id, group);
+      }
+      group.guthonLabel = definition.label;
+      group.guthonWorkspaceKey = record.workspace.workspaceKey;
+      group.guthonWorkingCopyIds = [...(definition.workingCopyIds || [])];
+      group.hideWhenEmpty = false;
+      group.resourceStates ||= [];
+    }
+  }
+
+  _groupForChange(record, change) {
+    for (const group of record.groups.values()) {
+      if (group.guthonWorkingCopyIds.includes(change.workingCopyId)) return group;
+    }
+    return record.groups.values().next().value;
   }
 
   ensure(workspace) {
@@ -95,55 +155,83 @@ class SvnScmManager {
     const previousRemote = record.status?.remoteChanges || [];
     const remoteChanges = value.remoteChecked ? (value.remoteChanges || []) : previousRemote;
     record.status = { ...value, remoteChanges };
-    for (const state of LOCAL_STATES) {
-      const group = record.groups[state];
-      group.resourceStates = (value.groups?.[state] || []).map((change) => ({
-        resourceUri: changeUri(this.vscode, record.workspace.workspaceKey, change),
+    this._syncGroups(record, record.workspace.sourceControlGroups || [], value.workingCopies || []);
+    const resources = new Map([...record.groups.values()].map((group) => [group, []]));
+    const addChange = (change, state) => {
+      const definition = CHANGE_STATES[state];
+      const diffStatus = changeDiffStatus(change);
+      const canOpenNexus = !['CONFLICT', 'UNTRACKED'].includes(state)
+        && change.item !== 'deleted'
+        && change.sourceType
+        && change.sourceId;
+      const group = this._groupForChange(record, change);
+      if (!group || !definition) return;
+      resources.get(group).push({
+        resourceUri: changeUri(this.vscode, record.workspace.workspaceKey, change, state),
         command: {
           command: 'gushenCompletion.showSvnDiff',
           title: '查看 SVN 差异',
-          arguments: [record.workspace.workspaceKey, change.path],
+          arguments: [record.workspace.workspaceKey, change.path, state === 'REMOTE'],
         },
-        contextValue: `guthonSvn.${state}`,
+        contextValue: `guthonSvn.${state}${canOpenNexus ? '.nexus' : ''}`,
         decorations: {
-          iconPath: new this.vscode.ThemeIcon(GROUPS[state].icon),
-          tooltip: `${GROUPS[state].label} · ${changeDisplayName(change)}\n${change.path}\n${change.workingCopyId}`,
+          iconPath: new this.vscode.ThemeIcon(
+            ['CONFLICT', 'REMOTE'].includes(state) ? definition.icon : diffStatus.icon
+          ),
+          tooltip: `${definition.label} · ${diffStatus.label} · ${changeDisplayName(change)}\n${change.path}\n${change.workingCopyId}`,
           strikeThrough: state === 'CONFLICT',
           faded: state === 'UNTRACKED',
         },
-      }));
+      });
+    };
+    for (const state of LOCAL_STATES) {
+      for (const change of value.groups?.[state] || []) addChange(change, state);
     }
-    record.groups.REMOTE.resourceStates = remoteChanges.map((change) => ({
-      resourceUri: changeUri(this.vscode, record.workspace.workspaceKey, change),
-      contextValue: 'guthonSvn.REMOTE',
-      decorations: {
-        iconPath: new this.vscode.ThemeIcon(GROUPS.REMOTE.icon),
-        tooltip: `远程${change.item || '变更'} · ${changeDisplayName(change)}\n${change.path}\n${change.workingCopyId}`,
-      },
-    }));
+    for (const change of remoteChanges) addChange(change, 'REMOTE');
+    if (![...resources.values()].some((items) => items.length)) {
+      const firstGroup = record.groups.values().next().value;
+      if (firstGroup) {
+        resources.get(firstGroup).push({
+          resourceUri: this.vscode.Uri.from({
+            scheme: 'guthon-svn-change',
+            authority: record.workspace.workspaceKey,
+            path: '/当前无变更',
+            query: 'placeholder=clean',
+          }),
+          contextValue: 'guthonSvn.PLACEHOLDER',
+          decorations: {
+            iconPath: new this.vscode.ThemeIcon('check'),
+            tooltip: '当前工作区没有本地或远端 SVN 变更；此占位项用于保持子系统可见',
+            faded: true,
+          },
+        });
+      }
+    }
+    for (const [group, resourceStates] of resources) group.resourceStates = resourceStates;
     record.sourceControl.count = (value.changes?.length || 0) + remoteChanges.length;
+    this.quickDiffProvider?.setStatus?.(record.workspace.workspaceKey, record.status);
     this.onStatusChanged?.(record.workspace.workspaceKey, record.status);
     return record.status;
   }
 
-  async refresh(workspace) {
+  async refresh(workspace, options = {}) {
     const record = this.ensure(workspace);
-    const value = await this.backend.scmStatus(workspace.workspaceKey);
+    const value = await this.backend.scmStatus(workspace.workspaceKey, false, options);
     return this._applyStatus(record, value);
   }
 
-  async refreshRemote(workspace) {
+  async refreshRemote(workspace, options = {}) {
     const record = this.ensure(workspace);
-    const value = await this.backend.scmStatus(workspace.workspaceKey, true);
+    const value = await this.backend.scmStatus(workspace.workspaceKey, true, options);
     return this._applyStatus(record, value);
   }
 
-  async refreshAll(workspaces) {
+  async refreshAll(workspaces, options = {}) {
     const expected = new Set(workspaces.map((workspace) => workspace.workspaceKey));
     const results = [];
     for (const workspace of workspaces) {
       try {
-        results.push(await this.refresh(workspace));
+        results.push(await this.refresh(workspace, options));
       } catch (error) {
         results.push({ ok: false, workspaceKey: workspace.workspaceKey, error });
       }
@@ -158,6 +246,7 @@ class SvnScmManager {
     const record = this.record(result?.workspaceKey);
     const current = record?.status;
     if (!record || !current || !result?.changed || !result.sourcePath || !result.workingCopyId) return false;
+    const previousChange = (current.changes || []).find((item) => item.path === result.sourcePath);
     const change = {
       workingCopyId: result.workingCopyId,
       scopeEntryId: result.workingCopyId,
@@ -168,6 +257,10 @@ class SvnScmManager {
       state: 'LOCAL_MODIFIED',
       sessionManaged: true,
       sourceHash: result.sourceHash || '',
+      sourceType: result.sourceType || previousChange?.sourceType || '',
+      sourceId: result.sourceId || previousChange?.sourceId || '',
+      funId: result.funId || previousChange?.funId || '',
+      jsonPointer: result.jsonPointer || previousChange?.jsonPointer || '',
     };
     const withoutSavedPath = (items = []) => items.filter((item) => item.path !== result.sourcePath);
     const groups = Object.fromEntries(
@@ -191,6 +284,7 @@ class SvnScmManager {
     const record = this.providers.get(workspaceKey);
     if (!record) return;
     record.sourceControl.dispose();
+    this.quickDiffProvider?.removeWorkspace?.(workspaceKey);
     this.providers.delete(workspaceKey);
   }
 
@@ -214,16 +308,22 @@ class SvnScmManager {
   clearRemote(workspaceKey) {
     const record = this.record(workspaceKey);
     if (!record) return;
-    record.groups.REMOTE.resourceStates = [];
-    if (record.status) record.status = { ...record.status, remoteChanges: [] };
-    record.sourceControl.count = record.status?.changes?.length || 0;
-    this.onStatusChanged?.(workspaceKey, record.status);
+    if (record.status) {
+      this._applyStatus(record, { ...record.status, remoteChecked: true, remoteChanges: [] });
+    }
   }
 
   dispose() {
     for (const record of this.providers.values()) record.sourceControl.dispose();
     this.providers.clear();
+    this.quickDiffProvider?.dispose?.();
   }
 }
 
-module.exports = { GROUPS, SvnScmManager, changeDisplayName, changeUri };
+module.exports = {
+  CHANGE_STATES,
+  SvnScmManager,
+  changeDiffStatus,
+  changeDisplayName,
+  changeUri,
+};

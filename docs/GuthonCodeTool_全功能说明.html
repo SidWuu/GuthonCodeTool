@@ -90,7 +90,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <div class="hero-meta"><span>架构与实现</span><span>源码与索引</span><span>Bridge &amp; VS Code</span><span>发布与维护</span></div>
 <div class="hero-actions">
 <a class="btn btn-primary" href="#1-定位与边界">开始阅读</a>
-<a class="btn btn-ghost" href="GuthonCodeTool_使用手册.html">快速开始</a>
+<a class="btn btn-ghost" href="index.html">快速开始</a>
 <a class="btn btn-ghost" href="https://github.com/SidWuu/GuthonCodeTool" target="_blank" rel="noopener">GitHub 仓库</a>
 </div>
 </div>
@@ -143,7 +143,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <li>工具负责读取、整理和索引源码；DATABASE 生成安全 Workcopy，SVN 由 Nexus 提供受控虚拟编辑。</li>
 <li>每个工作区显式选择 database 或 svn provider；SVN 只有用户执行初始化后才按授权清单中的精确 URL 检出。</li>
 <li>DATABASE 开发只修改 <code>source/workcopy</code>；SVN 不生成额外代码副本，虚拟文档直接回写授权 checkout 原文件。</li>
-<li>SVN 的“管理本地源码变更”提供类 Git 差异、多选/全选保存和撤销；SCM 支持全部/单文件提交 Nexus 修改和更新远程变更。“保存到谷神”固定可用，SVN 提交说明可选，跨 working copy 分组执行精确文件 <code>svn commit</code>，成功仍表示“待谷神平台最终提交”。检出/更新和手动重建索引在输出标签逐项显示每个子系统 working copy 的授权、checkout/update、状态检查、解析和索引事务步骤；同一工作区的重复重建点击会直接忽略；“谷神源码”树高亮本地修改文件及父目录，虚拟编辑器按 SVN BASE 在行号槽、整行背景和概览标尺标出新增、修改与删除位置。公共用户名读取 <code>sync.yaml</code> 的 <code>svn.username</code>；Nexus 输入密码后只通过 stdin 交给 SVN auth cache/系统钥匙串保存。内部 HTTPS 自签证书由非交互命令直接信任。</li>
+<li>SVN 的“管理本地源码变更”提供类 Git 差异、多选/全选保存和撤销；SCM 在产品节点下直接显示默认展开的中文子系统组，聚合同一 <code>DATA_SOURCE_ID</code> 的数据源及系统 working copy，并支持产品全部、子系统和单文件级提交/更新。单一名称原样显示，只有 <code>0008</code> 下国内贸易、国际贸易这类共同后缀分组显示为“贸易系统”，Skill/public 单列“公共源码”。产品与子系统行都只保留刷新状态、检查远端变更、提交 Nexus 修改、更新远端变更四项操作并默认常驻显示；子系统提交与更新按组限制 working copy，根节点保留全部范围。检查远端变更后，点击远端文件打开“工作副本 ↔ SVN HEAD”双栏差异，更新仍需用户明确点击对应按钮。“保存到谷神”固定可用，SVN 提交说明可选，跨 working copy 分组执行精确文件 <code>svn commit</code>，成功仍表示“待谷神平台最终提交”。检出/更新和手动重建索引在输出标签逐项显示实际处理范围；同一工作区的重复重建点击会直接忽略；“谷神源码”树高亮本地修改文件及父目录，虚拟编辑器使用 VS Code 原生 SCM Quick Diff 按 SVN BASE 标出新增、修改与删除位置，点击色块可内联查看本地更改。公共用户名读取 <code>sync.yaml</code> 的 <code>svn.username</code>；Nexus 输入密码后只通过 stdin 交给 SVN auth cache/系统钥匙串保存。内部 HTTPS 自签证书由非交互命令直接信任。</li>
 <li>数据库连接、源码、业务文档和运行索引均为本地私有内容，不进入公开仓库或 Release。</li>
 <li>Python 脚本继续作为开发与测试入口；普通用户只使用打包应用、VSIX 和 Bridge。</li>
 </ul>
@@ -303,7 +303,9 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
 <li>“谷神源码”树顶部“跳转”接受模块及其方法、字段、SQL、事件等任意子节点，沿父级解析所属模块后按 <code>workspaceKey + checkoutPath + sourcePath</code> 精确显示到资源管理器，并拒绝越出当前 checkout 的路径；同一命令保留在右键菜单，取消名称末尾的行内图标。</li>
 <li>顶部“定位”把当前打开的 SVN 虚拟分块或 checkout 物理文件反向映射到 Nexus 树，自动展开父级并选中节点；PAGE 定位只懒解析目标页面。</li>
 <li>“谷神源码”树还提供展开所选、收缩所选、直接显示的原生搜索框、刷新和水平滚动；搜索默认使用模糊过滤，只查询当前树缓存，不重新扫描 checkout。</li>
-<li>每个 SVN workspace 只注册一个 SCM provider，提供基于 SQLite/index.md 业务名称的本地/远程变更、历史、全部/单文件提交与更新、部分物理文件保存和放弃修改；底层多个 working copy 不拆成多个顶层项目。单文件更新只作用于授权范围内且仍为远程变更的精确物理路径。PAGE 默认使用脚本、SQL、字段可读双栏差异，原始 JSON 差异仍可显式打开；左侧为内存型只读 SVN BASE，右侧为当前 working copy，不生成临时源码副本。</li>
+<li>每个 SVN workspace 只注册一个 SCM provider，底层 working copy 不拆成多个顶层项目；provider 内按 <code>DATA_SOURCE_ID</code> 生成始终可见的中文子系统资源组，组同时持有数据源 working copy 与所有映射系统 working copy，并另设公共源码组。provider 与资源组暴露相同按钮，分别执行全部范围与子系统范围操作，文件行保留单文件操作。中文名称只用于展示和分组，不扩大授权清单。单文件更新只作用于授权范围内且仍为远程变更的精确物理路径；远端差异通过认证后的 <code>svn cat -r HEAD</code> 读取内存内容，与当前 working copy 双栏比较。PAGE 默认使用脚本、SQL、字段可读差异，原始 JSON 差异仍可显式打开；本地修改比较 SVN BASE 与 working copy，远端修改比较 working copy 与 SVN HEAD，均不生成临时源码副本。具有 Nexus 对象身份的文件行提供“在 Nexus 中编辑”“查看差异”“放弃此文件修改”和“提交此 Nexus 修改”操作，资源图标按 SVN 状态显示新增、删除或修改；提交仍直接走 Nexus/SVN，不引入 Git 暂存。</li>
+<li>SCM 的状态检查、Nexus 预览与提交、SVN 更新、提交后增量索引和状态刷新均向 GuthonCodeTool 输出通道流式写入阶段日志；同一工作区的重叠 SCM 操作会被拦截并提示已有操作正在执行，避免重复点击形成并发操作。</li>
+<li>VS Code 原生 SCM 在多个 repository 并存时会过滤没有资源的全部资源组。若 SVN 工作区整体无本地或远端变更，扩展仅在第一个子系统注入一条禁用的“当前无变更”显示资源，使所有子系统仍进入 SCM 树；provider 变更计数保持为零，提交、更新和候选筛选均忽略该占位项。</li>
 <li><code>.gss</code> 注册为独立 Guthon GSS 语言，在 Java grammar 上注入 Velocity/GSS 指令与变量，并继续接入 Nexus 补全、悬停、定义和引用；兼容 <code>.vm</code> 保持 Java。远端状态只在显式云操作时查询；更新发现 <code>incomplete</code> 或 working-copy 管理锁时只执行无删除/还原参数的标准 <code>svn cleanup</code> 后复检。</li>
 <li><code>var</code> 私有 Git 明确忽略根级 <code>checkout/</code>，只管理配置、上下文、索引资料和 DATABASE 工作区；SVN 源码只在 Nexus/SVN SCM 中审阅和提交，不形成第二套 Git 历史。</li>
 <li>虚拟保存只等待目标文件校验、原子写回和单文件增量索引；SCM 使用保存结果增量刷新，受控文件监听事件不重复索引，完整扫描留给手工刷新、更新和提交前检查。</li>

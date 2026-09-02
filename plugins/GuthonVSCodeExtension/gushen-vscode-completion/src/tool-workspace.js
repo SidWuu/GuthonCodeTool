@@ -32,7 +32,6 @@ function workspaceActions(item) {
         capability('svn.initialize') && ['导入 SVN checkout 配置', 'gushenCompletion.importSvnScope', 'file-add'],
         capability('svn.initialize') && ['从 SVN 范围配置检出/更新', 'gushenCompletion.initializeSvn', 'repo-clone'],
         capability('svn.reindex') && ['扫描/重建本地 SVN 索引', 'gushenCompletion.reindexCalls', 'refresh'],
-        capability('svn.refresh') && ['更新指定 SVN working copy', 'gushenCompletion.refreshSvn', 'repo-sync'],
         capability('svn.browse') && ['查看谷神同步源码', 'gushenCompletion.focusSvnSource', 'list-tree'],
         capability('svn.status') && ['管理本地源码变更', 'gushenCompletion.manageSvnChanges', 'source-control'],
         ['导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book'],

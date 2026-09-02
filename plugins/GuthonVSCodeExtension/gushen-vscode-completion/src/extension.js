@@ -63,11 +63,33 @@ const TOOL_LABELS = {
   doctor: '检查本地环境',
   diagnose: '执行源码逻辑排查',
   workcopy: '执行 Workcopy 操作',
-  svn: '管理 SVN 授权源码',
+  svn: 'SVN 检出/更新',
   'source-mode': '设置项目源码来源',
 };
 let toolQueue = Promise.resolve();
 const activeToolRuns = new Set();
+
+function toolRunKey(command, workspaceKey) {
+  return `${command}::${workspaceKey || ''}`;
+}
+
+function reportToolAlreadyRunning(command, workspaceKey, labelOverride = '') {
+  const message = `已有${labelOverride || TOOL_LABELS[command] || command}正在执行：${workspaceKey || '当前工作区'}，本次点击已忽略。`;
+  const output = vscode.window.createOutputChannel('GuthonCodeTool');
+  output.show(true);
+  output.appendLine(message);
+  vscode.window.showInformationMessage(message);
+}
+
+function claimToolRun(command, workspaceKey, labelOverride = '') {
+  const runKey = toolRunKey(command, workspaceKey);
+  if (activeToolRuns.has(runKey)) {
+    reportToolAlreadyRunning(command, workspaceKey, labelOverride);
+    return null;
+  }
+  activeToolRuns.add(runKey);
+  return () => activeToolRuns.delete(runKey);
+}
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -212,26 +234,26 @@ async function configuredTool() {
   return tool;
 }
 
-async function runTool(command, extraArgs = [], askForConfirmation = true, workspaceKey = '') {
+async function runTool(
+  command,
+  extraArgs = [],
+  askForConfirmation = true,
+  workspaceKey = '',
+  claimedRunRelease = null
+) {
   const label = TOOL_LABELS[command] || command;
-  const runKey = `${command}::${workspaceKey || ''}`;
-  if (activeToolRuns.has(runKey)) {
-    const output = vscode.window.createOutputChannel('GuthonCodeTool');
-    output.show(true);
-    output.appendLine(`已有${label}正在执行：${workspaceKey || '当前工作区'}，本次点击已忽略。`);
-    return false;
-  }
-  activeToolRuns.add(runKey);
+  const release = claimedRunRelease || claimToolRun(command, workspaceKey);
+  if (!release) return false;
   if (askForConfirmation) {
     const confirmed = await vscode.window.showWarningMessage(`确认${label}？`, { modal: true }, '执行');
     if (confirmed !== '执行') {
-      activeToolRuns.delete(runKey);
+      release();
       return false;
     }
   }
   const tool = await configuredTool();
   if (!tool) {
-    activeToolRuns.delete(runKey);
+    release();
     return false;
   }
   const output = vscode.window.createOutputChannel('GuthonCodeTool');
@@ -257,7 +279,7 @@ async function runTool(command, extraArgs = [], askForConfirmation = true, works
   });
   const pending = toolQueue.then(execute, execute);
   toolQueue = pending.catch(() => false);
-  return pending.finally(() => activeToolRuns.delete(runKey));
+  return pending.finally(release);
 }
 
 function configuredToolFromSettings() {
@@ -460,6 +482,7 @@ function activate(context) {
     getTool: async () => configuredToolFromSettings(),
     listSvnWorkspaces,
     onToolTreeChanged: () => toolView.refresh(),
+    claimOperation: (workspaceKey, label) => claimToolRun(TOOL_COMMANDS.svn, workspaceKey, label),
   });
   const toolCommands = [
     vscode.commands.registerCommand('gushenCompletion.setSvnCredentials', async (workspaceKey) => {
@@ -625,39 +648,50 @@ function activate(context) {
       if (action) return runTool(TOOL_COMMANDS.workcopy, [action.value, selected[0].fsPath], true, workspaceKey);
     }),
     vscode.commands.registerCommand('gushenCompletion.initializeSvn', async (workspaceKey) => {
-      const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
-      if (!workspace) return vscode.window.showErrorMessage(`未找到 SVN 项目：${workspaceKey}`);
-      const hasScopeConfig = Boolean(workspace.scopeConfigReady);
-      const hasCheckoutScript = Boolean(workspace.checkoutScriptReady);
-      if (!hasScopeConfig && !hasCheckoutScript) {
-        return vscode.window.showWarningMessage(
-          `未找到 SVN 范围配置：${workspace.scopeConfigPath || 'config/products.yaml/projects.yaml'}。请先在对应文件的 svn.scope 中配置，或使用“导入 SVN checkout 配置”选择 .sh/.bat/粘贴内容。`
-        );
-      }
-      let preview;
+      let release = claimToolRun(TOOL_COMMANDS.svn, workspaceKey);
+      if (!release) return false;
       try {
-        preview = await svnServices.backend.scopePreview(workspaceKey);
-      } catch (error) {
-        return vscode.window.showErrorMessage(`无法解析工作区 SVN 范围配置：${error.message}`);
-      }
-      const changeSummary = `新增 ${preview.added}、移除 ${preview.removed}、变更 ${preview.modified}`;
-      const scopeSummary = preview.excludedBySystemAliases
-        ? `${preview.source === 'config' ? '范围配置' : '签出脚本'}共 ${preview.commands} 个地址，按 systems.include.mappings 保留 ${preview.entries} 个、排除 ${preview.excludedBySystemAliases} 个`
-        : `${preview.source === 'config' ? '范围配置' : '签出脚本'}共 ${preview.commands} 个地址，保留 ${preview.entries} 个`;
-      const confirmed = await vscode.window.showWarningMessage(
-        `将使用当前工程的 SVN ${preview.source === 'config' ? '范围配置（products.yaml/projects.yaml 的 svn.scope）' : '签出脚本（可复制到现有配置的 svn.scope）'}：${scopeSummary}（${changeSummary}），随后使用同一次认证检出或更新筛选后的 working copy。配置只保存 URL 和相对目录，不保存凭据。`,
-        { modal: true },
-        '检出/更新'
-      );
-      if (confirmed !== '检出/更新') return false;
-      if (await runTool(
-        TOOL_COMMANDS.svn,
-        ['sync-from-config', '--accept-scope-change'],
-        false,
-        workspaceKey
-      )) {
-        await svnServices.refresh();
-        toolView.refresh();
+        const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
+        if (!workspace) return vscode.window.showErrorMessage(`未找到 SVN 项目：${workspaceKey}`);
+        svnServices.log('SVN 检出/更新', '读取 SVN 范围配置预览');
+        const hasScopeConfig = Boolean(workspace.scopeConfigReady);
+        const hasCheckoutScript = Boolean(workspace.checkoutScriptReady);
+        if (!hasScopeConfig && !hasCheckoutScript) {
+          return vscode.window.showWarningMessage(
+            `未找到 SVN 范围配置：${workspace.scopeConfigPath || 'config/products.yaml/projects.yaml'}。请先在对应文件的 svn.scope 中配置，或使用“导入 SVN checkout 配置”选择 .sh/.bat/粘贴内容。`
+          );
+        }
+        let preview;
+        try {
+          preview = await svnServices.backend.scopePreview(workspaceKey);
+        } catch (error) {
+          return vscode.window.showErrorMessage(`无法解析工作区 SVN 范围配置：${error.message}`);
+        }
+        const changeSummary = `新增 ${preview.added}、移除 ${preview.removed}、变更 ${preview.modified}`;
+        const scopeSummary = preview.excludedBySystemAliases
+          ? `${preview.source === 'config' ? '范围配置' : '签出脚本'}共 ${preview.commands} 个地址，按 systems.include.mappings 保留 ${preview.entries} 个、排除 ${preview.excludedBySystemAliases} 个`
+          : `${preview.source === 'config' ? '范围配置' : '签出脚本'}共 ${preview.commands} 个地址，保留 ${preview.entries} 个`;
+        const confirmed = await vscode.window.showWarningMessage(
+          `将使用当前工程的 SVN ${preview.source === 'config' ? '范围配置（products.yaml/projects.yaml 的 svn.scope）' : '签出脚本（可复制到现有配置的 svn.scope）'}：${scopeSummary}（${changeSummary}），随后使用同一次认证检出或更新筛选后的 working copy。配置只保存 URL 和相对目录，不保存凭据。`,
+          { modal: true },
+          '检出/更新'
+        );
+        if (confirmed !== '检出/更新') return false;
+        const completed = await runTool(
+          TOOL_COMMANDS.svn,
+          ['sync-from-config', '--accept-scope-change'],
+          false,
+          workspaceKey,
+          release
+        );
+        release = null;
+        if (completed) {
+          await svnServices.refresh();
+          toolView.refresh();
+        }
+        return completed;
+      } finally {
+        if (release) release();
       }
     }),
     vscode.commands.registerCommand('gushenCompletion.importSvnScope', async (workspaceKey) => {
@@ -727,55 +761,104 @@ function activate(context) {
       const providerId = workspaceValue?.id || workspaceValue?.sourceControl?.id || '';
       const workspaceKey = typeof workspaceValue === 'string'
         ? workspaceValue
-        : providerId.startsWith('guthon-svn-')
+        : workspaceValue?.guthonWorkspaceKey
+          || (providerId.startsWith('guthon-svn-')
           ? providerId.slice('guthon-svn-'.length)
-          : '';
+          : '');
+      const requestedWorkingCopyIds = Array.isArray(workspaceValue?.guthonWorkingCopyIds)
+        ? workspaceValue.guthonWorkingCopyIds.filter(Boolean)
+        : [];
       if (!workspaceKey) return vscode.window.showErrorMessage('无法解析 SVN 项目');
-      if (!await svnServices.saveDirtyDocuments(workspaceKey, '更新 SVN')) return;
-      const workspaces = await listSvnWorkspaces();
-      const workspace = workspaces.find((item) => item.workspaceKey === workspaceKey);
-      if (!workspace?.workingCopies?.length) {
-        if (await runTool(
-          TOOL_COMMANDS.svn,
-          ['refresh'],
+      let release = claimToolRun(TOOL_COMMANDS.svn, workspaceKey);
+      if (!release) return false;
+      try {
+        if (!await svnServices.saveDirtyDocuments(workspaceKey, '更新 SVN', '更新 SVN')) return false;
+        const workspaces = await listSvnWorkspaces();
+        const workspace = workspaces.find((item) => item.workspaceKey === workspaceKey);
+        if (!workspace?.workingCopies?.length) {
+          const completed = await runTool(
+            TOOL_COMMANDS.svn,
+            ['refresh'],
+            true,
+            workspaceKey,
+            release
+          );
+          release = null;
+          if (completed) {
+            svnServices.scm.clearRemote(workspaceKey);
+            await svnServices.refresh();
+          }
+          return completed;
+        }
+        svnServices.log('更新 SVN', '检查远程变更和本地修改');
+        const current = await svnServices.backend.scmStatus(
+          workspaceKey,
           true,
-          workspaceKey
-        )) {
+          svnServices.backendOutput
+        );
+        const currentById = new Map(current.workingCopies.map((item) => [item.id, item]));
+        let selectedWorkingCopyIds = requestedWorkingCopyIds;
+        if (!selectedWorkingCopyIds.length) {
+          const sourceGroups = (workspace.sourceControlGroups || []).map((group) => {
+            const items = (group.workingCopyIds || []).map((id) => currentById.get(id)).filter(Boolean);
+            const remoteCount = items.filter((item) => item.outOfDate).length;
+            const localCount = items.filter((item) => !item.clean).length;
+            return {
+              label: group.label,
+              description: `${group.dataSourceId || '公共'} · ${items.length} 个 working copy`,
+              detail: [
+                remoteCount ? `远程更新 ${remoteCount}` : '',
+                localCount ? `本地修改 ${localCount}` : '',
+              ].filter(Boolean).join(' · ') || '当前干净',
+              workingCopyIds: items.map((item) => item.id),
+            };
+          }).filter((group) => group.workingCopyIds.length);
+          const selected = await vscode.window.showQuickPick(
+            sourceGroups.length ? sourceGroups : current.workingCopies.map((item) => ({
+              label: item.id,
+              description: item.clean ? '干净' : '有本地修改',
+              detail: item.outOfDate ? '远程存在更新' : undefined,
+              workingCopyIds: [item.id],
+            })),
+            { title: '选择要更新的 SVN 子系统' }
+          );
+          if (!selected) return false;
+          selectedWorkingCopyIds = selected.workingCopyIds;
+        }
+        const selectedItems = selectedWorkingCopyIds.map((id) => currentById.get(id)).filter(Boolean);
+        if (!selectedItems.length) {
+          return vscode.window.showErrorMessage('所选子系统没有可更新的 SVN working copy');
+        }
+        const args = [
+          'refresh',
+          ...selectedItems.flatMap((item) => ['--working-copy', item.id]),
+        ];
+        svnServices.log('更新 SVN', `已选择 ${selectedItems.length} 个 working copy，准备执行 SVN update`);
+        if (selectedItems.some((item) => !item.clean)) {
+          const confirmed = await vscode.window.showWarningMessage(
+            '所选子系统存在本地修改。更新将由 SVN 执行原生文本合并，Nexus 不会自动解决冲突。',
+            { modal: true },
+            '更新并合并'
+          );
+          if (confirmed !== '更新并合并') return false;
+          args.push('--merge-local');
+        }
+        const completed = await runTool(
+          TOOL_COMMANDS.svn,
+          args,
+          true,
+          workspaceKey,
+          release
+        );
+        release = null;
+        if (completed) {
           svnServices.scm.clearRemote(workspaceKey);
           await svnServices.refresh();
+          toolView.refresh();
         }
-        return;
-      }
-      const current = await svnServices.backend.scmStatus(workspaceKey, true);
-      const selected = await vscode.window.showQuickPick(
-        current.workingCopies.map((item) => ({
-          label: item.id,
-          description: item.clean ? '干净' : '有本地修改',
-          detail: item.outOfDate ? '远程存在更新' : undefined,
-          item,
-        })),
-        { title: '选择要更新的 SVN working copy' }
-      );
-      if (!selected) return;
-      const args = ['refresh', '--working-copy', selected.item.id];
-      if (!selected.item.clean) {
-        const confirmed = await vscode.window.showWarningMessage(
-          '当前 working copy 有本地修改。更新将由 SVN 执行原生文本合并，Nexus 不会自动解决冲突。',
-          { modal: true },
-          '更新并合并'
-        );
-        if (confirmed !== '更新并合并') return;
-        args.push('--merge-local');
-      }
-      if (await runTool(
-        TOOL_COMMANDS.svn,
-        args,
-        true,
-        workspaceKey
-      )) {
-        svnServices.scm.clearRemote(workspaceKey);
-        await svnServices.refresh();
-        toolView.refresh();
+        return completed;
+      } finally {
+        if (release) release();
       }
     }),
     vscode.commands.registerCommand('gushenCompletion.showSvnStatus', async (workspaceKey) => {

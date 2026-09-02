@@ -63,6 +63,11 @@ EXPECTED_WRITEBACK_FILE = "svn-writeback-state.json"
 MIN_SVN_VERSION = (1, 10)
 
 
+def _progress(callback, message: str) -> None:
+    if callback is not None:
+        callback(message)
+
+
 def file_hash(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -418,6 +423,12 @@ def run_remote_svn(
     )
 
 
+def run_remote_svn_binary(args, settings: dict, cwd: Path | None = None, check=True) -> subprocess.CompletedProcess:
+    """Run an authenticated remote SVN command while preserving source bytes."""
+
+    return run_svn_binary([*_svn_auth(settings), *args], cwd=cwd, check=check)
+
+
 @lru_cache(maxsize=1)
 def client_version() -> str:
     version = run_svn(["--version", "--quiet"]).stdout.strip()
@@ -771,19 +782,21 @@ def _require_refreshable(status: dict) -> None:
         raise SystemExit(f"SVN refresh is blocked by unsupported working-copy state: {status.get('svnVersion')}")
 
 
-def _update_path(checkout_path: Path, relative: str, settings: dict) -> None:
+def _update_path(checkout_path: Path, relative: str, settings: dict, on_progress=None) -> None:
     target = checkout_path / relative
     args = ["update", "--parents"]
     if Path(relative).suffix == "":
         args.extend(["--set-depth", "infinity"])
     args.append(str(target))
+    _progress(on_progress, f"更新路径：{relative}")
     run_remote_svn(args, settings)
 
 
-def _initialize(workspace: dict, config_dir: Path, bootstrap=None) -> dict:
+def _initialize(workspace: dict, config_dir: Path, bootstrap=None, on_progress=None) -> dict:
     require_capability(workspace, "initialize")
     settings = workspace["svn"]
     checkout_path = workspace["checkoutPath"]
+    _progress(on_progress, f"{workspace['displayName']}｜初始化｜读取 SVN 范围配置")
     manifest = _ensure_scope(workspace, config_dir, bootstrap)
     if checkout_path.exists() and not checkout_path.is_dir():
         raise SystemExit(f"Checkout target is not a directory: {checkout_path}")
@@ -796,30 +809,36 @@ def _initialize(workspace: dict, config_dir: Path, bootstrap=None) -> dict:
         if not repository_url:
             raise SystemExit(f"Missing svn.repository_url for {workspace['workspaceKey']}")
         checkout_path.parent.mkdir(parents=True, exist_ok=True)
+        _progress(on_progress, f"{workspace['displayName']}｜初始化｜执行 SVN checkout")
         run_remote_svn(["checkout", "--depth", "empty", repository_url, str(checkout_path)], settings)
     info = _verify_checkout(workspace)
+    _progress(on_progress, f"{workspace['displayName']}｜初始化｜检查 working copy 状态")
     current = svn_status(checkout_path)
     _require_refreshable(current)
-    for relative in manifest["paths"]:
-        _update_path(checkout_path, relative, settings)
+    total = len(manifest["paths"])
+    for index, relative in enumerate(manifest["paths"], 1):
+        _progress(on_progress, f"{workspace['displayName']}｜初始化｜[{index}/{total}] 扩展 SVN 路径 · {relative}")
+        _update_path(checkout_path, relative, settings, on_progress=on_progress)
     info = _verify_checkout(workspace)
     fingerprint, product_metadata = _repository_fingerprint(workspace, info)
     manifest.update({"revision": info["revision"], "repository": info, "repositoryFingerprint": fingerprint, "productMetadata": product_metadata})
     atomic_json(scope_path(workspace), manifest)
     _clear_expected_changes(workspace)
+    _progress(on_progress, f"{workspace['displayName']}｜初始化｜完成 · r{info.get('revision') or '-'}")
     return {"ok": True, "action": "initialized", "scope": manifest, "status": svn_status(checkout_path)}
 
 
-def initialize(workspace: dict, config_dir: Path, bootstrap=None) -> dict:
+def initialize(workspace: dict, config_dir: Path, bootstrap=None, on_progress=None) -> dict:
     with operation_lock(workspace, "init"):
-        return _initialize(workspace, config_dir, bootstrap)
+        return _initialize(workspace, config_dir, bootstrap, on_progress=on_progress)
 
 
-def _refresh(workspace: dict, config_dir: Path, bootstrap=None, prune=False) -> dict:
+def _refresh(workspace: dict, config_dir: Path, bootstrap=None, prune=False, on_progress=None) -> dict:
     require_capability(workspace, "refresh")
     checkout_path = workspace["checkoutPath"]
     if not (checkout_path / ".svn").is_dir():
-        return _initialize(workspace, config_dir, bootstrap)
+        return _initialize(workspace, config_dir, bootstrap, on_progress=on_progress)
+    _progress(on_progress, f"{workspace['displayName']}｜更新｜检查 working copy 状态")
     info_before = _verify_checkout(workspace)
     before = svn_status(checkout_path)
     _require_refreshable(before)
@@ -831,14 +850,18 @@ def _refresh(workspace: dict, config_dir: Path, bootstrap=None, prune=False) -> 
         remote_fingerprint = _remote_repository_fingerprint(workspace, info_before)
         if previous["repositoryFingerprint"] != remote_fingerprint:
             raise SystemExit(f"SVN repository fingerprint changed remotely for {workspace['workspaceKey']}")
+    _progress(on_progress, f"{workspace['displayName']}｜更新｜读取 SVN 范围配置")
     manifest = _ensure_scope(workspace, config_dir, bootstrap)
     stale = sorted(set(previous.get("paths") or []) - set(manifest["paths"]))
-    for relative in manifest["paths"]:
-        _update_path(checkout_path, relative, workspace["svn"])
+    total = len(manifest["paths"])
+    for index, relative in enumerate(manifest["paths"], 1):
+        _progress(on_progress, f"{workspace['displayName']}｜更新｜[{index}/{total}] 执行 SVN update · {relative}")
+        _update_path(checkout_path, relative, workspace["svn"], on_progress=on_progress)
     if prune:
         for relative in stale:
             if relative in {"info.json", "pages/index.md"}:
                 continue
+            _progress(on_progress, f"{workspace['displayName']}｜更新｜移除过期稀疏路径 · {relative}")
             run_remote_svn(["update", "--set-depth", "exclude", str(checkout_path / relative)], workspace["svn"])
     info = _verify_checkout(workspace)
     fingerprint, product_metadata = _repository_fingerprint(workspace, info)
@@ -853,6 +876,7 @@ def _refresh(workspace: dict, config_dir: Path, bootstrap=None, prune=False) -> 
     })
     atomic_json(scope_path(workspace), manifest)
     _clear_expected_changes(workspace)
+    _progress(on_progress, f"{workspace['displayName']}｜更新｜完成 · r{info.get('revision') or '-'}")
     return {
         "ok": True,
         "action": "refreshed",
@@ -862,6 +886,6 @@ def _refresh(workspace: dict, config_dir: Path, bootstrap=None, prune=False) -> 
     }
 
 
-def refresh(workspace: dict, config_dir: Path, bootstrap=None, prune=False) -> dict:
+def refresh(workspace: dict, config_dir: Path, bootstrap=None, prune=False, on_progress=None) -> dict:
     with operation_lock(workspace, "refresh"):
-        return _refresh(workspace, config_dir, bootstrap, prune)
+        return _refresh(workspace, config_dir, bootstrap, prune, on_progress=on_progress)

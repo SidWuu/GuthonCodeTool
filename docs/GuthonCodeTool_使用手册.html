@@ -125,7 +125,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
     <div class="hero-meta"><span>从零开始</span><span>跨平台共用</span><span>日常工作流</span><span>常见问题</span></div>
     <div class="hero-actions">
       <a class="btn btn-primary" href="#1-准备与下载">开始安装</a>
-      <a class="btn btn-ghost" href="index.html">全功能说明</a>
+      <a class="btn btn-ghost" href="GuthonCodeTool_全功能说明.html">全功能说明</a>
       <a class="btn btn-ghost" href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">Github Release</a>
       <a class="btn btn-ghost" href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Release</a>
     </div>
@@ -275,7 +275,11 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 &lt;本地数据目录&gt;/var/docs/谷神方言API/custom.md
 &lt;本地数据目录&gt;/var/docs/谷神方言API/java.md
 &lt;本地数据目录&gt;/var/docs/谷神方言API/javascript.md
-&lt;本地数据目录&gt;/var/docs/谷神方言API/sql.md</code></pre></div>
+&lt;本地数据目录&gt;/var/docs/谷神方言API/sql.md
+&lt;本地数据目录&gt;/var/docs/谷神开发模式/页面脚本模式.md
+&lt;本地数据目录&gt;/var/docs/谷神开发模式/后端脚本模式.md
+&lt;本地数据目录&gt;/var/docs/谷神开发模式/SQL与报表模式.md
+&lt;本地数据目录&gt;/var/docs/谷神开发模式/外部接口模式.md</code></pre></div>
 </section>
 
 <section class="wiki-section">
@@ -326,14 +330,17 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 	<li>手动执行“扫描/重建本地 SVN 索引”时，输出标签同样会显示授权范围、每个 working copy 的状态/版本/解析步骤和事务结果；同一工作区的重复重建点击会直接忽略。</li>
 <li>从“谷神源码”打开 PAGE、过程函数或系统脚本。</li>
 <li>修改后按 <code>Ctrl+S</code>（macOS 为 <code>Cmd+S</code>）保存到本地。</li>
-<li>在“谷神源码”树查看带 <code>M</code> 和修改色的文件及父目录；打开文件后，行号槽、整行背景和概览标尺会按 SVN BASE 高亮新增、修改与删除位置。在 VS Code“源代码管理”中点击文件可继续查看双栏完整差异。</li>
-<li>提交全部修改时点击分组上的提交按钮；只提交一个文件时点击该文件行的提交按钮。SCM 顶部的 SVN 提交说明可选，留空可直接保存。</li>
-<li>更新全部或单个远端变更时，在“远程变更”分组使用对应的更新按钮。</li>
+<li>在“谷神源码”树查看带 <code>M</code> 和修改色的文件及父目录；打开文件后，VS Code 会按 SVN BASE 显示 GitLens 风格的色条、行背景和概览标记，点击色块可内联查看本地更改。在 VS Code“源代码管理”中点击本地变更文件可查看“SVN BASE ↔ 工作副本”，具有 Nexus 对象身份的文件行还可直接“在 Nexus 中编辑”、放弃此文件修改或提交此 Nexus 修改；状态图标区分新增、删除、修改，提交不经过 Git 暂存区。点击检查出的远端变更文件可查看“工作副本 ↔ SVN HEAD”。</li>
+<li>“源代码管理”在 <code>gdrm-product</code> 下直接显示始终可见的中文子系统组；每组同时管理对应数据源和映射到该数据源的系统源码。单一中文名称原样显示为“主数据”“风险管理”“共享中心”，只有国内贸易、国际贸易这种重复后缀分组显示为“贸易系统”；Skill/公共源码单列“公共源码”。</li>
+<li>提交全部修改时使用 <code>gdrm-product</code> 顶部的全部提交；只提交某个子系统或单个文件时使用对应组或文件行的提交按钮。SCM 顶部的 SVN 提交说明可选，留空可直接保存。</li>
+<li><code>gdrm-product</code> 与各子系统组都只保留相同的前四项操作：刷新状态、检查远端变更、提交 Nexus 修改、更新远端变更，并默认常驻显示。子系统首次显示时默认全部展开；之后仍尊重用户手动折叠状态。子系统行的提交与更新只作用于该组的数据源及其映射系统；根节点仍执行全部范围操作。</li>
+<li>提交 Nexus 修改、更新远端变更以及其他多步骤 SCM 操作会在“输出 → GuthonCodeTool”实时显示状态检查、预览、按 working copy 执行 SVN 操作、提交后索引和刷新步骤；同一工作区的重复操作会提示正在执行并忽略本次点击。</li>
+<li>同时显示 <code>var</code> 等其他 Git 仓库且整个 SVN 工作区无本地、远端变更时，第一个子系统下会显示一条不可操作的“当前无变更”占位项，防止 VS Code 原生 SCM 隐藏全部空子系统。该项不计入根节点变更数，也不参与提交或更新。</li>
 <li>看到 SVN revision 后，再到谷神平台完成最终提交。</li>
 </ol>
 <aside class="notice"><div class="notice-icon">!</div><div><p><code>Ctrl+S</code>/<code>Cmd+S</code> 只保存到本地；出现冲突时不要强制提交，先联系负责人处理。SVN 提交成功也不等于谷神平台已最终提交。</p></div></aside>
 <p>“谷神源码”已按业务分组和 <code>index.md</code> 顺序排列，普通用户无需手工整理目录。可使用视图顶部的定位、跳转、搜索和刷新按钮。</p>
-<p>首次重建索引后，AI 会先从索引定位页面事件、过程函数、单据对应表及写入条件，再按需要读取 checkout 中的局部源码；无需手工导出整套 Markdown 源码。</p>
+<p>首次重建索引后，AI 会按问题类型使用有界查询：错误、条件、字段和对象事实使用 <code>facts</code>，表或单据写入原因链使用 <code>explain</code>，对象名不明确时才使用 <code>find</code>，共享函数或跨对象影响分析时才补调用方。DATABASE 通过 <code>query facts/explain</code> 查询，SVN 通过 <code>svn facts/explain</code> 查询；结果返回源码路径、PAGE JSON Pointer、片段行号和续查 token，AI 只在证据不足或实际修改前读取 provider 对应的局部源码，无需手工导出整套 Markdown 源码。</p>
 </section>
 
 <section class="wiki-section">

@@ -120,10 +120,15 @@ def _status(
     remote=False,
     on_progress: ProgressCallback = None,
     phase="状态汇总",
+    working_copy_ids: set[str] | None = None,
 ) -> dict:
     records = []
-    total = len(scope.entries)
-    for index, entry in enumerate(scope.entries, 1):
+    candidates = [
+        entry for entry in scope.entries
+        if not working_copy_ids or entry.id in working_copy_ids
+    ]
+    total = len(candidates)
+    for index, entry in enumerate(candidates, 1):
         label = scope_entry_label(workspace, entry)
         _progress(on_progress, f"[{index}/{total}] {label}｜{phase}｜检查 working copy")
         info = _validate_existing(entry)
@@ -142,6 +147,34 @@ def _status(
         )
     state = _state(workspace, scope, records)
     state["clean"] = all(record["clean"] for record in records)
+    return state
+
+
+def _merge_refreshed_state(
+    workspace: dict,
+    scope: AuthorizedScope,
+    previous: dict,
+    refreshed: dict,
+) -> dict:
+    expected_ids = [entry.id for entry in scope.entries]
+    previous_records = {
+        item.get("id"): item
+        for item in previous.get("workingCopies") or []
+        if isinstance(item, dict) and item.get("id")
+    }
+    refreshed_records = {
+        item.get("id"): item
+        for item in refreshed.get("workingCopies") or []
+        if isinstance(item, dict) and item.get("id")
+    }
+    records = {**previous_records, **refreshed_records}
+    if previous.get("authorizedScopeHash") != scope.digest or any(
+        entry_id not in records for entry_id in expected_ids
+    ):
+        return refreshed
+    ordered = [records[entry_id] for entry_id in expected_ids]
+    state = _state(workspace, scope, ordered)
+    state["clean"] = all(record.get("clean") for record in ordered)
     return state
 
 
@@ -217,6 +250,7 @@ def refresh(
     if exact_targets:
         selected = set(exact_targets)
     with operation_lock(workspace, "manifest-refresh"):
+        previous_state = load_state(workspace, required=False)
         updated = []
         candidates = [entry for entry in scope.entries if not selected or entry.id in selected]
         total = len(candidates)
@@ -284,7 +318,16 @@ def refresh(
                 on_progress,
                 f"[{progress_index}/{total}] {label}｜更新｜完成 · {update_summary}",
             )
-        state = _status(workspace, scope, on_progress=on_progress, phase="更新汇总")
+        refreshed_state = _status(
+            workspace,
+            scope,
+            on_progress=on_progress,
+            phase="更新汇总",
+            working_copy_ids={item["id"] for item in updated},
+        )
+        state = _merge_refreshed_state(workspace, scope, previous_state, refreshed_state)
+        if len(state.get("workingCopies") or []) != len(scope.entries):
+            state = _status(workspace, scope, on_progress=on_progress, phase="更新汇总")
         atomic_json(state_path(workspace), state)
         return {
             "ok": True,

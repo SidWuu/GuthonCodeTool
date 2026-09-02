@@ -3,6 +3,7 @@ const test = require('node:test');
 const {
   DIFF_SCHEME,
   SvnDiffContentProvider,
+  SvnQuickDiffProvider,
   showSvnDiff,
 } = require('../src/svn/diff-content');
 
@@ -63,4 +64,147 @@ test('prefers PAGE readable projections while retaining an explicit raw diff', a
   assert.doesNotMatch(calls[1][3], /PAGE 可读源码/);
   assert.equal(provider.provideTextDocumentContent(calls[1][1]), result.baseContent);
   provider.dispose();
+});
+
+test('opens working copy and SVN HEAD for a remote change', async () => {
+  const calls = [];
+  const vscode = {
+    Uri: { from: fakeUri },
+    commands: { executeCommand: async (...args) => calls.push(args) },
+  };
+  const provider = new SvnDiffContentProvider({ vscode });
+  const result = {
+    workspaceKey: 'products.demo',
+    path: 'procedures/DS-1/demo/pkg/save.gss',
+    comparison: 'remote',
+    localContent: 'return "local";\n',
+    remoteContent: 'return "remote";\n',
+  };
+
+  await showSvnDiff(vscode, provider, result);
+
+  assert.match(calls[0][3], /工作副本.*SVN HEAD/);
+  assert.equal(provider.provideTextDocumentContent(calls[0][1]), result.localContent);
+  assert.equal(provider.provideTextDocumentContent(calls[0][2]), result.remoteContent);
+  provider.dispose();
+});
+
+test('retains returned diff snapshots until VS Code closes their documents', () => {
+  let onDidCloseTextDocument;
+  const vscode = {
+    Uri: { from: fakeUri },
+    workspace: {
+      onDidCloseTextDocument: (listener) => {
+        onDidCloseTextDocument = listener;
+        return { dispose() {} };
+      },
+    },
+  };
+  const provider = new SvnDiffContentProvider({ vscode });
+  const first = provider.documents({
+    workspaceKey: 'products.demo',
+    path: 'procedures/first.gss',
+    baseContent: 'first base\n',
+    workingContent: 'first working\n',
+  });
+
+  for (let index = 0; index < 45; index += 1) {
+    provider.documents({
+      workspaceKey: 'products.demo',
+      path: `procedures/other-${index}.gss`,
+      baseContent: `base ${index}\n`,
+      workingContent: `working ${index}\n`,
+    });
+  }
+
+  assert.equal(provider.provideTextDocumentContent(first.base), 'first base\n');
+  assert.equal(provider.provideTextDocumentContent(first.working), 'first working\n');
+
+  onDidCloseTextDocument({ uri: first.base });
+  assert.equal(provider.provideTextDocumentContent(first.base), '');
+  assert.equal(provider.provideTextDocumentContent(first.working), 'first working\n');
+  provider.dispose();
+});
+
+test('reuses an unchanged snapshot URI for repeated Quick Diff requests', () => {
+  const vscode = { Uri: { from: fakeUri } };
+  const provider = new SvnDiffContentProvider({ vscode });
+  const first = provider.storeOriginal('products.demo', 'procedures/save.gss', 'base\n');
+  const second = provider.storeOriginal('products.demo', 'procedures/save.gss', 'base\n');
+
+  assert.equal(first.toString(), second.toString());
+  assert.equal(provider.provideTextDocumentContent(first), 'base\n');
+  provider.dispose();
+});
+
+test('provides SVN BASE to VS Code Quick Diff for virtual documents', async () => {
+  const vscode = { Uri: { from: fakeUri } };
+  const contentProvider = new SvnDiffContentProvider({ vscode });
+  const calls = [];
+  const backend = {
+    async read(workspaceKey, identity) {
+      calls.push([workspaceKey, identity]);
+      return {
+        sourcePath: 'procedures/DS-1/demo/pkg/save.gss',
+        baseContent: 'return true;\n',
+      };
+    },
+  };
+  const quickDiff = new SvnQuickDiffProvider({ vscode, backend, contentProvider });
+  quickDiff.setWorkspace({ workspaceKey: 'products.demo', checkoutPath: '/checkout/demo' });
+  const uri = fakeUri({
+    scheme: 'guthon-svn-edit',
+    authority: 'products.demo',
+    path: '/save.gss',
+    query: 'sourceType=procedure&sourceId=demo.pkg%23save&funId=save',
+  });
+
+  const original = await quickDiff.provideOriginalResource(uri, { isCancellationRequested: false });
+
+  assert.equal(original.scheme, DIFF_SCHEME);
+  assert.equal(contentProvider.provideTextDocumentContent(original), 'return true;\n');
+  assert.deepEqual(calls, [[
+    'products.demo',
+    { workspaceKey: 'products.demo', sourceType: 'procedure', sourceId: 'demo.pkg#save', funId: 'save', jsonPointer: '' },
+  ]]);
+  quickDiff.dispose();
+  contentProvider.dispose();
+});
+
+test('provides SVN BASE to VS Code Quick Diff for checkout files', async () => {
+  const vscode = {
+    Uri: {
+      from: fakeUri,
+      file: (value) => fakeUri({ scheme: 'file', authority: '', path: value, fsPath: value, query: '' }),
+    },
+  };
+  const contentProvider = new SvnDiffContentProvider({ vscode });
+  const calls = [];
+  const quickDiff = new SvnQuickDiffProvider({
+    vscode,
+    backend: {
+      async diff(workspaceKey, sourcePath) {
+        calls.push([workspaceKey, sourcePath]);
+        return { baseContent: 'before\n' };
+      },
+    },
+    contentProvider,
+  });
+  quickDiff.setWorkspace({ workspaceKey: 'products.demo', checkoutPath: '/checkout/demo' });
+
+  const original = await quickDiff.provideOriginalResource(
+    fakeUri({
+      scheme: 'file',
+      authority: '',
+      path: '/checkout/demo/procedures/save.gss',
+      fsPath: '/checkout/demo/procedures/save.gss',
+      query: '',
+    }),
+    { isCancellationRequested: false }
+  );
+
+  assert.equal(contentProvider.provideTextDocumentContent(original), 'before\n');
+  assert.deepEqual(calls, [['products.demo', 'procedures/save.gss']]);
+  quickDiff.dispose();
+  contentProvider.dispose();
 });

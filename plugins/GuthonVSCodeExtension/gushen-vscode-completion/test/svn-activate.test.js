@@ -13,14 +13,15 @@ const {
 test('all and single submit selections include Nexus-managed candidates only', () => {
   const preview = {
     candidates: [
-      { id: 'nexus-a', path: 'pages/a.json', sessionManaged: true },
-      { id: 'external', path: 'pages/b.json', sessionManaged: false },
-      { id: 'nexus-c', path: 'procedures/c.gss', sessionManaged: true },
+      { id: 'nexus-a', path: 'pages/a.json', workingCopyId: 'system-a', sessionManaged: true },
+      { id: 'external', path: 'pages/b.json', workingCopyId: 'system-a', sessionManaged: false },
+      { id: 'nexus-c', path: 'procedures/c.gss', workingCopyId: 'datasource-c', sessionManaged: true },
     ],
   };
   assert.deepEqual(nexusCandidateIds(preview), ['nexus-a', 'nexus-c']);
   assert.deepEqual(nexusCandidateIds(preview, 'procedures/c.gss'), ['nexus-c']);
   assert.deepEqual(nexusCandidateIds(preview, 'pages/b.json'), []);
+  assert.deepEqual(nexusCandidateIds(preview, '', ['system-a']), ['nexus-a']);
 });
 
 test('multi-selection can span physical working copies', async () => {
@@ -95,12 +96,19 @@ test('opens native tree search after focusing the SVN source view', async () => 
   assert.equal(manifest.contributes.configurationDefaults['workbench.list.horizontalScrolling'], true);
   assert.equal(manifest.contributes.configurationDefaults['workbench.list.defaultFindMode'], 'filter');
   assert.equal(manifest.contributes.configurationDefaults['workbench.list.defaultFindMatchType'], 'fuzzy');
+  assert.equal(manifest.contributes.configurationDefaults['scm.alwaysShowActions'], true);
   const resourceMenus = manifest.contributes.menus['scm/resourceState/context'];
+  assert(resourceMenus.some((item) => item.command === 'gushenCompletion.openSvnChangeInNexus'));
+  assert(resourceMenus.some((item) => item.command === 'gushenCompletion.revertSingleSvnChange'));
   assert(resourceMenus.some((item) => item.command === 'gushenCompletion.saveSingleSvnNexusChange'));
   assert(resourceMenus.some((item) => item.command === 'gushenCompletion.updateSingleSvnChange'));
   const groupMenus = manifest.contributes.menus['scm/resourceGroup/context'];
-  assert(groupMenus.some((item) => item.command === 'gushenCompletion.saveAllSvnNexusChanges'));
-  assert(groupMenus.some((item) => item.command === 'gushenCompletion.updateAllSvnChanges'));
+  const rootCommands = manifest.contributes.menus['scm/title'].map((item) => item.command);
+  const groupCommands = groupMenus.map((item) => item.command);
+  assert.deepEqual(groupCommands, rootCommands);
+  assert.equal(rootCommands.length, 4);
+  assert(groupMenus.every((item) => item.group.startsWith('inline@')));
+  assert(!rootCommands.includes('gushenCompletion.refreshSvn'));
 });
 
 test('maps the active virtual editor back to its Nexus source identity', () => {

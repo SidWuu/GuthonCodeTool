@@ -15,10 +15,11 @@ function logicalSourcePath(workingCopy, filePath) {
 }
 
 class SvnSourceWatcher {
-  constructor({ vscode, backend, onChanged, debounceMs = 250 }) {
+  constructor({ vscode, backend, onChanged, onOutput, debounceMs = 250 }) {
     this.vscode = vscode;
     this.backend = backend;
     this.onChanged = onChanged;
+    this.onOutput = onOutput;
     this.debounceMs = debounceMs;
     this.watchers = new Map();
     this.timers = new Map();
@@ -75,7 +76,13 @@ class SvnSourceWatcher {
     this.timers.set(key, setTimeout(async () => {
       this.timers.delete(key);
       try {
-        const result = await this.backend.reindexFile(workspace.workspaceKey, sourcePath);
+        const result = this.onOutput
+          ? await this.backend.reindexFile(
+            workspace.workspaceKey,
+            sourcePath,
+            { onOutput: this.onOutput }
+          )
+          : await this.backend.reindexFile(workspace.workspaceKey, sourcePath);
         await this.onChanged?.(workspace.workspaceKey, result);
       } catch (error) {
         await this.onChanged?.(workspace.workspaceKey, { ok: false, sourcePath, error });

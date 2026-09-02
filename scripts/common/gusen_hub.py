@@ -411,6 +411,86 @@ def update_workspace_state(config, workspace, step=None, status=None, error="", 
     return load_workspace_state(config, workspace)
 
 
+def _svn_source_control_groups(workspace, working_copies):
+    mappings = workspace.get("systemMappings") or {}
+    records = []
+    cache_path = CONFIG_DIR / "system-data.json"
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
+        records = ((cache.get("datasources") or {}).get(workspace.get("datasourceName")) or {}).get("systems") or []
+    except (AttributeError, json.JSONDecodeError, OSError):
+        records = []
+    names_by_alias = {
+        str(record.get("SYSTEM_ALIAS_ID") or "").strip(): str(record.get("SYSTEM_NAME") or "").strip()
+        for record in records
+        if isinstance(record, dict) and str(record.get("SYSTEM_ALIAS_ID") or "").strip()
+    }
+    systems_by_data_source = {}
+    for alias, mapping in mappings.items():
+        if not isinstance(mapping, dict):
+            continue
+        data_source_id = str(mapping.get("data_source_id") or "").strip()
+        system_id = str(mapping.get("system_id") or "").strip()
+        if not data_source_id or not system_id:
+            continue
+        group = systems_by_data_source.setdefault(data_source_id, {"systemIds": [], "systemNames": []})
+        if system_id not in group["systemIds"]:
+            group["systemIds"].append(system_id)
+        system_name = names_by_alias.get(str(alias).strip())
+        if system_name and system_name not in group["systemNames"]:
+            group["systemNames"].append(system_name)
+
+    copy_ids_by_subdir = {
+        str(item.get("localSubdir") or "").strip().replace("\\", "/"): str(item.get("id") or "").strip()
+        for item in working_copies
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    assigned = set()
+    groups = []
+    for data_source_id, system_group in systems_by_data_source.items():
+        subdirs = [f"datasources/{data_source_id}"] + [
+            f"systems/{system_id}" for system_id in system_group["systemIds"]
+        ]
+        working_copy_ids = [copy_ids_by_subdir[subdir] for subdir in subdirs if subdir in copy_ids_by_subdir]
+        assigned.update(working_copy_ids)
+        system_names = system_group["systemNames"]
+        display_name = (
+            "贸易系统"
+            if set(system_names) == {"国内贸易", "国际贸易"}
+            else system_names[0]
+            if len(system_names) == 1
+            else " / ".join(system_names)
+            if system_names
+            else f"{data_source_id} 子系统"
+        )
+        groups.append({
+            "id": f"subsystem-flat-{data_source_id}",
+            "label": display_name,
+            "dataSourceId": data_source_id,
+            "systemIds": system_group["systemIds"],
+            "systemNames": system_group["systemNames"],
+            "workingCopyIds": working_copy_ids,
+        })
+
+    remaining = [
+        str(item.get("id") or "").strip()
+        for item in working_copies
+        if isinstance(item, dict)
+        and str(item.get("id") or "").strip()
+        and str(item.get("id") or "").strip() not in assigned
+    ]
+    if remaining:
+        groups.append({
+            "id": "shared-flat",
+            "label": "公共源码",
+            "dataSourceId": "",
+            "systemIds": [],
+            "systemNames": [],
+            "workingCopyIds": remaining,
+        })
+    return groups
+
+
 def workspace_summary(config, workspace):
     state = load_workspace_state(config, workspace)
     summary = {
@@ -468,6 +548,10 @@ def workspace_summary(config, workspace):
             }
             for item in checkout_state.get("workingCopies") or []
         ]
+        summary["sourceControlGroups"] = _svn_source_control_groups(
+            workspace,
+            summary["workingCopies"],
+        )
     return summary
 
 
@@ -759,16 +843,44 @@ def workspace_matches_request(config, workspace, payload, match_origin=True):
         return False
     requested_alias = str(payload.get("systemAlias") or "").strip()
     if workspace.get("sourceMode") == "svn":
-        scope = svn_checkout.load_scope(workspace, required=False)
-        if not scope:
-            return False
-        if requested_alias and requested_alias not in set(scope.get("systemAliases") or []):
+        if workspace["svn"].get("checkoutLayout") == "manifest-working-copies":
+            from providers.svn.nexus.manifest import load_authorized_scope
+
+            manifest_path = workspace["svn"].get("scopeManifestPath")
+            if not manifest_path or not manifest_path.is_file():
+                return False
+            entries = load_authorized_scope(workspace).entries
+            authorized_system_ids = {
+                Path(entry.local_subdir).name
+                for entry in entries
+                if entry.category in {"systems", "pages", "system-script"}
+            }
+            authorized_data_source_ids = {
+                Path(entry.local_subdir).name
+                for entry in entries
+                if entry.category in {"datasources", "procedures", "tables", "views"}
+            }
+            authorized_aliases = {
+                str(alias).strip()
+                for alias, mapping in (workspace.get("systemMappings") or {}).items()
+                if isinstance(mapping, dict)
+                and (
+                    str(mapping.get("system_id") or "").strip() in authorized_system_ids
+                    or str(mapping.get("data_source_id") or "").strip() in authorized_data_source_ids
+                )
+            }
+        else:
+            scope = svn_checkout.load_scope(workspace, required=False)
+            if not scope:
+                return False
+            authorized_aliases = set(scope.get("systemAliases") or [])
+            authorized_data_source_ids = set(scope.get("dataSourceIds") or [])
+            authorized_system_ids = set(scope.get("systemIds") or [])
+        if requested_alias and requested_alias not in authorized_aliases:
             return False
         if not data_source_ids and not system_ids:
             return bool(origin or requested_alias)
-        return data_source_ids.issubset(set(scope.get("dataSourceIds") or [])) and system_ids.issubset(
-            set(scope.get("systemIds") or [])
-        )
+        return data_source_ids.issubset(authorized_data_source_ids) and system_ids.issubset(authorized_system_ids)
     if not data_source_ids and not system_ids:
         return bool(origin or requested_alias)
     try:
@@ -1415,12 +1527,12 @@ def run_sync_once(args=None, on_progress=None):
     conn = connect_index(index_path)
     if workspace.get("sourceMode") == "svn":
         if parsed.init_only:
-            export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
+            export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
             return
         result = index_svn_workspace(conn, cfg, workspace, on_progress=on_progress)
         if on_progress is not None:
             on_progress(f"{workspace.get('displayName') or workspace['workspaceKey']}｜索引｜生成索引说明文档")
-        export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
+        export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
         if on_progress is not None:
             on_progress(f"{workspace.get('displayName') or workspace['workspaceKey']}｜索引｜重建流程完成")
         append_pull_log(
@@ -1434,11 +1546,11 @@ def run_sync_once(args=None, on_progress=None):
             raise SystemExit(f"SVN scan completed with {result['failures']} scoped path errors")
         return result
     if parsed.init_only:
-        export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
+        export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
         return
     if parsed.reindex_calls:
         indexed = reindex_local_calls(conn)
-        export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
+        export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
         return
 
     full_rebuild = parsed.full_rebuild
@@ -1473,7 +1585,7 @@ def run_sync_once(args=None, on_progress=None):
     conn.commit()
     if full_rebuild:
         stats["reindexed"] = reindex_local_calls(conn)
-    export_knowledge_readme(conn, index_name, workspace["workspaceKey"])
+    export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
     append_pull_log(
         "source",
         "scheduled",
@@ -1763,6 +1875,106 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
         "checkoutClean": scan["status"]["clean"],
         "checkoutChanges": scan["status"]["changes"],
         "providerCleanup": _cleanup_database_source_after_svn_index(workspace),
+    }
+
+
+def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, on_progress=None):
+    """Atomically rebuild only the selected physical SVN working copies."""
+
+    from providers.svn.nexus import catalog
+
+    svn_checkout.require_capability(workspace, "reindex")
+    if workspace["svn"].get("checkoutLayout") != "manifest-working-copies":
+        raise SystemExit("Scoped SVN indexing requires manifest-working-copies")
+    selected = list(dict.fromkeys(str(value or "").strip() for value in working_copy_ids if str(value or "").strip()))
+    if not selected:
+        return {
+            "mode": "svn-scoped-refresh",
+            "provider": "svn",
+            "workspaceKey": workspace["workspaceKey"],
+            "workingCopyIds": [],
+            "changed": 0,
+            "failures": 0,
+            "errors": [],
+        }
+    progress_label = workspace.get("displayName") or workspace["workspaceKey"]
+
+    def progress(message: str) -> None:
+        if on_progress is not None:
+            on_progress(f"{progress_label}｜索引｜{message}")
+
+    progress(f"开始按 working copy 增量重建 · {', '.join(selected)}")
+    with svn_checkout.operation_lock(workspace, "manifest-scan", shared=True):
+        scan = catalog.scan(
+            workspace,
+            working_copy_ids=selected,
+            collect_modules=False,
+            on_progress=on_progress,
+        )
+    errors = list(scan["errors"])
+    selected_set = set(selected)
+    for item in scan["objects"]:
+        collision = conn.execute(
+            """
+            SELECT source_path FROM gusen_source_record
+            WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=?
+              AND working_copy_id NOT IN ({})
+            LIMIT 1
+            """.format(",".join("?" for _ in selected)),
+            (
+                item["source_table"],
+                item["source_id"],
+                item.get("fun_id") or "",
+                *selected,
+            ),
+        ).fetchone()
+        if collision:
+            errors.append({
+                "scopeEntryId": item.get("scope_entry_id") or "",
+                "path": item["source_path"],
+                "error": f"duplicate object identity also used by {collision['source_path']}",
+            })
+    if errors:
+        progress(f"扫描发现 {len(errors)} 个错误，保留旧索引")
+        return {
+            "mode": "svn-scoped-refresh",
+            "provider": "svn",
+            "workspaceKey": workspace["workspaceKey"],
+            "workingCopyIds": selected,
+            "changed": 0,
+            "failures": len(errors),
+            "errors": errors,
+            "indexPreserved": True,
+        }
+    placeholders = ",".join("?" for _ in selected)
+    existing = conn.execute(
+        "SELECT source_table, source_id, fun_id FROM gusen_source_record "
+        f"WHERE provider='svn' AND working_copy_id IN ({placeholders})",
+        selected,
+    ).fetchall()
+    try:
+        conn.execute("BEGIN")
+        for row in existing:
+            _delete_svn_index_item(conn, workspace, row)
+        indexed_time = _now()
+        for item in scan["objects"]:
+            _insert_svn_index_item(conn, workspace, item, indexed_time)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        progress("索引事务异常，已回滚并保留旧索引")
+        raise
+    changed = len(scan["objects"])
+    progress(f"按 working copy 增量重建完成 · working copy {len(selected_set)} 个 · 对象 {changed} 个")
+    return {
+        "mode": "svn-scoped-refresh",
+        "provider": "svn",
+        "workspaceKey": workspace["workspaceKey"],
+        "workingCopyIds": selected,
+        "changed": changed,
+        "failures": 0,
+        "errors": [],
+        "indexPreserved": False,
     }
 
 
@@ -2241,10 +2453,21 @@ def _source_output_paths(row, base):
     ]
 
 
-def _walk_scripts(value, path=None, inherited_scripts=None, event_type=None):
+def _page_script_node_label(value, node_kind=None):
+    """Use field IDs and visible button names for DATABASE page script files."""
+
+    field_id = value.get("fieldId")
+    if field_id is not None and str(field_id).strip():
+        return str(field_id)
+    if node_kind == "button":
+        return str(value.get("name") or value.get("id") or "")
+    return str(value.get("name") or value.get("aliasName") or value.get("id") or "")
+
+
+def _walk_scripts(value, path=None, inherited_scripts=None, event_type=None, node_kind=None):
     path = path or []
     if isinstance(value, dict):
-        label = str(value.get("aliasName") or value.get("name") or value.get("id") or "")
+        label = _page_script_node_label(value, node_kind)
         next_path = path + ([label] if label else [])
         for key, child in value.items():
             if _is_script_key(key) and isinstance(child, str) and (child.strip() or key == "compScript"):
@@ -2263,10 +2486,11 @@ def _walk_scripts(value, path=None, inherited_scripts=None, event_type=None):
                     next_path,
                     inherited if isinstance(inherited, dict) else None,
                     key if key in EVENT_SUPERS else event_type,
+                    "button" if key in {"button", "buttons"} else None,
                 )
     elif isinstance(value, list):
         for child in value:
-            yield from _walk_scripts(child, path, inherited_scripts, event_type)
+            yield from _walk_scripts(child, path, inherited_scripts, event_type, node_kind)
 
 
 CALL_PATTERNS = [
@@ -2507,9 +2731,12 @@ def export_project_docs(conn, project_id, workspace=None):
     _write_table(out / "invoke-index.md", "项目调用索引", ["来源层", "来源类型", "来源别名", "来源函数", "脚本位置", "行号", "调用类型", "目标别名", "目标函数", "置信度"], [[c["source_layer"], c["source_table"], c["source_alias_id"], c["fun_id"], c["script_type"], c["line_no"], c["invoke_type"], c["target_alias_id"], c["target_fun_id"], c["confidence"]] for c in calls])
 
 
-def export_knowledge_readme(conn, index_db, active):
+def export_knowledge_readme(conn, index_db, active, source_mode="database"):
     out = current_workspace()["contextDir"]
     out.mkdir(parents=True, exist_ok=True)
+    source_mode = str(source_mode or "database").strip().lower()
+    if source_mode not in SOURCE_MODES:
+        raise ValueError(f"Unsupported source mode for knowledge README: {source_mode}")
     source_count = conn.execute("SELECT COUNT(*) FROM gusen_source_record").fetchone()[0]
     call_count = conn.execute("SELECT COUNT(*) FROM gusen_invoke_call").fetchone()[0]
     dynamic_count = conn.execute("SELECT COUNT(*) FROM gusen_dynamic_call").fetchone()[0]
@@ -2518,22 +2745,43 @@ def export_knowledge_readme(conn, index_db, active):
         "",
         f"- 当前索引：`{index_db}`",
         f"- 当前工作区：`{active}`",
-        f"- 源码对象数：{source_count}",
-        f"- 静态调用数：{call_count}",
-        f"- 动态调用点数：{dynamic_count}",
+        f"- 当前源码模式：`{source_mode.upper()}`",
+        f"- 生成时统计：源码对象 {source_count}，静态调用 {call_count}，动态调用点 {dynamic_count}",
         "",
-        "AI 开发先查询 SQLite 局部上下文，不读取全量 Markdown 索引：",
+        "AI 开发先按问题类型查询有界索引，不读取全量 Markdown 索引，也不直接依赖内部表结构：",
         "",
         "```text",
-        f'command + ["query", "--home", home, "--workspace", "{active}", "--", "find", "<关键字>"]',
-        f'command + ["query", "--home", home, "--workspace", "{active}", "--", "context", "--source-id", "<source_id>", "--fun", "<fun_id>"]',
-        f'command + ["query", "--home", home, "--workspace", "{active}", "--", "callers", "--alias", "<source_alias_id>", "--fun", "<fun_id>"]',
-        "```",
-        "",
-        "其中 `command` 和 `home` 读取自 `var/nexus/tool-runtime.json`；该文件由 Guthon Nexus 按当前发行或调试模式生成。PAGE 没有函数名时删除 `--fun` 及其值。",
-        "",
-        "全量 Markdown 仅在显式运行统一 CLI 的 `export-markdown` 时生成；默认使用上述 SQLite 局部查询。",
     ]
+    if source_mode == "svn":
+        lines.extend(
+            [
+                f'command + ["svn", "--home", home, "--workspace", "{active}", "--", "facts", "--keyword", "<错误、条件、字段或业务词>"]',
+                f'command + ["svn", "--home", home, "--workspace", "{active}", "--", "explain", "--table", "<表名>"]',
+                f'command + ["svn", "--home", home, "--workspace", "{active}", "--", "explain", "--bill-type", "<单据类型>", "--data-source-id", "<数据源ID>"]',
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f'command + ["query", "--home", home, "--workspace", "{active}", "--", "facts", "--keyword", "<错误、条件、字段或业务词>"]',
+                f'command + ["query", "--home", home, "--workspace", "{active}", "--", "explain", "--table", "<表名>"]',
+                f'command + ["query", "--home", home, "--workspace", "{active}", "--", "explain", "--bill-type", "<单据类型>", "--data-source-id", "<数据源ID>"]',
+            ]
+        )
+    lines.extend(
+        [
+            f'command + ["query", "--home", home, "--workspace", "{active}", "--", "find", "<对象名、别名或ID>"]',
+            f'command + ["query", "--home", home, "--workspace", "{active}", "--", "context", "--source-id", "<source_id>", "--fun", "<fun_id>"]',
+            f'command + ["query", "--home", home, "--workspace", "{active}", "--", "callers", "--alias", "<source_alias_id>", "--fun", "<fun_id>"]',
+            "```",
+            "",
+            "其中 `command` 和 `home` 读取自 `var/nexus/tool-runtime.json`；该文件由 Guthon Nexus 按当前发行或调试模式生成。对象名不明确时才用 `find`，共享函数或跨对象影响分析时才补 `context`/`callers`。",
+            "",
+            "默认只读取首屏结果；仅在证据不足时使用返回的 `continuationToken` 续查。PAGE 行号属于返回的 JSON Pointer 片段，不是原始 JSON 文件行号。索引是静态定位证据，实际修改前仍须按 provider 读取目标源码。",
+            "",
+            "全量 Markdown 仅在显式运行统一 CLI 的 `export-markdown` 时生成；默认使用上述有界查询。",
+        ]
+    )
     path = out / "README.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path

@@ -53,6 +53,31 @@ test('passes an empty optional SVN commit message through stdin', async () => {
   assert.deepEqual(JSON.parse(calls[0].input), { message: '' });
 });
 
+test('streams backend progress from stderr without breaking UTF-8 chunks', async () => {
+  const messages = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: () => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = { end: () => {} };
+      process.nextTick(() => {
+        const progress = Buffer.from('[SVN] 提交｜执行 commit\n', 'utf8');
+        child.stderr.emit('data', progress.subarray(0, 9));
+        child.stderr.emit('data', progress.subarray(9));
+        child.stdout.emit('data', Buffer.from(JSON.stringify({ ok: true }), 'utf8'));
+        child.emit('close', 0);
+      });
+      return child;
+    },
+  });
+
+  await client.scmStatus('projects.demo', false, { onOutput: (value) => messages.push(value) });
+
+  assert.equal(messages.join(''), '[SVN] 提交｜执行 commit\n');
+});
+
 test('loads page fragments independently from the catalog', async () => {
   const calls = [];
   const client = new SvnBackendClient({

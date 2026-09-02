@@ -52,13 +52,14 @@ function decodeIdentity(uri) {
 }
 
 class SvnVirtualFileSystem {
-  constructor({ vscode, backend, onLoaded, onSaved, onWillSave, onInvalidated }) {
+  constructor({ vscode, backend, onLoaded, onSaved, onWillSave, onInvalidated, onOutput }) {
     this.vscode = vscode;
     this.backend = backend;
     this.onSaved = onSaved;
     this.onWillSave = onWillSave;
     this.onLoaded = onLoaded;
     this.onInvalidated = onInvalidated;
+    this.onOutput = onOutput;
     this.changed = new vscode.EventEmitter();
     this.onDidChangeFile = this.changed.event;
     this.cache = new Map();
@@ -124,12 +125,20 @@ class SvnVirtualFileSystem {
     }
     const text = Buffer.from(content).toString('utf8');
     this.onWillSave?.(record.identity.workspaceKey, record.value.sourcePath);
-    const result = await this.backend.write(
-      record.identity.workspaceKey,
-      record.value.sessionId,
-      record.value.documentId,
-      text
-    );
+    const result = this.onOutput
+      ? await this.backend.write(
+        record.identity.workspaceKey,
+        record.value.sessionId,
+        record.value.documentId,
+        text,
+        { onOutput: this.onOutput }
+      )
+      : await this.backend.write(
+        record.identity.workspaceKey,
+        record.value.sessionId,
+        record.value.documentId,
+        text
+      );
     record.value.content = text;
     record.value.baseContent = result.baseContent ?? record.value.baseContent;
     record.value.lineChanges = result.lineChanges || [];

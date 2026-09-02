@@ -1,4 +1,5 @@
 const { spawn } = require('node:child_process');
+const { StringDecoder } = require('node:string_decoder');
 const { toolArguments } = require('../tool-runtime');
 
 class SvnBackendClient {
@@ -7,7 +8,7 @@ class SvnBackendClient {
     this.spawnProcess = spawnProcess;
   }
 
-  async run(workspaceKey, args, input) {
+  async run(workspaceKey, args, input, { onOutput } = {}) {
     const tool = await this.getTool();
     if (!tool) throw new Error('请先配置 GuthonCodeTool 运行模式和本地数据目录');
     return new Promise((resolve, reject) => {
@@ -18,14 +19,18 @@ class SvnBackendClient {
       );
       const stdoutChunks = [];
       const stderrChunks = [];
+      const stderrDecoder = new StringDecoder('utf8');
       child.stdout.on('data', (data) => {
         stdoutChunks.push(Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8'));
       });
       child.stderr.on('data', (data) => {
-        stderrChunks.push(Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8'));
+        const chunk = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
+        stderrChunks.push(chunk);
+        onOutput?.(stderrDecoder.write(chunk));
       });
       child.on('error', reject);
       child.on('close', (code) => {
+        onOutput?.(stderrDecoder.end());
         const stdout = Buffer.concat(stdoutChunks).toString('utf8');
         const stderr = Buffer.concat(stderrChunks).toString('utf8');
         if (code) return reject(new Error((stderr || stdout || `退出码 ${code}`).trim()));
@@ -77,28 +82,34 @@ class SvnBackendClient {
     return this.run(workspaceKey, args);
   }
 
-  write(workspaceKey, sessionId, documentId, content) {
+  write(workspaceKey, sessionId, documentId, content, options = {}) {
     return this.run(
       workspaceKey,
       ['write', '--session', sessionId, '--document', documentId],
-      { content }
+      { content },
+      options
     );
   }
 
-  scmStatus(workspaceKey, remote = false) {
-    return this.run(workspaceKey, ['scm-status', ...(remote ? ['--remote'] : [])]);
+  scmStatus(workspaceKey, remote = false, options = {}) {
+    return this.run(workspaceKey, ['scm-status', ...(remote ? ['--remote'] : [])], undefined, options);
   }
 
-  refresh(workspaceKey, { sourcePath = '', workingCopyIds = [], mergeLocal = false } = {}) {
+  refresh(workspaceKey, {
+    sourcePath = '',
+    workingCopyIds = [],
+    mergeLocal = false,
+    onOutput,
+  } = {}) {
     const args = ['refresh'];
     if (sourcePath) args.push('--path', sourcePath);
     for (const workingCopyId of workingCopyIds) args.push('--working-copy', workingCopyId);
     if (mergeLocal) args.push('--merge-local');
-    return this.run(workspaceKey, args);
+    return this.run(workspaceKey, args, undefined, { onOutput });
   }
 
-  diff(workspaceKey, sourcePath) {
-    return this.run(workspaceKey, ['diff', '--path', sourcePath]);
+  diff(workspaceKey, sourcePath, remote = false) {
+    return this.run(workspaceKey, ['diff', '--path', sourcePath, ...(remote ? ['--remote'] : [])]);
   }
 
   history(workspaceKey, sourcePath, limit = 20) {
@@ -115,30 +126,30 @@ class SvnBackendClient {
     ]);
   }
 
-  reindexFile(workspaceKey, sourcePath) {
-    return this.run(workspaceKey, ['reindex-file', '--path', sourcePath]);
+  reindexFile(workspaceKey, sourcePath, options = {}) {
+    return this.run(workspaceKey, ['reindex-file', '--path', sourcePath], undefined, options);
   }
 
-  preview(workspaceKey, action, sessionId) {
-    return this.run(workspaceKey, [`${action}-preview`, '--session', sessionId]);
+  preview(workspaceKey, action, sessionId, options = {}) {
+    return this.run(workspaceKey, [`${action}-preview`, '--session', sessionId], undefined, options);
   }
 
-  revert(workspaceKey, preview, candidateIds) {
+  revert(workspaceKey, preview, candidateIds, options = {}) {
     return this.run(workspaceKey, [
       'revert',
       '--session', preview.sessionId,
       '--selection-token', preview.selectionToken,
       ...candidateIds.flatMap((candidateId) => ['--candidate', candidateId]),
-    ]);
+    ], undefined, options);
   }
 
-  platformSave(workspaceKey, preview, candidateIds, message) {
+  platformSave(workspaceKey, preview, candidateIds, message, options = {}) {
     return this.run(workspaceKey, [
       'platform-save',
       '--session', preview.sessionId,
       '--selection-token', preview.selectionToken,
       ...candidateIds.flatMap((candidateId) => ['--candidate', candidateId]),
-    ], { message });
+    ], { message }, options);
   }
 }
 

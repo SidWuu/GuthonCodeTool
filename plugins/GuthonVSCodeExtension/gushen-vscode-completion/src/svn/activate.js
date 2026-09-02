@@ -5,8 +5,12 @@ const { SvnScmManager } = require('./scm-manager');
 const { decodeIdentity, SCHEME, SvnVirtualFileSystem } = require('./virtual-fs');
 const { procedureTargetAt } = require('../definition');
 const { SvnSourceWatcher } = require('./source-watcher');
-const { DIFF_SCHEME, SvnDiffContentProvider, showSvnDiff } = require('./diff-content');
-const { SvnLineDecorationManager } = require('./line-decorations');
+const {
+  DIFF_SCHEME,
+  SvnDiffContentProvider,
+  SvnQuickDiffProvider,
+  showSvnDiff,
+} = require('./diff-content');
 
 async function selectCandidates(vscode, preview, title) {
   const selected = await vscode.window.showQuickPick(
@@ -38,9 +42,14 @@ function selectedWorkingCopyCount(preview, candidateIds) {
   ).size;
 }
 
-function nexusCandidateIds(preview, sourcePath = '') {
+function nexusCandidateIds(preview, sourcePath = '', workingCopyIds = []) {
+  const selectedWorkingCopies = new Set(workingCopyIds || []);
   return (preview.candidates || [])
-    .filter((candidate) => candidate.sessionManaged && (!sourcePath || candidate.path === sourcePath))
+    .filter((candidate) => (
+      candidate.sessionManaged
+      && (!sourcePath || candidate.path === sourcePath)
+      && (!selectedWorkingCopies.size || selectedWorkingCopies.has(candidate.workingCopyId))
+    ))
     .map((candidate) => candidate.id);
 }
 
@@ -103,28 +112,51 @@ function activeSourceIdentity(workspaces, document) {
   return undefined;
 }
 
-function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeChanged }) {
+function activateSvn({
+  vscode,
+  context,
+  getTool,
+  listSvnWorkspaces,
+  onToolTreeChanged,
+  claimOperation,
+}) {
+  const operationOutput = vscode.window.createOutputChannel('GuthonCodeTool');
+  const log = (operation, message) => {
+    operationOutput.show(true);
+    operationOutput.appendLine(`[Nexus SVN] ${operation}｜${message}`);
+  };
+  const streamBackendOutput = (value) => {
+    if (!value) return;
+    operationOutput.show(true);
+    operationOutput.append(String(value));
+  };
+  const backendOutput = { onOutput: streamBackendOutput };
   const backend = new SvnBackendClient({ getTool });
   const catalogTree = new SvnCatalogTreeProvider({ vscode, backend, listSvnWorkspaces });
+  const diffContent = new SvnDiffContentProvider({ vscode });
+  const quickDiff = new SvnQuickDiffProvider({ vscode, backend, contentProvider: diffContent });
   const scm = new SvnScmManager({
     vscode,
     backend,
+    quickDiffProvider: quickDiff,
     onStatusChanged: (workspaceKey, status) => catalogTree.setStatus(workspaceKey, status),
   });
-  const diffContent = new SvnDiffContentProvider({ vscode });
-  const lineDecorations = new SvnLineDecorationManager({ vscode });
-  async function refreshWorkspaceScm(workspaceKey) {
+  async function refreshWorkspaceScm(workspaceKey, options = {}) {
     const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
     if (!workspace) return undefined;
-    return scm.refresh(workspace);
+    return scm.refresh(workspace, options);
   }
-  async function saveDirtyDocuments(workspaceKey, actionLabel) {
+  async function saveDirtyDocuments(workspaceKey, actionLabel, operation = '') {
     const documents = vscode.workspace.textDocuments.filter(
       (document) => document.uri.scheme === SCHEME
         && document.uri.authority === workspaceKey
         && document.isDirty
     );
-    if (!documents.length) return true;
+    if (!documents.length) {
+      if (operation) log(operation, '未发现未保存的 SVN 虚拟文档');
+      return true;
+    }
+    if (operation) log(operation, `发现 ${documents.length} 个未保存的 SVN 虚拟文档`);
     const confirmed = await vscode.window.showWarningMessage(
       `${actionLabel}前需要先保存 ${documents.length} 个 SVN 虚拟文档到本地 checkout。`,
       { modal: true },
@@ -132,23 +164,23 @@ function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeCh
     );
     if (confirmed !== '全部保存并继续') return false;
     for (const document of documents) {
+      if (operation) log(operation, `保存虚拟文档 · ${document.uri.path || document.uri.toString()}`);
       if (!await document.save()) return false;
     }
+    if (operation) log(operation, '虚拟文档已保存到本地 checkout');
     return true;
   }
   let sourceWatcher;
   const virtualFs = new SvnVirtualFileSystem({
     vscode,
     backend,
-    onLoaded: (uri, value) => lineDecorations.update(uri, value.lineChanges),
-    onInvalidated: (workspaceKey, preserveUri) => (
-      lineDecorations.clearWorkspace(workspaceKey, preserveUri)
-    ),
     onWillSave: (workspaceKey, sourcePath) => sourceWatcher?.suppress(workspaceKey, sourcePath),
+    onOutput: streamBackendOutput,
     onSaved: (workspaceKey, result, uri) => {
       catalogTree.refresh(workspaceKey);
       virtualFs.invalidate(workspaceKey, false, uri);
-      if (!scm.applySaved(result)) {
+      const savedIdentity = decodeIdentity(uri);
+      if (!scm.applySaved({ ...result, ...savedIdentity })) {
         refreshWorkspaceScm(workspaceKey).catch((error) => {
           vscode.window.showWarningMessage(`SVN 源码已保存，但 SCM 刷新失败：${error.message}`);
         });
@@ -174,6 +206,7 @@ function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeCh
         );
       }
     },
+    onOutput: streamBackendOutput,
   });
 
   const treeView = vscode.window.createTreeView('gushenCompletion.svnSourceView', {
@@ -238,17 +271,54 @@ function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeCh
       return vscode.window.showErrorMessage(`Guthon Nexus SVN：${error.message}`);
     }
   };
+  const firstResource = (value) => (Array.isArray(value) ? value[0] : value);
+  const singleResource = (value) => {
+    if (Array.isArray(value) && value.length !== 1) {
+      throw new Error('单文件操作一次只能选择一个 SVN 文件');
+    }
+    return firstResource(value);
+  };
   const workspaceKeyOf = (value) => {
     if (typeof value === 'string') return value;
-    if (value?.guthonWorkspaceKey) return value.guthonWorkspaceKey;
-    const id = value?.id || value?.sourceControl?.id || '';
-    return id.startsWith('guthon-svn-') ? id.slice('guthon-svn-'.length) : '';
+    const resource = firstResource(value);
+    if (resource?.guthonWorkspaceKey) return resource.guthonWorkspaceKey;
+    const id = resource?.id || resource?.sourceControl?.id || '';
+    if (id.startsWith('guthon-svn-')) return id.slice('guthon-svn-'.length);
+    return resource?.resourceUri?.authority || '';
+  };
+  const runClaimed = async (workspaceKey, action) => {
+    const claimKey = workspaceKey || '__all__';
+    const release = claimOperation ? claimOperation(claimKey, 'Nexus SVN 源码操作') : undefined;
+    if (claimOperation && !release) return false;
+    try {
+      return await action();
+    } finally {
+      release?.();
+    }
+  };
+  const runClaimedValue = (workspaceValue, action) => (
+    runClaimed(workspaceKeyOf(workspaceValue), () => action(workspaceValue))
+  );
+  const workingCopyIdsOf = (value) => {
+    const resource = firstResource(value);
+    return Array.isArray(resource?.guthonWorkingCopyIds)
+      ? resource.guthonWorkingCopyIds.filter(Boolean)
+      : [];
   };
   const changeIdentity = (workspaceOrResource, sourcePath) => {
     if (typeof workspaceOrResource === 'string') return { workspaceKey: workspaceOrResource, sourcePath };
-    const resourceUri = workspaceOrResource?.resourceUri;
+    const resourceUri = firstResource(workspaceOrResource)?.resourceUri;
     const params = new URLSearchParams(resourceUri?.query || '');
-    return { workspaceKey: resourceUri?.authority || '', sourcePath: params.get('path') || '' };
+    return {
+      workspaceKey: resourceUri?.authority || '',
+      sourcePath: params.get('path') || '',
+      state: params.get('state') || '',
+      workingCopyId: params.get('workingCopyId') || '',
+      sourceType: params.get('sourceType') || '',
+      sourceId: params.get('sourceId') || '',
+      funId: params.get('funId') || '',
+      jsonPointer: params.get('jsonPointer') || '',
+    };
   };
   const revealSourceFile = async (element) => {
     const sourcePath = resolveSourcePath(await listSvnWorkspaces(), element);
@@ -257,58 +327,85 @@ function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeCh
     return vscode.commands.executeCommand('revealInExplorer', uri);
   };
   const completePlatformSave = async (workspaceKey, preview, candidateIds) => {
+    const operation = '提交 Nexus 修改';
     const workingCopyCount = selectedWorkingCopyCount(preview, candidateIds);
     const message = (scm.inputMessage(workspaceKey) || '').trim();
+    log(operation, `准备提交 ${candidateIds.length} 个文件，涉及 ${workingCopyCount} 个 working copy`);
     const confirmed = await vscode.window.showWarningMessage(
       `将保存 ${candidateIds.length} 个文件，分为 ${workingCopyCount} 次 SVN 提交；谷神平台仍需最终提交。`,
       { modal: true },
       '保存到谷神'
     );
     if (confirmed !== '保存到谷神') return undefined;
-    const result = await backend.platformSave(workspaceKey, preview, candidateIds, message);
+    log(operation, '已确认，开始按 working copy 执行 SVN commit');
+    const result = await backend.platformSave(
+      workspaceKey,
+      preview,
+      candidateIds,
+      message,
+      backendOutput
+    );
+    log(operation, 'SVN commit 完成，刷新源码树、虚拟文档和 SCM 状态');
     scm.clearInput(workspaceKey);
     catalogTree.refresh(workspaceKey);
     virtualFs.invalidate(workspaceKey);
-    await refreshWorkspaceScm(workspaceKey);
+    await refreshWorkspaceScm(workspaceKey, backendOutput);
     onToolTreeChanged?.();
+    log(operation, `完成 · ${result.groups.length} 个 working copy · revision ${result.revisions.join('、')}`);
     return vscode.window.showInformationMessage(
       `已保存到谷神 · ${result.groups.length} 个 working copy · revision ${result.revisions.join('、')} · 待谷神平台最终提交`
     );
   };
   const saveNexusChanges = async (workspaceValue, sourcePathValue) => {
+    const operation = '提交 Nexus 修改';
     const identity = changeIdentity(workspaceValue, sourcePathValue);
     const workspaceKey = identity.workspaceKey || workspaceKeyOf(workspaceValue);
     const sourcePath = identity.sourcePath || sourcePathValue || '';
+    const workingCopyIds = [...new Set([
+      ...workingCopyIdsOf(workspaceValue),
+      identity.workingCopyId,
+    ].filter(Boolean))];
     if (!workspaceKey) throw new Error('无法解析 SVN 项目');
-    if (!await saveDirtyDocuments(workspaceKey, '提交 Nexus 修改')) return undefined;
-    const current = await refreshWorkspaceScm(workspaceKey);
+    log(operation, `开始${sourcePath ? `提交指定文件 · ${sourcePath}` : '提交全部 Nexus 修改'}`);
+    if (!await saveDirtyDocuments(workspaceKey, operation, operation)) return undefined;
+    log(operation, '检查当前 SCM 状态');
+    const current = await refreshWorkspaceScm(workspaceKey, backendOutput);
     const nexusChanges = current?.groups?.LOCAL_MODIFIED || [];
-    const selectedChanges = sourcePath
-      ? nexusChanges.filter((change) => change.path === sourcePath)
-      : nexusChanges;
+    const selectedChanges = nexusChanges.filter((change) => (
+      (!sourcePath || change.path === sourcePath)
+      && (!workingCopyIds.length || workingCopyIds.includes(change.workingCopyId))
+    ));
     if (!selectedChanges.length) {
+      log(operation, '没有可提交的 Nexus 修改');
       return vscode.window.showInformationMessage(
         sourcePath ? '所选文件已不是可提交的 Nexus 修改' : '当前项目没有可提交的 Nexus 修改'
       );
     }
-    const preview = await backend.preview(workspaceKey, 'platform-save', current.sessionId);
-    const candidateIds = nexusCandidateIds(preview, sourcePath);
+    log(operation, '生成提交预览并校验可提交文件');
+    const preview = await backend.preview(workspaceKey, 'platform-save', current.sessionId, backendOutput);
+    const candidateIds = nexusCandidateIds(preview, sourcePath, workingCopyIds);
     if (!candidateIds.length) throw new Error('Nexus 修改状态已变化，请刷新后重试');
     return completePlatformSave(workspaceKey, preview, candidateIds);
   };
   const updateRemoteChanges = async (workspaceValue, sourcePathValue) => {
+    const operation = '更新 SVN 远程变更';
     const identity = changeIdentity(workspaceValue, sourcePathValue);
     const workspaceKey = identity.workspaceKey || workspaceKeyOf(workspaceValue);
     const sourcePath = identity.sourcePath || sourcePathValue || '';
+    const scopedWorkingCopyIds = workingCopyIdsOf(workspaceValue);
     if (!workspaceKey) throw new Error('无法解析 SVN 项目');
     const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
     if (!workspace) throw new Error(`找不到 SVN 项目：${workspaceKey}`);
-    if (!await saveDirtyDocuments(workspaceKey, '更新 SVN 远程变更')) return undefined;
-    const current = await scm.refreshRemote(workspace);
-    const selectedRemote = sourcePath
-      ? (current.remoteChanges || []).filter((change) => change.path === sourcePath)
-      : (current.remoteChanges || []);
+    log(operation, `开始${sourcePath ? `更新指定文件 · ${sourcePath}` : '更新远程变更'}`);
+    if (!await saveDirtyDocuments(workspaceKey, operation, operation)) return undefined;
+    log(operation, '检查 SVN 远程变更和本地修改');
+    const current = await scm.refreshRemote(workspace, backendOutput);
+    const selectedRemote = (current.remoteChanges || []).filter((change) => (
+      (!sourcePath || change.path === sourcePath)
+      && (!scopedWorkingCopyIds.length || scopedWorkingCopyIds.includes(change.workingCopyId))
+    ));
     if (!selectedRemote.length) {
+      log(operation, '没有待更新的 SVN 远程变更');
       return vscode.window.showInformationMessage(
         sourcePath ? '所选文件已不是 SVN 远程变更' : '当前项目没有待更新的 SVN 远程变更'
       );
@@ -327,28 +424,47 @@ function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeCh
       button
     );
     if (confirmed !== button) return undefined;
+    log(operation, `已确认，开始更新 ${selectedRemote.length} 个远程文件`);
     const result = await backend.refresh(workspaceKey, {
       sourcePath,
       workingCopyIds: sourcePath ? [] : workingCopyIds,
       mergeLocal: relevantLocal.length > 0,
+      onOutput: streamBackendOutput,
     });
+    log(operation, 'SVN update 完成，刷新源码树、虚拟文档和 SCM 状态');
     catalogTree.refresh(workspaceKey);
     virtualFs.invalidate(workspaceKey, true);
-    await scm.refreshRemote(workspace);
+    await scm.refreshRemote(workspace, backendOutput);
     onToolTreeChanged?.();
+    log(operation, '完成');
     return vscode.window.showInformationMessage(
       sourcePath
         ? `已更新 SVN 文件：${sourcePath}`
         : `已更新 ${result.updated.length} 个 SVN working copy`
     );
   };
-  const manageChanges = async (workspaceValue, requestedAction) => {
-    const workspaceKey = workspaceKeyOf(workspaceValue);
+  const manageChanges = async (workspaceValue, requestedAction, sourcePathValue = '') => {
+    const operation = requestedAction === 'revert' ? '放弃 SVN 本地修改' : '管理本地源码变更';
+    const identity = changeIdentity(workspaceValue, sourcePathValue);
+    const workspaceKey = identity.workspaceKey || workspaceKeyOf(workspaceValue);
+    const sourcePath = identity.sourcePath || sourcePathValue || '';
+    const workingCopyIds = [...new Set([
+      ...workingCopyIdsOf(workspaceValue),
+      identity.workingCopyId,
+    ].filter(Boolean))];
     if (!workspaceKey) throw new Error('无法解析 SVN 项目');
-    if (!await saveDirtyDocuments(workspaceKey, '管理本地源码变更')) return undefined;
-    const current = await refreshWorkspaceScm(workspaceKey);
-    if (!current?.changes?.length) {
-      return vscode.window.showInformationMessage('当前项目没有本地 SVN 源码变更');
+    log(operation, '开始检查本地源码变更');
+    if (!await saveDirtyDocuments(workspaceKey, operation, operation)) return undefined;
+    const current = await refreshWorkspaceScm(workspaceKey, backendOutput);
+    const scopedChanges = (current?.changes || []).filter((change) => (
+      (!sourcePath || change.path === sourcePath)
+      && (!workingCopyIds.length || workingCopyIds.includes(change.workingCopyId))
+    ));
+    if (!scopedChanges.length) {
+      log(operation, '当前项目没有本地 SVN 源码变更');
+      return vscode.window.showInformationMessage(
+        sourcePath ? '所选文件已不是本地 SVN 修改' : '当前项目没有本地 SVN 源码变更'
+      );
     }
     const action = requestedAction || (await vscode.window.showQuickPick(
       [
@@ -372,14 +488,17 @@ function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeCh
       const result = await backend.diff(workspaceKey, selected.change.path);
       return showSvnDiff(vscode, diffContent, result);
     }
-    const preview = await backend.preview(workspaceKey, action, current.sessionId);
+    log(operation, '生成文件选择预览');
+    const preview = await backend.preview(workspaceKey, action, current.sessionId, backendOutput);
     showBlockedWorkingCopies(vscode, preview);
     const isSave = action === 'platform-save';
-    const candidateIds = await selectCandidates(
-      vscode,
-      preview,
-      isSave ? '选择要保存到谷神的物理文件' : '选择要放弃的物理文件'
-    );
+    const candidateIds = sourcePath
+      ? nexusCandidateIds(preview, sourcePath, workingCopyIds)
+      : await selectCandidates(
+        vscode,
+        preview,
+        isSave ? '选择要保存到谷神的物理文件' : '选择要放弃的物理文件'
+      );
     if (!candidateIds.length) return undefined;
     if (isSave) {
       return completePlatformSave(workspaceKey, preview, candidateIds);
@@ -391,17 +510,30 @@ function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeCh
       '放弃修改'
     );
     if (confirmed !== '放弃修改') return undefined;
-    await backend.revert(workspaceKey, preview, candidateIds);
+    log(operation, `已确认，开始恢复 ${candidateIds.length} 个文件到 SVN BASE`);
+    await backend.revert(workspaceKey, preview, candidateIds, backendOutput);
+    log(operation, '恢复完成，刷新源码树、虚拟文档和 SCM 状态');
     catalogTree.refresh(workspaceKey);
     virtualFs.invalidate(workspaceKey, true);
-    await refreshWorkspaceScm(workspaceKey);
+    await refreshWorkspaceScm(workspaceKey, backendOutput);
     onToolTreeChanged?.();
+    log(operation, '完成');
     return vscode.window.showInformationMessage(`已放弃 ${candidateIds.length} 个文件的本地修改`);
+  };
+
+  const openSvnChangeInNexus = async (value) => {
+    const resource = singleResource(value);
+    const identity = changeIdentity(resource);
+    if (!identity.workspaceKey || !identity.sourceType || !identity.sourceId) {
+      throw new Error('所选文件没有对应的 Nexus 源码对象，无法跳转编辑');
+    }
+    return virtualFs.open(identity);
   };
 
   const commands = [
     vscode.commands.registerCommand('gushenCompletion.openSvnDocument', withError((identity) =>
       virtualFs.open(identity))),
+    vscode.commands.registerCommand('gushenCompletion.openSvnChangeInNexus', withError(openSvnChangeInNexus)),
     vscode.commands.registerCommand('gushenCompletion.revealSvnSourceFile', withError(revealSourceFile)),
     vscode.commands.registerCommand('gushenCompletion.jumpSelectedSvnSource', withError(async () => {
       const element = sourceModuleElement(treeView.selection[0]);
@@ -422,41 +554,60 @@ function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeCh
       runFocusedTreeCommand(vscode, 'list.collapse'))),
     vscode.commands.registerCommand('gushenCompletion.searchSvnSource', withError(() =>
       runFocusedTreeCommand(vscode, 'list.find'))),
-    vscode.commands.registerCommand('gushenCompletion.refreshSvnSourceView', withError(async (workspaceKey) => {
-      catalogTree.refresh(workspaceKey);
-      if (workspaceKey) virtualFs.invalidate(workspaceKey, true);
-      const workspaces = await listSvnWorkspaces();
-      if (workspaceKey) {
-        const workspace = workspaces.find((item) => item.workspaceKey === workspaceKey);
-        if (workspace) await scm.refresh(workspace);
-      } else {
-        for (const workspace of workspaces) virtualFs.invalidate(workspace.workspaceKey, true);
-        await scm.refreshAll(workspaces);
+    vscode.commands.registerCommand('gushenCompletion.refreshSvnSourceView', withError((workspaceKey) => runClaimed(
+      workspaceKey || '',
+      async () => {
+        log('刷新 SVN 源码视图', workspaceKey ? `开始 · ${workspaceKey}` : '开始 · 全部工作区');
+        catalogTree.refresh(workspaceKey);
+        if (workspaceKey) virtualFs.invalidate(workspaceKey, true);
+        const workspaces = await listSvnWorkspaces();
+        if (workspaceKey) {
+          const workspace = workspaces.find((item) => item.workspaceKey === workspaceKey);
+          if (workspace) await scm.refresh(workspace, backendOutput);
+        } else {
+          for (const workspace of workspaces) virtualFs.invalidate(workspace.workspaceKey, true);
+          await scm.refreshAll(workspaces, backendOutput);
+        }
+        log('刷新 SVN 源码视图', '完成');
       }
-    })),
-    vscode.commands.registerCommand('gushenCompletion.refreshSvnScm', withError(async (workspaceValue) => {
-      const workspaceKey = workspaceKeyOf(workspaceValue);
-      const workspaces = await listSvnWorkspaces();
-      const selected = workspaceKey
-        ? workspaces.filter((item) => item.workspaceKey === workspaceKey)
-        : workspaces;
-      await scm.refreshAll(selected);
-    })),
-    vscode.commands.registerCommand('gushenCompletion.refreshSvnRemoteChanges', withError(async (workspaceValue) => {
-      const workspaceKey = workspaceKeyOf(workspaceValue);
-      const workspaces = await listSvnWorkspaces();
-      const selected = workspaceKey
-        ? workspaces.filter((item) => item.workspaceKey === workspaceKey)
-        : workspaces;
-      for (const workspace of selected) await scm.refreshRemote(workspace);
-      const total = selected.reduce(
-        (count, workspace) => count + (scm.status(workspace.workspaceKey)?.remoteChanges?.length || 0),
-        0
-      );
-      return vscode.window.showInformationMessage(`SVN 远程检查完成：${total} 个待更新文件`);
-    })),
-    vscode.commands.registerCommand('gushenCompletion.showSvnDiff', withError(async (workspaceKey, sourcePath) => {
-      const result = await backend.diff(workspaceKey, sourcePath);
+    ))),
+    vscode.commands.registerCommand('gushenCompletion.refreshSvnScm', withError((workspaceValue) => runClaimedValue(
+      workspaceValue,
+      async () => {
+        const workspaceKey = workspaceKeyOf(workspaceValue);
+        const workspaces = await listSvnWorkspaces();
+        const selected = workspaceKey
+          ? workspaces.filter((item) => item.workspaceKey === workspaceKey)
+          : workspaces;
+        log('刷新 SVN SCM 状态', `开始 · ${selected.length} 个工作区`);
+        await scm.refreshAll(selected, backendOutput);
+        log('刷新 SVN SCM 状态', '完成');
+      }
+    ))),
+    vscode.commands.registerCommand('gushenCompletion.refreshSvnRemoteChanges', withError((workspaceValue) => runClaimedValue(
+      workspaceValue,
+      async () => {
+        const workspaceKey = workspaceKeyOf(workspaceValue);
+        const workspaces = await listSvnWorkspaces();
+        const selected = workspaceKey
+          ? workspaces.filter((item) => item.workspaceKey === workspaceKey)
+          : workspaces;
+        log('检查 SVN 远程变更', `开始 · ${selected.length} 个工作区`);
+        for (const workspace of selected) await scm.refreshRemote(workspace, backendOutput);
+        const total = selected.reduce(
+          (count, workspace) => count + (scm.status(workspace.workspaceKey)?.remoteChanges?.length || 0),
+          0
+        );
+        log('检查 SVN 远程变更', `完成 · ${total} 个待更新文件`);
+        return vscode.window.showInformationMessage(`SVN 远程检查完成：${total} 个待更新文件`);
+      }
+    ))),
+    vscode.commands.registerCommand('gushenCompletion.showSvnDiff', withError(async (
+      workspaceKey,
+      sourcePath,
+      remote = false
+    ) => {
+      const result = await backend.diff(workspaceKey, sourcePath, remote);
       return showSvnDiff(vscode, diffContent, result);
     })),
     vscode.commands.registerCommand('gushenCompletion.showSvnRawDiff', withError(async (
@@ -478,19 +629,29 @@ function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeCh
       const document = await vscode.workspace.openTextDocument({ language: 'xml', content: result.xml });
       return vscode.window.showTextDocument(document, { preview: true });
     })),
-    vscode.commands.registerCommand('gushenCompletion.manageSvnChanges', withError(manageChanges)),
+    vscode.commands.registerCommand('gushenCompletion.manageSvnChanges', withError((workspaceValue) =>
+      runClaimedValue(workspaceValue, manageChanges))),
     vscode.commands.registerCommand('gushenCompletion.revertSvnChanges', withError((workspaceValue) =>
-      manageChanges(workspaceValue, 'revert'))),
+      runClaimedValue(workspaceValue, (value) => manageChanges(value, 'revert')))),
+    vscode.commands.registerCommand('gushenCompletion.revertSingleSvnChange', withError((value) => {
+      const resource = singleResource(value);
+      const { sourcePath } = changeIdentity(resource);
+      return runClaimedValue(resource, (value) => manageChanges(value, 'revert', sourcePath));
+    })),
     vscode.commands.registerCommand('gushenCompletion.saveSvnToGuthon', withError((workspaceValue) =>
-      manageChanges(workspaceValue, 'platform-save'))),
+      runClaimedValue(workspaceValue, (value) => manageChanges(value, 'platform-save')))),
     vscode.commands.registerCommand('gushenCompletion.saveAllSvnNexusChanges', withError((workspaceValue) =>
-      saveNexusChanges(workspaceValue))),
-    vscode.commands.registerCommand('gushenCompletion.saveSingleSvnNexusChange', withError((resource) =>
-      saveNexusChanges(resource))),
+      runClaimedValue(workspaceValue, saveNexusChanges))),
+    vscode.commands.registerCommand('gushenCompletion.saveSingleSvnNexusChange', withError((value) => {
+      const resource = singleResource(value);
+      return runClaimedValue(resource, saveNexusChanges);
+    })),
     vscode.commands.registerCommand('gushenCompletion.updateAllSvnChanges', withError((workspaceValue) =>
-      updateRemoteChanges(workspaceValue))),
-    vscode.commands.registerCommand('gushenCompletion.updateSingleSvnChange', withError((resource) =>
-      updateRemoteChanges(resource))),
+      runClaimedValue(workspaceValue, updateRemoteChanges))),
+    vscode.commands.registerCommand('gushenCompletion.updateSingleSvnChange', withError((value) => {
+      const resource = singleResource(value);
+      return runClaimedValue(resource, updateRemoteChanges);
+    })),
   ];
 
   async function refresh() {
@@ -513,15 +674,24 @@ function activateSvn({ vscode, context, getTool, listSvnWorkspaces, onToolTreeCh
       for (const command of commands) command.dispose();
       virtualFs.dispose();
       diffContent.dispose();
-      lineDecorations.dispose();
       sourceWatcher.dispose();
       catalogTree.dispose();
       scm.dispose();
+      operationOutput.dispose();
     },
   };
   context.subscriptions.push(disposable);
   refresh().catch(() => {});
-  return { backend, catalogTree, refresh, saveDirtyDocuments, scm, virtualFs };
+  return {
+    backend,
+    backendOutput,
+    catalogTree,
+    log,
+    refresh,
+    saveDirtyDocuments,
+    scm,
+    virtualFs,
+  };
 }
 
 module.exports = {

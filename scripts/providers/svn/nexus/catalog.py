@@ -245,6 +245,7 @@ def _object_for_file(entry: ScopeEntry, path: Path, revisions: dict, changes: di
 def scan(
     workspace: dict,
     *,
+    working_copy_ids=None,
     on_object=None,
     collect_objects: bool = True,
     collect_modules: bool = True,
@@ -253,6 +254,11 @@ def scan(
     """Read authorized files; optionally stream each parsed object to an index writer."""
 
     scope = load_authorized_scope(workspace)
+    selected = set(working_copy_ids or ())
+    unknown = selected - {entry.id for entry in scope.entries}
+    if unknown:
+        raise SystemExit(f"Unknown SVN working copy ids: {', '.join(sorted(unknown))}")
+    entries = [entry for entry in scope.entries if not selected or entry.id in selected]
     objects = []
     modules = []
     errors = []
@@ -260,8 +266,8 @@ def scan(
     revisions = []
     counts = {}
     identities = {}
-    total = len(scope.entries)
-    for index, entry in enumerate(scope.entries, 1):
+    total = len(entries)
+    for index, entry in enumerate(entries, 1):
         label = scope_entry_label(workspace, entry)
         if on_progress is not None:
             on_progress(f"[{index}/{total}] {label}｜索引｜扫描 working copy")

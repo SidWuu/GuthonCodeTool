@@ -10,6 +10,8 @@ import sqlite3
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Callable
+from urllib.parse import quote
 
 from common.page_projection import extract_page_fields, extract_page_scripts
 from providers.svn.checkout import (
@@ -18,8 +20,10 @@ from providers.svn.checkout import (
     operation_lock,
     require_capability,
     run_remote_svn,
+    run_remote_svn_binary,
     run_svn,
     run_svn_binary,
+    svn_info,
     svn_path_changes,
     svn_status,
 )
@@ -32,6 +36,7 @@ from .manifest import (
     resolve_authorized_path,
     source_category,
     source_path_writable,
+    scope_entry_label,
 )
 
 
@@ -39,6 +44,12 @@ TOKEN_VERSION = 1
 TOKEN_TTL_SECONDS = 600
 TOKEN_FILE = "svn-selection-token.json"
 PLATFORM_STATE_FILE = "svn-platform-save-state.json"
+ProgressCallback = Callable[[str], None] | None
+
+
+def _progress(callback: ProgressCallback, message: str) -> None:
+    if callback is not None:
+        callback(message)
 
 
 def _page_projection(text: str) -> str:
@@ -131,15 +142,20 @@ def _platform_state(workspace: dict) -> dict:
     return value if value.get("workspaceKey") == workspace["workspaceKey"] else {}
 
 
-def status(workspace: dict, *, remote=False) -> dict:
+def status(workspace: dict, *, remote=False, on_progress: ProgressCallback = None) -> dict:
     require_capability(workspace, "status")
     scope = load_authorized_scope(workspace)
     session = load_session(workspace)
     changes = []
     remote_changes = []
     working_copies = []
+    _progress(on_progress, "SCM 状态｜读取 Nexus 索引元数据")
     indexed = _catalog_by_path(workspace)
-    for entry in scope.entries:
+    total = len(scope.entries)
+    phase = "检查远程与本地状态" if remote else "检查本地状态"
+    for index, entry in enumerate(scope.entries, 1):
+        label = scope_entry_label(workspace, entry)
+        _progress(on_progress, f"[{index}/{total}] {label}｜SCM 状态｜{phase}")
         current = svn_status(entry.root, remote=remote, settings=workspace["svn"])
         working_copies.append(
             {
@@ -201,6 +217,11 @@ def status(workspace: dict, *, remote=False) -> dict:
                     **_change_metadata(indexed, logical_path),
                 }
             )
+        _progress(
+            on_progress,
+            f"[{index}/{total}] {label}｜SCM 状态｜完成 · "
+            f"本地 {len(current.get('changes') or [])} · 远程 {len(current.get('remoteChanges') or [])}",
+        )
     return {
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
@@ -218,12 +239,68 @@ def status(workspace: dict, *, remote=False) -> dict:
     }
 
 
-def diff(workspace: dict, *, logical_path: str) -> dict:
+def diff(workspace: dict, *, logical_path: str, remote=False) -> dict:
     require_capability(workspace, "status")
     entry, path, relative = _entry_and_path(workspace, logical_path)
-    if not path.is_file():
+    if not remote and not path.is_file():
         raise SystemExit(f"SVN diff target is not a file: {logical_path}")
     with operation_lock(workspace, "manifest-diff", shared=True):
+        if remote:
+            current = svn_status(entry.root, remote=True, settings=workspace["svn"])
+            remote_change = next(
+                (item for item in current.get("remoteChanges") or [] if item["path"] == relative),
+                None,
+            )
+            if not remote_change:
+                raise SystemExit(f"SVN path is no longer a remote change: {logical_path}")
+            local_bytes = path.read_bytes() if path.is_file() else b""
+            if remote_change.get("item") == "deleted":
+                remote_bytes = b""
+            else:
+                entry_url = svn_info(entry.root)["url"]
+                remote_url = f"{entry_url}/{quote(relative, safe='/')}"
+                remote_result = run_remote_svn_binary(
+                    ["cat", "-r", "HEAD", "--", remote_url],
+                    workspace["svn"],
+                    check=False,
+                )
+                if remote_result.returncode:
+                    message = (remote_result.stderr or remote_result.stdout).decode(
+                        "utf-8", errors="replace"
+                    ).strip()
+                    raise SystemExit(message or f"Unable to read SVN HEAD: {logical_path}")
+                remote_bytes = remote_result.stdout
+            local_content = decode_source(local_bytes)[0]
+            remote_content = decode_source(remote_bytes)[0]
+            readable_local = ""
+            readable_remote = ""
+            if path.suffix.lower() == ".json" and source_category(entry, relative) == "pages":
+                try:
+                    readable_local = _page_projection(local_content) if local_content else ""
+                    readable_remote = _page_projection(remote_content) if remote_content else ""
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    readable_local = ""
+                    readable_remote = ""
+            output = "".join(
+                difflib.unified_diff(
+                    local_content.splitlines(keepends=True),
+                    remote_content.splitlines(keepends=True),
+                    fromfile=f"{logical_path} (working copy)",
+                    tofile=f"{logical_path} (SVN HEAD)",
+                )
+            )
+            return {
+                "ok": True,
+                "workspaceKey": workspace["workspaceKey"],
+                "workingCopyId": entry.id,
+                "path": logical_path,
+                "comparison": "remote",
+                "localContent": local_content,
+                "remoteContent": remote_content,
+                "readableLocalContent": readable_local,
+                "readableRemoteContent": readable_remote,
+                "diff": output,
+            }
         base_result = run_svn_binary(["cat", "-r", "BASE", "--", str(path)], check=False)
         if base_result.returncode:
             change = next(
@@ -286,8 +363,13 @@ def history(workspace: dict, *, logical_path: str, limit=20) -> dict:
     }
 
 
-def _candidate_records(workspace: dict, session: dict) -> tuple[list[dict], list[dict]]:
-    current_status = status(workspace)
+def _candidate_records(
+    workspace: dict,
+    session: dict,
+    *,
+    on_progress: ProgressCallback = None,
+) -> tuple[list[dict], list[dict]]:
+    current_status = status(workspace, on_progress=on_progress)
     candidates = []
     for change in current_status["changes"]:
         if not change.get("selectable"):
@@ -316,7 +398,13 @@ def _candidate_records(workspace: dict, session: dict) -> tuple[list[dict], list
     return candidates, blockers
 
 
-def preview(workspace: dict, *, action: str, session_id: str) -> dict:
+def preview(
+    workspace: dict,
+    *,
+    action: str,
+    session_id: str,
+    on_progress: ProgressCallback = None,
+) -> dict:
     if action == "revert":
         require_capability(workspace, "revert")
     elif action != "platform-save":
@@ -324,7 +412,8 @@ def preview(workspace: dict, *, action: str, session_id: str) -> dict:
     session = load_session(workspace)
     if not session_id or session_id != session.get("sessionId"):
         raise SystemExit("SVN edit session is missing or expired")
-    candidates, blockers = _candidate_records(workspace, session)
+    _progress(on_progress, f"{action}｜生成可选文件和阻断项")
+    candidates, blockers = _candidate_records(workspace, session, on_progress=on_progress)
     now = dt.datetime.now(dt.timezone.utc)
     token = str(uuid.uuid4())
     record = {
@@ -339,6 +428,7 @@ def preview(workspace: dict, *, action: str, session_id: str) -> dict:
         "blockers": blockers,
     }
     atomic_json(workspace["contextDir"] / TOKEN_FILE, record)
+    _progress(on_progress, f"{action}｜预览完成 · 可选 {len(candidates)} 个文件 · 阻断 {len(blockers)} 个")
     return {
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
@@ -387,12 +477,16 @@ def _revalidate_selected(
     selected: list[dict],
     *,
     require_remote_current: bool,
+    on_progress: ProgressCallback = None,
+    phase: str = "提交前校验",
 ) -> tuple[ScopeEntry, list[Path]]:
     scope = load_authorized_scope(workspace)
     entry_id = selected[0]["workingCopyId"]
     entry = next((value for value in scope.entries if value.id == entry_id), None)
     if entry is None:
         raise SystemExit("Selected SVN working copy is no longer authorized")
+    label = scope_entry_label(workspace, entry)
+    _progress(on_progress, f"{label}｜{phase}｜重新检查 SVN 状态")
     current = svn_status(
         entry.root,
         remote=require_remote_current,
@@ -418,6 +512,7 @@ def _revalidate_selected(
         if not safe:
             raise SystemExit(f"Selected SVN file changed after preview: {candidate['path']}")
         targets.append(path)
+    _progress(on_progress, f"{label}｜{phase}｜通过 · {len(targets)} 个文件")
     return entry, targets
 
 
@@ -446,9 +541,11 @@ def revert(
     session_id: str,
     selection_token: str,
     candidate_ids: list[str],
+    on_progress: ProgressCallback = None,
 ) -> dict:
     require_capability(workspace, "revert")
     with operation_lock(workspace, "manifest-revert"):
+        _progress(on_progress, "放弃本地修改｜读取选择并重新校验")
         token_path, selected = _load_selection(
             workspace,
             action="revert",
@@ -465,16 +562,27 @@ def revert(
                     session,
                     group,
                     require_remote_current=False,
+                    on_progress=on_progress,
+                    phase="放弃前校验",
                 ),
             )
             for group in _selected_groups(selected)
         ]
         groups = []
-        for group, entry, targets in prepared:
+        total = len(prepared)
+        for index, (group, entry, targets) in enumerate(prepared, 1):
+            _progress(
+                on_progress,
+                f"[{index}/{total}] {scope_entry_label(workspace, entry)}｜放弃｜执行 SVN revert · "
+                f"{len(targets)} 个文件",
+            )
             run_svn(["revert", *map(str, targets)])
             groups.append({"workingCopyId": entry.id, "files": [item["path"] for item in group]})
+            _progress(on_progress, f"[{index}/{total}] {scope_entry_label(workspace, entry)}｜放弃｜完成")
+        _progress(on_progress, "放弃本地修改｜清理 Nexus 编辑会话")
         _clear_selected_session(workspace, session, selected)
         token_path.unlink(missing_ok=True)
+        _progress(on_progress, f"放弃本地修改｜完成 · {len(selected)} 个文件")
         return {
             "ok": True,
             "action": "reverted",
@@ -491,9 +599,11 @@ def platform_save(
     selection_token: str,
     candidate_ids: list[str],
     message: str,
+    on_progress: ProgressCallback = None,
 ) -> dict:
     commit_message = str(message or "").strip()
     with operation_lock(workspace, "manifest-platform-save"):
+        _progress(on_progress, "提交 Nexus 修改｜读取选择并重新校验")
         token_path, selected = _load_selection(
             workspace,
             action="platform-save",
@@ -510,13 +620,22 @@ def platform_save(
                     session,
                     group,
                     require_remote_current=True,
+                    on_progress=on_progress,
+                    phase="提交前校验",
                 ),
             )
             for group in _selected_groups(selected)
         ]
         saved_groups = []
         try:
-            for group, entry, targets in prepared:
+            total = len(prepared)
+            for index, (group, entry, targets) in enumerate(prepared, 1):
+                label = scope_entry_label(workspace, entry)
+                _progress(
+                    on_progress,
+                    f"[{index}/{total}] {label}｜提交｜写入 SVN 提交说明并执行 commit · "
+                    f"{len(targets)} 个文件",
+                )
                 descriptor, message_path = tempfile.mkstemp(
                     prefix="svn-message-", suffix=".txt", dir=workspace["contextDir"]
                 )
@@ -533,6 +652,7 @@ def platform_save(
                         os.unlink(message_path)
                     except FileNotFoundError:
                         pass
+                _progress(on_progress, f"[{index}/{total}] {label}｜提交｜检查提交后的 working copy 状态")
                 after = svn_status(entry.root)
                 remaining = {change["path"] for change in after.get("changes") or []}
                 for target in targets:
@@ -548,7 +668,9 @@ def platform_save(
                         "svnOutput": result.stdout,
                     }
                 )
+                _progress(on_progress, f"[{index}/{total}] {label}｜提交｜完成 · r{revision}")
                 _clear_selected_session(workspace, session, group)
+            _progress(on_progress, "提交 Nexus 修改｜写入待谷神平台最终提交状态")
         except (Exception, SystemExit) as error:
             completed = "、".join(
                 f"{group['workingCopyId']}@r{group['revision']}" for group in saved_groups
@@ -568,6 +690,11 @@ def platform_save(
             "committedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
         }
         atomic_json(workspace["contextDir"] / PLATFORM_STATE_FILE, platform_state)
+        _progress(
+            on_progress,
+            f"提交 Nexus 修改｜完成 · {len(saved_groups)} 个 working copy · "
+            f"revision {'、'.join(revisions)}",
+        )
         return {
             "ok": True,
             "action": "saved-to-guthon",

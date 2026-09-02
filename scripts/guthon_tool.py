@@ -213,20 +213,57 @@ def _reindex_svn(gusen_hub, config, workspace, on_progress=None) -> dict:
     return result
 
 
-def _reindex_svn_files(gusen_hub, config, workspace, source_paths: list[str]) -> list[dict]:
+def _reindex_svn_files(
+    gusen_hub,
+    config,
+    workspace,
+    source_paths: list[str],
+    on_progress=None,
+) -> list[dict]:
+    paths = list(dict.fromkeys(source_paths))
+    if on_progress is not None:
+        on_progress(f"{workspace['displayName']}｜索引｜开始更新 {len(paths)} 个源码文件")
     connection = gusen_hub.connect_index(workspace["indexPath"])
     try:
-        results = [
-            gusen_hub.index_svn_workspace_file(connection, config, workspace, source_path)
-            for source_path in dict.fromkeys(source_paths)
-        ]
+        results = []
+        for index, source_path in enumerate(paths, 1):
+            if on_progress is not None:
+                on_progress(f"[{index}/{len(paths)}] {workspace['displayName']}｜索引｜更新文件 · {source_path}")
+            results.append(
+                gusen_hub.index_svn_workspace_file(connection, config, workspace, source_path)
+            )
     finally:
         connection.close()
+    if on_progress is not None:
+        on_progress(f"{workspace['displayName']}｜索引｜完成 · {len(results)} 个源码文件")
     return results
 
 
+def _reindex_svn_working_copies(
+    gusen_hub,
+    config,
+    workspace,
+    working_copy_ids: list[str],
+    on_progress=None,
+) -> dict:
+    connection = gusen_hub.connect_index(workspace["indexPath"])
+    try:
+        result = gusen_hub.index_svn_workspace_working_copies(
+            connection,
+            config,
+            workspace,
+            working_copy_ids,
+            on_progress=on_progress,
+        )
+    finally:
+        connection.close()
+    if result.get("failures"):
+        raise SystemExit(f"Scoped SVN scan failed; existing index preserved: {result['errors']}")
+    return result
+
+
 def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str] | None:
-    """Return exact changed source paths, or None when a full scan is safer."""
+    """Return exact changed source paths, or None when the selected copies need a scoped scan."""
 
     from providers.svn.nexus.manifest import load_authorized_scope, source_category
 
@@ -281,18 +318,39 @@ def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str] 
     return list(dict.fromkeys(logical_paths))
 
 
-def _reindex_svn_refresh(gusen_hub, config, workspace, refresh_result: dict) -> dict:
+def _reindex_svn_refresh(gusen_hub, config, workspace, refresh_result: dict, on_progress=None) -> dict:
+    if on_progress is not None:
+        on_progress(f"{workspace['displayName']}｜索引｜开始更新后的增量索引")
     paths = _manifest_refresh_paths(workspace, refresh_result)
     if paths is None:
-        return _reindex_svn(gusen_hub, config, workspace)
-    files = _reindex_svn_files(gusen_hub, config, workspace, paths)
-    return {
-        "mode": "svn-incremental-refresh",
-        "workspaceKey": workspace["workspaceKey"],
-        "changed": sum(item.get("changed", 0) for item in files),
-        "failures": sum(item.get("failures", 0) for item in files),
-        "files": files,
-    }
+        result = _reindex_svn_working_copies(
+            gusen_hub,
+            config,
+            workspace,
+            [item.get("id") for item in refresh_result.get("updated") or [] if item.get("id")],
+            on_progress=on_progress,
+        )
+    else:
+        files = _reindex_svn_files(
+            gusen_hub,
+            config,
+            workspace,
+            paths,
+            on_progress=on_progress,
+        )
+        result = {
+            "mode": "svn-incremental-refresh",
+            "workspaceKey": workspace["workspaceKey"],
+            "changed": sum(item.get("changed", 0) for item in files),
+            "failures": sum(item.get("failures", 0) for item in files),
+            "files": files,
+        }
+    if on_progress is not None:
+        on_progress(
+            f"{workspace['displayName']}｜索引｜更新后的索引完成 · "
+            f"对象 {result.get('changed', 0)} · 失败 {result.get('failures', 0)}"
+        )
+    return result
 
 
 def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
@@ -543,15 +601,28 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     merge_local=parsed.merge_local,
                     working_copy_ids=parsed.working_copy,
                     logical_paths=[parsed.path] if parsed.path else None,
+                    on_progress=_svn_progress,
                 )
             else:
                 if parsed.path:
                     raise SystemExit("svn refresh --path requires manifest-working-copies")
-                result = checkout.refresh(workspace, gusen_hub.CONFIG_DIR, bootstrap, prune=parsed.prune)
+                result = checkout.refresh(
+                    workspace,
+                    gusen_hub.CONFIG_DIR,
+                    bootstrap,
+                    prune=parsed.prune,
+                    on_progress=_svn_progress,
+                )
             result["reindex"] = (
-                _reindex_svn_refresh(gusen_hub, config, workspace, result)
+                _reindex_svn_refresh(
+                    gusen_hub,
+                    config,
+                    workspace,
+                    result,
+                    on_progress=_svn_progress,
+                )
                 if manifest_layout
-                else _reindex_svn(gusen_hub, config, workspace)
+                else _reindex_svn(gusen_hub, config, workspace, on_progress=_svn_progress)
             )
             gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
         elif parsed.action == "status":
@@ -624,8 +695,16 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 document_id=parsed.document,
                 content=payload["content"],
             )
+            _svn_progress(f"{workspace['displayName']}｜源码写入｜已写回本地 SVN working copy")
             if result.get("changed"):
-                result["reindex"] = _reindex_svn_files(gusen_hub, config, workspace, [result["sourcePath"]])
+                result["reindex"] = _reindex_svn_files(
+                    gusen_hub,
+                    config,
+                    workspace,
+                    [result["sourcePath"]],
+                    on_progress=_svn_progress,
+                )
+            _svn_progress(f"{workspace['displayName']}｜源码写入｜完成")
         elif parsed.action in {"definition", "callers"}:
             if not manifest_layout:
                 raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
@@ -672,7 +751,13 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         elif parsed.action == "reindex-file":
             if not manifest_layout or not parsed.path:
                 raise SystemExit("svn reindex-file requires manifest-working-copies and --path")
-            indexed = _reindex_svn_files(gusen_hub, config, workspace, [parsed.path])
+            indexed = _reindex_svn_files(
+                gusen_hub,
+                config,
+                workspace,
+                [parsed.path],
+                on_progress=_svn_progress,
+            )
             result = {
                 "ok": True,
                 "workspaceKey": workspace["workspaceKey"],
@@ -686,11 +771,11 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             from providers.svn.nexus import scm
 
             if parsed.action == "scm-status":
-                result = scm.status(workspace, remote=parsed.remote)
+                result = scm.status(workspace, remote=parsed.remote, on_progress=_svn_progress)
             elif parsed.action == "diff":
                 if not parsed.path:
                     raise SystemExit("svn diff requires --path")
-                result = scm.diff(workspace, logical_path=parsed.path)
+                result = scm.diff(workspace, logical_path=parsed.path, remote=parsed.remote)
             elif parsed.action == "history":
                 if not parsed.path:
                     raise SystemExit("svn history requires --path")
@@ -699,7 +784,12 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 if not parsed.session:
                     raise SystemExit(f"svn {parsed.action} requires --session")
                 action = "revert" if parsed.action == "revert-preview" else "platform-save"
-                result = scm.preview(workspace, action=action, session_id=parsed.session)
+                result = scm.preview(
+                    workspace,
+                    action=action,
+                    session_id=parsed.session,
+                    on_progress=_svn_progress,
+                )
             elif parsed.action == "revert":
                 if not parsed.session or not parsed.selection_token:
                     raise SystemExit("svn revert requires --session and --selection-token")
@@ -708,8 +798,15 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     session_id=parsed.session,
                     selection_token=parsed.selection_token,
                     candidate_ids=parsed.candidate,
+                    on_progress=_svn_progress,
                 )
-                result["reindex"] = _reindex_svn_files(gusen_hub, config, workspace, result["files"])
+                result["reindex"] = _reindex_svn_files(
+                    gusen_hub,
+                    config,
+                    workspace,
+                    result["files"],
+                    on_progress=_svn_progress,
+                )
             else:
                 if not parsed.session or not parsed.selection_token:
                     raise SystemExit("svn platform-save requires --session and --selection-token")
@@ -723,8 +820,15 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     selection_token=parsed.selection_token,
                     candidate_ids=parsed.candidate,
                     message=(payload or {}).get("message") if isinstance(payload, dict) else "",
+                    on_progress=_svn_progress,
                 )
-                result["reindex"] = _reindex_svn_files(gusen_hub, config, workspace, result["files"])
+                result["reindex"] = _reindex_svn_files(
+                    gusen_hub,
+                    config,
+                    workspace,
+                    result["files"],
+                    on_progress=_svn_progress,
+                )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     if command == "init":
