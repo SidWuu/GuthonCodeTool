@@ -172,6 +172,133 @@ class SvnQuickDiffProvider {
   }
 }
 
+function isUri(value) {
+  return Boolean(value && typeof value.scheme === 'string' && typeof value.toString === 'function');
+}
+
+function documentWithLineChanges(
+  vscode,
+  originalDocument,
+  modifiedDocument,
+  changes,
+  omittedIndex = -1
+) {
+  const parts = [];
+  let originalLine = 0;
+  for (const [changeIndex, change] of changes.entries()) {
+    const originalEndLineNumber = Number(change.originalEndLineNumber || 0);
+    const modifiedEndLineNumber = Number(change.modifiedEndLineNumber || 0);
+    const originalStartLineNumber = Number(change.originalStartLineNumber || 0);
+    const modifiedStartLineNumber = Number(change.modifiedStartLineNumber || 0);
+    const originalIsEmpty = originalEndLineNumber === 0;
+    const modifiedIsEmpty = modifiedEndLineNumber === 0;
+    const originalChangeStartLine = originalIsEmpty
+      ? originalStartLineNumber
+      : originalStartLineNumber - 1;
+    let originalStartLine = originalChangeStartLine;
+    let originalStartColumn = 0;
+    if (modifiedIsEmpty && originalEndLineNumber === originalDocument.lineCount) {
+      originalStartLine -= 1;
+      originalStartColumn = originalDocument.lineAt(originalStartLine).range.end.character;
+    }
+    parts.push(originalDocument.getText(new vscode.Range(
+      originalLine,
+      0,
+      originalStartLine,
+      originalStartColumn
+    )));
+    if (changeIndex === omittedIndex) {
+      if (!originalIsEmpty) {
+        parts.push(originalDocument.getText(new vscode.Range(
+          originalChangeStartLine,
+          0,
+          originalEndLineNumber,
+          0
+        )));
+      }
+    } else if (!modifiedIsEmpty) {
+      let modifiedStartLine = modifiedStartLineNumber - 1;
+      let modifiedStartColumn = 0;
+      if (originalIsEmpty && originalStartLineNumber === originalDocument.lineCount) {
+        modifiedStartLine -= 1;
+        modifiedStartColumn = modifiedDocument.lineAt(modifiedStartLine).range.end.character;
+      }
+      parts.push(modifiedDocument.getText(new vscode.Range(
+        modifiedStartLine,
+        modifiedStartColumn,
+        modifiedEndLineNumber,
+        0
+      )));
+    }
+    originalLine = originalIsEmpty ? originalStartLineNumber : originalEndLineNumber;
+  }
+  parts.push(originalDocument.getText(new vscode.Range(
+    originalLine,
+    0,
+    originalDocument.lineCount,
+    0
+  )));
+  return parts.join('');
+}
+
+async function revertQuickDiffChange({ vscode, provider, resourceUri, changes, changeIndex }) {
+  if (!isUri(resourceUri)
+    || !Array.isArray(changes)
+    || !Number.isInteger(changeIndex)
+    || !changes[changeIndex]) {
+    void vscode.window.showWarningMessage('未取得当前 SVN 差异块，请重新点击左侧变更标记后再试。');
+    return false;
+  }
+  const editors = [
+    vscode.window.activeTextEditor,
+    ...(vscode.window.visibleTextEditors || []),
+  ].filter((editor, index, all) => (
+    editor && all.indexOf(editor) === index
+  ));
+  const editor = editors.find((candidate) => (
+    candidate.document.uri.toString() === resourceUri.toString()
+  ));
+  if (!editor) {
+    void vscode.window.showWarningMessage('当前修改文件未在编辑器中打开，无法撤销这一处变更。');
+    return false;
+  }
+  const originalUri = await provider.provideOriginalResource(resourceUri, {
+    isCancellationRequested: false,
+  });
+  if (!originalUri) {
+    void vscode.window.showWarningMessage('当前文件没有可用的 SVN BASE，无法撤销这一处变更。');
+    return false;
+  }
+  const originalDocument = await vscode.workspace.openTextDocument(originalUri);
+  const updatedText = documentWithLineChanges(
+    vscode,
+    originalDocument,
+    editor.document,
+    changes,
+    changeIndex
+  );
+  const lastLine = Math.max(0, editor.document.lineCount - 1);
+  const endCharacter = editor.document.lineAt(lastLine).range.end.character;
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(
+    resourceUri,
+    new vscode.Range(0, 0, lastLine, endCharacter),
+    updatedText
+  );
+  if (!await vscode.workspace.applyEdit(edit)) {
+    throw new Error('VS Code 未能应用当前差异块的撤销编辑');
+  }
+  if (!await editor.document.save()) throw new Error('撤销后保存文件失败');
+  const targetLine = Math.max(0, Math.min(
+    editor.document.lineCount - 1,
+    Number(changes[changeIndex].modifiedStartLineNumber || 1) - 1
+  ));
+  if (vscode.Selection) editor.selection = new vscode.Selection(targetLine, 0, targetLine, 0);
+  const visibleRange = editor.visibleRanges?.[0];
+  if (visibleRange) editor.revealRange?.(visibleRange);
+  return true;
+}
+
 async function showSvnDiff(vscode, provider, result, options = {}) {
   const documents = provider.documents(result, options);
   const filename = safeDiffName(result.path);
@@ -191,6 +318,8 @@ module.exports = {
   SvnDiffContentProvider,
   SvnQuickDiffProvider,
   relativeSourcePath,
+  documentWithLineChanges,
+  revertQuickDiffChange,
   safeDiffName,
   showSvnDiff,
 };

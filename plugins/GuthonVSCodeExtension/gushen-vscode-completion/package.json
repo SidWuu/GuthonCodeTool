@@ -14,6 +14,7 @@
     "Programming Languages"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onLanguage:java",
     "onLanguage:guthon-gss",
     "onLanguage:javascript",
@@ -35,6 +36,7 @@
     "onCommand:gushenCompletion.refreshSvnRemoteChanges",
     "onCommand:gushenCompletion.showSvnDiff",
     "onCommand:gushenCompletion.showSvnRawDiff",
+    "onCommand:gushenCompletion.revertSvnQuickDiffChange",
     "onCommand:gushenCompletion.showSvnHistory",
     "onCommand:gushenCompletion.manageSvnChanges",
     "onCommand:gushenCompletion.revertSvnChanges",
@@ -77,7 +79,8 @@
       "workbench.list.horizontalScrolling": true,
       "workbench.list.defaultFindMode": "filter",
       "workbench.list.defaultFindMatchType": "fuzzy",
-      "scm.alwaysShowActions": true
+      "scm.alwaysShowActions": true,
+      "scm.repositories.selectionMode": "multiple"
     },
     "languages": [
       {
@@ -153,6 +156,7 @@
       { "command": "gushenCompletion.refreshSvnRemoteChanges", "title": "Guthon Nexus: 检查 SVN 远程变更", "icon": "$(cloud-download)" },
       { "command": "gushenCompletion.showSvnDiff", "title": "Guthon Nexus: 查看 SVN 差异" },
       { "command": "gushenCompletion.showSvnRawDiff", "title": "Guthon Nexus: 查看 SVN 原始文件差异" },
+      { "command": "gushenCompletion.revertSvnQuickDiffChange", "title": "Guthon Nexus: 撤销当前差异块", "icon": "$(discard)" },
       { "command": "gushenCompletion.showSvnHistory", "title": "Guthon Nexus: 查看 SVN 历史", "icon": "$(history)" },
       { "command": "gushenCompletion.manageSvnChanges", "title": "Guthon Nexus: 管理本地源码变更", "icon": "$(source-control)" },
       { "command": "gushenCompletion.revertSvnChanges", "title": "Guthon Nexus: 放弃 SVN 本地修改", "icon": "$(discard)" },
@@ -221,6 +225,9 @@
         { "command": "gushenCompletion.refreshSvnRemoteChanges", "when": "scmProvider =~ /^guthon-svn-/", "group": "inline@2" },
         { "command": "gushenCompletion.saveAllSvnNexusChanges", "when": "scmProvider =~ /^guthon-svn-/", "group": "inline@3" },
         { "command": "gushenCompletion.updateAllSvnChanges", "when": "scmProvider =~ /^guthon-svn-/", "group": "inline@4" }
+      ],
+      "scm/change/title": [
+        { "command": "gushenCompletion.revertSvnQuickDiffChange", "when": "originalResourceScheme == guthon-svn-diff", "group": "navigation@1" }
       ],
       "scm/resourceState/context": [
         { "command": "gushenCompletion.openSvnChangeInNexus", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState =~ /^guthonSvn\\.(LOCAL_MODIFIED|EXTERNAL_MODIFIED)\\.nexus$/", "group": "inline@1" },

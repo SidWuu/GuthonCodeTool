@@ -4,6 +4,8 @@ const {
   SvnScmManager,
   changeDiffStatus,
   changeDisplayName,
+  sourceControlId,
+  workspaceKeyFromSourceControlId,
 } = require('../src/svn/scm-manager');
 
 function fakeVscode() {
@@ -56,6 +58,7 @@ test('SCM always exposes save-to-Guthon in Nexus SVN mode', () => {
   const vscode = fakeVscode();
   const manager = new SvnScmManager({ vscode, backend: {} });
   const record = manager.ensure(workspace());
+  assert.equal(record.sourceControl.id, 'guthon-svn-v3-projects.demo');
   const trade = record.groups.get('subsystem-flat-0008');
   assert.equal(trade.label, '贸易系统');
   assert.equal(trade.guthonWorkspaceKey, 'projects.demo');
@@ -71,7 +74,14 @@ test('SCM always exposes save-to-Guthon in Nexus SVN mode', () => {
   manager.dispose();
 });
 
-test('registers one Quick Diff provider for virtual and checkout documents', () => {
+test('keeps workspace routing compatible with current and legacy SCM provider IDs', () => {
+  assert.equal(sourceControlId('products.demo'), 'guthon-svn-v3-products.demo');
+  assert.equal(workspaceKeyFromSourceControlId('guthon-svn-v2-products.demo'), 'products.demo');
+  assert.equal(workspaceKeyFromSourceControlId('guthon-svn-products.demo'), 'products.demo');
+  assert.equal(workspaceKeyFromSourceControlId('git-demo'), '');
+});
+
+test('registers native Quick Diff for physical and virtual SVN documents', () => {
   const vscode = fakeVscode();
   const quickDiffProvider = {
     workspaces: [],
@@ -83,6 +93,7 @@ test('registers one Quick Diff provider for virtual and checkout documents', () 
   const record = manager.ensure(workspace());
 
   assert.equal(record.sourceControl.quickDiffProvider, quickDiffProvider);
+  assert.equal(record.sourceControl.rootUri, undefined);
   assert.deepEqual(quickDiffProvider.workspaces, ['projects.demo']);
   manager._applyStatus(record, {
     ok: true,
@@ -251,5 +262,87 @@ test('keeps remote changes across local refreshes and replaces them after a remo
   await manager.refresh(workspace());
   assert.equal(record.groups.get('subsystem-flat-0008').resourceStates.length, 1);
   assert.equal(record.sourceControl.count, 1);
+  manager.dispose();
+});
+
+test('scoped remote refresh keeps other local changes but only displays selected remote changes', async () => {
+  const vscode = fakeVscode();
+  const calls = [];
+  const backend = {
+    scmStatus: async (workspaceKey, remote, options) => {
+      calls.push({ workspaceKey, remote, options });
+      return {
+        ok: true,
+        workspaceKey,
+        clean: false,
+        workingCopies: [{ id: 'datasources-0008', clean: false }],
+        changes: [{
+          path: 'procedures/DS-1/local.gss',
+          item: 'modified',
+          workingCopyId: 'datasources-0008',
+        }],
+        groups: {
+          LOCAL_MODIFIED: [{
+            path: 'procedures/DS-1/local.gss',
+            item: 'modified',
+            workingCopyId: 'datasources-0008',
+          }],
+        },
+        remoteChecked: true,
+        remoteChanges: [{
+          path: 'procedures/DS-1/remote.gss',
+          item: 'modified',
+          workingCopyId: 'datasources-0008',
+        }],
+      };
+    },
+  };
+  const manager = new SvnScmManager({ vscode, backend });
+  const record = manager.ensure(workspace());
+  manager._applyStatus(record, {
+    ok: true,
+    workspaceKey: 'projects.demo',
+    clean: false,
+    workingCopies: [
+      { id: 'datasources-0008', clean: true },
+      { id: 'systems-domestic', clean: false },
+    ],
+    changes: [{
+      path: 'pages/SYS-1/local-page.json',
+      item: 'modified',
+      workingCopyId: 'systems-domestic',
+    }],
+    groups: {
+      LOCAL_MODIFIED: [{
+        path: 'pages/SYS-1/local-page.json',
+        item: 'modified',
+        workingCopyId: 'systems-domestic',
+      }],
+    },
+    remoteChecked: true,
+    remoteChanges: [{
+      path: 'pages/SYS-1/old-remote.json',
+      item: 'modified',
+      workingCopyId: 'systems-domestic',
+    }],
+  });
+
+  await manager.refreshRemote(workspace(), { workingCopyIds: ['datasources-0008'] });
+
+  assert.deepEqual(calls[0], {
+    workspaceKey: 'projects.demo',
+    remote: true,
+    options: { workingCopyIds: ['datasources-0008'] },
+  });
+  assert.deepEqual(record.status.workingCopies.map((item) => item.id), [
+    'systems-domestic', 'datasources-0008',
+  ]);
+  assert.deepEqual(record.status.changes.map((item) => item.path), [
+    'pages/SYS-1/local-page.json', 'procedures/DS-1/local.gss',
+  ]);
+  assert.deepEqual(record.status.remoteChanges.map((item) => item.path), [
+    'procedures/DS-1/remote.gss',
+  ]);
+  assert.equal(record.groups.get('subsystem-flat-0008').resourceStates.length, 3);
   manager.dispose();
 });

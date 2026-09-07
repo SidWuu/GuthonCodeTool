@@ -1,7 +1,7 @@
 const path = require('node:path');
 const { SvnBackendClient } = require('./backend-client');
 const { SvnCatalogTreeProvider } = require('./catalog-tree');
-const { SvnScmManager } = require('./scm-manager');
+const { SvnScmManager, workspaceKeyFromSourceControlId } = require('./scm-manager');
 const { decodeIdentity, SCHEME, SvnVirtualFileSystem } = require('./virtual-fs');
 const { procedureTargetAt } = require('../definition');
 const { SvnSourceWatcher } = require('./source-watcher');
@@ -9,6 +9,7 @@ const {
   DIFF_SCHEME,
   SvnDiffContentProvider,
   SvnQuickDiffProvider,
+  revertQuickDiffChange,
   showSvnDiff,
 } = require('./diff-content');
 
@@ -31,6 +32,11 @@ function showBlockedWorkingCopies(vscode, preview) {
   vscode.window.showWarningMessage(
     `另有 ${blockers.length} 个冲突、新增、删除或未跟踪文件仅供查看，本次不可保存或撤销。`
   );
+}
+
+function notifyInformation(vscode, message) {
+  // Do not return VS Code's notification Thenable: claimed SVN operations must release immediately.
+  void vscode.window.showInformationMessage(message);
 }
 
 function selectedWorkingCopyCount(preview, candidateIds) {
@@ -268,7 +274,8 @@ function activateSvn({
     try {
       return await action(...args);
     } catch (error) {
-      return vscode.window.showErrorMessage(`Guthon Nexus SVN：${error.message}`);
+      void vscode.window.showErrorMessage(`Guthon Nexus SVN：${error.message}`);
+      return undefined;
     }
   };
   const firstResource = (value) => (Array.isArray(value) ? value[0] : value);
@@ -283,7 +290,8 @@ function activateSvn({
     const resource = firstResource(value);
     if (resource?.guthonWorkspaceKey) return resource.guthonWorkspaceKey;
     const id = resource?.id || resource?.sourceControl?.id || '';
-    if (id.startsWith('guthon-svn-')) return id.slice('guthon-svn-'.length);
+    const providerWorkspaceKey = workspaceKeyFromSourceControlId(id);
+    if (providerWorkspaceKey) return providerWorkspaceKey;
     return resource?.resourceUri?.authority || '';
   };
   const runClaimed = async (workspaceKey, action) => {
@@ -304,6 +312,10 @@ function activateSvn({
     return Array.isArray(resource?.guthonWorkingCopyIds)
       ? resource.guthonWorkingCopyIds.filter(Boolean)
       : [];
+  };
+  const scopedBackendOptions = (workingCopyIds) => {
+    const selected = [...new Set((workingCopyIds || []).filter(Boolean))];
+    return selected.length ? { ...backendOutput, workingCopyIds: selected } : backendOutput;
   };
   const changeIdentity = (workspaceOrResource, sourcePath) => {
     if (typeof workspaceOrResource === 'string') return { workspaceKey: workspaceOrResource, sourcePath };
@@ -352,7 +364,7 @@ function activateSvn({
     await refreshWorkspaceScm(workspaceKey, backendOutput);
     onToolTreeChanged?.();
     log(operation, `完成 · ${result.groups.length} 个 working copy · revision ${result.revisions.join('、')}`);
-    return vscode.window.showInformationMessage(
+    notifyInformation(vscode,
       `已保存到谷神 · ${result.groups.length} 个 working copy · revision ${result.revisions.join('、')} · 待谷神平台最终提交`
     );
   };
@@ -369,7 +381,7 @@ function activateSvn({
     log(operation, `开始${sourcePath ? `提交指定文件 · ${sourcePath}` : '提交全部 Nexus 修改'}`);
     if (!await saveDirtyDocuments(workspaceKey, operation, operation)) return undefined;
     log(operation, '检查当前 SCM 状态');
-    const current = await refreshWorkspaceScm(workspaceKey, backendOutput);
+    const current = await refreshWorkspaceScm(workspaceKey, scopedBackendOptions(workingCopyIds));
     const nexusChanges = current?.groups?.LOCAL_MODIFIED || [];
     const selectedChanges = nexusChanges.filter((change) => (
       (!sourcePath || change.path === sourcePath)
@@ -377,12 +389,18 @@ function activateSvn({
     ));
     if (!selectedChanges.length) {
       log(operation, '没有可提交的 Nexus 修改');
-      return vscode.window.showInformationMessage(
+      notifyInformation(vscode,
         sourcePath ? '所选文件已不是可提交的 Nexus 修改' : '当前项目没有可提交的 Nexus 修改'
       );
+      return undefined;
     }
     log(operation, '生成提交预览并校验可提交文件');
-    const preview = await backend.preview(workspaceKey, 'platform-save', current.sessionId, backendOutput);
+    const preview = await backend.preview(
+      workspaceKey,
+      'platform-save',
+      current.sessionId,
+      scopedBackendOptions(workingCopyIds),
+    );
     const candidateIds = nexusCandidateIds(preview, sourcePath, workingCopyIds);
     if (!candidateIds.length) throw new Error('Nexus 修改状态已变化，请刷新后重试');
     return completePlatformSave(workspaceKey, preview, candidateIds);
@@ -392,23 +410,27 @@ function activateSvn({
     const identity = changeIdentity(workspaceValue, sourcePathValue);
     const workspaceKey = identity.workspaceKey || workspaceKeyOf(workspaceValue);
     const sourcePath = identity.sourcePath || sourcePathValue || '';
-    const scopedWorkingCopyIds = workingCopyIdsOf(workspaceValue);
+    const scopedWorkingCopyIds = [...new Set([
+      ...workingCopyIdsOf(workspaceValue),
+      identity.workingCopyId,
+    ].filter(Boolean))];
     if (!workspaceKey) throw new Error('无法解析 SVN 项目');
     const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
     if (!workspace) throw new Error(`找不到 SVN 项目：${workspaceKey}`);
     log(operation, `开始${sourcePath ? `更新指定文件 · ${sourcePath}` : '更新远程变更'}`);
     if (!await saveDirtyDocuments(workspaceKey, operation, operation)) return undefined;
     log(operation, '检查 SVN 远程变更和本地修改');
-    const current = await scm.refreshRemote(workspace, backendOutput);
+    const current = await scm.refreshRemote(workspace, scopedBackendOptions(scopedWorkingCopyIds));
     const selectedRemote = (current.remoteChanges || []).filter((change) => (
       (!sourcePath || change.path === sourcePath)
       && (!scopedWorkingCopyIds.length || scopedWorkingCopyIds.includes(change.workingCopyId))
     ));
     if (!selectedRemote.length) {
       log(operation, '没有待更新的 SVN 远程变更');
-      return vscode.window.showInformationMessage(
+      notifyInformation(vscode,
         sourcePath ? '所选文件已不是 SVN 远程变更' : '当前项目没有待更新的 SVN 远程变更'
       );
+      return undefined;
     }
     const workingCopyIds = [...new Set(selectedRemote.map((change) => change.workingCopyId))];
     const relevantLocal = (current.changes || []).filter((change) => (
@@ -434,10 +456,10 @@ function activateSvn({
     log(operation, 'SVN update 完成，刷新源码树、虚拟文档和 SCM 状态');
     catalogTree.refresh(workspaceKey);
     virtualFs.invalidate(workspaceKey, true);
-    await scm.refreshRemote(workspace, backendOutput);
+    await scm.refreshRemote(workspace, scopedBackendOptions(scopedWorkingCopyIds));
     onToolTreeChanged?.();
     log(operation, '完成');
-    return vscode.window.showInformationMessage(
+    notifyInformation(vscode,
       sourcePath
         ? `已更新 SVN 文件：${sourcePath}`
         : `已更新 ${result.updated.length} 个 SVN working copy`
@@ -455,16 +477,17 @@ function activateSvn({
     if (!workspaceKey) throw new Error('无法解析 SVN 项目');
     log(operation, '开始检查本地源码变更');
     if (!await saveDirtyDocuments(workspaceKey, operation, operation)) return undefined;
-    const current = await refreshWorkspaceScm(workspaceKey, backendOutput);
+    const current = await refreshWorkspaceScm(workspaceKey, scopedBackendOptions(workingCopyIds));
     const scopedChanges = (current?.changes || []).filter((change) => (
       (!sourcePath || change.path === sourcePath)
       && (!workingCopyIds.length || workingCopyIds.includes(change.workingCopyId))
     ));
     if (!scopedChanges.length) {
       log(operation, '当前项目没有本地 SVN 源码变更');
-      return vscode.window.showInformationMessage(
+      notifyInformation(vscode,
         sourcePath ? '所选文件已不是本地 SVN 修改' : '当前项目没有本地 SVN 源码变更'
       );
+      return undefined;
     }
     const action = requestedAction || (await vscode.window.showQuickPick(
       [
@@ -489,7 +512,12 @@ function activateSvn({
       return showSvnDiff(vscode, diffContent, result);
     }
     log(operation, '生成文件选择预览');
-    const preview = await backend.preview(workspaceKey, action, current.sessionId, backendOutput);
+    const preview = await backend.preview(
+      workspaceKey,
+      action,
+      current.sessionId,
+      scopedBackendOptions(workingCopyIds),
+    );
     showBlockedWorkingCopies(vscode, preview);
     const isSave = action === 'platform-save';
     const candidateIds = sourcePath
@@ -518,7 +546,7 @@ function activateSvn({
     await refreshWorkspaceScm(workspaceKey, backendOutput);
     onToolTreeChanged?.();
     log(operation, '完成');
-    return vscode.window.showInformationMessage(`已放弃 ${candidateIds.length} 个文件的本地修改`);
+    notifyInformation(vscode, `已放弃 ${candidateIds.length} 个文件的本地修改`);
   };
 
   const openSvnChangeInNexus = async (value) => {
@@ -575,12 +603,13 @@ function activateSvn({
       workspaceValue,
       async () => {
         const workspaceKey = workspaceKeyOf(workspaceValue);
+        const workingCopyIds = workingCopyIdsOf(workspaceValue);
         const workspaces = await listSvnWorkspaces();
         const selected = workspaceKey
           ? workspaces.filter((item) => item.workspaceKey === workspaceKey)
           : workspaces;
         log('刷新 SVN SCM 状态', `开始 · ${selected.length} 个工作区`);
-        await scm.refreshAll(selected, backendOutput);
+        await scm.refreshAll(selected, scopedBackendOptions(workingCopyIds));
         log('刷新 SVN SCM 状态', '完成');
       }
     ))),
@@ -588,18 +617,20 @@ function activateSvn({
       workspaceValue,
       async () => {
         const workspaceKey = workspaceKeyOf(workspaceValue);
+        const workingCopyIds = workingCopyIdsOf(workspaceValue);
         const workspaces = await listSvnWorkspaces();
         const selected = workspaceKey
           ? workspaces.filter((item) => item.workspaceKey === workspaceKey)
           : workspaces;
         log('检查 SVN 远程变更', `开始 · ${selected.length} 个工作区`);
-        for (const workspace of selected) await scm.refreshRemote(workspace, backendOutput);
+        const options = scopedBackendOptions(workingCopyIds);
+        for (const workspace of selected) await scm.refreshRemote(workspace, options);
         const total = selected.reduce(
           (count, workspace) => count + (scm.status(workspace.workspaceKey)?.remoteChanges?.length || 0),
           0
         );
         log('检查 SVN 远程变更', `完成 · ${total} 个待更新文件`);
-        return vscode.window.showInformationMessage(`SVN 远程检查完成：${total} 个待更新文件`);
+        notifyInformation(vscode, `SVN 远程检查完成：${total} 个待更新文件`);
       }
     ))),
     vscode.commands.registerCommand('gushenCompletion.showSvnDiff', withError(async (
@@ -618,6 +649,33 @@ function activateSvn({
       if (!workspaceKey || !sourcePath) throw new Error('无法解析 SVN 原始差异目标');
       const result = await backend.diff(workspaceKey, sourcePath);
       return showSvnDiff(vscode, diffContent, result, { raw: true });
+    })),
+    vscode.commands.registerCommand('gushenCompletion.revertSvnQuickDiffChange', withError(async (
+      resourceUri,
+      changes,
+      changeIndex
+    ) => {
+      const identity = activeSourceIdentity(
+        await listSvnWorkspaces(),
+        { uri: resourceUri }
+      );
+      return runClaimed(identity?.workspaceKey || '', async () => {
+        const reverted = await revertQuickDiffChange({
+          vscode,
+          provider: quickDiff,
+          resourceUri,
+          changes,
+          changeIndex,
+        });
+        if (!reverted) return reverted;
+        if (identity?.workspaceKey) {
+          catalogTree.refresh(identity.workspaceKey);
+          await refreshWorkspaceScm(identity.workspaceKey, backendOutput);
+          onToolTreeChanged?.();
+        }
+        notifyInformation(vscode, '已撤销当前 SVN 差异块');
+        return reverted;
+      });
     })),
     vscode.commands.registerCommand('gushenCompletion.showSvnHistory', withError(async (
       workspaceValue,
@@ -698,6 +756,7 @@ module.exports = {
   activeSourceIdentity,
   activateSvn,
   nexusCandidateIds,
+  notifyInformation,
   referenceTarget,
   resolveSourcePath,
   runFocusedTreeCommand,

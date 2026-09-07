@@ -37,6 +37,14 @@ test('selects a readable virtual filename extension', () => {
   assert.equal(documentExtension({ sourceType: 'page', jsonPointer: '/events/onClickScript' }), 'js');
   assert.equal(documentExtension({ sourceType: 'page', fragmentType: 'gss' }), 'gss');
   assert.equal(documentExtension({ sourceType: 'page', fragmentType: 'vm' }), 'gss');
+  assert.equal(
+    documentExtension({ sourceType: 'page', sourcePath: 'pages/PG-1.gss' }),
+    'gss'
+  );
+  assert.equal(
+    documentFilename({ sourceType: 'page', sourceId: 'PG-1', sourcePath: 'pages/PG-1.gss' }),
+    'PG-1.gss'
+  );
 });
 
 test('registers a dedicated GSS language while retaining legacy VM as Java', () => {

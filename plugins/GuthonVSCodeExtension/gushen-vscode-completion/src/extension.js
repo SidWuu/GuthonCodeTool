@@ -28,6 +28,7 @@ const {
 const { readWorkspaces } = require('./workspace-registry');
 const { activateSvn } = require('./svn/activate');
 const { clearLegacyCredentials, promptForPassword } = require('./svn/credentials');
+const { workspaceKeyFromSourceControlId } = require('./svn/scm-manager');
 
 const SUPPORTED_LANGUAGES = ['java', 'guthon-gss', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled', 'guthon-svn-edit'];
@@ -652,20 +653,25 @@ function activate(context) {
       if (!release) return false;
       try {
         const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
-        if (!workspace) return vscode.window.showErrorMessage(`未找到 SVN 项目：${workspaceKey}`);
+        if (!workspace) {
+          void vscode.window.showErrorMessage(`未找到 SVN 项目：${workspaceKey}`);
+          return false;
+        }
         svnServices.log('SVN 检出/更新', '读取 SVN 范围配置预览');
         const hasScopeConfig = Boolean(workspace.scopeConfigReady);
         const hasCheckoutScript = Boolean(workspace.checkoutScriptReady);
         if (!hasScopeConfig && !hasCheckoutScript) {
-          return vscode.window.showWarningMessage(
+          void vscode.window.showWarningMessage(
             `未找到 SVN 范围配置：${workspace.scopeConfigPath || 'config/products.yaml/projects.yaml'}。请先在对应文件的 svn.scope 中配置，或使用“导入 SVN checkout 配置”选择 .sh/.bat/粘贴内容。`
           );
+          return false;
         }
         let preview;
         try {
           preview = await svnServices.backend.scopePreview(workspaceKey);
         } catch (error) {
-          return vscode.window.showErrorMessage(`无法解析工作区 SVN 范围配置：${error.message}`);
+          void vscode.window.showErrorMessage(`无法解析工作区 SVN 范围配置：${error.message}`);
+          return false;
         }
         const changeSummary = `新增 ${preview.added}、移除 ${preview.removed}、变更 ${preview.modified}`;
         const scopeSummary = preview.excludedBySystemAliases
@@ -762,9 +768,7 @@ function activate(context) {
       const workspaceKey = typeof workspaceValue === 'string'
         ? workspaceValue
         : workspaceValue?.guthonWorkspaceKey
-          || (providerId.startsWith('guthon-svn-')
-          ? providerId.slice('guthon-svn-'.length)
-          : '');
+          || workspaceKeyFromSourceControlId(providerId);
       const requestedWorkingCopyIds = Array.isArray(workspaceValue?.guthonWorkingCopyIds)
         ? workspaceValue.guthonWorkingCopyIds.filter(Boolean)
         : [];
@@ -827,7 +831,8 @@ function activate(context) {
         }
         const selectedItems = selectedWorkingCopyIds.map((id) => currentById.get(id)).filter(Boolean);
         if (!selectedItems.length) {
-          return vscode.window.showErrorMessage('所选子系统没有可更新的 SVN working copy');
+          void vscode.window.showErrorMessage('所选子系统没有可更新的 SVN working copy');
+          return false;
         }
         const args = [
           'refresh',

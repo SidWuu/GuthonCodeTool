@@ -13,6 +13,7 @@ function documentExtension(identity) {
   if (identity.fragmentType === 'fields' || pointer.endsWith('/fields')) return 'json';
   if (identity.fragmentType === 'gss' || identity.fragmentType === 'vm') return 'gss';
   if (identity.fragmentType === 'js') return 'js';
+  if (String(identity.sourcePath || '').toLowerCase().endsWith('.gss')) return 'gss';
   if (identity.sourceType === 'procedure' || identity.sourceType === 'system-script') return 'gss';
   if (identity.sourceType === 'table' || identity.sourceType === 'view') return 'json';
   if (identity.sourceType === 'skill' || identity.sourceType === 'public') {

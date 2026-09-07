@@ -182,6 +182,7 @@ test('opens an independent PAGE service component as GSS', async () => {
         sourceType: 'page',
         sourceId: 'PG-GSS-1',
         funId: '',
+        sourcePath: 'pages/SYS-1/PG-GSS-1.gss',
         fragments: [{ scriptType: 'gss', jsonPointer: '', label: '' }],
         status: 'OK',
       },
@@ -191,6 +192,7 @@ test('opens an independent PAGE service component as GSS', async () => {
   assert.equal(component.kind, 'document');
   assert.equal(component.command.arguments[0].fragmentType, 'gss');
   assert.equal(component.command.arguments[0].sourceType, 'page');
+  assert.equal(component.command.arguments[0].sourcePath, 'pages/SYS-1/PG-GSS-1.gss');
 });
 
 test('locates an active virtual fragment through stable parent nodes', async () => {

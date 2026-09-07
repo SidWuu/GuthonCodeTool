@@ -12,6 +12,25 @@ const CHANGE_DIFF_STATUSES = {
   deleted: { id: 'DELETED', label: '删除', icon: 'diff-removed' },
   modified: { id: 'MODIFIED', label: '修改', icon: 'diff-modified' },
 };
+const LEGACY_SCM_PROVIDER_PREFIX = 'guthon-svn-';
+const SCM_PROVIDER_PREFIX = 'guthon-svn-v3-';
+const VERSIONED_SCM_PROVIDER_PREFIX = /^guthon-svn-v\d+-/;
+
+function sourceControlId(workspaceKey) {
+  // VS Code persists SCM repository visibility by provider ID. Versioning the
+  // ID performs a one-time migration for workspaces previously left hidden.
+  return `${SCM_PROVIDER_PREFIX}${workspaceKey}`;
+}
+
+function workspaceKeyFromSourceControlId(value) {
+  const id = String(value || '');
+  const versionedPrefix = id.match(VERSIONED_SCM_PROVIDER_PREFIX)?.[0];
+  if (versionedPrefix) return id.slice(versionedPrefix.length);
+  if (id.startsWith(LEGACY_SCM_PROVIDER_PREFIX)) {
+    return id.slice(LEGACY_SCM_PROVIDER_PREFIX.length);
+  }
+  return '';
+}
 
 function changeDiffStatus(change) {
   return CHANGE_DIFF_STATUSES[change?.item] || CHANGE_DIFF_STATUSES.modified;
@@ -67,15 +86,14 @@ class SvnScmManager {
   }
 
   _create(workspace) {
-    const rootUri = this.quickDiffProvider
-      ? undefined
-      : workspace.checkoutPath ? this.vscode.Uri.file(workspace.checkoutPath) : undefined;
+    // The same SCM provider serves physical checkout files and Nexus virtual
+    // documents. A checkout root would suppress Quick Diff for guthon-svn-edit.
+    const rootUri = undefined;
     const sourceControl = this.vscode.scm.createSourceControl(
-      `guthon-svn-${workspace.workspaceKey}`,
+      sourceControlId(workspace.workspaceKey),
       `${workspace.displayName} · 谷神 SVN 源码变更`,
-      // The editor documents are guthon-svn-edit URIs, while external changes
-      // use file URIs. An unscoped SCM provider lets Quick Diff handle both;
-      // the provider itself restricts the URI to this workspace's checkout.
+      // Let the Quick Diff provider decide whether a document belongs to this
+      // SVN workspace; virtual Nexus documents have no physical root URI.
       rootUri
     );
     const record = { workspace, sourceControl, groups: new Map(), status: undefined };
@@ -151,7 +169,33 @@ class SvnScmManager {
     return this._create(workspace);
   }
 
-  _applyStatus(record, value) {
+  _mergeScopedStatus(record, value, options = {}) {
+    const selected = new Set((options.workingCopyIds || []).filter(Boolean));
+    if (!selected.size || !record.status) return value;
+    const outside = (items = [], getId = (item) => item.workingCopyId) => (
+      items.filter((item) => !selected.has(getId(item)))
+    );
+    const groups = Object.fromEntries(
+      LOCAL_STATES.map((state) => [
+        state,
+        [...outside(record.status.groups?.[state]), ...(value.groups?.[state] || [])],
+      ])
+    );
+    const changes = [...outside(record.status.changes), ...(value.changes || [])];
+    return {
+      ...value,
+      clean: !changes.length,
+      changes,
+      workingCopies: [
+        ...outside(record.status.workingCopies, (item) => item.id),
+        ...(value.workingCopies || []),
+      ],
+      groups,
+    };
+  }
+
+  _applyStatus(record, value, options = {}) {
+    value = this._mergeScopedStatus(record, value, options);
     const previousRemote = record.status?.remoteChanges || [];
     const remoteChanges = value.remoteChecked ? (value.remoteChanges || []) : previousRemote;
     record.status = { ...value, remoteChanges };
@@ -217,13 +261,13 @@ class SvnScmManager {
   async refresh(workspace, options = {}) {
     const record = this.ensure(workspace);
     const value = await this.backend.scmStatus(workspace.workspaceKey, false, options);
-    return this._applyStatus(record, value);
+    return this._applyStatus(record, value, options);
   }
 
   async refreshRemote(workspace, options = {}) {
     const record = this.ensure(workspace);
     const value = await this.backend.scmStatus(workspace.workspaceKey, true, options);
-    return this._applyStatus(record, value);
+    return this._applyStatus(record, value, options);
   }
 
   async refreshAll(workspaces, options = {}) {
@@ -326,4 +370,6 @@ module.exports = {
   changeDiffStatus,
   changeDisplayName,
   changeUri,
+  sourceControlId,
+  workspaceKeyFromSourceControlId,
 };

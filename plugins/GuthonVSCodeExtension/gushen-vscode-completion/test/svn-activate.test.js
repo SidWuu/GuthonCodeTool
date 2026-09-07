@@ -3,12 +3,31 @@ const test = require('node:test');
 const {
   activeSourceIdentity,
   nexusCandidateIds,
+  notifyInformation,
   referenceTarget,
   resolveSourcePath,
   runFocusedTreeCommand,
   selectCandidates,
   sourceModuleElement,
 } = require('../src/svn/activate');
+
+test('shows completion notifications without keeping an SVN operation claimed', () => {
+  let resolveNotification;
+  const shown = [];
+  const vscode = {
+    window: {
+      showInformationMessage(message) {
+        shown.push(message);
+        return new Promise((resolve) => { resolveNotification = resolve; });
+      },
+    },
+  };
+
+  assert.equal(notifyInformation(vscode, '更新已完成'), undefined);
+  assert.deepEqual(shown, ['更新已完成']);
+  assert.equal(typeof resolveNotification, 'function');
+  resolveNotification();
+});
 
 test('all and single submit selections include Nexus-managed candidates only', () => {
   const preview = {
@@ -97,11 +116,14 @@ test('opens native tree search after focusing the SVN source view', async () => 
   assert.equal(manifest.contributes.configurationDefaults['workbench.list.defaultFindMode'], 'filter');
   assert.equal(manifest.contributes.configurationDefaults['workbench.list.defaultFindMatchType'], 'fuzzy');
   assert.equal(manifest.contributes.configurationDefaults['scm.alwaysShowActions'], true);
+  assert.equal(manifest.contributes.configurationDefaults['scm.repositories.selectionMode'], 'multiple');
   const resourceMenus = manifest.contributes.menus['scm/resourceState/context'];
   assert(resourceMenus.some((item) => item.command === 'gushenCompletion.openSvnChangeInNexus'));
   assert(resourceMenus.some((item) => item.command === 'gushenCompletion.revertSingleSvnChange'));
   assert(resourceMenus.some((item) => item.command === 'gushenCompletion.saveSingleSvnNexusChange'));
   assert(resourceMenus.some((item) => item.command === 'gushenCompletion.updateSingleSvnChange'));
+  const quickDiffMenus = manifest.contributes.menus['scm/change/title'];
+  assert(quickDiffMenus.some((item) => item.command === 'gushenCompletion.revertSvnQuickDiffChange'));
   const groupMenus = manifest.contributes.menus['scm/resourceGroup/context'];
   const rootCommands = manifest.contributes.menus['scm/title'].map((item) => item.command);
   const groupCommands = groupMenus.map((item) => item.command);

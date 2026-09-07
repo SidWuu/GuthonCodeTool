@@ -315,14 +315,16 @@ def require_capability(workspace: dict, name: str) -> None:
 
 
 @contextmanager
-def operation_lock(workspace: dict, action: str, shared=False):
+def operation_lock(workspace: dict, action: str, shared=False, blocking=False):
     lock_path = workspace["contextDir"] / ".svn-operation.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+b") as handle:
         try:
             if fcntl is not None:
                 mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
-                fcntl.flock(handle.fileno(), mode | fcntl.LOCK_NB)
+                if not blocking:
+                    mode |= fcntl.LOCK_NB
+                fcntl.flock(handle.fileno(), mode)
             else:  # Windows has no shared msvcrt lock; serialize all SVN operations.
                 handle.seek(0)
                 if not handle.read(1):
@@ -330,7 +332,8 @@ def operation_lock(workspace: dict, action: str, shared=False):
                     handle.write(b"\0")
                     handle.flush()
                 handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                lock_mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
+                msvcrt.locking(handle.fileno(), lock_mode, 1)
         except (BlockingIOError, OSError) as error:
             raise SystemExit(f"Another SVN operation is active for {workspace['workspaceKey']}") from error
         if not shared:

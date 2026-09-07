@@ -78,6 +78,42 @@ test('streams backend progress from stderr without breaking UTF-8 chunks', async
   assert.equal(messages.join(''), '[SVN] 提交｜执行 commit\n');
 });
 
+test('passes scoped working-copy selections to SVN SCM status', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls),
+  });
+
+  await client.scmStatus('products.demo', true, {
+    workingCopyIds: ['datasources-0015', 'systems-SYS-DD01', 'datasources-0015'],
+  });
+
+  assert.deepEqual(calls[0].args.slice(-6), [
+    'scm-status', '--remote',
+    '--working-copy', 'datasources-0015',
+    '--working-copy', 'systems-SYS-DD01',
+  ]);
+});
+
+test('passes scoped working-copy selections to SVN preview', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls),
+  });
+
+  await client.preview('products.demo', 'platform-save', 'session', {
+    workingCopyIds: ['datasources-0015', 'systems-SYS-DD01', 'datasources-0015'],
+  });
+
+  assert.deepEqual(calls[0].args.slice(-6), [
+    '--session', 'session',
+    '--working-copy', 'datasources-0015',
+    '--working-copy', 'systems-SYS-DD01',
+  ]);
+});
+
 test('loads page fragments independently from the catalog', async () => {
   const calls = [];
   const client = new SvnBackendClient({

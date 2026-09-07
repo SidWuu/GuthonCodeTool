@@ -92,7 +92,10 @@ class SvnBackendClient {
   }
 
   scmStatus(workspaceKey, remote = false, options = {}) {
-    return this.run(workspaceKey, ['scm-status', ...(remote ? ['--remote'] : [])], undefined, options);
+    const workingCopyIds = [...new Set((options.workingCopyIds || []).filter(Boolean))];
+    const args = ['scm-status', ...(remote ? ['--remote'] : [])];
+    for (const workingCopyId of workingCopyIds) args.push('--working-copy', workingCopyId);
+    return this.run(workspaceKey, args, undefined, options);
   }
 
   refresh(workspaceKey, {
@@ -131,7 +134,10 @@ class SvnBackendClient {
   }
 
   preview(workspaceKey, action, sessionId, options = {}) {
-    return this.run(workspaceKey, [`${action}-preview`, '--session', sessionId], undefined, options);
+    const workingCopyIds = [...new Set((options.workingCopyIds || []).filter(Boolean))];
+    const args = [`${action}-preview`, '--session', sessionId];
+    for (const workingCopyId of workingCopyIds) args.push('--working-copy', workingCopyId);
+    return this.run(workspaceKey, args, undefined, options);
   }
 
   revert(workspaceKey, preview, candidateIds, options = {}) {

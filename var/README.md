@@ -66,7 +66,7 @@ SVN 原始源码位于根级 `checkout/`，不在工作区中生成 readonly/wor
 
 ## 命令
 
-工作区级命令必须显式指定稳定键：
+以下是工具源码开发模式的示例，须在外层 GuthonCodeTool 根目录执行；Agent 实际入口以 `nexus/tool-runtime.json` 为准。工作区级命令显式指定稳定键：
 
 ```bash
 .venv/bin/python scripts/guthon_tool.py workspaces --home .
@@ -76,14 +76,9 @@ SVN 原始源码位于根级 `checkout/`，不在工作区中生成 readonly/wor
 
 Nexus 同时展示所有配置工作区；Bridge 使用 `workspaceKey`，或根据页面的 `pageOrigin + dataSourceId + systemId` 路由。多个工作区匹配时，由 Chrome 扩展只为当前请求选择一次，不保存默认绑定。
 
-## AI 助手处理顺序
+## AI 开发入口
 
-1. 先读 `AGENTS.md` 和公共 `docs/` 中命中的规则。
-2. 从用户描述、目标路径、Nexus 或 Bridge 上下文确定唯一 `workspaceKey`。
-3. 读取该工作区的 `context/source-mode.json`、`context/README.md` 和局部索引；默认不扫描整个 `workspace/`。
-4. DATABASE 只读取目标 workcopy/readonly 和 database；SVN 只读取授权 checkout 中的目标文件。
-5. 涉及运行入口时读取 `nexus/tool-runtime.json`。
-6. 只有用户明确要求跨产品或跨项目分析时才扩大范围。
+谷神任务从 [AGENTS.md](AGENTS.md) 进入，按其导航读取基线、模块规范、API、场景模式和业务事实；查询命令按需查阅[源码定位与有界查询](docs/AGENTS排查与源码调整提速方案.md)。README 只说明目录与工具用法，不另设执行流程。Claude 入口 [CLAUDE.md](CLAUDE.md) 引用同一规则。
 
 ## 注意
 

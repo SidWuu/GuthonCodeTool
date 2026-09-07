@@ -209,6 +209,7 @@ class SvnCatalogTreeProvider {
       sourceType: object.sourceType,
       sourceId: object.sourceId,
       funId: object.funId || '',
+      sourcePath: object.sourcePath || '',
       jsonPointer: fragments?.[0]?.jsonPointer || '',
       fragmentType: fragments?.[0]?.scriptType || '',
     };
@@ -404,6 +405,7 @@ class SvnCatalogTreeProvider {
             sourceType: element.object.sourceType,
             sourceId: element.object.sourceId,
             funId: element.object.funId || '',
+            sourcePath: element.object.sourcePath || '',
             jsonPointer: fragment.jsonPointer || '',
             fragmentType: fragment.scriptType || '',
           }],

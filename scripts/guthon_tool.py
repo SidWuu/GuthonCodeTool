@@ -426,7 +426,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             "--working-copy",
             action="append",
             default=[],
-            help="limit a manifest refresh to an exact scope entry id; repeat to select multiple entries",
+            help="limit a manifest operation to exact scope entry ids; repeat to select multiple entries",
         )
         svn_parser.add_argument(
             "--source-type",
@@ -771,7 +771,12 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             from providers.svn.nexus import scm
 
             if parsed.action == "scm-status":
-                result = scm.status(workspace, remote=parsed.remote, on_progress=_svn_progress)
+                result = scm.status(
+                    workspace,
+                    remote=parsed.remote,
+                    working_copy_ids=set(parsed.working_copy) or None,
+                    on_progress=_svn_progress,
+                )
             elif parsed.action == "diff":
                 if not parsed.path:
                     raise SystemExit("svn diff requires --path")
@@ -788,6 +793,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     workspace,
                     action=action,
                     session_id=parsed.session,
+                    working_copy_ids=set(parsed.working_copy) or None,
                     on_progress=_svn_progress,
                 )
             elif parsed.action == "revert":

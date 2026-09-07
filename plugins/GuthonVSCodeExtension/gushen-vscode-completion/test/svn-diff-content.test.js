@@ -208,3 +208,86 @@ test('provides SVN BASE to VS Code Quick Diff for checkout files', async () => {
   quickDiff.dispose();
   contentProvider.dispose();
 });
+
+test('reverts one native Quick Diff block while preserving the rest of the file', async () => {
+  class Range {
+    constructor(startLine, startCharacter, endLine, endCharacter) {
+      this.start = { line: startLine, character: startCharacter };
+      this.end = { line: endLine, character: endCharacter };
+    }
+  }
+  class WorkspaceEdit {
+    replace(uri, range, text) {
+      this.uri = uri;
+      this.range = range;
+      this.text = text;
+    }
+  }
+  function document(uri, text) {
+    const lines = text.split(/\r?\n/);
+    const offsets = [];
+    let offset = 0;
+    for (const line of lines) {
+      offsets.push(offset);
+      offset += line.length + 1;
+    }
+    return {
+      uri,
+      lineCount: lines.length,
+      lineAt: (line) => ({
+        range: { end: { character: lines[line].length } },
+      }),
+      getText: (range) => {
+        const start = offsets[range.start.line] + range.start.character;
+        const end = range.end.line >= lines.length
+          ? text.length
+          : offsets[range.end.line] + range.end.character;
+        return text.slice(start, end);
+      },
+      async save() { return true; },
+    };
+  }
+  const resourceUri = {
+    scheme: 'guthon-svn-edit',
+    toString: () => 'guthon-svn-edit://products.demo/save.gss',
+  };
+  const originalUri = {
+    scheme: DIFF_SCHEME,
+    toString: () => 'guthon-svn-diff://products.demo/base/save.gss',
+  };
+  const original = document(originalUri, 'one\ntwo\nthree\n');
+  const modified = document(resourceUri, 'one\nTWO\nthree\n');
+  const editor = { document: modified, visibleRanges: [] };
+  let appliedEdit;
+  const vscode = {
+    Range,
+    WorkspaceEdit,
+    Selection: class Selection {},
+    window: {
+      activeTextEditor: editor,
+      visibleTextEditors: [editor],
+      showWarningMessage() {},
+    },
+    workspace: {
+      openTextDocument: async () => original,
+      applyEdit: async (edit) => {
+        appliedEdit = edit;
+        return true;
+      },
+    },
+  };
+
+  assert.equal(await require('../src/svn/diff-content').revertQuickDiffChange({
+    vscode,
+    provider: { provideOriginalResource: async () => originalUri },
+    resourceUri,
+    changes: [{
+      originalStartLineNumber: 2,
+      originalEndLineNumber: 2,
+      modifiedStartLineNumber: 2,
+      modifiedEndLineNumber: 2,
+    }],
+    changeIndex: 0,
+  }), true);
+  assert.equal(appliedEdit.text, 'one\ntwo\nthree\n');
+});

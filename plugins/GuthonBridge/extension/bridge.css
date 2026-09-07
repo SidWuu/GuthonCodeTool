@@ -169,6 +169,10 @@ body.guthon-bridge-popup {
   text-decoration: none;
 }
 
+.guthon-bridge-inline [hidden] {
+  display: none !important;
+}
+
 .guthon-bridge-inline button + button {
   margin-left: 0;
 }

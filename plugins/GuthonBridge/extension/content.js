@@ -3,8 +3,10 @@ const FLOATING_ROOT_ID = "guthon-bridge-floating-root";
 const COPY_OVERLAY_ID = "guthon-bridge-copy-overlay";
 const FIELDS_MOVER_OVERLAY_ID = "guthon-bridge-fields-mover-overlay";
 const CALLERS_OVERLAY_ID = "guthon-bridge-callers-overlay";
+const TOOLBAR_REFRESH_INTERVAL_MS = 30000;
 
 let gIntervalId = null;
+let gRefreshInFlight = null;
 let gTreeScrollListenerInstalled = false;
 let gSystemScriptSelectionInstalled = false;
 
@@ -149,7 +151,7 @@ function sendRuntimeMessage(message) {
   });
 }
 
-async function sendWorkspaceRequest(type, payload) {
+async function sendWorkspaceRequest(type, payload, { allowWorkspaceSelection = true } = {}) {
   const request = { pageOrigin: location.origin, ...payload };
   const cachedWorkspaceKey = await GuthonBridgeWorkspace.storedWorkspaceKey(location.href);
   if (cachedWorkspaceKey) {
@@ -162,7 +164,7 @@ async function sendWorkspaceRequest(type, payload) {
     }
   }
   const result = await sendRuntimeMessage({ type, payload: request });
-  if (!result?.workspaceSelectionRequired) {
+  if (!result?.workspaceSelectionRequired || !allowWorkspaceSelection) {
     return result;
   }
   if (!result.candidates?.length) {
@@ -264,6 +266,13 @@ function makeNativeButton(text, className) {
 
 async function pullCurrentProcedure(root, button = root.querySelector("button"), force = false) {
   try {
+    if (root.dataset.workspaceMode !== "database") {
+      const message = root.dataset.workspaceMode === "svn"
+        ? "当前工作区使用 SVN 源码模式；请在 Guthon Nexus 打开对象 Workcopy"
+        : "正在确认当前工作区源码模式，请稍后重试";
+      setMessage(root, message, "idle");
+      return;
+    }
     button.disabled = true;
     setButtonTextNode(button, "源码拉取");
     button.title = "正在从源码表拉取...";
@@ -549,6 +558,7 @@ function installSourcePullButton() {
     root.dataset.mode = mode;
     root.dataset.sharedButtons = "true";
     const sourceButton = makeNativeButton("源码拉取", "guthon-bridge-inline-button guthon-bridge-source-button");
+    sourceButton.hidden = true;
     root.appendChild(sourceButton);
     const systemAllButton = makeNativeButton("全部拉取", "guthon-bridge-system-script-all guthon-bridge-system-script-only");
     systemAllButton.addEventListener("click", () => exportCurrentSystemScripts(root, systemAllButton, true));
@@ -610,7 +620,7 @@ function installSourcePullButton() {
 async function applyInlineWorkspaceMode() {
   const root = document.getElementById(FLOATING_ROOT_ID);
   if (!root) return;
-  const cacheKey = `${location.origin}${location.pathname}#${root.dataset.mode}`;
+  const cacheKey = `${location.origin}${location.pathname}${location.hash}#${root.dataset.mode}`;
   const checkedAt = Number(root.dataset.workspaceModeCheckedAt || 0);
   if (root.dataset.workspaceModeKey === cacheKey && Date.now() - checkedAt < 10000) return;
   if (root.dataset.workspaceModeChecking === "true") return;
@@ -618,8 +628,17 @@ async function applyInlineWorkspaceMode() {
   try {
     const inspected = await runPageCommand("inspect-hub-source");
     if (!inspected?.ok) return;
-    const route = await sendWorkspaceRequest("route-workspace", inspected.data || {});
-    const sourceMode = route?.workspace?.sourceMode || "";
+    const route = await sendWorkspaceRequest(
+      "route-workspace",
+      inspected.data || {},
+      { allowWorkspaceSelection: false }
+    );
+    const candidateModes = new Set(
+      (route?.candidates || [])
+        .map((candidate) => String(candidate?.sourceMode || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const sourceMode = route?.workspace?.sourceMode || (candidateModes.size === 1 ? [...candidateModes][0] : "");
     if (!sourceMode) return;
     const previousMode = root.dataset.workspaceMode;
     root.dataset.workspaceModeKey = cacheKey;
@@ -628,7 +647,7 @@ async function applyInlineWorkspaceMode() {
     const svnMode = sourceMode === "svn";
     root.querySelector(".guthon-bridge-source-button").hidden = svnMode;
     root.querySelector(".guthon-bridge-system-script-all").hidden = svnMode;
-    if (svnMode) {
+    if (svnMode && previousMode !== "svn") {
       setMessage(root, "当前工作区使用 SVN 源码模式；请在 Guthon Nexus 打开对象 Workcopy", "idle");
     } else if (previousMode === "svn") {
       setMessage(root, "", "idle");
@@ -1152,6 +1171,21 @@ async function refreshToolbarButtons() {
   }
 }
 
+function refreshToolbarButtonsSafely() {
+  if (gRefreshInFlight) {
+    return gRefreshInFlight;
+  }
+  gRefreshInFlight = refreshToolbarButtons()
+    .catch(() => {})
+    .finally(() => {
+      gRefreshInFlight = null;
+    });
+  return gRefreshInFlight;
+}
+
+window.addEventListener("hashchange", refreshToolbarButtonsSafely);
+window.addEventListener("popstate", refreshToolbarButtonsSafely);
+
 getRuntime()?.onMessage?.addListener((message, sender, sendResponse) => {
   const root = document.getElementById(FLOATING_ROOT_ID) || document.body;
   const action = message?.type === "run-page-command"
@@ -1189,5 +1223,5 @@ window.addEventListener("message", (event) => {
   }
 });
 
-refreshToolbarButtons().catch(() => {});
-gIntervalId = setInterval(refreshToolbarButtons, 1800);
+refreshToolbarButtonsSafely();
+gIntervalId = setInterval(refreshToolbarButtonsSafely, TOOLBAR_REFRESH_INTERVAL_MS);

@@ -142,18 +142,29 @@ def _platform_state(workspace: dict) -> dict:
     return value if value.get("workspaceKey") == workspace["workspaceKey"] else {}
 
 
-def status(workspace: dict, *, remote=False, on_progress: ProgressCallback = None) -> dict:
+def status(
+    workspace: dict,
+    *,
+    remote=False,
+    working_copy_ids: set[str] | list[str] | None = None,
+    on_progress: ProgressCallback = None,
+) -> dict:
     require_capability(workspace, "status")
     scope = load_authorized_scope(workspace)
+    selected = set(working_copy_ids or ())
+    unknown = selected - {entry.id for entry in scope.entries}
+    if unknown:
+        raise SystemExit(f"Unknown SVN working copy ids: {', '.join(sorted(unknown))}")
+    entries = [entry for entry in scope.entries if not selected or entry.id in selected]
     session = load_session(workspace)
     changes = []
     remote_changes = []
     working_copies = []
     _progress(on_progress, "SCM 状态｜读取 Nexus 索引元数据")
     indexed = _catalog_by_path(workspace)
-    total = len(scope.entries)
+    total = len(entries)
     phase = "检查远程与本地状态" if remote else "检查本地状态"
-    for index, entry in enumerate(scope.entries, 1):
+    for index, entry in enumerate(entries, 1):
         label = scope_entry_label(workspace, entry)
         _progress(on_progress, f"[{index}/{total}] {label}｜SCM 状态｜{phase}")
         current = svn_status(entry.root, remote=remote, settings=workspace["svn"])
@@ -367,9 +378,14 @@ def _candidate_records(
     workspace: dict,
     session: dict,
     *,
+    working_copy_ids: set[str] | list[str] | None = None,
     on_progress: ProgressCallback = None,
 ) -> tuple[list[dict], list[dict]]:
-    current_status = status(workspace, on_progress=on_progress)
+    current_status = status(
+        workspace,
+        working_copy_ids=working_copy_ids,
+        on_progress=on_progress,
+    )
     candidates = []
     for change in current_status["changes"]:
         if not change.get("selectable"):
@@ -403,6 +419,7 @@ def preview(
     *,
     action: str,
     session_id: str,
+    working_copy_ids: set[str] | list[str] | None = None,
     on_progress: ProgressCallback = None,
 ) -> dict:
     if action == "revert":
@@ -413,7 +430,12 @@ def preview(
     if not session_id or session_id != session.get("sessionId"):
         raise SystemExit("SVN edit session is missing or expired")
     _progress(on_progress, f"{action}｜生成可选文件和阻断项")
-    candidates, blockers = _candidate_records(workspace, session, on_progress=on_progress)
+    candidates, blockers = _candidate_records(
+        workspace,
+        session,
+        working_copy_ids=working_copy_ids,
+        on_progress=on_progress,
+    )
     now = dt.datetime.now(dt.timezone.utc)
     token = str(uuid.uuid4())
     record = {

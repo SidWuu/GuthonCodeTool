@@ -40,6 +40,7 @@ SVN_SOURCE_TYPES = {PAGE_SOURCE_TYPE, PROCEDURE_SOURCE_TYPE, "system-script", "t
 SOURCE_MODES = {"database", "svn"}
 SOURCE_MODE_FILE = "source-mode.json"
 SOURCE_MODE_VERSION = 1
+INDEX_BUSY_TIMEOUT_MS = 30000
 
 
 def workspace_steps(workspace):
@@ -933,9 +934,9 @@ def route_workspace_request(config, payload):
 
 def connect_index(index_db: Path) -> sqlite3.Connection:
     index_db.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(index_db)
+    conn = sqlite3.connect(index_db, timeout=INDEX_BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute(f"PRAGMA busy_timeout={INDEX_BUSY_TIMEOUT_MS}")
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS gusen_source_record (
@@ -1781,7 +1782,7 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
             indexed_time = _now()
             try:
                 progress("开始索引事务")
-                conn.execute("BEGIN")
+                conn.execute("BEGIN IMMEDIATE")
                 conn.execute("DELETE FROM gusen_invoke_call")
                 conn.execute("DELETE FROM gusen_dynamic_call")
                 source_facts.clear_all_details(conn)
@@ -1819,7 +1820,28 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
             progress("扫描 SVN checkout")
             svn_checkout.verify_repository_fingerprint(workspace, scope.get("repositoryFingerprint") or "")
             scan = scanner.scan(workspace["checkoutPath"], scope)
-        scan["errors"] = [*svn_checkout.validate_expected_changes(workspace, scan["status"]), *scan["errors"]]
+            scan["errors"] = [*svn_checkout.validate_expected_changes(workspace, scan["status"]), *scan["errors"]]
+            if not scan["errors"]:
+                try:
+                    progress("开始写入扫描结果")
+                    conn.execute("BEGIN IMMEDIATE")
+                    conn.execute("DELETE FROM gusen_invoke_call")
+                    conn.execute("DELETE FROM gusen_dynamic_call")
+                    source_facts.clear_all_details(conn)
+                    conn.execute("DELETE FROM gusen_source_record")
+                    indexed_time = _now()
+                    for item in scan["objects"]:
+                        _insert_svn_index_item(conn, workspace, item, indexed_time)
+                    conn.execute(
+                        "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+                        ("svn_revision", scan["revision"]),
+                    )
+                    conn.commit()
+                    progress("扫描结果事务已提交")
+                except Exception:
+                    conn.rollback()
+                    progress("扫描结果事务异常，已回滚并保留旧索引")
+                    raise
     if scan["errors"]:
         progress(f"重建失败 · {len(scan['errors'])} 个错误 · 旧索引已保留")
         return {
@@ -1836,27 +1858,6 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
             "checkoutClean": scan["status"]["clean"],
             "checkoutChanges": scan["status"]["changes"],
         }
-    if workspace["svn"].get("checkoutLayout") != "manifest-working-copies":
-        try:
-            progress("开始写入扫描结果")
-            conn.execute("BEGIN")
-            conn.execute("DELETE FROM gusen_invoke_call")
-            conn.execute("DELETE FROM gusen_dynamic_call")
-            source_facts.clear_all_details(conn)
-            conn.execute("DELETE FROM gusen_source_record")
-            indexed_time = _now()
-            for item in scan["objects"]:
-                _insert_svn_index_item(conn, workspace, item, indexed_time)
-            conn.execute(
-                "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
-                ("svn_revision", scan["revision"]),
-            )
-            conn.commit()
-            progress("扫描结果事务已提交")
-        except Exception:
-            conn.rollback()
-            progress("扫描结果事务异常，已回滚并保留旧索引")
-            raise
     scope_count = len(scope.entries) if hasattr(scope, "entries") else 1
     progress(
         f"重建完成 · working copy {scope_count} 个 · "
@@ -1904,66 +1905,79 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
             on_progress(f"{progress_label}｜索引｜{message}")
 
     progress(f"开始按 working copy 增量重建 · {', '.join(selected)}")
-    with svn_checkout.operation_lock(workspace, "manifest-scan", shared=True):
+    with svn_checkout.operation_lock(workspace, "manifest-scan", blocking=True):
         scan = catalog.scan(
             workspace,
             working_copy_ids=selected,
             collect_modules=False,
             on_progress=on_progress,
         )
-    errors = list(scan["errors"])
-    selected_set = set(selected)
-    for item in scan["objects"]:
-        collision = conn.execute(
-            """
-            SELECT source_path FROM gusen_source_record
-            WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=?
-              AND working_copy_id NOT IN ({})
-            LIMIT 1
-            """.format(",".join("?" for _ in selected)),
-            (
-                item["source_table"],
-                item["source_id"],
-                item.get("fun_id") or "",
-                *selected,
-            ),
-        ).fetchone()
-        if collision:
-            errors.append({
-                "scopeEntryId": item.get("scope_entry_id") or "",
-                "path": item["source_path"],
-                "error": f"duplicate object identity also used by {collision['source_path']}",
-            })
-    if errors:
-        progress(f"扫描发现 {len(errors)} 个错误，保留旧索引")
-        return {
-            "mode": "svn-scoped-refresh",
-            "provider": "svn",
-            "workspaceKey": workspace["workspaceKey"],
-            "workingCopyIds": selected,
-            "changed": 0,
-            "failures": len(errors),
-            "errors": errors,
-            "indexPreserved": True,
-        }
-    placeholders = ",".join("?" for _ in selected)
-    existing = conn.execute(
-        "SELECT source_table, source_id, fun_id FROM gusen_source_record "
-        f"WHERE provider='svn' AND working_copy_id IN ({placeholders})",
-        selected,
-    ).fetchall()
-    try:
-        conn.execute("BEGIN")
-        for row in existing:
-            _delete_svn_index_item(conn, workspace, row)
-        indexed_time = _now()
-        for item in scan["objects"]:
-            _insert_svn_index_item(conn, workspace, item, indexed_time)
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        progress("索引事务异常，已回滚并保留旧索引")
-        raise
+        errors = list(scan["errors"])
+        selected_set = set(selected)
+        if errors:
+            progress(f"扫描发现 {len(errors)} 个错误，保留旧索引")
+            return {
+                "mode": "svn-scoped-refresh",
+                "provider": "svn",
+                "workspaceKey": workspace["workspaceKey"],
+                "workingCopyIds": selected,
+                "changed": 0,
+                "failures": len(errors),
+                "errors": errors,
+                "indexPreserved": True,
+            }
+        placeholders = ",".join("?" for _ in selected)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            for item in scan["objects"]:
+                collision = conn.execute(
+                    """
+                    SELECT source_path FROM gusen_source_record
+                    WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=?
+                      AND working_copy_id NOT IN ({})
+                    LIMIT 1
+                    """.format(",".join("?" for _ in selected)),
+                    (
+                        item["source_table"],
+                        item["source_id"],
+                        item.get("fun_id") or "",
+                        *selected,
+                    ),
+                ).fetchone()
+                if collision:
+                    errors.append({
+                        "scopeEntryId": item.get("scope_entry_id") or "",
+                        "path": item["source_path"],
+                        "error": f"duplicate object identity also used by {collision['source_path']}",
+                    })
+            if errors:
+                conn.rollback()
+                progress(f"扫描发现 {len(errors)} 个错误，保留旧索引")
+                return {
+                    "mode": "svn-scoped-refresh",
+                    "provider": "svn",
+                    "workspaceKey": workspace["workspaceKey"],
+                    "workingCopyIds": selected,
+                    "changed": 0,
+                    "failures": len(errors),
+                    "errors": errors,
+                    "indexPreserved": True,
+                }
+            existing = conn.execute(
+                "SELECT source_table, source_id, fun_id FROM gusen_source_record "
+                f"WHERE provider='svn' AND working_copy_id IN ({placeholders})",
+                selected,
+            ).fetchall()
+            for row in existing:
+                _delete_svn_index_item(conn, workspace, row)
+            indexed_time = _now()
+            for item in scan["objects"]:
+                _insert_svn_index_item(conn, workspace, item, indexed_time)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            progress("索引事务异常，已回滚并保留旧索引")
+            raise
     changed = len(scan["objects"])
     progress(f"按 working copy 增量重建完成 · working copy {len(selected_set)} 个 · 对象 {changed} 个")
     return {
@@ -1986,71 +2000,72 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
     svn_checkout.require_capability(workspace, "reindex")
     if workspace["svn"].get("checkoutLayout") != "manifest-working-copies":
         raise SystemExit("Incremental SVN indexing requires manifest-working-copies")
-    with svn_checkout.operation_lock(workspace, "manifest-scan-file", shared=True):
+    with svn_checkout.operation_lock(workspace, "manifest-scan-file", blocking=True):
         scanned = catalog.scan_file(workspace, source_path)
-    if scanned["errors"]:
-        conn.execute(
-            "UPDATE gusen_source_record SET status='STALE', indexed_time=? "
-            "WHERE provider='svn' AND source_path=?",
-            (_now(), scanned["path"]),
-        )
-        conn.commit()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            if scanned["errors"]:
+                conn.execute(
+                    "UPDATE gusen_source_record SET status='STALE', indexed_time=? "
+                    "WHERE provider='svn' AND source_path=?",
+                    (_now(), scanned["path"]),
+                )
+                conn.commit()
+                return {
+                    "mode": "svn-incremental-scan",
+                    "provider": "svn",
+                    "workspaceKey": workspace["workspaceKey"],
+                    "sourcePath": scanned["path"],
+                    "changed": 0,
+                    "failures": len(scanned["errors"]),
+                    "errors": scanned["errors"],
+                    "indexPreserved": True,
+                }
+            existing = conn.execute(
+                "SELECT source_table, source_id, fun_id FROM gusen_source_record "
+                "WHERE provider='svn' AND source_path=?",
+                (scanned["path"],),
+            ).fetchall()
+            item = scanned["object"]
+            if item:
+                collision = conn.execute(
+                    """
+                    SELECT source_path FROM gusen_source_record
+                    WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=? AND source_path<>?
+                    LIMIT 1
+                    """,
+                    (item["source_table"], item["source_id"], item.get("fun_id") or "", scanned["path"]),
+                ).fetchone()
+                if collision:
+                    conn.rollback()
+                    return {
+                        "mode": "svn-incremental-scan",
+                        "provider": "svn",
+                        "workspaceKey": workspace["workspaceKey"],
+                        "sourcePath": scanned["path"],
+                        "changed": 0,
+                        "failures": 1,
+                        "errors": [{"path": scanned["path"], "error": f"duplicate object identity also used by {collision['source_path']}"}],
+                        "indexPreserved": True,
+                    }
+            for row in existing:
+                _delete_svn_index_item(conn, workspace, row)
+            if item:
+                _insert_svn_index_item(conn, workspace, item, _now())
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         return {
             "mode": "svn-incremental-scan",
             "provider": "svn",
             "workspaceKey": workspace["workspaceKey"],
             "sourcePath": scanned["path"],
-            "changed": 0,
-            "failures": len(scanned["errors"]),
-            "errors": scanned["errors"],
-            "indexPreserved": True,
+            "changed": 1,
+            "failures": 0,
+            "errors": [],
+            "indexPreserved": False,
         }
-    existing = conn.execute(
-        "SELECT source_table, source_id, fun_id FROM gusen_source_record "
-        "WHERE provider='svn' AND source_path=?",
-        (scanned["path"],),
-    ).fetchall()
-    item = scanned["object"]
-    if item:
-        collision = conn.execute(
-            """
-            SELECT source_path FROM gusen_source_record
-            WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=? AND source_path<>?
-            LIMIT 1
-            """,
-            (item["source_table"], item["source_id"], item.get("fun_id") or "", scanned["path"]),
-        ).fetchone()
-        if collision:
-            return {
-                "mode": "svn-incremental-scan",
-                "provider": "svn",
-                "workspaceKey": workspace["workspaceKey"],
-                "sourcePath": scanned["path"],
-                "changed": 0,
-                "failures": 1,
-                "errors": [{"path": scanned["path"], "error": f"duplicate object identity also used by {collision['source_path']}"}],
-                "indexPreserved": True,
-            }
-    try:
-        conn.execute("BEGIN")
-        for row in existing:
-            _delete_svn_index_item(conn, workspace, row)
-        if item:
-            _insert_svn_index_item(conn, workspace, item, _now())
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    return {
-        "mode": "svn-incremental-scan",
-        "provider": "svn",
-        "workspaceKey": workspace["workspaceKey"],
-        "sourcePath": scanned["path"],
-        "changed": 1,
-        "failures": 0,
-        "errors": [],
-        "indexPreserved": False,
-    }
 
 
 def workspace_index_path(cfg, value=None):
