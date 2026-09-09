@@ -116,7 +116,13 @@ def _display_name(display_path, key):
     return " / ".join(parts)
 
 
-def _node_display_label(value: dict) -> str:
+def _node_display_label(value: dict, node_kind: str | None = None) -> str:
+    if node_kind == "button":
+        name = value.get("name")
+        alias = value.get("aliasName")
+        readable_name = str(name).strip() if isinstance(name, (str, int, float)) else ""
+        readable_alias = str(alias).strip() if isinstance(alias, (str, int, float)) else ""
+        return " ".join(part for part in (readable_name, readable_alias) if part)
     for key in ("aliasName", "name"):
         label = value.get(key)
         if isinstance(label, (str, int, float)) and str(label).strip():
@@ -138,9 +144,9 @@ def extract_page_scripts(value) -> list[ScriptField]:
 
     fields = []
 
-    def walk(current, parts, display_path, inherited_scripts=None, event_type=None):
+    def walk(current, parts, display_path, inherited_scripts=None, event_type=None, node_kind=None):
         if isinstance(current, dict):
-            label = _node_display_label(current)
+            label = _node_display_label(current, node_kind)
             next_display = display_path + ([label] if label else [])
             for key, child in current.items():
                 child_parts = parts + [key]
@@ -170,10 +176,11 @@ def extract_page_scripts(value) -> list[ScriptField]:
                         next_display,
                         inherited if isinstance(inherited, dict) else None,
                         key if key in EVENT_SUPERS else event_type,
+                        "button" if key in {"button", "buttons"} else None,
                     )
         elif isinstance(current, list):
             for index, child in enumerate(current):
-                walk(child, parts + [index], display_path, inherited_scripts, event_type)
+                walk(child, parts + [index], display_path, inherited_scripts, event_type, node_kind)
 
     walk(value, [], [])
     return fields

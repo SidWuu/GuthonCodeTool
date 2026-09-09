@@ -20,6 +20,7 @@
     "onLanguage:javascript",
     "onLanguage:sql",
     "onCommand:gushenCompletion.setupTool",
+    "onCommand:gushenCompletion.addWorkspace",
     "onCommand:gushenCompletion.selectExecutionMode",
     "onCommand:gushenCompletion.selectWorkspaceSourceMode",
     "onCommand:gushenCompletion.setSvnCredentials",
@@ -43,7 +44,9 @@
     "onCommand:gushenCompletion.revertSingleSvnChange",
     "onCommand:gushenCompletion.saveSvnToGuthon",
     "onCommand:gushenCompletion.saveAllSvnNexusChanges",
-    "onCommand:gushenCompletion.saveSingleSvnNexusChange",
+    "onCommand:gushenCompletion.saveSelectedSvnNexusChanges",
+    "onCommand:gushenCompletion.openSvnConflictMerge",
+    "onCommand:gushenCompletion.markSvnConflictResolved",
     "onCommand:gushenCompletion.updateAllSvnChanges",
     "onCommand:gushenCompletion.updateSingleSvnChange",
     "onFileSystem:guthon-svn-edit",
@@ -139,6 +142,7 @@
     },
     "commands": [
       { "command": "gushenCompletion.setupTool", "title": "Guthon Nexus: 设置/切换工作空间" },
+      { "command": "gushenCompletion.addWorkspace", "title": "Guthon Nexus: 添加产品或项目", "icon": "$(add)" },
       { "command": "gushenCompletion.selectExecutionMode", "title": "Guthon Nexus: 切换运行模式" },
       { "command": "gushenCompletion.selectWorkspaceSourceMode", "title": "Guthon Nexus: 设置项目源码来源" },
       { "command": "gushenCompletion.setSvnCredentials", "title": "Guthon Nexus: 设置工作区 SVN 登录" },
@@ -163,7 +167,9 @@
       { "command": "gushenCompletion.revertSingleSvnChange", "title": "Guthon Nexus: 放弃此文件修改", "icon": "$(discard)" },
       { "command": "gushenCompletion.saveSvnToGuthon", "title": "Guthon Nexus: 保存到谷神", "icon": "$(cloud-upload)" },
       { "command": "gushenCompletion.saveAllSvnNexusChanges", "title": "Guthon Nexus: 提交全部 Nexus 修改", "icon": "$(cloud-upload)" },
-      { "command": "gushenCompletion.saveSingleSvnNexusChange", "title": "Guthon Nexus: 提交此 Nexus 修改", "icon": "$(cloud-upload)" },
+      { "command": "gushenCompletion.saveSelectedSvnNexusChanges", "title": "Guthon Nexus: 提交所选 Nexus 修改", "icon": "$(cloud-upload)" },
+      { "command": "gushenCompletion.openSvnConflictMerge", "title": "Guthon Nexus: 打开 SVN 三方合并", "icon": "$(merge)" },
+      { "command": "gushenCompletion.markSvnConflictResolved", "title": "Guthon Nexus: 标记 SVN 冲突为已解决", "icon": "$(pass-filled)" },
       { "command": "gushenCompletion.updateAllSvnChanges", "title": "Guthon Nexus: 更新全部远程变更", "icon": "$(cloud-download)" },
       { "command": "gushenCompletion.updateSingleSvnChange", "title": "Guthon Nexus: 更新此远程变更", "icon": "$(cloud-download)" },
       { "command": "gushenCompletion.startBridge", "title": "Guthon Nexus: 启动 Guthon Bridge" },
@@ -203,7 +209,8 @@
     },
     "menus": {
       "view/title": [
-        { "command": "gushenCompletion.refreshToolView", "when": "view == gushenCompletion.toolView", "group": "navigation" },
+        { "command": "gushenCompletion.addWorkspace", "when": "view == gushenCompletion.toolView", "group": "navigation@1" },
+        { "command": "gushenCompletion.refreshToolView", "when": "view == gushenCompletion.toolView", "group": "navigation@2" },
         { "command": "gushenCompletion.jumpSelectedSvnSource", "when": "view == gushenCompletion.svnSourceView", "group": "navigation@1" },
         { "command": "gushenCompletion.locateActiveSvnSource", "when": "view == gushenCompletion.svnSourceView", "group": "navigation@2" },
         { "command": "gushenCompletion.searchSvnSource", "when": "view == gushenCompletion.svnSourceView", "group": "navigation@3" },
@@ -232,7 +239,9 @@
       "scm/resourceState/context": [
         { "command": "gushenCompletion.openSvnChangeInNexus", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState =~ /^guthonSvn\\.(LOCAL_MODIFIED|EXTERNAL_MODIFIED)\\.nexus$/", "group": "inline@1" },
         { "command": "gushenCompletion.revertSingleSvnChange", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.LOCAL_MODIFIED.nexus", "group": "inline@2" },
-        { "command": "gushenCompletion.saveSingleSvnNexusChange", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.LOCAL_MODIFIED.nexus", "group": "inline@3" },
+        { "command": "gushenCompletion.saveSelectedSvnNexusChanges", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.LOCAL_MODIFIED.nexus", "group": "inline@3" },
+        { "command": "gushenCompletion.openSvnConflictMerge", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.CONFLICT.text", "group": "inline@1" },
+        { "command": "gushenCompletion.markSvnConflictResolved", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.CONFLICT.text", "group": "inline@2" },
         { "command": "gushenCompletion.updateSingleSvnChange", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.REMOTE", "group": "inline@1" },
         { "command": "gushenCompletion.showSvnHistory", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState != guthonSvn.REMOTE", "group": "navigation@1" },
         { "command": "gushenCompletion.showSvnRawDiff", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState != guthonSvn.REMOTE", "group": "navigation@2" }
@@ -243,6 +252,7 @@
     "build:data": "node scripts/build-data.mjs",
     "build:bridge": "node scripts/build-bridge.mjs",
     "package": "npm run build:bridge && vsce package --allow-missing-repository --skip-license --out guthon-nexus-vscode.vsix",
+    "check": "node --check src/extension.js && node --check src/tool-workspace.js && node --check scripts/build-bridge.mjs && node --check scripts/build-data.mjs",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {}

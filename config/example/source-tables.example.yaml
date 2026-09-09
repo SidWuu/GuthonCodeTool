@@ -1,4 +1,4 @@
-# PAGE 和过程函数源码表字段映射模板，product_content_field 用于项目继承标记。
+# PAGE 和过程函数源码表字段映射模板，product_content_field 用于项目快照内的脚本继承标记。
 # 源码类型与数据库表字段的映射集合。
 source_tables:
   # PAGE 源码映射。
@@ -74,7 +74,7 @@ source_tables:
     params_field: FUNCTION_PARAMS_FIELD
     # 当前层的函数脚本字段。
     content_field: FUNCTION_SCRIPT_FIELD
-    # 项目继承标记对应的产品快照脚本字段。
+    # 项目导出快照中，继承标记对应的产品脚本字段。
     product_content_field: PRODUCT_FUNCTION_SCRIPT_FIELD
     # 函数更新时间字段，用于增量查询。
     update_time_field: FUNCTION_UPDATE_TIME_FIELD

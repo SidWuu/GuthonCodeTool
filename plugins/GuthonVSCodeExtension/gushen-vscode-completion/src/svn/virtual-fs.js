@@ -13,8 +13,10 @@ function documentExtension(identity) {
   if (identity.fragmentType === 'fields' || pointer.endsWith('/fields')) return 'json';
   if (identity.fragmentType === 'gss' || identity.fragmentType === 'vm') return 'gss';
   if (identity.fragmentType === 'js') return 'js';
-  if (String(identity.sourcePath || '').toLowerCase().endsWith('.gss')) return 'gss';
-  if (identity.sourceType === 'procedure' || identity.sourceType === 'system-script') return 'gss';
+  const sourcePathExtension = String(identity.sourcePath || '').match(/\.([A-Za-z0-9]+)$/)?.[1]?.toLowerCase();
+  if (sourcePathExtension === 'gss' || sourcePathExtension === 'vm') return 'gss';
+  if (sourcePathExtension === 'js' || sourcePathExtension === 'sql') return sourcePathExtension;
+  if (identity.sourceType === 'procedure') return 'gss';
   if (identity.sourceType === 'table' || identity.sourceType === 'view') return 'json';
   if (identity.sourceType === 'skill' || identity.sourceType === 'public') {
     return sourceIdExtension(identity) || 'txt';
@@ -23,11 +25,21 @@ function documentExtension(identity) {
 }
 
 function safeName(value) {
-  return String(value || 'source').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '') || 'source';
+  return String(value || 'source')
+    // Keep Chinese and other readable Unicode characters in the virtual path;
+    // only remove characters that cannot safely be used in a file name.
+    .replace(/[<>:"/\\|?*\u0000-\u001F\u007F]+/g, '_')
+    .replace(/^\.+/, '')
+    .trim()
+    || 'source';
 }
 
 function documentFilename(identity) {
-  const name = safeName(identity.funId || identity.sourceId);
+  const name = safeName(
+    identity.documentName
+      || identity.funId
+      || identity.sourceId
+  );
   const extension = documentExtension(identity);
   return name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`;
 }

@@ -1,4 +1,5 @@
 node_modules/
+.venv/
 __pycache__/
 .DS_Store
 *.pyc
@@ -16,6 +17,18 @@ build/
 dist/
 /*.spec
 tests/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+coverage/
+htmlcov/
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
 docs/superpowers/
 docs/private/
 plugins/GuthonVSCodeExtension/gushen-vscode-completion/bridge/server.js

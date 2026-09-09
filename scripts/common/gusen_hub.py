@@ -43,6 +43,10 @@ SOURCE_MODE_VERSION = 1
 INDEX_BUSY_TIMEOUT_MS = 30000
 
 
+class IndexRebuildRequired(SystemExit):
+    """Raised when a derived index cannot be upgraded in place."""
+
+
 def workspace_steps(workspace):
     return ("source",) if workspace.get("sourceMode") == "svn" else WORKSPACE_STEPS
 
@@ -67,7 +71,7 @@ def _svn_capabilities(settings):
 def workspace_key(value=None):
     key = str(value or os.environ.get(WORKSPACE_ENV) or "").strip()
     if not key:
-        raise SystemExit("Missing --workspace. Use products.<product_id> or projects.<project_id>.")
+        raise SystemExit("Missing --workspace. Use products.<id> or projects.<id>.")
     return key
 
 
@@ -158,6 +162,26 @@ def change_workspace_source_mode(config: dict, workspace: dict, source_mode: str
     return result, updated
 
 
+def resolve_workspace_storage_root(kind: str, config_id: str, item: dict) -> Path:
+    """Resolve one product/project's private root from its persisted identity."""
+
+    prefixes = {"products": "PRD", "projects": "PRJ"}
+    if kind not in prefixes:
+        raise SystemExit(f"Unknown workspace kind: {kind}")
+    configured_workspace_root = item.get("workspace_root")
+    workspace_root_value = (
+        svn_checkout.expand_config_value(configured_workspace_root, f"workspace_root for {kind}.{config_id}")
+        if configured_workspace_root not in (None, "")
+        else ""
+    )
+    workspace_root = Path(workspace_root_value or VAR_DIR / "workspace").expanduser().absolute()
+    resolved_workspace_root = workspace_root.resolve()
+    if resolved_workspace_root in {Path("/").resolve(), Path.home().resolve()}:
+        raise SystemExit(f"Unsafe workspace_root for {kind}.{config_id}: {workspace_root}")
+    name = str(item.get("name") or "").strip()
+    return workspace_root / path_part(f"{prefixes[kind]} {name}")
+
+
 def list_workspaces(config):
     workspaces = []
     seen_names = {"products": set(), "projects": set()}
@@ -178,17 +202,8 @@ def list_workspaces(config):
                 raise SystemExit(f"Duplicate {kind} display name: {name}")
             seen_names[kind].add(name)
             key = f"{kind}.{item_id}"
-            configured_workspace_root = item.get("workspace_root")
-            workspace_root_value = (
-                svn_checkout.expand_config_value(configured_workspace_root, f"workspace_root for {key}")
-                if configured_workspace_root not in (None, "")
-                else ""
-            )
-            workspace_root = Path(workspace_root_value or VAR_DIR / "workspace").expanduser().absolute()
-            resolved_workspace_root = workspace_root.resolve()
-            if resolved_workspace_root in {Path("/").resolve(), Path.home().resolve()}:
-                raise SystemExit(f"Unsafe workspace_root for {key}: {workspace_root}")
-            root = workspace_root / path_part(f"{prefix} {name}")
+            root = resolve_workspace_storage_root(kind, item_id, item)
+            resolved_workspace_root = root.parent.resolve()
             source_mode, source_mode_source = read_workspace_source_mode(root, key, item)
             svn = svn_checkout.svn_settings(
                 item_id,
@@ -230,7 +245,7 @@ def list_workspaces(config):
                     "name": name,
                     "displayName": f"{prefix} {name}",
                     "layer": layer,
-                    "productId": item_id if kind == "products" else str(item.get("product_id") or ""),
+                    "scopeId": item_id,
                     "projectId": "" if kind == "products" else item_id,
                     "datasourceName": datasource_name,
                     "datasource": datasource,
@@ -666,8 +681,13 @@ def _scalar(value: str):
         return None
     if value in ('""', "''"):
         return ""
-    if value.startswith(("'", '"')) and value.endswith(("'", '"')):
-        return value[1:-1]
+    if value.startswith('"') and value.endswith('"'):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value[1:-1]
+    if value.startswith("'") and value.endswith("'"):
+        return value[1:-1].replace("''", "'")
     try:
         return int(value)
     except ValueError:
@@ -932,17 +952,82 @@ def route_workspace_request(config, payload):
     }
 
 
-def connect_index(index_db: Path) -> sqlite3.Connection:
+def _reset_incompatible_index(conn: sqlite3.Connection) -> bool:
+    existing = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gusen_source_record'"
+    ).fetchone()
+    if not existing:
+        return False
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(gusen_source_record)")}
+    if "scope_id" in columns:
+        return False
+
+    # The index is derived data. When its identity model changes, rebuilding it is
+    # safer than carrying obsolete workspace relationships into current queries.
+    objects = conn.execute(
+        "SELECT type, name FROM sqlite_master "
+        "WHERE type IN ('view', 'table') AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY CASE type WHEN 'view' THEN 0 ELSE 1 END"
+    ).fetchall()
+    for item in objects:
+        identifier = str(item["name"]).replace('"', '""')
+        conn.execute(f'DROP {item["type"].upper()} IF EXISTS "{identifier}"')
+    conn.commit()
+    return True
+
+
+def _migrate_workspace_identity(conn: sqlite3.Connection) -> bool:
+    """Upgrade the previous workspace identity column without discarding the index."""
+
+    existing = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gusen_source_record'"
+    ).fetchone()
+    if not existing:
+        return False
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(gusen_source_record)")}
+    if "scope_id" in columns:
+        return True
+    if "product_id" not in columns:
+        return False
+
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("ALTER TABLE gusen_source_record RENAME COLUMN product_id TO scope_id")
+        conn.execute(
+            "UPDATE gusen_source_record SET scope_id=project_id "
+            "WHERE source_layer='PROJECT' AND project_id<>''"
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return True
+
+
+def connect_index(index_db: Path, *, rebuild_incompatible: bool = False) -> sqlite3.Connection:
     index_db.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(index_db, timeout=INDEX_BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
     conn.execute(f"PRAGMA busy_timeout={INDEX_BUSY_TIMEOUT_MS}")
+    existing = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gusen_source_record'"
+    ).fetchone()
+    if existing:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(gusen_source_record)")}
+        if "scope_id" not in columns:
+            if _migrate_workspace_identity(conn):
+                pass
+            elif not rebuild_incompatible:
+                conn.close()
+                raise IndexRebuildRequired("源码索引结构已更新，需要重建派生索引")
+            else:
+                _reset_incompatible_index(conn)
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS gusen_source_record (
             record_id INTEGER,
             source_layer TEXT NOT NULL,
-            product_id TEXT NOT NULL,
+            scope_id TEXT NOT NULL,
             project_id TEXT NOT NULL DEFAULT '',
             source_table TEXT NOT NULL,
             source_id TEXT NOT NULL,
@@ -958,7 +1043,7 @@ def connect_index(index_db: Path) -> sqlite3.Connection:
             local_path TEXT,
             status TEXT NOT NULL,
             indexed_time TEXT NOT NULL,
-            PRIMARY KEY (source_layer, product_id, project_id, source_table, source_id, fun_id)
+            PRIMARY KEY (source_layer, scope_id, project_id, source_table, source_id, fun_id)
         );
         CREATE TABLE IF NOT EXISTS gusen_invoke_call (
             id INTEGER PRIMARY KEY,
@@ -1066,7 +1151,7 @@ def _migrate_call_index_schema(conn):
                        c.target_alias_id, c.target_fun_id, c.invoke_type
                 FROM gusen_invoke_call_legacy c
                 JOIN gusen_source_record s
-                  ON s.source_layer=c.source_layer AND s.product_id=c.product_id
+                  ON s.source_layer=c.source_layer AND s.scope_id=c.scope_id
                  AND s.project_id=c.project_id AND s.source_table=c.source_table
                  AND s.source_id=c.source_id AND s.fun_id=c.fun_id
                 """
@@ -1096,7 +1181,7 @@ def _migrate_call_index_schema(conn):
                 SELECT c.id, s.record_id, c.script_type, c.json_path, c.line_no, c.invoke_expr, c.reason
                 FROM gusen_dynamic_call_legacy c
                 JOIN gusen_source_record s
-                  ON s.source_layer=c.source_layer AND s.product_id=c.product_id
+                  ON s.source_layer=c.source_layer AND s.scope_id=c.scope_id
                  AND s.project_id=c.project_id AND s.source_table=c.source_table
                  AND s.source_id=c.source_id AND s.fun_id=c.fun_id
                 """
@@ -1112,15 +1197,15 @@ def _migrate_call_index_schema(conn):
             "CREATE INDEX IF NOT EXISTS gusen_dynamic_source_idx "
             "ON gusen_dynamic_call(source_record_id, line_no)",
             "CREATE INDEX IF NOT EXISTS gusen_source_alias_lookup_idx "
-            "ON gusen_source_record(source_alias_id, fun_id, status, product_id)",
+            "ON gusen_source_record(source_alias_id, fun_id, status, scope_id)",
             "CREATE INDEX IF NOT EXISTS gusen_source_object_lookup_idx "
-            "ON gusen_source_record(product_id, source_id, fun_id, source_layer, project_id)",
+            "ON gusen_source_record(scope_id, source_id, fun_id, source_layer, project_id)",
             "CREATE INDEX IF NOT EXISTS gusen_source_physical_lookup_idx "
             "ON gusen_source_record(provider, scope_entry_id, source_path, status)",
             """
             CREATE VIEW gusen_invoke_call_detail AS
             SELECT c.id, c.source_record_id, c.source_fragment_id,
-                   s.source_layer, s.product_id, s.project_id, s.source_table, s.source_id,
+                   s.source_layer, s.scope_id, s.project_id, s.source_table, s.source_id,
                    s.source_alias_id, s.fun_id, s.source_name,
                    c.script_type, c.json_path, c.line_no,
                    c.target_alias_id, c.target_fun_id, c.invoke_type,
@@ -1131,7 +1216,7 @@ def _migrate_call_index_schema(conn):
             """
             CREATE VIEW gusen_dynamic_call_detail AS
             SELECT c.id, c.source_record_id, c.source_fragment_id,
-                   s.source_layer, s.product_id, s.project_id, s.source_table, s.source_id,
+                   s.source_layer, s.scope_id, s.project_id, s.source_table, s.source_id,
                    s.source_alias_id, s.fun_id, s.source_name,
                    c.script_type, c.json_path, c.line_no, c.invoke_expr, c.reason,
                    'LOW' AS confidence, s.update_time, s.indexed_time
@@ -1147,7 +1232,7 @@ def _migrate_call_index_schema(conn):
         raise
 
 
-def find_source_candidates(conn, product_id, keyword, limit=10):
+def find_source_candidates(conn, scope_id, keyword, limit=10):
     limit = max(1, min(int(limit), 10))
     query = f"%{keyword.strip()}%"
     return conn.execute(
@@ -1155,28 +1240,28 @@ def find_source_candidates(conn, product_id, keyword, limit=10):
         SELECT source_layer, project_id, source_table, source_id, source_alias_id, fun_id, source_name,
                local_path, status, provider, source_path, source_hash, svn_revision, system_id, data_source_id
         FROM gusen_source_record
-        WHERE product_id=?
+        WHERE scope_id=?
           AND (source_id LIKE ? OR source_alias_id LIKE ? OR source_name LIKE ?)
         ORDER BY source_name, source_alias_id, fun_id
         LIMIT ?
         """,
-        (product_id, query, query, query, limit),
+        (scope_id, query, query, query, limit),
     ).fetchall()
 
 
-def query_source_context(conn, product_id, source_id, fun_id="", limit=20):
+def query_source_context(conn, scope_id, source_id, fun_id="", limit=20):
     limit = max(1, min(int(limit), 20))
     source = conn.execute(
         """
         SELECT record_id AS source_record_id, * FROM gusen_source_record
-        WHERE product_id=? AND source_id=? AND fun_id=?
+        WHERE scope_id=? AND source_id=? AND fun_id=?
         ORDER BY source_layer, project_id
         LIMIT 1
         """,
-        (product_id, source_id, fun_id),
+        (scope_id, source_id, fun_id),
     ).fetchone()
     if not source:
-        raise ValueError(f"Source not found: product={product_id}, sourceId={source_id}, funId={fun_id}")
+        raise ValueError(f"Source not found: scope={scope_id}, sourceId={source_id}, funId={fun_id}")
     outgoing = conn.execute(
         """
         SELECT ? AS source_table, ? AS source_id, ? AS source_alias_id, ? AS fun_id,
@@ -1201,11 +1286,11 @@ def query_source_context(conn, product_id, source_id, fun_id="", limit=20):
         SELECT source_layer, source_table, source_id, source_alias_id, fun_id, script_type, json_path, line_no,
                invoke_type, confidence
         FROM gusen_invoke_call_detail
-        WHERE product_id=? AND target_alias_id=? AND target_fun_id=?
+        WHERE scope_id=? AND target_alias_id=? AND target_fun_id=?
         ORDER BY source_layer, source_alias_id, fun_id, line_no
         LIMIT ?
         """,
-        (product_id, source["source_alias_id"], source["fun_id"], limit),
+        (scope_id, source["source_alias_id"], source["fun_id"], limit),
     ).fetchall()
     dynamic = conn.execute(
         """
@@ -1222,18 +1307,18 @@ def query_source_context(conn, product_id, source_id, fun_id="", limit=20):
     return {"source": source_payload, "outgoing": outgoing, "incoming": incoming, "dynamic": dynamic}
 
 
-def query_incoming_callers(conn, product_id, target_alias_id, target_fun_id, limit=100):
+def query_incoming_callers(conn, scope_id, target_alias_id, target_fun_id, limit=100):
     limit = max(1, min(int(limit), 100))
     return conn.execute(
         """
         SELECT source_layer, project_id, source_table, source_id, source_alias_id, fun_id,
                source_name, script_type, json_path, line_no, invoke_type, confidence
         FROM gusen_invoke_call_detail
-        WHERE product_id=? AND target_alias_id=? AND target_fun_id=?
+        WHERE scope_id=? AND target_alias_id=? AND target_fun_id=?
         ORDER BY source_table, source_alias_id, fun_id, line_no
         LIMIT ?
         """,
-        (product_id, target_alias_id, target_fun_id, limit),
+        (scope_id, target_alias_id, target_fun_id, limit),
     ).fetchall()
 
 
@@ -1525,7 +1610,13 @@ def run_sync_once(args=None, on_progress=None):
     sync = cfg["sync"]["sync"]
     index_path = workspace["indexPath"]
     index_name = _indexed_path(index_path)
-    conn = connect_index(index_path)
+    conn = connect_index(
+        index_path,
+        rebuild_incompatible=(
+            not parsed.init_only
+            and (workspace.get("sourceMode") == "svn" or not parsed.reindex_calls)
+        ),
+    )
     if workspace.get("sourceMode") == "svn":
         if parsed.init_only:
             export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
@@ -1572,7 +1663,7 @@ def run_sync_once(args=None, on_progress=None):
         cfg,
         workspace["config"],
         workspace["layer"],
-        workspace["productId"],
+        workspace["scopeId"],
         workspace["projectId"],
         sync_from,
         stats,
@@ -1613,7 +1704,7 @@ def _indexed_path(path: Path) -> str:
 def _delete_call_index(conn, identity):
     source_ids = (
         "SELECT record_id FROM gusen_source_record "
-        "WHERE source_layer=? AND product_id=? AND project_id=? "
+        "WHERE source_layer=? AND scope_id=? AND project_id=? "
         "AND source_table=? AND source_id=? AND fun_id=?"
     )
     record_ids = [
@@ -1636,7 +1727,7 @@ def _delete_call_index(conn, identity):
 def _delete_svn_index_item(conn, workspace, row):
     identity = (
         workspace["layer"],
-        workspace["productId"],
+        workspace["scopeId"],
         workspace["projectId"],
         row["source_table"],
         row["source_id"],
@@ -1644,7 +1735,7 @@ def _delete_svn_index_item(conn, workspace, row):
     )
     _delete_call_index(conn, identity)
     conn.execute(
-        "DELETE FROM gusen_source_record WHERE source_layer=? AND product_id=? AND project_id=? "
+        "DELETE FROM gusen_source_record WHERE source_layer=? AND scope_id=? AND project_id=? "
         "AND source_table=? AND source_id=? AND fun_id=?",
         identity,
     )
@@ -1655,7 +1746,7 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
     conn.execute(
         """
         INSERT OR REPLACE INTO gusen_source_record(
-            source_layer, product_id, project_id, source_table, source_id, source_alias_id, fun_id,
+            source_layer, scope_id, project_id, source_table, source_id, source_alias_id, fun_id,
             source_name, version_mac, update_time, check_out_user_id, check_out_date, check_in_date,
             change_key, local_path, status, indexed_time, provider, source_path, source_hash,
             svn_revision, json_pointer, system_id, data_source_id, working_copy_id, scope_entry_id,
@@ -1664,7 +1755,7 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
         """,
         (
             workspace["layer"],
-            workspace["productId"],
+            workspace["scopeId"],
             workspace["projectId"],
             item["source_table"],
             item["source_id"],
@@ -1733,7 +1824,7 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
             conn,
             item,
             workspace["layer"],
-            workspace["productId"],
+            workspace["scopeId"],
             workspace["projectId"],
             script["script_type"],
             local_path,
@@ -2082,7 +2173,7 @@ def resolve_datasource(cfg, name=None, workspace=None):
     return name, datasource
 
 
-def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, stats, workspace, force=False):
+def _sync_layer(conn, cfg, layer_cfg, layer, scope_id, project_id, sync_from, stats, workspace, force=False):
     ds_name = layer_cfg["datasource"]
     ds = cfg["datasource"]["datasource"][ds_name]
     table_cfg = cfg["source_tables"]
@@ -2102,11 +2193,11 @@ def _sync_layer(conn, cfg, layer_cfg, layer, product_id, project_id, sync_from, 
                         continue
                     if row["source_table"] == PAGE_SOURCE_TYPE:
                         row["model_path"] = model_paths.get(_str(row.get("model_id")))
-                    if upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_scope, force=force):
+                    if upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scope, force=force):
                         stats["changed"] += 1
             cur.execute(inventory_query, inventory_params)
             current_page_ids = {row["source_id"] for row in cur.fetchall() if _included(layer_cfg, row)}
-        stats["deleted"] = stats.get("deleted", 0) + reconcile_deleted_pages(conn, layer, product_id, project_id, current_page_ids)
+        stats["deleted"] = stats.get("deleted", 0) + reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids)
     conn.commit()
     return stats
 
@@ -2137,24 +2228,24 @@ def _included(layer_cfg, row):
     return any((row["source_alias_id"] or "").startswith(prefix) for prefix in prefixes)
 
 
-def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_scope, force=False):
+def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scope, force=False):
     change_key = _change_key(row)
     source_alias_id = _source_alias_id(row)
     existing = conn.execute(
         """
         SELECT change_key, local_path FROM gusen_source_record
-        WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
+        WHERE source_layer=? AND scope_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
         """,
-        (layer, product_id, project_id, row["source_table"], row["source_id"], row["fun_id"] or ""),
+        (layer, scope_id, project_id, row["source_table"], row["source_id"], row["fun_id"] or ""),
     ).fetchone()
-    desired_path = source_base(row, layer, product_id, project_id, layer_cfg, system_scope)
+    desired_path = source_base(row, layer, scope_id, project_id, layer_cfg, system_scope)
     if existing and existing["change_key"] == change_key and not force:
         indexed_path = ROOT / existing["local_path"] if existing["local_path"] else None
         if indexed_path == desired_path and desired_path.exists() and all(
             path.is_file() for path in _source_output_paths(row, desired_path)
         ):
             return False
-    local_path, status, scripts = write_source(row, layer, product_id, project_id, layer_cfg, system_scope, change_key)
+    local_path, status, scripts = write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, change_key)
     if existing and existing["local_path"]:
         old_path = ROOT / existing["local_path"]
         if old_path != local_path:
@@ -2162,7 +2253,7 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
     indexed_time = _now()
     identity = (
         layer,
-        product_id,
+        scope_id,
         project_id,
         row["source_table"],
         row["source_id"],
@@ -2172,14 +2263,14 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
     conn.execute(
         """
         INSERT OR REPLACE INTO gusen_source_record(
-            source_layer, product_id, project_id, source_table, source_id, source_alias_id, fun_id,
+            source_layer, scope_id, project_id, source_table, source_id, source_alias_id, fun_id,
             source_name, version_mac, update_time, check_out_user_id, check_out_date, check_in_date,
             change_key, local_path, status, indexed_time
         ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             layer,
-            product_id,
+            scope_id,
             project_id,
             row["source_table"],
             row["source_id"],
@@ -2200,7 +2291,7 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
     source_record = conn.execute(
         """
         SELECT record_id FROM gusen_source_record
-        WHERE source_layer=? AND product_id=? AND project_id=?
+        WHERE source_layer=? AND scope_id=? AND project_id=?
           AND source_table=? AND source_id=? AND fun_id=?
         """,
         identity,
@@ -2222,7 +2313,7 @@ def upsert_source(conn, row, layer, product_id, project_id, layer_cfg, system_sc
             conn,
             row,
             layer,
-            product_id,
+            scope_id,
             project_id,
             script["script_type"],
             script.get("path") or local_path,
@@ -2250,34 +2341,34 @@ def remove_source_path(path: Path):
         parent = parent.parent
 
 
-def reconcile_deleted_pages(conn, layer, product_id, project_id, current_page_ids):
+def reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids):
     rows = conn.execute(
         """
         SELECT source_id, local_path FROM gusen_source_record
-        WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=?
+        WHERE source_layer=? AND scope_id=? AND project_id=? AND source_table=?
         """,
-        (layer, product_id, project_id, PAGE_SOURCE_TYPE),
+        (layer, scope_id, project_id, PAGE_SOURCE_TYPE),
     ).fetchall()
     stale = [row for row in rows if row["source_id"] not in current_page_ids]
     for row in stale:
         if row["local_path"]:
             remove_source_path(ROOT / row["local_path"])
-        identity = (layer, product_id, project_id, PAGE_SOURCE_TYPE, row["source_id"], "")
+        identity = (layer, scope_id, project_id, PAGE_SOURCE_TYPE, row["source_id"], "")
         _delete_call_index(conn, identity)
         conn.execute(
-            "DELETE FROM gusen_source_record WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
+            "DELETE FROM gusen_source_record WHERE source_layer=? AND scope_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
             identity,
         )
     return len(stale)
 
 
-def readonly_layer_root(layer, product_id, project_id, layer_cfg):
+def readonly_layer_root(layer, scope_id, project_id, layer_cfg):
     return readonly_source_dir()
 
 
-def source_base(row, layer, product_id, project_id, layer_cfg, system_scope):
+def source_base(row, layer, scope_id, project_id, layer_cfg, system_scope):
     system_name = _system_name(row, system_scope)
-    layer_root = readonly_layer_root(layer, product_id, project_id, layer_cfg)
+    layer_root = readonly_layer_root(layer, scope_id, project_id, layer_cfg)
     root = layer_root / path_part(system_name)
     if row["source_table"] == PAGE_SOURCE_TYPE:
         module_name = row.get("mk_name") or row.get("mk_id") or "未归属模块"
@@ -2296,11 +2387,11 @@ def source_base(row, layer, product_id, project_id, layer_cfg, system_scope):
         return root / "procedure" / path_part(row["source_alias_id"]) / path_part(row["fun_id"])
 
 
-def write_source(row, layer, product_id, project_id, layer_cfg, system_scope, change_key):
-    base = source_base(row, layer, product_id, project_id, layer_cfg, system_scope)
+def write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, change_key):
+    base = source_base(row, layer, scope_id, project_id, layer_cfg, system_scope)
     if row["source_table"] != PAGE_SOURCE_TYPE:
         system_name = _system_name(row, system_scope)
-        layer_root = readonly_layer_root(layer, product_id, project_id, layer_cfg)
+        layer_root = readonly_layer_root(layer, scope_id, project_id, layer_cfg)
         _link_shared_procedure_dirs(layer_root, system_name, row, system_scope)
     if base.exists():
         shutil.rmtree(base)
@@ -2521,7 +2612,7 @@ def index_calls(
     conn,
     row,
     layer,
-    product_id,
+    scope_id,
     project_id,
     script_type,
     script_path,
@@ -2534,12 +2625,12 @@ def index_calls(
         """
         SELECT record_id AS source_record_id
         FROM gusen_source_record
-        WHERE source_layer=? AND product_id=? AND project_id=?
+        WHERE source_layer=? AND scope_id=? AND project_id=?
           AND source_table=? AND source_id=? AND fun_id=?
         """,
         (
             layer,
-            product_id,
+            scope_id,
             project_id,
             row["source_table"],
             row["source_id"],
@@ -2655,7 +2746,7 @@ def reindex_local_calls(conn):
                 conn,
                 dict(row),
                 row["source_layer"],
-                row["product_id"],
+                row["scope_id"],
                 row["project_id"],
                 script["script_type"],
                 script.get("path") or base,
@@ -2668,16 +2759,16 @@ def reindex_local_calls(conn):
     return indexed
 
 
-def export_product_docs(conn, product_id, workspace=None):
+def export_product_docs(conn, scope_id, workspace=None):
     out = (workspace or current_workspace())["contextDir"]
     out.mkdir(parents=True, exist_ok=True)
     rows = conn.execute(
         """
         SELECT * FROM gusen_source_record
-        WHERE source_layer='PRODUCT' AND product_id=?
+        WHERE source_layer='PRODUCT' AND scope_id=?
         ORDER BY source_table, source_alias_id, fun_id
         """,
-        (product_id,),
+        (scope_id,),
     ).fetchall()
     _write_table(
         out / "source-index.md",
@@ -2688,10 +2779,10 @@ def export_product_docs(conn, product_id, workspace=None):
     calls = conn.execute(
         """
         SELECT * FROM gusen_invoke_call_detail
-        WHERE source_layer='PRODUCT' AND product_id=?
+        WHERE source_layer='PRODUCT' AND scope_id=?
         ORDER BY source_table, source_alias_id, fun_id, line_no
         """,
-        (product_id,),
+        (scope_id,),
     ).fetchall()
     _write_table(
         out / "invoke-index.md",
@@ -2702,10 +2793,10 @@ def export_product_docs(conn, product_id, workspace=None):
     dynamic_calls = conn.execute(
         """
         SELECT * FROM gusen_dynamic_call_detail
-        WHERE source_layer='PRODUCT' AND product_id=?
+        WHERE source_layer='PRODUCT' AND scope_id=?
         ORDER BY source_table, source_alias_id, fun_id, line_no
         """,
-        (product_id,),
+        (scope_id,),
     ).fetchall()
     _write_table(
         out / "dynamic-invoke-points.md",
@@ -2730,12 +2821,12 @@ def export_project_docs(conn, project_id, workspace=None):
             conn.execute(
                 """
                 SELECT * FROM gusen_invoke_call_detail
-                WHERE source_layer=? AND product_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
+                WHERE source_layer=? AND scope_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
                 ORDER BY source_alias_id, fun_id, line_no
                 """,
                 (
                     "PROJECT",
-                    row["product_id"],
+                    row["scope_id"],
                     project_id,
                     row["source_table"],
                     row["source_id"],
@@ -3224,9 +3315,9 @@ def _current_work_copy_source(metadata: dict):
     row = conn.execute(
         """
         SELECT * FROM gusen_source_record
-        WHERE source_layer='PRODUCT' AND product_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
+        WHERE source_layer='PRODUCT' AND scope_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
         """,
-        (metadata.get("product_id") or "", source_type, alias, fun),
+        (metadata.get("scope_id") or "", source_type, alias, fun),
     ).fetchone()
     if not row:
         return None, None, ""
@@ -3267,7 +3358,7 @@ def work_copy_cli(args=None):
         if parsed.command == "save-svn" or parsed.command == "diff":
             result = writeback.save(workspace, Path(parsed.path), check_only=parsed.check or parsed.command == "diff")
             if parsed.command == "save-svn" and not parsed.check and result.get("changed"):
-                conn = connect_index(workspace["indexPath"])
+                conn = connect_index(workspace["indexPath"], rebuild_incompatible=True)
                 try:
                     result["reindex"] = index_svn_workspace(conn, cfg, workspace)
                 finally:
@@ -3320,7 +3411,7 @@ def create_work_copy(args=None):
     parsed = parser.parse_args(args)
     cfg = load_config()
     workspace = resolve_workspace(cfg)
-    layer, product_id, project_id, _layer_cfg = resolve_pull_scope(cfg, {"workspaceKey": workspace["workspaceKey"]})
+    layer, scope_id, project_id, _layer_cfg = resolve_pull_scope(cfg, {"workspaceKey": workspace["workspaceKey"]})
     conn = connect_index(workspace["indexPath"])
     try:
         if workspace.get("sourceMode") == "svn":
@@ -3328,7 +3419,7 @@ def create_work_copy(args=None):
         else:
             if not parsed.alias:
                 raise SystemExit("--alias is required in database source mode")
-            row = find_work_copy_source(conn, product_id if layer == "PRODUCT" else None, project_id or None, parsed.type, parsed.alias, parsed.fun)
+            row = find_work_copy_source(conn, scope_id if layer == "PRODUCT" else None, project_id or None, parsed.type, parsed.alias, parsed.fun)
         result = create_work_copy_from_row(conn, cfg, row, workspace)
     finally:
         conn.close()
@@ -3342,11 +3433,11 @@ def create_work_copy_from_row(conn, cfg, row, workspace, diff_check=True):
 
         svn_checkout.require_capability(workspace, "workcopy")
         return projection.open_workcopy(workspace, row_dict, svn_checkout.load_scope(workspace))
-    product_id = workspace["productId"]
+    scope_id = workspace["scopeId"]
     project_id = workspace["projectId"]
     found = find_work_copy_source(
         conn,
-        product_id=product_id if not project_id else None,
+        scope_id=scope_id if not project_id else None,
         project_id=project_id,
         source_type=row["source_table"],
         alias=_source_alias_id(row),
@@ -3416,7 +3507,7 @@ def pull_source_to_work_copy(payload: dict):
             "provider": "svn",
             "source": source,
         }
-    layer, product_id, project_id, layer_cfg = resolve_pull_scope(cfg, payload)
+    layer, scope_id, project_id, layer_cfg = resolve_pull_scope(cfg, payload)
     rules = cfg["sync"].get("rules") or {}
     pull_diff_check = rules.get("pull_diff_check", True)
     conn = connect_index(workspace["indexPath"])
@@ -3474,7 +3565,7 @@ def pull_source_to_work_copy(payload: dict):
             conn,
             candidate,
             layer,
-            product_id,
+            scope_id,
             project_id,
             layer_cfg,
             system_scope,
@@ -3504,7 +3595,7 @@ def pull_source_to_work_copy(payload: dict):
 
 def resolve_pull_scope(cfg: dict, payload: dict):
     workspace = resolve_workspace(cfg, payload.get("workspaceKey"))
-    return workspace["layer"], workspace["productId"], workspace["projectId"], workspace["config"]
+    return workspace["layer"], workspace["scopeId"], workspace["projectId"], workspace["config"]
 
 
 def pull_source_payload_from_args(workspace, source_type, source_id, alias, fun, force=False):
@@ -3558,14 +3649,14 @@ def pull_source_to_work_copy_cli(args=None):
     print(json.dumps(result, ensure_ascii=False))
 
 
-def find_work_copy_source(conn, product_id, project_id, source_type, alias, fun):
-    if product_id:
+def find_work_copy_source(conn, scope_id, project_id, source_type, alias, fun):
+    if scope_id:
         row = conn.execute(
             """
             SELECT * FROM gusen_source_record
-            WHERE source_layer='PRODUCT' AND product_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
+            WHERE source_layer='PRODUCT' AND scope_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
             """,
-            (product_id, source_type, alias, fun),
+            (scope_id, source_type, alias, fun),
         ).fetchone()
         if not row:
             raise SystemExit("Product source not found. Run sync first.")

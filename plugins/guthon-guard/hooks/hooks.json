@@ -1,0 +1,46 @@
+{
+  "description": "Enforce Guthon rules around Codex file edits and delivery.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/guthon_hook.py\"",
+            "commandWindows": "python \"%PLUGIN_ROOT%\\scripts\\guthon_hook.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking Guthon write rules"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/guthon_hook.py\"",
+            "commandWindows": "python \"%PLUGIN_ROOT%\\scripts\\guthon_hook.py\"",
+            "timeout": 10,
+            "statusMessage": "Validating Guthon changes"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/guthon_hook.py\"",
+            "commandWindows": "python \"%PLUGIN_ROOT%\\scripts\\guthon_hook.py\"",
+            "timeout": 15,
+            "statusMessage": "Running final Guthon validation"
+          }
+        ]
+      }
+    ]
+  }
+}

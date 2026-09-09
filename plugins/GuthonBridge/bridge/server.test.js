@@ -7,7 +7,9 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const ROOT = path.join(__dirname, "..");
-const MANIFEST_PATH = path.join(__dirname, "workspace", "manifest.json");
+const TEST_TOOL_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-bridge-test-home-"));
+process.env.GUTHON_TOOL_HOME = TEST_TOOL_HOME;
+test.after(() => fs.rmSync(TEST_TOOL_HOME, { recursive: true, force: true }));
 const EXTENSION_MANIFEST_PATH = path.join(ROOT, "extension", "manifest.json");
 const CONTENT_SCRIPT_PATH = path.join(ROOT, "extension", "content.js");
 const POPUP_HTML_PATH = path.join(ROOT, "extension", "popup.html");
@@ -43,15 +45,14 @@ function waitForHealth(port) {
 
 test("saveRemoteFile writes directly into the requested absolute output directory", async () => {
   const port = 17461;
+  const toolHome = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-bridge-home-"));
   const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-bridge-output-"));
-  const originalManifest = fs.existsSync(MANIFEST_PATH)
-    ? fs.readFileSync(MANIFEST_PATH, "utf8")
-    : null;
   const server = spawn(process.execPath, ["bridge/server.js"], {
     cwd: ROOT,
     env: {
       ...process.env,
-      GUTHON_BRIDGE_PORT: String(port)
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_TOOL_HOME: toolHome
     },
     stdio: "ignore"
   });
@@ -84,11 +85,7 @@ test("saveRemoteFile writes directly into the requested absolute output director
     assert.equal(fs.existsSync(path.join(outputDir, "demo.pkg")), false);
   } finally {
     server.kill();
-    if (originalManifest === null) {
-      fs.rmSync(MANIFEST_PATH, { force: true });
-    } else {
-      fs.writeFileSync(MANIFEST_PATH, originalManifest);
-    }
+    fs.rmSync(toolHome, { recursive: true, force: true });
   }
 });
 

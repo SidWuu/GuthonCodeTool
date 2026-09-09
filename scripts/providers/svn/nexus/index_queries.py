@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
-from common import source_facts
+from common import gusen_hub, source_facts
 
 from .manifest import load_authorized_scope, source_relative_path
 
@@ -24,9 +24,7 @@ SOURCE_ICONS = ("📂", "⭐", "📄", "🏠", "📦", "🧊", "🔰", "⚡", "�
 def _connection(workspace: dict) -> sqlite3.Connection:
     if not workspace["indexPath"].is_file():
         raise SystemExit(f"SVN call index is not initialized for {workspace['workspaceKey']}")
-    connection = sqlite3.connect(workspace["indexPath"])
-    connection.row_factory = sqlite3.Row
-    return connection
+    return gusen_hub.connect_index(workspace["indexPath"])
 
 
 def _display_label(value: str) -> str:
@@ -470,7 +468,7 @@ def facts(
     try:
         result = source_facts.query_facts(
             connection,
-            workspace["productId"],
+            workspace["scopeId"],
             keyword=keyword,
             table_name=table_name,
             source_id=source_id,
@@ -499,7 +497,7 @@ def explain(
     try:
         result = source_facts.explain_table(
             connection,
-            workspace["productId"],
+            workspace["scopeId"],
             table_name=table_name,
             bill_type_code=bill_type_code,
             data_source_id=data_source_id,

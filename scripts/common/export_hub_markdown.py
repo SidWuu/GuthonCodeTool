@@ -15,7 +15,7 @@ def main(args=None):
     conn = gusen_hub.connect_index(workspace["indexPath"])
     try:
         if workspace["type"] == "product":
-            gusen_hub.export_product_docs(conn, workspace["productId"])
+            gusen_hub.export_product_docs(conn, workspace["scopeId"])
         else:
             gusen_hub.export_project_docs(conn, workspace["projectId"])
     finally:

@@ -82,12 +82,29 @@ class SvnBackendClient {
     return this.run(workspaceKey, args);
   }
 
+  readBatch(workspaceKey, targets, options = {}) {
+    return this.run(workspaceKey, ['read-batch'], { targets }, options);
+  }
+
   write(workspaceKey, sessionId, documentId, content, options = {}) {
     return this.run(
       workspaceKey,
       ['write', '--session', sessionId, '--document', documentId],
       { content },
       options
+    );
+  }
+
+  writeBatch(workspaceKey, sessionOrChanges, changesOrOptions = {}, options = {}) {
+    const identityMode = Array.isArray(sessionOrChanges);
+    const sessionId = identityMode ? '' : sessionOrChanges;
+    const changes = identityMode ? sessionOrChanges : changesOrOptions;
+    const runOptions = identityMode ? changesOrOptions : options;
+    return this.run(
+      workspaceKey,
+      ['write-batch', ...(sessionId ? ['--session', sessionId] : [])],
+      { changes },
+      runOptions
     );
   }
 
@@ -113,6 +130,14 @@ class SvnBackendClient {
 
   diff(workspaceKey, sourcePath, remote = false) {
     return this.run(workspaceKey, ['diff', '--path', sourcePath, ...(remote ? ['--remote'] : [])]);
+  }
+
+  conflict(workspaceKey, sourcePath) {
+    return this.run(workspaceKey, ['conflict', '--path', sourcePath]);
+  }
+
+  resolveConflict(workspaceKey, sourcePath, options = {}) {
+    return this.run(workspaceKey, ['resolve-conflict', '--path', sourcePath], undefined, options);
   }
 
   history(workspaceKey, sourcePath, limit = 20) {

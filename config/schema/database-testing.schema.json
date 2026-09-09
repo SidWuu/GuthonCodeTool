@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guthon.local/schema/database-testing.schema.json",
+  "title": "谷神数据库测试目标映射",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "expectedIdentities", "databaseTests"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "expectedIdentities": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/identity"}
+    },
+    "databaseTests": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^(products|projects)\\.[A-Za-z0-9._-]+$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["targets"],
+          "properties": {
+            "targets": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"$ref": "#/$defs/target"}
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_$]*$"},
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "endpoint", "database", "evidenceRef"],
+      "properties": {
+        "engine": {"enum": ["mysql", "oracle"]},
+        "endpoint": {"type": "string", "minLength": 1},
+        "database": {"$ref": "#/$defs/identifier"},
+        "schema": {"$ref": "#/$defs/identifier"},
+        "evidenceRef": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"engine": {"const": "oracle"}}},
+          "then": {"required": ["schema"]}
+        }
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "systemId", "dataSourceId", "connectionId", "database",
+        "environment", "access", "expectedIdentityRef", "allowedTables", "tenantScope"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "systemId": {"type": "string", "minLength": 1},
+        "dataSourceId": {"type": "string", "minLength": 1},
+        "connectionId": {"type": "string", "minLength": 1},
+        "database": {"$ref": "#/$defs/identifier"},
+        "schema": {"$ref": "#/$defs/identifier"},
+        "environment": {"enum": ["dev", "test"]},
+        "access": {"const": "read-only"},
+        "expectedIdentityRef": {"type": "string", "minLength": 1},
+        "allowedTables": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/identifier"},
+          "not": {"contains": {"const": "*"}}
+        },
+        "tenantScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field", "evidenceRef"],
+          "properties": {
+            "field": {"$ref": "#/$defs/identifier"},
+            "evidenceRef": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    }
+  }
+}

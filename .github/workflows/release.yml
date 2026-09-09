@@ -44,6 +44,15 @@ jobs:
       - name: Build application
         run: python scripts/build_guthon_tool.py
 
+      - name: Test packaged application
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./dist/GuthonCodeTool.exe self-test --home "$RUNNER_TEMP/guthon-self-test"
+          else
+            ./dist/GuthonCodeTool self-test --home "$RUNNER_TEMP/guthon-self-test"
+          fi
+
       - name: Prepare Windows application
         if: runner.os == 'Windows'
         shell: pwsh
@@ -75,6 +84,7 @@ jobs:
         working-directory: plugins/GuthonVSCodeExtension/gushen-vscode-completion
         run: |
           npm test
+          npm run check
           npm run build:bridge
           npx --yes @vscode/vsce@3.9.2 package \
             --allow-missing-repository \

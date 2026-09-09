@@ -2,7 +2,11 @@
 
 YAML 配置文件首行说明各自用途；`system-data.json` 只是在 DATABASE 拉取时自动生成的本地缓存，SVN 不读取它。
 
-复制模板后再填写真实配置：
+发行模式通常不再手工复制这些模板：先执行 Nexus“设置工作空间”，再用始终可见的“添加产品或项目”向导。首次设置会创建空的
+`datasource.yaml`、`products.yaml`、`projects.yaml`，向导按源码模式补齐工作区、DATABASE 连接和首次 SVN 公共用户名；已有配置不会覆盖。
+生成后 Nexus 会询问是否立即调整对应 YAML，因为系统 alias、`system_id`、`data_source_id` 仍须以实际谷神环境为准。
+
+以下完整示例只供维护者手工配置或查阅字段：
 
 ```bash
 cp config/example/datasource.example.yaml config/datasource.yaml
@@ -13,6 +17,14 @@ cp config/example/sync.example.yaml config/sync.yaml
 ```
 
 `datasource.yaml` 和 `system-data.json` 不提交。
+
+谷神功能开发后的 DBX 只读数据库测试使用独立私有映射。仅在需要该工作流时复制模板到运行数据 home，不把 connection ID、环境身份、租户范围或查询结果提交到公开仓库：
+
+```bash
+cp config/example/database-testing.example.yaml <运行数据-home>/config/database-testing.yaml
+```
+
+填写后可用 `scripts/common/database_test_artifacts.py validate-config` 校验。模板中的 connection ID 和证据占位符会被拒绝执行；当前只允许 `dev/test`、MySQL/Oracle、`read-only` 和明确的 `allowedTables`，Oracle 目标还必须明确配置连接数据库与业务 `schema`。完整流程见 [谷神开发与数据库测试 Skill](../skills/gushen-development-testing/SKILL.md)，字段契约位于 `config/schema/`。
 
 ## sync.yaml
 
@@ -55,7 +67,7 @@ databases:
 
 ## 每个产品/项目的源码来源
 
-`products.yaml`、`projects.yaml` 不配置 `source_mode`。Nexus 会在全部产品和项目节点下显示
+`products.yaml`、`projects.yaml` 不配置 `source_mode`。产品与项目是并列工作区；项目是产品某个版本的完整导出快照，其定义完全独立，也不要求先创建产品。Nexus 会在全部产品和项目节点下显示
 `源码来源：DATABASE/SVN`；选择结果写入该工作区自己的 `context/source-mode.json`。未选择时默认 DATABASE，
 同一个产品/项目同一时刻仍只启用一种源码 provider。
 
@@ -224,7 +236,7 @@ SVN 不读取 `system-data.json`。产品和项目分别在 `mappings` 中维护
 
 页面源码除页面和模块字段外，还需配置模块排序、模型关联、模型名称、模型排序和父模型字段。PAGE 目录按完整模型父子链分组，并使用三位模型/模块序号自然排序；手动拉取会自动迁移路径和清理旧目录。
 
-过程函数的 `content_field` 配置项目脚本字段，`product_content_field` 配置继承标记对应的产品快照脚本字段。PAGE 后台脚本的产品快照直接读取 JSON 中与 `script` 同级的 `superScript`。
+在项目导出快照内部，过程函数的 `content_field` 配置项目脚本字段，`product_content_field` 配置继承标记对应的产品脚本字段。PAGE 后台脚本的产品快照直接读取 JSON 中与 `script` 同级的 `superScript`。这些字段属于同一个项目快照，不引用产品工作区。
 
 ## 多工作区
 
@@ -247,8 +259,10 @@ var/workspace/PRJ 示例项目/
 
 数据库工作区独立包含 `source/readonly`、`source/workcopy`、`database/{schema,billtype,views}`、`docs` 和
 `context/index.db`。SVN 新模式不创建 readonly/workcopy 代码目录，源码来自独立的
-`var/checkout/<配置 ID>/<entry.localSubdir>`，编辑会话只在 `context` 保存身份、hash、revision 和格式元数据，
-不保存源码正文。状态检查按 provider 的有效步骤计算：数据库为五步，SVN 为本地源码扫描一步。
+`var/checkout/<配置 ID>/<entry.localSubdir>`，编辑会话只在 `context` 保存身份、独立编辑租约、hash、revision 和格式元数据，
+不保存源码正文。同一工作区的短时读写通过带超时的跨进程锁排队；批量自动修改可在 `svn write-batch` 的 JSON
+变更计划中直接填写对象身份，由 CLI 自动取得会话；需要先查看多个对象时使用 `svn read-batch`。不得用临时脚本直接改
+checkout。状态检查按 provider 的有效步骤计算：数据库为五步，SVN 为本地源码扫描一步。
 
 ## 源码逻辑排查
 

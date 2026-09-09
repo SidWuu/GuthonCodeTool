@@ -164,6 +164,7 @@ test('keeps a lazy PAGE leaf expandable before its fragments are loaded', async 
     workspaceKey: 'products.demo',
     identity: { sourceType: 'page', sourceId: 'PG-1', funId: '' },
   }]);
+  assert.equal(fragments[0].command.arguments[0].documentName, undefined);
 });
 
 test('opens an independent PAGE service component as GSS', async () => {
@@ -182,6 +183,7 @@ test('opens an independent PAGE service component as GSS', async () => {
         sourceType: 'page',
         sourceId: 'PG-GSS-1',
         funId: '',
+        sourceName: '保存服务',
         sourcePath: 'pages/SYS-1/PG-GSS-1.gss',
         fragments: [{ scriptType: 'gss', jsonPointer: '', label: '' }],
         status: 'OK',
@@ -192,6 +194,7 @@ test('opens an independent PAGE service component as GSS', async () => {
   assert.equal(component.kind, 'document');
   assert.equal(component.command.arguments[0].fragmentType, 'gss');
   assert.equal(component.command.arguments[0].sourceType, 'page');
+  assert.equal(component.command.arguments[0].documentName, '保存服务');
   assert.equal(component.command.arguments[0].sourcePath, 'pages/SYS-1/PG-GSS-1.gss');
 });
 
@@ -304,5 +307,63 @@ test('decorates only changed fragments and clears cached file states on refresh'
   });
   provider.refresh('products.demo');
   assert.equal(provider.changeStates.has('products.demo'), false);
+  provider.dispose();
+});
+
+test('keeps file decorations available while the catalog tree is refreshing', () => {
+  class EventEmitter {
+    constructor() { this.event = () => {}; }
+    fire() {}
+    dispose() {}
+  }
+  class ThemeColor { constructor(id) { this.id = id; } }
+  class FileDecoration {
+    constructor(badge, tooltip, color) { Object.assign(this, { badge, tooltip, color }); }
+  }
+  class TreeItem { constructor(label) { this.label = label; } }
+  const Uri = {
+    parse(value) { return { toString: () => value, authority: 'products.demo' }; },
+    from(value) {
+      return { ...value, toString: () => JSON.stringify(value) };
+    },
+  };
+  const provider = new SvnCatalogTreeProvider({
+    vscode: {
+      EventEmitter,
+      FileDecoration,
+      ThemeColor,
+      ThemeIcon: class ThemeIcon {},
+      TreeItem,
+      TreeItemCollapsibleState: { None: 0, Collapsed: 1 },
+      Uri,
+    },
+    backend: {},
+    listSvnWorkspaces: async () => [],
+  });
+  const [directory] = provider._decorateChildren([{
+    kind: 'directory',
+    label: '贸易系统',
+    children: [{
+      kind: 'source',
+      label: '保存',
+      object: {
+        sourceType: 'procedure', sourceId: 'demo#save', funId: 'save',
+        sourcePath: 'datasources/DS-1/procedures/demo/save.gss', fragments: [], status: 'OK',
+      },
+    }],
+  }], undefined, 'products.demo');
+  const sourceUri = provider.getTreeItem(directory.children[0]).resourceUri;
+  const directoryUri = provider.getTreeItem(directory).resourceUri;
+
+  provider.setStatus('products.demo', {
+    changes: [{ path: directory.children[0].object.sourcePath, state: 'LOCAL_MODIFIED' }],
+  });
+  provider.refresh('products.demo');
+  provider.setStatus('products.demo', {
+    changes: [{ path: directory.children[0].object.sourcePath, state: 'LOCAL_MODIFIED' }],
+  });
+
+  assert.equal(provider.provideFileDecoration(sourceUri).badge, 'M');
+  assert.equal(provider.provideFileDecoration(directoryUri).badge, 'M');
   provider.dispose();
 });

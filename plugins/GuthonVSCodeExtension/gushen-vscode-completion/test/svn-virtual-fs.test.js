@@ -38,12 +38,32 @@ test('selects a readable virtual filename extension', () => {
   assert.equal(documentExtension({ sourceType: 'page', fragmentType: 'gss' }), 'gss');
   assert.equal(documentExtension({ sourceType: 'page', fragmentType: 'vm' }), 'gss');
   assert.equal(
+    documentExtension({ sourceType: 'system-script', sourcePath: 'system-script/SYS-1/20.js' }),
+    'js'
+  );
+  assert.equal(
+    documentExtension({ sourceType: 'system-script', sourcePath: 'system-script/SYS-1/21.gss' }),
+    'gss'
+  );
+  assert.equal(
     documentExtension({ sourceType: 'page', sourcePath: 'pages/PG-1.gss' }),
     'gss'
   );
   assert.equal(
     documentFilename({ sourceType: 'page', sourceId: 'PG-1', sourcePath: 'pages/PG-1.gss' }),
     'PG-1.gss'
+  );
+  assert.equal(
+    documentFilename({
+      sourceType: 'page', sourceId: 'PG-1', sourcePath: 'pages/PG-1.gss', documentName: '拉取记录',
+    }),
+    '拉取记录.gss'
+  );
+  assert.equal(
+    documentFilename({
+      sourceType: 'procedure', sourceId: 'demo.pkg#save', funId: 'save', sourceName: '保存业务数据',
+    }),
+    'save.gss'
   );
 });
 

@@ -24,6 +24,7 @@ from .manifest import (
     resolve_authorized_path,
     scope_entry_label,
 )
+from .documents import accept_refreshed_files
 
 
 ProgressCallback = Callable[[str], None] | None
@@ -249,7 +250,10 @@ def refresh(
         exact_targets.setdefault(entry.id, []).append((target, relative, logical_path))
     if exact_targets:
         selected = set(exact_targets)
-    with operation_lock(workspace, "manifest-refresh"):
+    # An explicit update may follow a short watcher-triggered reindex for the
+    # same platform-side file change. Command-entry deduplication still rejects
+    # duplicate user operations; here we serialize behind that background job.
+    with operation_lock(workspace, "manifest-refresh", blocking=True):
         previous_state = load_state(workspace, required=False)
         updated = []
         candidates = [entry for entry in scope.entries if not selected or entry.id in selected]
@@ -318,6 +322,7 @@ def refresh(
                 on_progress,
                 f"[{progress_index}/{total}] {label}｜更新｜完成 · {update_summary}",
             )
+        accept_refreshed_files(workspace, updated)
         refreshed_state = _status(
             workspace,
             scope,

@@ -50,13 +50,25 @@ function selectedWorkingCopyCount(preview, candidateIds) {
 
 function nexusCandidateIds(preview, sourcePath = '', workingCopyIds = []) {
   const selectedWorkingCopies = new Set(workingCopyIds || []);
+  const selectedPaths = new Set(
+    (Array.isArray(sourcePath) ? sourcePath : [sourcePath]).filter(Boolean)
+  );
   return (preview.candidates || [])
     .filter((candidate) => (
       candidate.sessionManaged
-      && (!sourcePath || candidate.path === sourcePath)
+      && (!selectedPaths.size || selectedPaths.has(candidate.path))
       && (!selectedWorkingCopies.size || selectedWorkingCopies.has(candidate.workingCopyId))
     ))
     .map((candidate) => candidate.id);
+}
+
+function openSvnConflictMerge(vscode, conflict) {
+  return vscode.commands.executeCommand('_open.mergeEditor', {
+    base: vscode.Uri.file(conflict.basePath),
+    input1: { uri: vscode.Uri.file(conflict.input1Path), title: '本地修改' },
+    input2: { uri: vscode.Uri.file(conflict.input2Path), title: 'SVN 远程修改' },
+    output: vscode.Uri.file(conflict.resultPath),
+  });
 }
 
 function referenceTarget(document, position) {
@@ -279,11 +291,16 @@ function activateSvn({
     }
   };
   const firstResource = (value) => (Array.isArray(value) ? value[0] : value);
+  const resourceList = (value) => (Array.isArray(value) ? value.flat().filter(Boolean) : [value].filter(Boolean));
   const singleResource = (value) => {
     if (Array.isArray(value) && value.length !== 1) {
       throw new Error('单文件操作一次只能选择一个 SVN 文件');
     }
     return firstResource(value);
+  };
+  const resourceUriOf = (value) => {
+    const resource = firstResource(value);
+    return resource?.resourceUri || (resource?.scheme ? resource : undefined);
   };
   const workspaceKeyOf = (value) => {
     if (typeof value === 'string') return value;
@@ -292,7 +309,7 @@ function activateSvn({
     const id = resource?.id || resource?.sourceControl?.id || '';
     const providerWorkspaceKey = workspaceKeyFromSourceControlId(id);
     if (providerWorkspaceKey) return providerWorkspaceKey;
-    return resource?.resourceUri?.authority || '';
+    return resourceUriOf(resource)?.authority || '';
   };
   const runClaimed = async (workspaceKey, action) => {
     const claimKey = workspaceKey || '__all__';
@@ -319,7 +336,7 @@ function activateSvn({
   };
   const changeIdentity = (workspaceOrResource, sourcePath) => {
     if (typeof workspaceOrResource === 'string') return { workspaceKey: workspaceOrResource, sourcePath };
-    const resourceUri = firstResource(workspaceOrResource)?.resourceUri;
+    const resourceUri = resourceUriOf(workspaceOrResource);
     const params = new URLSearchParams(resourceUri?.query || '');
     return {
       workspaceKey: resourceUri?.authority || '',
@@ -329,6 +346,7 @@ function activateSvn({
       sourceType: params.get('sourceType') || '',
       sourceId: params.get('sourceId') || '',
       funId: params.get('funId') || '',
+      documentName: params.get('documentName') || '',
       jsonPointer: params.get('jsonPointer') || '',
     };
   };
@@ -370,27 +388,34 @@ function activateSvn({
   };
   const saveNexusChanges = async (workspaceValue, sourcePathValue) => {
     const operation = '提交 Nexus 修改';
-    const identity = changeIdentity(workspaceValue, sourcePathValue);
+    const resources = resourceList(workspaceValue);
+    const identities = resources.map((resource) => changeIdentity(resource));
+    const workspaceKeys = new Set(identities.map((item) => item.workspaceKey).filter(Boolean));
+    if (workspaceKeys.size > 1) throw new Error('所选文件必须属于同一个 SVN 项目');
+    const identity = identities[0] || {};
     const workspaceKey = identity.workspaceKey || workspaceKeyOf(workspaceValue);
-    const sourcePath = identity.sourcePath || sourcePathValue || '';
+    const sourcePaths = [...new Set([
+      sourcePathValue,
+      ...identities.map((item) => item.sourcePath),
+    ].filter(Boolean))];
     const workingCopyIds = [...new Set([
-      ...workingCopyIdsOf(workspaceValue),
-      identity.workingCopyId,
+      ...resources.flatMap((resource) => workingCopyIdsOf(resource)),
+      ...identities.map((item) => item.workingCopyId),
     ].filter(Boolean))];
     if (!workspaceKey) throw new Error('无法解析 SVN 项目');
-    log(operation, `开始${sourcePath ? `提交指定文件 · ${sourcePath}` : '提交全部 Nexus 修改'}`);
+    log(operation, `开始${sourcePaths.length ? `提交所选 ${sourcePaths.length} 个文件` : '提交全部 Nexus 修改'}`);
     if (!await saveDirtyDocuments(workspaceKey, operation, operation)) return undefined;
     log(operation, '检查当前 SCM 状态');
     const current = await refreshWorkspaceScm(workspaceKey, scopedBackendOptions(workingCopyIds));
     const nexusChanges = current?.groups?.LOCAL_MODIFIED || [];
     const selectedChanges = nexusChanges.filter((change) => (
-      (!sourcePath || change.path === sourcePath)
+      (!sourcePaths.length || sourcePaths.includes(change.path))
       && (!workingCopyIds.length || workingCopyIds.includes(change.workingCopyId))
     ));
-    if (!selectedChanges.length) {
+    if (!selectedChanges.length || (sourcePaths.length && selectedChanges.length !== sourcePaths.length)) {
       log(operation, '没有可提交的 Nexus 修改');
       notifyInformation(vscode,
-        sourcePath ? '所选文件已不是可提交的 Nexus 修改' : '当前项目没有可提交的 Nexus 修改'
+        sourcePaths.length ? '部分所选文件已不是可提交的 Nexus 修改，请刷新后重试' : '当前项目没有可提交的 Nexus 修改'
       );
       return undefined;
     }
@@ -401,9 +426,54 @@ function activateSvn({
       current.sessionId,
       scopedBackendOptions(workingCopyIds),
     );
-    const candidateIds = nexusCandidateIds(preview, sourcePath, workingCopyIds);
+    const candidateIds = nexusCandidateIds(preview, sourcePaths, workingCopyIds);
     if (!candidateIds.length) throw new Error('Nexus 修改状态已变化，请刷新后重试');
     return completePlatformSave(workspaceKey, preview, candidateIds);
+  };
+  const conflictIdentity = (value) => {
+    const resource = singleResource(value);
+    const identity = changeIdentity(resource);
+    if (!identity.workspaceKey || !identity.sourcePath || identity.state !== 'CONFLICT') {
+      throw new Error('所选文件已不是 SVN 冲突文件');
+    }
+    return { resource, ...identity };
+  };
+  const openConflictMerge = async (value) => {
+    const identity = conflictIdentity(value);
+    const conflict = await backend.conflict(identity.workspaceKey, identity.sourcePath);
+    await openSvnConflictMerge(vscode, conflict);
+    notifyInformation(vscode, '请在合并结果中完成修改并保存，然后执行“标记冲突为已解决”');
+  };
+  const markConflictResolved = async (value) => {
+    const operation = '解决 SVN 冲突';
+    const identity = conflictIdentity(value);
+    const conflict = await backend.conflict(identity.workspaceKey, identity.sourcePath);
+    const resultUri = vscode.Uri.file(conflict.resultPath);
+    const resultDocument = vscode.workspace.textDocuments.find((document) => (
+      document.uri.toString() === resultUri.toString()
+    ));
+    if (resultDocument?.isDirty && !await resultDocument.save()) {
+      throw new Error('合并结果尚未成功保存');
+    }
+    const confirmed = await vscode.window.showWarningMessage(
+      '确认合并结果已经检查并保存？此操作会将 SVN 冲突标记为已解决，但不会提交文件。',
+      { modal: true },
+      '标记为已解决'
+    );
+    if (confirmed !== '标记为已解决') return undefined;
+    sourceWatcher?.suppress(identity.workspaceKey, identity.sourcePath, 30 * 60 * 1000);
+    log(operation, `执行 svn resolve · ${identity.sourcePath}`);
+    const result = await backend.resolveConflict(
+      identity.workspaceKey,
+      identity.sourcePath,
+      backendOutput
+    );
+    catalogTree.refresh(identity.workspaceKey);
+    virtualFs.invalidate(identity.workspaceKey, true);
+    await refreshWorkspaceScm(identity.workspaceKey, backendOutput);
+    onToolTreeChanged?.();
+    notifyInformation(vscode, `SVN 冲突已解决，文件仍保留为本地修改：${identity.sourcePath}`);
+    return result;
   };
   const updateRemoteChanges = async (workspaceValue, sourcePathValue) => {
     const operation = '更新 SVN 远程变更';
@@ -446,6 +516,12 @@ function activateSvn({
       button
     );
     if (confirmed !== button) return undefined;
+    // Platform-side pulls and the ensuing SVN update both produce checkout
+    // watcher events. The refresh command reindexes these exact files itself,
+    // so cancel pending watcher work before it can race for the SVN lock.
+    for (const change of selectedRemote) {
+      sourceWatcher?.suppress(workspaceKey, change.path, 30 * 60 * 1000);
+    }
     log(operation, `已确认，开始更新 ${selectedRemote.length} 个远程文件`);
     const result = await backend.refresh(workspaceKey, {
       sourcePath,
@@ -700,9 +776,17 @@ function activateSvn({
       runClaimedValue(workspaceValue, (value) => manageChanges(value, 'platform-save')))),
     vscode.commands.registerCommand('gushenCompletion.saveAllSvnNexusChanges', withError((workspaceValue) =>
       runClaimedValue(workspaceValue, saveNexusChanges))),
-    vscode.commands.registerCommand('gushenCompletion.saveSingleSvnNexusChange', withError((value) => {
+    vscode.commands.registerCommand('gushenCompletion.saveSelectedSvnNexusChanges', withError((...values) => {
+      const resources = values.flat().filter(Boolean);
+      return runClaimedValue(resources, saveNexusChanges);
+    })),
+    vscode.commands.registerCommand('gushenCompletion.openSvnConflictMerge', withError((value) => {
       const resource = singleResource(value);
-      return runClaimedValue(resource, saveNexusChanges);
+      return runClaimedValue(resource, openConflictMerge);
+    })),
+    vscode.commands.registerCommand('gushenCompletion.markSvnConflictResolved', withError((value) => {
+      const resource = singleResource(value);
+      return runClaimedValue(resource, markConflictResolved);
     })),
     vscode.commands.registerCommand('gushenCompletion.updateAllSvnChanges', withError((workspaceValue) =>
       runClaimedValue(workspaceValue, updateRemoteChanges))),
@@ -757,6 +841,7 @@ module.exports = {
   activateSvn,
   nexusCandidateIds,
   notifyInformation,
+  openSvnConflictMerge,
   referenceTarget,
   resolveSourcePath,
   runFocusedTreeCommand,

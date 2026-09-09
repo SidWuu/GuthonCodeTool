@@ -1,0 +1,33 @@
+# 谷神数据库测试目标映射模板；复制到私有运行目录后替换所有占位值。
+schemaVersion: 1
+
+expectedIdentities:
+  demo-trade-dev:
+    engine: mysql
+    endpoint: "db.dev.example:3306"
+    database: demo_trade
+    evidenceRef: "<私有环境清单或平台配置证据>"
+
+# Oracle 连接还需同时声明服务数据库和业务 schema：
+#   engine: oracle
+#   database: pdb
+#   schema: DEMO_OWNER
+
+databaseTests:
+  projects.demo:
+    targets:
+      - id: trade-dev
+        systemId: SYS-DEMO
+        dataSourceId: DS-DEMO
+        connectionId: "<DBX_CONNECTION_ID>"
+        database: demo_trade
+        # Oracle target 的 database 填服务数据库，并增加 schema: DEMO_OWNER。
+        environment: dev
+        access: read-only
+        expectedIdentityRef: demo-trade-dev
+        allowedTables:
+          - DEMO_ORDER
+          - DEMO_ORDER_DETAIL
+        tenantScope:
+          field: TENANT_ID
+          evidenceRef: "<租户字段及允许值的私有证据>"

@@ -6,7 +6,7 @@ GuthonCodeTool 是谷神低代码开发平台的本地开发工具集。每个�
 
 ## AI 开发入口
 
-工具开发读取 [AGENTS.md](AGENTS.md)；谷神业务开发从独立私有工作区的 `var/AGENTS.md` 进入。专项规范按任务加载，README 不维护第二套 Agent 流程。
+工具开发读取 [AGENTS.md](AGENTS.md)；谷神业务开发从独立私有工作区的 `var/AGENTS.md` 进入。需要在功能开发后执行开发库/测试库验证时，使用 [谷神开发与数据库测试 Skill](skills/gushen-development-testing/SKILL.md)。专项规范按任务加载，README 不维护第二套 Agent 流程。
 
 ## 核心能力
 
@@ -25,6 +25,7 @@ GuthonCodeTool 是谷神低代码开发平台的本地开发工具集。每个�
 ```text
 config/                         配置模板和配置说明
 docs/                           使用手册和全功能说明
+skills/gushen-development-testing/  谷神需求开发与 DBX 只读数据库测试工作流
 plugins/GuthonBridge/           Chrome 扩展及本地 Bridge
 plugins/GuthonVSCodeExtension/  Guthon Nexus
 scripts/
@@ -72,7 +73,12 @@ SVN 新模式的工作区只创建 `docs` 和 `context` 等派生资料；授权
 
 ## 配置
 
-复制模板后填写本机配置：
+发行模式优先在 Nexus 的“工作区”或“项目”区域点击“添加产品或项目”。向导会创建稳定
+`workspaceKey`、DATABASE 连接或 SVN 模式文件；首次 SVN 工作区还会写入公共用户名。生成后 Nexus 会询问是否立即打开
+`products.yaml` / `projects.yaml`，由用户确认系统 alias、`system_id` 和 `data_source_id`。后续增加项目使用同一入口，无需重新初始化数据目录。
+项目无需先创建或选择产品：项目是产品某个版本的完整导出快照，导出后与产品并列，拥有独立配置、源码、索引和数据源范围。
+
+`setup` 对首次使用生成空的 datasource/products/projects 注册表，并保留 source-tables/sync 模板；已有文件绝不覆盖。维护者也可手工复制完整示例：
 
 ```bash
 cp config/example/datasource.example.yaml config/datasource.yaml
@@ -110,6 +116,7 @@ products:
 
 ```bash
 .venv/bin/python scripts/guthon_tool.py setup --home .
+.venv/bin/python scripts/guthon_tool.py workspace-create --home .  # JSON 从 stdin 输入
 .venv/bin/python scripts/guthon_tool.py workspaces --home .
 ```
 
@@ -185,15 +192,37 @@ SVN 工作区的 `sync-all` 只扫描本地 SVN 范围并更新索引和摘要�
 
 - DATABASE 模式继续只修改同一工作区的 `source/workcopy`，不修改 `source/readonly`；PAGE 仍只修改拆分脚本，
   不修改 `raw.json`。
-- SVN 模式不生成额外代码副本。Nexus 虚拟文档的 `Ctrl+S` 直接、最小化回写授权 checkout 中的原文件；
-  资源管理器仍显示原始目录；直接修改会标记为外部修改，并交给“管理本地源码变更”执行安全检查。
+- SVN 模式不生成额外代码副本。仅独立 PAGE GSS 服务组件的 Nexus 虚拟文档标签使用索引提供的中文名称；有函数名的过程函数仍使用英文函数名，源码 ID 仅用于内部定位；`Ctrl+S` 直接、最小化回写授权 checkout 中的原文件；
+  每次打开都会取得独立编辑租约，同一文件的旧内容不能覆盖其他会话的新保存；不同文件的短时并发写入会在本机跨进程锁内有界排队。资源管理器仍显示原始目录；直接修改会标记为外部修改，并交给“管理本地源码变更”执行安全检查。
+- 自动化已知“旧文本 → 新文本”时，直接把 `sourceType/sourceId/funId/jsonPointer` 和精确 `replacements` 交给 `svn write-batch`；CLI 会自动打开目标，不再要求预先收集 `sessionId/documentId`。需要先阅读多个对象或生成完整 `content` 时，可用一次 `svn read-batch` 取得全部正文和文档 ID；旧的显式会话写法继续兼容。工具会先预检整批、拒绝同一物理文件重复出现，写入失败时恢复已写文件，成功后一次性增量更新涉及的索引。不要编写临时 Python 直接读写 checkout 或自行循环重试锁。
+
+  ```bash
+  .venv/bin/python scripts/guthon_tool.py --home . \
+    --workspace products.demo-product svn -- \
+    write-batch < /tmp/guthon-svn-change-plan.json
+  ```
+
+  ```json
+  {
+    "changes": [
+      {
+        "sourceType": "procedure",
+        "sourceId": "demo.pkg#save",
+        "funId": "save",
+        "replacements": [
+          {"old": "return true;", "new": "return false;", "expectedCount": 1}
+        ]
+      }
+    ]
+  }
+  ```
 - `var` 私有 Git 仓库明确忽略根级 `checkout/`：Git 只管理工具配置、上下文、索引资料和 DATABASE 工作区，
   SVN 源码差异、更新、放弃与提交只由 Nexus/SVN SCM 处理，禁止用 `git add -f` 把 checkout 纳入第二套版本历史。
 - `rules.pull_diff_check` 缺省为 `true`，再次拉取会直接比较 readonly 与 workcopy，存在差异时保留 workcopy 并生成差异报告；设为 `false` 会直接覆盖 readonly/workcopy。
-- SVN 的“管理本地源码变更”列出 Nexus 与外部产生的本地修改，支持类 Git 差异、多选/全选保存和撤销；跨
+- SVN 的“管理本地源码变更”列出 Nexus 与外部产生的本地修改，支持类 Git 差异、多选/全选保存和撤销；SCM 文件行支持多选后直接“提交所选 Nexus 修改”，不增加 Git 式暂存区；跨
   working copy 时按组依次执行并产生多个 revision。“保存到谷神”是 SVN 模式核心能力，提交成功仅表示谷神草稿
   已保存，仍需在谷神平台执行最终提交。SVN 提交说明可选，SCM 顶部和分组提供“提交全部 Nexus 修改 / 更新全部远程变更”，每个
-  Nexus 修改和远程变更行也提供单文件提交/更新；单文件更新只执行授权范围内的精确路径。检出/更新会在输出标签逐项显示
+  Nexus 修改和远程变更行也提供所选文件提交/单文件更新；重叠更新产生文本冲突时，可从冲突文件行打开 VS Code 三方合并，保存物理 checkout 结果后显式标记 SVN 冲突为已解决。单文件更新只执行授权范围内的精确路径。检出/更新会在输出标签逐项显示
   每个子系统 working copy 的授权、checkout/update、状态检查和索引步骤；“谷神源码”树用 SVN 状态装饰修改文件及父目录，
   打开虚拟源码后按 SVN BASE 在行号槽、整行背景和概览标尺高亮新增、修改与删除位置。
   手动重建本地 SVN 索引同样逐阶段输出；同一工作区的相同操作进行中再次点击会直接忽略。
@@ -211,7 +240,7 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
 4. 展开目标 `PRD`、`PRJ`，在该节点选择“源码来源：DATABASE / SVN”；全部产品和项目始终混合显示，运行模式仍独立
    保留“发行模式 / 调试模式”。
 5. DATABASE 项目继续执行同步、诊断和 Workcopy；SVN 项目从“谷神源码”虚拟编辑，并在单一 SCM 项目中查看
-   本地/远程变更，执行全部或单文件提交/更新、部分保存或放弃修改。PAGE 默认以脚本、SQL、字段的可读投影打开 VS Code 双栏 Diff，
+   本地/远程变更，执行全部、所选文件或单文件范围的提交/更新、部分保存、放弃修改和文本冲突三方合并。PAGE 默认以脚本、SQL、字段的可读投影打开 VS Code 双栏 Diff，
    同时保留原始 JSON 差异入口；所有子系统按过程函数数据源分组顺序排列，共用数据源时按 `systems.include.mappings` 声明顺序排列；页面与过程函数的目录、叶子顺序及 SCM 名称复用各自 `index.md`，`.gss` 使用独立 Guthon GSS 高亮与既有补全。
 6. 需要网页功能时从 Nexus 启动 Guthon Bridge。
 

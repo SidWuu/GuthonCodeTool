@@ -21,6 +21,11 @@ CONFIG_FILES = (
     "source-tables.yaml",
     "sync.yaml",
 )
+EMPTY_REGISTRY_FILES = {
+    "datasource.yaml": "# 本地数据库连接由 Nexus 添加产品/项目时写入。\ndatasource: {}\n",
+    "products.yaml": "# 本地产品工作区；可在 Nexus 中随时添加。\nproducts: {}\n",
+    "projects.yaml": "# 本地项目工作区；可在 Nexus 中随时添加。\nprojects: {}\n",
+}
 SCRIPT_COMMANDS = {
     "doctor": ("common.doctor", "main"),
     "export-schema": ("providers.database.export_table_schema_sql", "main"),
@@ -44,6 +49,7 @@ SVN_BROWSE_ACTIONS = {
     "catalog",
     "fragments",
     "read",
+    "read-batch",
     "status",
     "scm-status",
     "diff",
@@ -55,7 +61,7 @@ SVN_BROWSE_ACTIONS = {
     "scope-preview",
     "auth-cache",
 }
-GLOBAL_COMMANDS = {"setup", "doctor", "route", "workspaces", "self-test"}
+GLOBAL_COMMANDS = {"setup", "workspace-create", "doctor", "route", "workspaces", "self-test"}
 DATABASE_ONLY_COMMANDS = {
     "export-schema": "database.schemaExport",
     "export-bill-type": "database.billTypeExport",
@@ -78,9 +84,12 @@ def setup_config(home: Path) -> list[Path]:
         target = config_dir / filename
         template = template_dir / filename.replace(".yaml", ".example.yaml")
         if not target.exists():
-            if not template.exists():
+            if filename in EMPTY_REGISTRY_FILES:
+                target.write_text(EMPTY_REGISTRY_FILES[filename], encoding="utf-8")
+            elif not template.exists():
                 raise SystemExit(f"Missing bundled config template: {template}")
-            shutil.copyfile(template, target)
+            else:
+                shutil.copyfile(template, target)
             created.append(target)
     return created
 
@@ -95,8 +104,46 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
     os.environ["GUTHON_HOME"] = str(home)
     if command == "self-test":
         with tempfile.TemporaryDirectory() as temp:
-            created = setup_config(Path(temp) / "home")
-        assert len(created) == len(CONFIG_FILES)
+            test_home = Path(temp) / "home"
+            created = setup_config(test_home)
+            os.environ["GUTHON_HOME"] = str(test_home)
+            from common import gusen_hub
+            from common.workspace_config import create_workspace
+
+            configured = create_workspace(
+                test_home,
+                {
+                    "kind": "product",
+                    "id": "self-test",
+                    "name": "Self Test",
+                    "sourceMode": "svn",
+                    "svnUsername": "self-test",
+                },
+                gusen_hub,
+            )
+            configured_database = create_workspace(
+                test_home,
+                {
+                    "kind": "project",
+                    "id": "self-test-db",
+                    "name": "Self Test Database",
+                    "sourceMode": "database",
+                    "datasource": {
+                        "id": "self-test-db-dev",
+                        "host": "127.0.0.1",
+                        "port": 3306,
+                        "database": "self_test",
+                        "username": "self_test",
+                        "password": "",
+                    },
+                },
+                gusen_hub,
+            )
+            assert len(created) == len(CONFIG_FILES)
+            assert configured["workspace"]["workspaceKey"] == "products.self-test"
+            assert configured["workspace"]["sourceMode"] == "svn"
+            assert configured_database["workspace"]["workspaceKey"] == "projects.self-test-db"
+            assert configured_database["workspace"]["sourceMode"] == "database"
         print("guthon_tool self-test: ok")
         return 0
     if command == "setup":
@@ -106,7 +153,7 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
         return 0
     if command == "import-svn-scope":
         if not selected_workspace:
-            raise SystemExit("Missing --workspace. Use products.<product_id> or projects.<project_id>.")
+            raise SystemExit("Missing --workspace. Use products.<id> or projects.<id>.")
         import_parser = argparse.ArgumentParser(prog="guthon_tool.py import-svn-scope")
         source = import_parser.add_mutually_exclusive_group(required=True)
         source.add_argument("--script", help="path to svnCheckoutHere.sh or svnCheckoutHere.bat")
@@ -139,6 +186,14 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
 
     from common import gusen_hub
 
+    if command == "workspace-create":
+        if extra_args:
+            raise SystemExit("workspace-create does not accept extra arguments")
+        from common.workspace_config import create_workspace
+
+        result = create_workspace(home, json.load(sys.stdin), gusen_hub)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
     if command == "workspaces":
         config = gusen_hub.load_config()
         print(json.dumps(
@@ -153,7 +208,7 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
     if selected_workspace:
         gusen_hub.set_workspace(selected_workspace)
     if command not in GLOBAL_COMMANDS and command != "pull" and not selected_workspace:
-        raise SystemExit("Missing --workspace. Use products.<product_id> or projects.<project_id>.")
+        raise SystemExit("Missing --workspace. Use products.<id> or projects.<id>.")
 
     config = gusen_hub.load_config()
     workspace = None if command in GLOBAL_COMMANDS or command == "pull" and not selected_workspace else gusen_hub.resolve_workspace(config)
@@ -203,7 +258,7 @@ def _svn_progress(message: str) -> None:
 
 
 def _reindex_svn(gusen_hub, config, workspace, on_progress=None) -> dict:
-    conn = gusen_hub.connect_index(workspace["indexPath"])
+    conn = gusen_hub.connect_index(workspace["indexPath"], rebuild_incompatible=True)
     try:
         result = gusen_hub.index_svn_workspace(conn, config, workspace, on_progress=on_progress)
     finally:
@@ -211,6 +266,16 @@ def _reindex_svn(gusen_hub, config, workspace, on_progress=None) -> dict:
     if result.get("failures"):
         raise SystemExit(f"SVN scan failed; existing index preserved: {result['errors']}")
     return result
+
+
+def _connect_incremental_svn_index(gusen_hub, config, workspace, on_progress=None):
+    try:
+        return gusen_hub.connect_index(workspace["indexPath"])
+    except gusen_hub.IndexRebuildRequired:
+        if on_progress is not None:
+            on_progress(f"{workspace['displayName']}｜索引｜旧索引无法原地升级，自动完整重建")
+        _reindex_svn(gusen_hub, config, workspace, on_progress=on_progress)
+        return gusen_hub.connect_index(workspace["indexPath"])
 
 
 def _reindex_svn_files(
@@ -223,7 +288,12 @@ def _reindex_svn_files(
     paths = list(dict.fromkeys(source_paths))
     if on_progress is not None:
         on_progress(f"{workspace['displayName']}｜索引｜开始更新 {len(paths)} 个源码文件")
-    connection = gusen_hub.connect_index(workspace["indexPath"])
+    connection = _connect_incremental_svn_index(
+        gusen_hub,
+        config,
+        workspace,
+        on_progress=on_progress,
+    )
     try:
         results = []
         for index, source_path in enumerate(paths, 1):
@@ -246,7 +316,12 @@ def _reindex_svn_working_copies(
     working_copy_ids: list[str],
     on_progress=None,
 ) -> dict:
-    connection = gusen_hub.connect_index(workspace["indexPath"])
+    connection = _connect_incremental_svn_index(
+        gusen_hub,
+        config,
+        workspace,
+        on_progress=on_progress,
+    )
     try:
         result = gusen_hub.index_svn_workspace_working_copies(
             connection,
@@ -394,9 +469,13 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 "catalog",
                 "fragments",
                 "read",
+                "read-batch",
                 "write",
+                "write-batch",
                 "scm-status",
                 "diff",
+                "conflict",
+                "resolve-conflict",
                 "history",
                 "revert-preview",
                 "revert",
@@ -662,46 +741,167 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 source_id=parsed.source_id,
                 fun_id=parsed.fun_id,
             )
-        elif parsed.action == "read":
+        elif parsed.action in {"read", "read-batch"}:
             if not manifest_layout:
-                raise SystemExit("svn read requires manifest-working-copies")
-            if not parsed.source_type or not parsed.source_id:
-                raise SystemExit("svn read requires --source-type and --source-id")
+                raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
             from providers.svn.nexus import documents
 
-            result = documents.read(
-                workspace,
-                source_type=parsed.source_type,
-                source_id=parsed.source_id,
-                fun_id=parsed.fun_id,
-                json_pointer=parsed.json_pointer,
-            )
-        elif parsed.action == "write":
+            if parsed.action == "read":
+                if not parsed.source_type or not parsed.source_id:
+                    raise SystemExit("svn read requires --source-type and --source-id")
+                result = documents.read(
+                    workspace,
+                    source_type=parsed.source_type,
+                    source_id=parsed.source_id,
+                    fun_id=parsed.fun_id,
+                    json_pointer=parsed.json_pointer,
+                )
+            else:
+                try:
+                    payload = json.load(sys.stdin)
+                except json.JSONDecodeError as error:
+                    raise SystemExit("svn read-batch requires a JSON stdin payload") from error
+                targets = payload.get("targets") if isinstance(payload, dict) else None
+                if not isinstance(targets, list) or not targets:
+                    raise SystemExit("svn read-batch stdin must contain a non-empty targets array")
+                if len(targets) > documents.MAX_BATCH_CHANGES:
+                    raise SystemExit(
+                        f"svn read-batch supports at most {documents.MAX_BATCH_CHANGES} targets"
+                    )
+                opened = []
+                for index, target in enumerate(targets, 1):
+                    if not isinstance(target, dict):
+                        raise SystemExit(f"svn read-batch target {index} must be an object")
+                    source_type = str(
+                        target.get("sourceType") or target.get("source_type") or ""
+                    ).strip().lower()
+                    source_id = str(
+                        target.get("sourceId") or target.get("source_id") or ""
+                    ).strip()
+                    if not source_type or not source_id:
+                        raise SystemExit(
+                            f"svn read-batch target {index} requires sourceType and sourceId"
+                        )
+                    opened.append(
+                        documents.read(
+                            workspace,
+                            source_type=source_type,
+                            source_id=source_id,
+                            fun_id=str(
+                                target.get("funId") or target.get("fun_id") or ""
+                            ).strip(),
+                            json_pointer=str(
+                                target.get("jsonPointer") or target.get("json_pointer") or ""
+                            ).strip(),
+                        )
+                    )
+                result = {
+                    "ok": True,
+                    "workspaceKey": workspace["workspaceKey"],
+                    "sessionId": next(
+                        (item["sessionId"] for item in opened if item.get("sessionId")),
+                        "",
+                    ),
+                    "documents": opened,
+                }
+        elif parsed.action in {"write", "write-batch"}:
             if not manifest_layout:
-                raise SystemExit("svn write requires manifest-working-copies")
-            if not parsed.session or not parsed.document:
-                raise SystemExit("svn write requires --session and --document")
+                raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
             try:
                 payload = json.load(sys.stdin)
             except json.JSONDecodeError as error:
-                raise SystemExit("svn write requires a JSON stdin payload") from error
-            if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
-                raise SystemExit("svn write stdin must contain a text content field")
+                raise SystemExit(f"svn {parsed.action} requires a JSON stdin payload") from error
             from providers.svn.nexus import documents
 
-            result = documents.write(
-                workspace,
-                session_id=parsed.session,
-                document_id=parsed.document,
-                content=payload["content"],
+            if parsed.action == "write":
+                if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
+                    raise SystemExit("svn write stdin must contain a text content field")
+                session_id = parsed.session or str(payload.get("sessionId") or "")
+                document_id = parsed.document or str(payload.get("documentId") or "")
+                if not session_id or not document_id:
+                    raise SystemExit(
+                        "svn write requires --session/--document or sessionId/documentId in stdin"
+                    )
+                result = documents.write(
+                    workspace,
+                    session_id=session_id,
+                    document_id=document_id,
+                    content=payload["content"],
+                )
+                source_paths = [result["sourcePath"]] if result.get("written") else []
+            else:
+                if not isinstance(payload, dict) or not isinstance(payload.get("changes"), list):
+                    raise SystemExit("svn write-batch stdin must contain a changes array")
+                changes = payload["changes"]
+                if not changes:
+                    raise SystemExit("svn write-batch changes must not be empty")
+                if len(changes) > documents.MAX_BATCH_CHANGES:
+                    raise SystemExit(
+                        f"svn write-batch supports at most {documents.MAX_BATCH_CHANGES} changes"
+                    )
+                session_id = parsed.session or str(payload.get("sessionId") or "")
+                resolved_changes = []
+                auto_opened = 0
+                for index, change in enumerate(changes, 1):
+                    if not isinstance(change, dict):
+                        raise SystemExit(f"svn write-batch change {index} must be an object")
+                    document_id = str(change.get("documentId") or "")
+                    if not document_id:
+                        target = change.get("target") or change
+                        if not isinstance(target, dict):
+                            raise SystemExit(f"svn write-batch change {index} target must be an object")
+                        source_type = str(
+                            target.get("sourceType") or target.get("source_type") or ""
+                        ).strip().lower()
+                        source_id = str(
+                            target.get("sourceId") or target.get("source_id") or ""
+                        ).strip()
+                        if not source_type or not source_id:
+                            raise SystemExit(
+                                f"svn write-batch change {index} requires documentId or "
+                                "sourceType/sourceId"
+                            )
+                        opened = documents.read(
+                            workspace,
+                            source_type=source_type,
+                            source_id=source_id,
+                            fun_id=str(
+                                target.get("funId") or target.get("fun_id") or ""
+                            ).strip(),
+                            json_pointer=str(
+                                target.get("jsonPointer") or target.get("json_pointer") or ""
+                            ).strip(),
+                        )
+                        if not opened.get("editable"):
+                            raise SystemExit(
+                                f"svn write-batch target is not editable: {opened['sourcePath']}"
+                            )
+                        document_id = opened["documentId"]
+                        if session_id and session_id != opened["sessionId"]:
+                            raise SystemExit("svn write-batch changes resolved to different sessions")
+                        session_id = opened["sessionId"]
+                        auto_opened += 1
+                    resolved_changes.append({**change, "documentId": document_id})
+                if not session_id:
+                    raise SystemExit(
+                        "svn write-batch requires --session/sessionId when changes use documentId"
+                    )
+                result = documents.write_batch(
+                    workspace,
+                    session_id=session_id,
+                    changes=resolved_changes,
+                )
+                result["autoOpened"] = auto_opened
+                source_paths = result["sourcePaths"]
+            _svn_progress(
+                f"{workspace['displayName']}｜源码写入｜已写回 {len(source_paths)} 个本地 SVN 文件"
             )
-            _svn_progress(f"{workspace['displayName']}｜源码写入｜已写回本地 SVN working copy")
-            if result.get("changed"):
+            if source_paths:
                 result["reindex"] = _reindex_svn_files(
                     gusen_hub,
                     config,
                     workspace,
-                    [result["sourcePath"]],
+                    source_paths,
                     on_progress=_svn_progress,
                 )
             _svn_progress(f"{workspace['displayName']}｜源码写入｜完成")
@@ -781,6 +981,21 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 if not parsed.path:
                     raise SystemExit("svn diff requires --path")
                 result = scm.diff(workspace, logical_path=parsed.path, remote=parsed.remote)
+            elif parsed.action == "conflict":
+                if not parsed.path:
+                    raise SystemExit("svn conflict requires --path")
+                result = scm.conflict_details(workspace, logical_path=parsed.path)
+            elif parsed.action == "resolve-conflict":
+                if not parsed.path:
+                    raise SystemExit("svn resolve-conflict requires --path")
+                result = scm.resolve_conflict(workspace, logical_path=parsed.path)
+                result["reindex"] = _reindex_svn_files(
+                    gusen_hub,
+                    config,
+                    workspace,
+                    result["files"],
+                    on_progress=_svn_progress,
+                )
             elif parsed.action == "history":
                 if not parsed.path:
                     raise SystemExit("svn history requires --path")
@@ -927,7 +1142,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("setup", "import-svn-scope", "workspaces", "workspace-summary", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
+        choices=("setup", "workspace-create", "import-svn-scope", "workspaces", "workspace-summary", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
     )
     parser.add_argument("--home", required=True, help="Directory that stores local config and private source data")
     parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")

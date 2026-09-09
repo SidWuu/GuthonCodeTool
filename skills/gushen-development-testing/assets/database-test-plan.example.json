@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "taskId": "TASK-DEMO",
+  "workspaceKey": "projects.demo",
+  "sourceMode": "svn",
+  "sourceDigest": "sha256:demo-source-v1",
+  "cases": [
+    {
+      "caseId": "DB-001",
+      "requirementIds": ["AC-01"],
+      "targetId": "trade-dev",
+      "level": "query",
+      "sourceEvidence": ["demo://source/order-confirm"],
+      "preconditions": [
+        {
+          "id": "order-exists",
+          "sql": "SELECT COUNT(*) AS total FROM DEMO_ORDER WHERE ID = 1001 AND TENANT_ID = 7",
+          "assert": {"type": "scalar_equals", "column": "total", "expected": 1, "valueType": "integer"}
+        }
+      ],
+      "checks": [
+        {
+          "id": "detail-count",
+          "sql": "SELECT COUNT(*) AS total FROM DEMO_ORDER_DETAIL WHERE ORDER_ID = 1001 AND TENANT_ID = 7",
+          "assert": {"type": "scalar_equals", "column": "total", "expected": 2, "valueType": "integer"}
+        }
+      ],
+      "expectedBasis": "验收样例明确包含两条有效明细",
+      "cleanup": {"required": false, "reason": "只读查询已有演示记录"}
+    }
+  ]
+}

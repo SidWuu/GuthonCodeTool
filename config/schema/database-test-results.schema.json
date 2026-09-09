@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guthon.local/schema/database-test-results.schema.json",
+  "title": "谷神数据库测试规范化结果",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "taskId", "workspaceKey", "sourceDigest", "planDigest",
+    "runId", "targetVerification", "steps"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "taskId": {"type": "string", "minLength": 1},
+    "workspaceKey": {"type": "string", "minLength": 1},
+    "sourceDigest": {"type": "string", "minLength": 1},
+    "planDigest": {"type": "string", "minLength": 1},
+    "runId": {"type": "string", "minLength": 1},
+    "targetVerification": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status", "targetDigest", "evidenceRef"],
+        "properties": {
+          "status": {"enum": ["PASS", "BLOCKED"]},
+          "targetDigest": {"type": "string", "minLength": 1},
+          "evidenceRef": {"type": "string", "minLength": 1},
+          "errorCode": {"type": "string"},
+          "message": {"type": "string"}
+        }
+      }
+    },
+    "platformEvidence": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "status", "sourceDigest", "targetId", "versionEvidenceRef",
+          "triggerEvidenceRef", "correlationId"
+        ],
+        "properties": {
+          "status": {"const": "VERIFIED"},
+          "sourceDigest": {"type": "string", "minLength": 1},
+          "targetId": {"type": "string", "minLength": 1},
+          "versionEvidenceRef": {"type": "string", "minLength": 1},
+          "triggerEvidenceRef": {"type": "string", "minLength": 1},
+          "correlationId": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "caseId", "stepId", "targetId", "startedAt", "finishedAt", "status",
+          "columns", "rows", "truncation", "rawEvidenceRef"
+        ],
+        "properties": {
+          "caseId": {"type": "string"},
+          "stepId": {"type": "string"},
+          "targetId": {"type": "string"},
+          "startedAt": {"type": "string"},
+          "finishedAt": {"type": "string"},
+          "status": {"enum": ["SUCCESS", "ERROR"]},
+          "columns": {"type": "array"},
+          "rows": {"type": "array", "items": {"type": "object"}},
+          "truncation": {"enum": ["none", "rows", "cell", "unknown"]},
+          "rawEvidenceRef": {"type": "string"},
+          "errorCode": {"type": "string"},
+          "message": {"type": "string"}
+        }
+      }
+    }
+  }
+}

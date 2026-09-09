@@ -46,22 +46,22 @@ def main(args=None):
     if parsed.workspace:
         gusen_hub.set_workspace(parsed.workspace)
     workspace = gusen_hub.resolve_workspace(cfg)
-    product_id = workspace["productId"]
+    scope_id = workspace["scopeId"]
     conn = gusen_hub.connect_index(workspace["indexPath"])
     try:
         if parsed.command == "find":
-            result = {"productId": product_id, "candidates": _rows(gusen_hub.find_source_candidates(conn, product_id, parsed.keyword, parsed.limit))}
+            result = {"scopeId": scope_id, "candidates": _rows(gusen_hub.find_source_candidates(conn, scope_id, parsed.keyword, parsed.limit))}
         elif parsed.command == "context":
-            result = {key: (dict(value) if key == "source" else _rows(value)) for key, value in gusen_hub.query_source_context(conn, product_id, parsed.source_id, parsed.fun, parsed.limit).items()}
+            result = {key: (dict(value) if key == "source" else _rows(value)) for key, value in gusen_hub.query_source_context(conn, scope_id, parsed.source_id, parsed.fun, parsed.limit).items()}
         elif parsed.command == "callers":
             result = {
                 "target": {"alias": parsed.alias, "funId": parsed.fun},
-                "callers": _rows(gusen_hub.query_incoming_callers(conn, product_id, parsed.alias, parsed.fun, parsed.limit)),
+                "callers": _rows(gusen_hub.query_incoming_callers(conn, scope_id, parsed.alias, parsed.fun, parsed.limit)),
             }
         elif parsed.command == "facts":
             result = source_facts.query_facts(
                 conn,
-                product_id,
+                scope_id,
                 keyword=parsed.keyword,
                 table_name=parsed.table,
                 source_id=parsed.source_id,
@@ -71,7 +71,7 @@ def main(args=None):
         else:
             result = source_facts.explain_table(
                 conn,
-                product_id,
+                scope_id,
                 table_name=parsed.table,
                 bill_type_code=parsed.bill_type,
                 data_source_id=parsed.data_source_id,

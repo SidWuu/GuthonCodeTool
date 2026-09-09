@@ -4,6 +4,7 @@ const {
   activeSourceIdentity,
   nexusCandidateIds,
   notifyInformation,
+  openSvnConflictMerge,
   referenceTarget,
   resolveSourcePath,
   runFocusedTreeCommand,
@@ -41,6 +42,34 @@ test('all and single submit selections include Nexus-managed candidates only', (
   assert.deepEqual(nexusCandidateIds(preview, 'procedures/c.gss'), ['nexus-c']);
   assert.deepEqual(nexusCandidateIds(preview, 'pages/b.json'), []);
   assert.deepEqual(nexusCandidateIds(preview, '', ['system-a']), ['nexus-a']);
+  assert.deepEqual(nexusCandidateIds(preview, ['pages/a.json', 'procedures/c.gss']), [
+    'nexus-a',
+    'nexus-c',
+  ]);
+});
+
+test('opens the native merge editor with SVN physical conflict artifacts', async () => {
+  const calls = [];
+  const vscode = {
+    Uri: { file: (path) => ({ path }) },
+    commands: { executeCommand: async (...args) => calls.push(args) },
+  };
+  await openSvnConflictMerge(vscode, {
+    basePath: '/wc/source.gss.r1',
+    input1Path: '/wc/source.gss.mine',
+    input2Path: '/wc/source.gss.r2',
+    resultPath: '/wc/source.gss',
+  });
+
+  assert.deepEqual(calls, [[
+    '_open.mergeEditor',
+    {
+      base: { path: '/wc/source.gss.r1' },
+      input1: { uri: { path: '/wc/source.gss.mine' }, title: '本地修改' },
+      input2: { uri: { path: '/wc/source.gss.r2' }, title: 'SVN 远程修改' },
+      output: { path: '/wc/source.gss' },
+    },
+  ]]);
 });
 
 test('multi-selection can span physical working copies', async () => {
@@ -120,8 +149,10 @@ test('opens native tree search after focusing the SVN source view', async () => 
   const resourceMenus = manifest.contributes.menus['scm/resourceState/context'];
   assert(resourceMenus.some((item) => item.command === 'gushenCompletion.openSvnChangeInNexus'));
   assert(resourceMenus.some((item) => item.command === 'gushenCompletion.revertSingleSvnChange'));
-  assert(resourceMenus.some((item) => item.command === 'gushenCompletion.saveSingleSvnNexusChange'));
+  assert(resourceMenus.some((item) => item.command === 'gushenCompletion.saveSelectedSvnNexusChanges'));
   assert(resourceMenus.some((item) => item.command === 'gushenCompletion.updateSingleSvnChange'));
+  assert(resourceMenus.some((item) => item.command === 'gushenCompletion.openSvnConflictMerge'));
+  assert(resourceMenus.some((item) => item.command === 'gushenCompletion.markSvnConflictResolved'));
   const quickDiffMenus = manifest.contributes.menus['scm/change/title'];
   assert(quickDiffMenus.some((item) => item.command === 'gushenCompletion.revertSvnQuickDiffChange'));
   const groupMenus = manifest.contributes.menus['scm/resourceGroup/context'];

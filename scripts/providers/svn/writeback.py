@@ -49,6 +49,8 @@ def _atomic_bytes(path: Path, value: bytes, mode: int) -> None:
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.chmod(temp_name, mode)
         os.replace(temp_name, path)
     except Exception:
@@ -441,5 +443,10 @@ def _save(workspace: dict, workcopy_path: Path, check_only=False) -> dict:
 
 
 def save(workspace: dict, workcopy_path: Path, check_only=False) -> dict:
-    with operation_lock(workspace, "writeback-check" if check_only else "writeback"):
+    with operation_lock(
+        workspace,
+        "writeback-check" if check_only else "writeback",
+        blocking=True,
+        timeout_seconds=30,
+    ):
         return _save(workspace, workcopy_path, check_only)

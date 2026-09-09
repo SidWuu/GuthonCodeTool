@@ -17,7 +17,7 @@ const {
 } = require('./rules');
 const { createDocumentSelector } = require('./selector');
 const { procedureTargetAt, selectDefinitionPaths } = require('./definition');
-const { prepareWorkspaceSetup, workspaceActions } = require('./tool-workspace');
+const { prepareWorkspaceSetup, promptWorkspaceCreation, workspaceActions } = require('./tool-workspace');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 const { resolveDevelopmentRuntime, toolArguments, writeRuntimeDescriptor } = require('./tool-runtime');
 const {
@@ -34,6 +34,7 @@ const SUPPORTED_LANGUAGES = ['java', 'guthon-gss', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled', 'guthon-svn-edit'];
 const TOOL_COMMANDS = {
   setup: 'setup',
+  workspaceCreate: 'workspace-create',
   syncSourceAll: 'sync-source-all',
   syncSource: 'sync-source',
   syncAll: 'sync-all',
@@ -66,6 +67,7 @@ const TOOL_LABELS = {
   workcopy: '执行 Workcopy 操作',
   svn: 'SVN 检出/更新',
   'source-mode': '设置项目源码来源',
+  'workspace-create': '添加产品或项目',
 };
 let toolQueue = Promise.resolve();
 const activeToolRuns = new Set();
@@ -240,7 +242,8 @@ async function runTool(
   extraArgs = [],
   askForConfirmation = true,
   workspaceKey = '',
-  claimedRunRelease = null
+  claimedRunRelease = null,
+  stdinPayload = undefined
 ) {
   const label = TOOL_LABELS[command] || command;
   const release = claimedRunRelease || claimToolRun(command, workspaceKey);
@@ -267,6 +270,7 @@ async function runTool(
     });
     child.stdout.on('data', (data) => output.append(data.toString()));
     child.stderr.on('data', (data) => output.append(data.toString()));
+    child.stdin.end(stdinPayload === undefined ? '' : JSON.stringify(stdinPayload));
     child.on('error', (error) => {
       vscode.window.showErrorMessage(`GuthonCodeTool 启动失败：${error.message}`);
       resolve(false);
@@ -348,16 +352,27 @@ class ToolTreeDataProvider {
         'folder-library',
         ready ? toolHome : '选择程序和本地数据目录'
       ),
+      ready && toolItem(
+        '添加产品或项目',
+        'gushenCompletion.addWorkspace',
+        'add',
+        '后续开发可随时新增'
+      ),
       configFiles,
       toolItem('打开本地数据目录', 'gushenCompletion.openToolHome', 'folder-opened'),
-    ];
+    ].filter(Boolean);
     const projects = new vscode.TreeItem('项目', vscode.TreeItemCollapsibleState.Expanded);
     projects.iconPath = new vscode.ThemeIcon('folder-library');
     const tool = configuredToolFromSettings();
     try {
       const statusLabels = { UNINITIALIZED: '未初始化', PARTIAL: '部分同步', SYNCED: '已同步', FAILED: '同步失败' };
       const workspaces = tool ? await readWorkspaces(tool) : [];
-      projects.children = workspaces.map((item) => {
+      projects.children = [toolItem(
+        '添加产品或项目',
+        'gushenCompletion.addWorkspace',
+        'add',
+        '创建本地配置并选择源码来源'
+      ), ...workspaces.map((item) => {
         const actions = workspaceActions(item);
         const node = new vscode.TreeItem(item.displayName, vscode.TreeItemCollapsibleState.Collapsed);
         node.command = {
@@ -408,16 +423,7 @@ class ToolTreeDataProvider {
             toolItem(label, command, icon, undefined, [item.workspaceKey])),
         ].filter(Boolean);
         return node;
-      });
-      if (!projects.children.length) {
-        projects.children = [toolItem(
-          '当前没有配置产品或项目',
-          'gushenCompletion.editConfig',
-          'warning',
-          undefined,
-          ['products.yaml']
-        )];
-      }
+      })];
     } catch (error) {
       projects.children = [toolItem(`读取失败：${error.message}`, 'gushenCompletion.refreshToolView', 'error')];
     }
@@ -601,13 +607,75 @@ function activate(context) {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
       const setupMode = await prepareWorkspaceSetup(config, vscode.window, vscode.ConfigurationTarget.Global);
       if (!setupMode) return;
-      await runTool(TOOL_COMMANDS.setup, [], setupMode !== 'switch');
+      const completed = await runTool(TOOL_COMMANDS.setup, [], setupMode !== 'switch');
+      if (!completed) return;
       if (setupMode === 'switch' && bridge.isRunning()) {
         const tool = await configuredTool();
         if (tool) await bridge.restart(tool);
       }
       toolView.refresh();
       await svnServices.refresh();
+      if (setupMode === 'setup') {
+        const next = await vscode.window.showInformationMessage(
+          '本地数据目录已初始化，是否现在添加第一个产品或项目？',
+          '立即添加',
+          '稍后'
+        );
+        if (next === '立即添加') {
+          return vscode.commands.executeCommand('gushenCompletion.addWorkspace');
+        }
+      }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.addWorkspace', async () => {
+      const tool = await configuredTool();
+      if (!tool) return false;
+      let workspaces;
+      try {
+        workspaces = await readWorkspaces(tool);
+      } catch (error) {
+        return vscode.window.showErrorMessage(`读取现有产品/项目失败：${error.message}`);
+      }
+      const definition = await promptWorkspaceCreation(vscode.window, workspaces, tool.toolHome);
+      if (!definition) return false;
+      const created = await runTool(
+        TOOL_COMMANDS.workspaceCreate,
+        [],
+        false,
+        '',
+        null,
+        definition
+      );
+      if (!created) return false;
+      toolView.refresh();
+      await svnServices.refresh();
+
+      const configFile = definition.kind === 'product' ? 'products.yaml' : 'projects.yaml';
+      const actions = definition.sourceMode === 'svn'
+        ? ['立即调整配置', '继续导入 SVN 配置', '稍后']
+        : ['立即调整配置', '稍后'];
+      const next = await vscode.window.showInformationMessage(
+        `${definition.name} 的配置已生成。系统别名、系统 ID、数据源 ID 仍需按实际谷神环境确认，是否现在调整？`,
+        { modal: true },
+        ...actions
+      );
+      if (next === '立即调整配置') {
+        await vscode.commands.executeCommand('gushenCompletion.editConfig', configFile);
+        return true;
+      }
+      if (next !== '继续导入 SVN 配置') return true;
+      const workspaceKey = `${definition.kind === 'product' ? 'products' : 'projects'}.${definition.id}`;
+      const imported = await vscode.commands.executeCommand('gushenCompletion.importSvnScope', workspaceKey);
+      if (!imported) return true;
+      const initialize = await vscode.window.showInformationMessage(
+        'SVN 范围已导入，是否立即检出/更新并建立本地索引？',
+        { modal: true },
+        '立即执行',
+        '稍后'
+      );
+      if (initialize === '立即执行') {
+        await vscode.commands.executeCommand('gushenCompletion.initializeSvn', workspaceKey);
+      }
+      return true;
     }),
     vscode.commands.registerCommand('gushenCompletion.startBridge', async () => {
       const tool = await configuredTool();

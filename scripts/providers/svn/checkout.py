@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from functools import lru_cache
@@ -87,6 +88,8 @@ def atomic_json(path: Path, value) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(value, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(temp_name, path)
     except Exception:
         try:
@@ -315,27 +318,48 @@ def require_capability(workspace: dict, name: str) -> None:
 
 
 @contextmanager
-def operation_lock(workspace: dict, action: str, shared=False, blocking=False):
+def operation_lock(
+    workspace: dict,
+    action: str,
+    shared=False,
+    blocking=False,
+    timeout_seconds: float | None = None,
+):
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        raise ValueError("SVN operation lock timeout must be positive")
     lock_path = workspace["contextDir"] / ".svn-operation.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+b") as handle:
-        try:
-            if fcntl is not None:
-                mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
-                if not blocking:
-                    mode |= fcntl.LOCK_NB
-                fcntl.flock(handle.fileno(), mode)
-            else:  # Windows has no shared msvcrt lock; serialize all SVN operations.
-                handle.seek(0)
-                if not handle.read(1):
+        deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+        while True:
+            try:
+                if fcntl is not None:
+                    mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+                    if not blocking or deadline is not None:
+                        mode |= fcntl.LOCK_NB
+                    fcntl.flock(handle.fileno(), mode)
+                else:  # Windows has no shared msvcrt lock; serialize all SVN operations.
                     handle.seek(0)
-                    handle.write(b"\0")
-                    handle.flush()
-                handle.seek(0)
-                lock_mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
-                msvcrt.locking(handle.fileno(), lock_mode, 1)
-        except (BlockingIOError, OSError) as error:
-            raise SystemExit(f"Another SVN operation is active for {workspace['workspaceKey']}") from error
+                    if not handle.read(1):
+                        handle.seek(0)
+                        handle.write(b"\0")
+                        handle.flush()
+                    handle.seek(0)
+                    lock_mode = msvcrt.LK_LOCK if blocking and deadline is None else msvcrt.LK_NBLCK
+                    msvcrt.locking(handle.fileno(), lock_mode, 1)
+                break
+            except (BlockingIOError, OSError) as error:
+                if deadline is None:
+                    raise SystemExit(
+                        f"Another SVN operation is active for {workspace['workspaceKey']}"
+                    ) from error
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise SystemExit(
+                        f"Timed out waiting for another SVN operation to finish for "
+                        f"{workspace['workspaceKey']} ({timeout_seconds:g}s)"
+                    ) from error
+                time.sleep(min(0.05, remaining))
         if not shared:
             handle.seek(0)
             handle.truncate()

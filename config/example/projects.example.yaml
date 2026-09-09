@@ -34,8 +34,8 @@ projects:
     #     edit: true
     #     history: true
     #     revert: true
-    # 项目继承的产品 ID，对应 products.yaml 中的键名。
-    product_id: demo-product
+    # 项目是产品某个版本的完整导出快照，导出后作为独立工作区管理，
+    # 不需要也不应关联 products.yaml 中的产品条目。
     # 保留项；当前实现根据 projects 分组固定判定为 PROJECT。
     source_layer: PROJECT
     # 源码包含规则。

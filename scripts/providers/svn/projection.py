@@ -252,5 +252,11 @@ def _open_workcopy(workspace: dict, row, scope: dict) -> dict:
 
 
 def open_workcopy(workspace: dict, row, scope: dict) -> dict:
-    with operation_lock(workspace, "workcopy-open", shared=True):
+    # Opening or refreshing a projection writes its files and metadata.
+    with operation_lock(
+        workspace,
+        "workcopy-open",
+        blocking=True,
+        timeout_seconds=30,
+    ):
         return _open_workcopy(workspace, row, scope)

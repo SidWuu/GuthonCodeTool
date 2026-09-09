@@ -36,6 +36,13 @@ function changeDiffStatus(change) {
   return CHANGE_DIFF_STATUSES[change?.item] || CHANGE_DIFF_STATUSES.modified;
 }
 
+function isTextConflict(change, state) {
+  return state === 'CONFLICT' && (
+    change?.conflictKind === 'text'
+    || (!change?.conflictKind && change?.item === 'conflicted' && !change?.treeConflicted)
+  );
+}
+
 function appendExtension(label, sourcePath) {
   const extension = String(sourcePath || '').match(/\.[A-Za-z0-9]+$/)?.[0] || '';
   return extension && !String(label).toLowerCase().endsWith(extension.toLowerCase())
@@ -61,12 +68,23 @@ function changeDisplayName(change) {
   return appendExtension(label || fallback, change.path);
 }
 
+function changeDocumentName(change) {
+  if (change.sourceType !== 'page' || !String(change.path || '').toLowerCase().endsWith('.gss')) {
+    return '';
+  }
+  const sourceName = String(change.sourceName || '').trim();
+  if (!sourceName || sourceName === change.sourceId || sourceName === change.funId) return '';
+  return appendExtension(sourceName, change.path);
+}
+
 function changeUri(vscode, workspaceKey, change, state = '') {
   const params = new URLSearchParams({ path: change.path });
   if (state) params.set('state', state);
   for (const key of ['workingCopyId', 'sourceType', 'sourceId', 'funId', 'jsonPointer']) {
     if (change[key]) params.set(key, change[key]);
   }
+  const documentName = changeDocumentName(change);
+  if (documentName) params.set('documentName', documentName);
   const displayName = changeDisplayName(change).replace(/[\\/]+/g, ' · ');
   return vscode.Uri.from({
     scheme: 'guthon-svn-change',
@@ -204,20 +222,32 @@ class SvnScmManager {
     const addChange = (change, state) => {
       const definition = CHANGE_STATES[state];
       const diffStatus = changeDiffStatus(change);
+      const textConflict = isTextConflict(change, state);
       const canOpenNexus = !['CONFLICT', 'UNTRACKED'].includes(state)
         && change.item !== 'deleted'
         && change.sourceType
         && change.sourceId;
       const group = this._groupForChange(record, change);
       if (!group || !definition) return;
+      const resourceUri = changeUri(this.vscode, record.workspace.workspaceKey, change, state);
       resources.get(group).push({
-        resourceUri: changeUri(this.vscode, record.workspace.workspaceKey, change, state),
-        command: {
-          command: 'gushenCompletion.showSvnDiff',
-          title: '查看 SVN 差异',
-          arguments: [record.workspace.workspaceKey, change.path, state === 'REMOTE'],
-        },
-        contextValue: `guthonSvn.${state}${canOpenNexus ? '.nexus' : ''}`,
+        resourceUri,
+        command: textConflict
+          ? {
+            command: 'gushenCompletion.openSvnConflictMerge',
+            title: '打开 SVN 三方合并',
+            arguments: [resourceUri],
+          }
+          : {
+            command: 'gushenCompletion.showSvnDiff',
+            title: '查看 SVN 差异',
+            arguments: [record.workspace.workspaceKey, change.path, state === 'REMOTE'],
+          },
+        contextValue: `guthonSvn.${state}${
+          textConflict
+            ? '.text'
+            : canOpenNexus ? '.nexus' : ''
+        }`,
         decorations: {
           iconPath: new this.vscode.ThemeIcon(
             ['CONFLICT', 'REMOTE'].includes(state) ? definition.icon : diffStatus.icon
@@ -370,6 +400,7 @@ module.exports = {
   changeDiffStatus,
   changeDisplayName,
   changeUri,
+  isTextConflict,
   sourceControlId,
   workspaceKeyFromSourceControlId,
 };

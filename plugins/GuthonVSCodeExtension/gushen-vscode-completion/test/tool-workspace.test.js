@@ -3,7 +3,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { prepareWorkspaceSetup, workspaceActions } = require('../src/tool-workspace');
+const {
+  configuredSvnUsername,
+  prepareWorkspaceSetup,
+  promptWorkspaceCreation,
+  suggestedWorkspaceId,
+  workspaceActions,
+} = require('../src/tool-workspace');
 
 test('continues normal setup when the workspace is not initialized', async () => {
   const config = { get: () => '' };
@@ -104,5 +110,70 @@ test('database workspace keeps pull, metadata and diagnosis actions', () => {
     ],
     diagnose: true,
     syncAll: ['同步工作区全部资料', 'gushenCompletion.syncWorkspaceAll', 'cloud-download'],
+  });
+});
+
+test('suggests readable ids and stable fallback ids for Chinese names', () => {
+  assert.equal(suggestedWorkspaceId('Risk Center', 'product'), 'risk-center');
+  assert.equal(
+    suggestedWorkspaceId('风险管理', 'project', new Date(2026, 8, 9, 10, 8)),
+    'project-202609091008'
+  );
+});
+
+test('reads an existing shared SVN username', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-workspace-'));
+  fs.mkdirSync(path.join(home, 'config'));
+  fs.writeFileSync(path.join(home, 'config', 'sync.yaml'), 'svn:\n  username: "u10001"\n\nsync: {}\n');
+
+  assert.equal(configuredSvnUsername(home), 'u10001');
+  fs.rmSync(home, { recursive: true });
+});
+
+test('prompts an independent SVN project and reuses the shared username', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-workspace-'));
+  fs.mkdirSync(path.join(home, 'config'));
+  fs.writeFileSync(path.join(home, 'config', 'sync.yaml'), 'svn:\n  username: u10001\n');
+  const quickPicks = [
+    { label: '项目', value: 'project' },
+    { label: 'SVN', value: 'svn' },
+  ];
+  const inputs = ['风险开发', 'risk-dev'];
+  const window = {
+    showQuickPick: async () => quickPicks.shift(),
+    showInputBox: async () => inputs.shift(),
+    showWarningMessage: async () => undefined,
+  };
+
+  const result = await promptWorkspaceCreation(window, [], home);
+
+  assert.deepEqual(result, {
+    kind: 'project',
+    id: 'risk-dev',
+    name: '风险开发',
+    sourceMode: 'svn',
+  });
+  fs.rmSync(home, { recursive: true });
+});
+
+test('collects a DATABASE connection without environment-variable setup', async () => {
+  const quickPicks = [
+    { label: '产品', value: 'product' },
+    { label: 'DATABASE', value: 'database' },
+  ];
+  const inputs = ['核心产品', 'core', 'core-dev', 'db.local', '3307', 'core_db', 'dev', 'secret'];
+  const result = await promptWorkspaceCreation({
+    showQuickPick: async () => quickPicks.shift(),
+    showInputBox: async () => inputs.shift(),
+  }, [], '/not/used');
+
+  assert.deepEqual(result.datasource, {
+    id: 'core-dev',
+    host: 'db.local',
+    port: 3307,
+    database: 'core_db',
+    username: 'dev',
+    password: 'secret',
+    environment: 'dev',
   });
 });

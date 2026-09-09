@@ -150,6 +150,17 @@ function fragmentLabel(fragment) {
   return tail ? `${typeLabel} · ${tail}` : typeLabel;
 }
 
+function serviceComponentDocumentName(object) {
+  if (object.sourceType !== 'page' || !String(object.sourcePath || '').toLowerCase().endsWith('.gss')) {
+    return '';
+  }
+  const sourceName = String(object.sourceName || '').trim();
+  return sourceName && sourceName !== String(object.sourceId || '')
+    && sourceName !== String(object.funId || '')
+    ? sourceName
+    : '';
+}
+
 class SvnCatalogTreeProvider {
   constructor({ vscode, backend, listSvnWorkspaces }) {
     this.vscode = vscode;
@@ -184,8 +195,12 @@ class SvnCatalogTreeProvider {
     this.workspaceNodes = null;
     this.objectElements.clear();
     this.sourcePathElements.clear();
-    this.decorationElements.clear();
     this.changed.fire();
+    // VS Code can request a decoration for an existing TreeItem before the
+    // refreshed tree has produced its replacement TreeItem. Keep the URI to
+    // element mapping alive across that interval so a fresh SCM status can
+    // still decorate the existing resource URI.
+    this.decorationChanged.fire();
   }
 
   _objectKey(workspaceKey, object) {
@@ -209,6 +224,7 @@ class SvnCatalogTreeProvider {
       sourceType: object.sourceType,
       sourceId: object.sourceId,
       funId: object.funId || '',
+      documentName: serviceComponentDocumentName(object),
       sourcePath: object.sourcePath || '',
       jsonPointer: fragments?.[0]?.jsonPointer || '',
       fragmentType: fragments?.[0]?.scriptType || '',

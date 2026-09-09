@@ -40,6 +40,56 @@ test('passes virtual source text only through stdin', async () => {
   assert.deepEqual(JSON.parse(calls[0].input), { content: 'secret source' });
 });
 
+test('passes batch source replacements only through stdin', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls),
+  });
+  const changes = [{
+    documentId: 'document',
+    replacements: [{ old: 'before', new: 'after', expectedCount: 1 }],
+  }];
+  await client.writeBatch('projects.demo', 'session', changes);
+  assert.deepEqual(calls[0].args.slice(-3), ['write-batch', '--session', 'session']);
+  assert.deepEqual(JSON.parse(calls[0].input), { changes });
+  assert.equal(calls[0].args.includes('before'), false);
+  assert.equal(calls[0].args.includes('after'), false);
+});
+
+test('reads multiple SVN documents through one backend call', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls),
+  });
+  const targets = [
+    { sourceType: 'procedure', sourceId: 'demo.pkg#save', funId: 'save' },
+    { sourceType: 'page', sourceId: 'PAGE-1', jsonPointer: '/pageSetup/pageEvents/onOpenScript' },
+  ];
+  await client.readBatch('projects.demo', targets);
+  assert.equal(calls[0].args.at(-1), 'read-batch');
+  assert.deepEqual(JSON.parse(calls[0].input), { targets });
+});
+
+test('writes an identity batch without command-line session ids', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls),
+  });
+  const changes = [{
+    sourceType: 'procedure',
+    sourceId: 'demo.pkg#save',
+    funId: 'save',
+    replacements: [{ old: 'before', new: 'after' }],
+  }];
+  await client.writeBatch('projects.demo', changes);
+  assert.equal(calls[0].args.at(-1), 'write-batch');
+  assert.equal(calls[0].args.includes('--session'), false);
+  assert.deepEqual(JSON.parse(calls[0].input), { changes });
+});
+
 test('passes an empty optional SVN commit message through stdin', async () => {
   const calls = [];
   const client = new SvnBackendClient({
@@ -51,6 +101,24 @@ test('passes an empty optional SVN commit message through stdin', async () => {
     selectionToken: 'token',
   }, ['candidate'], '');
   assert.deepEqual(JSON.parse(calls[0].input), { message: '' });
+});
+
+test('passes exact conflict targets to inspect and resolve actions', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls),
+  });
+
+  await client.conflict('products.demo', 'procedures/DS-1/demo/save.gss');
+  await client.resolveConflict('products.demo', 'procedures/DS-1/demo/save.gss');
+
+  assert.deepEqual(calls[0].args.slice(-3), [
+    'conflict', '--path', 'procedures/DS-1/demo/save.gss',
+  ]);
+  assert.deepEqual(calls[1].args.slice(-3), [
+    'resolve-conflict', '--path', 'procedures/DS-1/demo/save.gss',
+  ]);
 });
 
 test('streams backend progress from stderr without breaking UTF-8 chunks', async () => {

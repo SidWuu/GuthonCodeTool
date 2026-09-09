@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "taskId": "TASK-DEMO",
+  "workspaceKey": "projects.demo",
+  "sourceDigest": "sha256:demo-source-v1",
+  "planDigest": "<validate-plan 输出的 planDigest>",
+  "runId": "RUN-DEMO-001",
+  "targetVerification": {
+    "trade-dev": {
+      "status": "PASS",
+      "targetDigest": "<resolve-target 输出的 targetDigest>",
+      "evidenceRef": "demo://dbx/target-verification"
+    }
+  },
+  "platformEvidence": {},
+  "steps": [
+    {
+      "caseId": "DB-001",
+      "stepId": "order-exists",
+      "targetId": "trade-dev",
+      "startedAt": "2026-09-07T10:00:00+08:00",
+      "finishedAt": "2026-09-07T10:00:01+08:00",
+      "status": "SUCCESS",
+      "columns": ["total"],
+      "rows": [{"total": 1}],
+      "truncation": "none",
+      "rawEvidenceRef": "demo://dbx/query/order-exists"
+    },
+    {
+      "caseId": "DB-001",
+      "stepId": "detail-count",
+      "targetId": "trade-dev",
+      "startedAt": "2026-09-07T10:00:01+08:00",
+      "finishedAt": "2026-09-07T10:00:02+08:00",
+      "status": "SUCCESS",
+      "columns": ["total"],
+      "rows": [{"total": 2}],
+      "truncation": "none",
+      "rawEvidenceRef": "demo://dbx/query/detail-count"
+    }
+  ]
+}

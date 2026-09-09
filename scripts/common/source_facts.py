@@ -668,9 +668,9 @@ def index_source_details(
     return {"fragments": fragments}
 
 
-def _fact_rows(conn, product_id: str, *, source_id: str = "", keyword: str = "", limit: int, offset: int):
-    clauses = ["s.product_id=?"]
-    params: list[object] = [product_id]
+def _fact_rows(conn, scope_id: str, *, source_id: str = "", keyword: str = "", limit: int, offset: int):
+    clauses = ["s.scope_id=?"]
+    params: list[object] = [scope_id]
     if source_id:
         clauses.append("s.source_id=?")
         params.append(source_id)
@@ -766,7 +766,7 @@ def _source_locator(conn, source_record_id: int, source_fragment_id: int | None 
 
 def query_facts(
     conn,
-    product_id: str,
+    scope_id: str,
     *,
     keyword: str = "",
     table_name: str = "",
@@ -784,16 +784,16 @@ def query_facts(
             SELECT 'data' AS fact_type, d.access_id AS fact_id
             FROM gusen_data_access d
             JOIN gusen_source_record s ON s.record_id=d.source_record_id
-            WHERE s.product_id=? AND UPPER(d.table_name)=UPPER(?)
+            WHERE s.scope_id=? AND UPPER(d.table_name)=UPPER(?)
             ORDER BY d.operation, s.source_alias_id, s.fun_id, d.line_no
             LIMIT ? OFFSET ?
             """,
-            (product_id, table_name, limit + 1, offset),
+            (scope_id, table_name, limit + 1, offset),
         ).fetchall()
     elif source_id:
-        rows = _fact_rows(conn, product_id, source_id=source_id, limit=limit + 1, offset=offset)
+        rows = _fact_rows(conn, scope_id, source_id=source_id, limit=limit + 1, offset=offset)
     elif normalized_keyword:
-        rows = _fact_rows(conn, product_id, keyword=normalized_keyword, limit=limit + 1, offset=offset)
+        rows = _fact_rows(conn, scope_id, keyword=normalized_keyword, limit=limit + 1, offset=offset)
     else:
         raise ValueError("facts query requires keyword, table_name, or source_id")
     truncated = len(rows) > limit
@@ -831,7 +831,7 @@ def query_facts(
     }
 
 
-def _incoming_chain(conn, product_id: str, alias: str, fun_id: str, depth: int) -> list[dict]:
+def _incoming_chain(conn, scope_id: str, alias: str, fun_id: str, depth: int) -> list[dict]:
     chain = []
     visited = {(alias, fun_id)}
     current = [(alias, fun_id)]
@@ -844,11 +844,11 @@ def _incoming_chain(conn, product_id: str, alias: str, fun_id: str, depth: int) 
                        source_alias_id, fun_id, source_name, script_type, json_path,
                        line_no, invoke_type
                 FROM gusen_invoke_call_detail
-                WHERE product_id=? AND target_alias_id=? AND target_fun_id=?
+                WHERE scope_id=? AND target_alias_id=? AND target_fun_id=?
                 ORDER BY source_table, source_alias_id, fun_id, line_no
                 LIMIT 3
                 """,
-                (product_id, target_alias, target_fun),
+                (scope_id, target_alias, target_fun),
             ).fetchall()
             for row in rows:
                 identity = (row["source_alias_id"], row["fun_id"])
@@ -897,7 +897,7 @@ def _incoming_chain(conn, product_id: str, alias: str, fun_id: str, depth: int) 
 
 def explain_table(
     conn,
-    product_id: str,
+    scope_id: str,
     *,
     table_name: str = "",
     bill_type_code: str = "",
@@ -935,7 +935,7 @@ def explain_table(
     fact_limit = max(1, min(int(fact_limit), 50))
     normalized_operation = str(operation or "WRITE").upper()
     operation_sql = "d.operation IN ('INSERT','UPDATE','DELETE','MERGE','BATCH_WRITE')"
-    params: list[object] = [product_id, table_name]
+    params: list[object] = [scope_id, table_name]
     if normalized_operation not in {"", "WRITE", "ANY"}:
         operation_sql = "d.operation=?"
         params.append(normalized_operation)
@@ -944,7 +944,7 @@ def explain_table(
         SELECT COUNT(*)
         FROM gusen_data_access d
         JOIN gusen_source_record s ON s.record_id=d.source_record_id
-        WHERE s.product_id=? AND UPPER(d.table_name)=UPPER(?) AND {operation_sql}
+        WHERE s.scope_id=? AND UPPER(d.table_name)=UPPER(?) AND {operation_sql}
         """,
         tuple(params),
     ).fetchone()[0]
@@ -955,7 +955,7 @@ def explain_table(
         FROM gusen_data_access d
         JOIN gusen_source_record s ON s.record_id=d.source_record_id
         JOIN gusen_source_fragment f ON f.fragment_id=d.source_fragment_id
-        WHERE s.product_id=? AND UPPER(d.table_name)=UPPER(?) AND {operation_sql}
+        WHERE s.scope_id=? AND UPPER(d.table_name)=UPPER(?) AND {operation_sql}
         ORDER BY CASE d.confidence WHEN 'HIGH' THEN 0 WHEN 'MEDIUM' THEN 1 ELSE 2 END,
                  s.source_table, s.source_alias_id, s.fun_id, d.line_no
         LIMIT ? OFFSET ?
@@ -1015,7 +1015,7 @@ def explain_table(
                 "factsTruncated": total_facts > len(fact_payload),
                 "callers": _incoming_chain(
                     conn,
-                    product_id,
+                    scope_id,
                     row["source_alias_id"],
                     row["fun_id"],
                     caller_depth,

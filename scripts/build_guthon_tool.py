@@ -19,6 +19,7 @@ HIDDEN_IMPORTS = (
     "common.page_projection",
     "common.query_hub_context",
     "common.source_format",
+    "common.workspace_config",
     "pymysql",
     "providers.database.export_bill_type_sql",
     "providers.database.export_system_script_sql",

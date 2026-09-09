@@ -6,9 +6,11 @@ import datetime as dt
 import difflib
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import uuid
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Callable
 from urllib.parse import quote
@@ -29,7 +31,7 @@ from providers.svn.checkout import (
 )
 from common.source_format import decode_source
 
-from .documents import load_session, session_path
+from .documents import accept_refreshed_files, load_session, session_path
 from .manifest import (
     ScopeEntry,
     load_authorized_scope,
@@ -127,10 +129,32 @@ def _safe_session_change(change: dict, entry: ScopeEntry, session: dict) -> tupl
         and change.get("properties") in {"", "normal", "none"}
         and not any(change.get(key) for key in ("treeConflicted", "switched", "copied", "wcLocked"))
         and path.is_file()
-        and record.get("state") == "LOCAL_MODIFIED"
+        and record.get("state") in {"EDITING", "LOCAL_MODIFIED"}
         and record.get("expectedCurrentHash") == file_hash(path)
     )
     return safe, logical_path, record
+
+
+def _text_conflict_artifacts(raw_changes: list[dict]) -> set[str]:
+    """Return unversioned helper files created by SVN for text conflicts."""
+
+    conflicted_paths = {
+        str(change.get("path") or "")
+        for change in raw_changes
+        if change.get("item") == "conflicted" and not change.get("treeConflicted")
+    }
+    artifacts = set()
+    for change in raw_changes:
+        path = str(change.get("path") or "")
+        if change.get("item") != "unversioned":
+            continue
+        for conflicted_path in conflicted_paths:
+            if path == f"{conflicted_path}.mine" or re.fullmatch(
+                rf"{re.escape(conflicted_path)}\.r\d+", path
+            ):
+                artifacts.add(path)
+                break
+    return artifacts
 
 
 def _platform_state(workspace: dict) -> dict:
@@ -178,10 +202,25 @@ def status(
                 "outOfDate": current.get("outOfDate", False),
             }
         )
-        for change in current.get("changes") or []:
+        local_changes = current.get("changes") or []
+        conflict_artifacts = _text_conflict_artifacts(local_changes)
+        visible_local_count = 0
+        for change in local_changes:
+            if change.get("path") in conflict_artifacts:
+                continue
+            visible_local_count += 1
             safe, logical_path, record = _safe_session_change(change, entry, session)
             path = entry.root / change["path"]
-            conflicted = bool(change.get("treeConflicted") or change.get("item") == "conflicted")
+            conflict_kind = (
+                "tree"
+                if change.get("treeConflicted")
+                else "text"
+                if change.get("item") == "conflicted"
+                else "property"
+                if change.get("properties") == "conflicted"
+                else ""
+            )
+            conflicted = bool(conflict_kind)
             untracked = change.get("item") == "unversioned"
             selectable = bool(
                 source_path_writable(entry, change["path"])
@@ -208,6 +247,7 @@ def status(
                     "item": change.get("item") or "",
                     "properties": change.get("properties") or "",
                     "state": state,
+                    "conflictKind": conflict_kind,
                     "sessionManaged": safe,
                     "diffable": path.is_file(),
                     "selectable": selectable,
@@ -231,7 +271,7 @@ def status(
         _progress(
             on_progress,
             f"[{index}/{total}] {label}｜SCM 状态｜完成 · "
-            f"本地 {len(current.get('changes') or [])} · 远程 {len(current.get('remoteChanges') or [])}",
+            f"本地 {visible_local_count} · 远程 {len(current.get('remoteChanges') or [])}",
         )
     return {
         "ok": True,
@@ -354,6 +394,94 @@ def diff(workspace: dict, *, logical_path: str, remote=False) -> dict:
         "readableBaseContent": readable_base,
         "readableWorkingContent": readable_working,
         "diff": output,
+    }
+
+
+def _conflict_artifact(entry: ScopeEntry, target: Path, value: str, label: str) -> Path:
+    artifact = Path(value)
+    if not artifact.is_absolute():
+        artifact = target.parent / artifact
+    artifact = artifact.resolve()
+    root = entry.root.resolve()
+    if root not in artifact.parents or not artifact.is_file():
+        raise SystemExit(f"SVN {label} conflict artifact is missing or outside the working copy")
+    return artifact
+
+
+def conflict_details(workspace: dict, *, logical_path: str) -> dict:
+    """Return the four physical files required by VS Code's merge editor."""
+
+    require_capability(workspace, "edit")
+    entry, path, relative = _entry_and_path(workspace, logical_path)
+    if not source_path_writable(entry, relative) or not path.is_file():
+        raise SystemExit(f"SVN conflict target is not an editable file: {logical_path}")
+    with operation_lock(workspace, "manifest-conflict-details", shared=True):
+        change = next(
+            (item for item in svn_path_changes(entry.root, path) if item["path"] == relative),
+            None,
+        )
+        if not change or change.get("item") != "conflicted" or change.get("treeConflicted"):
+            raise SystemExit(f"SVN path is no longer a text conflict: {logical_path}")
+        result = run_svn(["info", "--xml", "--", str(path)])
+        conflict = ET.fromstring(result.stdout).find(".//conflict")
+        if conflict is None:
+            raise SystemExit(f"SVN text conflict metadata is missing: {logical_path}")
+        previous_base = _conflict_artifact(
+            entry, path, conflict.findtext("prev-base-file") or "", "previous-base"
+        )
+        previous_working = _conflict_artifact(
+            entry, path, conflict.findtext("prev-wc-file") or "", "local"
+        )
+        current_base = _conflict_artifact(
+            entry, path, conflict.findtext("cur-base-file") or "", "incoming"
+        )
+    return {
+        "ok": True,
+        "workspaceKey": workspace["workspaceKey"],
+        "workingCopyId": entry.id,
+        "path": logical_path,
+        "basePath": str(previous_base),
+        "input1Path": str(previous_working),
+        "input2Path": str(current_base),
+        "resultPath": str(path.resolve()),
+    }
+
+
+def resolve_conflict(workspace: dict, *, logical_path: str) -> dict:
+    """Mark an already edited physical checkout file as the resolved result."""
+
+    require_capability(workspace, "edit")
+    entry, path, relative = _entry_and_path(workspace, logical_path)
+    if not source_path_writable(entry, relative) or not path.is_file():
+        raise SystemExit(f"SVN conflict target is not an editable file: {logical_path}")
+    with operation_lock(workspace, "manifest-resolve-conflict"):
+        change = next(
+            (item for item in svn_path_changes(entry.root, path) if item["path"] == relative),
+            None,
+        )
+        if not change or change.get("item") != "conflicted" or change.get("treeConflicted"):
+            raise SystemExit(f"SVN path is no longer a text conflict: {logical_path}")
+        run_svn(["resolve", "--accept", "working", "--", str(path)])
+        remaining = next(
+            (item for item in svn_path_changes(entry.root, path) if item["path"] == relative),
+            None,
+        )
+        if remaining and (
+            remaining.get("item") == "conflicted" or remaining.get("treeConflicted")
+        ):
+            raise SystemExit(f"SVN conflict remains after resolve: {logical_path}")
+        after = svn_status(entry.root)
+        accept_refreshed_files(
+            workspace,
+            [{"id": entry.id, "paths": [logical_path], "after": after}],
+        )
+    return {
+        "ok": True,
+        "action": "conflict-resolved",
+        "workspaceKey": workspace["workspaceKey"],
+        "workingCopyId": entry.id,
+        "path": logical_path,
+        "files": [logical_path],
     }
 
 
@@ -509,13 +637,7 @@ def _revalidate_selected(
         raise SystemExit("Selected SVN working copy is no longer authorized")
     label = scope_entry_label(workspace, entry)
     _progress(on_progress, f"{label}｜{phase}｜重新检查 SVN 状态")
-    current = svn_status(
-        entry.root,
-        remote=require_remote_current,
-        settings=workspace["svn"] if require_remote_current else None,
-    )
-    if require_remote_current and current.get("outOfDate"):
-        raise SystemExit(f"SVN working copy is out of date: {entry.id}")
+    current = svn_status(entry.root)
     changes_by_path = {change["path"]: change for change in current.get("changes") or []}
     targets = []
     for candidate in selected:
@@ -534,6 +656,26 @@ def _revalidate_selected(
         if not safe:
             raise SystemExit(f"Selected SVN file changed after preview: {candidate['path']}")
         targets.append(path)
+    if require_remote_current:
+        remote_result = run_remote_svn(
+            ["status", "--xml", "--show-updates", *map(str, targets)],
+            workspace["svn"],
+        )
+        root = ET.fromstring(remote_result.stdout)
+        outdated = []
+        for node in root.findall(".//entry"):
+            repository = node.find("repos-status")
+            if repository is None:
+                continue
+            item = repository.get("item", "")
+            properties = repository.get("props", "")
+            if item not in {"", "none", "normal"} or properties not in {"", "none", "normal"}:
+                outdated.append(node.get("path") or "")
+        if outdated:
+            raise SystemExit(
+                "Selected SVN file is out of date: "
+                + ", ".join(Path(value).name for value in outdated[:10])
+            )
     _progress(on_progress, f"{label}｜{phase}｜通过 · {len(targets)} 个文件")
     return entry, targets
 

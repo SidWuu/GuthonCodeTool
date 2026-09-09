@@ -6,6 +6,7 @@ import hashlib
 import difflib
 import json
 import os
+import stat
 import tempfile
 import uuid
 from pathlib import Path, PurePosixPath
@@ -35,11 +36,22 @@ from providers.svn.checkout import (
 
 from .catalog import header_fields, scan
 from . import index_queries
-from .manifest import load_authorized_scope, source_path_writable
+from .manifest import load_authorized_scope, resolve_authorized_path, source_path_writable
 
 
 SESSION_VERSION = 1
 SESSION_FILE = "svn-edit-session.json"
+DOCUMENT_LOCK_TIMEOUT_SECONDS = 30
+MAX_BATCH_CHANGES = 100
+MAX_DOCUMENT_LEASES = 1000
+PAGE_FRAGMENT_TYPES = {
+    "page-string",
+    "page-js",
+    "page-gss",
+    "page-vm",
+    "page-sql",
+    "page-fields",
+}
 
 
 def _text_hash(value: str) -> str:
@@ -48,6 +60,14 @@ def _text_hash(value: str) -> str:
 
 def session_path(workspace: dict) -> Path:
     return workspace["contextDir"] / SESSION_FILE
+
+
+def _prune_document_leases(session: dict) -> None:
+    documents = session["documents"]
+    overflow = len(documents) - MAX_DOCUMENT_LEASES
+    if overflow > 0:
+        for document_id in list(documents)[:overflow]:
+            documents.pop(document_id, None)
 
 
 def load_session(workspace: dict) -> dict:
@@ -71,6 +91,61 @@ def load_session(workspace: dict) -> dict:
     if not isinstance(value.get("files"), dict) or not isinstance(value.get("documents"), dict):
         raise SystemExit(f"Invalid SVN edit session records: {path}")
     return value
+
+
+def accept_refreshed_files(workspace: dict, refreshed: list[dict]) -> None:
+    """Advance the edit ledger after an explicit, successful SVN update."""
+    session = load_session(workspace)
+    scope = load_authorized_scope(workspace)
+    entries = {entry.id: entry for entry in scope.entries}
+    accepted_paths = set()
+    affected_paths = set()
+    for result in refreshed:
+        entry = entries.get(result.get("id"))
+        if entry is None:
+            continue
+        exact_paths = set(result.get("paths") or ())
+        if exact_paths:
+            affected_paths.update(exact_paths)
+        else:
+            prefix = f"{entry.local_subdir}/"
+            affected_paths.update(path for path in session["files"] if path.startswith(prefix))
+        for change in (result.get("after") or {}).get("changes") or ():
+            relative = str(change.get("path") or "")
+            logical_path = f"{entry.local_subdir}/{relative}"
+            if exact_paths and logical_path not in exact_paths:
+                continue
+            path = entry.root / relative
+            safe = (
+                change.get("item") == "modified"
+                and change.get("properties") in {"", "normal", "none"}
+                and not any(change.get(key) for key in ("treeConflicted", "switched", "copied", "wcLocked"))
+                and path.is_file()
+                and source_path_writable(entry, relative)
+            )
+            if safe:
+                accepted_paths.add(logical_path)
+                affected_paths.add(logical_path)
+                record = session["files"].setdefault(logical_path, {})
+                record["expectedCurrentHash"] = file_hash(path)
+                record["refreshAccepted"] = True
+    for logical_path in affected_paths - accepted_paths:
+        record = session["files"].get(logical_path)
+        if not record:
+            continue
+        try:
+            _entry, path, _relative = resolve_authorized_path(scope, logical_path)
+        except SystemExit:
+            continue
+        if path.is_file():
+            record["expectedCurrentHash"] = file_hash(path)
+            record["refreshAccepted"] = True
+    session["documents"] = {
+        key: value
+        for key, value in session["documents"].items()
+        if value.get("sourcePath") not in affected_paths
+    }
+    atomic_json(session_path(workspace), session)
 
 
 def _object_identity(source_type: str, source_id: str, fun_id: str = "") -> tuple[str, str, str]:
@@ -345,14 +420,32 @@ def _relative_in_entry(entry, path: Path) -> str:
         raise SystemExit(f"SVN object escaped its authorized working copy: {path}") from error
 
 
-def _session_change_errors(entry, session: dict, logical_path: str) -> list[str]:
+def _is_safe_modified_file(entry, path: Path, changes: list[dict] | None = None) -> bool:
+    relative = _relative_in_entry(entry, path)
+    current = changes if changes is not None else svn_path_changes(entry.root, path)
+    matching = next((change for change in current if change["path"] == relative), None)
+    return bool(
+        matching
+        and matching.get("item") == "modified"
+        and matching.get("properties") in {"", "normal", "none"}
+        and not any(matching.get(key) for key in ("treeConflicted", "switched", "copied", "wcLocked"))
+        and path.is_file()
+    )
+
+
+def _session_change_errors(
+    entry,
+    session: dict,
+    logical_path: str,
+    current_changes: list[dict] | None = None,
+) -> list[str]:
     try:
         relative = PurePosixPath(logical_path).relative_to(PurePosixPath(entry.local_subdir))
     except ValueError as error:
         raise SystemExit(f"SVN session path escaped its authorized working copy: {logical_path}") from error
     target = entry.root.joinpath(*relative.parts)
     _relative_in_entry(entry, target)
-    current = svn_path_changes(entry.root, target)
+    current = current_changes if current_changes is not None else svn_path_changes(entry.root, target)
     errors = []
     for change in current:
         logical_path = f"{entry.local_subdir}/{change['path']}"
@@ -379,7 +472,14 @@ def read(
     json_pointer: str = "",
 ) -> dict:
     require_capability(workspace, "browse")
-    with operation_lock(workspace, "document-read", shared=True):
+    # An editable read also creates an edit lease in the shared session ledger,
+    # so it must not run under a shared/read lock.
+    with operation_lock(
+        workspace,
+        "document-read",
+        blocking=True,
+        timeout_seconds=DOCUMENT_LOCK_TIMEOUT_SECONDS,
+    ):
         item = _resolve_object(workspace, source_type, source_id, fun_id)
         entry = _entry(workspace, item["scope_entry_id"])
         if entry is None:
@@ -389,9 +489,25 @@ def read(
         base_content = _base_document_content(path, json_pointer, fragment_type)
         session = load_session(workspace)
         known_file = session["files"].get(item["source_path"])
-        external = bool(_session_change_errors(entry, session, item["source_path"]))
-        if known_file and known_file.get("expectedCurrentHash") != file_hash(path):
-            external = True
+        current_hash = file_hash(path)
+        current_changes = svn_path_changes(entry.root, path)
+        external = bool(
+            _session_change_errors(entry, session, item["source_path"], current_changes)
+        )
+        if known_file and known_file.get("expectedCurrentHash") != current_hash:
+            if current_changes:
+                external = True
+            else:
+                # A clean SVN file whose bytes changed since it was opened was
+                # advanced by update/switch, not by an untracked local edit.
+                # Drop stale fragment hashes and establish a fresh edit record.
+                session["files"].pop(item["source_path"], None)
+                session["documents"] = {
+                    key: value
+                    for key, value in session["documents"].items()
+                    if value.get("sourcePath") != item["source_path"]
+                }
+                known_file = None
         relative_path = PurePosixPath(item["source_path"]).relative_to(PurePosixPath(entry.local_subdir))
         editable = bool(
             workspace["capabilities"].get("svn.edit")
@@ -404,18 +520,11 @@ def read(
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        document_id = next(
-            (
-                key
-                for key, value in session["documents"].items()
-                if value.get("documentKey") == document_key
-            ),
-            "",
-        )
+        document_id = ""
         if editable:
             raw = path.read_bytes()
             _text, format_info = decode_source(raw)
-            if not known_file:
+            if not known_file or known_file.get("refreshAccepted"):
                 session["files"][item["source_path"]] = {
                     "scopeEntryId": entry.id,
                     "workingCopyId": entry.id,
@@ -423,20 +532,28 @@ def read(
                     "objectId": item["source_id"],
                     "funId": item.get("fun_id") or "",
                     "baseRevision": item.get("svn_revision") or "",
-                    "openingHash": file_hash(path),
-                    "expectedCurrentHash": file_hash(path),
+                    "openingHash": current_hash,
+                    "expectedCurrentHash": current_hash,
                     "format": format_info,
-                    "state": "EDITING",
+                    "state": (
+                        "LOCAL_MODIFIED"
+                        if _is_safe_modified_file(entry, path, current_changes)
+                        else "EDITING"
+                    ),
                 }
-            if not document_id:
-                document_id = str(uuid.uuid4())
-                session["documents"][document_id] = {
-                    "documentKey": document_key,
-                    "sourcePath": item["source_path"],
-                    "jsonPointer": json_pointer,
-                    "fragmentType": fragment_type,
-                    "expectedDocumentHash": _text_hash(content),
-                }
+            # Every open receives an independent lease. Reusing a mutable
+            # document record lets a stale editor inherit another editor's
+            # advanced hash and overwrite that editor's save.
+            document_id = str(uuid.uuid4())
+            session["documents"][document_id] = {
+                "documentKey": document_key,
+                "sourcePath": item["source_path"],
+                "jsonPointer": json_pointer,
+                "fragmentType": fragment_type,
+                "expectedSourceHash": current_hash,
+                "expectedDocumentHash": _text_hash(content),
+            }
+            _prune_document_leases(session)
             atomic_json(session_path(workspace), session)
         return {
             "ok": True,
@@ -459,6 +576,8 @@ def read(
             "editable": editable,
             "externalModified": external,
             "sourcePath": item["source_path"],
+            "sourceHash": current_hash,
+            "documentHash": _text_hash(content),
             "content": content,
             "baseContent": base_content,
             "lineChanges": line_changes(base_content, content),
@@ -468,10 +587,12 @@ def read(
 def _atomic_write(path: Path, value: bytes) -> None:
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
+        mode = stat.S_IMODE(path.stat().st_mode)
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(value)
             handle.flush()
             os.fsync(handle.fileno())
+        os.chmod(temporary_name, mode)
         os.replace(temporary_name, path)
     except Exception:
         try:
@@ -481,189 +602,337 @@ def _atomic_write(path: Path, value: bytes) -> None:
         raise
 
 
-def write(workspace: dict, *, session_id: str, document_id: str, content: str) -> dict:
-    require_capability(workspace, "edit")
+def _session_document(workspace: dict, session: dict, document_id: str) -> dict:
+    document = session["documents"].get(document_id)
+    if not document:
+        raise SystemExit("SVN virtual document is missing or expired")
+    file_record = session["files"].get(document["sourcePath"])
+    if not file_record:
+        raise SystemExit("SVN edit session file record is missing")
+    item = _resolve_object(
+        workspace,
+        file_record["objectType"],
+        file_record["objectId"],
+        file_record.get("funId") or "",
+    )
+    if item["source_path"] != document["sourcePath"]:
+        raise SystemExit("SVN object path changed after the virtual document was opened")
+    entry = _entry(workspace, file_record["scopeEntryId"])
+    if entry is None:
+        raise SystemExit("SVN object is no longer writable in the authorization scope")
+    relative_path = PurePosixPath(item["source_path"]).relative_to(PurePosixPath(entry.local_subdir))
+    if not source_path_writable(entry, relative_path):
+        raise SystemExit("SVN object is no longer writable in the authorization scope")
+    return {
+        "document": document,
+        "fileRecord": file_record,
+        "item": item,
+        "entry": entry,
+        "path": Path(item["local_path"]),
+    }
+
+
+def _apply_replacements(content: str, replacements, source_path: str) -> str:
+    if not isinstance(replacements, list) or not replacements:
+        raise SystemExit(f"SVN batch replacements must be a non-empty array: {source_path}")
+    result = content
+    for index, replacement in enumerate(replacements, 1):
+        if not isinstance(replacement, dict):
+            raise SystemExit(f"SVN batch replacement {index} must be an object: {source_path}")
+        old = replacement.get("old")
+        new = replacement.get("new")
+        expected_count = replacement.get("expectedCount", 1)
+        if not isinstance(old, str) or not isinstance(new, str):
+            raise SystemExit(f"SVN batch replacement {index} requires text old/new values: {source_path}")
+        if not isinstance(expected_count, int) or isinstance(expected_count, bool) or expected_count <= 0:
+            raise SystemExit(f"SVN batch replacement {index} expectedCount must be positive: {source_path}")
+        actual_count = result.count(old)
+        if actual_count != expected_count:
+            raise SystemExit(
+                f"SVN batch replacement {index} expected {expected_count} matches but found "
+                f"{actual_count}: {source_path}"
+            )
+        result = result.replace(old, new, expected_count)
+    return result
+
+
+def _prepare_write(
+    workspace: dict,
+    session: dict,
+    *,
+    document_id: str,
+    content: str | None = None,
+    replacements=None,
+) -> dict:
+    record = _session_document(workspace, session, document_id)
+    document = record["document"]
+    file_record = record["fileRecord"]
+    item = record["item"]
+    entry = record["entry"]
+    path = record["path"]
+    source_bytes = path.read_bytes()
+    current_hash = file_hash(path)
+    external = _session_change_errors(entry, session, item["source_path"])
+    if external:
+        raise SystemExit("CHECKOUT_EXTERNAL_CHANGED: " + ", ".join(external[:10]))
+    source_text, detected_format = decode_source(source_bytes)
+    if detected_format != file_record.get("format"):
+        raise SystemExit("SVN source encoding or newline format changed")
+    pointer = document.get("jsonPointer") or ""
+    fragment_type = document.get("fragmentType") or ""
+    is_page_fragment = fragment_type in PAGE_FRAGMENT_TYPES
+    current_value = None
+    if is_page_fragment:
+        data = json.loads(source_text)
+        if isinstance(data, str):
+            raise SystemExit("Double-encoded PAGE JSON is read-only")
+        current_value = pointer_value(data, pointer)
+        current_document = (
+            json.dumps(current_value, ensure_ascii=False, indent=2)
+            if fragment_type == "page-fields"
+            else current_value
+        )
+        if not isinstance(current_document, str):
+            raise SystemExit(f"PAGE JSON Pointer is no longer text: {pointer}")
+    else:
+        current_document = source_text
+
+    expected_source_hash = document.get("expectedSourceHash")
+    expected_document_hash = document.get("expectedDocumentHash")
+    current_document_hash = _text_hash(current_document)
+    ledger_is_current = file_record.get("expectedCurrentHash") == current_hash
+    if not expected_source_hash:
+        raise SystemExit("SVN edit lease predates concurrency protection; reopen the virtual document")
+    if current_hash != expected_source_hash:
+        can_rebase_fragment = (
+            is_page_fragment
+            and ledger_is_current
+            and current_document_hash == expected_document_hash
+        )
+        if not can_rebase_fragment:
+            raise SystemExit("SVN_EDIT_CONFLICT: source changed after this document was opened")
+    elif not ledger_is_current:
+        raise SystemExit("SVN edit session source ledger is stale; reopen the virtual document")
+    if is_page_fragment and current_document_hash != expected_document_hash:
+        raise SystemExit(f"SVN_EDIT_CONFLICT: PAGE JSON Pointer changed after open: {pointer}")
+
+    if content is not None and replacements is not None:
+        raise SystemExit(f"SVN batch change cannot contain both content and replacements: {item['source_path']}")
+    if replacements is not None:
+        content = _apply_replacements(current_document, replacements, item["source_path"])
     if not isinstance(content, str):
         raise SystemExit("SVN virtual document content must be text")
-    with operation_lock(workspace, "document-write"):
-        session = load_session(workspace)
-        if not session_id or session_id != session.get("sessionId"):
-            raise SystemExit("SVN edit session is missing or expired")
-        document = session["documents"].get(document_id)
-        if not document:
-            raise SystemExit("SVN virtual document is missing or expired")
-        file_record = session["files"].get(document["sourcePath"])
-        if not file_record:
-            raise SystemExit("SVN edit session file record is missing")
-        item = _resolve_object(
-            workspace,
-            file_record["objectType"],
-            file_record["objectId"],
-            file_record.get("funId") or "",
-        )
-        if item["source_path"] != document["sourcePath"]:
-            raise SystemExit("SVN object path changed after the virtual document was opened")
-        entry = _entry(workspace, file_record["scopeEntryId"])
-        if entry is None:
-            raise SystemExit("SVN object is no longer writable in the authorization scope")
-        relative_path = PurePosixPath(item["source_path"]).relative_to(PurePosixPath(entry.local_subdir))
-        if not source_path_writable(entry, relative_path):
-            raise SystemExit("SVN object is no longer writable in the authorization scope")
-        path = Path(item["local_path"])
-        current_hash = file_hash(path)
-        if current_hash != file_record.get("expectedCurrentHash"):
-            raise SystemExit("SVN source hash changed after the virtual document was opened")
-        external = _session_change_errors(entry, session, item["source_path"])
-        if external:
-            raise SystemExit("CHECKOUT_EXTERNAL_CHANGED: " + ", ".join(external[:10]))
-        source_bytes = path.read_bytes()
-        source_text, detected_format = decode_source(source_bytes)
-        if detected_format != file_record.get("format"):
-            raise SystemExit("SVN source encoding or newline format changed")
-        pointer = document.get("jsonPointer") or ""
-        fragment_type = document.get("fragmentType") or ""
-        base_source_text = _base_source_text(path)
-        if base_source_text is None:
+
+    base_source_text = _base_source_text(path)
+    if base_source_text is None:
+        base_content = ""
+    else:
+        try:
+            base_content = _content_at_pointer(base_source_text, pointer, fragment_type)
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             base_content = ""
-        else:
+    if is_page_fragment:
+        if fragment_type == "page-fields":
             try:
-                base_content = _content_at_pointer(base_source_text, pointer, fragment_type)
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-                base_content = ""
-        if document.get("fragmentType") in {
-            "page-string",
-            "page-js",
-            "page-gss",
-            "page-vm",
-            "page-sql",
-            "page-fields",
-        }:
-            data = json.loads(source_text)
-            if isinstance(data, str):
-                raise SystemExit("Double-encoded PAGE JSON is read-only")
-            current_value = pointer_value(data, pointer)
-            current_document = (
-                json.dumps(current_value, ensure_ascii=False, indent=2)
-                if document.get("fragmentType") == "page-fields"
-                else current_value
+                replacement = json.loads(content)
+            except json.JSONDecodeError as error:
+                raise SystemExit("PAGE fields fragment must be valid JSON") from error
+            if not isinstance(replacement, list) or any(not isinstance(field, dict) for field in replacement):
+                raise SystemExit("PAGE fields fragment must be an array of objects")
+            after_text = replace_json_value(source_text, pointer, replacement, current_value)
+        else:
+            encoded_replacements = {}
+            if base_source_text is not None and content == base_content:
+                base_token = _base_json_string_token(base_source_text, pointer)
+                if base_token:
+                    encoded_replacements[pointer] = base_token
+            after_text = replace_json_strings(
+                source_text,
+                {pointer: content},
+                {pointer: current_value},
+                encoded_replacements,
             )
-            document_unchanged = (
-                isinstance(current_document, str)
-                and _text_hash(current_document) == document.get("expectedDocumentHash")
+        after_bytes = encode_source_exact(after_text, detected_format)
+        parsed_after = json.loads(after_text)
+        if str(parsed_after.get("pageId") or item["source_id"]) != item["source_id"]:
+            raise SystemExit("PAGE identity changed during virtual document save")
+    else:
+        try:
+            merged = merge_preserving_generated_header(source_text, content, detected_format)
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
+        header = header_fields(content)
+        if item["source_table"] == "procedure" and (
+            (header.get("packageId") and header["packageId"] != item["source_alias_id"])
+            or (header.get("functionId") and header["functionId"] != item["fun_id"])
+        ):
+            raise SystemExit("Procedure identity header must not be changed")
+        if item["source_table"] == "page" and header.get("pageId") and header["pageId"] != item["source_id"]:
+            raise SystemExit("PAGE identity header must not be changed")
+        after_bytes = (
+            encode_source_exact(merged, detected_format)
+            if merged is not None
+            else encode_source(content, detected_format)
+        )
+    base_bytes = (
+        encode_source_exact(base_source_text, detected_format)
+        if base_source_text is not None
+        else None
+    )
+    physical_changed = after_bytes != source_bytes
+    returns_to_base = base_bytes is not None and after_bytes == base_bytes
+    if returns_to_base:
+        next_state = "EDITING"
+    elif physical_changed or _is_safe_modified_file(entry, path):
+        next_state = "LOCAL_MODIFIED"
+    else:
+        next_state = "EDITING"
+    return {
+        **record,
+        "documentId": document_id,
+        "content": content,
+        "sourceBytes": source_bytes,
+        "sourceHash": current_hash,
+        "afterBytes": after_bytes,
+        "afterHash": hashlib.sha256(after_bytes).hexdigest(),
+        "physicalChanged": physical_changed,
+        "changed": bool(physical_changed and not returns_to_base),
+        "state": next_state,
+        "baseContent": base_content,
+        "lineChanges": line_changes(base_content, content),
+    }
+
+
+def _commit_prepared(workspace: dict, session: dict, prepared: dict) -> dict:
+    path = prepared["path"]
+    if prepared["physicalChanged"]:
+        _atomic_write(path, prepared["afterBytes"])
+    after_hash = file_hash(path)
+    if after_hash != prepared["afterHash"]:
+        raise SystemExit("SVN source hash changed during virtual document save")
+    if prepared["state"] == "LOCAL_MODIFIED" and not _is_safe_modified_file(
+        prepared["entry"], path
+    ):
+        raise SystemExit("SVN status after virtual document save is not a safe modified file")
+    prepared["fileRecord"]["expectedCurrentHash"] = after_hash
+    prepared["fileRecord"]["state"] = prepared["state"]
+    prepared["document"]["expectedSourceHash"] = after_hash
+    prepared["document"]["expectedDocumentHash"] = _text_hash(prepared["content"])
+    return {
+        "ok": True,
+        "changed": prepared["changed"],
+        "written": prepared["physicalChanged"],
+        "workspaceKey": workspace["workspaceKey"],
+        "sessionId": session["sessionId"],
+        "documentId": prepared["documentId"],
+        "sourcePath": prepared["item"]["source_path"],
+        "workingCopyId": prepared["entry"].id,
+        "sourceHash": after_hash,
+        "documentHash": prepared["document"]["expectedDocumentHash"],
+        "status": prepared["state"],
+        "baseContent": prepared["baseContent"],
+        "lineChanges": prepared["lineChanges"],
+    }
+
+
+def _restore_prepared(prepared_items: list[dict]) -> None:
+    errors = []
+    for prepared in reversed(prepared_items):
+        if not prepared["physicalChanged"]:
+            continue
+        try:
+            if prepared["path"].read_bytes() != prepared["sourceBytes"]:
+                _atomic_write(prepared["path"], prepared["sourceBytes"])
+        except Exception as error:  # pragma: no cover - requires filesystem failure
+            errors.append(f"{prepared['path']}: {error}")
+    if errors:
+        raise RuntimeError("SVN virtual write rollback was incomplete: " + "; ".join(errors))
+
+
+def _validate_session(session: dict, session_id: str) -> None:
+    if not session_id or session_id != session.get("sessionId"):
+        raise SystemExit("SVN edit session is missing or expired")
+
+
+def write(workspace: dict, *, session_id: str, document_id: str, content: str) -> dict:
+    require_capability(workspace, "edit")
+    with operation_lock(
+        workspace,
+        "document-write",
+        blocking=True,
+        timeout_seconds=DOCUMENT_LOCK_TIMEOUT_SECONDS,
+    ):
+        session = load_session(workspace)
+        _validate_session(session, session_id)
+        prepared = _prepare_write(
+            workspace,
+            session,
+            document_id=document_id,
+            content=content,
+        )
+        try:
+            result = _commit_prepared(workspace, session, prepared)
+            atomic_json(session_path(workspace), session)
+            return result
+        except BaseException:
+            _restore_prepared([prepared])
+            raise
+
+
+def write_batch(workspace: dict, *, session_id: str, changes: list[dict]) -> dict:
+    require_capability(workspace, "edit")
+    if not isinstance(changes, list) or not changes:
+        raise SystemExit("SVN write-batch requires a non-empty changes array")
+    if len(changes) > MAX_BATCH_CHANGES:
+        raise SystemExit(f"SVN write-batch supports at most {MAX_BATCH_CHANGES} changes")
+    with operation_lock(
+        workspace,
+        "document-write-batch",
+        blocking=True,
+        timeout_seconds=DOCUMENT_LOCK_TIMEOUT_SECONDS,
+    ):
+        session = load_session(workspace)
+        _validate_session(session, session_id)
+        prepared_items = []
+        document_ids = set()
+        source_paths = set()
+        for index, change in enumerate(changes, 1):
+            if not isinstance(change, dict):
+                raise SystemExit(f"SVN write-batch change {index} must be an object")
+            document_id = str(change.get("documentId") or "")
+            if not document_id:
+                raise SystemExit(f"SVN write-batch change {index} requires documentId")
+            if document_id in document_ids:
+                raise SystemExit(f"SVN write-batch repeats documentId: {document_id}")
+            document_ids.add(document_id)
+            prepared = _prepare_write(
+                workspace,
+                session,
+                document_id=document_id,
+                content=change.get("content"),
+                replacements=change.get("replacements"),
             )
-            if not document_unchanged:
-                raise SystemExit(f"PAGE JSON Pointer changed after open: {pointer}")
-            if document.get("fragmentType") == "page-fields":
-                try:
-                    replacement = json.loads(content)
-                except json.JSONDecodeError as error:
-                    raise SystemExit("PAGE fields fragment must be valid JSON") from error
-                if not isinstance(replacement, list) or any(not isinstance(field, dict) for field in replacement):
-                    raise SystemExit("PAGE fields fragment must be an array of objects")
-                after_text = replace_json_value(source_text, pointer, replacement, current_value)
-            else:
-                if not isinstance(current_value, str):
-                    raise SystemExit(f"PAGE JSON Pointer is no longer a string: {pointer}")
-                encoded_replacements = {}
-                if base_source_text is not None and content == base_content:
-                    base_token = _base_json_string_token(base_source_text, pointer)
-                    if base_token:
-                        encoded_replacements[pointer] = base_token
-                after_text = replace_json_strings(
-                    source_text,
-                    {pointer: content},
-                    {pointer: current_value},
-                    encoded_replacements,
+            source_path = prepared["item"]["source_path"]
+            if source_path in source_paths:
+                raise SystemExit(
+                    f"SVN write-batch requires one change per physical source file: {source_path}"
                 )
-            after_bytes = encode_source_exact(after_text, detected_format)
-            parsed_after = json.loads(after_text)
-            if str(parsed_after.get("pageId") or item["source_id"]) != item["source_id"]:
-                raise SystemExit("PAGE identity changed during virtual document save")
-        else:
-            try:
-                merged = merge_preserving_generated_header(source_text, content, detected_format)
-            except ValueError as error:
-                raise SystemExit(str(error)) from error
-            header = header_fields(content)
-            if item["source_table"] == "procedure" and (
-                (header.get("packageId") and header["packageId"] != item["source_alias_id"])
-                or (header.get("functionId") and header["functionId"] != item["fun_id"])
-            ):
-                raise SystemExit("Procedure identity header must not be changed")
-            if item["source_table"] == "page" and header.get("pageId") and header["pageId"] != item["source_id"]:
-                raise SystemExit("PAGE identity header must not be changed")
-            after_bytes = (
-                encode_source_exact(merged, detected_format)
-                if merged is not None
-                else encode_source(content, detected_format)
-            )
-        current_line_changes = line_changes(base_content, content)
-        base_bytes = (
-            encode_source_exact(base_source_text, detected_format)
-            if base_source_text is not None
-            else None
-        )
-        if after_bytes == source_bytes:
-            file_record["expectedCurrentHash"] = file_hash(path)
-            file_record["state"] = "EDITING"
-            document["expectedDocumentHash"] = _text_hash(content)
+            source_paths.add(source_path)
+            prepared_items.append(prepared)
+        results = []
+        try:
+            for prepared in prepared_items:
+                results.append(_commit_prepared(workspace, session, prepared))
             atomic_json(session_path(workspace), session)
-            return {
-                "ok": True,
-                "changed": False,
-                "sourcePath": item["source_path"],
-                "baseContent": base_content,
-                "lineChanges": current_line_changes,
-            }
-        if base_bytes is not None and after_bytes == base_bytes:
-            _atomic_write(path, after_bytes)
-            after_hash = file_hash(path)
-            file_record["expectedCurrentHash"] = after_hash
-            file_record["state"] = "EDITING"
-            document["expectedDocumentHash"] = _text_hash(content)
-            atomic_json(session_path(workspace), session)
-            return {
-                "ok": True,
-                "changed": False,
-                "workspaceKey": workspace["workspaceKey"],
-                "sessionId": session["sessionId"],
-                "documentId": document_id,
-                "sourcePath": item["source_path"],
-                "workingCopyId": entry.id,
-                "sourceHash": after_hash,
-                "status": "OK",
-                "baseContent": base_content,
-                "lineChanges": current_line_changes,
-            }
-        _atomic_write(path, after_bytes)
-        after_hash = file_hash(path)
-        relative = _relative_in_entry(entry, path)
-        matching = next(
-            (change for change in svn_path_changes(entry.root, path) if change["path"] == relative),
-            None,
-        )
-        safe_modified = bool(
-            matching
-            and matching.get("item") == "modified"
-            and matching.get("properties") in {"", "normal", "none"}
-            and not any(matching.get(key) for key in ("treeConflicted", "switched", "copied"))
-        )
-        if not safe_modified:
-            raise SystemExit("SVN status after virtual document save is not a safe modified file")
-        file_record["expectedCurrentHash"] = after_hash
-        file_record["state"] = "LOCAL_MODIFIED"
-        document["expectedDocumentHash"] = _text_hash(content)
-        atomic_json(session_path(workspace), session)
+        except BaseException:
+            _restore_prepared(prepared_items)
+            raise
         return {
             "ok": True,
-            "changed": True,
+            "changed": any(result["changed"] for result in results),
+            "written": any(result["written"] for result in results),
             "workspaceKey": workspace["workspaceKey"],
             "sessionId": session["sessionId"],
-            "documentId": document_id,
-            "sourcePath": item["source_path"],
-            "workingCopyId": entry.id,
-            "sourceHash": after_hash,
-            "status": "LOCAL_MODIFIED",
-            "baseContent": base_content,
-            "lineChanges": current_line_changes,
+            "sourcePaths": [result["sourcePath"] for result in results if result["written"]],
+            "results": results,
         }

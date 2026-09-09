@@ -4,6 +4,7 @@ const {
   SvnScmManager,
   changeDiffStatus,
   changeDisplayName,
+  changeUri,
   sourceControlId,
   workspaceKeyFromSourceControlId,
 } = require('../src/svn/scm-manager');
@@ -166,6 +167,12 @@ test('shows SVN added, deleted and modified status decorations per resource', ()
         item: 'deleted',
         workingCopyId: 'systems-domestic',
       }],
+      CONFLICT: [{
+        path: 'procedures/DS-1/demo/pkg/conflict.gss',
+        item: 'conflicted',
+        conflictKind: 'text',
+        workingCopyId: 'datasources-0008',
+      }],
     },
   });
 
@@ -173,6 +180,7 @@ test('shows SVN added, deleted and modified status decorations per resource', ()
   const modified = resources.find((item) => item.resourceUri.query.includes('save.gss'));
   const added = resources.find((item) => item.resourceUri.query.includes('PG-1.json'));
   const deleted = resources.find((item) => item.resourceUri.query.includes('deleted.json'));
+  const conflict = resources.find((item) => item.resourceUri.query.includes('conflict.gss'));
 
   assert.equal(changeDiffStatus({ item: 'added' }).id, 'ADDED');
   assert.equal(changeDiffStatus({ item: 'deleted' }).id, 'DELETED');
@@ -181,12 +189,49 @@ test('shows SVN added, deleted and modified status decorations per resource', ()
   assert.match(modified.decorations.tooltip, /修改/);
   assert.equal(modified.contextValue, 'guthonSvn.LOCAL_MODIFIED.nexus');
   assert.equal(new URLSearchParams(modified.resourceUri.query).get('sourceType'), 'procedure');
+  assert.equal(new URLSearchParams(modified.resourceUri.query).get('documentName'), null);
+  const serviceComponent = changeUri(vscode, 'projects.demo', {
+    path: 'pages/SYS-1/PG-GSS-1.gss',
+    sourceType: 'page',
+    sourceId: 'PG-GSS-1',
+    sourceName: '拉取记录',
+  }, 'LOCAL_MODIFIED');
+  assert.equal(new URLSearchParams(serviceComponent.query).get('documentName'), '拉取记录.gss');
   assert.equal(added.decorations.iconPath.id, 'diff-added');
   assert.match(added.decorations.tooltip, /新增/);
   assert.equal(added.contextValue, 'guthonSvn.EXTERNAL_MODIFIED.nexus');
   assert.equal(deleted.decorations.iconPath.id, 'diff-removed');
   assert.match(deleted.decorations.tooltip, /删除/);
   assert.equal(deleted.contextValue, 'guthonSvn.EXTERNAL_MODIFIED');
+  assert.equal(conflict.contextValue, 'guthonSvn.CONFLICT.text');
+  assert.equal(conflict.command.command, 'gushenCompletion.openSvnConflictMerge');
+  assert.equal(conflict.command.title, '打开 SVN 三方合并');
+  assert.equal(conflict.command.arguments[0], conflict.resourceUri);
+  manager.dispose();
+});
+
+test('opens legacy text conflicts in the merge editor when conflictKind is absent', () => {
+  const vscode = fakeVscode();
+  const manager = new SvnScmManager({ vscode, backend: {} });
+  const record = manager.ensure(workspace());
+  manager._applyStatus(record, {
+    ok: true,
+    workspaceKey: 'projects.demo',
+    clean: false,
+    workingCopies: [],
+    changes: [],
+    groups: {
+      CONFLICT: [{
+        path: 'pages/SYS-1/PG-1.json',
+        item: 'conflicted',
+        workingCopyId: 'systems-domestic',
+      }],
+    },
+  });
+
+  const [conflict] = record.groups.get('subsystem-flat-0008').resourceStates;
+  assert.equal(conflict.contextValue, 'guthonSvn.CONFLICT.text');
+  assert.equal(conflict.command.command, 'gushenCompletion.openSvnConflictMerge');
   manager.dispose();
 });
 

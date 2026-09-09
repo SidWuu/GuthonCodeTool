@@ -223,7 +223,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>等待输出面板显示 <code>GuthonCodeTool 完成：setup</code>。</li>
 </ol>
 <p>设置后，入口会变为“切换工作空间”。普通用户保持“发行模式”即可；只有工具维护人员才需要使用“调试模式”。切换工作空间不会删除原目录。</p>
-<p>设置工作空间会创建缺失的五个配置模板，不会覆盖已经存在的配置。完成后目录为：</p>
+<p>设置工作空间会创建缺失的五个配置文件，不会覆盖已经存在的配置；首次创建的 datasource/products/projects 注册表为空。设置后点击“添加产品或项目”，后续开发新增项目也使用同一入口，不必重新初始化或切换数据目录。</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/
 ├── config/
 │   ├── datasource.yaml
@@ -236,11 +236,11 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="4-填写配置和放置-ai-规范">4. 填写配置和放置 AI 规范</h2>
-<p>在“Guthon Nexus → 工作区 → 配置文件”中单击文件名即可编辑。优先使用公司提供的真实配置；不要把数据库密码、源码或配置提交到公开仓库。</p>
+<p>优先使用“添加产品或项目”向导：选择产品/项目和 DATABASE/SVN，DATABASE 直接填写连接信息，首次 SVN 填一次公共用户名。添加项目不需要先创建或选择产品；项目是产品某个版本的完整导出快照，导出后作为并列的独立工作区管理。向导生成配置后会询问是否立即打开对应 YAML；系统别名、系统 ID、数据源 ID 必须按实际谷神环境确认。后续仍可在“Guthon Nexus → 工作区 → 配置文件”中单击文件名编辑。不要把数据库密码、源码或配置提交到公开仓库。</p>
 <ul>
 <li><code>datasource.yaml</code>：填数据库连接；只用 SVN 时按公司模板保留。</li>
 <li><code>products.yaml</code>：填产品和子系统映射。</li>
-<li><code>projects.yaml</code>：填项目、所属产品和子系统映射。</li>
+<li><code>projects.yaml</code>：填独立项目快照、数据源和子系统映射，不包含产品工作区引用。</li>
 <li><code>source-tables.yaml</code>：直接使用公司提供的文件。</li>
 <li><code>sync.yaml</code>：直接使用公司提供的文件，有特殊要求时再修改。</li>
 </ul>
@@ -248,7 +248,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <ol>
 <li>在目标产品或项目上选择“源码来源：SVN”。</li>
 <li>在对应的 <code>products.yaml</code> 或 <code>projects.yaml</code> 的 <code>svn.url</code>/<code>svn.scope</code> 中维护紧凑范围；也可使用“导入 SVN checkout 配置”选择 <code>.sh/.bat</code> 或粘贴 checkout 内容，Nexus 会写入共享根地址和分类并保留原有手工配置。展开后的实际清单保存在工作区 <code>context/authorized-scope.json</code>，仅供程序使用。</li>
-<li>在 <code>sync.yaml</code> 的 <code>svn.username</code> 填写公共用户名。</li>
+<li>首次添加 SVN 产品/项目时由向导填写 <code>sync.yaml</code> 的公共用户名，后续自动复用；也可手工修改。</li>
 <li>点击“设置工作区 SVN 登录”，输入一次公共密码；Nexus 会让 SVN auth cache/系统钥匙串保存。</li>
 <li>点击“从 SVN 范围配置检出/更新”，核对范围后确认；也可以直接在配置中追加 URL 和相对目录。</li>
 </ol>
@@ -330,15 +330,18 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 	<li>手动执行“扫描/重建本地 SVN 索引”时，输出标签同样会显示授权范围、每个 working copy 的状态/版本/解析步骤和事务结果；同一工作区的重复重建点击会直接忽略。</li>
 <li>从“谷神源码”打开 PAGE、过程函数或系统脚本。</li>
 <li>修改后按 <code>Ctrl+S</code>（macOS 为 <code>Cmd+S</code>）保存到本地。</li>
-<li>在“谷神源码”树查看带 <code>M</code> 和修改色的文件及父目录；打开文件后，VS Code 会按 SVN BASE 显示 GitLens 风格的色条、行背景和概览标记，点击色块可内联查看本地更改。在 VS Code“源代码管理”中点击本地变更文件可查看“SVN BASE ↔ 工作副本”，具有 Nexus 对象身份的文件行还可直接“在 Nexus 中编辑”、放弃此文件修改或提交此 Nexus 修改；状态图标区分新增、删除、修改，提交不经过 Git 暂存区。点击检查出的远端变更文件可查看“工作副本 ↔ SVN HEAD”。</li>
+<li>每次打开虚拟源码都会取得独立编辑租约；同一文件已被其他会话保存时，旧编辑器会收到冲突并要求重新打开。不同文件的短时并发保存会在跨进程锁内有界排队，不需要手工循环重试。</li>
+<li>AI 或自动化已知精确替换内容时，可把对象类型、对象 ID、函数 ID/JSON Pointer 和 <code>old/new/expectedCount</code> 直接交给 <code>svn write-batch</code>，CLI 会自动取得会话；需要先阅读多个对象或生成完整内容时使用一次 <code>svn read-batch</code>。工具会整批预检、失败回滚并统一更新索引；禁止临时 Python 直接改 checkout。</li>
+<li>在“谷神源码”树查看带 <code>M</code> 和修改色的文件及父目录；打开文件后，VS Code 会按 SVN BASE 显示 GitLens 风格的色条、行背景和概览标记，点击色块可内联查看本地更改。在 VS Code“源代码管理”中点击本地变更文件可查看“SVN BASE ↔ 工作副本”，具有 Nexus 对象身份的文件行还可直接“在 Nexus 中编辑”、放弃此文件修改或提交所选 Nexus 修改；可按 <code>Ctrl</code>/<code>Cmd</code> 多选文件后一次提交，提交不经过 Git 暂存区。点击检查出的远端变更文件可查看“工作副本 ↔ SVN HEAD”。</li>
 <li>“源代码管理”在 <code>gdrm-product</code> 下直接显示始终可见的中文子系统组；每组同时管理对应数据源和映射到该数据源的系统源码。单一中文名称原样显示为“主数据”“风险管理”“共享中心”，只有国内贸易、国际贸易这种重复后缀分组显示为“贸易系统”；Skill/公共源码单列“公共源码”。</li>
-<li>提交全部修改时使用 <code>gdrm-product</code> 顶部的全部提交；只提交某个子系统或单个文件时使用对应组或文件行的提交按钮。SCM 顶部的 SVN 提交说明可选，留空可直接保存。</li>
+<li>提交全部修改时使用 <code>gdrm-product</code> 顶部的全部提交；只提交某个子系统时使用对应组按钮；提交一个或多个文件时先选择文件，再执行“提交所选 Nexus 修改”。SCM 顶部的 SVN 提交说明可选，留空可直接保存。</li>
+<li>“更新并合并”出现重叠文本冲突时，在冲突文件行执行“打开 SVN 三方合并”，以 SVN 旧基线、本地修改和远程修改编辑物理 checkout 结果；检查并保存结果后，再执行“标记 SVN 冲突为已解决”。该操作只执行 <code>svn resolve --accept working</code> 并刷新索引，不会自动提交。属性冲突和树冲突仍需在工作副本外部处理。</li>
 <li><code>gdrm-product</code> 与各子系统组都只保留相同的前四项操作：刷新状态、检查远端变更、提交 Nexus 修改、更新远端变更，并默认常驻显示。子系统首次显示时默认全部展开；之后仍尊重用户手动折叠状态。子系统行的提交与更新只作用于该组的数据源及其映射系统；根节点仍执行全部范围操作。</li>
 <li>提交 Nexus 修改、更新远端变更以及其他多步骤 SCM 操作会在“输出 → GuthonCodeTool”实时显示状态检查、预览、按 working copy 执行 SVN 操作、提交后索引和刷新步骤；同一工作区的重复操作会提示正在执行并忽略本次点击。</li>
 <li>同时显示 <code>var</code> 等其他 Git 仓库且整个 SVN 工作区无本地、远端变更时，第一个子系统下会显示一条不可操作的“当前无变更”占位项，防止 VS Code 原生 SCM 隐藏全部空子系统。该项不计入根节点变更数，也不参与提交或更新。</li>
 <li>看到 SVN revision 后，再到谷神平台完成最终提交。</li>
 </ol>
-<aside class="notice"><div class="notice-icon">!</div><div><p><code>Ctrl+S</code>/<code>Cmd+S</code> 只保存到本地；出现冲突时不要强制提交，先联系负责人处理。SVN 提交成功也不等于谷神平台已最终提交。</p></div></aside>
+<aside class="notice"><div class="notice-icon">!</div><div><p><code>Ctrl+S</code>/<code>Cmd+S</code> 只保存到本地；冲突必须先完成三方合并并显式标记已解决，不能直接强制提交。SVN 提交成功也不等于谷神平台已最终提交。</p></div></aside>
 <p>“谷神源码”已按业务分组和 <code>index.md</code> 顺序排列，普通用户无需手工整理目录。可使用视图顶部的定位、跳转、搜索和刷新按钮。</p>
 <p>首次重建索引后，AI 会按问题类型使用有界查询：错误、条件、字段和对象事实使用 <code>facts</code>，表或单据写入原因链使用 <code>explain</code>，对象名不明确时才使用 <code>find</code>，共享函数或跨对象影响分析时才补调用方。DATABASE 通过 <code>query facts/explain</code> 查询，SVN 通过 <code>svn facts/explain</code> 查询；结果返回源码路径、PAGE JSON Pointer、片段行号和续查 token，AI 只在证据不足或实际修改前读取 provider 对应的局部源码，无需手工导出整套 Markdown 源码。</p>
 </section>
@@ -394,7 +397,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h3>Workcopy 与 readonly 不一致</h3>
 <p>先打开 <code>diff.md</code> 确认需要保留的内容。不确定时不要覆盖，请联系负责人处理。</p>
 <h3>SVN SCM 显示“外部修改”</h3>
-<p>点击“管理本地源码变更”查看差异，再选择保存或撤销。如果显示冲突、新增或删除，不要强制操作，请联系负责人处理。</p>
+<p>点击“管理本地源码变更”查看差异，再选择保存或撤销。文本冲突使用文件行的三方合并和“标记为已解决”；如果显示属性冲突、树冲突、新增或删除，不要强制操作，请联系负责人处理。</p>
 <h3>验收清单</h3>
 <ul>
 <li><label class="check-item"><input type="checkbox" disabled><span>应用、VSIX 和 Bridge 来自同一个 Release。</span></label></li>
@@ -404,7 +407,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li><label class="check-item"><input type="checkbox" disabled><span>环境检查没有 FAIL，项目树同时显示 PRD、PRJ，两个样例均完整同步成功。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>Bridge 健康检查返回 <code>{"ok":true}</code>。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>DATABASE 能拉取 Workcopy；SVN 能从“谷神源码”打开文件并在“源代码管理”查看差异。</span></label></li>
-<li><label class="check-item"><input type="checkbox" disabled><span>SVN 可以查看差异，并能分别执行全部或单文件提交/更新。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>SVN 可以查看差异，执行全部、所选文件或单文件范围的提交/更新，并处理文本冲突三方合并。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>已明确 SVN revision 仍需在谷神平台最终提交。</span></label></li>
 </ul>
 </section>
