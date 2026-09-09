@@ -1,6 +1,6 @@
 {
   "name": "guthon-guard",
-  "version": "0.1.0+codex.20260909021258",
+  "version": "0.1.0+codex.20260909074805",
   "description": "Enforce Guthon dialect and workspace write rules before code is delivered.",
   "author": {
     "name": "Guthon Development Team"

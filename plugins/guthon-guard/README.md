@@ -41,11 +41,11 @@ python3 ../plugins/guthon-guard/scripts/generate_api_index.py
 
 ## Codex 团队安装
 
-首次将仓库注册为团队市场并安装插件：
+首次注册团队 Marketplace 并安装插件：
 
 ```bash
-codex plugin marketplace add /absolute/path/to/GuthonCodeTool
-codex plugin add guthon-guard@personal
+codex plugin marketplace add SidWuu/guthon-team --ref main
+codex plugin add guthon-guard@guthon-team
 ```
 
 安装后在 Codex 中审查并信任插件 Hook。Hook 成功时不输出上下文；失败时只返回精简诊断。
@@ -80,10 +80,10 @@ guthon-lint（唯一规则实现）
 └── CI：合并前最终门禁
 ```
 
-团队发布时使用唯一 Marketplace 名称（建议 `guthon-team`），不要复用当前
-本机开发用的 `personal`。同事只需克隆工具仓库、注册 Marketplace、安装插件、
-信任 Hook，并在私有项目中生成 `.guthon/api-index.json`。API 文档和生成索引
-继续保留在私有工作区；公开插件只携带通用规则实现。
+团队发布使用唯一 Marketplace 名称 `guthon-team`，不复用本机开发用的
+`personal`。同事按团队仓库 README 执行 `bootstrap`、注册 Marketplace、安装插件并
+信任 Hook；`bootstrap` 会在私有项目中生成 `.guthon/api-index.json`。API 文档和
+生成索引继续保留在私有工作区；公开插件只携带通用规则实现。
 
 其他 Agent 不复制规则代码，只把其生命周期事件转换为以下三个动作：
 
