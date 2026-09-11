@@ -9,6 +9,7 @@ const {
   resolveSourcePath,
   runFocusedTreeCommand,
   selectCandidates,
+  selectEditableIdentity,
   sourceModuleElement,
 } = require('../src/svn/activate');
 
@@ -92,6 +93,80 @@ test('multi-selection can span physical working copies', async () => {
   assert.deepEqual(selected, ['a', 'b']);
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].items.map((item) => item.candidateId), ['a', 'b']);
+});
+
+test('selects a supported virtual fragment before opening a PAGE JSON change', async () => {
+  const calls = [];
+  const fragments = [
+    {
+      scriptType: 'js',
+      jsonPointer: '/pageSetup/pageEvents/onOpenScript',
+      label: 'pageSetup / pageEvents / onOpenScript',
+    },
+    {
+      scriptType: 'fields',
+      jsonPointer: '/views/0/fields',
+      label: '主视图',
+    },
+  ];
+  const vscode = {
+    window: {
+      async showQuickPick(items, options) {
+        calls.push({ items, options });
+        return items[1];
+      },
+    },
+  };
+  const backend = {
+    async fragments(workspaceKey, identity) {
+      calls.push({ workspaceKey, identity });
+      return { fragments };
+    },
+  };
+  const identity = {
+    workspaceKey: 'products.demo',
+    sourceType: 'page',
+    sourceId: 'PG-1',
+    sourcePath: 'pages/SYS-1/PG-1.json',
+    jsonPointer: '',
+  };
+
+  assert.deepEqual(await selectEditableIdentity(vscode, backend, identity), {
+    ...identity,
+    jsonPointer: '/views/0/fields',
+    fragmentType: 'fields',
+  });
+  assert.equal(calls[0].workspaceKey, 'products.demo');
+  assert.deepEqual(calls[1].items.map((item) => item.label), [
+    'JS · pageSetup / pageEvents / onOpenScript',
+    '字段 · 主视图',
+  ]);
+});
+
+test('opens the only PAGE JSON fragment directly and leaves PAGE GSS unchanged', async () => {
+  let pickCalled = false;
+  const vscode = { window: { showQuickPick: async () => { pickCalled = true; } } };
+  const backend = {
+    fragments: async () => ({
+      fragments: [{ scriptType: 'sql', jsonPointer: '/views/0/datasource/sql', label: '' }],
+    }),
+  };
+  const pageJson = {
+    workspaceKey: 'products.demo', sourceType: 'page', sourceId: 'PG-1',
+    sourcePath: 'pages/SYS-1/PG-1.json', jsonPointer: '',
+  };
+  const pageGss = {
+    workspaceKey: 'products.demo', sourceType: 'page', sourceId: 'PG-GSS-1',
+    sourcePath: 'pages/SYS-1/PG-GSS-1.gss', jsonPointer: '',
+  };
+
+  assert.deepEqual(await selectEditableIdentity(vscode, backend, pageJson), {
+    ...pageJson,
+    jsonPointer: '/views/0/datasource/sql',
+    fragmentType: 'sql',
+  });
+  assert.equal(await selectEditableIdentity(vscode, backend, pageGss), pageGss);
+  assert.equal(pickCalled, false);
 });
 
 test('find references derives the current procedure identity from a stable virtual URI', () => {

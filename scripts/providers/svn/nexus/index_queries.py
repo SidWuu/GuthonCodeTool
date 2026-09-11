@@ -455,6 +455,47 @@ def callers(workspace: dict, *, alias: str, fun_id: str, limit=100) -> dict:
     }
 
 
+def find(workspace: dict, *, keyword: str, limit: int = 10) -> dict:
+    connection = _connection(workspace)
+    try:
+        rows = gusen_hub.find_source_candidates(
+            connection,
+            workspace["scopeId"],
+            keyword,
+            limit,
+        )
+    finally:
+        connection.close()
+    return {
+        "ok": True,
+        "workspaceKey": workspace["workspaceKey"],
+        "scopeId": workspace["scopeId"],
+        "candidates": [dict(row) for row in rows],
+    }
+
+
+def context(workspace: dict, *, source_id: str, fun_id: str = "", limit: int = 20) -> dict:
+    connection = _connection(workspace)
+    try:
+        result = gusen_hub.query_source_context(
+            connection,
+            workspace["scopeId"],
+            source_id,
+            fun_id,
+            limit,
+        )
+    finally:
+        connection.close()
+    return {
+        "ok": True,
+        "workspaceKey": workspace["workspaceKey"],
+        "source": dict(result["source"]),
+        "outgoing": [dict(row) for row in result["outgoing"]],
+        "incoming": [dict(row) for row in result["incoming"]],
+        "dynamic": [dict(row) for row in result["dynamic"]],
+    }
+
+
 def facts(
     workspace: dict,
     *,

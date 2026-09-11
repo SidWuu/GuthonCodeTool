@@ -183,6 +183,7 @@ Chrome 扩展 ──HTTP──▶ Bridge ─────┘
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>setup                 创建缺失配置，不覆盖已有文件
 workspace-create      从 stdin JSON 原子追加产品/项目、数据源和源码模式
 workspaces            列出全部产品、项目和同步状态
+workspace-resolve     从 cwd 解析唯一工作区、provider 与索引状态
 route                 按 Bridge 页面身份解析工作区
 workspace-summary     返回源码模式和有效 capabilities
 svn                   从 products/projects.yaml 的 svn.url/scope 管理精确授权 working copy，或执行更新、状态与差异操作
@@ -198,7 +199,7 @@ export-view           导出视图
 query / diagnose      查询局部上下文 / 执行只读排查
 create-workcopy       按索引创建或打开对象 Workcopy
 workcopy              查看状态、生成差异/交付物，或预检/执行 save-svn</code></pre></div>
-<p>除 <code>setup</code>、<code>doctor</code>、<code>workspaces</code>、<code>route</code> 等全局命令外，均要求 <code>--workspace products.&lt;id&gt;</code> 或 <code>--workspace projects.&lt;id&gt;</code>。</p>
+<p><code>workspace-resolve</code> 是 Agent 的轻量启动入口，从当前 PRD/PRJ cwd 返回唯一 <code>workspaceKey</code>、provider、<code>index.ready</code> 和首选有界查询；不读取源码正文。除 <code>setup</code>、<code>doctor</code>、<code>workspaces</code>、<code>workspace-resolve</code>、<code>route</code> 等全局命令外，均要求 <code>--workspace products.&lt;id&gt;</code> 或 <code>--workspace projects.&lt;id&gt;</code>。</p>
 <h3 id="3-2-打包方式">3.2 打包方式</h3>
 <p><code>scripts/build_guthon_tool.py</code> 使用 PyInstaller <code>--onefile</code>，内置配置模板和运行所需 Python 模块。构建必须在目标系统执行：Windows 生成 EXE，macOS 生成 ARM64 Mach-O。</p>
 <ul>

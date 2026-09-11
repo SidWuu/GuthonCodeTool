@@ -315,6 +315,75 @@ def resolve_workspace(config, value=None):
     raise SystemExit(f"Unknown workspace: {key}")
 
 
+def resolve_workspace_for_path(config: dict, value: str | Path | None = None) -> dict:
+    """Resolve exactly one configured workspace containing a cwd or child path."""
+
+    candidate = Path(value or Path.cwd()).expanduser().resolve()
+    matches = []
+    for workspace in list_workspaces(config):
+        root = workspace["root"].expanduser().resolve()
+        if candidate == root or root in candidate.parents:
+            matches.append((len(root.parts), workspace))
+    if not matches:
+        raise SystemExit(f"Path is not inside a configured workspace: {candidate}")
+    matches.sort(key=lambda item: item[0], reverse=True)
+    if len(matches) > 1 and matches[0][0] == matches[1][0]:
+        keys = ", ".join(item[1]["workspaceKey"] for item in matches if item[0] == matches[0][0])
+        raise SystemExit(f"Path matches multiple configured workspaces: {candidate}: {keys}")
+    return matches[0][1]
+
+
+def workspace_agent_context(config: dict, workspace: dict) -> dict:
+    """Return the small, machine-readable context an agent needs before source lookup."""
+
+    index_path = workspace["indexPath"]
+    index_size = index_path.stat().st_size if index_path.is_file() else 0
+    index_ready = False
+    if index_size:
+        try:
+            connection = sqlite3.connect(f"file:{index_path}?mode=ro", uri=True)
+            try:
+                columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(gusen_source_record)")
+                }
+                if "scope_id" in columns:
+                    index_ready = connection.execute(
+                        "SELECT 1 FROM gusen_source_record WHERE scope_id=? LIMIT 1",
+                        (workspace["scopeId"],),
+                    ).fetchone() is not None
+                elif {"product_id", "project_id"}.issubset(columns):
+                    index_ready = connection.execute(
+                        "SELECT 1 FROM gusen_source_record WHERE product_id=? OR project_id=? LIMIT 1",
+                        (workspace["scopeId"], workspace["scopeId"]),
+                    ).fetchone() is not None
+            finally:
+                connection.close()
+        except sqlite3.Error:
+            index_ready = False
+    query_command = "svn" if workspace["sourceMode"] == "svn" else "query"
+    return {
+        "workspaceKey": workspace["workspaceKey"],
+        "root": str(workspace["root"]),
+        "sourceMode": workspace["sourceMode"],
+        "sourceModeSource": workspace["sourceModeSource"],
+        "sourceModePath": str(workspace["sourceModePath"]),
+        "index": {
+            "path": str(index_path),
+            "ready": index_ready,
+            "sizeBytes": index_size,
+            "requiredAction": "" if index_ready else "init-or-reindex",
+        },
+        "indexFirst": {
+            "command": query_command,
+            "unknownObject": "find",
+            "knownLocalFact": "facts",
+            "tableOrBillWriteReason": "explain",
+            "sharedCallChain": "context/callers",
+        },
+    }
+
+
 def current_workspace(config=None):
     return resolve_workspace(config or load_config())
 

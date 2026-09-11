@@ -343,7 +343,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 </ol>
 <aside class="notice"><div class="notice-icon">!</div><div><p><code>Ctrl+S</code>/<code>Cmd+S</code> 只保存到本地；冲突必须先完成三方合并并显式标记已解决，不能直接强制提交。SVN 提交成功也不等于谷神平台已最终提交。</p></div></aside>
 <p>“谷神源码”已按业务分组和 <code>index.md</code> 顺序排列，普通用户无需手工整理目录。可使用视图顶部的定位、跳转、搜索和刷新按钮。</p>
-<p>首次重建索引后，AI 会按问题类型使用有界查询：错误、条件、字段和对象事实使用 <code>facts</code>，表或单据写入原因链使用 <code>explain</code>，对象名不明确时才使用 <code>find</code>，共享函数或跨对象影响分析时才补调用方。DATABASE 通过 <code>query facts/explain</code> 查询，SVN 通过 <code>svn facts/explain</code> 查询；结果返回源码路径、PAGE JSON Pointer、片段行号和续查 token，AI 只在证据不足或实际修改前读取 provider 对应的局部源码，无需手工导出整套 Markdown 源码。</p>
+<p>首次重建索引后，AI 先从 runtime descriptor 执行 <code>workspaceResolveCommand</code>，按当前 PRD/PRJ cwd 确认唯一工作区、provider 和 <code>index.ready</code>。索引可用时，第一次源码定位必须使用有界查询：错误、条件、字段和对象事实使用 <code>facts</code>，表或单据写入原因链使用 <code>explain</code>，对象名不明确时使用 <code>find</code>，共享函数或跨对象影响分析补 <code>context/callers</code>。DATABASE 通过 <code>query</code> 查询，SVN 通过 <code>svn</code> 查询；只有索引未初始化、明确漏项、查询证据不足或实际修改前才读取对应局部源码，不遍历完整 checkout 或 PAGE JSON。</p>
 </section>
 
 <section class="wiki-section">

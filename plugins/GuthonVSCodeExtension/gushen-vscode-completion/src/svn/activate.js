@@ -1,6 +1,6 @@
 const path = require('node:path');
 const { SvnBackendClient } = require('./backend-client');
-const { SvnCatalogTreeProvider } = require('./catalog-tree');
+const { fragmentLabel, SvnCatalogTreeProvider } = require('./catalog-tree');
 const { SvnScmManager, workspaceKeyFromSourceControlId } = require('./scm-manager');
 const { decodeIdentity, SCHEME, SvnVirtualFileSystem } = require('./virtual-fs');
 const { procedureTargetAt } = require('../definition');
@@ -24,6 +24,38 @@ async function selectCandidates(vscode, preview, title) {
     { title, canPickMany: true, matchOnDescription: true, matchOnDetail: true }
   );
   return selected?.map((item) => item.candidateId) || [];
+}
+
+async function selectEditableIdentity(vscode, backend, identity) {
+  const isPageJson = identity.sourceType === 'page'
+    && String(identity.sourcePath || '').toLowerCase().endsWith('.json');
+  if (!isPageJson || identity.jsonPointer) return identity;
+
+  const result = await backend.fragments(identity.workspaceKey, identity);
+  const fragments = (result.fragments || []).filter((fragment) => fragment.jsonPointer);
+  if (!fragments.length) {
+    throw new Error('所选 PAGE 没有可在 Nexus 中编辑的脚本、SQL 或字段分块');
+  }
+  const selected = fragments.length === 1
+    ? fragments[0]
+    : (await vscode.window.showQuickPick(
+      fragments.map((fragment) => ({
+        label: fragmentLabel(fragment),
+        description: fragment.jsonPointer,
+        fragment,
+      })),
+      {
+        title: '选择要在 Nexus 中编辑的 PAGE 分块',
+        placeHolder: 'PAGE JSON 需要通过具体的虚拟分块打开',
+        matchOnDescription: true,
+      }
+    ))?.fragment;
+  if (!selected) return undefined;
+  return {
+    ...identity,
+    jsonPointer: selected.jsonPointer,
+    fragmentType: selected.scriptType || '',
+  };
 }
 
 function showBlockedWorkingCopies(vscode, preview) {
@@ -631,7 +663,8 @@ function activateSvn({
     if (!identity.workspaceKey || !identity.sourceType || !identity.sourceId) {
       throw new Error('所选文件没有对应的 Nexus 源码对象，无法跳转编辑');
     }
-    return virtualFs.open(identity);
+    const editableIdentity = await selectEditableIdentity(vscode, backend, identity);
+    return editableIdentity ? virtualFs.open(editableIdentity) : undefined;
   };
 
   const commands = [
@@ -846,6 +879,7 @@ module.exports = {
   resolveSourcePath,
   runFocusedTreeCommand,
   selectCandidates,
+  selectEditableIdentity,
   showBlockedWorkingCopies,
   sourceModuleElement,
 };

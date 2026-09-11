@@ -42,6 +42,8 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
     mode: 'packaged',
     command: ['/tool/GuthonCodeTool'],
     home,
+    workspaceResolveCommand: ['/tool/GuthonCodeTool', 'workspace-resolve', '--home', home],
+    linterCommand: [path.join(home, 'var', 'tools', 'guthon-lint')],
   });
 
   writeRuntimeDescriptor({
@@ -54,6 +56,14 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
     mode: 'development',
     command: ['/repo/.venv/bin/python', '/repo/scripts/guthon_tool.py'],
     home,
+    workspaceResolveCommand: [
+      '/repo/.venv/bin/python',
+      '/repo/scripts/guthon_tool.py',
+      'workspace-resolve',
+      '--home',
+      home,
+    ],
+    linterCommand: [path.join(home, 'var', 'tools', 'guthon-lint')],
   });
 
   fs.rmSync(home, { recursive: true });

@@ -27,10 +27,13 @@ function writeRuntimeDescriptor(tool) {
   const runtimeDir = path.join(tool.toolHome, 'var', 'nexus');
   const descriptorPath = path.join(runtimeDir, 'tool-runtime.json');
   fs.mkdirSync(runtimeDir, { recursive: true });
+  const command = [tool.toolPath, ...(tool.toolEntry ? [tool.toolEntry] : [])];
   fs.writeFileSync(descriptorPath, `${JSON.stringify({
     mode: tool.mode,
-    command: [tool.toolPath, ...(tool.toolEntry ? [tool.toolEntry] : [])],
+    command,
     home: tool.toolHome,
+    workspaceResolveCommand: [...command, 'workspace-resolve', '--home', tool.toolHome],
+    linterCommand: [path.join(tool.toolHome, 'var', 'tools', 'guthon-lint')],
   }, null, 2)}\n`, 'utf8');
   return descriptorPath;
 }

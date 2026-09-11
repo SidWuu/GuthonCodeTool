@@ -56,12 +56,14 @@ SVN_BROWSE_ACTIONS = {
     "history",
     "definition",
     "callers",
+    "find",
+    "context",
     "facts",
     "explain",
     "scope-preview",
     "auth-cache",
 }
-GLOBAL_COMMANDS = {"setup", "workspace-create", "doctor", "route", "workspaces", "self-test"}
+GLOBAL_COMMANDS = {"setup", "workspace-create", "doctor", "route", "workspaces", "workspace-resolve", "self-test"}
 DATABASE_ONLY_COMMANDS = {
     "export-schema": "database.schemaExport",
     "export-bill-type": "database.billTypeExport",
@@ -429,6 +431,13 @@ def _reindex_svn_refresh(gusen_hub, config, workspace, refresh_result: dict, on_
 
 
 def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
+    if command == "workspace-resolve":
+        parser = argparse.ArgumentParser(prog="guthon_tool.py workspace-resolve")
+        parser.add_argument("--path", default=str(Path.cwd()))
+        parsed = parser.parse_args(extra_args)
+        resolved = gusen_hub.resolve_workspace_for_path(config, parsed.path)
+        print(json.dumps({"ok": True, **gusen_hub.workspace_agent_context(config, resolved)}, ensure_ascii=False))
+        return 0
     if command == "source-mode":
         parser = argparse.ArgumentParser(prog="guthon_tool.py source-mode")
         parser.add_argument("action", choices=["get", "set"])
@@ -483,6 +492,8 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 "platform-save",
                 "definition",
                 "callers",
+                "find",
+                "context",
                 "facts",
                 "explain",
                 "reindex-file",
@@ -917,6 +928,24 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 if parsed.action == "definition"
                 else index_queries.callers(workspace, alias=parsed.alias, fun_id=parsed.fun_id, limit=parsed.limit)
             )
+        elif parsed.action in {"find", "context"}:
+            if not manifest_layout:
+                raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
+            from providers.svn.nexus import index_queries
+
+            if parsed.action == "find":
+                if not parsed.keyword:
+                    raise SystemExit("svn find requires --keyword")
+                result = index_queries.find(workspace, keyword=parsed.keyword, limit=parsed.limit)
+            else:
+                if not parsed.source_id:
+                    raise SystemExit("svn context requires --source-id")
+                result = index_queries.context(
+                    workspace,
+                    source_id=parsed.source_id,
+                    fun_id=parsed.fun_id,
+                    limit=parsed.limit,
+                )
         elif parsed.action in {"facts", "explain"}:
             if not manifest_layout:
                 raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
@@ -1142,7 +1171,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("setup", "workspace-create", "import-svn-scope", "workspaces", "workspace-summary", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
+        choices=("setup", "workspace-create", "import-svn-scope", "workspaces", "workspace-resolve", "workspace-summary", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
     )
     parser.add_argument("--home", required=True, help="Directory that stores local config and private source data")
     parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")

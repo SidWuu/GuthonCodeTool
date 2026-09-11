@@ -118,6 +118,7 @@ products:
 .venv/bin/python scripts/guthon_tool.py setup --home .
 .venv/bin/python scripts/guthon_tool.py workspace-create --home .  # JSON 从 stdin 输入
 .venv/bin/python scripts/guthon_tool.py workspaces --home .
+.venv/bin/python scripts/guthon_tool.py workspace-resolve --home .  # 从当前 cwd 解析工作区与索引状态
 ```
 
 工作区命令必须显式传入 `--workspace`：
@@ -144,6 +145,7 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- refresh
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --diff
 .venv/bin/python scripts/guthon_tool.py reindex --home . --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- find --keyword 订单保存
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- facts --keyword 保存失败
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- explain --table T_ORDER
 ```
@@ -154,8 +156,11 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 
 `svn init` 会全量建立索引；`svn refresh` 按更新结果增量刷新，遇到目录级新增/删除等无法安全定位的结构变化时
 退回全量扫描。普通浏览、虚拟编辑、SCM 和调用查询只使用本地 working copy，不查询源码数据库。
-AI 排查时优先使用 <code>svn facts</code> 定位事实，使用 <code>svn explain</code> 按表或单据号返回有界写入链；结果直接携带
-SVN 相对路径、PAGE JSON Pointer、行号、控制条件和调用者，只有事实不足或实际修改前才读取对应局部源码。
+AI 从 PRD/PRJ 目录启动时，先执行 runtime descriptor 的 `workspaceResolveCommand`，由 cwd 得到唯一
+`workspaceKey`、provider 和 `index.ready`，不从目录名猜测。索引可用时第一次源码定位必须使用有界查询：对象名不明用
+`svn find`，局部事实用 `svn facts`，表或单据写入原因用 `svn explain`，跨对象影响用 `svn context/callers`；结果直接携带
+SVN 相对路径、PAGE JSON Pointer、行号、控制条件和调用者。仅在索引未初始化、明确漏项、查询证据不足或实际修改前读取对应局部源码，
+不得遍历整个 checkout 或读取完整 PAGE JSON。
 
 Windows PowerShell 使用 `.\.venv\Scripts\python.exe`，其余参数不变。
 
@@ -249,6 +254,10 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
 ```text
 var/nexus/tool-runtime.json
 ```
+
+该描述符除基础 `command`/`home` 外，还写入 cwd 无关的 `workspaceResolveCommand` 与 `linterCommand` 数组。
+Agent 不再拼装 `../../scripts` 或 `../../tools/guthon-lint`；从具体 PRD/PRJ cwd 运行 `--changed` 时，Linter 只检查当前
+workspace，Git pre-commit 的 `--staged` 仍检查整个暂存集合。
 
 ## Guthon Bridge
 
