@@ -3,7 +3,7 @@
 YAML 配置文件首行说明各自用途；`system-data.json` 只是在 DATABASE 拉取时自动生成的本地缓存，SVN 不读取它。
 
 发行模式通常不再手工复制这些模板：先执行 Nexus“设置工作空间”，再用始终可见的“添加产品或项目”向导。首次设置会创建空的
-`datasource.yaml`、`products.yaml`、`projects.yaml`，向导按源码模式补齐工作区、DATABASE 连接和首次 SVN 公共用户名；已有配置不会覆盖。
+`datasource.yaml`、`products.yaml`、`projects.yaml`，向导按源码模式补齐工作区、DATABASE 连接和首次 SVN 公共用户名；已有配置不会覆盖。DATABASE 只要求粘贴一次 MySQL/MariaDB/PostgreSQL 连接地址，再输入一次用户名和密码，其余连接字段自动解析。
 生成后 Nexus 会询问是否立即调整对应 YAML，因为系统 alias、`system_id`、`data_source_id` 仍须以实际谷神环境为准。
 
 以下完整示例只供维护者手工配置或查阅字段：
@@ -42,7 +42,7 @@ SVN auth cache/系统钥匙串保存并供所有产品和项目复用。
 
 ## datasource.yaml
 
-配置产品库、项目库和独立测试库。数据源键名统一使用“对象 ID-环境”，`name` 统一使用“项目名_环境”：
+配置产品库、项目库和独立测试库。数据源键名统一使用“对象 ID-环境”，`name` 统一使用“项目名_环境”。Nexus 会从连接地址自动填写 `type`、`host`、`port`、`database`，当前支持 MySQL、MariaDB 和 PostgreSQL：
 
 ```text
 demo-product-dev   -> 示例产品_开发

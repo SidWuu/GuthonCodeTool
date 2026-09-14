@@ -132,8 +132,9 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
                     "sourceMode": "database",
                     "datasource": {
                         "id": "self-test-db-dev",
+                        "type": "postgresql",
                         "host": "127.0.0.1",
-                        "port": 3306,
+                        "port": 5432,
                         "database": "self_test",
                         "username": "self_test",
                         "password": "",
@@ -146,6 +147,11 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
             assert configured["workspace"]["sourceMode"] == "svn"
             assert configured_database["workspace"]["workspaceKey"] == "projects.self-test-db"
             assert configured_database["workspace"]["sourceMode"] == "database"
+            database_workspace = gusen_hub.resolve_workspace(
+                gusen_hub.load_config(),
+                "projects.self-test-db",
+            )
+            assert database_workspace["datasource"]["type"] == "postgresql"
         print("guthon_tool self-test: ok")
         return 0
     if command == "setup":

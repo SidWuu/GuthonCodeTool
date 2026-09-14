@@ -2,14 +2,18 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   activeSourceIdentity,
+  callerIdentity,
+  callerLabel,
   nexusCandidateIds,
   notifyInformation,
   openSvnConflictMerge,
+  procedureIdentityFromElement,
   referenceTarget,
   resolveSourcePath,
   runFocusedTreeCommand,
   selectCandidates,
   selectEditableIdentity,
+  showProcedureCallers,
   sourceModuleElement,
 } = require('../src/svn/activate');
 
@@ -186,6 +190,98 @@ test('find references derives the current procedure identity from a stable virtu
   });
 });
 
+test('derives copyable procedure names only from procedure tree nodes', () => {
+  const procedure = {
+    kind: 'document',
+    workspaceKey: 'products.demo',
+    object: {
+      sourceType: 'procedure',
+      sourceAliasId: 'com.golden.demo.order',
+      funId: 'pullData',
+    },
+  };
+  assert.deepEqual(procedureIdentityFromElement(procedure), {
+    workspaceKey: 'products.demo',
+    alias: 'com.golden.demo.order',
+    funId: 'pullData',
+  });
+  assert.equal(procedureIdentityFromElement({ object: { sourceType: 'page' } }), undefined);
+});
+
+test('shows indexed procedure callers and opens the selected exact call line', async () => {
+  const calls = [];
+  const caller = {
+    source_table: 'procedure',
+    source_id: 'demo.caller#run',
+    source_alias_id: 'demo.caller',
+    fun_id: 'run',
+    source_name: '调用过程',
+    script_type: 'gss',
+    json_path: '',
+    line_no: 27,
+  };
+  const vscode = {
+    window: {
+      async showQuickPick(items, options) {
+        calls.push({ items, options });
+        return items[0];
+      },
+    },
+  };
+  const backend = {
+    async callers(...args) {
+      calls.push({ backend: args });
+      return { callers: [caller] };
+    },
+  };
+  const virtualFs = {
+    async open(...args) {
+      calls.push({ open: args });
+      return 'opened';
+    },
+  };
+  const element = {
+    workspaceKey: 'products.demo',
+    object: {
+      sourceType: 'procedure',
+      sourceAliasId: 'demo.target',
+      funId: 'save',
+    },
+  };
+
+  assert.equal(await showProcedureCallers(vscode, backend, virtualFs, element), 'opened');
+  assert.deepEqual(calls[0].backend, ['products.demo', 'demo.target', 'save', 500]);
+  assert.equal(calls[1].items[0].label, 'demo.caller.run');
+  assert.equal(calls[1].options.title, '查看 demo.target.save 的调用方');
+  assert.deepEqual(calls[2].open, [
+    {
+      workspaceKey: 'products.demo',
+      sourceType: 'procedure',
+      sourceId: 'demo.caller#run',
+      funId: 'run',
+      jsonPointer: '',
+      fragmentType: 'gss',
+    },
+    { lineNumber: 27 },
+  ]);
+});
+
+test('formats PAGE caller labels and preserves their fragment identity', () => {
+  const caller = {
+    source_table: 'page', source_id: 'PG-1', source_alias_id: 'demo.page', fun_id: '',
+    source_name: '示例页面', script_type: 'gss', json_path: '/pageSetup/serviceEvents/query',
+  };
+  assert.equal(callerLabel(caller), 'demo.page');
+  assert.deepEqual(callerIdentity('products.demo', caller), {
+    workspaceKey: 'products.demo',
+    sourceType: 'page',
+    sourceId: 'PG-1',
+    funId: '',
+    jsonPointer: '/pageSetup/serviceEvents/query',
+    fragmentType: 'gss',
+  });
+});
+
 test('resolves a Nexus source module only inside its workspace checkout', () => {
   const workspaces = [{ workspaceKey: 'products.demo', checkoutPath: '/workspace/checkout' }];
   const module = {
@@ -237,6 +333,16 @@ test('opens native tree search after focusing the SVN source view', async () => 
   assert.equal(rootCommands.length, 4);
   assert(groupMenus.every((item) => item.group.startsWith('inline@')));
   assert(!rootCommands.includes('gushenCompletion.refreshSvn'));
+  const sourceMenus = manifest.contributes.menus['view/item/context'];
+  assert.deepEqual(
+    sourceMenus.slice(0, 3).map((item) => item.command),
+    [
+      'gushenCompletion.copySvnProcedureName',
+      'gushenCompletion.copyQualifiedSvnProcedureName',
+      'gushenCompletion.showSvnProcedureCallers',
+    ]
+  );
+  assert(sourceMenus.slice(0, 3).every((item) => item.when.includes('guthonSvnProcedure')));
 });
 
 test('maps the active virtual editor back to its Nexus source identity', () => {

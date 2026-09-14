@@ -3,6 +3,7 @@ const test = require('node:test');
 const {
   buildSourceTree,
   CATEGORY_ICONS,
+  compareFragmentType,
   fragmentLabel,
   groupCatalog,
   objectLabel,
@@ -73,7 +74,7 @@ test('keeps indexed source directories and sorts folders before leaves', () => {
   assert.equal(tree[1].label, 'run root');
 });
 
-test('orders PAGE and procedure folders and leaves by index.md position', () => {
+test('orders PAGE folders and leaves by index.md position', () => {
   const tree = buildSourceTree([
     {
       sourceType: 'page', sourceId: 'PG-A', sourceAliasId: 'a', funId: '',
@@ -122,6 +123,53 @@ test('uses labels as a stable fallback when descendants share one index position
   );
 });
 
+test('sorts procedure packages and functions alphabetically when datasource order is shared', () => {
+  const tree = buildSourceTree([
+    {
+      sourceType: 'procedure', sourceId: 'z.pkg#run', sourceAliasId: 'z.pkg', funId: 'run',
+      treePath: ['示例数据源', 'z.pkg · Z包'], treeLabel: 'run · 执行', treeOrder: [0, 0],
+    },
+    {
+      sourceType: 'procedure', sourceId: 'a.pkg#save', sourceAliasId: 'a.pkg', funId: 'save',
+      treePath: ['示例数据源', 'a.pkg · A包'], treeLabel: 'save · 保存', treeOrder: [0, 0],
+    },
+    {
+      sourceType: 'procedure', sourceId: 'a.pkg#load', sourceAliasId: 'a.pkg', funId: 'load',
+      treePath: ['示例数据源', 'a.pkg · A包'], treeLabel: 'load · 加载', treeOrder: [0, 0],
+    },
+    {
+      sourceType: 'procedure', sourceId: 'legacy.pkg#old', sourceAliasId: 'legacy.pkg', funId: 'old',
+      treePath: ['示例数据源', '未编入 index.md', 'legacy', 'pkg'],
+      treeLabel: 'old legacy.pkg', treeOrder: [0, 1],
+    },
+  ]);
+
+  assert.deepEqual(tree[0].children.map((item) => item.label), [
+    'a.pkg · A包',
+    'z.pkg · Z包',
+    '未编入 index.md',
+  ]);
+  assert.deepEqual(tree[0].children[0].children.map((item) => item.label), [
+    'load · 加载',
+    'save · 保存',
+  ]);
+});
+
+test('sorts PAGE fragments as GSS, JS, SQL, then fields', () => {
+  const fragments = [
+    { scriptType: 'fields' },
+    { scriptType: 'sql' },
+    { scriptType: 'js' },
+    { scriptType: 'gss' },
+    { scriptType: 'vm' },
+  ];
+
+  assert.deepEqual(
+    [...fragments].sort(compareFragmentType).map((item) => item.scriptType),
+    ['gss', 'vm', 'js', 'sql', 'fields']
+  );
+});
+
 test('keeps a lazy PAGE leaf expandable before its fragments are loaded', async () => {
   const fragmentCalls = [];
   const provider = new SvnCatalogTreeProvider({
@@ -155,10 +203,10 @@ test('keeps a lazy PAGE leaf expandable before its fragments are loaded', async 
   const fragments = await provider.getChildren(page);
   assert.equal(fragments.length, 4);
   assert.deepEqual(fragments.map((item) => item.label), [
-    'JS · pageSetup / pageEvents / onOpenScript',
     'GSS · serviceEvents / query / doMethodScript',
-    '字段 · 主视图',
+    'JS · pageSetup / pageEvents / onOpenScript',
     'SQL · sql',
+    '字段 · 主视图',
   ]);
   assert.deepEqual(fragmentCalls, [{
     workspaceKey: 'products.demo',
@@ -280,6 +328,7 @@ test('decorates modified SVN sources and their parent directories', async () => 
 
   const sourceItem = provider.getTreeItem(directory.children[0]);
   const directoryItem = provider.getTreeItem(directory);
+  assert.equal(sourceItem.contextValue, 'guthonSvnProcedure');
   assert.equal(provider.provideFileDecoration(sourceItem.resourceUri).badge, 'M');
   assert.equal(provider.provideFileDecoration(directoryItem.resourceUri).badge, 'M');
   assert.equal(

@@ -420,6 +420,42 @@ test("database connection failures return a friendly message", async () => {
   }
 });
 
+test("PostgreSQL connection failures return the same friendly message", async () => {
+  const port = 17470;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-postgresql-error-"));
+  const schemaScript = path.join(tmp, "fake-schema.js");
+  fs.writeFileSync(
+    schemaScript,
+    'process.stderr.write("psycopg.OperationalError: connection failed: Connection refused"); process.exit(1);',
+    "utf8",
+  );
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_HUB_PYTHON: process.execPath,
+      GUTHON_TABLE_SCHEMA_SCRIPT: schemaScript,
+    },
+    stdio: "ignore",
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/exportTableSchema`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceKey: "products.demo-product", dataSourceId: "0015" }),
+    });
+    const data = await response.json();
+    assert.equal(response.status, 500);
+    assert.equal(data.message, "无法连接源码数据库，请确认已连接公司内网或 VPN 后重试");
+  } finally {
+    server.kill();
+    fs.rmSync(tmp, { recursive: true });
+  }
+});
+
 test("exportBillType delegates to script and writes pull log", async () => {
   const port = 17464;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-billtype-command-"));

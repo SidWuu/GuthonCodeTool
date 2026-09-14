@@ -5,11 +5,41 @@ const path = require('node:path');
 const test = require('node:test');
 const {
   configuredSvnUsername,
+  parseDatabaseCredentials,
+  parseDatabaseUrl,
   prepareWorkspaceSetup,
   promptWorkspaceCreation,
   suggestedWorkspaceId,
   workspaceActions,
 } = require('../src/tool-workspace');
+
+test('parses database URLs and defaults their standard ports', () => {
+  assert.deepEqual(
+    parseDatabaseUrl('postgresql://postgres\\@192.168.1.183:5432/nbkcqx\\_gdsdp'),
+    {
+      type: 'postgresql',
+      host: '192.168.1.183',
+      port: 5432,
+      database: 'nbkcqx_gdsdp',
+      username: 'postgres',
+      password: '',
+    }
+  );
+  assert.equal(parseDatabaseUrl('mysql://db.local/risk').port, 3306);
+  assert.equal(parseDatabaseUrl('jdbc:postgres://db.local/risk').port, 5432);
+});
+
+test('parses combined database credentials with Chinese and English separators', () => {
+  assert.deepEqual(
+    parseDatabaseCredentials('用户名：postgres，密码：a b,:- c'),
+    { username: 'postgres', password: 'a b,:- c' }
+  );
+  assert.deepEqual(parseDatabaseCredentials('dev:secret:x'), { username: 'dev', password: 'secret:x' });
+  assert.deepEqual(parseDatabaseCredentials('dev, pass word'), { username: 'dev', password: 'pass word' });
+  assert.deepEqual(parseDatabaseCredentials('dev - pass-word'), { username: 'dev', password: 'pass-word' });
+  assert.deepEqual(parseDatabaseCredentials('dev secret value'), { username: 'dev', password: 'secret value' });
+  assert.deepEqual(parseDatabaseCredentials('用户名-postgres 密码-pass'), { username: 'postgres', password: 'pass' });
+});
 
 test('continues normal setup when the workspace is not initialized', async () => {
   const config = { get: () => '' };
@@ -161,19 +191,30 @@ test('collects a DATABASE connection without environment-variable setup', async 
     { label: '产品', value: 'product' },
     { label: 'DATABASE', value: 'database' },
   ];
-  const inputs = ['核心产品', 'core', 'core-dev', 'db.local', '3307', 'core_db', 'dev', 'secret'];
+  const inputs = [
+    '核心产品',
+    'core',
+    'postgresql://postgres@db.local:5433/core_db',
+    '用户名：dev，密码：secret value',
+  ];
+  let databasePrompts = 0;
   const result = await promptWorkspaceCreation({
     showQuickPick: async () => quickPicks.shift(),
-    showInputBox: async () => inputs.shift(),
+    showInputBox: async (options) => {
+      if (options.title.startsWith('粘贴数据库') || options.title.startsWith('输入数据库')) databasePrompts += 1;
+      return inputs.shift();
+    },
   }, [], '/not/used');
 
   assert.deepEqual(result.datasource, {
     id: 'core-dev',
+    type: 'postgresql',
     host: 'db.local',
-    port: 3307,
+    port: 5433,
     database: 'core_db',
     username: 'dev',
-    password: 'secret',
+    password: 'secret value',
     environment: 'dev',
   });
+  assert.equal(databasePrompts, 2);
 });

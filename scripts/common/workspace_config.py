@@ -93,7 +93,11 @@ def _datasource_body(payload: dict, workspace_key: str) -> tuple[str, list[str]]
     environment = str(datasource.get("environment") or "dev").strip().lower()
     if environment not in {"dev", "test"}:
         raise SystemExit("datasource.environment must be dev or test")
-    raw_port = datasource.get("port", 3306)
+    database_type = str(datasource.get("type") or "mysql").strip().lower()
+    database_type = {"mariadb": "mysql", "postgres": "postgresql"}.get(database_type, database_type)
+    if database_type not in {"mysql", "postgresql"}:
+        raise SystemExit("datasource.type must be mysql or postgresql")
+    raw_port = datasource.get("port", 5432 if database_type == "postgresql" else 3306)
     try:
         port = int(raw_port)
     except (TypeError, ValueError) as error:
@@ -104,7 +108,7 @@ def _datasource_body(payload: dict, workspace_key: str) -> tuple[str, list[str]]
         f"name: {_yaml_string(datasource.get('name') or payload['name'] + '_' + environment)}",
         f"object: {_yaml_string(workspace_key)}",
         f"environment: {environment}",
-        "type: mysql",
+        f"type: {database_type}",
         f"host: {_yaml_string(_required_text(datasource.get('host'), 'datasource.host'))}",
         f"port: {port}",
         f"database: {_yaml_string(_required_text(datasource.get('database'), 'datasource.database'))}",

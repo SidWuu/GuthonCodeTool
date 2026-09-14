@@ -69,12 +69,12 @@ context/
 
 SVN 新模式的工作区只创建 `docs` 和 `context` 等派生资料；授权清单中的多个精确 URL 检出到同一
 `var/checkout/<配置 ID>/` 逻辑根下。资源管理器保留这些原始目录供查看，日常修改从“谷神源码”进入并
-回写同一份文件，不再生成额外 `source/readonly` 或 `source/workcopy` 代码副本。
+回写同一份文件；过程函数节点可右键复制函数名或 `包名.函数名`，也可选择索引识别的调用方并跳转到精确调用行。不再生成额外 `source/readonly` 或 `source/workcopy` 代码副本。
 
 ## 配置
 
 发行模式优先在 Nexus 的“工作区”或“项目”区域点击“添加产品或项目”。向导会创建稳定
-`workspaceKey`、DATABASE 连接或 SVN 模式文件；首次 SVN 工作区还会写入公共用户名。生成后 Nexus 会询问是否立即打开
+`workspaceKey`、DATABASE 连接或 SVN 模式文件。DATABASE 连接只输入两次：先粘贴 MySQL/MariaDB/PostgreSQL 地址，再一次性输入用户名和密码；服务器、端口、数据库/服务名、数据源 ID 和显示名称自动生成。首次 SVN 工作区还会写入公共用户名。生成后 Nexus 会询问是否立即打开
 `products.yaml` / `projects.yaml`，由用户确认系统 alias、`system_id` 和 `data_source_id`。后续增加项目使用同一入口，无需重新初始化数据目录。
 项目无需先创建或选择产品：项目是产品某个版本的完整导出快照，导出后与产品并列，拥有独立配置、源码、索引和数据源范围。
 
@@ -246,7 +246,7 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
    保留“发行模式 / 调试模式”。
 5. DATABASE 项目继续执行同步、诊断和 Workcopy；SVN 项目从“谷神源码”虚拟编辑，并在单一 SCM 项目中查看
    本地/远程变更，执行全部、所选文件或单文件范围的提交/更新、部分保存、放弃修改和文本冲突三方合并。PAGE 默认以脚本、SQL、字段的可读投影打开 VS Code 双栏 Diff，
-   同时保留原始 JSON 差异入口；所有子系统按过程函数数据源分组顺序排列，共用数据源时按 `systems.include.mappings` 声明顺序排列；页面与过程函数的目录、叶子顺序及 SCM 名称复用各自 `index.md`，`.gss` 使用独立 Guthon GSS 高亮与既有补全。
+   同时保留原始 JSON 差异入口；所有子系统按过程函数数据源分组顺序排列，共用数据源时按 `systems.include.mappings` 声明顺序排列；页面目录、叶子顺序及 SCM 名称复用 `pages/index.md`，PAGE 分块按 GSS、JS、SQL、字段排列；过程函数包名称复用 `procedures/index.md`，包和包内函数分别按名称字母排序；`.gss` 使用独立 Guthon GSS 高亮与既有补全。
 6. 需要网页功能时从 Nexus 启动 Guthon Bridge。
 
 维护者可切换到调试模式并选择本仓库；Nexus 会直接调用 `.venv` 和 `scripts/guthon_tool.py`。当前运行模式写入：

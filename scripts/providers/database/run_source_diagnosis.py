@@ -202,7 +202,10 @@ def execute_database_step(case: dict, step: dict, datasource: dict, connect) -> 
         selected = dict(datasource)
         selected["database"] = database
         connection = connect(selected)
-        connection.autocommit(False)
+        if callable(getattr(connection, "autocommit", None)):
+            connection.autocommit(False)
+        else:
+            connection.autocommit = False
         with connection.cursor() as cursor:
             cursor.execute("START TRANSACTION READ ONLY")
             result = execute_step(cursor, step, case.get("parameters") or {}, case["max_rows"])

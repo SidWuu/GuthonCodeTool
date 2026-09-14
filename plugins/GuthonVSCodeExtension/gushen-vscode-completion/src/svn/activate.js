@@ -137,6 +137,69 @@ function sourceModuleElement(element) {
   return current?.object ? current : undefined;
 }
 
+function procedureIdentityFromElement(element) {
+  const sourceElement = sourceModuleElement(element);
+  const object = sourceElement?.object;
+  if (object?.sourceType !== 'procedure') return undefined;
+  const alias = String(object.sourceAliasId || '').trim();
+  const funId = String(object.funId || '').trim();
+  if (!alias || !funId) return undefined;
+  return {
+    workspaceKey: sourceElement.workspaceKey,
+    alias,
+    funId,
+  };
+}
+
+function callerLabel(caller) {
+  const alias = String(caller.source_alias_id || '').trim();
+  const funId = String(caller.fun_id || '').trim();
+  if (alias && funId) return `${alias}.${funId}`;
+  return alias || String(caller.source_name || caller.source_id || '未命名调用方');
+}
+
+function callerIdentity(workspaceKey, caller) {
+  return {
+    workspaceKey,
+    sourceType: caller.source_table,
+    sourceId: caller.source_id,
+    funId: caller.fun_id || '',
+    jsonPointer: caller.json_path?.startsWith('/') ? caller.json_path : '',
+    fragmentType: caller.script_type || '',
+  };
+}
+
+async function showProcedureCallers(vscode, backend, virtualFs, element) {
+  const target = procedureIdentityFromElement(element);
+  if (!target) throw new Error('所选节点不是可查询调用方的过程函数');
+  const qualifiedName = `${target.alias}.${target.funId}`;
+  const result = await backend.callers(target.workspaceKey, target.alias, target.funId, 500);
+  const callers = result.callers || [];
+  if (!callers.length) {
+    void vscode.window.showInformationMessage(`未找到调用 ${qualifiedName} 的函数`);
+    return undefined;
+  }
+  const selected = await vscode.window.showQuickPick(
+    callers.map((caller) => ({
+      label: callerLabel(caller),
+      description: `${caller.source_name || caller.source_table} · 第 ${caller.line_no || 1} 行`,
+      detail: caller.json_path || caller.source_id,
+      caller,
+    })),
+    {
+      title: `查看 ${qualifiedName} 的调用方`,
+      placeHolder: `找到 ${callers.length} 个调用位置，选择后跳转`,
+      matchOnDescription: true,
+      matchOnDetail: true,
+    }
+  );
+  if (!selected) return undefined;
+  return virtualFs.open(
+    callerIdentity(target.workspaceKey, selected.caller),
+    { lineNumber: selected.caller.line_no || 1 }
+  );
+}
+
 async function runFocusedTreeCommand(vscode, command) {
   await vscode.commands.executeCommand('gushenCompletion.svnSourceView.focus');
   return vscode.commands.executeCommand(command);
@@ -672,6 +735,18 @@ function activateSvn({
       virtualFs.open(identity))),
     vscode.commands.registerCommand('gushenCompletion.openSvnChangeInNexus', withError(openSvnChangeInNexus)),
     vscode.commands.registerCommand('gushenCompletion.revealSvnSourceFile', withError(revealSourceFile)),
+    vscode.commands.registerCommand('gushenCompletion.copySvnProcedureName', withError(async (element) => {
+      const target = procedureIdentityFromElement(element);
+      if (!target) throw new Error('所选节点不是过程函数');
+      return vscode.env.clipboard.writeText(target.funId);
+    })),
+    vscode.commands.registerCommand('gushenCompletion.copyQualifiedSvnProcedureName', withError(async (element) => {
+      const target = procedureIdentityFromElement(element);
+      if (!target) throw new Error('所选节点不是过程函数');
+      return vscode.env.clipboard.writeText(`${target.alias}.${target.funId}`);
+    })),
+    vscode.commands.registerCommand('gushenCompletion.showSvnProcedureCallers', withError((element) =>
+      showProcedureCallers(vscode, backend, virtualFs, element))),
     vscode.commands.registerCommand('gushenCompletion.jumpSelectedSvnSource', withError(async () => {
       const element = sourceModuleElement(treeView.selection[0]);
       if (!element) throw new Error('请先选择一个 SVN 源码模块或其方法、字段、SQL 节点');
@@ -875,11 +950,15 @@ module.exports = {
   nexusCandidateIds,
   notifyInformation,
   openSvnConflictMerge,
+  callerIdentity,
+  callerLabel,
+  procedureIdentityFromElement,
   referenceTarget,
   resolveSourcePath,
   runFocusedTreeCommand,
   selectCandidates,
   selectEditableIdentity,
+  showProcedureCallers,
   showBlockedWorkingCopies,
   sourceModuleElement,
 };

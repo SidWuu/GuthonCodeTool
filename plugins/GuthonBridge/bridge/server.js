@@ -178,7 +178,7 @@ function systemScriptSummary(payload, result = {}) {
 
 function commandErrorMessage(errorLabel, output, code) {
   const message = String(output || "").trim();
-  if (/(?:pymysql\.err\.(?:Operational|Interface)Error|CR_SERVER_LOST|Can't connect to MySQL server|Lost connection to MySQL server|\((?:2003|2006|2013),)/i.test(message)) {
+  if (/(?:pymysql\.err\.(?:Operational|Interface)Error|psycopg\.(?:Operational|Interface)Error|CR_SERVER_LOST|Can't connect to MySQL server|Lost connection to MySQL server|connection (?:failed|refused)|server closed the connection unexpectedly|\((?:2003|2006|2013),)/i.test(message)) {
     return "无法连接源码数据库，请确认已连接公司内网或 VPN 后重试";
   }
   return message || `${errorLabel}失败，退出码：${code}`;

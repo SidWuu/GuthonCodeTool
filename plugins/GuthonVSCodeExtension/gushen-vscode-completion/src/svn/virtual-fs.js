@@ -101,11 +101,19 @@ class SvnVirtualFileSystem {
     return record;
   }
 
-  async open(identity) {
+  async open(identity, options = {}) {
     const uri = this.uriFor(identity);
     const record = await this._load(uri, true);
     const document = await this.vscode.workspace.openTextDocument(uri);
-    await this.vscode.window.showTextDocument(document, { preview: false });
+    const editor = await this.vscode.window.showTextDocument(document, { preview: false });
+    const requestedLine = Number(options.lineNumber);
+    if (Number.isFinite(requestedLine) && requestedLine > 0) {
+      const line = Math.min(requestedLine - 1, Math.max(0, document.lineCount - 1));
+      const position = new this.vscode.Position(line, 0);
+      const range = new this.vscode.Range(position, position);
+      editor.selection = new this.vscode.Selection(position, position);
+      editor.revealRange(range, this.vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    }
     if (!record.value.editable) {
       const reason = record.value.externalModified
         ? '原文件存在 Nexus 会话外修改，已以只读方式打开'

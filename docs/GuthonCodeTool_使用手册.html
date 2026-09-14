@@ -236,7 +236,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="4-填写配置和放置-ai-规范">4. 填写配置和放置 AI 规范</h2>
-<p>优先使用“添加产品或项目”向导：选择产品/项目和 DATABASE/SVN，DATABASE 直接填写连接信息，首次 SVN 填一次公共用户名。添加项目不需要先创建或选择产品；项目是产品某个版本的完整导出快照，导出后作为并列的独立工作区管理。向导生成配置后会询问是否立即打开对应 YAML；系统别名、系统 ID、数据源 ID 必须按实际谷神环境确认。后续仍可在“Guthon Nexus → 工作区 → 配置文件”中单击文件名编辑。不要把数据库密码、源码或配置提交到公开仓库。</p>
+<p>优先使用“添加产品或项目”向导：选择产品/项目和 DATABASE/SVN。DATABASE 连接只输入两次：先粘贴 MySQL、MariaDB 或 PostgreSQL 连接地址，再一次性输入用户名和密码；主机、端口、数据库/服务名、本地数据源 ID 和名称自动生成。首次 SVN 填一次公共用户名。添加项目不需要先创建或选择产品；项目是产品某个版本的完整导出快照，导出后作为并列的独立工作区管理。向导生成配置后会询问是否立即打开对应 YAML；系统别名、系统 ID、数据源 ID 必须按实际谷神环境确认。后续仍可在“Guthon Nexus → 工作区 → 配置文件”中单击文件名编辑。不要把数据库密码、源码或配置提交到公开仓库。</p>
 <ul>
 <li><code>datasource.yaml</code>：填数据库连接；只用 SVN 时按公司模板保留。</li>
 <li><code>products.yaml</code>：填产品和子系统映射。</li>
@@ -342,7 +342,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>看到 SVN revision 后，再到谷神平台完成最终提交。</li>
 </ol>
 <aside class="notice"><div class="notice-icon">!</div><div><p><code>Ctrl+S</code>/<code>Cmd+S</code> 只保存到本地；冲突必须先完成三方合并并显式标记已解决，不能直接强制提交。SVN 提交成功也不等于谷神平台已最终提交。</p></div></aside>
-<p>“谷神源码”已按业务分组和 <code>index.md</code> 顺序排列，普通用户无需手工整理目录。可使用视图顶部的定位、跳转、搜索和刷新按钮。</p>
+<p>“谷神源码”已按业务分组：页面沿用 <code>pages/index.md</code> 顺序，PAGE 分块依次显示 GSS、JS、SQL、字段；过程函数包按包名字母排序，包内函数按函数名字母排序。可使用视图顶部的定位、跳转、搜索和刷新按钮；右键过程函数还可复制函数名或“包名.函数名”，并按索引查看全部已识别调用方，选择后跳转到对应调用行。</p>
 <p>首次重建索引后，AI 先从 runtime descriptor 执行 <code>workspaceResolveCommand</code>，按当前 PRD/PRJ cwd 确认唯一工作区、provider 和 <code>index.ready</code>。索引可用时，第一次源码定位必须使用有界查询：错误、条件、字段和对象事实使用 <code>facts</code>，表或单据写入原因链使用 <code>explain</code>，对象名不明确时使用 <code>find</code>，共享函数或跨对象影响分析补 <code>context/callers</code>。DATABASE 通过 <code>query</code> 查询，SVN 通过 <code>svn</code> 查询；只有索引未初始化、明确漏项、查询证据不足或实际修改前才读取对应局部源码，不遍历完整 checkout 或 PAGE JSON。</p>
 </section>
 

@@ -102,33 +102,35 @@ def system_script_mapping(config):
     return mapping
 
 
-def quoted(mapping, key):
+def quoted(mapping, key, database_type="mysql"):
+    if database_type == "postgresql":
+        return mapping[key]
     return f"`{mapping[key]}`"
 
 
-def fetch_systems(conn, mapping, data_source_ids, system_ids=None):
+def fetch_systems(conn, mapping, data_source_ids, system_ids=None, database_type="mysql"):
     ids = normalize_data_source_ids(data_source_ids)
     placeholders = ", ".join(["%s"] * len(ids))
     selected = normalize_values(system_ids)
     params = list(ids)
     system_filter = ""
     if selected:
-        system_filter = f" AND {quoted(mapping, 'system_id_field')} IN ({', '.join(['%s'] * len(selected))})"
+        system_filter = f" AND {quoted(mapping, 'system_id_field', database_type)} IN ({', '.join(['%s'] * len(selected))})"
         params.extend(selected)
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT {quoted(mapping, 'system_id_field')} AS system_id, "
-            f"{quoted(mapping, 'system_name_field')} AS system_name, "
-            f"{quoted(mapping, 'system_alias_id_field')} AS system_alias_id, "
-            f"{quoted(mapping, 'data_source_id_field')} AS data_source_id "
-            f"FROM {quoted(mapping, 'system_table_name')} "
-            f"WHERE {quoted(mapping, 'data_source_id_field')} IN ({placeholders}){system_filter}",
+            f"SELECT {quoted(mapping, 'system_id_field', database_type)} AS system_id, "
+            f"{quoted(mapping, 'system_name_field', database_type)} AS system_name, "
+            f"{quoted(mapping, 'system_alias_id_field', database_type)} AS system_alias_id, "
+            f"{quoted(mapping, 'data_source_id_field', database_type)} AS data_source_id "
+            f"FROM {quoted(mapping, 'system_table_name', database_type)} "
+            f"WHERE {quoted(mapping, 'data_source_id_field', database_type)} IN ({placeholders}){system_filter}",
             tuple(params),
         )
         return list(cur.fetchall())
 
 
-def fetch_scripts(conn, mapping, system_ids, script_types=None):
+def fetch_scripts(conn, mapping, system_ids, script_types=None, database_type="mysql"):
     ids = normalize_values(system_ids)
     if not ids:
         return []
@@ -137,22 +139,22 @@ def fetch_scripts(conn, mapping, system_ids, script_types=None):
     params = list(ids)
     type_filter = ""
     if selected_types:
-        type_filter = f" AND {quoted(mapping, 'script_type_field')} IN ({', '.join(['%s'] * len(selected_types))})"
+        type_filter = f" AND {quoted(mapping, 'script_type_field', database_type)} IN ({', '.join(['%s'] * len(selected_types))})"
         params.extend(selected_types)
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT {quoted(mapping, 'script_type_field')} AS script_type, "
-            f"{quoted(mapping, 'script_system_id_field')} AS system_id, "
-            f"{quoted(mapping, 'content_field')} AS source, "
-            f"{quoted(mapping, 'last_update_field')} AS last_update, "
-            f"{quoted(mapping, 'check_out_user_id_field')} AS check_out_user_id, "
-            f"{quoted(mapping, 'check_out_date_field')} AS check_out_date, "
-            f"{quoted(mapping, 'check_in_date_field')} AS check_in_date, "
-            f"{quoted(mapping, 'product_content_field')} AS product_source, "
-            f"{quoted(mapping, 'is_product_field')} AS is_product, "
-            f"{quoted(mapping, 'description_field')} AS description "
-            f"FROM {quoted(mapping, 'source_table_name')} "
-            f"WHERE {quoted(mapping, 'script_system_id_field')} IN ({placeholders}){type_filter}",
+            f"SELECT {quoted(mapping, 'script_type_field', database_type)} AS script_type, "
+            f"{quoted(mapping, 'script_system_id_field', database_type)} AS system_id, "
+            f"{quoted(mapping, 'content_field', database_type)} AS source, "
+            f"{quoted(mapping, 'last_update_field', database_type)} AS last_update, "
+            f"{quoted(mapping, 'check_out_user_id_field', database_type)} AS check_out_user_id, "
+            f"{quoted(mapping, 'check_out_date_field', database_type)} AS check_out_date, "
+            f"{quoted(mapping, 'check_in_date_field', database_type)} AS check_in_date, "
+            f"{quoted(mapping, 'product_content_field', database_type)} AS product_source, "
+            f"{quoted(mapping, 'is_product_field', database_type)} AS is_product, "
+            f"{quoted(mapping, 'description_field', database_type)} AS description "
+            f"FROM {quoted(mapping, 'source_table_name', database_type)} "
+            f"WHERE {quoted(mapping, 'script_system_id_field', database_type)} IN ({placeholders}){type_filter}",
             tuple(params),
         )
         return list(cur.fetchall())
@@ -235,13 +237,15 @@ def export_system_scripts(
     system_ids = normalize_values(system_ids)
     script_types = normalize_script_types(script_types)
     mapping = system_script_mapping(config)
+    database_type = str(gusen_hub.resolve_workspace(config)["datasource"].get("type") or "mysql").lower()
+    database_type = "postgresql" if database_type in {"postgres", "postgresql"} else "mysql"
 
-    systems = fetch_systems(conn, mapping, data_source_ids, system_ids)
+    systems = fetch_systems(conn, mapping, data_source_ids, system_ids, database_type)
     system_by_id = {str(row.get("system_id") or ""): row for row in systems if row.get("system_id")}
     missing_system_ids = [system_id for system_id in system_ids if system_id not in system_by_id]
     if missing_system_ids:
         raise ValueError(f"System IDs are outside configured mappings: {','.join(missing_system_ids)}")
-    scripts = fetch_scripts(conn, mapping, system_by_id, script_types)
+    scripts = fetch_scripts(conn, mapping, system_by_id, script_types, database_type)
     if script_types and not scripts:
         raise ValueError(f"System script source not found. script_types={','.join(map(str, script_types))}")
     if workcopy_dir and (len(system_ids) != 1 or len(script_types) != 1):

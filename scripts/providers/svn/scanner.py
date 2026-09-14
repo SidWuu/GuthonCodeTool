@@ -10,6 +10,7 @@ from pathlib import Path
 from common.page_projection import extract_page_scripts
 from common.source_format import decode_source
 from providers.svn.checkout import file_hash, run_svn, svn_status
+from providers.svn.dedup import resolve_page_duplicates
 
 
 HEADER_FIELD = re.compile(r"(?m)^\s*\*\s*@(?P<key>[A-Za-z]+)\s+(?P<value>.*?)\s*$")
@@ -299,6 +300,7 @@ def scan(checkout_path: Path, scope: dict) -> dict:
             for path in sorted(root.glob("*.json")):
                 objects.append(_scan_metadata(path, checkout_path, kind, data_source_id, revision_map, changes))
 
+    objects, ignored = resolve_page_duplicates(objects)
     counts = {}
     identities = {}
     for item in objects:
@@ -322,5 +324,6 @@ def scan(checkout_path: Path, scope: dict) -> dict:
         "objects": objects,
         "counts": counts,
         "errors": errors,
+        "ignored": ignored,
         "systemNames": system_names,
     }

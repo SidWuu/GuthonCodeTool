@@ -27,6 +27,9 @@
     "onCommand:gushenCompletion.openSvnDocument",
     "onCommand:gushenCompletion.openSvnChangeInNexus",
     "onCommand:gushenCompletion.revealSvnSourceFile",
+    "onCommand:gushenCompletion.copySvnProcedureName",
+    "onCommand:gushenCompletion.copyQualifiedSvnProcedureName",
+    "onCommand:gushenCompletion.showSvnProcedureCallers",
     "onCommand:gushenCompletion.jumpSelectedSvnSource",
     "onCommand:gushenCompletion.locateActiveSvnSource",
     "onCommand:gushenCompletion.expandSelectedSvnSource",
@@ -150,6 +153,9 @@
       { "command": "gushenCompletion.openSvnDocument", "title": "Guthon Nexus: 打开 SVN 虚拟源码" },
       { "command": "gushenCompletion.openSvnChangeInNexus", "title": "Guthon Nexus: 在 Nexus 中编辑", "icon": "$(edit)" },
       { "command": "gushenCompletion.revealSvnSourceFile", "title": "Guthon Nexus: 跳转到资源管理器原文件", "icon": "$(go-to-file)" },
+      { "command": "gushenCompletion.copySvnProcedureName", "title": "Guthon Nexus: 复制函数名", "icon": "$(copy)" },
+      { "command": "gushenCompletion.copyQualifiedSvnProcedureName", "title": "Guthon Nexus: 复制包名.函数名", "icon": "$(copy)" },
+      { "command": "gushenCompletion.showSvnProcedureCallers", "title": "Guthon Nexus: 查看函数调用方", "icon": "$(references)" },
       { "command": "gushenCompletion.jumpSelectedSvnSource", "title": "Guthon Nexus: 跳转所选 SVN 原文件", "icon": "$(go-to-file)" },
       { "command": "gushenCompletion.locateActiveSvnSource", "title": "Guthon Nexus: 定位当前编辑源码", "icon": "$(target)" },
       { "command": "gushenCompletion.expandSelectedSvnSource", "title": "Guthon Nexus: 展开所选 SVN 节点", "icon": "$(expand-all)" },
@@ -219,7 +225,10 @@
         { "command": "gushenCompletion.refreshSvnSourceView", "when": "view == gushenCompletion.svnSourceView", "group": "navigation@6" }
       ],
       "view/item/context": [
-        { "command": "gushenCompletion.revealSvnSourceFile", "when": "view == gushenCompletion.svnSourceView && viewItem == guthonSvnSource", "group": "navigation@1" }
+        { "command": "gushenCompletion.copySvnProcedureName", "when": "view == gushenCompletion.svnSourceView && viewItem == guthonSvnProcedure", "group": "navigation@1" },
+        { "command": "gushenCompletion.copyQualifiedSvnProcedureName", "when": "view == gushenCompletion.svnSourceView && viewItem == guthonSvnProcedure", "group": "navigation@2" },
+        { "command": "gushenCompletion.showSvnProcedureCallers", "when": "view == gushenCompletion.svnSourceView && viewItem == guthonSvnProcedure", "group": "navigation@3" },
+        { "command": "gushenCompletion.revealSvnSourceFile", "when": "view == gushenCompletion.svnSourceView && viewItem =~ /^guthonSvn(Source|Procedure)$/", "group": "navigation@4" }
       ],
       "scm/title": [
         { "command": "gushenCompletion.refreshSvnScm", "when": "scmProvider =~ /^guthon-svn-/", "group": "navigation@1" },

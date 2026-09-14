@@ -10,6 +10,7 @@ from pathlib import Path
 from common.page_projection import extract_page_fields, extract_page_scripts
 from common.source_format import decode_source
 from providers.svn.checkout import file_hash, run_svn, svn_path_changes, svn_status
+from providers.svn.dedup import resolve_page_duplicates
 
 from .manifest import (
     ScopeEntry,
@@ -260,6 +261,7 @@ def scan(
         raise SystemExit(f"Unknown SVN working copy ids: {', '.join(sorted(unknown))}")
     entries = [entry for entry in scope.entries if not selected or entry.id in selected]
     objects = []
+    page_objects = []
     modules = []
     errors = []
     status_records = []
@@ -313,27 +315,30 @@ def scan(
             try:
                 item = _object_for_file(entry, path, revision_map, change_map)
                 if item:
-                    counts[item["source_table"]] = counts.get(item["source_table"], 0) + 1
-                    identity = (item["source_table"], item["source_id"], item.get("fun_id") or "")
-                    previous = identities.get(identity)
-                    if previous:
-                        previous_path = previous["source_path"] if isinstance(previous, dict) else previous
-                        item["status"] = "IDENTITY_AMBIGUOUS"
-                        if isinstance(previous, dict):
-                            previous["status"] = "IDENTITY_AMBIGUOUS"
-                        errors.append(
-                            {
-                                "scopeEntryId": item["scope_entry_id"],
-                                "path": item["source_path"],
-                                "error": f"duplicate object identity also used by {previous_path}",
-                            }
-                        )
-                    else:
-                        identities[identity] = item if collect_objects else item["source_path"]
                     if collect_objects:
                         objects.append(item)
-                    if on_object is not None:
-                        on_object(item)
+                    elif item["source_table"] == "page":
+                        # PAGE alias renames can leave an older file behind. Defer
+                        # page callbacks until all working copies have been scanned
+                        # so the stale file is never written to the index.
+                        page_objects.append(item)
+                    else:
+                        counts[item["source_table"]] = counts.get(item["source_table"], 0) + 1
+                        identity = (item["source_table"], item["source_id"], item.get("fun_id") or "")
+                        previous = identities.get(identity)
+                        if previous:
+                            item["status"] = "IDENTITY_AMBIGUOUS"
+                            errors.append(
+                                {
+                                    "scopeEntryId": item["scope_entry_id"],
+                                    "path": item["source_path"],
+                                    "error": f"duplicate object identity also used by {previous}",
+                                }
+                            )
+                        else:
+                            identities[identity] = item["source_path"]
+                        if on_object is not None:
+                            on_object(item)
             except Exception as error:
                 errors.append(
                     {"scopeEntryId": entry.id, "path": _logical_path(entry, path), "error": str(error)}
@@ -343,6 +348,38 @@ def scan(
                 f"[{index}/{total}] {label}｜索引｜完成 · "
                 f"对象 {sum(counts.values()) - before_count} · 错误 {len(errors) - before_errors}"
             )
+
+    if collect_objects:
+        objects, ignored = resolve_page_duplicates(objects)
+        for item in objects:
+            counts[item["source_table"]] = counts.get(item["source_table"], 0) + 1
+            identity = (item["source_table"], item["source_id"], item.get("fun_id") or "")
+            previous = identities.get(identity)
+            if previous:
+                item["status"] = "IDENTITY_AMBIGUOUS"
+                errors.append(
+                    {
+                        "scopeEntryId": item["scope_entry_id"],
+                        "path": item["source_path"],
+                        "error": f"duplicate object identity also used by {previous}",
+                    }
+                )
+            else:
+                identities[identity] = item["source_path"]
+        if on_object is not None:
+            for item in objects:
+                on_object(item)
+    else:
+        page_objects, ignored = resolve_page_duplicates(page_objects)
+        counts["page"] = len(page_objects)
+        if on_object is not None:
+            for item in page_objects:
+                on_object(item)
+
+    ignored_paths = {item["path"] for item in ignored}
+    for module in modules:
+        if module["path"] in ignored_paths:
+            module["status"] = "SVN_DUPLICATE_IGNORED"
 
     all_changes = [
         {"workingCopyId": record["id"], **change}
@@ -359,6 +396,7 @@ def scan(
         "modules": modules,
         "counts": counts,
         "errors": errors,
+        "ignored": ignored,
     }
 
 

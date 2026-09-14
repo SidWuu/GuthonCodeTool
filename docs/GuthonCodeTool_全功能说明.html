@@ -220,7 +220,7 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
 <li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射；公开模板只保留占位符，真实表名和字段名由内部配置提供。</li>
 <li><code>sync.yaml</code>：公共 SVN 用户名、全局同步窗口、未签入源码白名单和拉取规则，不保存当前或默认工作区。</li>
 </ul>
-<p><code>setup</code> 只补齐缺失文件，不覆盖用户配置；首次创建空的 datasource/products/projects 注册表。Nexus 在工作区树、项目树和标题栏持续提供“添加产品或项目”，向导原子追加工作区、DATABASE 连接或 SVN 模式，并在首次 SVN 时补齐公共用户名。项目是产品某个版本的完整导出快照，创建时不选择产品，导出后与产品并列并独立管理。生成后明确询问是否打开对应 YAML 调整系统 alias、<code>system_id</code>、<code>data_source_id</code>；SVN 还可继续导入 checkout 配置并检出/建索引。DATABASE 查询结果缓存到 <code>config/system-data.json</code>；SVN 不读取该缓存。</p>
+<p><code>setup</code> 只补齐缺失文件，不覆盖用户配置；首次创建空的 datasource/products/projects 注册表。Nexus 在工作区树、项目树和标题栏持续提供“添加产品或项目”，向导原子追加工作区、DATABASE 连接或 SVN 模式。DATABASE 连接阶段只提问两次：连接地址支持 MySQL、MariaDB、PostgreSQL，凭据支持中英文标签、逗号、冒号、横线或空格分隔；其余连接字段自动解析和生成。首次 SVN 时补齐公共用户名。项目是产品某个版本的完整导出快照，创建时不选择产品，导出后与产品并列并独立管理。生成后明确询问是否打开对应 YAML 调整系统 alias、<code>system_id</code>、<code>data_source_id</code>；SVN 还可继续导入 checkout 配置并检出/建索引。DATABASE 查询结果缓存到 <code>config/system-data.json</code>；SVN 不读取该缓存。</p>
 <h3 id="4-2-目录契约">4.2 目录契约</h3>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>&lt;本地数据目录&gt;/
 ├── config/
@@ -298,7 +298,7 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
 <li>全局保存 <code>gushenCompletion.toolPath</code> 和 <code>gushenCompletion.toolHome</code>。</li>
 <li>每个产品或项目的“源码来源：DATABASE / SVN”与发行/调试运行模式正交；DATABASE/SVN 工作区始终混合展示。</li>
 <li>每个节点绑定自己的 <code>workspaceKey</code> 和状态，菜单完全由 workspace summary 返回的有效 capabilities 生成。</li>
-<li>“谷神源码”树按业务类别展示 SVN 模式的 PAGE 脚本/SQL/字段、过程函数、系统脚本、表和视图；PAGE 与过程函数的层级和同级顺序来自各自 <code>index.md</code>，未编入索引的对象排在已索引内容之后。PAGE <code>raw.json</code> 的 <code>serviceEvents</code>（如 <code>beforeSaveScript</code>、<code>afterSaveScript</code>、<code>beforeSqlSelectScript</code>）按 GSS 后端分块展示，可写虚拟文档直接回写 checkout；仅独立 PAGE GSS 服务组件在编辑器标签中用索引中文名称替代 ID，有函数名的过程函数仍显示英文函数名。</li>
+<li>“谷神源码”树按业务类别展示 SVN 模式的 PAGE 脚本/SQL/字段、过程函数、系统脚本、表和视图；PAGE 层级和同级顺序来自 <code>pages/index.md</code>，分块固定按 GSS、JS、SQL、字段排列；过程函数包名称来自 <code>procedures/index.md</code>，包按包名字母排序、包内函数按函数名字母排序。未编入索引的对象排在已索引内容之后。PAGE <code>raw.json</code> 的 <code>serviceEvents</code>（如 <code>beforeSaveScript</code>、<code>afterSaveScript</code>、<code>beforeSqlSelectScript</code>）按 GSS 后端分块展示，可写虚拟文档直接回写 checkout；仅独立 PAGE GSS 服务组件在编辑器标签中用索引中文名称替代 ID，有函数名的过程函数仍显示英文函数名。过程函数右键菜单支持复制函数名、复制“包名.函数名”，以及按该稳定身份列出索引识别的调用位置并跳转到精确调用行。</li>
 <li>SVN 目录 catalog 从本地索引加载并在扩展内缓存；PAGE 分块按页面懒加载，树展开不触发整个 checkout 的 SVN 和文件扫描。</li>
 <li>虚拟文档打开和保存的 SVN 安全检查限定为目标文件和独立编辑租约，不用同 working copy 的无关变更阻断当前文件；同文件旧租约不得继承其他编辑器更新后的 hash。</li>
 <li>PAGE 独立 GSS 服务组件保存时严格保护自动生成身份头，只忽略 VS Code 造成的等价换行差异，并分别保留原始头部和正文的换行布局。</li>

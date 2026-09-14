@@ -28,6 +28,19 @@ const SOURCE_ICONS = {
   public: 'file-code',
 };
 
+const FRAGMENT_TYPE_ORDER = {
+  gss: 0,
+  vm: 0,
+  js: 1,
+  sql: 2,
+  fields: 3,
+};
+
+function compareFragmentType(left, right) {
+  return (FRAGMENT_TYPE_ORDER[left?.scriptType] ?? Number.MAX_SAFE_INTEGER)
+    - (FRAGMENT_TYPE_ORDER[right?.scriptType] ?? Number.MAX_SAFE_INTEGER);
+}
+
 function groupCatalog(objects) {
   const grouped = new Map();
   for (const object of objects || []) {
@@ -348,7 +361,11 @@ class SvnCatalogTreeProvider {
     item.tooltip = element.tooltip;
     item.iconPath = new this.vscode.ThemeIcon(element.icon || 'file-code');
     item.resourceUri = this._treeUri(element);
-    if (['document', 'object', 'fragment'].includes(element.kind)) item.contextValue = 'guthonSvnSource';
+    if (['document', 'object', 'fragment'].includes(element.kind)) {
+      item.contextValue = element.object?.sourceType === 'procedure'
+        ? 'guthonSvnProcedure'
+        : 'guthonSvnSource';
+    }
     if (element.command) item.command = element.command;
     return item;
   }
@@ -389,7 +406,7 @@ class SvnCatalogTreeProvider {
         });
         element.object.fragments = result.fragments || [];
       }
-      const fragments = element.object.fragments;
+      const fragments = [...element.object.fragments].sort(compareFragmentType);
       if (!fragments.length) {
         element.children = [{
           kind: 'message',
@@ -457,6 +474,7 @@ module.exports = {
   compareTreeOrder,
   CATEGORY_ICONS,
   CATEGORY_LABELS,
+  compareFragmentType,
   SOURCE_ICONS,
   SvnCatalogTreeProvider,
   fragmentLabel,

@@ -19,6 +19,7 @@ from pathlib import Path
 from common import source_facts
 from common.source_format import decode_source
 from providers.svn import checkout as svn_checkout
+from providers.svn.dedup import is_newer_page
 
 
 # Packaged launches set GUTHON_HOME so config and private source data stay outside
@@ -1392,8 +1393,38 @@ def query_incoming_callers(conn, scope_id, target_alias_id, target_fun_id, limit
 
 
 def db_connect(ds: dict):
-    if ds.get("type", "mysql") != "mysql":
-        raise SystemExit(f"Only mysql datasource is implemented now: {ds.get('name')}")
+    database_type = str(ds.get("type") or "mysql").strip().lower()
+    database_type = {"mariadb": "mysql", "postgres": "postgresql"}.get(database_type, database_type)
+    if database_type == "postgresql":
+        try:
+            import psycopg  # type: ignore
+        except ModuleNotFoundError as exc:
+            raise SystemExit("Missing dependency: pip install 'psycopg[binary]'") from exc
+
+        def flexible_dict_row(cursor):
+            keys = [column.name for column in cursor.description]
+
+            def make_row(values):
+                row = {}
+                for key, value in zip(keys, values):
+                    row[key] = value
+                    row.setdefault(key.lower(), value)
+                    row.setdefault(key.upper(), value)
+                return row
+
+            return make_row
+
+        return psycopg.connect(
+            host=ds["host"],
+            port=int(ds["port"]),
+            dbname=ds["database"],
+            user=ds["username"],
+            password=ds["password"],
+            row_factory=flexible_dict_row,
+            connect_timeout=60,
+        )
+    if database_type != "mysql":
+        raise SystemExit(f"Unsupported datasource type: {database_type}")
     try:
         import pymysql  # type: ignore
     except ModuleNotFoundError as exc:
@@ -2014,6 +2045,7 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
             "counts": scan["counts"],
             "failures": len(scan["errors"]),
             "errors": scan["errors"],
+            "ignored": scan.get("ignored") or [],
             "indexPreserved": True,
             "checkoutClean": scan["status"]["clean"],
             "checkoutChanges": scan["status"]["changes"],
@@ -2033,6 +2065,7 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
         "counts": scan["counts"],
         "failures": len(scan["errors"]),
         "errors": scan["errors"],
+        "ignored": scan.get("ignored") or [],
         "checkoutClean": scan["status"]["clean"],
         "checkoutChanges": scan["status"]["changes"],
         "providerCleanup": _cleanup_database_source_after_svn_index(workspace),
@@ -2089,13 +2122,16 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
         placeholders = ",".join("?" for _ in selected)
         try:
             conn.execute("BEGIN IMMEDIATE")
+            skipped = set()
+            ignored = list(scan.get("ignored") or [])
             for item in scan["objects"]:
                 collision = conn.execute(
                     """
-                    SELECT source_path FROM gusen_source_record
+                    SELECT source_table, source_id, fun_id, source_path, svn_revision, status
+                    FROM gusen_source_record
                     WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=?
                       AND working_copy_id NOT IN ({})
-                    LIMIT 1
+                      LIMIT 1
                     """.format(",".join("?" for _ in selected)),
                     (
                         item["source_table"],
@@ -2105,11 +2141,28 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
                     ),
                 ).fetchone()
                 if collision:
-                    errors.append({
-                        "scopeEntryId": item.get("scope_entry_id") or "",
-                        "path": item["source_path"],
-                        "error": f"duplicate object identity also used by {collision['source_path']}",
-                    })
+                    collision_item = dict(collision)
+                    if is_newer_page(item, collision_item):
+                        _delete_svn_index_item(conn, workspace, collision_item)
+                    elif item["source_table"] == "page":
+                        skipped.add(item["source_path"])
+                        ignored.append(
+                            {
+                                "source_table": "page",
+                                "source_id": item["source_id"],
+                                "path": item["source_path"],
+                                "keptPath": collision_item["source_path"],
+                                "revision": item.get("svn_revision") or "",
+                                "keptRevision": collision_item.get("svn_revision") or "",
+                                "reason": "duplicate PAGE_ID; older SVN file excluded from source index",
+                            }
+                        )
+                    else:
+                        errors.append({
+                            "scopeEntryId": item.get("scope_entry_id") or "",
+                            "path": item["source_path"],
+                            "error": f"duplicate object identity also used by {collision_item['source_path']}",
+                        })
             if errors:
                 conn.rollback()
                 progress(f"扫描发现 {len(errors)} 个错误，保留旧索引")
@@ -2132,13 +2185,14 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
                 _delete_svn_index_item(conn, workspace, row)
             indexed_time = _now()
             for item in scan["objects"]:
-                _insert_svn_index_item(conn, workspace, item, indexed_time)
+                if item["source_path"] not in skipped:
+                    _insert_svn_index_item(conn, workspace, item, indexed_time)
             conn.commit()
         except Exception:
             conn.rollback()
             progress("索引事务异常，已回滚并保留旧索引")
             raise
-    changed = len(scan["objects"])
+    changed = len(scan["objects"]) - len(skipped)
     progress(f"按 working copy 增量重建完成 · working copy {len(selected_set)} 个 · 对象 {changed} 个")
     return {
         "mode": "svn-scoped-refresh",
@@ -2148,6 +2202,7 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
         "changed": changed,
         "failures": 0,
         "errors": [],
+        "ignored": ignored,
         "indexPreserved": False,
     }
 
@@ -2190,24 +2245,52 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
             if item:
                 collision = conn.execute(
                     """
-                    SELECT source_path FROM gusen_source_record
+                    SELECT source_table, source_id, fun_id, source_path, svn_revision, status
+                    FROM gusen_source_record
                     WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=? AND source_path<>?
                     LIMIT 1
                     """,
                     (item["source_table"], item["source_id"], item.get("fun_id") or "", scanned["path"]),
                 ).fetchone()
                 if collision:
-                    conn.rollback()
-                    return {
-                        "mode": "svn-incremental-scan",
-                        "provider": "svn",
-                        "workspaceKey": workspace["workspaceKey"],
-                        "sourcePath": scanned["path"],
-                        "changed": 0,
-                        "failures": 1,
-                        "errors": [{"path": scanned["path"], "error": f"duplicate object identity also used by {collision['source_path']}"}],
-                        "indexPreserved": True,
-                    }
+                    collision_item = dict(collision)
+                    if is_newer_page(item, collision_item):
+                        _delete_svn_index_item(conn, workspace, collision_item)
+                    elif item["source_table"] == "page":
+                        conn.commit()
+                        return {
+                            "mode": "svn-incremental-scan",
+                            "provider": "svn",
+                            "workspaceKey": workspace["workspaceKey"],
+                            "sourcePath": scanned["path"],
+                            "changed": 0,
+                            "failures": 0,
+                            "errors": [],
+                            "ignored": [
+                                {
+                                    "source_table": "page",
+                                    "source_id": item["source_id"],
+                                    "path": item["source_path"],
+                                    "keptPath": collision_item["source_path"],
+                                    "revision": item.get("svn_revision") or "",
+                                    "keptRevision": collision_item.get("svn_revision") or "",
+                                    "reason": "duplicate PAGE_ID; older SVN file excluded from source index",
+                                }
+                            ],
+                            "indexPreserved": True,
+                        }
+                    else:
+                        conn.rollback()
+                        return {
+                            "mode": "svn-incremental-scan",
+                            "provider": "svn",
+                            "workspaceKey": workspace["workspaceKey"],
+                            "sourcePath": scanned["path"],
+                            "changed": 0,
+                            "failures": 1,
+                            "errors": [{"path": scanned["path"], "error": f"duplicate object identity also used by {collision_item['source_path']}"}],
+                            "indexPreserved": True,
+                        }
             for row in existing:
                 _delete_svn_index_item(conn, workspace, row)
             if item:
@@ -2224,6 +2307,7 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
             "changed": 1,
             "failures": 0,
             "errors": [],
+            "ignored": [],
             "indexPreserved": False,
         }
 

@@ -330,6 +330,14 @@ def catalog(workspace: dict) -> dict:
                 location = _page_index_location(entry, relative, page_locations.get(entry.id) or {})
             elif source_type == "procedure":
                 location = (procedure_locations.get(entry.id) or {}).get(relative.as_posix())
+        if source_type == "page":
+            tree_order = [*subsystem_orders[entry.id], location["order"] if location else 1_000_000]
+        elif source_type == "procedure":
+            # Keep the datasource/subsystem position, then sort indexed packages
+            # and functions by their labels. The unindexed bucket remains last.
+            tree_order = [*subsystem_orders[entry.id], 0 if location else 1]
+        else:
+            tree_order = subsystem_orders[entry.id]
         counts[source_type] = counts.get(source_type, 0) + 1
         objects.append({
             "sourceType": source_type,
@@ -343,13 +351,7 @@ def catalog(workspace: dict) -> dict:
             "status": row["status"],
             "treePath": directories,
             "treeLabel": label,
-            "treeOrder": (
-                [*subsystem_orders[entry.id], location["order"]]
-                if location
-                else [*subsystem_orders[entry.id], 1_000_000]
-                if source_type in {"page", "procedure"}
-                else subsystem_orders[entry.id]
-            ),
+            "treeOrder": tree_order,
             "fragments": _catalog_fragments(row),
         })
     return {

@@ -76,6 +76,54 @@ test('registers a dedicated GSS language while retaining legacy VM as Java', () 
   assert.equal(manifest.contributes.grammars.length, 2);
 });
 
+test('opens a virtual source at a requested indexed line', async () => {
+  class EventEmitter {
+    constructor() { this.event = () => {}; }
+    dispose() {}
+  }
+  class Position {
+    constructor(line, character) { Object.assign(this, { line, character }); }
+  }
+  class Range {
+    constructor(start, end) { Object.assign(this, { start, end }); }
+  }
+  class Selection extends Range {}
+  const editor = { revealRangeCalls: [], revealRange(...args) { this.revealRangeCalls.push(args); } };
+  const document = { lineCount: 10 };
+  let uri;
+  const vscode = {
+    EventEmitter,
+    Position,
+    Range,
+    Selection,
+    TextEditorRevealType: { InCenterIfOutsideViewport: 2 },
+    Uri: {
+      from(value) {
+        uri = { ...value, toString: () => 'guthon-svn-edit://products.demo/save.gss' };
+        return uri;
+      },
+    },
+    workspace: { openTextDocument: async () => document },
+    window: {
+      showTextDocument: async () => editor,
+      showWarningMessage() {},
+    },
+  };
+  const provider = new SvnVirtualFileSystem({
+    vscode,
+    backend: { read: async () => ({ editable: true, content: 'source' }) },
+  });
+
+  await provider.open({
+    workspaceKey: 'products.demo', sourceType: 'procedure', sourceId: 'demo#save', funId: 'save',
+  }, { lineNumber: 27 });
+
+  assert.equal(editor.selection.start.line, 9);
+  assert.equal(editor.selection.start.character, 0);
+  assert.equal(editor.revealRangeCalls[0][1], 2);
+  provider.dispose();
+});
+
 test('accepts VS Code create-and-overwrite flags only for an existing backend object', async () => {
   class EventEmitter {
     constructor() { this.event = () => {}; this.events = []; }

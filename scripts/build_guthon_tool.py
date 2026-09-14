@@ -21,6 +21,8 @@ HIDDEN_IMPORTS = (
     "common.source_format",
     "common.workspace_config",
     "pymysql",
+    "psycopg",
+    "psycopg.pq",
     "providers.database.export_bill_type_sql",
     "providers.database.export_system_script_sql",
     "providers.database.export_table_schema_sql",

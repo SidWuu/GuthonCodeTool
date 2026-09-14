@@ -9,7 +9,7 @@ datasource:
     object: products.demo-product
     # 环境标识使用 dev 或 test。
     environment: dev
-    # 数据库类型；当前工具仅实现 mysql。
+    # 数据库类型；支持 mysql 和 postgresql（MariaDB 归一为 mysql）。
     type: mysql
     # 数据库主机地址，从环境变量读取。
     host: ${GUSEN_PRODUCT_DB_HOST}
@@ -45,7 +45,7 @@ datasource:
     name: 示例项目_开发
     object: projects.demo-project
     environment: dev
-    # 数据库类型；当前工具仅实现 mysql。
+    # 数据库类型；支持 mysql 和 postgresql（MariaDB 归一为 mysql）。
     type: mysql
     # 数据库主机地址，从环境变量读取。
     host: ${GUSEN_PROJECT_DB_HOST}

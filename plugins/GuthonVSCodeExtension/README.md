@@ -14,7 +14,7 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口。它把工作空间设
 - 运行时描述：把当前模式、命令前缀和本地数据目录写入 `var/nexus/tool-runtime.json`，供 AI 使用同一套规范调用。
 - 设置工作空间：尚未配置时选择 GuthonCodeTool 应用和本地数据目录，创建缺失配置但不覆盖已有文件。
 - 切换工作空间：已配置时同一位置显示“切换工作空间”，确认后选择新的本地数据目录；取消时保留当前工作空间。
-- 添加产品或项目：首次设置和后续开发都使用同一向导；自动追加工作区、DATABASE 连接或 SVN 模式，首次 SVN 只询问一次公共用户名。项目作为独立版本快照创建，不要求已有产品，也不选择产品条目。
+- 添加产品或项目：首次设置和后续开发都使用同一向导；DATABASE 连接只询问两次（连接地址、用户名和密码），自动解析 MySQL/MariaDB/PostgreSQL 并生成其余字段；SVN 首次只询问一次公共用户名。项目作为独立版本快照创建，不要求已有产品，也不选择产品条目。
 - 配置确认：生成后询问是否立即打开对应 YAML，人工确认系统 alias、系统 ID 和数据源 ID；SVN 可继续导入 checkout 配置并直接检出/建索引。
 - 配置文件：直接编辑 `datasource.yaml`、`products.yaml`、`projects.yaml`、`source-tables.yaml` 和 `sync.yaml`。
 - 打开本地数据目录。
@@ -27,7 +27,8 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口。它把工作空间设
 - SVN 工程不在 YAML 配置模式；在目标节点选择 SVN，并把谷神下载的 `svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`（Windows）放入工程 `context/`；“从签出脚本
   检出/更新 SVN”先展示脱敏范围统计，确认后生成同目录授权清单并使用同一次认证处理全部 working copy，不执行脚本或持久化凭据；两种文件均为正式支持格式。
 - SVN 节点按授权清单初始化或更新多个精确 URL working copy；物理目录按 `systems/<SYSTEM_ID>` 和 `datasources/<DATA_SOURCE_ID>` 聚合，在“谷神源码”中按业务分类展示 PAGE、过程函数、
-  系统脚本、表和视图；所有子系统按过程函数数据源分组顺序排列，共用数据源时按 `systems.include.mappings` 声明顺序排列；页面与过程函数的名称、目录及显示顺序分别来自 `pages/index.md`、`procedures/index.md`，PAGE 脚本/SQL/字段以及过程源码通过虚拟文档编辑并直接回写原 checkout。未编入索引的对象稳定排在已索引内容之后。
+  系统脚本、表和视图；所有子系统按过程函数数据源分组顺序排列，共用数据源时按 `systems.include.mappings` 声明顺序排列；页面名称、目录和显示顺序来自 `pages/index.md`，过程函数包名称来自 `procedures/index.md`，包按包名字母排序、包内函数按函数名字母排序；PAGE 分块固定按 GSS、JS、SQL、字段排列，同类型保留源码顺序。PAGE 脚本/SQL/字段以及过程源码通过虚拟文档编辑并直接回写原 checkout。未编入索引的对象稳定排在已索引内容之后。
+- “谷神源码”的过程函数右键菜单可复制函数名或 `包名.函数名`；“查看函数调用方”按索引中的包名与函数名查询全部已识别调用位置，选择后打开调用函数并定位到调用行。
 - 每个 SVN workspace 在 VS Code 源代码管理中只显示一个逻辑项目，内部聚合多个 working copy，提供基于 `index.md` 中文名称的本地/远程变更、PAGE 可读/原始 diff、历史、全部/单文件提交与更新、按物理文件部分保存和放弃修改。
 - 每次打开可写 SVN 虚拟文档都会取得独立编辑租约；过期的完整文件保存会被拒绝，PAGE 的其他片段已由 Nexus 更新而当前片段未变时可安全重放。短时读写通过带超时的跨进程锁排队；自动化可用 `svn read-batch` 一次读取多个对象，或在 CLI `svn write-batch` 中直接填写对象身份并自动取得会话，随后整批预检、失败回滚并统一更新索引。
 - 不设置当前或默认产品、项目。

@@ -2,6 +2,74 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const DATABASE_SCHEMES = {
+  mysql: { type: 'mysql', port: 3306 },
+  mariadb: { type: 'mysql', port: 3306 },
+  postgres: { type: 'postgresql', port: 5432 },
+  postgresql: { type: 'postgresql', port: 5432 },
+};
+
+function decodedUrlPart(value) {
+  try {
+    return decodeURIComponent(value || '');
+  } catch {
+    return value || '';
+  }
+}
+
+function parseDatabaseUrl(value) {
+  const source = String(value || '')
+    .trim()
+    .replace(/^jdbc:/i, '')
+    .replace(/\\([@_])/g, '$1');
+  let parsed;
+  try {
+    parsed = new URL(source);
+  } catch {
+    throw new Error('请输入完整连接地址，例如 postgresql://服务器:5432/数据库');
+  }
+  const scheme = parsed.protocol.replace(/:$/, '').toLowerCase();
+  const dialect = DATABASE_SCHEMES[scheme];
+  if (!dialect) throw new Error('当前仅支持 mysql、mariadb、postgresql 连接地址');
+  const host = parsed.hostname.trim();
+  const database = decodedUrlPart(parsed.pathname.replace(/^\/+/, '')).trim()
+    || parsed.searchParams.get('database')
+    || parsed.searchParams.get('dbname')
+    || parsed.searchParams.get('service')
+    || '';
+  const port = parsed.port ? Number(parsed.port) : dialect.port;
+  if (!host) throw new Error('连接地址缺少服务器');
+  if (!database) throw new Error('连接地址缺少数据库或服务名');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('数据库端口须为 1-65535');
+  return {
+    type: dialect.type,
+    host,
+    port,
+    database,
+    username: decodedUrlPart(parsed.username).trim(),
+    password: decodedUrlPart(parsed.password),
+  };
+}
+
+function parseDatabaseCredentials(value) {
+  const source = String(value || '').trim();
+  const labeled = source.match(
+    /^(?:用户名|用户|账号|username|user)\s*[:：=\-－—]?\s*(.*?)\s*(?:[,，;；]\s*)?(?:密码|口令|password|pass|pwd)\s*[:：=\-－—]?\s*(.*)$/i
+  );
+  if (labeled) {
+    const username = labeled[1].trim();
+    if (username) return { username, password: labeled[2].trim() };
+  }
+  const separators = [/[，,]/, /[：:]/, /\s+[-－—]\s+/, /\s+/, /[－—]/, /-/];
+  for (const separator of separators) {
+    const match = separator.exec(source);
+    if (!match) continue;
+    const username = source.slice(0, match.index).trim();
+    const password = source.slice(match.index + match[0].length).trim();
+    if (username) return { username, password };
+  }
+  throw new Error('请同时输入用户名和密码，例如：用户名：postgres，密码：secret');
+}
 
 async function prepareWorkspaceSetup(config, window, configurationTarget) {
   const toolHome = config.get('toolHome', '');
@@ -139,30 +207,46 @@ async function promptWorkspaceCreation(window, workspaces, toolHome, now = new D
     return result;
   }
 
-  const datasourceId = await window.showInputBox({
-    title: '确认本地数据源 ID',
-    value: `${result.id}-dev`,
-    prompt: '用于 datasource.yaml 和工作区之间的本地引用',
-    validateInput: (value) => SAFE_ID.test(String(value || '').trim()) ? undefined : '请输入有效的数据源 ID',
+  const connectionUrl = await window.showInputBox({
+    title: '粘贴数据库连接地址',
+    prompt: '支持 mysql、mariadb、postgresql；自动解析服务器、端口和数据库/服务名',
+    placeHolder: 'postgresql://192.168.1.183:5432/nbkcqx_gdsdp',
+    validateInput: (value) => {
+      try {
+        parseDatabaseUrl(value);
+        return undefined;
+      } catch (error) {
+        return error.message;
+      }
+    },
   });
-  if (datasourceId === undefined) return undefined;
-  const host = await window.showInputBox({ title: '数据库主机', value: '127.0.0.1', validateInput: (value) => String(value || '').trim() ? undefined : '主机不能为空' });
-  if (host === undefined) return undefined;
-  const port = await window.showInputBox({ title: '数据库端口', value: '3306', validateInput: (value) => /^\d+$/.test(value) && Number(value) > 0 && Number(value) <= 65535 ? undefined : '端口须为 1-65535' });
-  if (port === undefined) return undefined;
-  const database = await window.showInputBox({ title: '数据库名称', validateInput: (value) => String(value || '').trim() ? undefined : '数据库名称不能为空' });
-  if (database === undefined) return undefined;
-  const username = await window.showInputBox({ title: '数据库用户名', validateInput: (value) => String(value || '').trim() ? undefined : '用户名不能为空' });
-  if (username === undefined) return undefined;
-  const password = await window.showInputBox({ title: '数据库密码', password: true, prompt: '保存在本机数据目录的 datasource.yaml 中' });
-  if (password === undefined) return undefined;
+  if (connectionUrl === undefined) return undefined;
+  const connection = parseDatabaseUrl(connectionUrl);
+  const credentials = await window.showInputBox({
+    title: '输入数据库用户名和密码',
+    value: connection.username
+      ? `用户名：${connection.username}，密码：${connection.password}`
+      : '',
+    prompt: '支持“用户名：user，密码：pass”、user:pass、user,pass、user - pass 或空格分隔',
+    validateInput: (value) => {
+      try {
+        parseDatabaseCredentials(value);
+        return undefined;
+      } catch (error) {
+        return error.message;
+      }
+    },
+  });
+  if (credentials === undefined) return undefined;
+  const credential = parseDatabaseCredentials(credentials);
   result.datasource = {
-    id: datasourceId.trim(),
-    host: host.trim(),
-    port: Number(port),
-    database: database.trim(),
-    username: username.trim(),
-    password,
+    id: `${result.id}-dev`,
+    type: connection.type,
+    host: connection.host,
+    port: connection.port,
+    database: connection.database,
+    username: credential.username,
+    password: credential.password,
     environment: 'dev',
   };
   return result;
@@ -170,6 +254,8 @@ async function promptWorkspaceCreation(window, workspaces, toolHome, now = new D
 
 module.exports = {
   configuredSvnUsername,
+  parseDatabaseCredentials,
+  parseDatabaseUrl,
   prepareWorkspaceSetup,
   promptWorkspaceCreation,
   suggestedWorkspaceId,
