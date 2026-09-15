@@ -99,6 +99,7 @@ function workspaceActions(item) {
   if (item.sourceMode === 'svn') {
     return {
       source: [
+        ['搜索工作区完整索引', 'gushenCompletion.searchWorkspace', 'search'],
         capability('svn.initialize') && ['导入 SVN checkout 配置', 'gushenCompletion.importSvnScope', 'file-add'],
         capability('svn.initialize') && ['从 SVN 范围配置检出/更新', 'gushenCompletion.initializeSvn', 'repo-clone'],
         capability('svn.reindex') && ['扫描/重建本地 SVN 索引', 'gushenCompletion.reindexCalls', 'refresh'],
@@ -107,13 +108,14 @@ function workspaceActions(item) {
         ['导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book'],
       ].filter(Boolean),
       workcopy: [],
-      metadata: [],
+      metadata: [['配置数据库排查', 'gushenCompletion.configureDatabaseDiagnosis', 'database']],
       diagnose: false,
       syncAll: undefined,
     };
   }
   return {
     source: [
+      ['搜索工作区完整索引', 'gushenCompletion.searchWorkspace', 'search'],
       ['拉取源码重建索引', 'gushenCompletion.initSourceIndex', 'database'],
       ['拉取源码', 'gushenCompletion.syncWorkspaceSource', 'sync'],
       ['重建索引', 'gushenCompletion.reindexCalls', 'refresh'],
@@ -121,6 +123,7 @@ function workspaceActions(item) {
     ],
     workcopy: [['检查或打包 Workcopy', 'gushenCompletion.inspectWorkcopy', 'package']],
     metadata: [
+      ['配置数据库排查', 'gushenCompletion.configureDatabaseDiagnosis', 'database'],
       ['导出表结构', 'gushenCompletion.exportSchema', 'table'],
       ['导出单据类型', 'gushenCompletion.exportBillTypes', 'list-tree'],
       ['导出系统脚本', 'gushenCompletion.exportSystemScripts', 'file-code'],

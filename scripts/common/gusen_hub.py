@@ -334,8 +334,8 @@ def resolve_workspace_for_path(config: dict, value: str | Path | None = None) ->
     return matches[0][1]
 
 
-def workspace_agent_context(config: dict, workspace: dict) -> dict:
-    """Return the small, machine-readable context an agent needs before source lookup."""
+def workspace_index_state(workspace: dict) -> dict:
+    """Return local index readiness without triggering synchronization or remote access."""
 
     index_path = workspace["indexPath"]
     index_size = index_path.stat().st_size if index_path.is_file() else 0
@@ -362,6 +362,17 @@ def workspace_agent_context(config: dict, workspace: dict) -> dict:
                 connection.close()
         except sqlite3.Error:
             index_ready = False
+    return {
+        "path": str(index_path),
+        "ready": index_ready,
+        "sizeBytes": index_size,
+        "requiredAction": "" if index_ready else "init-or-reindex",
+    }
+
+
+def workspace_agent_context(config: dict, workspace: dict) -> dict:
+    """Return the small, machine-readable context an agent needs before source lookup."""
+
     query_command = "svn" if workspace["sourceMode"] == "svn" else "query"
     return {
         "workspaceKey": workspace["workspaceKey"],
@@ -369,12 +380,7 @@ def workspace_agent_context(config: dict, workspace: dict) -> dict:
         "sourceMode": workspace["sourceMode"],
         "sourceModeSource": workspace["sourceModeSource"],
         "sourceModePath": str(workspace["sourceModePath"]),
-        "index": {
-            "path": str(index_path),
-            "ready": index_ready,
-            "sizeBytes": index_size,
-            "requiredAction": "" if index_ready else "init-or-reindex",
-        },
+        "index": workspace_index_state(workspace),
         "indexFirst": {
             "command": query_command,
             "unknownObject": "find",
@@ -382,6 +388,72 @@ def workspace_agent_context(config: dict, workspace: dict) -> dict:
             "tableOrBillWriteReason": "explain",
             "sharedCallChain": "context/callers",
         },
+    }
+
+
+def _svn_delivery_state(workspace: dict) -> dict:
+    path = workspace["contextDir"] / "svn-platform-save-state.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"deliveryCount": 0, "deliveries": []}
+    if not isinstance(value, dict) or value.get("workspaceKey") != workspace["workspaceKey"]:
+        return {"deliveryCount": 0, "deliveries": []}
+    deliveries = value.get("deliveries") if isinstance(value.get("deliveries"), list) else []
+    if not deliveries and value.get("committedAt"):
+        deliveries = [{
+            "deliveryId": value.get("deliveryId") or "legacy-latest",
+            "workingCopyId": value.get("workingCopyId") or "",
+            "lastCommittedRevision": value.get("lastCommittedRevision") or "",
+            "files": value.get("files") or [],
+            "groups": value.get("groups") or [],
+            "committedAt": value.get("committedAt") or "",
+        }]
+    deliveries = [{
+        "deliveryId": item.get("deliveryId") or "",
+        "workingCopyId": item.get("workingCopyId") or "",
+        "lastCommittedRevision": item.get("lastCommittedRevision") or "",
+        "files": item.get("files") or [],
+        "groups": [{
+            "workingCopyId": group.get("workingCopyId") or "",
+            "revision": group.get("revision") or "",
+            "files": group.get("files") or [],
+        } for group in item.get("groups") or []],
+        "committedAt": item.get("committedAt") or "",
+    } for item in deliveries]
+    return {
+        "deliveryCount": len(deliveries),
+        "lastCommittedRevision": value.get("lastCommittedRevision") or "",
+        "committedAt": value.get("committedAt") or "",
+        "deliveries": deliveries[-10:],
+    }
+
+
+def _workspace_cockpit(summary: dict) -> dict:
+    index_ready = bool(summary["index"]["ready"])
+    status_failed = summary.get("status") == "FAILED"
+    working_copies = summary.get("workingCopies") or []
+    dirty_count = sum(not item.get("clean") for item in working_copies)
+    messages = []
+    if status_failed:
+        failure = summary.get("lastFailure") or {}
+        message = failure.get("message") if isinstance(failure, dict) else str(failure)
+        messages.append(message or "最近一次工作区操作失败")
+    if not index_ready:
+        messages.append("本地事实索引尚未就绪")
+    if summary.get("status") == "PARTIAL":
+        messages.append("工作区资料尚未达到完整一致状态")
+    elif summary.get("status") == "UNINITIALIZED" and index_ready:
+        messages.append("工作区尚未完成初始化")
+    if dirty_count:
+        messages.append(f"{dirty_count} 个 SVN working copy 存在本地变更")
+    return {
+        "health": "FAILED" if status_failed else "ACTION_REQUIRED" if messages else "READY",
+        "issueCount": len(messages),
+        "indexReady": index_ready,
+        "workingCopyCount": len(working_copies),
+        "dirtyWorkingCopies": dirty_count,
+        "messages": messages,
     }
 
 
@@ -638,6 +710,9 @@ def workspace_summary(config, workspace):
             workspace,
             summary["workingCopies"],
         )
+        summary["delivery"] = _svn_delivery_state(workspace)
+    summary["index"] = workspace_index_state(workspace)
+    summary["cockpit"] = _workspace_cockpit(summary)
     return summary
 
 
@@ -1311,25 +1386,36 @@ def find_source_candidates(conn, scope_id, keyword, limit=10):
                local_path, status, provider, source_path, source_hash, svn_revision, system_id, data_source_id
         FROM gusen_source_record
         WHERE scope_id=?
-          AND (source_id LIKE ? OR source_alias_id LIKE ? OR source_name LIKE ?)
+          AND (source_id LIKE ? OR source_alias_id LIKE ? OR fun_id LIKE ? OR source_name LIKE ?)
         ORDER BY source_name, source_alias_id, fun_id
         LIMIT ?
         """,
-        (scope_id, query, query, query, limit),
+        (scope_id, query, query, query, query, limit),
     ).fetchall()
 
 
 def query_source_context(conn, scope_id, source_id, fun_id="", limit=20):
     limit = max(1, min(int(limit), 20))
-    source = conn.execute(
-        """
-        SELECT record_id AS source_record_id, * FROM gusen_source_record
-        WHERE scope_id=? AND source_id=? AND fun_id=?
-        ORDER BY source_layer, project_id
-        LIMIT 1
-        """,
-        (scope_id, source_id, fun_id),
-    ).fetchone()
+    if fun_id:
+        source = conn.execute(
+            """
+            SELECT record_id AS source_record_id, * FROM gusen_source_record
+            WHERE scope_id=? AND source_id=? AND fun_id=?
+            ORDER BY source_layer, project_id
+            LIMIT 1
+            """,
+            (scope_id, source_id, fun_id),
+        ).fetchone()
+    else:
+        source = conn.execute(
+            """
+            SELECT record_id AS source_record_id, * FROM gusen_source_record
+            WHERE scope_id=? AND source_id=?
+            ORDER BY source_layer, project_id
+            LIMIT 1
+            """,
+            (scope_id, source_id),
+        ).fetchone()
     if not source:
         raise ValueError(f"Source not found: scope={scope_id}, sourceId={source_id}, funId={fun_id}")
     outgoing = conn.execute(

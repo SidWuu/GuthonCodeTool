@@ -18,13 +18,13 @@ cp config/example/sync.example.yaml config/sync.yaml
 
 `datasource.yaml` 和 `system-data.json` 不提交。
 
-谷神功能开发后的 DBX 只读数据库测试使用独立私有映射。仅在需要该工作流时复制模板到运行数据 home，不把 connection ID、环境身份、租户范围或查询结果提交到公开仓库：
+谷神数据库快速排查和功能开发后的只读验证使用独立私有映射。日常从 Nexus 项目的“配置资料 → 配置数据库排查”创建 `diagnosis-only` 目标；连接密码写入操作系统凭据库，不进入 YAML、命令参数或日志。已有 DBX 的用户也可继续填写 `connectionId`。维护者可复制模板手工建立 `full` 正式验证目标：
 
 ```bash
 cp config/example/database-testing.example.yaml <运行数据-home>/config/database-testing.yaml
 ```
 
-填写后可用 `scripts/common/database_test_artifacts.py validate-config` 校验。模板中的 connection ID 和证据占位符会被拒绝执行；当前只允许 `dev/test`、MySQL/Oracle、`read-only` 和明确的 `allowedTables`，Oracle 目标还必须明确配置连接数据库与业务 `schema`。完整流程见 [谷神开发与数据库测试 Skill](../skills/gushen-development-testing/SKILL.md)，字段契约位于 `config/schema/`。
+填写后可用 `scripts/common/database_test_artifacts.py validate-config` 校验。`defaults.diagnosisTargetId` 指定 cwd 未明确环境时的默认诊断库，`defaults.byEnvironment.dev/test` 指定明确环境的默认目标；引用必须指向同一工作区内环境一致的 target。支持 MySQL、PostgreSQL、Oracle，只允许 `dev/test` 与 `read-only`；Oracle 必须明确服务 database 和业务 `schema`。内置连接使用 `connections` + `connectionRef`，DBX 使用 `connectionId`，可并存。`diagnosis-only` 只供快速排查；正式计划必须使用包含 `systemId`、`dataSourceId`、`allowedTables`、`tenantScope` 的 `full` target。完整流程见 [Guthon Testing Skill](../skills/guthon-testing/SKILL.md)，字段契约位于 `config/schema/`。
 
 ## sync.yaml
 

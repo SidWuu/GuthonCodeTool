@@ -6,7 +6,7 @@ GuthonCodeTool 是谷神低代码开发平台的本地开发工具集。每个�
 
 ## AI 开发入口
 
-工具开发读取 [AGENTS.md](AGENTS.md)；谷神业务开发从独立私有工作区的 `var/AGENTS.md` 进入。需要在功能开发后执行开发库/测试库验证时，使用 [谷神开发与数据库测试 Skill](skills/gushen-development-testing/SKILL.md)。专项规范按任务加载，README 不维护第二套 Agent 流程。
+工具开发读取 [AGENTS.md](AGENTS.md)；谷神业务开发从独立私有工作区的 `var/AGENTS.md` 进入。排查开发库/测试库，或在功能开发后执行数据库验证时，使用 [Guthon Testing Skill](skills/guthon-testing/SKILL.md)。Skill 可调用工具内置只读连接器；已有 DBX 时也可继续使用。专项规范按任务加载，README 不维护第二套 Agent 流程。
 
 ## 核心能力
 
@@ -17,6 +17,8 @@ GuthonCodeTool 是谷神低代码开发平台的本地开发工具集。每个�
 - SVN 模式由 Nexus 的“谷神源码”聚合展示源码，并为每个工作区注册一个 SCM provider；支持 PAGE 分块、过程函数、系统脚本虚拟编辑并直接回写 checkout，表和视图保持只读。
 - 数据库模式一次执行源码、表结构、单据类型、系统脚本、视图五步同步。
 - Guthon Nexus 同时展示并操作多个产品、项目。
+- Guthon Nexus 在每个项目下提供“工作区驾驶舱”，集中显示本地事实索引、同步状态、SVN working copy、本地变更和最近一次 SVN 提交；各状态行可直接进入对应操作。
+- “搜索工作区完整索引”把源码身份与条件、赋值、异常、表读写和调用事实放入同一个结果列表，不依赖树节点是否展开；任一源码结果都可复制精简或详细 AI 上下文。
 - Guthon Bridge 根据 `workspaceKey` 或页面身份自动路由；存在多个候选时由 Chrome 只为当前请求选择。
 - 手动拉取和全量同步只自动暂存本次新生成、未被忽略的文件，不暂存已跟踪修改或无关文件。
 
@@ -25,7 +27,7 @@ GuthonCodeTool 是谷神低代码开发平台的本地开发工具集。每个�
 ```text
 config/                         配置模板和配置说明
 docs/                           使用手册和全功能说明
-skills/gushen-development-testing/  谷神需求开发与 DBX 只读数据库测试工作流
+skills/guthon-testing/          谷神需求开发、数据库快速排查与只读验证工作流
 plugins/GuthonBridge/           Chrome 扩展及本地 Bridge
 plugins/GuthonVSCodeExtension/  Guthon Nexus
 scripts/
@@ -46,6 +48,8 @@ var/
     ├── PRD <产品名称>/
     └── PRJ <项目名称>/
 ```
+
+正式 Release 同时提供 `guthon-testing.zip`。其他用户无需安装 DBX/MCP：安装 GuthonCodeTool 应用和 Guthon Nexus VSIX，将压缩包中的 `guthon-testing` 解压到 Codex Skills 目录，然后在 Nexus 为目标工作区配置一次专用只读数据库账号即可。
 
 数据库模式的产品或项目工作区：
 
@@ -119,6 +123,11 @@ products:
 .venv/bin/python scripts/guthon_tool.py workspace-create --home .  # JSON 从 stdin 输入
 .venv/bin/python scripts/guthon_tool.py workspaces --home .
 .venv/bin/python scripts/guthon_tool.py workspace-resolve --home .  # 从当前 cwd 解析工作区与索引状态
+.venv/bin/python scripts/guthon_tool.py database-target-resolve --home . -- --path "$PWD"  # 自动选择该 cwd 的默认诊断库
+.venv/bin/python scripts/guthon_tool.py database-target-resolve --home . -- --path "$PWD" --environment test
+.venv/bin/python scripts/guthon_tool.py database-probe --home . -- --path "$PWD"
+.venv/bin/python scripts/guthon_tool.py database-describe --home . -- --path "$PWD" --table DEMO_ORDER
+printf '%s' '{"sql":"SELECT COUNT(*) AS total FROM DEMO_ORDER","maxRows":100}' | .venv/bin/python scripts/guthon_tool.py database-query-readonly --home . -- --path "$PWD"
 ```
 
 工作区命令必须显式传入 `--workspace`：
@@ -129,6 +138,8 @@ products:
 .venv/bin/python scripts/guthon_tool.py sync-all --home . --workspace products.demo-product
 .venv/bin/python scripts/guthon_tool.py reindex --home . --workspace projects.demo-project
 .venv/bin/python scripts/guthon_tool.py export-markdown --home . --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py search --home . --workspace products.demo-product -- --query 订单保存
+.venv/bin/python scripts/guthon_tool.py context-pack --home . --workspace products.demo-product -- --source-id '<source-id>' --fun-id '<fun-id>'
 ```
 
 SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 SVN，紧凑范围配置直接写在已有的
@@ -148,6 +159,7 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- find --keyword 订单保存
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- facts --keyword 保存失败
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- explain --table T_ORDER
+.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- delivery-status
 ```
 
 配置变更会在执行前显示新增、移除和变更数量，确认后将展开结果写入工作区 `context/authorized-scope.json` 并检出/更新；该 JSON 仅供程序使用。
@@ -161,6 +173,9 @@ AI 从 PRD/PRJ 目录启动时，先执行 runtime descriptor 的 `workspaceReso
 `svn find`，局部事实用 `svn facts`，表或单据写入原因用 `svn explain`，跨对象影响用 `svn context/callers`；结果直接携带
 SVN 相对路径、PAGE JSON Pointer、行号、控制条件和调用者。仅在索引未初始化、明确漏项、查询证据不足或实际修改前读取对应局部源码，
 不得遍历整个 checkout 或读取完整 PAGE JSON。
+
+数据库快速排查时，Agent 从同一 runtime descriptor 执行 `databaseTargetResolveCommand`，按 cwd 解析
+`workspaceKey`，再从私有 `config/database-testing.yaml` 选择目标：未明确环境时使用 `defaults.diagnosisTargetId`，明确开发库或测试库时使用 `defaults.byEnvironment.dev/test`。目标有 `connectionRef` 时调用内置 `databaseProbeCommand`、`databaseDescribeCommand`、`databaseQueryCommand`；只有 `connectionId` 时使用当前会话实际可用的 DBX。内置查询仅接受 stdin JSON 中的单条 `SELECT`，最大 100 行，校验 database/schema 与可见表，并始终回滚只读事务。密码仅保存在操作系统凭据库。首次配置从 Nexus 项目“配置资料 → 配置数据库排查”完成；“测试一下”不视为测试环境选择。功能验收、回归和交付仍使用 `full` 正式数据库测试目标。
 
 Windows PowerShell 使用 `.\.venv\Scripts\python.exe`，其余参数不变。
 
@@ -231,6 +246,7 @@ SVN 工作区的 `sync-all` 只扫描本地 SVN 范围并更新索引和摘要�
   每个子系统 working copy 的授权、checkout/update、状态检查和索引步骤；“谷神源码”树用 SVN 状态装饰修改文件及父目录，
   打开虚拟源码后按 SVN BASE 在行号槽、整行背景和概览标尺高亮新增、修改与删除位置。
   手动重建本地 SVN 索引同样逐阶段输出；同一工作区的相同操作进行中再次点击会直接忽略。
+  每次 SVN 提交都会生成独立交付编号并保留回执历史，驾驶舱直接显示最近一次 revision 和文件数。回执仅证明 SVN 提交；谷神平台最终提交和运行结果不在 Nexus 内重复登记。
 - 数据库模式不自动回写谷神平台，交付内容仍由人工复制、保存、提交和签入。
 
 目标对象明确时，DATABASE 可通过 Bridge 拉取，SVN 可直接从 Nexus 的“谷神源码”打开；不需要先执行全量同步。目标不明确或需要影响分析时，再查询该工作区的局部索引。
@@ -247,7 +263,8 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
 5. DATABASE 项目继续执行同步、诊断和 Workcopy；SVN 项目从“谷神源码”虚拟编辑，并在单一 SCM 项目中查看
    本地/远程变更，执行全部、所选文件或单文件范围的提交/更新、部分保存、放弃修改和文本冲突三方合并。PAGE 默认以脚本、SQL、字段的可读投影打开 VS Code 双栏 Diff，
    同时保留原始 JSON 差异入口；所有子系统按过程函数数据源分组顺序排列，共用数据源时按 `systems.include.mappings` 声明顺序排列；页面目录、叶子顺序及 SCM 名称复用 `pages/index.md`，PAGE 分块按 GSS、JS、SQL、字段排列；过程函数包名称复用 `procedures/index.md`，包和包内函数分别按名称字母排序；`.gss` 使用独立 Guthon GSS 高亮与既有补全。
-6. 需要网页功能时从 Nexus 启动 Guthon Bridge。
+6. 在项目的“工作区驾驶舱”查看状态并直接进入对应操作；使用“搜索工作区完整索引”跨源码身份与事实检索，选择结果后可打开源码，或复制默认精简、按需详细的 AI 上下文。
+7. 需要网页功能时从 Nexus 启动 Guthon Bridge。
 
 维护者可切换到调试模式并选择本仓库；Nexus 会直接调用 `.venv` 和 `scripts/guthon_tool.py`。当前运行模式写入：
 
@@ -255,7 +272,7 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
 var/nexus/tool-runtime.json
 ```
 
-该描述符除基础 `command`/`home` 外，还写入 cwd 无关的 `workspaceResolveCommand` 与 `linterCommand` 数组。
+该描述符除基础 `command`/`home` 外，还写入 cwd 无关的 `workspaceResolveCommand`、`databaseTargetResolveCommand`、`databaseProbeCommand`、`databaseDescribeCommand`、`databaseQueryCommand` 与 `linterCommand` 数组。
 Agent 不再拼装 `../../scripts` 或 `../../tools/guthon-lint`；从具体 PRD/PRJ cwd 运行 `--changed` 时，Linter 只检查当前
 workspace，Git pre-commit 的 `--staged` 仍检查整个暂存集合。
 
@@ -292,7 +309,7 @@ cd ../GuthonVSCodeExtension/gushen-vscode-completion
 npm test
 ```
 
-发布构建仍由现有脚本和 GitHub Actions 生成 GuthonCodeTool 应用、VSIX 与 Chrome 扩展压缩包。
+发布构建由现有脚本和 GitHub Actions 生成 GuthonCodeTool 应用、Nexus All-in-One VSIX 与 Chrome 扩展压缩包。独立 Guthon SVN Navigator 源码暂时保留，但不再触发或进入自动 Release；SVN 用户统一安装 Nexus All-in-One。
 
 ## 文档
 

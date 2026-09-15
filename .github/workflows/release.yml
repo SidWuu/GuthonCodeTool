@@ -8,7 +8,6 @@ on:
       - "scripts/**"
       - "config/example/**"
       - "plugins/GuthonBridge/**"
-      - "plugins/GuthonSvnVSCodeExtension/**"
       - "plugins/GuthonVSCodeExtension/**"
       - ".github/workflows/release.yml"
   workflow_dispatch:
@@ -39,7 +38,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install build dependencies
-        run: python -m pip install pyinstaller pymysql "psycopg[binary]"
+        run: python -m pip install pyinstaller pymysql "psycopg[binary]" oracledb keyring
 
       - name: Build application
         run: python scripts/build_guthon_tool.py
@@ -91,16 +90,6 @@ jobs:
             --skip-license \
             --out ../../../guthon-nexus-vscode.vsix
 
-      - name: Test and package Guthon SVN Navigator
-        working-directory: plugins/GuthonSvnVSCodeExtension/guthon-svn-navigator
-        run: |
-          npm test
-          npm run check
-          npx --yes @vscode/vsce@3.9.2 package \
-            --no-dependencies \
-            --skip-license \
-            --out ../../../guthon-svn-navigator-vscode.vsix
-
       - name: Prepare Release VSIX names
         run: mv guthon-nexus-vscode.vsix guthon-nexus-all-in-one-vscode.vsix
 
@@ -114,13 +103,17 @@ jobs:
           node -e 'const fs=require("fs"); const p=require("./extension/manifest.json"); p.version=`0.1.${process.env.GITHUB_RUN_NUMBER}`; fs.writeFileSync("extension/manifest.json", JSON.stringify(p, null, 2) + "\n")'
           zip -r ../../GuthonCodeTool-chrome.zip extension -x "*.DS_Store" "*.test.js"
 
+      - name: Package Guthon Testing Skill
+        working-directory: skills
+        run: zip -r ../guthon-testing.zip guthon-testing -x "*.DS_Store"
+
       - uses: actions/upload-artifact@v7
         with:
           name: release-plugins
           path: |
             guthon-nexus-all-in-one-vscode.vsix
-            guthon-svn-navigator-vscode.vsix
             GuthonCodeTool-chrome.zip
+            guthon-testing.zip
           if-no-files-found: error
 
   release:
@@ -168,8 +161,8 @@ jobs:
             echo "- Windows x64 应用：\`GuthonCodeTool-windows-x64.exe\`"
             echo "- macOS M1 及后续型号应用：\`GuthonCodeTool-macos-arm64.zip\`"
             echo "- Guthon Nexus All-in-One（DATABASE/SVN 双模式）：\`guthon-nexus-all-in-one-vscode.vsix\`"
-            echo "- Guthon SVN Navigator（仅 SVN）：\`guthon-svn-navigator-vscode.vsix\`"
             echo "- Guthon Bridge：\`GuthonCodeTool-chrome.zip\`"
+            echo "- Guthon Testing Skill：\`guthon-testing.zip\`（解压到 Codex Skills 目录）"
             echo
             echo "## 本次变更"
             echo

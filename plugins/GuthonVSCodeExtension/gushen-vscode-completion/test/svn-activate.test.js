@@ -15,6 +15,7 @@ const {
   selectEditableIdentity,
   showProcedureCallers,
   sourceModuleElement,
+  workspaceKeyFromElement,
 } = require('../src/svn/activate');
 
 test('shows completion notifications without keeping an SVN operation claimed', () => {
@@ -295,6 +296,7 @@ test('resolves a Nexus source module only inside its workspace checkout', () => 
     '/workspace/checkout/pages/SYS-1/PG-1.json'
   );
   assert.equal(sourceModuleElement(fragment), module);
+  assert.equal(workspaceKeyFromElement(fragment), 'products.demo');
   assert.throws(
     () => resolveSourcePath(workspaces, {
       workspaceKey: 'products.demo',
@@ -304,17 +306,19 @@ test('resolves a Nexus source module only inside its workspace checkout', () => 
   );
 });
 
-test('opens native tree search after focusing the SVN source view', async () => {
+test('runs native tree actions after focusing the SVN source view', async () => {
   const calls = [];
   await runFocusedTreeCommand({
     commands: { executeCommand: async (command) => calls.push(command) },
-  }, 'list.find');
-  assert.deepEqual(calls, ['gushenCompletion.svnSourceView.focus', 'list.find']);
+  }, 'list.expand');
+  assert.deepEqual(calls, ['gushenCompletion.svnSourceView.focus', 'list.expand']);
 
   const manifest = require('../package.json');
+  const svnSearch = manifest.contributes.menus['view/title'].find((item) =>
+    item.when.includes('gushenCompletion.svnSourceView') && item.group === 'navigation@3'
+  );
+  assert.equal(svnSearch.command, 'gushenCompletion.searchCurrentSvnWorkspace');
   assert.equal(manifest.contributes.configurationDefaults['workbench.list.horizontalScrolling'], true);
-  assert.equal(manifest.contributes.configurationDefaults['workbench.list.defaultFindMode'], 'filter');
-  assert.equal(manifest.contributes.configurationDefaults['workbench.list.defaultFindMatchType'], 'fuzzy');
   assert.equal(manifest.contributes.configurationDefaults['scm.alwaysShowActions'], true);
   assert.equal(manifest.contributes.configurationDefaults['scm.repositories.selectionMode'], 'multiple');
   const resourceMenus = manifest.contributes.menus['scm/resourceState/context'];

@@ -2,6 +2,14 @@ const { spawn } = require('node:child_process');
 const { StringDecoder } = require('node:string_decoder');
 const { toolArguments } = require('../tool-runtime');
 
+function backendErrorMessage(stderr, stdout, code) {
+  const stderrLines = String(stderr || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('[SVN] '));
+  return stderrLines.join('\n') || String(stdout || '').trim() || `退出码 ${code}`;
+}
+
 class SvnBackendClient {
   constructor({ getTool, spawnProcess = spawn }) {
     this.getTool = getTool;
@@ -33,7 +41,7 @@ class SvnBackendClient {
         onOutput?.(stderrDecoder.end());
         const stdout = Buffer.concat(stdoutChunks).toString('utf8');
         const stderr = Buffer.concat(stderrChunks).toString('utf8');
-        if (code) return reject(new Error((stderr || stdout || `退出码 ${code}`).trim()));
+        if (code) return reject(new Error(backendErrorMessage(stderr, stdout, code)));
         try {
           const payload = JSON.parse(stdout);
           if (payload?.ok !== true) {
@@ -182,6 +190,11 @@ class SvnBackendClient {
       ...candidateIds.flatMap((candidateId) => ['--candidate', candidateId]),
     ], { message }, options);
   }
+
+  deliveryStatus(workspaceKey) {
+    return this.run(workspaceKey, ['delivery-status']);
+  }
+
 }
 
-module.exports = { SvnBackendClient };
+module.exports = { backendErrorMessage, SvnBackendClient };

@@ -54,6 +54,20 @@ def _progress(callback: ProgressCallback, message: str) -> None:
         callback(message)
 
 
+def _format_commit_error(error: BaseException) -> str:
+    lines = [line.strip() for line in str(error).splitlines() if line.strip()]
+    hook_failures = []
+    for line in lines:
+        match = re.match(r"^FAIL:\s*(.+)$", line, flags=re.IGNORECASE)
+        if match:
+            message = match.group(1).strip()
+            if message and message not in hook_failures:
+                hook_failures.append(message)
+    if hook_failures:
+        return "SVN 提交被谷神平台阻止：" + "；".join(hook_failures)
+    return "\n".join(dict.fromkeys(lines)) or "未知 SVN 提交错误"
+
+
 def _page_projection(text: str) -> str:
     """Render PAGE JSON as stable script/SQL/field sections for human diffing."""
 
@@ -164,6 +178,76 @@ def _platform_state(workspace: dict) -> dict:
     except (OSError, json.JSONDecodeError):
         return {}
     return value if value.get("workspaceKey") == workspace["workspaceKey"] else {}
+
+
+def _deliveries(state: dict) -> list[dict]:
+    deliveries = state.get("deliveries") if isinstance(state.get("deliveries"), list) else []
+    if deliveries or not state.get("committedAt"):
+        return [dict(item) for item in deliveries if isinstance(item, dict)]
+    return [{
+        "deliveryId": state.get("deliveryId") or "legacy-latest",
+        "workingCopyId": state.get("workingCopyId") or "",
+        "lastCommittedRevision": state.get("lastCommittedRevision") or "",
+        "files": state.get("files") or [],
+        "groups": state.get("groups") or [],
+        "committedAt": state.get("committedAt") or "",
+    }]
+
+
+def _delivery_markdown(workspace: dict, deliveries: list[dict]) -> str:
+    lines = [
+        f"# SVN 交付回执：{workspace['displayName']}",
+        "",
+        f"- 工作区：`{workspace['workspaceKey']}`",
+        f"- 交付总数：{len(deliveries)}",
+    ]
+    if not deliveries:
+        lines.extend(["", "暂无 SVN 交付记录。"])
+    for item in reversed(deliveries[-20:]):
+        revisions = [str(group.get("revision") or "") for group in item.get("groups") or []]
+        lines.extend([
+            "",
+            f"## {item.get('deliveryId') or '未编号交付'}",
+            "",
+            f"- SVN revision：`{' / '.join(filter(None, revisions)) or item.get('lastCommittedRevision') or ''}`",
+            f"- SVN 提交时间：`{item.get('committedAt') or ''}`",
+            f"- 文件数：{len(item.get('files') or [])}",
+        ])
+        lines.extend(f"- `{source_path}`" for source_path in item.get("files") or [])
+    lines.extend([
+        "",
+        "## 证据边界",
+        "",
+        "本回执只证明列出的文件已完成 SVN commit；谷神平台最终提交及运行结果不在 Nexus 跟踪范围内。",
+    ])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _delivery_view(item: dict) -> dict:
+    return {
+        "deliveryId": item.get("deliveryId") or "",
+        "workingCopyId": item.get("workingCopyId") or "",
+        "lastCommittedRevision": item.get("lastCommittedRevision") or "",
+        "files": item.get("files") or [],
+        "groups": [{
+            "workingCopyId": group.get("workingCopyId") or "",
+            "revision": group.get("revision") or "",
+            "files": group.get("files") or [],
+        } for group in item.get("groups") or []],
+        "committedAt": item.get("committedAt") or "",
+    }
+
+
+def delivery_status(workspace: dict) -> dict:
+    require_capability(workspace, "status")
+    deliveries = _deliveries(_platform_state(workspace))
+    return {
+        "ok": True,
+        "workspaceKey": workspace["workspaceKey"],
+        "deliveryCount": len(deliveries),
+        "deliveries": [_delivery_view(item) for item in deliveries[-20:]],
+        "markdown": _delivery_markdown(workspace, deliveries),
+    }
 
 
 def status(
@@ -636,7 +720,6 @@ def _revalidate_selected(
     if entry is None:
         raise SystemExit("Selected SVN working copy is no longer authorized")
     label = scope_entry_label(workspace, entry)
-    _progress(on_progress, f"{label}｜{phase}｜重新检查 SVN 状态")
     current = svn_status(entry.root)
     changes_by_path = {change["path"]: change for change in current.get("changes") or []}
     targets = []
@@ -676,7 +759,7 @@ def _revalidate_selected(
                 "Selected SVN file is out of date: "
                 + ", ".join(Path(value).name for value in outdated[:10])
             )
-    _progress(on_progress, f"{label}｜{phase}｜通过 · {len(targets)} 个文件")
+    _progress(on_progress, f"{label}｜{phase}通过 · {len(targets)} 个文件")
     return entry, targets
 
 
@@ -767,7 +850,6 @@ def platform_save(
 ) -> dict:
     commit_message = str(message or "").strip()
     with operation_lock(workspace, "manifest-platform-save"):
-        _progress(on_progress, "提交 Nexus 修改｜读取选择并重新校验")
         token_path, selected = _load_selection(
             workspace,
             action="platform-save",
@@ -776,6 +858,11 @@ def platform_save(
             candidate_ids=candidate_ids,
         )
         session = load_session(workspace)
+        selected_groups = _selected_groups(selected)
+        _progress(
+            on_progress,
+            f"提交 Nexus 修改｜校验选择 · {len(selected_groups)} 个分组 / {len(selected)} 个文件",
+        )
         prepared = [
             (
                 group,
@@ -788,7 +875,7 @@ def platform_save(
                     phase="提交前校验",
                 ),
             )
-            for group in _selected_groups(selected)
+            for group in selected_groups
         ]
         saved_groups = []
         try:
@@ -797,7 +884,7 @@ def platform_save(
                 label = scope_entry_label(workspace, entry)
                 _progress(
                     on_progress,
-                    f"[{index}/{total}] {label}｜提交｜写入 SVN 提交说明并执行 commit · "
+                    f"[{index}/{total}] {label}｜提交中 · "
                     f"{len(targets)} 个文件",
                 )
                 descriptor, message_path = tempfile.mkstemp(
@@ -816,7 +903,6 @@ def platform_save(
                         os.unlink(message_path)
                     except FileNotFoundError:
                         pass
-                _progress(on_progress, f"[{index}/{total}] {label}｜提交｜检查提交后的 working copy 状态")
                 after = svn_status(entry.root)
                 remaining = {change["path"] for change in after.get("changes") or []}
                 for target in targets:
@@ -832,32 +918,50 @@ def platform_save(
                         "svnOutput": result.stdout,
                     }
                 )
-                _progress(on_progress, f"[{index}/{total}] {label}｜提交｜完成 · r{revision}")
+                _progress(on_progress, f"[{index}/{total}] {label}｜提交完成 · r{revision}")
                 _clear_selected_session(workspace, session, group)
-            _progress(on_progress, "提交 Nexus 修改｜写入待谷神平台最终提交状态")
         except (Exception, SystemExit) as error:
             completed = "、".join(
                 f"{group['workingCopyId']}@r{group['revision']}" for group in saved_groups
             ) or "无"
-            raise SystemExit(f"分组保存中断；已完成：{completed}；失败：{error}") from error
+            raise SystemExit(
+                f"提交中断（已完成：{completed}）\n{_format_commit_error(error)}"
+            ) from error
         finally:
             token_path.unlink(missing_ok=True)
         revisions = [group["revision"] for group in saved_groups]
-        platform_state = {
-            "workspaceKey": workspace["workspaceKey"],
-            "pendingPlatformSubmit": True,
-            "statusVerified": False,
+        committed_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        delivery = {
+            "deliveryId": uuid.uuid4().hex[:12],
             "workingCopyId": saved_groups[-1]["workingCopyId"],
             "lastCommittedRevision": revisions[-1],
             "files": [item["path"] for item in selected],
+            "groups": [{
+                "workingCopyId": group["workingCopyId"],
+                "revision": group["revision"],
+                "files": group["files"],
+            } for group in saved_groups],
+            "committedAt": committed_at,
+        }
+        previous = _platform_state(workspace)
+        deliveries = _deliveries(previous)
+        deliveries.append(delivery)
+        platform_state = {
+            "workspaceKey": workspace["workspaceKey"],
+            "version": 3,
+            "workingCopyId": saved_groups[-1]["workingCopyId"],
+            "lastCommittedRevision": revisions[-1],
+            "deliveryId": delivery["deliveryId"],
+            "files": delivery["files"],
             "groups": saved_groups,
-            "committedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "committedAt": committed_at,
+            "deliveries": deliveries[-50:],
         }
         atomic_json(workspace["contextDir"] / PLATFORM_STATE_FILE, platform_state)
         _progress(
             on_progress,
-            f"提交 Nexus 修改｜完成 · {len(saved_groups)} 个 working copy · "
-            f"revision {'、'.join(revisions)}",
+            f"提交 Nexus 修改｜完成 · {len(saved_groups)} 个分组 / {len(selected)} 个文件 · "
+            f"r{'、'.join(revisions)}",
         )
         return {
             "ok": True,
@@ -868,7 +972,6 @@ def platform_save(
             "revisions": revisions,
             "groups": saved_groups,
             "files": platform_state["files"],
-            "pendingPlatformSubmit": True,
-            "platformStatusVerified": False,
+            "deliveryId": delivery["deliveryId"],
             "svnOutput": "\n".join(group["svnOutput"] for group in saved_groups),
         }

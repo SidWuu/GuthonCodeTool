@@ -137,6 +137,15 @@ function sourceModuleElement(element) {
   return current?.object ? current : undefined;
 }
 
+function workspaceKeyFromElement(element) {
+  let current = element;
+  while (current) {
+    if (current.workspaceKey) return current.workspaceKey;
+    current = current.parent;
+  }
+  return '';
+}
+
 function procedureIdentityFromElement(element) {
   const sourceElement = sourceModuleElement(element);
   const object = sourceElement?.object;
@@ -730,6 +739,18 @@ function activateSvn({
     return editableIdentity ? virtualFs.open(editableIdentity) : undefined;
   };
 
+  const showDeliveryReceipt = async (workspaceValue) => {
+    const workspaceKey = workspaceKeyOf(workspaceValue);
+    if (!workspaceKey) throw new Error('请选择一个 SVN 工作区');
+    const result = await backend.deliveryStatus(workspaceKey);
+    const document = await vscode.workspace.openTextDocument({
+      language: 'markdown',
+      content: result.markdown,
+    });
+    await vscode.window.showTextDocument(document, { preview: true });
+    return result;
+  };
+
   const commands = [
     vscode.commands.registerCommand('gushenCompletion.openSvnDocument', withError((identity) =>
       virtualFs.open(identity))),
@@ -747,6 +768,7 @@ function activateSvn({
     })),
     vscode.commands.registerCommand('gushenCompletion.showSvnProcedureCallers', withError((element) =>
       showProcedureCallers(vscode, backend, virtualFs, element))),
+    vscode.commands.registerCommand('gushenCompletion.showSvnDeliveryReceipt', withError(showDeliveryReceipt)),
     vscode.commands.registerCommand('gushenCompletion.jumpSelectedSvnSource', withError(async () => {
       const element = sourceModuleElement(treeView.selection[0]);
       if (!element) throw new Error('请先选择一个 SVN 源码模块或其方法、字段、SQL 节点');
@@ -764,8 +786,6 @@ function activateSvn({
       runFocusedTreeCommand(vscode, 'list.expand'))),
     vscode.commands.registerCommand('gushenCompletion.collapseSelectedSvnSource', withError(() =>
       runFocusedTreeCommand(vscode, 'list.collapse'))),
-    vscode.commands.registerCommand('gushenCompletion.searchSvnSource', withError(() =>
-      runFocusedTreeCommand(vscode, 'list.find'))),
     vscode.commands.registerCommand('gushenCompletion.refreshSvnSourceView', withError((workspaceKey) => runClaimed(
       workspaceKey || '',
       async () => {
@@ -939,6 +959,9 @@ function activateSvn({
     log,
     refresh,
     saveDirtyDocuments,
+    selectedWorkspaceKey() {
+      return workspaceKeyFromElement(treeView.selection?.[0]);
+    },
     scm,
     virtualFs,
   };
@@ -961,4 +984,5 @@ module.exports = {
   showProcedureCallers,
   showBlockedWorkingCopies,
   sourceModuleElement,
+  workspaceKeyFromElement,
 };

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Validate and evaluate artifacts produced by the DBX database-test workflow.
+"""Validate database targets and evaluate database-test workflow artifacts.
 
-This module never connects to a database. Codex uses the configured DBX tools to
-collect read-only evidence, normalizes that evidence, and passes it here for
-deterministic target resolution, assertions, and report rendering.
+This module never connects to a database. DBX and the built-in read-only adapter
+share its deterministic target resolution, scope validation, assertions, and
+report rendering.
 """
 
 from __future__ import annotations
@@ -37,6 +37,8 @@ ASSERTION_TYPES = {
 TRUNCATION_VALUES = {"none", "rows", "cell", "unknown"}
 CASE_LEVELS = {"query", "platform-result"}
 ENVIRONMENTS = {"dev", "test"}
+ENGINES = {"mysql", "postgresql", "oracle"}
+VALIDATION_SCOPES = {"diagnosis-only", "full"}
 
 
 class ArtifactError(ValueError):
@@ -90,11 +92,14 @@ def _is_placeholder(value: str) -> bool:
 
 
 def validate_config(config: dict) -> dict:
-    _reject_unknown(config, {"schemaVersion", "expectedIdentities", "databaseTests"}, "配置")
+    _reject_unknown(config, {"schemaVersion", "connections", "expectedIdentities", "databaseTests"}, "配置")
     if config.get("schemaVersion") != SCHEMA_VERSION:
         raise ArtifactError("CONFIG_VERSION_UNSUPPORTED", "仅支持 schemaVersion=1")
     identities = config.get("expectedIdentities")
+    connections = config.get("connections") or {}
     workspaces = config.get("databaseTests")
+    if not isinstance(connections, dict):
+        raise ArtifactError("CONFIG_INVALID", "connections 必须是对象")
     if not isinstance(identities, dict) or not identities:
         raise ArtifactError("CONFIG_INVALID", "expectedIdentities 必须是非空对象")
     if not isinstance(workspaces, dict) or not workspaces:
@@ -105,8 +110,8 @@ def validate_config(config: dict) -> dict:
             raise ArtifactError("CONFIG_INVALID", f"环境身份 {identity_id} 必须是对象")
         _reject_unknown(identity, {"engine", "endpoint", "database", "schema", "evidenceRef"}, f"环境身份 {identity_id}")
         _require_keys(identity, {"engine", "endpoint", "database", "evidenceRef"}, f"环境身份 {identity_id}")
-        if identity["engine"] not in {"mysql", "oracle"}:
-            raise ArtifactError("UNSUPPORTED", f"仅支持 MySQL/Oracle: {identity_id}")
+        if identity["engine"] not in ENGINES:
+            raise ArtifactError("UNSUPPORTED", f"仅支持 MySQL/PostgreSQL/Oracle: {identity_id}")
         if identity["engine"] == "oracle" and not identity.get("schema"):
             raise ArtifactError("CONFIG_INVALID", f"Oracle 环境身份必须配置 schema: {identity_id}")
         if identity.get("schema") and not IDENTIFIER.fullmatch(str(identity["schema"])):
@@ -114,25 +119,92 @@ def validate_config(config: dict) -> dict:
         if _is_placeholder(str(identity["endpoint"])) or _is_placeholder(str(identity["evidenceRef"])):
             raise ArtifactError("ENVIRONMENT_UNVERIFIED", f"环境身份 {identity_id} 仍包含占位值")
 
+    for connection_id, connection in connections.items():
+        validate_connection(connection, str(connection_id), identities)
+
     for workspace_key, workspace_config in workspaces.items():
         if not WORKSPACE_KEY.fullmatch(str(workspace_key)):
             raise ArtifactError("CONFIG_INVALID", f"无效 workspaceKey: {workspace_key}")
         if not isinstance(workspace_config, dict):
             raise ArtifactError("CONFIG_INVALID", f"工作区配置必须是对象: {workspace_key}")
-        _reject_unknown(workspace_config, {"targets"}, f"工作区 {workspace_key}")
+        _reject_unknown(workspace_config, {"defaults", "targets"}, f"工作区 {workspace_key}")
         targets = workspace_config.get("targets")
         if not isinstance(targets, list) or not targets:
             raise ArtifactError("CONFIG_INVALID", f"工作区 {workspace_key} 的 targets 必须是非空数组")
         seen: set[str] = set()
         for target in targets:
-            validate_target(target, workspace_key, identities)
+            validate_target(target, workspace_key, identities, connections)
             if target["id"] in seen:
                 raise ArtifactError("CONFIG_INVALID", f"工作区 {workspace_key} 的 target ID 重复: {target['id']}")
             seen.add(target["id"])
+        defaults = workspace_config.get("defaults") or {}
+        if not isinstance(defaults, dict):
+            raise ArtifactError("CONFIG_INVALID", f"工作区 {workspace_key} 的 defaults 必须是对象")
+        _reject_unknown(defaults, {"diagnosisTargetId", "byEnvironment"}, f"工作区 {workspace_key} defaults")
+        diagnosis_target_id = str(defaults.get("diagnosisTargetId") or "")
+        if diagnosis_target_id and diagnosis_target_id not in seen:
+            raise ArtifactError(
+                "CONFIG_INVALID",
+                f"工作区 {workspace_key} 的 diagnosisTargetId 不存在: {diagnosis_target_id}",
+            )
+        by_environment = defaults.get("byEnvironment") or {}
+        if not isinstance(by_environment, dict):
+            raise ArtifactError("CONFIG_INVALID", f"工作区 {workspace_key} 的 byEnvironment 必须是对象")
+        unknown_environments = sorted(set(by_environment) - ENVIRONMENTS)
+        if unknown_environments:
+            raise ArtifactError(
+                "CONFIG_INVALID",
+                f"工作区 {workspace_key} 包含无效环境默认值: {', '.join(unknown_environments)}",
+            )
+        targets_by_id = {target["id"]: target for target in targets}
+        for environment, target_id in by_environment.items():
+            target = targets_by_id.get(str(target_id))
+            if not target:
+                raise ArtifactError(
+                    "CONFIG_INVALID",
+                    f"工作区 {workspace_key} 的 {environment} 默认 target 不存在: {target_id}",
+                )
+            if target["environment"] != environment:
+                raise ArtifactError(
+                    "ENVIRONMENT_MISMATCH",
+                    f"工作区 {workspace_key} 的 {environment} 默认 target 环境不一致: {target_id}",
+                )
     return config
 
 
-def validate_target(target: Any, workspace_key: str, identities: dict) -> None:
+def validate_connection(connection: Any, connection_id: str, identities: dict) -> None:
+    if not isinstance(connection, dict):
+        raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 必须是对象")
+    allowed = {
+        "engine", "host", "port", "database", "schema", "username",
+        "credentialRef", "connectTimeoutSeconds",
+    }
+    _reject_unknown(connection, allowed, f"连接 {connection_id}")
+    _require_keys(
+        connection,
+        {"engine", "host", "port", "database", "username", "credentialRef"},
+        f"连接 {connection_id}",
+    )
+    if connection["engine"] not in ENGINES:
+        raise ArtifactError("UNSUPPORTED", f"连接 {connection_id} 的引擎不受支持")
+    if _is_placeholder(str(connection["host"])) or _is_placeholder(str(connection["credentialRef"])):
+        raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 仍包含占位值")
+    try:
+        port = int(connection["port"])
+        timeout = int(connection.get("connectTimeoutSeconds", 10))
+    except (TypeError, ValueError) as error:
+        raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 的端口或超时无效") from error
+    if not 1 <= port <= 65535 or not 1 <= timeout <= 60:
+        raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 的端口或超时超出范围")
+    if not IDENTIFIER.fullmatch(str(connection["database"])):
+        raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 的 database 无效")
+    if connection.get("schema") and not IDENTIFIER.fullmatch(str(connection["schema"])):
+        raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 的 schema 无效")
+    if connection["engine"] == "oracle" and not connection.get("schema"):
+        raise ArtifactError("CONFIG_INVALID", f"Oracle 连接必须配置 schema: {connection_id}")
+
+
+def validate_target(target: Any, workspace_key: str, identities: dict, connections: dict | None = None) -> None:
     if not isinstance(target, dict):
         raise ArtifactError("CONFIG_INVALID", f"工作区 {workspace_key} 的 target 必须是对象")
     allowed = {
@@ -140,6 +212,8 @@ def validate_target(target: Any, workspace_key: str, identities: dict) -> None:
         "systemId",
         "dataSourceId",
         "connectionId",
+        "connectionRef",
+        "validationScope",
         "database",
         "schema",
         "environment",
@@ -149,21 +223,21 @@ def validate_target(target: Any, workspace_key: str, identities: dict) -> None:
         "tenantScope",
     }
     _reject_unknown(target, allowed, f"target {target.get('id', '?')}")
-    required = {
-        "id",
-        "systemId",
-        "dataSourceId",
-        "connectionId",
-        "database",
-        "environment",
-        "access",
-        "expectedIdentityRef",
-        "allowedTables",
-        "tenantScope",
-    }
+    validation_scope = str(target.get("validationScope") or "full")
+    if validation_scope not in VALIDATION_SCOPES:
+        raise ArtifactError("CONFIG_INVALID", f"target {target.get('id', '?')} 的 validationScope 无效")
+    required = {"id", "database", "environment", "access", "expectedIdentityRef"}
+    if validation_scope == "full":
+        required |= {"systemId", "dataSourceId", "allowedTables", "tenantScope"}
     _require_keys(target, required, f"工作区 {workspace_key} 的 target")
-    if _is_placeholder(str(target["connectionId"])):
+    connection_id = str(target.get("connectionId") or "")
+    connection_ref = str(target.get("connectionRef") or "")
+    if not connection_id and not connection_ref:
+        raise ArtifactError("CONNECTION_MISSING", f"target {target['id']} 未配置 connectionId 或 connectionRef")
+    if connection_id and _is_placeholder(connection_id):
         raise ArtifactError("CONNECTION_MISSING", f"target {target['id']} 仍使用占位 connectionId")
+    if connection_ref and (connections is None or connection_ref not in connections):
+        raise ArtifactError("CONNECTION_MISSING", f"target {target['id']} 的 connectionRef 不存在")
     if target["environment"] not in ENVIRONMENTS:
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的 environment 仅允许 dev/test")
     if target["access"] != "read-only":
@@ -172,10 +246,10 @@ def validate_target(target: Any, workspace_key: str, identities: dict) -> None:
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的 database 无效")
     if target.get("schema") and not IDENTIFIER.fullmatch(str(target["schema"])):
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的 schema 无效")
-    tables = target["allowedTables"]
-    if not isinstance(tables, list) or not tables or "*" in tables:
+    tables = target.get("allowedTables") or []
+    if validation_scope == "full" and (not isinstance(tables, list) or not tables or "*" in tables):
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 必须配置非通配 allowedTables")
-    if any(not IDENTIFIER.fullmatch(str(table)) for table in tables):
+    if not isinstance(tables, list) or any(not IDENTIFIER.fullmatch(str(table)) for table in tables):
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 包含无效表名")
     identity_ref = str(target["expectedIdentityRef"])
     if identity_ref not in identities:
@@ -189,7 +263,19 @@ def validate_target(target: Any, workspace_key: str, identities: dict) -> None:
         raise ArtifactError("CONFIG_INVALID", f"Oracle target 必须配置 schema: {target['id']}")
     if identity_schema.lower() != target_schema.lower():
         raise ArtifactError("ENVIRONMENT_MISMATCH", f"target {target['id']} 与环境身份的 schema 不一致")
-    tenant_scope = target["tenantScope"]
+    if connection_ref:
+        connection = connections[connection_ref]
+        endpoint = f"{connection['host']}:{int(connection['port'])}"
+        for field in ("engine", "database"):
+            if str(connection[field]).lower() != str(identity[field]).lower():
+                raise ArtifactError("ENVIRONMENT_MISMATCH", f"target {target['id']} 的内置连接与环境身份 {field} 不一致")
+        if endpoint.lower() != str(identity["endpoint"]).lower():
+            raise ArtifactError("ENVIRONMENT_MISMATCH", f"target {target['id']} 的内置连接与环境身份 endpoint 不一致")
+        if str(connection.get("schema") or "").lower() != identity_schema.lower():
+            raise ArtifactError("ENVIRONMENT_MISMATCH", f"target {target['id']} 的内置连接与环境身份 schema 不一致")
+    tenant_scope = target.get("tenantScope")
+    if validation_scope == "diagnosis-only" and tenant_scope is None:
+        return
     if not isinstance(tenant_scope, dict):
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的 tenantScope 必须是对象")
     _reject_unknown(tenant_scope, {"field", "evidenceRef"}, f"target {target['id']} tenantScope")
@@ -215,8 +301,9 @@ def resolve_target(
     matches = [
         target
         for target in workspace["targets"]
-        if str(target["systemId"]) == system_id
-        and str(target["dataSourceId"]) == data_source_id
+        if str(target.get("validationScope") or "full") == "full"
+        and str(target.get("systemId") or "") == system_id
+        and str(target.get("dataSourceId") or "") == data_source_id
         and (not target_id or target["id"] == target_id)
     ]
     if not matches:
@@ -228,6 +315,53 @@ def resolve_target(
         ids = ", ".join(sorted(target["id"] for target in matches))
         raise ArtifactError("BINDING_AMBIGUOUS", f"多个 target 同时匹配: {ids}")
     return matches[0]
+
+
+def resolve_diagnosis_target(
+    config: dict,
+    workspace_key: str,
+    *,
+    environment: str = "",
+    target_id: str = "",
+) -> tuple[dict, str]:
+    """Resolve one database target for ad-hoc diagnosis without guessing names."""
+
+    validate_config(config)
+    workspace = config["databaseTests"].get(workspace_key)
+    if not workspace:
+        raise ArtifactError("BINDING_MISSING", f"工作区未配置数据库排查目标: {workspace_key}")
+    targets = workspace["targets"]
+    defaults = workspace.get("defaults") or {}
+    if target_id:
+        matches = [target for target in targets if target["id"] == target_id]
+        selection_source = "explicit-target"
+    elif environment:
+        if environment not in ENVIRONMENTS:
+            raise ArtifactError("CONFIG_INVALID", f"数据库环境仅允许 dev/test: {environment}")
+        preferred = str((defaults.get("byEnvironment") or {}).get(environment) or "")
+        matches = [
+            target for target in targets
+            if target["environment"] == environment and (not preferred or target["id"] == preferred)
+        ]
+        selection_source = "environment-default" if preferred else "explicit-environment"
+    else:
+        preferred = str(defaults.get("diagnosisTargetId") or "")
+        matches = [target for target in targets if not preferred or target["id"] == preferred]
+        selection_source = "workspace-default" if preferred else "single-target"
+    if not matches:
+        detail = f", environment={environment}" if environment else ""
+        detail += f", targetId={target_id}" if target_id else ""
+        raise ArtifactError("BINDING_MISSING", f"没有匹配数据库排查目标: workspace={workspace_key}{detail}")
+    if len(matches) > 1:
+        ids = ", ".join(sorted(target["id"] for target in matches))
+        raise ArtifactError("BINDING_AMBIGUOUS", f"多个数据库排查目标同时匹配: {ids}")
+    target = matches[0]
+    if environment and target["environment"] != environment:
+        raise ArtifactError(
+            "ENVIRONMENT_MISMATCH",
+            f"target {target['id']} 不属于 {environment} 环境",
+        )
+    return target, selection_source
 
 
 def validate_plan(plan: dict, config: dict | None = None) -> dict:
@@ -257,7 +391,13 @@ def validate_plan(plan: dict, config: dict | None = None) -> dict:
             for target in config["databaseTests"][plan["workspaceKey"]]["targets"]
         }
     for case in plan["cases"]:
-        validate_case(case, targets_by_id.get(case.get("targetId")) if targets_by_id else None)
+        target = targets_by_id.get(case.get("targetId")) if targets_by_id else None
+        if target is not None and str(target.get("validationScope") or "full") != "full":
+            raise ArtifactError(
+                "BINDING_UNSUPPORTED",
+                f"用例 {case.get('caseId', '?')} 不能使用 diagnosis-only target: {target['id']}",
+            )
+        validate_case(case, target)
         if case["caseId"] in case_ids:
             raise ArtifactError("ARTIFACT_INVALID", f"caseId 重复: {case['caseId']}")
         case_ids.add(case["caseId"])
@@ -788,7 +928,7 @@ def render_report(plan: dict, results: dict, evaluation: dict) -> str:
             "## 平台与清理边界",
             "",
             f"- 平台结果用例：{len(platform_cases)}",
-            "- DBX 阶段只执行只读查询；平台触发、持久化夹具及清理由既有开发流程按授权负责。",
+            "- 数据库适配器只执行只读查询；平台触发、持久化夹具及清理由既有开发流程按授权负责。",
             "- BLOCKED/SKIPPED 不计为通过；源码或计划摘要变化后必须创建新 run 并重新执行受影响用例。",
             "",
             "## 需要开发流程处理的问题",

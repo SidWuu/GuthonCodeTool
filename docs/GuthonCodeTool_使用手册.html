@@ -308,6 +308,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h3 id="6-2-启动本地服务">6.2 启动本地服务</h3>
 <ol>
 <li>打开 VS Code 左侧“Guthon Nexus”面板。</li>
+<li>展开项目顶部的“工作区驾驶舱”，查看索引、同步状态、SVN working copy、本地变更和最近一次 SVN 提交；点击状态行可直接进入对应操作。</li>
 <li>单击“启动 Guthon Bridge”。Nexus 自动使用初始化时选择的应用和本地数据目录。</li>
 <li>面板显示“运行中 · 127.0.0.1:17361”后即可使用；单击“停止 Guthon Bridge”可关闭服务。</li>
 </ol>
@@ -340,10 +341,13 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>提交 Nexus 修改、更新远端变更以及其他多步骤 SCM 操作会在“输出 → GuthonCodeTool”实时显示状态检查、预览、按 working copy 执行 SVN 操作、提交后索引和刷新步骤；同一工作区的重复操作会提示正在执行并忽略本次点击。</li>
 <li>同时显示 <code>var</code> 等其他 Git 仓库且整个 SVN 工作区无本地、远端变更时，第一个子系统下会显示一条不可操作的“当前无变更”占位项，防止 VS Code 原生 SCM 隐藏全部空子系统。该项不计入根节点变更数，也不参与提交或更新。</li>
 <li>看到 SVN revision 后，再到谷神平台完成最终提交。</li>
+<li>返回项目的“工作区驾驶舱”，点击最近一次 SVN 提交查看带交付编号、revision、文件和时间的历史回执。回执只证明 SVN 提交；谷神平台最终提交及运行验证仍在平台侧完成。</li>
 </ol>
 <aside class="notice"><div class="notice-icon">!</div><div><p><code>Ctrl+S</code>/<code>Cmd+S</code> 只保存到本地；冲突必须先完成三方合并并显式标记已解决，不能直接强制提交。SVN 提交成功也不等于谷神平台已最终提交。</p></div></aside>
-<p>“谷神源码”已按业务分组：页面沿用 <code>pages/index.md</code> 顺序，PAGE 分块依次显示 GSS、JS、SQL、字段；过程函数包按包名字母排序，包内函数按函数名字母排序。可使用视图顶部的定位、跳转、搜索和刷新按钮；右键过程函数还可复制函数名或“包名.函数名”，并按索引查看全部已识别调用方，选择后跳转到对应调用行。</p>
+<p>“谷神源码”已按业务分组：页面沿用 <code>pages/index.md</code> 顺序，PAGE 分块依次显示 GSS、JS、SQL、字段；过程函数包按包名字母排序，包内函数按函数名字母排序。可使用视图顶部的定位、跳转、搜索和刷新按钮；搜索按钮查询当前 SVN 工作区的完整本地 SQLite 索引，不依赖树节点是否展开，并且只在输入完成后执行一次查询。右键过程函数还可复制函数名或“包名.函数名”，并按索引查看全部已识别调用方，选择后跳转到对应调用行。</p>
+<p>Nexus 顶部和每个项目的“源码与索引”都提供“搜索工作区完整索引”：同一入口搜索源码名称/ID/函数以及已索引的条件、赋值、异常、表读写和调用事实。选择结果后可以打开源码，或复制 AI 上下文。默认精简版只包含对象定位、最多 3 条直接关系、最多 5 条优先级较高的事实、简短 hash 和证据边界；需要深入分析时再选择详细版。两种版本都不会默认复制整份源码。</p>
 <p>首次重建索引后，AI 先从 runtime descriptor 执行 <code>workspaceResolveCommand</code>，按当前 PRD/PRJ cwd 确认唯一工作区、provider 和 <code>index.ready</code>。索引可用时，第一次源码定位必须使用有界查询：错误、条件、字段和对象事实使用 <code>facts</code>，表或单据写入原因链使用 <code>explain</code>，对象名不明确时使用 <code>find</code>，共享函数或跨对象影响分析补 <code>context/callers</code>。DATABASE 通过 <code>query</code> 查询，SVN 通过 <code>svn</code> 查询；只有索引未初始化、明确漏项、查询证据不足或实际修改前才读取对应局部源码，不遍历完整 checkout 或 PAGE JSON。</p>
+<p>排查开发库或测试库前，在对应项目的“配置资料”选择“配置数据库排查”，输入环境、MySQL/PostgreSQL/Oracle 地址和专用只读账号；Nexus 会立即核验连接，只把非敏感映射写入 <code>database-testing.yaml</code>，密码写入操作系统凭据库。之后 AI 从 runtime descriptor 执行 <code>databaseTargetResolveCommand</code> 并传入当前 cwd：有 <code>connectionRef</code> 时直接使用内置 <code>databaseProbeCommand</code>、<code>databaseDescribeCommand</code>、<code>databaseQueryCommand</code>，只有 <code>connectionId</code> 时才依赖当前会话的 DBX。未明确环境时使用工作区默认目标；明确开发库或测试库时选择对应环境，同时比较时分别解析。“测试一下”不自动解释为测试库。内置快速查询只允许单条 SELECT，最大返回 100 行，功能验收与回归仍使用正式 <code>full</code> 数据库测试目标。</p>
 </section>
 
 <section class="wiki-section">

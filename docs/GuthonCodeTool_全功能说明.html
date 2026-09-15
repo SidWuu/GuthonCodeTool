@@ -141,6 +141,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <p>GuthonCodeTool 把谷神平台中的 PAGE、过程函数、表结构、单据类型、视图和系统脚本整理到本地，形成可检索、可比较、可供 AI 分析的私有开发工作区。</p>
 <ul>
 <li>工具负责读取、整理和索引源码；DATABASE 生成安全 Workcopy，SVN 由 Nexus 提供受控虚拟编辑。</li>
+<li>每个项目的工作区驾驶舱聚合索引就绪度、同步状态、SVN working copy、本地变更和最近一次 SVN 提交；各状态行可直接进入对应操作。完整索引搜索同时查询源码身份与事实索引。</li>
 <li>每个工作区显式选择 database 或 svn provider；SVN 只有用户执行初始化后才按授权清单中的精确 URL 检出。</li>
 <li>DATABASE 开发只修改 <code>source/workcopy</code>；SVN 不生成额外代码副本，虚拟文档直接回写授权 checkout 原文件。</li>
 <li>SVN 的“管理本地源码变更”提供类 Git 差异、多选/全选保存和撤销；SCM 在产品节点下直接显示默认展开的中文子系统组，聚合同一 <code>DATA_SOURCE_ID</code> 的数据源及系统 working copy，并支持产品全部、子系统和单文件级提交/更新。单一名称原样显示，只有 <code>0008</code> 下国内贸易、国际贸易这类共同后缀分组显示为“贸易系统”，Skill/public 单列“公共源码”。产品与子系统行都只保留刷新状态、检查远端变更、提交 Nexus 修改、更新远端变更四项操作并默认常驻显示；子系统提交与更新按组限制 working copy，根节点保留全部范围。检查远端变更后，点击远端文件打开“工作副本 ↔ SVN HEAD”双栏差异，更新仍需用户明确点击对应按钮。“保存到谷神”固定可用，SVN 提交说明可选，跨 working copy 分组执行精确文件 <code>svn commit</code>，成功仍表示“待谷神平台最终提交”。检出/更新和手动重建索引在输出标签逐项显示实际处理范围；同一工作区的重复重建点击会直接忽略；“谷神源码”树高亮本地修改文件及父目录，虚拟编辑器使用 VS Code 原生 SCM Quick Diff 按 SVN BASE 标出新增、修改与删除位置，点击色块可内联查看本地更改。公共用户名读取 <code>sync.yaml</code> 的 <code>svn.username</code>；Nexus 输入密码后只通过 stdin 交给 SVN auth cache/系统钥匙串保存。内部 HTTPS 自签证书由非交互命令直接信任。</li>
@@ -184,6 +185,11 @@ Chrome 扩展 ──HTTP──▶ Bridge ─────┘
 workspace-create      从 stdin JSON 原子追加产品/项目、数据源和源码模式
 workspaces            列出全部产品、项目和同步状态
 workspace-resolve     从 cwd 解析唯一工作区、provider 与索引状态
+database-target-resolve  从 cwd 和可选 dev/test 环境解析私有数据库诊断目标
+database-target-configure 从 stdin 配置并验证内置只读目标，密码进入系统凭据库
+database-probe/describe/query-readonly  核验连接、读取结构、执行有界单条 SELECT
+search                统一查询源码身份与索引事实
+context-pack          默认生成精简 AI 上下文；--detailed 可生成详细版本
 route                 按 Bridge 页面身份解析工作区
 workspace-summary     返回源码模式和有效 capabilities
 svn                   从 products/projects.yaml 的 svn.url/scope 管理精确授权 working copy，或执行更新、状态与差异操作
@@ -199,7 +205,7 @@ export-view           导出视图
 query / diagnose      查询局部上下文 / 执行只读排查
 create-workcopy       按索引创建或打开对象 Workcopy
 workcopy              查看状态、生成差异/交付物，或预检/执行 save-svn</code></pre></div>
-<p><code>workspace-resolve</code> 是 Agent 的轻量启动入口，从当前 PRD/PRJ cwd 返回唯一 <code>workspaceKey</code>、provider、<code>index.ready</code> 和首选有界查询；不读取源码正文。除 <code>setup</code>、<code>doctor</code>、<code>workspaces</code>、<code>workspace-resolve</code>、<code>route</code> 等全局命令外，均要求 <code>--workspace products.&lt;id&gt;</code> 或 <code>--workspace projects.&lt;id&gt;</code>。</p>
+<p><code>workspace-resolve</code> 是 Agent 的轻量启动入口，从当前 PRD/PRJ cwd 返回唯一 <code>workspaceKey</code>、provider、<code>index.ready</code> 和首选有界查询；不读取源码正文。<code>database-target-resolve</code> 再按 cwd 和可选 <code>dev/test</code> 环境，从私有 <code>config/database-testing.yaml</code> 返回目标及其内置 <code>connectionRef</code> 或可选 DBX <code>connectionId</code>。内置 <code>probe/describe/query-readonly</code> 支持 MySQL、PostgreSQL、Oracle，只接受单条 SELECT，限制 100 行，校验 database/schema 和可见表，并始终回滚只读事务；密码仅存于系统凭据库。未明确环境时使用 <code>defaults.diagnosisTargetId</code>，明确环境时使用 <code>defaults.byEnvironment</code>。解析失败或存在歧义会终止，不按连接名或历史状态猜测。</p>
 <h3 id="3-2-打包方式">3.2 打包方式</h3>
 <p><code>scripts/build_guthon_tool.py</code> 使用 PyInstaller <code>--onefile</code>，内置配置模板和运行所需 Python 模块。构建必须在目标系统执行：Windows 生成 EXE，macOS 生成 ARM64 Mach-O。</p>
 <ul>
@@ -304,9 +310,11 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
 <li>PAGE 独立 GSS 服务组件保存时严格保护自动生成身份头，只忽略 VS Code 造成的等价换行差异，并分别保留原始头部和正文的换行布局。</li>
 <li>“谷神源码”树顶部“跳转”接受模块及其方法、字段、SQL、事件等任意子节点，沿父级解析所属模块后按 <code>workspaceKey + checkoutPath + sourcePath</code> 精确显示到资源管理器，并拒绝越出当前 checkout 的路径；同一命令保留在右键菜单，取消名称末尾的行内图标。</li>
 <li>顶部“定位”把当前打开的 SVN 虚拟分块或 checkout 物理文件反向映射到 Nexus 树，自动展开父级并选中节点；PAGE 定位只懒解析目标页面。</li>
-<li>“谷神源码”树还提供展开所选、收缩所选、直接显示的原生搜索框、刷新和水平滚动；搜索默认使用模糊过滤，只查询当前树缓存，不重新扫描 checkout。</li>
+<li>“谷神源码”树还提供展开所选、收缩所选、刷新和水平滚动；原搜索按钮已改为“搜索当前 SVN 工作区完整索引”，只在输入完成后查询一次本地 SQLite，不依赖过程函数或页面是否已展开，也不扫描 checkout。</li>
+<li>项目驾驶舱的“搜索工作区完整索引”跨源码身份和本地事实索引返回同一结果列表；结果可打开源码，或复制默认精简、按需详细的 AI 上下文。精简版只保留最多 3 条直接关系、5 条高价值事实和简短 hash；两种版本都不隐式复制整份源码，并明确证据边界。</li>
 <li>每个 SVN workspace 只注册一个 SCM provider，底层 working copy 不拆成多个顶层项目；provider 内按 <code>DATA_SOURCE_ID</code> 生成始终可见的中文子系统资源组，组同时持有数据源 working copy 与所有映射系统 working copy，并另设公共源码组。provider 与资源组暴露相同按钮，分别执行全部范围与子系统范围操作。中文名称只用于展示和分组，不扩大授权清单。单文件更新只作用于授权范围内且仍为远程变更的精确物理路径；远端差异通过认证后的 <code>svn cat -r HEAD</code> 读取内存内容，与当前 working copy 双栏比较。PAGE 默认使用脚本、SQL、字段可读差异，原始 JSON 差异仍可显式打开；本地修改比较 SVN BASE 与 working copy，远端修改比较 working copy 与 SVN HEAD，均不生成临时源码副本。具有 Nexus 对象身份的文件行提供“在 Nexus 中编辑”“查看差异”“放弃此文件修改”和“提交所选 Nexus 修改”，支持 SCM 原生多选后复用 selection token、源 hash 与远端状态复核执行精确文件提交，不引入 Git 暂存。文本冲突行使用 SVN 的旧基线、本地和远程冲突工件打开 VS Code 三方合并，结果直接写回物理 checkout；用户保存并确认后才执行 <code>svn resolve --accept working</code>、增量索引和 SCM 刷新。属性冲突与树冲突继续阻断。</li>
 <li>SCM 的状态检查、Nexus 预览与提交、SVN 更新、提交后增量索引和状态刷新均向 GuthonCodeTool 输出通道流式写入阶段日志；同一工作区的重叠 SCM 操作会被拦截并提示已有操作正在执行，避免重复点击形成并发操作。</li>
+<li>每次成功的 SVN 保存追加一条持久交付回执，记录交付编号、分组 revision、文件和提交时间；驾驶舱显示最近一次提交。回执只证明 SVN 提交，谷神平台最终提交及运行验证不在 Nexus 内重复登记。</li>
 <li>VS Code 原生 SCM 在多个 repository 并存时会过滤没有资源的全部资源组。若 SVN 工作区整体无本地或远端变更，扩展仅在第一个子系统注入一条禁用的“当前无变更”显示资源，使所有子系统仍进入 SCM 树；provider 变更计数保持为零，提交、更新和候选筛选均忽略该占位项。</li>
 <li><code>.gss</code> 注册为独立 Guthon GSS 语言，在 Java grammar 上注入 Velocity/GSS 指令与变量，并继续接入 Nexus 补全、悬停、定义和引用；兼容 <code>.vm</code> 保持 Java。远端状态只在显式云操作时查询；更新发现 <code>incomplete</code> 或 working-copy 管理锁时只执行无删除/还原参数的标准 <code>svn cleanup</code> 后复检。</li>
 <li><code>var</code> 私有 Git 明确忽略根级 <code>checkout/</code>，只管理配置、上下文、索引资料和 DATABASE 工作区；SVN 源码只在 Nexus/SVN SCM 中审阅和提交，不形成第二套 Git 历史。</li>
@@ -349,7 +357,7 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
 npm test  # plugins/GuthonVSCodeExtension/gushen-vscode-completion
 npm test  # plugins/GuthonBridge
 git diff --check</code></pre></div>
-<p>修改功能时应同步检查应用命令、VS Code 侧边栏、Bridge 路由、配置模板、README、知识库和使用手册。Release 只分发应用、VSIX 和 Bridge，不包含真实配置、AI 规范或私有 <code>var/</code>。</p>
+<p>修改功能时应同步检查应用命令、VS Code 侧边栏、Bridge 路由、配置模板、README、知识库和使用手册。Release 只分发应用、Nexus All-in-One VSIX 和 Bridge，不包含真实配置、AI 规范或私有 <code>var/</code>。独立 Guthon SVN Navigator 源码暂时保留，但不再触发或进入自动 Release；SVN 能力统一由 Nexus All-in-One 交付。</p>
 </section>
 </main>
 </div>

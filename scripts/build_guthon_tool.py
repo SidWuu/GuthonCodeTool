@@ -13,6 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SEP = ";" if sys.platform == "win32" else ":"
 HIDDEN_IMPORTS = (
+    "common.database_test_artifacts",
+    "common.database_readonly",
     "common.doctor",
     "common.export_hub_markdown",
     "common.gusen_hub",
@@ -20,9 +22,14 @@ HIDDEN_IMPORTS = (
     "common.query_hub_context",
     "common.source_format",
     "common.workspace_config",
+    "common.workspace_assistant",
     "pymysql",
+    "oracledb",
     "psycopg",
     "psycopg.pq",
+    "keyring",
+    "keyring.backends.macOS",
+    "keyring.backends.Windows",
     "providers.database.export_bill_type_sql",
     "providers.database.export_system_script_sql",
     "providers.database.export_table_schema_sql",

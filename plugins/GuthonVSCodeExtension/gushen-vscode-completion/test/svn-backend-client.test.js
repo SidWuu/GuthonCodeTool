@@ -1,7 +1,19 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
-const { SvnBackendClient } = require('../src/svn/backend-client');
+const { backendErrorMessage, SvnBackendClient } = require('../src/svn/backend-client');
+
+test('removes streamed SVN progress from backend errors', () => {
+  const message = backendErrorMessage(
+    '[SVN] 提交 Nexus 修改｜校验选择\n提交中断（已完成：无）\nSVN 提交被谷神平台阻止：过程函数[x]已被其他用户签出\n',
+    '',
+    1
+  );
+  assert.equal(
+    message,
+    '提交中断（已完成：无）\nSVN 提交被谷神平台阻止：过程函数[x]已被其他用户签出'
+  );
+});
 
 function fakeSpawn(calls, payload = { ok: true }) {
   return (command, args, options) => {
@@ -101,6 +113,16 @@ test('passes an empty optional SVN commit message through stdin', async () => {
     selectionToken: 'token',
   }, ['candidate'], '');
   assert.deepEqual(JSON.parse(calls[0].input), { message: '' });
+});
+
+test('reads durable SVN delivery receipts', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls),
+  });
+  await client.deliveryStatus('projects.demo');
+  assert.equal(calls[0].args.at(-1), 'delivery-status');
 });
 
 test('passes exact conflict targets to inspect and resolve actions', async () => {

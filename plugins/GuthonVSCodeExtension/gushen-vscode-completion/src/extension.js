@@ -18,6 +18,9 @@ const {
 const { createDocumentSelector } = require('./selector');
 const { procedureTargetAt, selectDefinitionPaths } = require('./definition');
 const { prepareWorkspaceSetup, promptWorkspaceCreation, workspaceActions } = require('./tool-workspace');
+const { promptDatabaseDiagnosis } = require('./database-config');
+const { ToolJsonClient } = require('./tool-json-client');
+const { searchPickItems, workspaceCockpit } = require('./workspace-assistant');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 const { resolveDevelopmentRuntime, toolArguments, writeRuntimeDescriptor } = require('./tool-runtime');
 const {
@@ -26,7 +29,7 @@ const {
   sourceModeLabel,
 } = require('./source-mode');
 const { readWorkspaces } = require('./workspace-registry');
-const { activateSvn } = require('./svn/activate');
+const { activateSvn, selectEditableIdentity, sourceModuleElement } = require('./svn/activate');
 const { clearLegacyCredentials, promptForPassword } = require('./svn/credentials');
 const { workspaceKeyFromSourceControlId } = require('./svn/scm-manager');
 
@@ -49,8 +52,11 @@ const TOOL_COMMANDS = {
   workcopy: 'workcopy',
   svn: 'svn',
   sourceMode: 'source-mode',
+  search: 'search',
+  contextPack: 'context-pack',
+  databaseTargetConfigure: 'database-target-configure',
 };
-const CONFIG_FILES = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'source-tables.yaml', 'sync.yaml'];
+const CONFIG_FILES = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'source-tables.yaml', 'sync.yaml', 'database-testing.yaml'];
 const TOOL_LABELS = {
   setup: '设置工作空间',
   'sync-source-all': '拉取源码重建索引',
@@ -68,6 +74,9 @@ const TOOL_LABELS = {
   svn: 'SVN 检出/更新',
   'source-mode': '设置项目源码来源',
   'workspace-create': '添加产品或项目',
+  search: '搜索工作区完整索引',
+  'context-pack': '生成 AI 上下文',
+  'database-target-configure': '配置数据库排查',
 };
 let toolQueue = Promise.resolve();
 const activeToolRuns = new Set();
@@ -311,6 +320,13 @@ function toolItem(label, command, icon, description, args = []) {
   return item;
 }
 
+function staticItem(label, icon, description) {
+  const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+  item.iconPath = new vscode.ThemeIcon(icon);
+  item.description = description;
+  return item;
+}
+
 class ToolTreeDataProvider {
   constructor(bridge = { isRunning: () => false }) {
     this.bridge = bridge;
@@ -338,7 +354,9 @@ class ToolTreeDataProvider {
     workspace.description = ready ? '已配置' : '未配置';
     const configFiles = new vscode.TreeItem('配置文件', vscode.TreeItemCollapsibleState.Collapsed);
     configFiles.iconPath = new vscode.ThemeIcon('settings-gear');
-    configFiles.children = CONFIG_FILES.map((filename) => toolItem(filename, 'gushenCompletion.editConfig', 'edit', undefined, [filename]));
+    configFiles.children = CONFIG_FILES
+      .filter((filename) => filename !== 'database-testing.yaml' || fs.existsSync(path.join(toolHome, 'config', filename)))
+      .map((filename) => toolItem(filename, 'gushenCompletion.editConfig', 'edit', undefined, [filename]));
     workspace.children = [
       toolItem(
         `运行模式：${executionMode === 'development' ? '调试模式' : '发行模式'}`,
@@ -365,7 +383,6 @@ class ToolTreeDataProvider {
     projects.iconPath = new vscode.ThemeIcon('folder-library');
     const tool = configuredToolFromSettings();
     try {
-      const statusLabels = { UNINITIALIZED: '未初始化', PARTIAL: '部分同步', SYNCED: '已同步', FAILED: '同步失败' };
       const workspaces = tool ? await readWorkspaces(tool) : [];
       projects.children = [toolItem(
         '添加产品或项目',
@@ -374,13 +391,20 @@ class ToolTreeDataProvider {
         '创建本地配置并选择源码来源'
       ), ...workspaces.map((item) => {
         const actions = workspaceActions(item);
+        const cockpit = workspaceCockpit(item);
         const node = new vscode.TreeItem(item.displayName, vscode.TreeItemCollapsibleState.Collapsed);
         node.command = {
           command: 'gushenCompletion.expandProjectSource',
           title: '展开源码与索引',
         };
-        node.description = `${item.id} · ${item.sourceMode === 'svn' ? 'SVN' : '数据库'} · ${statusLabels[item.status] || item.status}`;
-        node.iconPath = new vscode.ThemeIcon(item.status === 'SYNCED' ? 'pass-filled' : item.status === 'FAILED' ? 'error' : 'folder');
+        node.description = `${item.id} · ${item.sourceMode === 'svn' ? 'SVN' : '数据库'} · ${cockpit.description}`;
+        node.iconPath = new vscode.ThemeIcon(cockpit.icon);
+        const cockpitNode = new vscode.TreeItem(cockpit.label, vscode.TreeItemCollapsibleState.Expanded);
+        cockpitNode.description = cockpit.description;
+        cockpitNode.iconPath = new vscode.ThemeIcon(cockpit.icon);
+        cockpitNode.children = cockpit.rows.map((row) => row.command
+          ? toolItem(row.label, row.command, row.icon, row.description, [item.workspaceKey])
+          : staticItem(row.label, row.icon, row.description));
         const source = new vscode.TreeItem('源码与索引', vscode.TreeItemCollapsibleState.Expanded);
         source.iconPath = new vscode.ThemeIcon('code');
         source.children = actions.source.map(([label, command, icon]) =>
@@ -393,6 +417,7 @@ class ToolTreeDataProvider {
           ? toolItem(...actions.syncAll, undefined, [item.workspaceKey])
           : undefined;
         node.children = [
+          cockpitNode,
           toolItem(
             `源码来源：${sourceModeLabel(item.sourceMode)}`,
             'gushenCompletion.selectWorkspaceSourceMode',
@@ -491,7 +516,120 @@ function activate(context) {
     onToolTreeChanged: () => toolView.refresh(),
     claimOperation: (workspaceKey, label) => claimToolRun(TOOL_COMMANDS.svn, workspaceKey, label),
   });
+  const assistantClient = new ToolJsonClient({
+    getTool: async () => configuredToolFromSettings(),
+  });
+
+  const copyAiContext = async (workspaceKey, identity, detailed = false) => {
+    if (!workspaceKey || !identity?.sourceId) throw new Error('所选结果没有可定位的源码对象');
+    const args = ['--source-id', identity.sourceId];
+    if (identity.funId) args.push('--fun-id', identity.funId);
+    if (detailed) args.push('--detailed', '--limit', '12');
+    const result = await assistantClient.run(workspaceKey, TOOL_COMMANDS.contextPack, args);
+    await vscode.env.clipboard.writeText(result.markdown);
+    vscode.window.showInformationMessage(`${detailed ? '详细' : '精简'} AI 上下文已复制：${identity.sourceId}`);
+    return result;
+  };
+
+  const selectWorkspace = async (workspaceKey = '', sourceMode = '') => {
+    const tool = configuredToolFromSettings();
+    if (!tool) throw new Error('请先配置 GuthonCodeTool');
+    const allWorkspaces = await readWorkspaces(tool);
+    const workspaces = sourceMode
+      ? filterWorkspacesBySourceMode(allWorkspaces, sourceMode)
+      : allWorkspaces;
+    if (workspaceKey) {
+      const selected = workspaces.find((item) => item.workspaceKey === workspaceKey);
+      if (!selected) throw new Error(`找不到工作区：${workspaceKey}`);
+      return selected;
+    }
+    return vscode.window.showQuickPick(workspaces.map((item) => ({
+      label: item.displayName,
+      description: `${item.workspaceKey} · ${sourceModeLabel(item.sourceMode)}`,
+      workspace: item,
+    })), { title: '选择统一搜索的工作区' }).then((item) => item?.workspace);
+  };
+
+  const searchWorkspace = async (workspaceValue, sourceMode = '') => {
+    const requestedKey = typeof workspaceValue === 'string' ? workspaceValue : '';
+    const workspace = await selectWorkspace(requestedKey, sourceMode);
+    if (!workspace) return undefined;
+    const query = await vscode.window.showInputBox({
+      title: `统一搜索 · ${workspace.displayName}`,
+      prompt: '搜索源码名称、ID、函数、条件、赋值、异常、表读写或调用关系',
+      validateInput: (value) => String(value || '').trim() ? undefined : '请输入搜索关键词',
+    });
+    if (!query) return undefined;
+    const result = await assistantClient.run(
+      workspace.workspaceKey,
+      TOOL_COMMANDS.search,
+      ['--query', query, '--limit', '30']
+    );
+    if (!result.items?.length) {
+      return vscode.window.showInformationMessage(`未找到与“${query}”相关的本地索引结果`);
+    }
+    const selected = await vscode.window.showQuickPick(searchPickItems(result), {
+      title: `统一搜索 · ${result.items.length} 条结果`,
+      matchOnDescription: true,
+      matchOnDetail: true,
+    });
+    if (!selected) return undefined;
+    const action = await vscode.window.showQuickPick([
+      { label: '打开源码', value: 'open', description: selected.item.filePath || selected.item.identity?.sourcePath || '' },
+      { label: '复制精简 AI 上下文', value: 'context', description: '定位、关键关系和最多 5 条高价值事实' },
+      { label: '复制详细 AI 上下文', value: 'context-detailed', description: '用于需要更多调用关系和事实的深入分析' },
+    ], { title: selected.label });
+    if (!action) return undefined;
+    if (action.value === 'context') {
+      return copyAiContext(workspace.workspaceKey, selected.item.identity);
+    }
+    if (action.value === 'context-detailed') {
+      return copyAiContext(workspace.workspaceKey, selected.item.identity, true);
+    }
+    if (workspace.sourceMode === 'svn' && selected.item.identity?.sourceType) {
+      const identity = await selectEditableIdentity(vscode, svnServices.backend, {
+        workspaceKey: workspace.workspaceKey,
+        ...selected.item.identity,
+      });
+      return svnServices.virtualFs.open(
+        identity,
+        selected.item.line > 0 ? { lineNumber: selected.item.line } : {}
+      );
+    }
+    if (!selected.item.filePath) throw new Error('该结果没有可打开的本地文件');
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(selected.item.filePath));
+    const editor = await vscode.window.showTextDocument(document, { preview: true });
+    if (selected.item.line > 0) {
+      const line = Math.min(selected.item.line - 1, Math.max(0, document.lineCount - 1));
+      editor.selection = new vscode.Selection(line, 0, line, 0);
+      editor.revealRange(new vscode.Range(line, 0, line, 0));
+    }
+    return editor;
+  };
   const toolCommands = [
+    vscode.commands.registerCommand('gushenCompletion.searchWorkspace', async (workspaceKey) => {
+      try {
+        return await searchWorkspace(workspaceKey);
+      } catch (error) {
+        return vscode.window.showErrorMessage(`统一搜索失败：${error.message}`);
+      }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.searchCurrentSvnWorkspace', async () => {
+      try {
+        return await searchWorkspace(svnServices.selectedWorkspaceKey(), 'svn');
+      } catch (error) {
+        return vscode.window.showErrorMessage(`统一搜索失败：${error.message}`);
+      }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.copySvnAiContext', async (element) => {
+      try {
+        const sourceElement = sourceModuleElement(element);
+        if (!sourceElement?.object) throw new Error('请选择一个 SVN 源码对象或其子节点');
+        return await copyAiContext(sourceElement.workspaceKey, sourceElement.object);
+      } catch (error) {
+        return vscode.window.showErrorMessage(`生成 AI 上下文失败：${error.message}`);
+      }
+    }),
     vscode.commands.registerCommand('gushenCompletion.setSvnCredentials', async (workspaceKey) => {
       let selectedWorkspaceKey = typeof workspaceKey === 'string' ? workspaceKey : '';
       if (!selectedWorkspaceKey) {
@@ -676,6 +814,23 @@ function activate(context) {
         await vscode.commands.executeCommand('gushenCompletion.initializeSvn', workspaceKey);
       }
       return true;
+    }),
+    vscode.commands.registerCommand('gushenCompletion.configureDatabaseDiagnosis', async (workspaceKey) => {
+      if (typeof workspaceKey !== 'string' || !workspaceKey) {
+        return vscode.window.showErrorMessage('请从具体产品或项目下配置数据库排查');
+      }
+      const definition = await promptDatabaseDiagnosis(vscode.window, workspaceKey);
+      if (!definition) return false;
+      const completed = await runTool(
+        TOOL_COMMANDS.databaseTargetConfigure,
+        [],
+        false,
+        workspaceKey,
+        null,
+        definition
+      );
+      if (completed) toolView.refresh();
+      return completed;
     }),
     vscode.commands.registerCommand('gushenCompletion.startBridge', async () => {
       const tool = await configuredTool();

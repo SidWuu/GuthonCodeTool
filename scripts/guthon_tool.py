@@ -62,8 +62,21 @@ SVN_BROWSE_ACTIONS = {
     "explain",
     "scope-preview",
     "auth-cache",
+    "delivery-status",
 }
-GLOBAL_COMMANDS = {"setup", "workspace-create", "doctor", "route", "workspaces", "workspace-resolve", "self-test"}
+GLOBAL_COMMANDS = {
+    "setup",
+    "workspace-create",
+    "doctor",
+    "route",
+    "workspaces",
+    "workspace-resolve",
+    "database-target-resolve",
+    "database-probe",
+    "database-describe",
+    "database-query-readonly",
+    "self-test",
+}
 DATABASE_ONLY_COMMANDS = {
     "export-schema": "database.schemaExport",
     "export-bill-type": "database.billTypeExport",
@@ -97,7 +110,7 @@ def setup_config(home: Path) -> list[Path]:
 
 
 def _auto_add_operation_enabled(command: str, extra_args: list[str]) -> bool:
-    if command == "source-mode":
+    if command in {"source-mode", "workspace-summary", "search", "context-pack", "database-target-configure"}:
         return False
     return not (command == "svn" and extra_args and extra_args[0] in SVN_BROWSE_ACTIONS)
 
@@ -444,6 +457,141 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         resolved = gusen_hub.resolve_workspace_for_path(config, parsed.path)
         print(json.dumps({"ok": True, **gusen_hub.workspace_agent_context(config, resolved)}, ensure_ascii=False))
         return 0
+    if command in {"database-target-resolve", "database-probe", "database-describe", "database-query-readonly"}:
+        from common import database_test_artifacts
+        from common import database_readonly
+
+        parser = argparse.ArgumentParser(prog=f"guthon_tool.py {command}")
+        parser.add_argument("--path", default=str(Path.cwd()))
+        parser.add_argument("--environment", choices=["dev", "test"], default="")
+        parser.add_argument("--target-id", default="")
+        if command == "database-describe":
+            parser.add_argument("--table", required=True)
+        parsed = parser.parse_args(extra_args)
+        resolved = gusen_hub.resolve_workspace_for_path(config, parsed.path)
+        database_config_path = gusen_hub.CONFIG_DIR / "database-testing.yaml"
+        try:
+            database_config = database_test_artifacts.load_yaml(database_config_path)
+            target, selection_source = database_test_artifacts.resolve_diagnosis_target(
+                database_config,
+                resolved["workspaceKey"],
+                environment=parsed.environment,
+                target_id=parsed.target_id,
+            )
+        except (database_test_artifacts.ArtifactError, OSError) as error:
+            code = getattr(error, "code", "CONFIG_INVALID")
+            raise SystemExit(f"{code}: {error}") from error
+        identity = database_config["expectedIdentities"][target["expectedIdentityRef"]]
+        summary = {
+            "ok": True,
+            "workspaceKey": resolved["workspaceKey"],
+            "workspaceRoot": str(resolved["root"]),
+            "selectionSource": selection_source,
+            "connector": "builtin-readonly" if target.get("connectionRef") else "dbx",
+            "targetDigest": database_test_artifacts.digest(target),
+            "target": {
+                key: target.get(key)
+                for key in (
+                    "id", "environment", "connectionId", "connectionRef", "validationScope", "database", "schema",
+                    "systemId", "dataSourceId", "access", "allowedTables", "tenantScope",
+                )
+                if target.get(key) not in (None, "")
+            },
+            "expectedIdentity": {
+                key: identity.get(key)
+                for key in ("engine", "endpoint", "database", "schema")
+                if identity.get(key) not in (None, "")
+            },
+        }
+        if command == "database-target-resolve":
+            print(json.dumps(summary, ensure_ascii=False, indent=2))
+            return 0
+        try:
+            connection = database_readonly.connection_for_target(database_config, target)
+            if command == "database-probe":
+                result = database_readonly.probe(connection, target)
+            elif command == "database-describe":
+                result = database_readonly.describe(connection, target, parsed.table)
+            else:
+                payload = json.load(sys.stdin)
+                if not isinstance(payload, dict):
+                    raise database_readonly.DatabaseReadonlyError("QUERY_INVALID", "查询输入必须是 JSON 对象")
+                unknown = sorted(set(payload) - {"sql", "maxRows"})
+                if unknown:
+                    raise database_readonly.DatabaseReadonlyError("QUERY_INVALID", f"查询输入包含未知字段: {', '.join(unknown)}")
+                result = database_readonly.query(
+                    connection,
+                    target,
+                    str(payload.get("sql") or ""),
+                    int(payload.get("maxRows", database_readonly.MAX_ROWS)),
+                )
+        except Exception as error:
+            code = getattr(error, "code", "DATABASE_QUERY_FAILED")
+            raise SystemExit(f"{code}: {error}") from error
+        print(json.dumps({**summary, "result": result}, ensure_ascii=False, indent=2))
+        return 0
+    if command == "database-target-configure":
+        from common import database_readonly
+        from common import database_test_artifacts
+
+        if extra_args:
+            raise SystemExit("database-target-configure does not accept extra arguments")
+        config_path = gusen_hub.CONFIG_DIR / "database-testing.yaml"
+        credential_changed = False
+        configuration_saved = False
+        credential_ref = ""
+        previous_password = None
+        temporary_path = None
+        try:
+            payload = json.load(sys.stdin)
+            if not isinstance(payload, dict):
+                raise database_readonly.DatabaseReadonlyError("CONFIG_INVALID", "数据库配置输入必须是 JSON 对象")
+            current = database_test_artifacts.load_yaml(config_path) if config_path.is_file() else {}
+            updated, credential_ref = database_readonly.build_diagnosis_config(
+                current, workspace["workspaceKey"], payload
+            )
+            password = str(payload.get("password") or "")
+            keyring = database_readonly._keyring()
+            previous_password = keyring.get_password(database_readonly.CREDENTIAL_SERVICE, credential_ref)
+            database_readonly.set_password(credential_ref, password)
+            credential_changed = True
+            target, _ = database_test_artifacts.resolve_diagnosis_target(
+                updated, workspace["workspaceKey"], target_id=str(payload["targetId"])
+            )
+            probe_result = database_readonly.probe(
+                database_readonly.connection_for_target(updated, target), target
+            )
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=config_path.parent, prefix=".database-testing-", delete=False
+            ) as handle:
+                json.dump(updated, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                temporary_path = Path(handle.name)
+            os.replace(temporary_path, config_path)
+            configuration_saved = True
+        except Exception as error:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+            if credential_changed and not configuration_saved:
+                try:
+                    if previous_password is None:
+                        database_readonly.delete_password(credential_ref)
+                    else:
+                        database_readonly.set_password(credential_ref, previous_password)
+                except database_readonly.DatabaseReadonlyError:
+                    pass
+            code = getattr(error, "code", "CONFIG_INVALID")
+            raise SystemExit(f"{code}: {error}") from error
+        print(json.dumps({
+            "ok": True,
+            "workspaceKey": workspace["workspaceKey"],
+            "targetId": target["id"],
+            "environment": target["environment"],
+            "connector": "builtin-readonly",
+            "probe": probe_result,
+        }, ensure_ascii=False, indent=2))
+        return 0
     if command == "source-mode":
         parser = argparse.ArgumentParser(prog="guthon_tool.py source-mode")
         parser.add_argument("action", choices=["get", "set"])
@@ -464,6 +612,31 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         if extra_args:
             raise SystemExit("workspace-summary does not accept extra arguments")
         print(json.dumps({"ok": True, "workspace": gusen_hub.workspace_summary(config, workspace)}, ensure_ascii=False))
+        return 0
+    if command in {"search", "context-pack"}:
+        from common import workspace_assistant
+
+        parser = argparse.ArgumentParser(prog=f"guthon_tool.py {command}")
+        parser.add_argument("--limit", type=int, default=20 if command == "search" else 5)
+        if command == "search":
+            parser.add_argument("--query", required=True)
+        else:
+            parser.add_argument("--source-id", required=True)
+            parser.add_argument("--fun-id", default="")
+            parser.add_argument("--detailed", action="store_true")
+        parsed = parser.parse_args(extra_args)
+        result = (
+            workspace_assistant.unified_search(workspace, parsed.query, parsed.limit)
+            if command == "search"
+            else workspace_assistant.context_pack(
+                workspace,
+                parsed.source_id,
+                parsed.fun_id,
+                parsed.limit,
+                parsed.detailed,
+            )
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     if command == "svn":
         from providers.svn import checkout
@@ -496,6 +669,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 "revert",
                 "platform-save-preview",
                 "platform-save",
+                "delivery-status",
                 "definition",
                 "callers",
                 "find",
@@ -1035,6 +1209,8 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 if not parsed.path:
                     raise SystemExit("svn history requires --path")
                 result = scm.history(workspace, logical_path=parsed.path, limit=parsed.limit)
+            elif parsed.action == "delivery-status":
+                result = scm.delivery_status(workspace)
             elif parsed.action in {"revert-preview", "platform-save-preview"}:
                 if not parsed.session:
                     raise SystemExit(f"svn {parsed.action} requires --session")
@@ -1177,7 +1353,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("setup", "workspace-create", "import-svn-scope", "workspaces", "workspace-resolve", "workspace-summary", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
+        choices=("setup", "workspace-create", "import-svn-scope", "workspaces", "workspace-resolve", "database-target-resolve", "database-target-configure", "database-probe", "database-describe", "database-query-readonly", "workspace-summary", "search", "context-pack", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
     )
     parser.add_argument("--home", required=True, help="Directory that stores local config and private source data")
     parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")

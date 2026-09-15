@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 import urllib.error
@@ -48,6 +49,27 @@ def run_checks(bridge_port=17361):
             checks.append(result("config", "PASS", f"workspaces={len(workspaces)}"))
         except (Exception, SystemExit) as error:
             checks.append(result("config", "FAIL", str(error)))
+
+    missing_drivers = []
+    for module, label in (("pymysql", "MySQL"), ("psycopg", "PostgreSQL"), ("oracledb", "Oracle")):
+        try:
+            importlib.import_module(module)
+        except ImportError:
+            missing_drivers.append(label)
+    try:
+        keyring = importlib.import_module("keyring")
+        credential_store_ready = float(keyring.get_keyring().priority) > 0
+    except (ImportError, TypeError, ValueError):
+        credential_store_ready = False
+    if missing_drivers or not credential_store_ready:
+        detail = []
+        if missing_drivers:
+            detail.append(f"missing drivers: {', '.join(missing_drivers)}")
+        if not credential_store_ready:
+            detail.append("credential store unavailable")
+        checks.append(result("database-readonly", "FAIL", "; ".join(detail)))
+    else:
+        checks.append(result("database-readonly", "PASS", "MySQL/PostgreSQL/Oracle + system credential store"))
 
     try:
         index = json.loads((EXTENSION_DATA / "index.json").read_text(encoding="utf-8"))

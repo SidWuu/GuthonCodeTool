@@ -43,6 +43,10 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
     command: ['/tool/GuthonCodeTool'],
     home,
     workspaceResolveCommand: ['/tool/GuthonCodeTool', 'workspace-resolve', '--home', home],
+    databaseTargetResolveCommand: ['/tool/GuthonCodeTool', 'database-target-resolve', '--home', home],
+    databaseProbeCommand: ['/tool/GuthonCodeTool', 'database-probe', '--home', home],
+    databaseDescribeCommand: ['/tool/GuthonCodeTool', 'database-describe', '--home', home],
+    databaseQueryCommand: ['/tool/GuthonCodeTool', 'database-query-readonly', '--home', home],
     linterCommand: [path.join(home, 'var', 'tools', 'guthon-lint')],
   });
 
@@ -62,6 +66,25 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
       'workspace-resolve',
       '--home',
       home,
+    ],
+    databaseTargetResolveCommand: [
+      '/repo/.venv/bin/python',
+      '/repo/scripts/guthon_tool.py',
+      'database-target-resolve',
+      '--home',
+      home,
+    ],
+    databaseProbeCommand: [
+      '/repo/.venv/bin/python', '/repo/scripts/guthon_tool.py',
+      'database-probe', '--home', home,
+    ],
+    databaseDescribeCommand: [
+      '/repo/.venv/bin/python', '/repo/scripts/guthon_tool.py',
+      'database-describe', '--home', home,
+    ],
+    databaseQueryCommand: [
+      '/repo/.venv/bin/python', '/repo/scripts/guthon_tool.py',
+      'database-query-readonly', '--home', home,
     ],
     linterCommand: [path.join(home, 'var', 'tools', 'guthon-lint')],
   });

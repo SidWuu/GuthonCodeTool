@@ -108,6 +108,7 @@ test('SVN workspace actions come only from effective capabilities', () => {
   });
 
   assert.deepEqual(actions.source.map((item) => item[1]), [
+    'gushenCompletion.searchWorkspace',
     'gushenCompletion.importSvnScope',
     'gushenCompletion.initializeSvn',
     'gushenCompletion.reindexCalls',
@@ -116,7 +117,9 @@ test('SVN workspace actions come only from effective capabilities', () => {
     'gushenCompletion.exportMarkdown',
   ]);
   assert.deepEqual(actions.workcopy, []);
-  assert.deepEqual(actions.metadata, []);
+  assert.deepEqual(actions.metadata, [
+    ['配置数据库排查', 'gushenCompletion.configureDatabaseDiagnosis', 'database'],
+  ]);
   assert.equal(actions.diagnose, false);
   assert.equal(actions.syncAll, undefined);
 });
@@ -126,6 +129,7 @@ test('database workspace keeps pull, metadata and diagnosis actions', () => {
 
   assert.deepEqual(actions, {
     source: [
+      ['搜索工作区完整索引', 'gushenCompletion.searchWorkspace', 'search'],
       ['拉取源码重建索引', 'gushenCompletion.initSourceIndex', 'database'],
       ['拉取源码', 'gushenCompletion.syncWorkspaceSource', 'sync'],
       ['重建索引', 'gushenCompletion.reindexCalls', 'refresh'],
@@ -133,6 +137,7 @@ test('database workspace keeps pull, metadata and diagnosis actions', () => {
     ],
     workcopy: [['检查或打包 Workcopy', 'gushenCompletion.inspectWorkcopy', 'package']],
     metadata: [
+      ['配置数据库排查', 'gushenCompletion.configureDatabaseDiagnosis', 'database'],
       ['导出表结构', 'gushenCompletion.exportSchema', 'table'],
       ['导出单据类型', 'gushenCompletion.exportBillTypes', 'list-tree'],
       ['导出系统脚本', 'gushenCompletion.exportSystemScripts', 'file-code'],

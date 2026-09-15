@@ -33,6 +33,10 @@ function writeRuntimeDescriptor(tool) {
     command,
     home: tool.toolHome,
     workspaceResolveCommand: [...command, 'workspace-resolve', '--home', tool.toolHome],
+    databaseTargetResolveCommand: [...command, 'database-target-resolve', '--home', tool.toolHome],
+    databaseProbeCommand: [...command, 'database-probe', '--home', tool.toolHome],
+    databaseDescribeCommand: [...command, 'database-describe', '--home', tool.toolHome],
+    databaseQueryCommand: [...command, 'database-query-readonly', '--home', tool.toolHome],
     linterCommand: [path.join(tool.toolHome, 'var', 'tools', 'guthon-lint')],
   }, null, 2)}\n`, 'utf8');
   return descriptorPath;
