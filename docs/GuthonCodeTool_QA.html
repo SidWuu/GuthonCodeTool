@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="GuthonCodeTool macOS 与 Windows 部署、配置、DATABASE、SVN、Nexus 和 Bridge 问题解决中心">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233c5ddd'/%3E%3Cpath d='M18 19h28v8H27v10h15v8H18z' fill='white'/%3E%3C/svg%3E">
+<title>GuthonCodeTool 问题解决中心</title>
+<style>
+:root{
+  --bg:#f4f6fb;--surface:#fff;--surface-soft:#f8faff;--text:#172033;--muted:#65708a;
+  --primary:#3c5ddd;--primary-deep:#1d347f;--primary-soft:#eaf0ff;--line:#e2e7f1;
+  --success:#16836b;--success-soft:#e8f7f2;--warning:#a85705;--warning-soft:#fff5e8;
+  --danger:#b23a48;--danger-soft:#fff0f2;--code:#101827;--code-text:#e7eefb;
+  --shadow:0 18px 55px rgba(28,47,94,.10);--radius:18px;
+}
+[data-theme="dark"]{
+  --bg:#0d1321;--surface:#151d2d;--surface-soft:#111827;--text:#e9eef9;--muted:#9aa7bd;
+  --primary:#83a0ff;--primary-deep:#c3d0ff;--primary-soft:#202d50;--line:#2a354c;
+  --success:#64d3b7;--success-soft:#14382f;--warning:#ffc178;--warning-soft:#3b2a16;
+  --danger:#ff91a0;--danger-soft:#3b2027;--code:#080d16;--code-text:#edf3ff;
+  --shadow:0 18px 55px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:28px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;line-height:1.76;transition:background .2s,color .2s}
+button,input{font:inherit}a{color:var(--primary);text-underline-offset:3px}
+.progress{position:fixed;z-index:100;left:0;top:0;width:0;height:3px;background:linear-gradient(90deg,#7ea2ff,#fff);box-shadow:0 0 12px #6d8cff}
+.hero{position:relative;overflow:hidden;color:#fff;padding:72px 24px 68px;background:radial-gradient(circle at 88% 14%,rgba(140,170,255,.42),transparent 29%),radial-gradient(circle at 8% 88%,rgba(77,113,239,.24),transparent 30%),linear-gradient(135deg,#172554 0%,#223f9d 55%,#4569e3 100%)}
+.hero:after{content:"";position:absolute;right:-90px;bottom:-160px;width:430px;height:430px;border:1px solid rgba(255,255,255,.15);border-radius:50%;box-shadow:0 0 0 48px rgba(255,255,255,.035),0 0 0 96px rgba(255,255,255,.025)}
+.hero-inner{position:relative;z-index:1;max-width:1240px;margin:auto}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border:1px solid rgba(255,255,255,.24);border-radius:999px;background:rgba(255,255,255,.10);font-size:13px;letter-spacing:.04em}
+.eyebrow-dot{width:7px;height:7px;border-radius:50%;background:#8ef0d2;box-shadow:0 0 0 5px rgba(142,240,210,.13)}
+.hero h1{max-width:920px;margin:20px 0 16px;font-size:clamp(38px,6vw,67px);line-height:1.08;letter-spacing:-.035em}.hero p{max-width:820px;margin:0;color:rgba(255,255,255,.84);font-size:18px}
+.hero-actions{display:flex;flex-wrap:wrap;gap:11px;margin-top:28px}.hero-link{display:inline-flex;align-items:center;gap:8px;padding:11px 16px;border:1px solid rgba(255,255,255,.28);border-radius:10px;color:#fff;text-decoration:none;background:rgba(255,255,255,.07);font-weight:700}.hero-link:hover{background:rgba(255,255,255,.14)}.hero-link.primary{background:#fff;color:#213b99;border-color:#fff}
+.search-shell{max-width:1380px;margin:28px auto 0;padding:0 24px}.search-panel{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}
+.search-box{position:relative}.search-box svg{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--muted)}
+.search-input{width:100%;height:52px;padding:0 45px 0 49px;border:1px solid var(--line);border-radius:12px;background:var(--surface-soft);color:var(--text);outline:none;font-size:16px}.search-input:focus{border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 14%,transparent)}
+.search-shortcut{position:absolute;right:14px;top:50%;transform:translateY(-50%);padding:2px 7px;border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:12px;background:var(--surface)}
+.clear-btn{border:0;border-radius:10px;padding:0 18px;background:var(--primary-soft);color:var(--primary);font-weight:750;cursor:pointer}.clear-btn:hover{background:color-mix(in srgb,var(--primary-soft) 75%,var(--primary))}
+.quick{max-width:1380px;margin:20px auto 0;padding:0 24px}.quick-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:15px}.quick-card{text-align:left;border:1px solid var(--line);border-radius:16px;padding:17px 18px;background:var(--surface);color:var(--text);cursor:pointer;box-shadow:0 10px 28px rgba(28,47,94,.055);transition:.18s transform,.18s border-color}.quick-card:hover{transform:translateY(-2px);border-color:var(--primary)}.quick-card strong{display:block;font-size:14px}.quick-card span{display:block;margin-top:3px;color:var(--muted);font-size:12px}
+.layout{max-width:1380px;margin:auto;padding:28px 24px 80px;display:grid;grid-template-columns:292px minmax(0,1fr);gap:28px;align-items:start}
+.sidebar{position:sticky;top:17px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 10px 30px rgba(28,47,94,.055);overflow:hidden}.side-block{padding:17px;border-bottom:1px solid var(--line)}.side-block:last-child{border:0}.side-title{margin:0 0 11px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.filter-row{display:flex;flex-wrap:wrap;gap:7px}.filter-btn{border:1px solid var(--line);border-radius:999px;padding:6px 10px;background:var(--surface-soft);color:var(--muted);cursor:pointer;font-size:12px}.filter-btn:hover{color:var(--primary);border-color:var(--primary)}.filter-btn.active{color:#fff;background:var(--primary);border-color:var(--primary);font-weight:700}
+.category-list{display:flex;flex-direction:column;gap:3px}.category-btn{display:flex;justify-content:space-between;gap:10px;width:100%;border:0;border-radius:9px;padding:8px 9px;background:transparent;color:var(--muted);cursor:pointer;text-align:left;font-size:13px}.category-btn:hover{background:var(--primary-soft);color:var(--primary)}.category-btn.active{background:var(--primary-soft);color:var(--primary);font-weight:750}.category-count{font-variant-numeric:tabular-nums;opacity:.8}
+.side-note{margin:0;color:var(--muted);font-size:12px}.side-note strong{color:var(--text)}
+.main{min-width:0}.result-head{display:flex;align-items:end;justify-content:space-between;gap:14px;margin:2px 0 14px}.result-head h2{margin:0;font-size:24px}.result-meta{margin:3px 0 0;color:var(--muted);font-size:13px}.result-actions{display:flex;gap:8px}.text-btn{border:1px solid var(--line);border-radius:9px;padding:7px 10px;background:var(--surface);color:var(--muted);cursor:pointer;font-size:12px}.text-btn:hover{color:var(--primary);border-color:var(--primary)}
+.active-filters{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}.active-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:12px}.active-chip button{border:0;background:none;color:inherit;cursor:pointer;padding:0;font-weight:900}
+.qa-list{display:flex;flex-direction:column;gap:11px}.qa-card{scroll-margin-top:18px;border:1px solid var(--line);border-radius:15px;background:var(--surface);box-shadow:0 8px 25px rgba(28,47,94,.045);overflow:hidden}.qa-card[open]{border-color:color-mix(in srgb,var(--primary) 38%,var(--line));box-shadow:0 14px 35px rgba(28,47,94,.08)}
+.qa-summary{list-style:none;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;padding:18px 19px;cursor:pointer}.qa-summary::-webkit-details-marker{display:none}.qa-summary:after{content:"＋";width:27px;height:27px;display:grid;place-items:center;border-radius:8px;background:var(--primary-soft);color:var(--primary);font-weight:800}.qa-card[open] .qa-summary:after{content:"−"}.qa-summary:hover{background:var(--surface-soft)}
+.qa-title{font-size:16px;font-weight:780;line-height:1.45}.qa-lead{margin:5px 0 0;color:var(--muted);font-size:13px}.tag-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.tag{padding:2px 7px;border:1px solid var(--line);border-radius:6px;background:var(--surface-soft);color:var(--muted);font-size:10.5px}.tag.platform{color:var(--primary);background:var(--primary-soft);border-color:transparent}.tag.mode{color:var(--success);background:var(--success-soft);border-color:transparent}
+.qa-body{padding:3px 19px 22px;border-top:1px solid var(--line)}.answer-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:17px}.answer-block{padding:14px 15px;border:1px solid var(--line);border-radius:12px;background:var(--surface-soft)}.answer-block.full{grid-column:1/-1}.answer-block h3{margin:0 0 7px;font-size:13px;color:var(--primary)}.answer-block ul,.answer-block ol{margin:0;padding-left:1.28em}.answer-block li{margin:4px 0;font-size:13.5px}.answer-block p{margin:0;font-size:13.5px}.answer-block.verify{background:var(--success-soft);border-color:color-mix(in srgb,var(--success) 24%,var(--line))}.answer-block.verify h3{color:var(--success)}.answer-block.avoid{background:var(--danger-soft);border-color:color-mix(in srgb,var(--danger) 20%,var(--line))}.answer-block.avoid h3{color:var(--danger)}
+code{font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace;font-size:.9em;background:var(--primary-soft);border:1px solid var(--line);border-radius:5px;padding:1px 5px;overflow-wrap:anywhere}.answer-links{display:flex;flex-wrap:wrap;gap:9px;margin-top:13px}.answer-links a{font-size:12px;font-weight:700;text-decoration:none}.answer-links a:after{content:" ↗"}
+.empty{display:none;padding:50px 25px;text-align:center;border:1px dashed var(--line);border-radius:16px;background:var(--surface)}.empty-icon{font:700 42px/1 Georgia,serif;color:var(--primary)}.empty h3{margin:11px 0 5px}.empty p{margin:0;color:var(--muted);font-size:13px}
+.support{margin-top:18px;padding:19px;border:1px solid color-mix(in srgb,var(--warning) 24%,var(--line));border-radius:15px;background:var(--warning-soft)}.support-head{display:flex;justify-content:space-between;gap:14px;align-items:start}.support h2{margin:0;font-size:18px}.support p{margin:5px 0;color:var(--muted);font-size:13px}.support pre{margin:13px 0 0;padding:14px;white-space:pre-wrap;border-radius:10px;background:var(--code);color:var(--code-text);font-size:12px;overflow:auto}.copy-support{border:0;border-radius:9px;padding:7px 10px;background:var(--warning);color:#fff;cursor:pointer;font-size:12px;font-weight:700}
+.toolbar{position:fixed;z-index:90;right:18px;bottom:18px;display:flex;flex-direction:column;gap:9px}.round-btn{width:42px;height:42px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);cursor:pointer;font-size:16px}.round-btn:hover{color:var(--primary);transform:translateY(-1px)}
+.footer{max-width:1380px;margin:auto;padding:0 24px 42px;text-align:center;color:var(--muted);font-size:13px}
+@media(max-width:1050px){.quick-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.layout{grid-template-columns:1fr}.sidebar{position:relative;top:auto}.sidebar-inner{display:grid;grid-template-columns:1fr 1fr}.side-block:nth-child(2){border-right:1px solid var(--line)}.side-block:last-child{grid-column:1/-1}.category-list{display:grid;grid-template-columns:repeat(3,1fr)}}
+@media(max-width:680px){.hero{padding:48px 18px 43px}.hero h1{font-size:39px}.hero p{font-size:15.5px}.search-shell{margin-top:20px}.search-shell,.quick,.layout{padding-left:13px;padding-right:13px}.search-panel{grid-template-columns:1fr}.clear-btn{height:40px}.quick-grid{grid-template-columns:1fr 1fr}.quick-card:last-child{grid-column:1/-1}.layout{padding-top:20px}.sidebar-inner{display:block}.side-block{border-right:0!important}.category-list{grid-template-columns:1fr 1fr}.result-head{align-items:start}.result-actions{display:none}.qa-summary{padding:16px 15px}.qa-body{padding:3px 15px 18px}.answer-grid{grid-template-columns:1fr}.answer-block.full{grid-column:auto}.support-head{display:block}.copy-support{margin-top:9px}.toolbar{right:12px;bottom:12px}}
+@media print{body{background:#fff;color:#111}.hero{padding:20px 0;background:#fff;color:#111;border-bottom:2px solid #ddd}.hero p{color:#333}.search-shell,.quick,.sidebar,.result-actions,.active-filters,.toolbar,.copy-support,.progress{display:none!important}.layout{display:block;padding:22px 0}.qa-card{box-shadow:none;break-inside:avoid}.qa-card:not([open]) .qa-body{display:block}.qa-summary:after{display:none}.answer-block{background:#fff}.footer{padding-top:20px}}
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<header class="hero">
+  <div class="hero-inner">
+    <span class="eyebrow"><span class="eyebrow-dot"></span>macOS &amp; Windows · DATABASE &amp; SVN</span>
+    <h1>GuthonCodeTool<br>问题解决中心</h1>
+    <p>按错误提示、使用阶段和组件快速定位问题。每条答案都包含检查路径、处理步骤、恢复验证和安全边界。</p>
+    <div class="hero-actions">
+      <a class="hero-link primary" href="index.html">使用手册</a>
+      <a class="hero-link" href="GuthonCodeTool_全功能说明.html">全功能说明</a>
+      <a class="hero-link" href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">最新 Release</a>
+    </div>
+  </div>
+</header>
+
+<div class="search-shell">
+  <div class="search-panel" role="search">
+    <div class="search-box">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input class="search-input" id="search" type="search" placeholder="搜索错误提示、功能名称或现象，例如 EADDRINUSE、SVN 密码、项目不显示…" autocomplete="off" aria-label="搜索问题">
+      <span class="search-shortcut">/</span>
+    </div>
+    <button class="clear-btn" id="reset" type="button">清除筛选</button>
+  </div>
+</div>
+
+<section class="quick" aria-label="高频问题">
+  <div class="quick-grid">
+    <button class="quick-card" data-quick="启动失败"><strong>打不开或启动失败</strong><span>权限、拦截与应用路径</span></button>
+    <button class="quick-card" data-quick="Nexus"><strong>Nexus 没有显示内容</strong><span>VSIX、工作空间与项目树</span></button>
+    <button class="quick-card" data-quick="配置"><strong>配置或同步失败</strong><span>YAML、DATABASE 与状态</span></button>
+    <button class="quick-card" data-quick="Bridge"><strong>Bridge 无法连接</strong><span>端口、进程与 Chrome</span></button>
+    <button class="quick-card" data-quick="SVN 冲突"><strong>SVN 保存或冲突</strong><span>本地修改、更新与提交</span></button>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <section class="side-block">
+        <h2 class="side-title">操作系统</h2>
+        <div class="filter-row" id="osFilters"></div>
+        <h2 class="side-title" style="margin-top:17px">源码模式</h2>
+        <div class="filter-row" id="modeFilters"></div>
+      </section>
+      <section class="side-block">
+        <h2 class="side-title">问题分类</h2>
+        <div class="category-list" id="categories"></div>
+      </section>
+      <section class="side-block">
+        <p class="side-note"><strong>先看哪里？</strong><br>优先查看“工作区驾驶舱”和“输出”面板中的第一条失败信息；不要用后续连带错误替代根因。</p>
+      </section>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="result-head">
+      <div><h2>问题与解答</h2><p class="result-meta" id="resultMeta" aria-live="polite"></p></div>
+      <div class="result-actions"><button class="text-btn" id="expandAll" type="button">展开当前结果</button><button class="text-btn" id="collapseAll" type="button">全部收起</button></div>
+    </div>
+    <div class="active-filters" id="activeFilters"></div>
+    <div class="qa-list" id="qaList"></div>
+    <div class="empty" id="empty"><div class="empty-icon">?</div><h3>没有找到匹配问题</h3><p>尝试使用错误原文中的短关键词，或清除部分筛选条件。</p></div>
+    <section class="support">
+      <div class="support-head">
+        <div><h2>仍未解决？复制最小求助信息</h2><p>请删除密码、连接串、业务数据和私有源码后再发送。路径可只保留末级目录名。</p></div>
+        <button class="copy-support" id="copySupport" type="button">复制模板</button>
+      </div>
+      <pre id="supportTemplate">操作系统与架构：
+GuthonCodeTool 版本：
+Guthon Nexus VSIX 版本：
+运行模式：发行模式 / 调试模式
+workspaceKey：
+源码模式：DATABASE / SVN
+操作入口：
+完整错误文本：
+“输出”面板名称及首条失败信息：
+“检查本地环境”结果：
+已经尝试的步骤：</pre>
+    </section>
+  </main>
+</div>
+
+<div class="toolbar">
+  <button class="round-btn" id="themeToggle" type="button" title="切换明暗主题" aria-label="切换明暗主题">◐</button>
+  <button class="round-btn" id="backTop" type="button" title="返回顶部" aria-label="返回顶部">↑</button>
+</div>
+<footer class="footer">GuthonCodeTool 问题解决中心 · 当前内容面向 2.0 DATABASE + SVN 双模式版本 · 最后核验 2026-09-16</footer>
+
+<script>
+const qaItems=[
+  {id:"install-download",category:"安装与启动",os:["mac","windows"],mode:"all",title:"应该下载哪个安装包？",lead:"不同系统使用不同应用，但 VSIX 和 Chrome 扩展应来自同一个 Release。",symptom:"Release 中有多个文件，不确定哪些是必需组件。",checks:["确认系统和处理器架构。","确认所有组件的 Release 版本号一致。"],steps:["Apple Silicon Mac 下载 <code>GuthonCodeTool-macos-arm64.zip</code>。","Windows x64 下载 <code>GuthonCodeTool-windows-x64.exe</code>。","两个系统都安装 <code>guthon-nexus-all-in-one-vscode.vsix</code>；需要网页能力时再安装 Guthon Bridge。"],verify:"应用路径可在 Nexus 中选择，VS Code 左侧出现“Guthon Nexus”，Bridge 与应用版本来自同一 Release。",avoid:"不要混用不同 Release 的应用、VSIX 和 Bridge。",links:[["查看使用手册","GuthonCodeTool_使用手册.html#1-准备与下载"]]},
+  {id:"install-macos-permission",category:"安装与启动",os:["mac"],mode:"all",title:"macOS 提示没有执行权限或无法启动",lead:"解压后的应用可能缺少 Unix 执行权限。",symptom:"Nexus 选择应用后提示启动失败，或终端显示 permission denied。",checks:["确认使用 Apple Silicon M1 及后续型号。","确认应用文件没有再次被改名或移动。"],steps:["在终端执行 <code>chmod +x \"/你的应用目录/GuthonCodeTool\"</code>。","回到 Nexus 重新执行“设置/切换工作空间”，重新选择该应用。"],verify:"执行“检查本地环境”能启动工具并返回结构化检查结果。",avoid:"不要为了绕过权限问题改用来源不明的可执行文件。"},
+  {id:"install-macos-gatekeeper",category:"安装与启动",os:["mac"],mode:"all",title:"macOS 提示无法验证开发者或阻止打开",lead:"这是 Gatekeeper 对未公证内部工具的系统拦截。",symptom:"双击或由 Nexus 启动时出现“无法验证开发者”等提示。",checks:["核对文件确实来自 GuthonCodeTool Release。"],steps:["尝试启动一次，让系统记录拦截。","打开“系统设置 → 隐私与安全性”。","在对应拦截信息旁选择“仍要打开”，再次确认。"],verify:"应用可以由 Nexus 启动，后续不再重复弹出同一拦截。",avoid:"不要全局关闭 Gatekeeper。"},
+  {id:"install-windows-smartscreen",category:"安装与启动",os:["windows"],mode:"all",title:"Windows SmartScreen 阻止运行",lead:"内部发布的 EXE 可能触发 SmartScreen。",symptom:"启动 EXE 时显示“Windows 已保护你的电脑”。",checks:["核对文件名、Release 版本和下载来源。"],steps:["在 SmartScreen 页面选择“更多信息”。","确认发布来源后选择“仍要运行”。","把 EXE 放在固定应用目录，再由 Nexus 选择。"],verify:"Nexus 能稳定调用 EXE，重启 VS Code 后路径仍有效。",avoid:"不要把应用长期放在下载目录或临时目录。"},
+  {id:"install-windows-path",category:"安装与启动",os:["windows"],mode:"all",title:"Windows 提示路径过长或目录链接失败",lead:"过深数据目录和未启用链接能力会影响同步。",symptom:"同步或创建目录时报告 path too long、symlink 或权限错误。",checks:["检查数据目录是否位于很深的用户目录中。","检查 Windows 开发人员模式和公司长路径策略。"],steps:["优先使用 <code>D:\\GuthonCodeToolData</code> 一类短路径。","按公司策略启用 Windows 长路径支持。","目录链接失败时启用开发人员模式，或让管理员完成首次同步。"],verify:"重新同步后不再出现路径或目录链接错误。",avoid:"不要在已有同步过程中直接改名或搬动部分子目录。"},
+  {id:"install-version-mismatch",category:"安装与启动",os:["mac","windows"],mode:"all",title:"升级后出现找不到命令或组件不兼容",lead:"应用、Nexus VSIX 和 Bridge 版本不一致通常会造成接口错位。",symptom:"升级一个组件后出现旧版本没有的命令、参数或响应格式错误。",checks:["分别确认应用、VSIX 和 Bridge 的 Release 来源。","在 VS Code 扩展面板确认 Nexus 版本。"],steps:["从同一个 Release 重新下载三个组件。","替换应用，重新安装 VSIX 并执行 Developer: Reload Window。","替换并重新加载 Chrome 扩展。"],verify:"Nexus 的核心命令、Bridge 健康检查和项目树均能正常工作。"},
+
+  {id:"windows-architecture",category:"Windows 部署",os:["windows"],mode:"all",title:"Windows 应用提示与此电脑不兼容",lead:"当前正式发布物只面向 Windows x64。",symptom:"EXE 无法启动，系统提示不能在此电脑上运行，或设备是 Windows on ARM。",checks:["打开“设置 → 系统 → 系统信息”，确认系统类型。","确认下载的是 <code>GuthonCodeTool-windows-x64.exe</code>，而不是 macOS 压缩包。"],steps:["在 Windows x64 系统使用正式 EXE。","Windows on ARM 不作为当前原生发布目标；不要把仿真可启动当作已支持，需改用受支持的 x64 设备或联系维护者确认。"],verify:"系统类型为 x64，正式 EXE 能由 Nexus 启动并完成环境检查。",avoid:"不要从第三方来源下载所谓 ARM 或 32 位改包。"},
+  {id:"windows-file-blocked",category:"Windows 部署",os:["windows"],mode:"all",title:"下载后的 EXE 或 VSIX 被 Windows 标记为已阻止",lead:"浏览器下载的文件可能带有来自 Internet 的安全标记。",symptom:"EXE 无法运行、VSIX 安装异常，文件属性底部出现“解除锁定”。",checks:["核对文件来自官方 Release。","右键文件打开“属性 → 常规”，检查是否有“解除锁定”。"],steps:["确认来源后勾选“解除锁定”并应用。","若下载的是压缩包，应先对压缩包解除锁定，再重新解压。","重新安装 VSIX 或重新选择 EXE。"],verify:"文件属性不再显示阻止标记，EXE 和 VSIX 可以正常加载。",avoid:"不要对来源不明的文件解除安全限制。"},
+  {id:"windows-antivirus-quarantine",category:"Windows 部署",os:["windows"],mode:"all",title:"Defender 或公司杀毒软件删除、隔离 GuthonCodeTool",lead:"PyInstaller 打包的内部 EXE 可能触发启发式误报。",symptom:"下载后文件消失、启动即被终止，或安全中心显示已隔离。",checks:["在“Windows 安全中心 → 病毒和威胁防护 → 保护历史记录”查看命中项。","核对 Release 来源、文件名和版本。"],steps:["确认是正式发布物后，按公司流程申请安全放行或恢复。","优先让 IT 对准确文件哈希、签名或固定应用目录建立最小范围规则。","恢复后重新执行环境检查。"],verify:"EXE 不再被隔离，重启 VS Code 后 Nexus 仍能调用同一文件。",avoid:"不要关闭整个 Defender、实时保护或公司终端防护。"},
+  {id:"windows-controlled-folder",category:"Windows 部署",os:["windows"],mode:"all",title:"同步时报拒绝访问，Windows 受控文件夹访问阻止写入",lead:"企业安全策略可能允许读取但阻止应用写入受保护目录。",symptom:"创建 config、var、索引或 checkout 时出现 Access denied、WinError 5。",checks:["确认错误涉及的具体目录。","检查 Windows 安全中心的“勒索软件防护/受控文件夹访问”记录。","确认目录是否位于桌面、文档或其他受保护位置。"],steps:["将数据目录放到用户有完整权限的固定本地目录，例如 <code>D:\\GuthonCodeToolData</code>。","必须使用受保护目录时，按公司流程允许准确的 GuthonCodeTool EXE。","重新设置工作空间后重试失败步骤。"],verify:"工具可以创建和更新配置、SQLite 索引及工作区文件，无 WinError 5。",avoid:"不要长期以管理员身份运行所有日常开发操作，也不要放开整个磁盘。"},
+  {id:"windows-protected-path",category:"Windows 部署",os:["windows"],mode:"all",title:"把应用或数据放在 Program Files 后频繁要求管理员权限",lead:"Program Files 适合受管应用，不适合作为可写数据和 checkout 根。",symptom:"配置、索引或 SVN 操作需要 UAC，普通启动时失败。",checks:["确认应用目录和数据目录是否混放。","确认数据目录是否在 <code>C:\\Program Files</code>、Windows 系统目录或其他管理员路径。"],steps:["应用可放固定工具目录，例如 <code>D:\\GuthonCodeTool\</code>。","数据单独放在普通用户可写的短路径，例如 <code>D:\\GuthonCodeToolData\</code>。","在 Nexus 重新选择应用和数据目录。"],verify:"普通用户会话下环境检查、同步和 SVN 写入均正常，不再弹 UAC。",avoid:"不要通过给 Program Files 全目录授予 Everyone 写权限解决。"},
+  {id:"windows-cloud-network-path",category:"Windows 部署",os:["windows"],mode:"all",title:"数据目录位于 OneDrive、网络盘或映射盘后索引和锁异常",lead:"SQLite、SVN working copy 和进程锁更适合稳定的本地磁盘。",symptom:"索引偶发损坏、锁超时、文件被同步软件改名，或盘符重连后路径失效。",checks:["检查数据目录是否带云同步标记、UNC 路径或临时映射盘符。","确认磁盘是否会离线、按需下载或被多人共享。"],steps:["把活动数据目录迁移到固定的本地磁盘路径。","先停止 Bridge 和同步任务，再完整复制目录。","在 Nexus 执行“设置/切换工作空间”，指向新根目录并运行环境检查。"],verify:"重启和离线状态下路径仍稳定，索引、锁和 SVN 状态可重复读取。",avoid:"不要让多个电脑同时写同一个云同步或网络共享数据目录。"},
+  {id:"windows-vsix-policy",category:"Windows 部署",os:["windows"],mode:"all",title:"Windows 上无法从 VSIX 安装或扩展被自动禁用",lead:"企业 VS Code 策略、旧扩展冲突或未信任工作区可能限制扩展。",symptom:"Install from VSIX 失败、扩展显示 Disabled，或重启后 Nexus 不激活。",checks:["在扩展面板查看明确禁用原因。","打开“帮助 → 切换开发人员工具”或扩展日志查看安装错误。","确认安装的是 All-in-One VSIX。"],steps:["卸载旧版 Guthon 扩展，安装当前 Release 的 All-in-One VSIX。","执行 Developer: Reload Window。","若被企业策略阻止，联系 IT 放行该 VSIX/扩展，不要绕过策略。","按工作区信任提示确认本地受控目录。"],verify:"扩展处于 Enabled，活动栏出现 Guthon Nexus，命令面板能找到 Nexus 命令。"},
+  {id:"windows-svn-path",category:"Windows 部署",os:["windows"],mode:"svn",title:"Windows 已安装 SVN，但 Nexus 仍提示找不到 svn",lead:"VS Code 进程可能没有读取新 PATH，或安装的客户端未提供命令行工具。",symptom:"终端或 Nexus 显示 svn is not recognized、ENOENT 或客户端不可用。",checks:["新开 PowerShell 执行 <code>where.exe svn</code>。","执行 <code>svn --version --quiet</code>，确认版本不低于 1.10。","确认安装包包含命令行客户端。"],steps:["把 svn 可执行目录按公司规范加入用户或系统 PATH。","完全关闭所有 VS Code 窗口后重新打开。","在 VS Code 集成终端再次运行 where/version，再执行 Nexus 登录。"],verify:"VS Code 集成终端和 Nexus 解析到同一个 SVN 1.10+ 客户端。",avoid:"不要把某个临时终端能找到 svn 当作已证明 VS Code 进程也能找到。"},
+  {id:"windows-team-prerequisites",category:"Windows 部署",os:["windows"],mode:"all",title:"Windows 安装 guthon-team 时提示找不到 Git、Python 或 py",lead:"这些是团队规范安装依赖，不是 GuthonCodeTool 本体的运行依赖。",symptom:"clone 失败，或 <code>py -3 tools/guthon_team.py</code> 无法执行。",checks:["运行 <code>git --version</code>。","运行 <code>py -3 --version</code>。","确认 GitHub 账号已获得私有仓库权限。"],steps:["按公司软件渠道安装 Git 和 Python 3。","重启 PowerShell 与 VS Code，让 PATH 生效。","使用 <code>py -3 tools/guthon_team.py install --workspace \"D:\\你的数据目录\\var\"</code>。"],verify:"安装程序完成并能在 var 下找到受管规范、<code>.guthon/config.json</code> 和 <code>tools/guthon-lint</code>。",avoid:"不要因为此步骤缺 Python 就判断 GuthonCodeTool EXE 本体无法使用。"},
+  {id:"windows-proxy-certificate",category:"Windows 部署",os:["windows"],mode:"all",title:"公司代理或证书导致 Release、GitHub 私库下载失败",lead:"代理认证和企业根证书问题应由系统或公司 Git 配置解决。",symptom:"浏览器、git clone 或 VSIX 下载出现 timeout、407、SSL certificate problem。",checks:["确认浏览器能否访问对应 GitHub/Gitee 地址。","确认公司 VPN、代理和根证书是否已按规范安装。","区分无仓库权限的 404 与网络/证书错误。"],steps:["连接公司要求的网络或 VPN。","按公司 IT 规范配置 Windows/Git 代理和企业根证书。","无私库权限时联系仓库负责人开通账号。","网络恢复后重新下载完整 Release，避免使用残缺文件。"],verify:"浏览器和 Git 能在证书校验开启的情况下访问目标，下载文件大小稳定。",avoid:"不要使用 <code>sslVerify=false</code>、关闭证书校验或把账号令牌写进 URL。"},
+  {id:"windows-credential-manager",category:"Windows 部署",os:["windows"],mode:"all",title:"Windows 凭据管理器不可用，数据库密码无法保存",lead:"内置数据库连接依赖操作系统凭据库保存密码。",symptom:"环境检查包含 credential store unavailable，或重启后反复要求数据库密码。",checks:["打开 Windows“凭据管理器”，确认当前用户的 Windows 凭据可用。","确认不是临时账户、受限服务账户或无持久用户配置的会话。"],steps:["在正常桌面用户会话中启动 VS Code。","按公司策略恢复 Credential Manager 服务或用户凭据保管能力。","重新运行 Nexus 数据库配置向导并保存密码。"],verify:"环境检查的 database-readonly 项为 PASS，重启后仍可读取凭据。",avoid:"不要退回到 YAML、脚本或命令参数中保存明文密码。"},
+  {id:"windows-loopback-security",category:"Windows 部署",os:["windows"],mode:"all",title:"Windows 安全软件阻止 Bridge 的 127.0.0.1 连接",lead:"Bridge 只监听本机回环地址，不需要对局域网或公网开放。",symptom:"Nexus 显示 Bridge 已启动，但浏览器访问 health 超时，且端口没有被其他进程占用。",checks:["确认地址是 <code>http://127.0.0.1:17361/health</code>。","查看 Defender Firewall、公司 EDR 或浏览器安全策略的拦截记录。","先排除 EADDRINUSE。"],steps:["按公司流程允许准确的 Guthon Bridge/VS Code 本机回环通信。","保持监听地址为 127.0.0.1。","重启 Bridge，再访问 health 并刷新 Chrome 扩展。"],verify:"health 返回 <code>{\"ok\":true}</code>，端口仍只绑定本机回环地址。",avoid:"不要改成 <code>0.0.0.0</code>、开放公网端口或关闭整个防火墙。"},
+
+  {id:"nexus-icon-missing",category:"Nexus",os:["mac","windows"],mode:"all",title:"VS Code 左侧没有“Guthon Nexus”图标",lead:"通常是 VSIX 未启用或安装后尚未重新加载窗口。",symptom:"安装 VSIX 后活动栏没有 Guthon Nexus。",checks:["在扩展面板确认 Guthon Nexus 已安装且已启用。"],steps:["执行 <code>Developer: Reload Window</code>。","仍未出现时卸载旧版，安装当前 Release 的 VSIX，再重新加载。"],verify:"左侧活动栏出现 Guthon Nexus，展开后能看到工作区入口。"},
+  {id:"nexus-tool-start-failed",category:"Nexus",os:["mac","windows"],mode:"all",title:"点击 Nexus 功能后提示 GuthonCodeTool 启动失败",lead:"已保存的应用路径可能失效，或当前系统选错了应用。",symptom:"所有需要运行后端的 Nexus 操作都立即失败。",checks:["确认应用文件仍在原位置。","确认不是把 macOS 应用复制到了 Windows，或反之。","macOS 额外检查执行权限。"],steps:["在 Nexus 中执行“设置/切换工作空间”。","重新选择当前系统的应用和原本的数据目录。","执行“检查本地环境”读取首条失败信息。"],verify:"环境检查能够完成，且项目命令不再报启动失败。"},
+  {id:"nexus-project-missing",category:"Nexus",os:["mac","windows"],mode:"all",title:"项目树没有显示某个产品或项目",lead:"配置身份、YAML 格式或 datasource 映射错误会阻止工作区加载。",symptom:"其他项目可见，但新配置的 PRD/PRJ 没有出现在 Nexus。",checks:["打开 <code>products.yaml</code> 或 <code>projects.yaml</code>。","检查 ID、名称、systems mappings 和 datasource。","查看“输出 → GuthonCodeTool”的配置解析错误。"],steps:["修正 YAML 后保存。","在 Nexus 顶部执行刷新。","仍不显示时运行“检查本地环境”。"],verify:"项目以独立 <code>workspaceKey</code> 出现在树中，且驾驶舱能打开。",avoid:"不要通过复制另一个项目的 system ID 或 data source ID 来猜测配置。"},
+  {id:"nexus-cockpit-status",category:"Nexus",os:["mac","windows"],mode:"all",title:"驾驶舱显示“未初始化”“部分完成”或“失败”",lead:"状态表示工作区实际步骤，不是单纯看配置文件是否存在。",symptom:"项目可见，但驾驶舱不是“就绪”或“完整”。",checks:["点击状态行进入对应操作。","查看输出面板中的第一条 FAILED，而不是最后一条连带错误。","确认当前项目的 DATABASE/SVN 模式。"],steps:["未初始化：先完成当前模式的初始化。","部分完成：从失败步骤继续处理，不要删除已成功资料。","失败：修复根因后重新执行相同范围操作。"],verify:"DATABASE 的必需步骤全部成功，或 SVN 本地扫描与索引成功；驾驶舱状态随之更新。"},
+  {id:"nexus-output-location",category:"Nexus",os:["mac","windows"],mode:"all",title:"操作失败后应该查看哪个日志？",lead:"不同能力写入不同 VS Code 输出通道。",symptom:"右下角只显示简短错误，不知道详细原因在哪里。",checks:["打开“查看 → 输出”，检查右侧通道下拉框。"],steps:["应用、同步、配置、DATABASE 操作查看“GuthonCodeTool”。","Bridge 启动和网页服务查看“Guthon Bridge”。","SVN 多步骤操作也会在 GuthonCodeTool 输出中逐阶段显示。","优先复制第一条失败信息和紧邻上下文。"],verify:"能够定位到明确组件、步骤和原始错误文本。",avoid:"不要只提供“操作失败”截图而省略输出通道内容。"},
+
+  {id:"workspace-app-data",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"应用目录和本地数据目录有什么区别？",lead:"应用可以替换，数据目录需要长期保留。",symptom:"首次设置时不知道两个路径应该如何选择。",checks:["应用目录只放可执行应用。","数据目录用于保存 config、var、索引、源码和 Workcopy。"],steps:["为应用选择固定、可替换的位置。","为数据选择容量充足、不会自动清理的位置。","升级只替换应用，不删除数据目录。"],verify:"Nexus 能同时解析有效应用和数据目录，重启后配置仍在。"},
+  {id:"workspace-moved",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"移动应用或数据目录后功能全部失败",lead:"Nexus 保存的运行时路径不会猜测新位置。",symptom:"原本正常，移动目录后所有后端操作报找不到文件。",checks:["确认移动的是应用、数据目录，还是两者。"],steps:["执行“设置/切换工作空间”。","选择新的应用路径和完整的数据目录根。","不要选择数据目录内部的 <code>config</code> 或 <code>var</code> 子目录。"],verify:"运行时描述重新生成，环境检查与项目列表恢复。"},
+  {id:"config-yaml",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"保存 YAML 后提示解析失败",lead:"缩进、引号或把带前导零的 ID 写成数字是高频原因。",symptom:"环境检查的 config 项为 FAIL，或项目列表无法刷新。",checks:["查看输出中的具体文件和行号。","检查缩进是否只用空格。","检查 <code>0000</code> 等 ID 是否加引号。"],steps:["修复第一处 YAML 语法错误。","将 <code>system_id</code>、<code>data_source_id</code> 保持为字符串。","保存后重新运行环境检查。"],verify:"config 检查为 PASS，所有预期 workspace 都能被解析。"},
+  {id:"config-workspace-key",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"workspaceKey 应该怎么填写或判断？",lead:"工作区身份来自配置，不从 PRD/PRJ 目录名推断。",symptom:"命令路由到错误项目，或提示找不到工作区。",checks:["产品使用 <code>products.&lt;id&gt;</code>。","项目使用 <code>projects.&lt;id&gt;</code>。","确认 ID 与 YAML 顶层条目一致。"],steps:["从 Nexus 项目节点或配置文件读取准确 key。","CLI、Bridge 和诊断操作始终传递同一个 key。"],verify:"工作区解析结果只返回一个目标，并显示正确 provider 和路径。",avoid:"不要恢复全局 ACTIVE 或用目录名称猜测默认工作区。"},
+  {id:"config-password",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"数据库或 SVN 密码应该写在哪里？",lead:"密码只进入操作系统凭据库，不进入 YAML、参数或日志。",symptom:"配置文件只有用户名或 connectionRef，看不到密码字段。",checks:["DATABASE 使用 Nexus 的数据库配置向导。","SVN 使用“设置工作区 SVN 登录”。"],steps:["通过 Nexus 输入密码。","让系统凭据库或 SVN 原生认证缓存保存。","YAML 只保留非敏感路由信息。"],verify:"重启 VS Code 后能够使用系统凭据，不需要在配置中出现明文密码。",avoid:"不要把密码写入 YAML、授权清单、脚本参数、日志或公开仓库。"},
+  {id:"config-present-not-active",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"配置文件存在，为什么功能仍未生效？",lead:"“文件存在”只能证明已配置，不能证明运行入口读取成功。",symptom:"YAML、插件或规则文件都在，但运行结果与预期不一致。",checks:["确认运行时实际使用的数据目录。","确认 Nexus 当前是发行模式还是调试模式。","运行环境检查或目标功能，取得实际执行证据。"],steps:["先证明配置被当前运行入口读取。","再证明对应命令实际执行。","最后用结果或状态验证业务效果。"],verify:"形成“配置存在 → 已接线 → 已执行 → 结果符合预期”的完整证据链。"},
+
+  {id:"database-connect",category:"DATABASE",os:["mac","windows"],mode:"database",title:"DATABASE 连接或快速排查配置失败",lead:"先区分地址、账号、驱动、凭据库和网络问题。",symptom:"配置数据库排查或同步时连接失败。",checks:["核对数据库类型、主机、端口、数据库或服务名。","确认使用专用只读账号。","查看原始数据库错误码。"],steps:["用 Nexus 向导重新输入连接地址和账号。","让向导执行即时连接验证。","按错误码分别处理网络、认证或目标库名称问题。"],verify:"配置向导验证成功，后续只读 probe 能返回目标数据库身份。",avoid:"不要为了通过验证给账号增加写权限。"},
+  {id:"database-credential-store",category:"DATABASE",os:["mac","windows"],mode:"database",title:"环境检查提示 credential store unavailable",lead:"只读数据库密码必须有可用的操作系统凭据存储。",symptom:"doctor 的 database-readonly 项为 FAIL，并包含 credential store unavailable。",checks:["确认当前桌面会话可以使用系统钥匙串或凭据管理器。","确认不是在缺少用户会话的受限终端中运行。"],steps:["在正常登录的桌面会话中重启 VS Code。","重新执行数据库配置向导并保存密码。","仍失败时按公司系统策略修复钥匙串/凭据管理器。"],verify:"环境检查的 database-readonly 项为 PASS。",avoid:"不要改成在配置文件中保存明文密码。"},
+  {id:"database-env",category:"DATABASE",os:["mac","windows"],mode:"database",title:"终端中的数据库环境变量在 VS Code 中不生效",lead:"GUI 启动的 VS Code 不一定继承当前终端环境。",symptom:"终端能连接，但 Nexus 调用看不到相同环境变量。",checks:["比较 VS Code 的启动方式。","确认变量是否只在当前 shell 临时设置。"],steps:["macOS 可从已设置变量的同一终端启动 VS Code。","Windows 关闭并重新打开 VS Code 和 PowerShell。","更稳定的做法是按公司策略配置用户环境后重启应用。"],verify:"由 Nexus 启动的工具能够读取所需环境。"},
+  {id:"database-workcopy-diff",category:"DATABASE",os:["mac","windows"],mode:"database",title:"Workcopy 与 readonly 不一致，能否直接覆盖？",lead:"差异代表本地开发内容，默认必须保留并人工判断。",symptom:"同步后生成 diff.md，或提示 Workcopy 与 readonly 有差异。",checks:["先打开 <code>diff.md</code>。","确认差异属于本地开发、上游变化还是误操作。"],steps:["需要保留时继续在 Workcopy 工作。","确认不需要后再使用明确的受控操作处理。","无法判断时联系负责人。"],verify:"保留的本地修改仍完整，后续处理范围明确。",avoid:"不要删除 Workcopy、关闭差异保护或用默认值强行覆盖。"},
+
+  {id:"svn-version",category:"SVN",os:["mac","windows"],mode:"svn",title:"SVN 检出前提示客户端不可用或版本过低",lead:"SVN 模式要求本机安装 SVN 1.10 或更高版本。",symptom:"初始化、登录或远程检查无法执行 svn。",checks:["在系统终端运行 <code>svn --version --quiet</code>。","确认 VS Code 能访问同一个 svn。"],steps:["按公司标准安装或升级 SVN 客户端。","重启 VS Code，使 PATH 重新加载。","再次执行“设置工作区 SVN 登录”。"],verify:"Nexus 能完成认证并读取远程范围。"},
+  {id:"svn-password",category:"SVN",os:["mac","windows"],mode:"svn",title:"SVN 反复要求密码或登录保存失败",lead:"用户名来自 sync.yaml，密码由 SVN 原生认证缓存保存。",symptom:"每次远程操作都要求密码，或设置登录后仍认证失败。",checks:["检查 <code>sync.yaml</code> 中公共 <code>svn.username</code>。","确认用户名属于当前认证域。","查看原始 svn 认证错误。"],steps:["在 Nexus 执行“设置工作区 SVN 登录”。","重新输入公共密码，让 SVN 通过 stdin 接收并保存。","认证域或账号变更后，按公司 SVN 方式清理对应旧凭据再重试。"],verify:"同一数据工作区的多个产品和项目可以复用认证。",avoid:"不要把密码加入 sync.yaml、VS Code SecretStorage、命令参数或日志。"},
+  {id:"svn-import",category:"SVN",os:["mac","windows"],mode:"svn",title:"导入 svnCheckoutHere.sh/.bat 后为什么没有执行脚本？",lead:"Nexus 只解析其中的精确 checkout 范围，不执行下载脚本。",symptom:"导入成功后没有立刻出现 working copy。",checks:["macOS/Linux 通常选择 <code>.sh</code>，Windows 选择 <code>.bat</code>。","确认导入预览列出了预期范围。"],steps:["检查写入 products.yaml/projects.yaml 的 <code>svn.url</code> 和 <code>svn.scope</code>。","确认后执行“从 SVN 范围配置检出/更新”。"],verify:"授权清单生成，目标 working copy 检出并建立索引。",avoid:"不要直接运行来源和范围尚未检查的签出脚本。"},
+  {id:"svn-scope-invalid",category:"SVN",os:["mac","windows"],mode:"svn",title:"SVN 范围配置无法解析或被阻止",lead:"变量、绝对目录、重叠目标和未知分类会被安全校验拒绝。",symptom:"导入或预览提示 URL、相对目录、分类或映射无效。",checks:["查看错误指出的具体条目。","确认 URL 和目录是字面量。","确认 systems mappings 的 system_id/data_source_id 一一对应。"],steps:["修正当前产品或项目的 <code>svn.url</code>/<code>svn.scope</code>。","保持目录为安全相对路径。","重新预览新增、移除和变更数量后再确认。"],verify:"预览范围与谷神签出配置一致，且不会扩展到未授权目录。",avoid:"不要通过放宽路径校验或手工扩大 authorized-scope 来绕过。"},
+  {id:"svn-index",category:"SVN",os:["mac","windows"],mode:"svn",title:"谷神源码为空、索引未初始化或显示 stale",lead:"SVN 树来自本地索引，不会在每次展开时扫描完整 checkout。",symptom:"working copy 已存在，但 Nexus 中找不到源码或提示 reindex。",checks:["确认当前项目选择了 SVN 模式。","确认授权 working copy 存在且可读。","查看上次扫描错误。"],steps:["在项目节点执行“扫描/重建本地 SVN 索引”。","等待输出完成全部 working copy 的解析和索引事务。","外部修改后使用刷新，让 watcher 或重建更新索引。"],verify:"驾驶舱显示索引就绪，谷神源码树和完整索引搜索能找到对象。"},
+  {id:"svn-readonly",category:"SVN",os:["mac","windows"],mode:"svn",title:"SVN 虚拟文档提示当前对象只读",lead:"表、视图以及无法安全映射的对象按设计保持只读。",symptom:"可以打开源码，但保存时报 NoPermissions 或“当前对象只读”。",checks:["确认对象类型是否支持写回。","确认对象仍在授权范围和当前 checkout 中。","确认没有打开原始只读投影。"],steps:["PAGE、过程函数或系统脚本从“谷神源码”的可编辑节点打开。","表和视图只用于查看，不应尝试保存。","对象身份失效时先刷新或重建索引。"],verify:"受支持对象可保存到 checkout；只读对象继续明确拒绝写入。"},
+  {id:"svn-local-save",category:"SVN",os:["mac","windows"],mode:"svn",title:"Ctrl+S / Cmd+S 后代码保存到哪里？",lead:"编辑器保存只写本地 SVN checkout，不会自动提交。",symptom:"保存后平台没有变化，或误以为已经提交。",checks:["在谷神源码树或源代码管理中查看 M 标记。","打开 SVN BASE ↔ 工作副本差异。"],steps:["先用编辑器保存到本地 checkout。","检查差异后执行“保存到谷神（SVN提交）”。","取得 revision 后仍需回谷神平台完成最终提交。"],verify:"本地保存、SVN revision、谷神平台最终提交分别有独立证据。"},
+  {id:"svn-external-change",category:"SVN",os:["mac","windows"],mode:"svn",title:"SVN SCM 显示“外部修改”",lead:"文件在 Nexus 编辑会话之外被其他工具修改。",symptom:"源代码管理列出外部修改，保存路径与普通 Nexus 修改不同。",checks:["执行“管理本地源码变更”并查看差异。","判断是安全的 tracked 文本修改，还是新增、删除或冲突。"],steps:["安全文本修改可以选择保存或放弃。","新增、删除、属性冲突和树冲突交给负责人处理。","需要保留时先确认对象身份和远端最新状态。"],verify:"差异被明确提交、保留或受控撤销，SCM 状态与工作副本一致。",avoid:"不要在不看差异时批量放弃外部修改。"},
+  {id:"svn-update-conflict",category:"SVN",os:["mac","windows"],mode:"svn",title:"SVN 更新后出现文本冲突",lead:"Nexus 不自动决定本地与远端内容，必须人工三方合并。",symptom:"更新产生冲突，SCM 文件行显示冲突状态。",checks:["确认冲突类型是文本冲突。","区分旧基线、本地修改、远端修改和合并结果。"],steps:["从冲突文件行执行“打开 SVN 三方合并”。","检查并保存物理 checkout 的合并结果。","执行“标记 SVN 冲突为已解决”。","再次检查差异后再决定是否提交。"],verify:"冲突标记消失，文件仍作为本地修改保留，内容经过人工检查。",avoid:"属性冲突或树冲突不要强制标记解决；标记已解决也不等于已经提交。"},
+  {id:"svn-commit-revision",category:"SVN",os:["mac","windows"],mode:"svn",title:"SVN 提交成功是否等于谷神平台已提交？",lead:"SVN revision 只证明源码进入 SVN，不证明平台最终发布或运行正确。",symptom:"Nexus 已显示 revision 和交付回执，不确定是否还要操作。",checks:["查看回执中的 working copy、文件和 revision。"],steps:["确认 SVN 提交范围正确。","回到谷神平台执行最终提交。","按业务要求完成平台编译、运行或回归验证。"],verify:"分别保留 SVN revision、平台最终提交和运行验证证据。",avoid:"不要把静态检查、SVN revision 或回执描述为业务流程已通过。"},
+
+  {id:"bridge-cannot-connect",category:"Bridge",os:["mac","windows"],mode:"all",title:"Chrome 扩展显示 Bridge 无法连接",lead:"先确认本地服务，再检查 Chrome 扩展和页面。",symptom:"Bridge 插件显示离线或谷神页面功能无响应。",checks:["Nexus 是否显示 Bridge“运行中”。","访问 <code>http://127.0.0.1:17361/health</code>。","查看“输出 → Guthon Bridge”。"],steps:["从 Nexus 停止并重新启动 Bridge。","健康检查成功后重新加载 Chrome 扩展。","刷新谷神页面。"],verify:"health 返回 <code>{\"ok\":true}</code>，Chrome 扩展恢复连接。"},
+  {id:"bridge-eaddrinuse",category:"Bridge",os:["mac","windows"],mode:"all",title:"Bridge 启动失败并显示 EADDRINUSE",lead:"本机已有进程占用 127.0.0.1:17361。",symptom:"启动后立即退出，输出包含 <code>EADDRINUSE</code>。",checks:["确认是否有旧终端 Bridge、旧版应用或另一个 VS Code 窗口正在运行服务。"],steps:["优先从原来的 Nexus 窗口停止 Bridge。","关闭确认属于 Guthon Bridge 的旧进程。","回到当前 Nexus 重新启动。"],verify:"17361 只由当前 Bridge 监听，health 检查成功。",avoid:"不要随意终止无法确认归属的系统进程。"},
+  {id:"bridge-routing",category:"Bridge",os:["mac","windows"],mode:"all",title:"Bridge 路由到错误工作区或出现多个候选",lead:"Bridge 优先使用 workspaceKey，否则根据页面身份匹配。",symptom:"相同页面身份对应多个产品/项目，Chrome 要求选择。",checks:["确认页面 origin、dataSourceId 和 systemId。","确认请求是否携带 workspaceKey。"],steps:["有明确项目时从对应 Nexus 节点进入操作。","多个候选时只为当前请求选择正确工作区。","检查各项目 mappings 是否错误复用。"],verify:"本次请求命中预期 workspace，且没有保存全局默认绑定。",avoid:"不要通过删除其他有效工作区来消除候选。"},
+  {id:"bridge-vsix-missing",category:"Bridge",os:["mac","windows"],mode:"all",title:"启动 Bridge 提示 VSIX 中缺少服务文件",lead:"当前 VSIX 包不完整或安装版本过旧。",symptom:"错误包含“VSIX 中缺少 Guthon Bridge 服务文件”。",checks:["确认安装的是 All-in-One VSIX。","确认不是旧的独立导航扩展。"],steps:["卸载不完整或旧版扩展。","从当前 Release 安装 <code>guthon-nexus-all-in-one-vscode.vsix</code>。","重新加载 VS Code。"],verify:"Nexus 能使用 VS Code 自带 Node 启动 Bridge，无需另装 Node.js。"},
+
+  {id:"governance-private-repo",category:"团队规范",os:["mac","windows"],mode:"all",title:"无法访问或克隆 guthon-team 私有仓库",lead:"404 或认证失败通常表示账号尚未获得私有仓库权限。",symptom:"浏览器打不开仓库，或 git clone 提示 not found/authentication failed。",checks:["确认当前 GitHub 账号。","确认账号已被授予仓库访问权限。"],steps:["联系仓库负责人开通当前 GitHub 账号。","按公司 GitHub 认证方式登录。","取得权限后重新 clone，并运行 install。"],verify:"能拉取仓库，安装程序能把规范与门禁部署到目标 var。",avoid:"不要让他人转发包含私有内容的仓库副本。"},
+  {id:"governance-hook",category:"团队规范",os:["mac","windows"],mode:"all",title:"插件已安装，是否说明 Agent Hook 已生效？",lead:"安装状态不是运行证据，首次还需信任并在新任务中实际触发。",symptom:"界面显示插件存在，但没有 Hook 日志或阻断结果。",checks:["确认目标是真正初始化的谷神工作区。","确认同时存在 <code>.guthon/config.json</code> 和 <code>tools/guthon-lint</code>。","查看新任务中的 Hook 执行证据。"],steps:["完成客户端要求的信任或插件确认。","新建任务执行一次受控验证。","分别记录 Linter、Agent Hook、Git Hook 或 CI 的实际结果。"],verify:"不仅文件存在，而且对应生命周期事件确实运行并产生预期诊断。",avoid:"不要把静态 Linter PASS 等同数据库、平台、SVN 或业务流程通过。"},
+
+  {id:"upgrade-safe",category:"升级与迁移",os:["mac","windows"],mode:"all",title:"升级 GuthonCodeTool 时哪些内容可以替换？",lead:"替换应用和扩展，保留本地数据目录。",symptom:"准备升级但担心配置、源码或索引丢失。",checks:["确认没有同步或 SVN 操作正在运行。","记录当前应用和数据目录。"],steps:["关闭 Bridge 和进行中的任务。","用新版本替换应用。","重新安装 VSIX 并 Reload Window。","更新 Chrome 扩展后重新加载。","运行环境检查和一个代表性工作区验证。"],verify:"原配置、工作区和本地修改仍在，新版组件运行正常。",avoid:"升级时不要删除本地数据目录或 checkout。"},
+  {id:"migration-computer",category:"升级与迁移",os:["mac","windows"],mode:"all",title:"迁移电脑时应该复制什么？",lead:"数据目录承载配置和派生资料，但系统凭据通常需要在新电脑重新建立。",symptom:"更换电脑或系统，需要保留工作区。",checks:["确认旧电脑没有运行中的同步或未保存编辑。","检查 SVN 本地修改和 DATABASE Workcopy 差异。"],steps:["安全复制完整本地数据目录。","在新电脑安装对应系统应用和相同版本 VSIX。","执行“设置工作空间”指向复制后的目录。","重新建立数据库和 SVN 系统凭据。","运行环境检查。"],verify:"项目列表、索引和本地修改完整，凭据通过新系统安全存储。",avoid:"不要只复制 config 而遗漏 var、workspace 或 checkout 状态。"},
+  {id:"upgrade-rollback",category:"升级与迁移",os:["mac","windows"],mode:"all",title:"如何安全回退应用版本？",lead:"回退前先确认旧应用与当前配置格式是否兼容。",symptom:"新版应用异常，希望临时恢复上一 Release。",checks:["确认问题确实来自应用版本，而不是 VSIX 或数据状态。","查看 Release 说明中的配置迁移。"],steps:["停止 Bridge 和运行中的任务。","保留当前数据目录备份。","同时回退到同一 Release 的应用、VSIX 和 Bridge。","重新加载 VS Code 后运行环境检查。"],verify:"旧版本能读取当前工作区，且没有降级导致的配置或索引错误。",avoid:"不要只替换一个组件后继续混用不同版本。"}
+];
+
+const categoryOrder=["全部","安装与启动","Windows 部署","Nexus","工作空间与配置","DATABASE","SVN","Bridge","团队规范","升级与迁移"];
+const labels={os:{all:"全部",mac:"macOS",windows:"Windows"},mode:{all:"全部",database:"DATABASE",svn:"SVN"}};
+const state={os:"all",mode:"all",category:"全部",query:""};
+const search=document.getElementById("search");
+const qaList=document.getElementById("qaList");
+const escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+const textOf=value=>String(value||"").replace(/<[^>]+>/g," ");
+const searchable=item=>[item.title,item.lead,item.symptom,item.category,item.os.join(" "),item.mode,...(item.checks||[]),...(item.steps||[]),item.verify,item.avoid].map(textOf).join(" ").toLowerCase();
+const platformLabel=item=>item.os.length===2?"macOS + Windows":item.os[0]==="mac"?"macOS":"Windows";
+const modeLabel=item=>item.mode==="all"?"通用":labels.mode[item.mode];
+const listHtml=(items,ordered=false)=>`<${ordered?"ol":"ul"}>${items.map(item=>`<li>${item}</li>`).join("")}</${ordered?"ol":"ul"}>`;
+
+function loadState(){
+  const params=new URLSearchParams(location.search);
+  if(["mac","windows"].includes(params.get("os")))state.os=params.get("os");
+  if(["database","svn"].includes(params.get("mode")))state.mode=params.get("mode");
+  if(categoryOrder.includes(params.get("category")))state.category=params.get("category");
+  state.query=params.get("q")||"";search.value=state.query;
+}
+function syncUrl(){
+  const params=new URLSearchParams();
+  if(state.os!=="all")params.set("os",state.os);
+  if(state.mode!=="all")params.set("mode",state.mode);
+  if(state.category!=="全部")params.set("category",state.category);
+  if(state.query)params.set("q",state.query);
+  const next=`${location.pathname}${params.size?`?${params}`:""}${location.hash}`;
+  history.replaceState(null,"",next);
+}
+function filterItems(){
+  const terms=state.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return qaItems.filter(item=>(state.os==="all"||item.os.includes(state.os))&&(state.mode==="all"||item.mode===state.mode||item.mode==="all")&&(state.category==="全部"||item.category===state.category)&&terms.every(term=>searchable(item).includes(term)));
+}
+function renderFilters(){
+  document.getElementById("osFilters").innerHTML=Object.entries(labels.os).map(([value,label])=>`<button class="filter-btn ${state.os===value?"active":""}" data-filter="os" data-value="${value}" type="button">${label}</button>`).join("");
+  document.getElementById("modeFilters").innerHTML=Object.entries(labels.mode).map(([value,label])=>`<button class="filter-btn ${state.mode===value?"active":""}" data-filter="mode" data-value="${value}" type="button">${label}</button>`).join("");
+  const counts=Object.fromEntries(categoryOrder.map(category=>[category,category==="全部"?qaItems.length:qaItems.filter(item=>item.category===category).length]));
+  document.getElementById("categories").innerHTML=categoryOrder.map(category=>`<button class="category-btn ${state.category===category?"active":""}" data-category="${category}" type="button"><span>${category}</span><span class="category-count">${counts[category]}</span></button>`).join("");
+}
+function renderActive(){
+  const chips=[];
+  if(state.os!=="all")chips.push(["os",labels.os[state.os]]);
+  if(state.mode!=="all")chips.push(["mode",labels.mode[state.mode]]);
+  if(state.category!=="全部")chips.push(["category",state.category]);
+  if(state.query)chips.push(["query",`搜索：${state.query}`]);
+  document.getElementById("activeFilters").innerHTML=chips.map(([key,label])=>`<span class="active-chip">${escapeHtml(label)}<button type="button" data-remove="${key}" aria-label="移除${escapeHtml(label)}">×</button></span>`).join("");
+}
+function cardHtml(item){
+  const links=(item.links||[]).map(([label,href])=>`<a href="${href}">${label}</a>`).join("");
+  return `<details class="qa-card" id="qa-${item.id}">
+    <summary class="qa-summary"><div><div class="qa-title">${item.title}</div><p class="qa-lead">${item.lead}</p><div class="tag-row"><span class="tag">${item.category}</span><span class="tag platform">${platformLabel(item)}</span><span class="tag mode">${modeLabel(item)}</span></div></div></summary>
+    <div class="qa-body"><div class="answer-grid">
+      <section class="answer-block full"><h3>现象</h3><p>${item.symptom}</p></section>
+      <section class="answer-block"><h3>先检查</h3>${listHtml(item.checks||[])}</section>
+      <section class="answer-block"><h3>处理步骤</h3>${listHtml(item.steps||[],true)}</section>
+      <section class="answer-block verify ${item.avoid?"":"full"}"><h3>如何确认已恢复</h3><p>${item.verify}</p></section>
+      ${item.avoid?`<section class="answer-block avoid"><h3>不要这样处理</h3><p>${item.avoid}</p></section>`:""}
+    </div>${links?`<nav class="answer-links" aria-label="相关文档">${links}</nav>`:""}</div>
+  </details>`;
+}
+function render(){
+  const items=filterItems();
+  qaList.innerHTML=items.map(cardHtml).join("");
+  document.getElementById("resultMeta").textContent=`找到 ${items.length} 条，共 ${qaItems.length} 条问题`;
+  document.getElementById("empty").style.display=items.length?"none":"block";
+  renderFilters();renderActive();syncUrl();
+}
+function setFilter(key,value){state[key]=value;render()}
+document.addEventListener("click",event=>{
+  const filter=event.target.closest("[data-filter]");if(filter)return setFilter(filter.dataset.filter,filter.dataset.value);
+  const category=event.target.closest("[data-category]");if(category)return setFilter("category",category.dataset.category);
+  const remove=event.target.closest("[data-remove]");if(remove){const key=remove.dataset.remove;if(key==="category")state.category="全部";else if(key==="query"){state.query="";search.value=""}else state[key]="all";render()}
+  const quick=event.target.closest("[data-quick]");if(quick){state.query=quick.dataset.quick;search.value=state.query;state.category="全部";render();document.querySelector(".layout").scrollIntoView({behavior:"smooth"})}
+});
+search.addEventListener("input",()=>{state.query=search.value.trim();render()});
+document.getElementById("reset").addEventListener("click",()=>{Object.assign(state,{os:"all",mode:"all",category:"全部",query:""});search.value="";render();search.focus()});
+document.getElementById("expandAll").addEventListener("click",()=>document.querySelectorAll(".qa-card").forEach(card=>card.open=true));
+document.getElementById("collapseAll").addEventListener("click",()=>document.querySelectorAll(".qa-card").forEach(card=>card.open=false));
+document.getElementById("copySupport").addEventListener("click",async event=>{
+  const text=document.getElementById("supportTemplate").innerText;
+  try{await navigator.clipboard.writeText(text)}catch{const area=document.createElement("textarea");area.value=text;area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.select();document.execCommand("copy");area.remove()}
+  event.currentTarget.textContent="已复制";setTimeout(()=>event.currentTarget.textContent="复制模板",1200);
+});
+addEventListener("keydown",event=>{if(event.key==="/"&&document.activeElement!==search){event.preventDefault();search.focus()}if(event.key==="Escape"&&document.activeElement===search){state.query="";search.value="";render();search.blur()}});
+
+const root=document.documentElement;const savedTheme=localStorage.getItem("guthon-wiki-theme");if(savedTheme)root.dataset.theme=savedTheme;
+document.getElementById("themeToggle").addEventListener("click",()=>{const next=root.dataset.theme==="dark"?"light":"dark";root.dataset.theme=next;localStorage.setItem("guthon-wiki-theme",next)});
+document.getElementById("backTop").addEventListener("click",()=>scrollTo({top:0,behavior:"smooth"}));
+addEventListener("scroll",()=>{const height=document.documentElement.scrollHeight-innerHeight;document.getElementById("progress").style.width=(height>0?scrollY/height*100:0)+"%"},{passive:true});
+addEventListener("beforeprint",()=>document.querySelectorAll(".qa-card").forEach(card=>card.open=true));
+function openHashTarget(){
+  if(!location.hash)return;
+  requestAnimationFrame(()=>{const target=document.querySelector(location.hash);if(target){target.open=true;target.scrollIntoView({block:"start"})}});
+}
+addEventListener("hashchange",openHashTarget);
+loadState();render();openHashTarget();
+</script>
+</body>
+</html>

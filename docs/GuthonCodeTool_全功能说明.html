@@ -47,7 +47,7 @@ a{color:var(--primary);text-underline-offset:3px}
 .toc-link.active{color:var(--primary);background:var(--primary-soft);border-left-color:var(--primary);font-weight:700}
 .toc-sub{padding-left:20px;font-size:12.5px}.no-result{padding:12px;color:var(--muted);font-size:13px;display:none}
 .main{min-width:0}
-.feature-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px;margin-bottom:24px}
+.feature-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;margin-bottom:24px}
 .feature-card{position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:19px;box-shadow:0 10px 28px rgba(28,47,94,.055)}
 .feature-card:after{content:"";position:absolute;right:-24px;top:-30px;width:85px;height:85px;border-radius:50%;background:var(--primary-soft)}
 .feature-icon{position:relative;z-index:1;width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:linear-gradient(135deg,var(--primary),#8098f5);color:#fff;font-size:12px;font-weight:800}
@@ -67,6 +67,11 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 .code-wrap pre code{padding:0;border:0;background:none;color:inherit;font-size:13.5px;white-space:pre}
 .code-lang{position:absolute;z-index:1;left:15px;top:12px;text-transform:uppercase;color:#94a7c2;font:700 11px/1.4 "Segoe UI",sans-serif;letter-spacing:.08em}
 .copy-btn{position:absolute;z-index:1;right:10px;top:8px;border:0;border-radius:8px;padding:7px 10px;background:rgba(255,255,255,.11);color:#fff;cursor:pointer}.copy-btn:hover{background:rgba(255,255,255,.2)}
+.comparison-table{width:100%;margin:18px 0 24px;border:1px solid var(--line);border-collapse:separate;border-spacing:0;border-radius:14px;overflow:hidden}
+.comparison-table th,.comparison-table td{width:50%;padding:13px 16px;text-align:left;vertical-align:top}
+.comparison-table thead th{background:var(--surface-soft);border-bottom:2px solid var(--line);font-size:16px}
+.comparison-table tbody tr+tr td{border-top:1px solid var(--line)}
+/* .comparison-table th+th,.comparison-table td+td{border-left:3px solid var(--primary)} */
 .divider{border:0;border-top:1px solid var(--line);margin:28px 0}
 .plugin-highlight{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0 24px}
 .plugin-highlight>div{display:flex;flex-direction:column;gap:6px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-soft)}
@@ -87,11 +92,12 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <span class="eyebrow"><span class="eyebrow-dot"></span>GuthonCodeTool Internal Wiki</span>
 <h1>GuthonCodeTool<br/>内部知识库</h1>
 <p>面向工具维护者和需要理解实现的开发人员，说明 GuthonCodeTool 的组件边界、数据链路、目录约定、安全机制、打包发布与扩展方式。</p>
-<div class="hero-meta"><span>架构与实现</span><span>源码与索引</span><span>Bridge &amp; VS Code</span><span>发布与维护</span></div>
+<div class="hero-meta"><span>当前版本 2.0</span><span>DATABASE + SVN</span><span>架构与实现</span><span>源码与索引</span><span>Bridge &amp; VS Code</span><span>发布与维护</span></div>
 <div class="hero-actions">
 <a class="btn btn-primary" href="#1-定位与边界">开始阅读</a>
 <a class="btn btn-ghost" href="index.html">快速开始</a>
 <a class="btn btn-ghost" href="https://github.com/SidWuu/GuthonCodeTool" target="_blank" rel="noopener">GitHub 仓库</a>
+<a class="btn btn-ghost" href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有仓库</a>
 </div>
 </div>
 </header>
@@ -100,6 +106,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <div class="side-head"><div class="side-title"><strong>知识库目录</strong><span class="chapter-count">10 章</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索章节…（按 / 聚焦）" aria-label="搜索章节"/></div>
 <nav class="toc" id="toc">
 <a class="toc-link" href="#1-定位与边界">1. 定位与边界</a>
+<a class="toc-link toc-sub" href="#1-1-版本差异">1.1 版本差异</a>
 <a class="toc-link" href="#2-整体架构">2. 整体架构</a>
 <a class="toc-link toc-sub" href="#2-1-组件关系">2.1 组件关系</a>
 <a class="toc-link toc-sub" href="#2-2-运行链路">2.2 运行链路</a>
@@ -109,6 +116,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <a class="toc-link" href="#4-配置与本地数据">4. 配置与本地数据</a>
 <a class="toc-link toc-sub" href="#4-1-配置职责">4.1 配置职责</a>
 <a class="toc-link toc-sub" href="#4-2-目录契约">4.2 目录契约</a>
+<a class="toc-link toc-sub" href="#4-3-guthon-team-规范治理">4.3 guthon-team 规范治理</a>
 <a class="toc-link" href="#5-源码同步与索引">5. 源码同步与索引</a>
 <a class="toc-link toc-sub" href="#5-1-page-导出">5.1 PAGE 导出</a>
 <a class="toc-link toc-sub" href="#5-2-过程函数导出">5.2 过程函数导出</a>
@@ -128,17 +136,33 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <article class="feature-card"><div class="feature-icon">03</div><h3>双模式安全编辑</h3><p>DATABASE 使用 readonly/workcopy；SVN 直接保护授权 checkout，并通过目标文件校验阻止误覆盖。</p></article>
 <article class="feature-card"><div class="feature-icon">04</div><h3>SQLite 局部检索</h3><p>每个工作区独立索引，支持源码定位、静态调用关系和低置信动态调用记录。</p></article>
 <article class="feature-card"><div class="feature-icon">05</div><h3>双端增强</h3><p>VS Code 提供本地操作和方言能力，Bridge 增强谷神在线开发页面。</p></article>
-<article class="feature-card"><div class="feature-icon">06</div><h3>自动发行</h3><p>main 变更触发跨平台构建、插件打包、GitHub Release 与 Gitee Release 同步。</p></article>
+<article class="feature-card"><div class="feature-icon">06</div><h3>可执行规范门禁</h3><p>guthon-team 把规范升级为统一 Linter、Agent Hook、Git Hook 和可接入的 CI 门禁。</p></article>
+<article class="feature-card"><div class="feature-icon">07</div><h3>自动发行</h3><p>main 变更触发跨平台构建、插件打包、GitHub Release 与 Gitee Release 同步。</p></article>
 </div>
 <blockquote>
 <p>本文解释功能为什么这样实现，以及修改功能时应进入哪些代码路径。</p>
 <p>普通用户从零安装和日常操作请查看：<a href="GuthonCodeTool_使用手册.html">GuthonCodeTool 使用手册</a>。</p>
-<p>仓库：<a href="https://github.com/SidWuu/GuthonCodeTool">GitHub</a> · <a href="https://gitee.com/sidwu/GuthonCodeTool">Gitee 镜像</a></p>
+<p>工具仓库：<a href="https://github.com/SidWuu/GuthonCodeTool">GitHub</a> · <a href="https://gitee.com/sidwu/GuthonCodeTool">Gitee 镜像</a>；团队规范与门禁：<a href="https://github.com/SidWuu/guthon-team">guthon-team 私有 GitHub 仓库</a>（需要授权，联系我开通）。</p>
 </blockquote>
 
 <section class="section">
 <h2 id="1-定位与边界">1. 定位与边界</h2>
 <p>GuthonCodeTool 把谷神平台中的 PAGE、过程函数、表结构、单据类型、视图和系统脚本整理到本地，形成可检索、可比较、可供 AI 分析的私有开发工作区。</p>
+<h3 id="1-1-版本差异">1.1 版本差异</h3>
+<blockquote>
+<p><strong>1.0</strong> 是原 DATABASE 源码版，只支持从数据库读取和拉取谷神源码；<strong>2.0</strong> 是当前版本，在完整保留 DATABASE 模式的基础上，新增 SVN 源码检出、更新、索引、受控编辑和交付能力。</p>
+</blockquote>
+<table class="comparison-table">
+<thead><tr><th>1.0 · DATABASE 源码版</th><th>2.0 · DATABASE + SVN 双模式版（当前）</th></tr></thead>
+<tbody>
+<tr><td><strong>源码来源：</strong>只支持连接数据库，从谷神源码表读取 PAGE、过程函数和系统脚本。</td><td><strong>源码来源：</strong>保留 DATABASE 拉取，同时支持按授权范围从 SVN 检出或更新源码。</td></tr>
+<tr><td><strong>本地结构：</strong>生成 <code>source/readonly</code>，开发修改进入 <code>source/workcopy</code>。</td><td><strong>本地结构：</strong>DATABASE 继续使用 readonly/workcopy；SVN 直接以授权 checkout 为唯一源码事实，不再复制第二份源码。</td></tr>
+<tr><td><strong>编辑方式：</strong>修改 Workcopy，检查差异后再人工复制回谷神平台。</td><td><strong>编辑方式：</strong>DATABASE 沿用 Workcopy；SVN 通过 Nexus 虚拟文档和受控批量写入直接修改 checkout，并校验对象身份、源码 hash、BASE revision 和路径范围。</td></tr>
+<tr><td><strong>更新与冲突：</strong>重新拉取时比较 readonly/workcopy，避免覆盖本地修改。</td><td><strong>更新与冲突：</strong>支持 SVN BASE、本地工作副本与 SVN HEAD 差异，提供远端检查、精确更新和文本三方合并。</td></tr>
+<tr><td><strong>索引与导航：</strong>从数据库导出的源码构建工作区索引。</td><td><strong>索引与导航：</strong>DATABASE 与 SVN 共用统一 SQLite 事实索引、工作区驾驶舱、完整索引搜索、调用关系和精简 AI 上下文。</td></tr>
+<tr><td><strong>交付方式：</strong>生成 Workcopy 差异或交付包，由开发人员回到平台处理。</td><td><strong>交付方式：</strong>SVN SCM 支持产品、子系统、所选文件和单文件提交，记录 revision 与交付回执；SVN 提交后仍需在谷神平台完成最终提交和运行验证。</td></tr>
+</tbody>
+</table>
 <ul>
 <li>工具负责读取、整理和索引源码；DATABASE 生成安全 Workcopy，SVN 由 Nexus 提供受控虚拟编辑。</li>
 <li>每个项目的工作区驾驶舱聚合索引就绪度、同步状态、SVN working copy、本地变更和最近一次 SVN 提交；各状态行可直接进入对应操作。完整索引搜索同时查询源码身份与事实索引。</li>
@@ -146,6 +170,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <li>DATABASE 开发只修改 <code>source/workcopy</code>；SVN 不生成额外代码副本，虚拟文档直接回写授权 checkout 原文件。</li>
 <li>SVN 的“管理本地源码变更”提供类 Git 差异、多选/全选保存和撤销；SCM 在产品节点下直接显示默认展开的中文子系统组，聚合同一 <code>DATA_SOURCE_ID</code> 的数据源及系统 working copy，并支持产品全部、子系统和单文件级提交/更新。单一名称原样显示，只有 <code>0008</code> 下国内贸易、国际贸易这类共同后缀分组显示为“贸易系统”，Skill/public 单列“公共源码”。产品与子系统行都只保留刷新状态、检查远端变更、提交 Nexus 修改、更新远端变更四项操作并默认常驻显示；子系统提交与更新按组限制 working copy，根节点保留全部范围。检查远端变更后，点击远端文件打开“工作副本 ↔ SVN HEAD”双栏差异，更新仍需用户明确点击对应按钮。“保存到谷神”固定可用，SVN 提交说明可选，跨 working copy 分组执行精确文件 <code>svn commit</code>，成功仍表示“待谷神平台最终提交”。检出/更新和手动重建索引在输出标签逐项显示实际处理范围；同一工作区的重复重建点击会直接忽略；“谷神源码”树高亮本地修改文件及父目录，虚拟编辑器使用 VS Code 原生 SCM Quick Diff 按 SVN BASE 标出新增、修改与删除位置，点击色块可内联查看本地更改。公共用户名读取 <code>sync.yaml</code> 的 <code>svn.username</code>；Nexus 输入密码后只通过 stdin 交给 SVN auth cache/系统钥匙串保存。内部 HTTPS 自签证书由非交互命令直接信任。</li>
 <li>数据库连接、源码、业务文档和运行索引均为本地私有内容，不进入公开仓库或 Release。</li>
+<li><code>AGENTS.md</code>、开发基线、方言 API、开发模式及其机器门禁由 <code>guthon-team</code> 私有 GitHub 仓库统一分发，不再依赖内部地址或人工复制。</li>
 <li>Python 脚本继续作为开发与测试入口；普通用户只使用打包应用、VSIX 和 Bridge。</li>
 </ul>
 </section>
@@ -248,8 +273,32 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
             ├── database/{schema,billtype,views}/ # 仅 DATABASE
             └── context/{README.md,source-mode.json,index.db,state.json,logs}/</code></pre></div>
 <p><code>PRD</code>、<code>PRJ</code> 只控制目录和 Nexus 展示顺序，真实身份始终来自配置中的 <code>workspaceKey</code>。</p>
+<p><code>var/AGENTS.md</code>、<code>var/docs/</code> 中的 11 份权威规范、<code>.guthon/</code>、<code>tools/guthon-lint</code> 和 Git Hook 均由 <code>guthon-team</code> 的一键安装写入；它们不包含在 GuthonCodeTool Release 中，也不再从内部地址单独下载。</p>
 <p>Nexus 同时展示全部产品和项目；每个节点的“源码来源：DATABASE/SVN”只切换当前工作区，并把结果写入该工程 <code>context/source-mode.json</code>。YAML 不配置模式，未设置时默认 DATABASE。SVN 工作区以 <code>config/products.yaml</code> 或 <code>config/projects.yaml</code> 对应条目的紧凑 <code>svn.url</code>/<code>svn.scope</code> 作为可编辑配置；<code>systems</code>、<code>datasources</code> 从 <code>systems.include.mappings</code> 拼接 ID，省略 scope 时只检出映射目录。程序把展开后的精确清单写入工作区 <code>context/authorized-scope.json</code> 供内部操作，旧的逐条条目和 <code>checkoutPaths</code> 仍兼容。Nexus 的“导入 SVN checkout 配置”可选择 <code>.sh/.bat</code> 或粘贴 checkout 内容，写入共享根地址和分类并保留原有手工配置；脚本只作为一次性导入来源，不会被执行。SVN 不创建 readonly 和 database 镜像，checkout 与 workspace 分离，凭据不会写入范围配置、清单、YAML 或日志。</p>
 <p><code>scripts/providers/svn/import_svn_scope.py</code> 与打包工具的 <code>import-svn-scope</code> 命令仍兼容把 checkout shell/BAT 转换为授权清单。它支持 shell 的反斜杠续行和 BAT 的插入符续行，只接受字面量精确 URL 与安全相对目录，忽略认证参数且不执行脚本、SVN checkout 或旧 working copy 清理；变量、绝对目录、URL/目录重叠和未知分类会阻断。已有配置可手动追加条目，执行“从 SVN 范围配置检出/更新”后会按新增、移除和变更统计更新清单。</p>
+<h3 id="4-3-guthon-team-规范治理">4.3 guthon-team 规范治理</h3>
+<p><a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team</a> 是私人 GitHub 仓库。使用者必须先获得仓库权限；无法访问或克隆时联系我开通。授权后执行：</p>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>git clone https://github.com/SidWuu/guthon-team.git
+cd guthon-team
+python3 tools/guthon_team.py install --workspace "/绝对路径/var"</code></pre></div>
+<p>仓库以 <code>standards/var/</code> 维护唯一一套权威规范正文，以 <code>standards.json</code> 记录版本和逐文件 SHA-256；<code>install/bootstrap</code> 将规范、<code>.guthon/config.json</code>、私有 API 索引、独立 Linter、<code>tools/guthon-lint</code> 和 Git pre-commit 安装到业务工作区，并按本机已有客户端安装或提示配置 <code>guthon-guard</code>。</p>
+<table class="comparison-table">
+<thead><tr><th>只使用 AI 规范文件</th><th>使用 guthon-team</th></tr></thead>
+<tbody>
+<tr><td>依赖 AI 主动读取、正确理解并始终记住</td><td>规范保留业务语义，可机械判断的部分由同一 <code>guthon-lint</code> 自动检查</td></tr>
+<tr><td>上下文变长或更换 Agent 后容易遗漏、误解</td><td>支持 Hook 的 Agent 在写前、写后和任务结束时检查；其他 Agent 复用 CLI</td></tr>
+<tr><td>只能提示“不要这样写”</td><td>可阻止受保护路径写入、非法 API、Velocity 结构错误、错误赋值、重复保存和不兼容 SQL</td></tr>
+<tr><td>人工复制容易版本漂移或覆盖本地调整</td><td>版本、哈希和锁文件可审计；安全升级会保护人工修改，强制更新前先备份</td></tr>
+<tr><td>不同 Agent 可能各自解释或复制一套规则</td><td>Codex、ZCode、WorkBuddy/CodeBuddy、Git Hook 和可接入的 CI 共享同一规则核心</td></tr>
+<tr><td>平台 API 容易被通用语言经验替代或猜测</td><td>从私有方言文档生成 API 索引，索引缺失或调用不存在时明确拒绝</td></tr>
+<tr><td>AI 声称“已遵守”但缺少证据</td><td>输出稳定诊断码、文件位置和检查结果，便于复核与回归</td></tr>
+<tr><td>全局规则可能误伤普通项目</td><td>仅在同时存在 <code>.guthon/config.json</code> 与 <code>tools/guthon-lint</code> 的已初始化谷神工作区启用</td></tr>
+</tbody>
+</table>
+<blockquote>
+<p>核心提升不是增加更多提示词，而是形成“规范提供语义、Linter 提供判定、Hook 提供时机、Git/CI 提供兜底”的治理链。</p>
+<p>Linter 通过只证明已覆盖的静态规则通过，不代表数据库结果、平台编译、SVN 提交或业务流程已经验证；插件显示已安装也不等于 Hook 已生效，首次安装或内容更新后仍需完成信任并在新任务中验证。</p>
+</blockquote>
 </section>
 
 <section class="section">
@@ -357,7 +406,7 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
 npm test  # plugins/GuthonVSCodeExtension/gushen-vscode-completion
 npm test  # plugins/GuthonBridge
 git diff --check</code></pre></div>
-<p>修改功能时应同步检查应用命令、VS Code 侧边栏、Bridge 路由、配置模板、README、知识库和使用手册。Release 只分发应用、Nexus All-in-One VSIX 和 Bridge，不包含真实配置、AI 规范或私有 <code>var/</code>。独立 Guthon SVN Navigator 源码暂时保留，但不再触发或进入自动 Release；SVN 能力统一由 Nexus All-in-One 交付。</p>
+<p>修改功能时应同步检查应用命令、VS Code 侧边栏、Bridge 路由、配置模板、README、知识库和使用手册。Release 只分发应用、Nexus All-in-One VSIX、Bridge 和公开 Skill，不包含真实配置、团队规范或私有 <code>var/</code>；团队规范与 <code>guthon-guard</code> 统一从 <a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有 GitHub 仓库</a>获取，访问权限联系我开通。独立 Guthon SVN Navigator 源码暂时保留，但不再触发或进入自动 Release；SVN 能力统一由 Nexus All-in-One 交付。</p>
 </section>
 </main>
 </div>

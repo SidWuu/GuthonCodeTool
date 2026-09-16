@@ -313,7 +313,9 @@ npm test
 
 ## 文档
 
+- [在线文档（GitHub Pages）](https://sidwuu.github.io/GuthonCodeTool/)
 - [使用手册](docs/GuthonCodeTool_使用手册.html)
+- [问题解决中心（QA）](docs/GuthonCodeTool_QA.html)
 - [全功能说明](docs/GuthonCodeTool_全功能说明.html)
 - [配置说明](config/README.md)
 - [Bridge 说明](plugins/GuthonBridge/README.md)

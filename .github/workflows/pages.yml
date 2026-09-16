@@ -1,0 +1,56 @@
+name: Deploy Documentation Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/GuthonCodeTool_*.html"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Prepare static site
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp "docs/GuthonCodeTool_使用手册.html" "_site/index.html"
+          cp "docs/GuthonCodeTool_使用手册.html" "_site/GuthonCodeTool_使用手册.html"
+          cp "docs/GuthonCodeTool_QA.html" "_site/GuthonCodeTool_QA.html"
+          cp "docs/GuthonCodeTool_全功能说明.html" "_site/GuthonCodeTool_全功能说明.html"
+          touch "_site/.nojekyll"
+          test -s "_site/index.html"
+          test -s "_site/GuthonCodeTool_QA.html"
+          test -s "_site/GuthonCodeTool_全功能说明.html"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: "_site"
+
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
