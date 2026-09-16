@@ -309,7 +309,7 @@ cd ../GuthonVSCodeExtension/gushen-vscode-completion
 npm test
 ```
 
-发布构建由现有脚本和 GitHub Actions 生成 GuthonCodeTool 应用、Nexus All-in-One VSIX 与 Chrome 扩展压缩包。独立 Guthon SVN Navigator 源码暂时保留，但不再触发或进入自动 Release；SVN 用户统一安装 Nexus All-in-One。
+发布版本由根目录 `VERSION` 统一管理，当前从 `0.2.0` 继续迭代；每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 生成 GuthonCodeTool 应用、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill。独立 Guthon SVN Navigator 源码暂时保留，但不再触发或进入自动 Release；SVN 用户统一安装 Guthon Nexus。
 
 ## 文档
 

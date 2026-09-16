@@ -98,10 +98,10 @@ $proc.函数名($参数)
 
 ## 安装方式
 
-从 [GuthonCodeTool Releases](https://github.com/SidWuu/GuthonCodeTool/releases) 下载双模式全功能扩展 `guthon-nexus-all-in-one-vscode.vsix` 后安装：
+从 [GuthonCodeTool Releases](https://github.com/SidWuu/GuthonCodeTool/releases) 下载 Guthon Nexus 扩展 `guthon-nexus-vscode.vsix` 后安装：
 
 ```bash
-code --install-extension /path/to/guthon-nexus-all-in-one-vscode.vsix --force
+code --install-extension /path/to/guthon-nexus-vscode.vsix --force
 ```
 
 安装后在 VS Code 中执行：
@@ -119,7 +119,7 @@ Shell Command: Install 'code' command in PATH
 也可以在 VS Code 扩展面板右上角菜单中选择 `Install from VSIX...`，然后选择：
 
 ```text
-下载的 guthon-nexus-all-in-one-vscode.vsix 文件
+下载的 guthon-nexus-vscode.vsix 文件
 ```
 
 ## 重新打包
