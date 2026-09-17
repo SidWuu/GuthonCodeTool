@@ -163,6 +163,10 @@ function itemMatchRank(item, typedPrefix) {
 }
 
 function filterItems(data, route, typedPrefix) {
+  if (!shouldProvideApiCompletions(typedPrefix)) {
+    return [];
+  }
+
   const sourceItems = data[route.source] || [];
 
   return sourceItems.filter((item) => {
@@ -287,7 +291,8 @@ function itemFilterText(item, typedPrefix) {
 }
 
 function shouldProvideApiCompletions(currentWord) {
-  return !normalizeText(currentWord).startsWith('$');
+  const word = normalizeText(currentWord);
+  return /[A-Za-z0-9_]/.test(word) && !word.startsWith('$');
 }
 
 function itemGroupRank(item) {

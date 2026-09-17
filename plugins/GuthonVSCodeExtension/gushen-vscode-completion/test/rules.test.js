@@ -260,9 +260,19 @@ test('keeps all matching prefix segments available for continued filtering', () 
 });
 
 test('leaves dollar-prefixed completion to VS Code local variables', () => {
+  assert.equal(shouldProvideApiCompletions(''), false);
+  assert.equal(shouldProvideApiCompletions('#'), false);
+  assert.equal(shouldProvideApiCompletions('.'), false);
   assert.equal(shouldProvideApiCompletions('$'), false);
   assert.equal(shouldProvideApiCompletions('$form'), false);
   assert.equal(shouldProvideApiCompletions('strin'), true);
+});
+
+test('does not return the whole language index for an empty completion query', () => {
+  const route = resolveRoute(rules, 'java', '');
+
+  assert.deepEqual(filterItems(data, route, ''), []);
+  assert.deepEqual(filterItems(data, route, '.'), []);
 });
 
 test('prevents stale fi candidates from surviving the final find filter', () => {
