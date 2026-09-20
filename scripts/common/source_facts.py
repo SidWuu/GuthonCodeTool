@@ -46,6 +46,7 @@ def setup_schema(conn) -> None:
 
     conn.executescript(
         """
+        -- 源码片段表：把 PAGE、过程函数和系统脚本拆成可定位片段，保存 JSON Pointer、语言和内容哈希。
         CREATE TABLE IF NOT EXISTS gusen_source_fragment (
             fragment_id INTEGER PRIMARY KEY,
             source_record_id INTEGER NOT NULL,
@@ -58,6 +59,7 @@ def setup_schema(conn) -> None:
             content_hash TEXT NOT NULL,
             UNIQUE(source_record_id, json_pointer, fragment_type)
         );
+        -- PAGE 关系表：记录字段、组件、映射键等 PAGE 元素之间的结构关系与置信度。
         CREATE TABLE IF NOT EXISTS gusen_page_relation (
             relation_id INTEGER PRIMARY KEY,
             source_record_id INTEGER NOT NULL,
@@ -68,6 +70,7 @@ def setup_schema(conn) -> None:
             json_pointer TEXT NOT NULL DEFAULT '',
             confidence TEXT NOT NULL DEFAULT 'MEDIUM'
         );
+        -- 单据路由表：关联数据源、单据类型和业务表，支持按单据快速定位源码入口。
         CREATE TABLE IF NOT EXISTS gusen_bill_route (
             route_id INTEGER PRIMARY KEY,
             source_record_id INTEGER NOT NULL,
@@ -78,6 +81,7 @@ def setup_schema(conn) -> None:
             primary_keys TEXT NOT NULL DEFAULT '',
             UNIQUE(source_record_id, data_source_id, bill_type_code, table_name)
         );
+        -- 数据访问事实表：记录源码对业务表的读写操作、行号、作用域和有界证据。
         CREATE TABLE IF NOT EXISTS gusen_data_access (
             access_id INTEGER PRIMARY KEY,
             source_record_id INTEGER NOT NULL,
@@ -94,6 +98,7 @@ def setup_schema(conn) -> None:
             detail_hash TEXT NOT NULL DEFAULT '',
             detail_truncated INTEGER NOT NULL DEFAULT 0
         );
+        -- 逻辑事实表：记录条件、赋值、返回和异常等结构化事实，支持有界检索与原因解释。
         CREATE TABLE IF NOT EXISTS gusen_logic_fact (
             fact_id INTEGER PRIMARY KEY,
             source_record_id INTEGER NOT NULL,

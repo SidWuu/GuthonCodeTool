@@ -338,15 +338,18 @@ test('runs native tree actions after focusing the SVN source view', async () => 
   assert(groupMenus.every((item) => item.group.startsWith('inline@')));
   assert(!rootCommands.includes('gushenCompletion.refreshSvn'));
   const sourceMenus = manifest.contributes.menus['view/item/context'];
+  assert.ok(sourceMenus.some((item) => item.command === 'gushenCompletion.deleteWorkspace'
+    && item.when.includes('guthonWorkspace')));
+  const procedureMenus = sourceMenus.filter((item) => item.when.includes('guthonSvnProcedure'));
   assert.deepEqual(
-    sourceMenus.slice(0, 3).map((item) => item.command),
+    procedureMenus.slice(0, 3).map((item) => item.command),
     [
       'gushenCompletion.copySvnProcedureName',
       'gushenCompletion.copyQualifiedSvnProcedureName',
       'gushenCompletion.showSvnProcedureCallers',
     ]
   );
-  assert(sourceMenus.slice(0, 3).every((item) => item.when.includes('guthonSvnProcedure')));
+  assert(procedureMenus.slice(0, 3).every((item) => item.when.includes('guthonSvnProcedure')));
 });
 
 test('maps the active virtual editor back to its Nexus source identity', () => {

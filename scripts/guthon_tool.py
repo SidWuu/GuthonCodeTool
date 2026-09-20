@@ -67,6 +67,8 @@ SVN_BROWSE_ACTIONS = {
 GLOBAL_COMMANDS = {
     "setup",
     "workspace-create",
+    "workspace-delete",
+    "svn-login-configure",
     "doctor",
     "route",
     "workspaces",
@@ -213,6 +215,22 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
         from common.workspace_config import create_workspace
 
         result = create_workspace(home, json.load(sys.stdin), gusen_hub)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    if command == "workspace-delete":
+        if extra_args:
+            raise SystemExit("workspace-delete does not accept extra arguments")
+        from common.workspace_config import delete_workspace_config
+
+        result = delete_workspace_config(home, json.load(sys.stdin), gusen_hub)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    if command == "svn-login-configure":
+        if extra_args:
+            raise SystemExit("svn-login-configure does not accept extra arguments")
+        from common.workspace_config import configure_svn_username
+
+        result = configure_svn_username(home, json.load(sys.stdin))
         print(json.dumps(result, ensure_ascii=False))
         return 0
     if command == "workspaces":
@@ -836,6 +854,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 ),
                 "scopeImport": scope_import,
                 "workingCopies": len(initialized_scope.get("workingCopies") or []),
+                "skipped": initialized_scope.get("skipped") or [],
                 "clean": bool((refreshed_status or initialized_scope).get("clean")),
                 "updated": len((refreshed or {}).get("updated") or []),
                 "reindex": _reindex_svn(
@@ -848,6 +867,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             _svn_progress(
                 f"{workspace['displayName']}｜完成｜"
                 f"{'更新' if had_working_copies else '检出'} {result['workingCopies']} 个 working copy · "
+                f"跳过 {len(result['skipped'])} 个 · "
                 f"索引对象 {result['reindex'].get('changed', 0)}"
             )
             gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
@@ -931,6 +951,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 source_type=parsed.source_type,
                 source_id=parsed.source_id,
                 fun_id=parsed.fun_id,
+                working_copy_id=parsed.working_copy[0] if len(parsed.working_copy) == 1 else "",
             )
         elif parsed.action in {"read", "read-batch"}:
             if not manifest_layout:
@@ -946,6 +967,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     source_id=parsed.source_id,
                     fun_id=parsed.fun_id,
                     json_pointer=parsed.json_pointer,
+                    working_copy_id=parsed.working_copy[0] if len(parsed.working_copy) == 1 else "",
                 )
             else:
                 try:
@@ -983,6 +1005,9 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                             ).strip(),
                             json_pointer=str(
                                 target.get("jsonPointer") or target.get("json_pointer") or ""
+                            ).strip(),
+                            working_copy_id=str(
+                                target.get("workingCopyId") or target.get("working_copy_id") or ""
                             ).strip(),
                         )
                     )
@@ -1353,7 +1378,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("setup", "workspace-create", "import-svn-scope", "workspaces", "workspace-resolve", "database-target-resolve", "database-target-configure", "database-probe", "database-describe", "database-query-readonly", "workspace-summary", "search", "context-pack", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
+        choices=("setup", "workspace-create", "workspace-delete", "svn-login-configure", "import-svn-scope", "workspaces", "workspace-resolve", "database-target-resolve", "database-target-configure", "database-probe", "database-describe", "database-query-readonly", "workspace-summary", "search", "context-pack", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
     )
     parser.add_argument("--home", required=True, help="Directory that stores local config and private source data")
     parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")

@@ -77,10 +77,9 @@ SVN 新模式的工作区只创建 `docs` 和 `context` 等派生资料；授权
 
 ## 配置
 
-发行模式优先在 Nexus 的“工作区”或“项目”区域点击“添加产品或项目”。向导会创建稳定
-`workspaceKey`、DATABASE 连接或 SVN 模式文件。DATABASE 连接只输入两次：先粘贴 MySQL/MariaDB/PostgreSQL 地址，再一次性输入用户名和密码；服务器、端口、数据库/服务名、数据源 ID 和显示名称自动生成。首次 SVN 工作区还会写入公共用户名。生成后 Nexus 会询问是否立即打开
-`products.yaml` / `projects.yaml`，由用户确认系统 alias、`system_id` 和 `data_source_id`。后续增加项目使用同一入口，无需重新初始化数据目录。
+发行模式优先在 Nexus 的“工作区”或“项目”区域点击“添加产品或项目”。向导只收集产品/项目、名称、稳定 ID 和源码来源；选择 SVN 或 DATABASE 后即创建对应 Nexus 并结束。新建 SVN Nexus 中的“设置工作区 SVN 登录”、“导入/粘贴 SVN checkout 配置”（支持多行粘贴）和“编辑 SVN 范围配置”用于后续配置；同一产品的多个 checkout 地址统一解析为一个公共 `svn.url`，每条地址去掉公共前缀后的唯一相对路径逐条写入 `svn.scope`，不会探测其他工作区的脚本。DATABASE Nexus 可先创建，后续再补充 datasource。生成的 `workspaceKey` 写入 `products.yaml` / `projects.yaml`；`systems.include.mappings` 可选，用于进一步筛选、命名和路由子系统。后续增加项目使用同一入口，无需重新初始化数据目录。
 项目无需先创建或选择产品：项目是产品某个版本的完整导出快照，导出后与产品并列，拥有独立配置、源码、索引和数据源范围。
+不再需要的 PRD/PRJ 可在工作区节点右键选择“删除产品或项目”；确认框会列出精确范围，确认后相关目录进入系统废纸篓，并删除该工作区配置、独占数据源和数据库排查条目。
 
 `setup` 对首次使用生成空的 datasource/products/projects 注册表，并保留 source-tables/sync 模板；已有文件绝不覆盖。维护者也可手工复制完整示例：
 
@@ -144,9 +143,9 @@ printf '%s' '{"sql":"SELECT COUNT(*) AS total FROM DEMO_ORDER","maxRows":100}' |
 
 SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 SVN，紧凑范围配置直接写在已有的
 `config/products.yaml`（项目写在 `config/projects.yaml`）对应条目的 `svn.url`/`svn.scope` 下，可手动编辑。
-`svn.url` 是公共根地址；`systems`、`datasources` 会从 `systems.include.mappings` 拼接 ID。省略 `scope` 时只检出这两类映射目录。
-首次没有 `svn.url` 时，也可把谷神平台下载的 `svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`
-（Windows）放入工程 `context/`，Nexus 只解析一次其中的 checkout 命令；脚本不会被执行。之后检出/更新以配置为准：
+`svn.url` 是公共根地址；导入脚本时，`svn.scope` 保存全部去重后的精确相对路径。没有 `systems.include.mappings` 时检出这些路径的全部地址；配置 mappings 后只保留匹配的系统和数据源。手写纯分类 `systems`、`datasources` 时仍从 mappings 拼接 ID；省略 `scope` 时也只检出这两类映射目录。逐项检出时，当前 SVN 账号无权读取或远端不存在的单个 scope 会被记录并跳过，其余 scope 继续；网络中断、认证整体失效等系统性错误仍会终止操作。Nexus 驾驶舱会持续显示跳过数量，后续再次执行检出会重试这些 scope。
+新增工作区时也可选择谷神平台为当前产品/项目下载的 `svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`
+（Windows），Nexus 只解析一次其中的 checkout 命令；脚本不会被执行，也不会从 `context/` 或其他工作区自动发现。之后检出/更新以配置为准。简明步骤见 [发行模式新增 SVN 产品或项目](docs/GuthonCodeTool_发行模式新增SVN产品项目.md)：
 
 ```bash
 .venv/bin/python scripts/guthon_tool.py source-mode --home . --workspace products.demo-product -- set --mode svn
@@ -168,6 +167,7 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 
 `svn init` 会全量建立索引；`svn refresh` 按更新结果增量刷新，遇到目录级新增/删除等无法安全定位的结构变化时
 退回全量扫描。普通浏览、虚拟编辑、SCM 和调用查询只使用本地 working copy，不查询源码数据库。
+SVN 表、视图和过程函数以 working copy（即数据源/schema）与对象名组成索引身份，因此不同数据源允许存在同名对象；Nexus 打开对象时会携带 `workingCopyId` 精确定位。PAGE_ID 仍在工作区内按版本去重。
 AI 从 PRD/PRJ 目录启动时，先执行 runtime descriptor 的 `workspaceResolveCommand`，由 cwd 得到唯一
 `workspaceKey`、provider 和 `index.ready`，不从目录名猜测。索引可用时第一次源码定位必须使用有界查询：对象名不明用
 `svn find`，局部事实用 `svn facts`，表或单据写入原因用 `svn explain`，跨对象影响用 `svn context/callers`；结果直接携带
@@ -262,7 +262,7 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
    保留“发行模式 / 调试模式”。
 5. DATABASE 项目继续执行同步、诊断和 Workcopy；SVN 项目从“谷神源码”虚拟编辑，并在单一 SCM 项目中查看
    本地/远程变更，执行全部、所选文件或单文件范围的提交/更新、部分保存、放弃修改和文本冲突三方合并。PAGE 默认以脚本、SQL、字段的可读投影打开 VS Code 双栏 Diff，
-   同时保留原始 JSON 差异入口；所有子系统按过程函数数据源分组顺序排列，共用数据源时按 `systems.include.mappings` 声明顺序排列；页面目录、叶子顺序及 SCM 名称复用 `pages/index.md`，PAGE 分块按 GSS、JS、SQL、字段排列；过程函数包名称复用 `procedures/index.md`，包和包内函数分别按名称字母排序；`.gss` 使用独立 Guthon GSS 高亮与既有补全。
+   同时保留原始 JSON 差异入口；配置 `systems.include.mappings` 时按声明关系分组；未配置时根据系统/数据源根目录的 `$.中文名称` 和 `pages/index.md`/`procedures/index.md` 内容保守推断，证据不足的系统或数据源各自保留为独立业务组，Skill/Public 进入“公共源码”；页面目录、叶子顺序及 SCM 名称复用 `pages/index.md`，PAGE 分块按 GSS、JS、SQL、字段排列；过程函数包名称复用 `procedures/index.md`，包和包内函数分别按名称字母排序；`.gss` 使用独立 Guthon GSS 高亮与既有补全。
 6. 在项目的“工作区驾驶舱”查看状态并直接进入对应操作；使用“搜索工作区完整索引”跨源码身份与事实检索，选择结果后可打开源码，或复制默认精简、按需详细的 AI 上下文。
 7. 需要网页功能时从 Nexus 启动 Guthon Bridge。
 
@@ -309,7 +309,7 @@ cd ../GuthonVSCodeExtension/gushen-vscode-completion
 npm test
 ```
 
-发布版本由根目录 `VERSION` 统一管理，当前从 `0.2.0` 继续迭代；每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 生成 GuthonCodeTool 应用、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill。独立 Guthon SVN Navigator 源码暂时保留，但不再触发或进入自动 Release；SVN 用户统一安装 Guthon Nexus。
+发布版本由根目录 `VERSION` 统一管理，当前从 `0.2.1` 继续迭代；每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 生成 GuthonCodeTool 应用、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill。独立 Guthon SVN Navigator 源码暂时保留，但不再触发或进入自动 Release；SVN 用户统一安装 Guthon Nexus。
 
 ## 文档
 

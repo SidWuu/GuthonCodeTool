@@ -31,25 +31,28 @@ def _is_compact_scope_config(settings: dict) -> bool:
         return True
     if not isinstance(values, list):
         return False
-    # A compact scope is a list of category names. Keep accepting the older
-    # exact URL objects/strings when a user has both ``url`` and legacy scope.
+    # A compact scope is a list of category names or exact relative paths
+    # below the shared root URL. Keep accepting older full URL objects/strings
+    # through the legacy config parser.
+    supported = {
+        "skill",
+        "public",
+        "system",
+        "systems",
+        "datasource",
+        "datasources",
+        "pages",
+        "procedures",
+        "tables",
+        "views",
+        "system-script",
+        "system_script",
+        "systemscript",
+    }
     return all(
         isinstance(value, str)
-        and value.strip().casefold() in {
-            "skill",
-            "public",
-            "system",
-            "systems",
-            "datasource",
-            "datasources",
-            "pages",
-            "procedures",
-            "tables",
-            "views",
-            "system-script",
-            "system_script",
-            "systemscript",
-        }
+        and value.strip()
+        and value.strip().replace("\\", "/").split("/", 1)[0].casefold() in supported
         for value in values
     )
 

@@ -99,6 +99,12 @@ def _logical_lines(text: str):
     start_line = 0
     for line_number, physical in enumerate(text.splitlines(), 1):
         line = physical.rstrip()
+        line = re.sub(
+            r"^\s*[-*+]\s+(?=(?:svn(?:\.exe)?\s+(?:checkout|co)\b|(?:https?|svn(?:\+ssh)?|file)://))",
+            "",
+            line,
+            flags=re.IGNORECASE,
+        )
         if not buffered:
             start_line = line_number
         continued = bool(re.search(r"(?<!\^)\^$|(?<!\\)\\$", line))
@@ -194,12 +200,18 @@ def _parse_statement(
     if first in {"rem", "echo", "::", "#"} or first.startswith(("::", "#")):
         return None
     svn_index = next((index for index, token in enumerate(tokens) if _is_svn_executable(token)), None)
-    if svn_index is None or svn_index + 1 >= len(tokens):
-        return None
-    action = tokens[svn_index + 1].casefold()
-    if action not in CHECKOUT_ACTIONS:
-        return None
-    operands = tokens[svn_index + 2 :]
+    direct_urls = svn_index is None
+    if direct_urls:
+        if urlsplit(tokens[0].rstrip(")")).scheme.casefold() not in {"http", "https", "svn", "svn+ssh", "file"}:
+            return None
+        operands = tokens
+    else:
+        if svn_index + 1 >= len(tokens):
+            return None
+        action = tokens[svn_index + 1].casefold()
+        if action not in CHECKOUT_ACTIONS:
+            return None
+        operands = tokens[svn_index + 2 :]
     url_indexes = [
         index
         for index, token in enumerate(operands)
@@ -216,7 +228,16 @@ def _parse_statement(
     url = normalize_scope_url(raw_url, f"line-{line_number}")
     raw_subdir = _destination_after_url(operands, url_index, line_number)
     if not raw_subdir:
-        raw_subdir = PurePosixPath(urlsplit(url).path).name
+        url_parts = PurePosixPath(urlsplit(url).path).parts
+        category_index = next(
+            (index for index, part in enumerate(url_parts) if part.casefold() in SUPPORTED_CATEGORIES),
+            None,
+        )
+        raw_subdir = (
+            "/".join(url_parts[category_index:])
+            if direct_urls and category_index is not None
+            else PurePosixPath(urlsplit(url).path).name
+        )
     if VARIABLE_PATTERN.search(raw_subdir):
         raise SystemExit(f"Line {line_number}: variables are not allowed in an SVN checkout destination")
     if PureWindowsPath(raw_subdir).is_absolute():
@@ -792,7 +813,7 @@ def _workspace_mapping_ids(workspace: dict) -> tuple[list[str], list[str]]:
 
 
 def _compact_scope_values(workspace: dict) -> list[str]:
-    """Normalize the optional compact ``svn.scope`` category list."""
+    """Normalize compact ``svn.scope`` categories or exact relative paths."""
 
     svn = workspace.get("svn") or {}
     configured = svn.get("scope")
@@ -808,15 +829,19 @@ def _compact_scope_values(workspace: dict) -> list[str]:
         raise SystemExit("svn.scope must be a list of compact source categories")
     values = []
     for raw in configured:
-        value = str(raw or "").strip().casefold().replace("_", "-")
-        value = COMPACT_SCOPE_ALIASES.get(value, value)
-        if not value:
-            continue
-        if value not in COMPACT_SCOPE_NAMES:
+        value = normalize_scope_subdir(raw, "svn.scope")
+        parts = list(PurePosixPath(value).parts)
+        category = parts[0].casefold().replace("_", "-")
+        category = COMPACT_SCOPE_ALIASES.get(category, category)
+        if category not in COMPACT_SCOPE_NAMES:
             raise SystemExit(
                 f"Unsupported compact SVN scope '{raw}'; use: "
                 + ", ".join(sorted(COMPACT_SCOPE_NAMES))
             )
+        parts[0] = category
+        value = PurePosixPath(*parts).as_posix()
+        if not value:
+            continue
         if value not in values:
             values.append(value)
     return values or list(COMPACT_SCOPE_DEFAULT)
@@ -837,26 +862,31 @@ def build_manifest_from_workspace_config(workspace: dict) -> ImportResult:
     if not root_url:
         raise SystemExit(f"Missing svn.url for compact SVN scope: {workspace.get('workspaceKey') or ''}")
     scope_values = _compact_scope_values(workspace)
-    needs_mapping = any(
-        scope in {"systems", "datasources", "pages", "procedures", "tables", "views", "system-script"}
-        for scope in scope_values
-    )
+    expandable_categories = {
+        "systems", "datasources", "pages", "procedures", "tables", "views", "system-script"
+    }
+    needs_mapping = any(scope in expandable_categories for scope in scope_values)
     system_ids, data_source_ids = _workspace_mapping_ids(workspace) if needs_mapping else ([], [])
     entries = []
     for scope in scope_values:
-        if scope in {"systems", "pages", "system-script"}:
+        scope_path = PurePosixPath(scope)
+        category = scope_path.parts[0]
+        if len(scope_path.parts) > 1:
+            paths = [scope]
+        elif category in {"systems", "pages", "system-script"}:
             identifiers = system_ids
-        elif scope in {"datasources", "procedures", "tables", "views"}:
+            paths = [f"{category}/{identifier}" for identifier in identifiers]
+        elif category in {"datasources", "procedures", "tables", "views"}:
             identifiers = data_source_ids
+            paths = [f"{category}/{identifier}" for identifier in identifiers]
         else:
-            identifiers = [""]
-        for identifier in identifiers:
-            path = scope if not identifier else f"{scope}/{identifier}"
+            paths = [category]
+        for path in paths:
             entries.append({
                 "url": f"{root_url.rstrip('/')}/{path}",
                 "localSubdir": path,
-                "category": scope,
-                "writable": scope not in {"skill", "public"},
+                "category": category,
+                "writable": category not in {"skill", "public"},
             })
     if not entries:
         raise SystemExit(f"Compact SVN scope has no entries for {workspace.get('workspaceKey') or ''}")
@@ -1073,13 +1103,13 @@ def _compact_scope_root(result: ImportResult) -> str:
         local_parts = PurePosixPath(str(entry.get("localSubdir") or "")).parts
         if not url.scheme or not url.netloc or not local_parts:
             continue
-        category = local_parts[0]
         remote_parts = tuple(part for part in PurePosixPath(url.path).parts if part != "/")
-        try:
-            category_index = remote_parts.index(category)
-        except ValueError:
-            continue
-        root_path = "/" + "/".join(remote_parts[:category_index])
+        if len(remote_parts) < len(local_parts) or remote_parts[-len(local_parts) :] != local_parts:
+            raise SystemExit(
+                f"SVN URL does not end with its checkout scope: {entry.get('url') or ''}"
+            )
+        root_parts = remote_parts[: -len(local_parts)]
+        root_path = "/" + "/".join(root_parts)
         roots.append((url.scheme, url.netloc, root_path.rstrip("/")))
     if not roots:
         raise SystemExit("Unable to infer compact SVN root URL from checkout entries")
@@ -1091,49 +1121,26 @@ def _compact_scope_root(result: ImportResult) -> str:
 
 def _compact_config_values(result: ImportResult, workspace: dict) -> tuple[str, list[str]]:
     settings = workspace.get("svn") or {}
+    inferred_root = _compact_scope_root(result)
     root = str(settings.get("scopeRootUrl") or "").strip().rstrip("/")
-    if not root:
-        root = _compact_scope_root(result)
+    if root and root != inferred_root:
+        raise SystemExit(
+            f"Imported SVN root URL conflicts with existing config: {root} != {inferred_root}"
+        )
+    root = root or inferred_root
     scopes = []
     for entry in result.manifest.get("entries") or []:
-        local = PurePosixPath(str(entry.get("localSubdir") or ""))
-        if not local.parts:
+        local_subdir = normalize_scope_subdir(entry.get("localSubdir"), "imported-scope")
+        if not local_subdir:
             continue
-        category = local.parts[0]
-        category = COMPACT_SCOPE_ALIASES.get(category.casefold(), category.casefold())
-        if category in COMPACT_SCOPE_NAMES and category not in scopes:
-            scopes.append(category)
+        local = PurePosixPath(local_subdir)
+        category = COMPACT_SCOPE_ALIASES.get(local.parts[0].casefold(), local.parts[0].casefold())
+        normalized = PurePosixPath(category, *local.parts[1:]).as_posix()
+        if category in COMPACT_SCOPE_NAMES and normalized not in scopes:
+            scopes.append(normalized)
     if not scopes:
         scopes = list(COMPACT_SCOPE_DEFAULT)
     return root, scopes
-
-
-def _compact_mapping_is_ready(workspace: dict, result: ImportResult) -> bool:
-    mapped_categories = {
-        "systems",
-        "datasources",
-        "pages",
-        "procedures",
-        "tables",
-        "views",
-        "system-script",
-    }
-    if not any(
-        PurePosixPath(str(entry.get("localSubdir") or "")).parts
-        and PurePosixPath(str(entry.get("localSubdir") or "")).parts[0] in mapped_categories
-        for entry in result.manifest.get("entries") or []
-    ):
-        return True
-    mappings = workspace.get("systemMappings")
-    if not isinstance(mappings, dict):
-        mappings = ((workspace.get("systems") or {}).get("include") or {}).get("mappings") or {}
-    aliases = workspace.get("systemAliases") or list(mappings)
-    return bool(aliases) and all(
-        isinstance(mappings.get(alias), dict)
-        and str(mappings[alias].get("system_id") or "").strip()
-        and str(mappings[alias].get("data_source_id") or "").strip()
-        for alias in aliases
-    )
 
 
 def _render_compact_scope(root: str, scopes: list[str], indent: int) -> list[str]:
@@ -1150,12 +1157,22 @@ def _merge_compact_scope_config(path: Path, workspace_key: str, result: ImportRe
     root, scopes = _compact_config_values(result, workspace)
     existing_scope_values = _yaml_scope_entries(path, workspace_key)
     preserved_scopes = []
+    imported_exact_categories = {
+        PurePosixPath(scope).parts[0]
+        for scope in scopes
+        if len(PurePosixPath(scope).parts) > 1
+    }
     for raw in existing_scope_values:
         if not isinstance(raw, str):
             continue
-        value = raw.strip().casefold().replace("_", "-")
-        value = COMPACT_SCOPE_ALIASES.get(value, value)
-        if value in COMPACT_SCOPE_NAMES and value not in preserved_scopes:
+        value = normalize_scope_subdir(raw, "existing-svn.scope")
+        parts = list(PurePosixPath(value).parts)
+        category = COMPACT_SCOPE_ALIASES.get(parts[0].casefold().replace("_", "-"), parts[0].casefold())
+        parts[0] = category
+        value = PurePosixPath(*parts).as_posix()
+        if len(parts) == 1 and category in imported_exact_categories:
+            continue
+        if category in COMPACT_SCOPE_NAMES and value not in preserved_scopes:
             preserved_scopes.append(value)
     scopes = preserved_scopes + [scope for scope in scopes if scope not in preserved_scopes]
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -1203,6 +1220,7 @@ def _merge_compact_scope_config(path: Path, workspace_key: str, result: ImportRe
             "workspaceKey": workspace_key,
             "added": 0,
             "duplicatesSkipped": result.duplicate_count,
+            "commands": result.command_count,
             "entries": len(result.manifest.get("entries") or []),
             "url": root,
             "scope": scopes,
@@ -1221,6 +1239,7 @@ def _merge_compact_scope_config(path: Path, workspace_key: str, result: ImportRe
         "workspaceKey": workspace_key,
         "added": len(result.manifest.get("entries") or []),
         "duplicatesSkipped": result.duplicate_count,
+        "commands": result.command_count,
         "entries": len(result.manifest.get("entries") or []),
         "url": root,
         "scope": scopes,
@@ -1243,7 +1262,7 @@ def merge_scope_config(
     path = Path(path).expanduser().resolve()
     if not path.is_file():
         raise SystemExit(f"Missing SVN workspace configuration: {path}")
-    if workspace is not None and _compact_mapping_is_ready(workspace, result):
+    if workspace is not None:
         return _merge_compact_scope_config(path, workspace_key, result, workspace)
     existing_raw = _yaml_scope_entries(path, workspace_key)
     existing_result = None

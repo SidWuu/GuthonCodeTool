@@ -19,6 +19,7 @@ from pathlib import Path
 from common import source_facts
 from common.source_format import decode_source
 from providers.svn import checkout as svn_checkout
+from providers.svn import group_inference
 from providers.svn.dedup import is_newer_page
 
 
@@ -220,7 +221,7 @@ def list_workspaces(config):
             datasource_name = str(item.get("datasource") or "").strip()
             datasource = (config.get("datasource", {}).get("datasource") or {}).get(datasource_name)
             manifest_layout = bool(svn and svn.get("checkoutLayout") == "manifest-working-copies")
-            if not datasource and not (manifest_layout and not datasource_name):
+            if datasource_name and not datasource:
                 raise SystemExit(f"Unknown datasource for {key}: {datasource_name}")
             datasource = datasource or {}
             resolved_checkout_root = svn["checkoutRoot"].resolve() if svn else None
@@ -348,7 +349,7 @@ def workspace_index_state(workspace: dict) -> dict:
                     row[1]
                     for row in connection.execute("PRAGMA table_info(gusen_source_record)")
                 }
-                if "scope_id" in columns:
+                if {"scope_id", "source_namespace"}.issubset(columns):
                     index_ready = connection.execute(
                         "SELECT 1 FROM gusen_source_record WHERE scope_id=? LIMIT 1",
                         (workspace["scopeId"],),
@@ -433,6 +434,7 @@ def _workspace_cockpit(summary: dict) -> dict:
     index_ready = bool(summary["index"]["ready"])
     status_failed = summary.get("status") == "FAILED"
     working_copies = summary.get("workingCopies") or []
+    skipped_working_copies = summary.get("skippedWorkingCopies") or []
     dirty_count = sum(not item.get("clean") for item in working_copies)
     messages = []
     if status_failed:
@@ -441,17 +443,22 @@ def _workspace_cockpit(summary: dict) -> dict:
         messages.append(message or "最近一次工作区操作失败")
     if not index_ready:
         messages.append("本地事实索引尚未就绪")
+    if summary.get("sourceMode") == "database" and not summary.get("datasourceReady"):
+        messages.append("DATABASE 数据源尚未配置")
     if summary.get("status") == "PARTIAL":
         messages.append("工作区资料尚未达到完整一致状态")
     elif summary.get("status") == "UNINITIALIZED" and index_ready:
         messages.append("工作区尚未完成初始化")
     if dirty_count:
         messages.append(f"{dirty_count} 个 SVN working copy 存在本地变更")
+    if skipped_working_copies:
+        messages.append(f"{len(skipped_working_copies)} 个 SVN scope 无权限或不存在，已跳过")
     return {
         "health": "FAILED" if status_failed else "ACTION_REQUIRED" if messages else "READY",
         "issueCount": len(messages),
         "indexReady": index_ready,
         "workingCopyCount": len(working_copies),
+        "skippedWorkingCopyCount": len(skipped_working_copies),
         "dirtyWorkingCopies": dirty_count,
         "messages": messages,
     }
@@ -571,20 +578,25 @@ def update_workspace_state(config, workspace, step=None, status=None, error="", 
 
 def _svn_source_control_groups(workspace, working_copies):
     mappings = workspace.get("systemMappings") or {}
-    records = []
-    cache_path = CONFIG_DIR / "system-data.json"
-    try:
-        cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
-        records = ((cache.get("datasources") or {}).get(workspace.get("datasourceName")) or {}).get("systems") or []
-    except (AttributeError, json.JSONDecodeError, OSError):
-        records = []
-    names_by_alias = {
-        str(record.get("SYSTEM_ALIAS_ID") or "").strip(): str(record.get("SYSTEM_NAME") or "").strip()
-        for record in records
-        if isinstance(record, dict) and str(record.get("SYSTEM_ALIAS_ID") or "").strip()
-    }
+
+    def checkout_name(local_subdir):
+        return group_inference.checkout_name(workspace["checkoutPath"] / local_subdir)
+
+    inferred = None
+    effective_mappings = mappings
+    if not mappings:
+        inferred = group_inference.infer_groups(workspace["checkoutPath"], working_copies)
+        effective_mappings = {
+            f"inferred.{system_id}": {
+                "system_id": system_id,
+                "data_source_id": match["dataSourceId"],
+                "inference": match,
+            }
+            for system_id, match in inferred["matches"].items()
+        }
+
     systems_by_data_source = {}
-    for alias, mapping in mappings.items():
+    for mapping in effective_mappings.values():
         if not isinstance(mapping, dict):
             continue
         data_source_id = str(mapping.get("data_source_id") or "").strip()
@@ -594,7 +606,7 @@ def _svn_source_control_groups(workspace, working_copies):
         group = systems_by_data_source.setdefault(data_source_id, {"systemIds": [], "systemNames": []})
         if system_id not in group["systemIds"]:
             group["systemIds"].append(system_id)
-        system_name = names_by_alias.get(str(alias).strip())
+        system_name = checkout_name(f"systems/{system_id}")
         if system_name and system_name not in group["systemNames"]:
             group["systemNames"].append(system_name)
 
@@ -612,9 +624,10 @@ def _svn_source_control_groups(workspace, working_copies):
         working_copy_ids = [copy_ids_by_subdir[subdir] for subdir in subdirs if subdir in copy_ids_by_subdir]
         assigned.update(working_copy_ids)
         system_names = system_group["systemNames"]
+        datasource_name = checkout_name(f"datasources/{data_source_id}")
         display_name = (
-            "贸易系统"
-            if set(system_names) == {"国内贸易", "国际贸易"}
+            datasource_name
+            if datasource_name
             else system_names[0]
             if len(system_names) == 1
             else " / ".join(system_names)
@@ -622,29 +635,61 @@ def _svn_source_control_groups(workspace, working_copies):
             else f"{data_source_id} 子系统"
         )
         groups.append({
-            "id": f"subsystem-flat-{data_source_id}",
+            "id": f"{'subsystem' if mappings else 'inferred-subsystem'}-flat-{data_source_id}",
             "label": display_name,
             "dataSourceId": data_source_id,
             "systemIds": system_group["systemIds"],
             "systemNames": system_group["systemNames"],
             "workingCopyIds": working_copy_ids,
+            "inferred": not bool(mappings),
         })
 
-    remaining = [
-        str(item.get("id") or "").strip()
+    remaining = {
+        str(item.get("localSubdir") or "").strip().replace("\\", "/"):
+            str(item.get("id") or "").strip()
         for item in working_copies
         if isinstance(item, dict)
         and str(item.get("id") or "").strip()
         and str(item.get("id") or "").strip() not in assigned
-    ]
-    if remaining:
+    }
+    if inferred:
+        for item in inferred["unmatchedSystems"]:
+            system_id = item["systemId"]
+            working_copy_id = remaining.pop(f"systems/{system_id}", "")
+            if working_copy_id:
+                groups.append({
+                    "id": f"unmatched-system-flat-{system_id}",
+                    "label": item["systemName"] or f"{system_id} 业务系统",
+                    "dataSourceId": "",
+                    "systemIds": [system_id],
+                    "systemNames": [item["systemName"]] if item["systemName"] else [],
+                    "workingCopyIds": [working_copy_id],
+                    "inferred": True,
+                    "unmatched": True,
+                })
+        for item in inferred["unmatchedDatasources"]:
+            data_source_id = item["dataSourceId"]
+            working_copy_id = remaining.pop(f"datasources/{data_source_id}", "")
+            if working_copy_id:
+                groups.append({
+                    "id": f"unmatched-datasource-flat-{data_source_id}",
+                    "label": item["dataSourceName"] or f"{data_source_id} 数据源",
+                    "dataSourceId": data_source_id,
+                    "systemIds": [],
+                    "systemNames": [],
+                    "workingCopyIds": [working_copy_id],
+                    "inferred": True,
+                    "unmatched": True,
+                })
+    remaining_ids = [working_copy_id for working_copy_id in remaining.values() if working_copy_id]
+    if remaining_ids:
         groups.append({
             "id": "shared-flat",
             "label": "公共源码",
             "dataSourceId": "",
             "systemIds": [],
             "systemNames": [],
-            "workingCopyIds": remaining,
+            "workingCopyIds": remaining_ids,
         })
     return groups
 
@@ -663,6 +708,8 @@ def workspace_summary(config, workspace):
         "sourceModePath": str(workspace["sourceModePath"]),
         "providerSourceRoot": str(workspace["providerSourceRoot"]),
         "checkoutPath": str(workspace["checkoutPath"]) if workspace.get("checkoutPath") else "",
+        "datasourceName": workspace.get("datasourceName") or "",
+        "datasourceReady": bool(workspace.get("datasourceName") and workspace.get("datasource")),
         "capabilities": workspace["capabilities"],
         "status": state["status"],
         "lastFullSyncAt": state["lastFullSyncAt"],
@@ -694,6 +741,7 @@ def workspace_summary(config, workspace):
         summary["checkoutBatReady"] = summary["checkoutScriptReady"]
         summary["svnLoginRequired"] = True
         summary["svnUsernameSource"] = "sync.yaml"
+        summary["svnUsername"] = workspace["svn"].get("username") or ""
         summary["workingCopies"] = [
             {
                 "id": item.get("id") or "",
@@ -705,6 +753,16 @@ def workspace_summary(config, workspace):
                 "clean": bool(item.get("clean")),
             }
             for item in checkout_state.get("workingCopies") or []
+        ]
+        summary["skippedWorkingCopies"] = [
+            {
+                "id": item.get("id") or "",
+                "localSubdir": item.get("localSubdir") or "",
+                "category": item.get("category") or "",
+                "reason": item.get("reason") or "",
+            }
+            for item in checkout_state.get("skipped") or []
+            if isinstance(item, dict)
         ]
         summary["sourceControlGroups"] = _svn_source_control_groups(
             workspace,
@@ -1103,10 +1161,6 @@ def _reset_incompatible_index(conn: sqlite3.Connection) -> bool:
     ).fetchone()
     if not existing:
         return False
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(gusen_source_record)")}
-    if "scope_id" in columns:
-        return False
-
     # The index is derived data. When its identity model changes, rebuilding it is
     # safer than carrying obsolete workspace relationships into current queries.
     objects = conn.execute(
@@ -1159,21 +1213,32 @@ def connect_index(index_db: Path, *, rebuild_incompatible: bool = False) -> sqli
     ).fetchone()
     if existing:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(gusen_source_record)")}
+        reset = False
         if "scope_id" not in columns:
             if _migrate_workspace_identity(conn):
-                pass
+                columns = {
+                    row["name"] for row in conn.execute("PRAGMA table_info(gusen_source_record)")
+                }
             elif not rebuild_incompatible:
                 conn.close()
                 raise IndexRebuildRequired("源码索引结构已更新，需要重建派生索引")
             else:
                 _reset_incompatible_index(conn)
+                reset = True
+        if not reset and "source_namespace" not in columns:
+            if not rebuild_incompatible:
+                conn.close()
+                raise IndexRebuildRequired("源码索引身份结构已更新，需要重建派生索引")
+            _reset_incompatible_index(conn)
     conn.executescript(
         """
+        -- 源码对象主表：保存对象身份、来源、版本、路径和索引状态，是其他事实表的关联入口。
         CREATE TABLE IF NOT EXISTS gusen_source_record (
             record_id INTEGER,
             source_layer TEXT NOT NULL,
             scope_id TEXT NOT NULL,
             project_id TEXT NOT NULL DEFAULT '',
+            source_namespace TEXT NOT NULL DEFAULT '',
             source_table TEXT NOT NULL,
             source_id TEXT NOT NULL,
             source_alias_id TEXT NOT NULL,
@@ -1188,8 +1253,12 @@ def connect_index(index_db: Path, *, rebuild_incompatible: bool = False) -> sqli
             local_path TEXT,
             status TEXT NOT NULL,
             indexed_time TEXT NOT NULL,
-            PRIMARY KEY (source_layer, scope_id, project_id, source_table, source_id, fun_id)
+            PRIMARY KEY (
+                source_layer, scope_id, project_id, source_namespace,
+                source_table, source_id, fun_id
+            )
         );
+        -- 静态调用边表：记录能够确定目标的函数调用，用于转到定义、查找引用和调用链分析。
         CREATE TABLE IF NOT EXISTS gusen_invoke_call (
             id INTEGER PRIMARY KEY,
             source_record_id INTEGER NOT NULL,
@@ -1200,6 +1269,7 @@ def connect_index(index_db: Path, *, rebuild_incompatible: bool = False) -> sqli
             target_fun_id TEXT,
             invoke_type TEXT
         );
+        -- 动态调用线索表：记录无法静态确定目标的调用表达式及原因，供人工或 AI 继续核验。
         CREATE TABLE IF NOT EXISTS gusen_dynamic_call (
             id INTEGER PRIMARY KEY,
             source_record_id INTEGER NOT NULL,
@@ -1209,6 +1279,7 @@ def connect_index(index_db: Path, *, rebuild_incompatible: bool = False) -> sqli
             invoke_expr TEXT,
             reason TEXT
         );
+        -- 索引同步状态表：保存索引构建和增量刷新所需的轻量键值状态。
         CREATE TABLE IF NOT EXISTS gusen_sync_state (
             state_key TEXT PRIMARY KEY,
             state_value TEXT
@@ -1273,6 +1344,7 @@ def _migrate_call_index_schema(conn):
             conn.execute("ALTER TABLE gusen_invoke_call RENAME TO gusen_invoke_call_legacy")
             conn.execute(
                 """
+                -- 迁移后的静态调用边表；用途与主建表语句中的 gusen_invoke_call 相同。
                 CREATE TABLE gusen_invoke_call (
                     id INTEGER PRIMARY KEY,
                     source_record_id INTEGER NOT NULL,
@@ -1306,6 +1378,7 @@ def _migrate_call_index_schema(conn):
             conn.execute("ALTER TABLE gusen_dynamic_call RENAME TO gusen_dynamic_call_legacy")
             conn.execute(
                 """
+                -- 迁移后的动态调用线索表；用途与主建表语句中的 gusen_dynamic_call 相同。
                 CREATE TABLE gusen_dynamic_call (
                     id INTEGER PRIMARY KEY,
                     source_record_id INTEGER NOT NULL,
@@ -1911,18 +1984,29 @@ def _delete_call_index(conn, identity):
 
 
 def _delete_svn_index_item(conn, workspace, row):
-    identity = (
-        workspace["layer"],
-        workspace["scopeId"],
-        workspace["projectId"],
-        row["source_table"],
-        row["source_id"],
-        row["fun_id"] or "",
+    row = dict(row)
+    namespace = str(row.get("scope_entry_id") or row.get("source_namespace") or "").strip()
+    source_ids = (
+        "SELECT record_id FROM gusen_source_record "
+        "WHERE source_layer=? AND scope_id=? AND project_id=? AND source_namespace=? "
+        "AND source_table=? AND source_id=? AND fun_id=?"
     )
-    _delete_call_index(conn, identity)
+    identity = (
+        workspace["layer"], workspace["scopeId"], workspace["projectId"], namespace,
+        row["source_table"], row["source_id"], row["fun_id"] or "",
+    )
+    record_ids = [
+        int(item["record_id"])
+        for item in conn.execute(source_ids, identity).fetchall()
+        if item["record_id"] is not None
+    ]
+    conn.execute(f"DELETE FROM gusen_invoke_call WHERE source_record_id IN ({source_ids})", identity)
+    conn.execute(f"DELETE FROM gusen_dynamic_call WHERE source_record_id IN ({source_ids})", identity)
+    for record_id in record_ids:
+        source_facts.clear_source_details(conn, record_id)
     conn.execute(
         "DELETE FROM gusen_source_record WHERE source_layer=? AND scope_id=? AND project_id=? "
-        "AND source_table=? AND source_id=? AND fun_id=?",
+        "AND source_namespace=? AND source_table=? AND source_id=? AND fun_id=?",
         identity,
     )
 
@@ -1932,17 +2016,19 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
     conn.execute(
         """
         INSERT OR REPLACE INTO gusen_source_record(
-            source_layer, scope_id, project_id, source_table, source_id, source_alias_id, fun_id,
+            source_layer, scope_id, project_id, source_namespace,
+            source_table, source_id, source_alias_id, fun_id,
             source_name, version_mac, update_time, check_out_user_id, check_out_date, check_in_date,
             change_key, local_path, status, indexed_time, provider, source_path, source_hash,
             svn_revision, json_pointer, system_id, data_source_id, working_copy_id, scope_entry_id,
             file_size, mtime_ns, diagnostic_code, diagnostic_message, parser_version, last_seen_time
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             workspace["layer"],
             workspace["scopeId"],
             workspace["projectId"],
+            item.get("scope_entry_id") or item.get("working_copy_id") or "",
             item["source_table"],
             item["source_id"],
             item["source_alias_id"],
@@ -1976,8 +2062,11 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
     )
     source_record = conn.execute(
         "SELECT record_id FROM gusen_source_record WHERE provider='svn' AND source_path=? "
-        "AND source_table=? AND source_id=? AND fun_id=?",
-        (item["source_path"], item["source_table"], item["source_id"], item.get("fun_id") or ""),
+        "AND source_namespace=? AND source_table=? AND source_id=? AND fun_id=?",
+        (
+            item["source_path"], item.get("scope_entry_id") or item.get("working_copy_id") or "",
+            item["source_table"], item["source_id"], item.get("fun_id") or "",
+        ),
     ).fetchone()
     if source_record is None:
         raise ValueError(f"SVN source record was not inserted: {item['source_path']}")
@@ -2017,6 +2106,7 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
             script["content"],
             json_path=script.get("json_path") or item["source_path"],
             source_fragment_id=fragments.get(script.get("json_path") or ""),
+            source_record_id=source_record_id,
         )
 
 
@@ -2211,9 +2301,12 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
             skipped = set()
             ignored = list(scan.get("ignored") or [])
             for item in scan["objects"]:
+                if item["source_table"] != "page":
+                    continue
                 collision = conn.execute(
                     """
-                    SELECT source_table, source_id, fun_id, source_path, svn_revision, status
+                    SELECT source_table, source_id, fun_id, source_path, svn_revision, status,
+                           scope_entry_id, source_namespace
                     FROM gusen_source_record
                     WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=?
                       AND working_copy_id NOT IN ({})
@@ -2230,7 +2323,7 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
                     collision_item = dict(collision)
                     if is_newer_page(item, collision_item):
                         _delete_svn_index_item(conn, workspace, collision_item)
-                    elif item["source_table"] == "page":
+                    else:
                         skipped.add(item["source_path"])
                         ignored.append(
                             {
@@ -2243,12 +2336,6 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
                                 "reason": "duplicate PAGE_ID; older SVN file excluded from source index",
                             }
                         )
-                    else:
-                        errors.append({
-                            "scopeEntryId": item.get("scope_entry_id") or "",
-                            "path": item["source_path"],
-                            "error": f"duplicate object identity also used by {collision_item['source_path']}",
-                        })
             if errors:
                 conn.rollback()
                 progress(f"扫描发现 {len(errors)} 个错误，保留旧索引")
@@ -2263,7 +2350,8 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
                     "indexPreserved": True,
                 }
             existing = conn.execute(
-                "SELECT source_table, source_id, fun_id FROM gusen_source_record "
+                "SELECT source_table, source_id, fun_id, scope_entry_id, source_namespace "
+                "FROM gusen_source_record "
                 f"WHERE provider='svn' AND working_copy_id IN ({placeholders})",
                 selected,
             ).fetchall()
@@ -2323,15 +2411,17 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
                     "indexPreserved": True,
                 }
             existing = conn.execute(
-                "SELECT source_table, source_id, fun_id FROM gusen_source_record "
+                "SELECT source_table, source_id, fun_id, scope_entry_id, source_namespace "
+                "FROM gusen_source_record "
                 "WHERE provider='svn' AND source_path=?",
                 (scanned["path"],),
             ).fetchall()
             item = scanned["object"]
-            if item:
+            if item and item["source_table"] == "page":
                 collision = conn.execute(
                     """
-                    SELECT source_table, source_id, fun_id, source_path, svn_revision, status
+                    SELECT source_table, source_id, fun_id, source_path, svn_revision, status,
+                           scope_entry_id, source_namespace
                     FROM gusen_source_record
                     WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=? AND source_path<>?
                     LIMIT 1
@@ -2342,7 +2432,7 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
                     collision_item = dict(collision)
                     if is_newer_page(item, collision_item):
                         _delete_svn_index_item(conn, workspace, collision_item)
-                    elif item["source_table"] == "page":
+                    else:
                         conn.commit()
                         return {
                             "mode": "svn-incremental-scan",
@@ -2363,18 +2453,6 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
                                     "reason": "duplicate PAGE_ID; older SVN file excluded from source index",
                                 }
                             ],
-                            "indexPreserved": True,
-                        }
-                    else:
-                        conn.rollback()
-                        return {
-                            "mode": "svn-incremental-scan",
-                            "provider": "svn",
-                            "workspaceKey": workspace["workspaceKey"],
-                            "sourcePath": scanned["path"],
-                            "changed": 0,
-                            "failures": 1,
-                            "errors": [{"path": scanned["path"], "error": f"duplicate object identity also used by {collision_item['source_path']}"}],
                             "indexPreserved": True,
                         }
             for row in existing:
@@ -2858,29 +2936,31 @@ def index_calls(
     content,
     json_path=None,
     source_fragment_id=None,
+    source_record_id=None,
 ):
     stored_path = json_path or _indexed_path(script_path)
-    source_record = conn.execute(
-        """
-        SELECT record_id AS source_record_id
-        FROM gusen_source_record
-        WHERE source_layer=? AND scope_id=? AND project_id=?
-          AND source_table=? AND source_id=? AND fun_id=?
-        """,
-        (
-            layer,
-            scope_id,
-            project_id,
-            row["source_table"],
-            row["source_id"],
-            row["fun_id"] or "",
-        ),
-    ).fetchone()
-    if source_record is None:
-        raise ValueError(
-            f"Call index source record is missing: {row['source_table']}/{row['source_id']}/{row['fun_id'] or ''}"
-        )
-    source_record_id = source_record["source_record_id"]
+    if source_record_id is None:
+        source_record = conn.execute(
+            """
+            SELECT record_id AS source_record_id
+            FROM gusen_source_record
+            WHERE source_layer=? AND scope_id=? AND project_id=?
+              AND source_table=? AND source_id=? AND fun_id=?
+            """,
+            (
+                layer,
+                scope_id,
+                project_id,
+                row["source_table"],
+                row["source_id"],
+                row["fun_id"] or "",
+            ),
+        ).fetchone()
+        if source_record is None:
+            raise ValueError(
+                f"Call index source record is missing: {row['source_table']}/{row['source_id']}/{row['fun_id'] or ''}"
+            )
+        source_record_id = source_record["source_record_id"]
     bindings = {}
     for line_no, line in enumerate(content.splitlines(), 1):
         find = PROC_FIND.search(line)

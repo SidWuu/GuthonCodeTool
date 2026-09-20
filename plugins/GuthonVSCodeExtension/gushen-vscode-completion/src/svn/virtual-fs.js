@@ -49,19 +49,23 @@ function encodeIdentity(identity) {
   params.set('sourceType', identity.sourceType);
   params.set('sourceId', identity.sourceId);
   if (identity.funId) params.set('funId', identity.funId);
+  if (identity.workingCopyId) params.set('workingCopyId', identity.workingCopyId);
   if (identity.jsonPointer) params.set('jsonPointer', identity.jsonPointer);
   return params.toString();
 }
 
 function decodeIdentity(uri) {
   const params = new URLSearchParams(uri.query || '');
-  return {
+  const identity = {
     workspaceKey: uri.authority,
     sourceType: params.get('sourceType') || '',
     sourceId: params.get('sourceId') || '',
     funId: params.get('funId') || '',
     jsonPointer: params.get('jsonPointer') || '',
   };
+  const workingCopyId = params.get('workingCopyId') || '';
+  if (workingCopyId) identity.workingCopyId = workingCopyId;
+  return identity;
 }
 
 class SvnVirtualFileSystem {

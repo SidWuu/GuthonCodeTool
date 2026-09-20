@@ -32,12 +32,20 @@ const { readWorkspaces } = require('./workspace-registry');
 const { activateSvn, selectEditableIdentity, sourceModuleElement } = require('./svn/activate');
 const { clearLegacyCredentials, promptForPassword } = require('./svn/credentials');
 const { workspaceKeyFromSourceControlId } = require('./svn/scm-manager');
+const {
+  createSvnScopeInputFile,
+  hasSvnScopeInput,
+  removeSvnScopeInputFile,
+  waitForEditorTabClose,
+} = require('./svn/scope-input');
 
 const SUPPORTED_LANGUAGES = ['java', 'guthon-gss', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled', 'guthon-svn-edit'];
 const TOOL_COMMANDS = {
   setup: 'setup',
   workspaceCreate: 'workspace-create',
+  workspaceDelete: 'workspace-delete',
+  svnLoginConfigure: 'svn-login-configure',
   syncSourceAll: 'sync-source-all',
   syncSource: 'sync-source',
   syncAll: 'sync-all',
@@ -74,6 +82,8 @@ const TOOL_LABELS = {
   svn: 'SVN 检出/更新',
   'source-mode': '设置项目源码来源',
   'workspace-create': '添加产品或项目',
+  'workspace-delete': '删除产品或项目',
+  'svn-login-configure': '设置工作区 SVN 用户名',
   search: '搜索工作区完整索引',
   'context-pack': '生成 AI 上下文',
   'database-target-configure': '配置数据库排查',
@@ -362,13 +372,13 @@ class ToolTreeDataProvider {
         `运行模式：${executionMode === 'development' ? '调试模式' : '发行模式'}`,
         'gushenCompletion.selectExecutionMode',
         executionMode === 'development' ? 'beaker' : 'package',
-        executionMode === 'development' ? developmentRoot : '打包应用'
+        executionMode === 'development' ? (path.basename(developmentRoot) || '源码运行') : '打包应用'
       ),
       toolItem(
         ready ? '切换工作空间' : '设置工作空间',
         'gushenCompletion.setupTool',
         'folder-library',
-        ready ? toolHome : '选择程序和本地数据目录'
+        ready ? (path.basename(toolHome) || '已配置') : '选择本地数据目录'
       ),
       ready && toolItem(
         '添加产品或项目',
@@ -399,6 +409,9 @@ class ToolTreeDataProvider {
         };
         node.description = `${item.id} · ${item.sourceMode === 'svn' ? 'SVN' : '数据库'} · ${cockpit.description}`;
         node.iconPath = new vscode.ThemeIcon(cockpit.icon);
+        node.contextValue = 'guthonWorkspace';
+        node.guthonWorkspaceKey = item.workspaceKey;
+        node.guthonDisplayName = item.displayName;
         const cockpitNode = new vscode.TreeItem(cockpit.label, vscode.TreeItemCollapsibleState.Expanded);
         cockpitNode.description = cockpit.description;
         cockpitNode.iconPath = new vscode.ThemeIcon(cockpit.icon);
@@ -422,14 +435,21 @@ class ToolTreeDataProvider {
             `源码来源：${sourceModeLabel(item.sourceMode)}`,
             'gushenCompletion.selectWorkspaceSourceMode',
             item.sourceMode === 'svn' ? 'repo' : 'database',
-            '仅作用于当前项目',
+            '当前项目',
             [item.workspaceKey, item.sourceMode, item.root]
           ),
           item.sourceMode === 'svn' && toolItem(
             '设置工作区 SVN 登录',
             'gushenCompletion.setSvnCredentials',
             'key',
-            '当前本地数据工作区内所有产品和项目共用',
+            '全工作区共用',
+            [item.workspaceKey],
+          ),
+          item.sourceMode === 'svn' && item.capabilities?.['svn.initialize'] && toolItem(
+            '导入/粘贴 SVN checkout 配置',
+            'gushenCompletion.importSvnScope',
+            'file-add',
+            '支持多行粘贴',
             [item.workspaceKey],
           ),
           syncItem,
@@ -437,7 +457,7 @@ class ToolTreeDataProvider {
             '编辑 SVN 范围配置',
             'gushenCompletion.editSvnScope',
             'edit',
-            item.scopeConfigReady ? item.scopeConfigPath : '在现有 products/projects.yaml 增加 svn.scope',
+            item.scopeConfigReady ? '已配置' : '待配置',
             [item.workspaceKey]
           ),
           toolItem('打开工作区目录', 'gushenCompletion.openWorkspace', 'folder-opened', undefined, [item.root]),
@@ -644,6 +664,32 @@ function activate(context) {
         if (!selected) return;
         selectedWorkspaceKey = selected.workspaceKey;
       }
+      const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === selectedWorkspaceKey);
+      if (!workspace) return vscode.window.showErrorMessage(`未找到 SVN 项目：${selectedWorkspaceKey}`);
+      const username = await vscode.window.showInputBox({
+        title: '设置当前本地数据工作区的 SVN 登录',
+        prompt: '公共 SVN 用户名（全部产品和项目共用）',
+        value: workspace.svnUsername || '',
+        ignoreFocusOut: true,
+        validateInput: (value) => String(value || '').trim() ? undefined : '用户名不能为空',
+      });
+      if (username === undefined) return;
+      const usernameConfigured = await runTool(
+        TOOL_COMMANDS.svnLoginConfigure,
+        [],
+        false,
+        '',
+        null,
+        { username: username.trim() }
+      );
+      if (!usernameConfigured) return false;
+      toolView.refresh();
+      await svnServices.refresh();
+      if (!workspace.scopeConfigReady && !workspace.checkoutScriptReady) {
+        return vscode.window.showInformationMessage(
+          '公共 SVN 用户名已保存。请先导入/粘贴 checkout 配置，再次点击此入口保存密码。'
+        );
+      }
       const password = await promptForPassword(vscode.window);
       if (!password) return;
       try {
@@ -652,13 +698,12 @@ function activate(context) {
         return vscode.window.showErrorMessage(`SVN 登录保存失败：${error.message}`);
       }
       return vscode.window.showInformationMessage(
-        '已由 SVN 系统保存公共密码；用户名读取自 sync.yaml'
+        '公共 SVN 用户名已更新，密码已由 SVN 系统保存。'
       );
     }),
     vscode.commands.registerCommand('gushenCompletion.selectWorkspaceSourceMode', async (
       workspaceKey,
-      currentMode,
-      workspaceRoot
+      currentMode
     ) => {
       const selected = await selectWorkspaceSourceMode(vscode.window, currentMode, async (current, next) => {
         if (current !== 'svn' || next !== 'database') return true;
@@ -705,24 +750,9 @@ function activate(context) {
       if (!await runTool(TOOL_COMMANDS.sourceMode, ['set', '--mode', selected], false, workspaceKey)) return;
       toolView.refresh();
       await svnServices.refresh();
-      if (selected === 'svn') {
-        const scriptPath = path.join(workspaceRoot, 'context', 'svnCheckoutHere.sh');
-        const batScriptPath = path.join(workspaceRoot, 'context', 'svnCheckoutHere.bat');
-        if (!fs.existsSync(scriptPath) && !fs.existsSync(batScriptPath)) {
-          return vscode.window.showWarningMessage(
-            `已将 ${workspaceKey} 设为 SVN；请把谷神下载的 svnCheckoutHere.sh（macOS/Linux）或 svnCheckoutHere.bat（Windows）放入项目 context 目录。`
-          );
-        }
-        const action = await vscode.window.showInformationMessage(
-          `已将 ${workspaceKey} 设为 SVN。`,
-          '从签出脚本检出/更新'
-        );
-        if (action === '从签出脚本检出/更新') {
-          return vscode.commands.executeCommand('gushenCompletion.initializeSvn', workspaceKey);
-        }
-        return undefined;
-      }
-      return vscode.window.showInformationMessage(`已将 ${workspaceKey} 设为 DATABASE`);
+      return vscode.window.showInformationMessage(
+        `已将 ${workspaceKey} 设为 ${selected === 'svn' ? 'SVN' : 'DATABASE'}。请在该 Nexus 节点中继续配置。`
+      );
     }),
     vscode.commands.registerCommand('gushenCompletion.selectExecutionMode', async () => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
@@ -787,33 +817,65 @@ function activate(context) {
       toolView.refresh();
       await svnServices.refresh();
 
-      const configFile = definition.kind === 'product' ? 'products.yaml' : 'projects.yaml';
-      const actions = definition.sourceMode === 'svn'
-        ? ['立即调整配置', '继续导入 SVN 配置', '稍后']
-        : ['立即调整配置', '稍后'];
-      const next = await vscode.window.showInformationMessage(
-        `${definition.name} 的配置已生成。系统别名、系统 ID、数据源 ID 仍需按实际谷神环境确认，是否现在调整？`,
-        { modal: true },
-        ...actions
-      );
-      if (next === '立即调整配置') {
-        await vscode.commands.executeCommand('gushenCompletion.editConfig', configFile);
-        return true;
-      }
-      if (next !== '继续导入 SVN 配置') return true;
-      const workspaceKey = `${definition.kind === 'product' ? 'products' : 'projects'}.${definition.id}`;
-      const imported = await vscode.commands.executeCommand('gushenCompletion.importSvnScope', workspaceKey);
-      if (!imported) return true;
-      const initialize = await vscode.window.showInformationMessage(
-        'SVN 范围已导入，是否立即检出/更新并建立本地索引？',
-        { modal: true },
-        '立即执行',
-        '稍后'
-      );
-      if (initialize === '立即执行') {
-        await vscode.commands.executeCommand('gushenCompletion.initializeSvn', workspaceKey);
-      }
+      const nextStep = definition.sourceMode === 'svn'
+        ? '请展开该 Nexus，再设置 SVN 登录、导入/粘贴 checkout 配置或编辑 SVN 范围。'
+        : '请后续在配置文件中补充 datasource 后再拉取源码。';
+      vscode.window.showInformationMessage(`${definition.name} Nexus 已创建。${nextStep}`);
       return true;
+    }),
+    vscode.commands.registerCommand('gushenCompletion.deleteWorkspace', async (workspaceValue) => {
+      const workspaceKey = typeof workspaceValue === 'string'
+        ? workspaceValue
+        : workspaceValue?.guthonWorkspaceKey;
+      if (!workspaceKey) return vscode.window.showErrorMessage('请在具体产品或项目节点上执行删除');
+      let plan;
+      try {
+        plan = await assistantClient.run('', TOOL_COMMANDS.workspaceDelete, [], {
+          mode: 'preview',
+          workspaceKey,
+        });
+      } catch (error) {
+        return vscode.window.showErrorMessage(`无法读取删除范围：${error.message}`);
+      }
+      const existingDirectories = (plan.directories || []).filter((item) => item.exists);
+      const details = [
+        `配置：${plan.workspaceConfigPath}`,
+        plan.datasourceIds?.length ? `独占数据源：${plan.datasourceIds.join('、')}` : '独占数据源：无',
+        plan.databaseTestingConfigured ? '数据库排查配置：将删除当前工作区条目' : '数据库排查配置：无',
+        ...existingDirectories.map((item) => `${item.label}：${item.path}`),
+      ].join('\n');
+      const confirmed = await vscode.window.showWarningMessage(
+        `确认删除 ${plan.displayName}（${workspaceKey}）？\n\n${details}\n\n目录将移入系统废纸篓；未提交的本地源码修改也会一并移走。其他产品、项目和共享配置不会删除。`,
+        { modal: true },
+        '确认删除'
+      );
+      if (confirmed !== '确认删除') return false;
+      try {
+        for (const item of existingDirectories) {
+          await vscode.workspace.fs.delete(vscode.Uri.file(item.path), {
+            recursive: true,
+            useTrash: true,
+          });
+        }
+      } catch (error) {
+        return vscode.window.showErrorMessage(
+          `删除已停止：无法把相关目录移入系统废纸篓（${error.message}）。配置尚未删除；已移入废纸篓的目录可恢复。`
+        );
+      }
+      try {
+        await assistantClient.run('', TOOL_COMMANDS.workspaceDelete, [], {
+          mode: 'delete',
+          workspaceKey,
+          confirmation: workspaceKey,
+        });
+      } catch (error) {
+        return vscode.window.showErrorMessage(
+          `目录已移入系统废纸篓，但配置删除失败：${error.message}。配置仍保留，可直接重试删除；已移入废纸篓的目录无需先恢复。`
+        );
+      }
+      toolView.refresh();
+      await svnServices.refresh();
+      return vscode.window.showInformationMessage(`已删除 ${plan.displayName}，相关目录可从系统废纸篓恢复。`);
     }),
     vscode.commands.registerCommand('gushenCompletion.configureDatabaseDiagnosis', async (workspaceKey) => {
       if (typeof workspaceKey !== 'string' || !workspaceKey) {
@@ -885,7 +947,7 @@ function activate(context) {
         const hasCheckoutScript = Boolean(workspace.checkoutScriptReady);
         if (!hasScopeConfig && !hasCheckoutScript) {
           void vscode.window.showWarningMessage(
-            `未找到 SVN 范围配置：${workspace.scopeConfigPath || 'config/products.yaml/projects.yaml'}。请先在对应文件的 svn.scope 中配置，或使用“导入 SVN checkout 配置”选择 .sh/.bat/粘贴内容。`
+            `未找到 SVN 范围配置：${workspace.scopeConfigPath || 'config/products.yaml/projects.yaml'}。请先在对应文件的 svn.scope 中配置，或使用“导入/粘贴 SVN checkout 配置”。`
           );
           return false;
         }
@@ -923,13 +985,15 @@ function activate(context) {
         if (release) release();
       }
     }),
-    vscode.commands.registerCommand('gushenCompletion.importSvnScope', async (workspaceKey) => {
+    vscode.commands.registerCommand('gushenCompletion.importSvnScope', async (workspaceKey, preferredSource = '') => {
       const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
       if (!workspace) return vscode.window.showErrorMessage(`未找到 SVN 项目：${workspaceKey}`);
-      const choice = await vscode.window.showQuickPick([
-        { label: '选择 svnCheckoutHere.sh/.bat', value: 'file' },
-        { label: '粘贴 checkout 命令或地址', value: 'paste' },
-      ], { title: '导入 SVN 范围到 products/projects.yaml 的 svn.scope' });
+      const choice = preferredSource
+        ? { value: preferredSource }
+        : await vscode.window.showQuickPick([
+          { label: '选择 svnCheckoutHere.sh/.bat', value: 'file' },
+          { label: '粘贴一个或多个 SVN 地址/checkout 命令', value: 'paste' },
+        ], { title: '导入/粘贴 SVN checkout 配置' });
       if (!choice) return;
       let result;
       try {
@@ -944,25 +1008,48 @@ function activate(context) {
           if (!selected) return;
           result = await svnServices.backend.scopeImportFile(workspaceKey, selected[0].fsPath);
         } else {
-          const document = await vscode.workspace.openTextDocument({
-            language: 'shellscript',
-            content: '# 请在此粘贴 svn checkout 命令或 <url> <localSubdir>，然后点击“解析当前内容”。\n',
-          });
-          await vscode.window.showTextDocument(document, { preview: false });
-          const confirmed = await vscode.window.showInformationMessage(
-            '请把 checkout 命令粘贴到临时编辑器，完成后继续。',
-            { modal: true },
-            '解析当前内容'
-          );
-          if (confirmed !== '解析当前内容') return;
-          result = await svnServices.backend.scopeImport(workspaceKey, document.getText(), 'script');
+          const input = createSvnScopeInputFile(context.globalStorageUri?.fsPath);
+          try {
+            const document = await vscode.workspace.openTextDocument(vscode.Uri.file(input.file));
+            const closed = waitForEditorTabClose(vscode, document);
+            await vscode.window.showTextDocument(document, { preview: false });
+            await closed;
+            const action = await vscode.window.showInformationMessage(
+              'SVN 地址编辑器已关闭，请选择下一步。',
+              { modal: true },
+              '解析 SVN 范围',
+              '编辑配置 SVN 范围'
+            );
+            if (action === '编辑配置 SVN 范围') {
+              await vscode.commands.executeCommand('gushenCompletion.editSvnScope', workspaceKey);
+              return { action: 'edit' };
+            }
+            if (action !== '解析 SVN 范围') return;
+            const text = fs.readFileSync(input.file, 'utf8');
+            if (!hasSvnScopeInput(text)) {
+              const next = await vscode.window.showWarningMessage(
+                '未检测到 SVN 地址或 checkout 命令，没有执行解析。',
+                '编辑配置 SVN 范围'
+              );
+              if (next === '编辑配置 SVN 范围') {
+                await vscode.commands.executeCommand('gushenCompletion.editSvnScope', workspaceKey);
+                return { action: 'edit' };
+              }
+              return;
+            }
+            result = await svnServices.backend.scopeImport(workspaceKey, text, 'script');
+          } finally {
+            removeSvnScopeInputFile(input);
+          }
         }
       } catch (error) {
         return vscode.window.showErrorMessage(`导入 SVN 范围失败：${error.message}`);
       }
-      const message = result.added
-        ? `已向 ${result.output} 添加 ${result.added} 个 SVN 范围条目，重复 ${result.duplicatesSkipped || 0} 个。请检查配置后执行“从 SVN 范围配置检出/更新”。`
-        : `没有新增 SVN 范围条目（重复 ${result.duplicatesSkipped || 0} 个）。`;
+      const message = result.url && Array.isArray(result.scope)
+        ? `已解析 ${result.commands || result.scope.length} 条 checkout，归并为 1 个 SVN URL 和 ${result.scope.length} 个不重复 scope${result.duplicatesSkipped ? `（跳过重复 ${result.duplicatesSkipped} 条）` : ''}：${result.scope.join('、')}。请检查配置后执行“从 SVN 范围配置检出/更新”。`
+        : result.added
+          ? `已向 ${result.output} 添加 ${result.added} 个 SVN 范围条目，重复 ${result.duplicatesSkipped || 0} 个。请检查配置后执行“从 SVN 范围配置检出/更新”。`
+          : `没有新增 SVN 范围条目（重复 ${result.duplicatesSkipped || 0} 个）。`;
       vscode.window.showInformationMessage(message);
       await svnServices.refresh();
       toolView.refresh();

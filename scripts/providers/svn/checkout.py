@@ -264,13 +264,6 @@ def svn_settings(
         checkout_script_path = (context_root / configured_script).resolve()
         if context_root not in checkout_script_path.parents:
             raise SystemExit(f"svn.checkout_script escapes workspace context for {config_id}")
-    elif workspace_dir is not None:
-        context_root = (workspace_dir / "context").resolve()
-        shell_script = (context_root / "svnCheckoutHere.sh").resolve()
-        bat_script = (context_root / "svnCheckoutHere.bat").resolve()
-        checkout_script_path = shell_script if shell_script.is_file() or not bat_script.is_file() else bat_script
-        if context_root not in checkout_script_path.parents:
-            raise SystemExit(f"Default SVN checkout script escapes workspace context for {config_id}")
     else:
         checkout_script_path = None
     update_policy = str(svn.get("update_policy") or "manual").strip().lower()
@@ -287,8 +280,6 @@ def svn_settings(
         if not isinstance(shared_svn, dict):
             raise SystemExit("sync.yaml 的 svn 必须是对象")
         shared_username = str(shared_svn.get("username") or "").strip()
-        if not shared_username:
-            raise SystemExit("未配置公共 SVN 用户名：请设置 sync.yaml 的 svn.username")
     return {
         "repositoryUrl": repository_url,
         "scopeRootUrl": scope_root_url,
@@ -378,8 +369,9 @@ def operation_lock(
 def _svn_auth(settings: dict, *, password_from_stdin=False) -> list[str]:
     args = []
     username = str(settings.get("username") or "").strip()
-    if username:
-        args.extend(["--username", username])
+    if not username:
+        raise SystemExit("未配置公共 SVN 用户名：请先在 Nexus 点击“设置工作区 SVN 登录”")
+    args.extend(["--username", username])
     if password_from_stdin:
         args.append("--password-from-stdin")
     return [

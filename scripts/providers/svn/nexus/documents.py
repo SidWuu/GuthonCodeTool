@@ -159,7 +159,13 @@ def _object_identity(source_type: str, source_id: str, fun_id: str = "") -> tupl
     return normalized_type, normalized_id, normalized_fun
 
 
-def _resolve_object(workspace: dict, source_type: str, source_id: str, fun_id: str = "") -> dict:
+def _resolve_object(
+    workspace: dict,
+    source_type: str,
+    source_id: str,
+    fun_id: str = "",
+    working_copy_id: str = "",
+) -> dict:
     identity = _object_identity(source_type, source_id, fun_id)
     if workspace["indexPath"].is_file():
         return index_queries.source_object(
@@ -167,12 +173,14 @@ def _resolve_object(workspace: dict, source_type: str, source_id: str, fun_id: s
             source_type=identity[0],
             source_id=identity[1],
             fun_id=identity[2],
+            working_copy_id=working_copy_id,
         )
     current = scan(workspace)
     matches = [
         item
         for item in current["objects"]
         if (item["source_table"], item["source_id"], item.get("fun_id") or "") == identity
+        and (not working_copy_id or item.get("working_copy_id") == working_copy_id)
     ]
     if not matches:
         raise SystemExit(f"SVN object was not found: {source_type}/{source_id}/{fun_id}")
@@ -359,10 +367,17 @@ def line_changes(base_content: str, working_content: str) -> list[dict]:
     return changes
 
 
-def fragments(workspace: dict, *, source_type: str, source_id: str, fun_id: str = "") -> dict:
+def fragments(
+    workspace: dict,
+    *,
+    source_type: str,
+    source_id: str,
+    fun_id: str = "",
+    working_copy_id: str = "",
+) -> dict:
     require_capability(workspace, "browse")
     with operation_lock(workspace, "document-fragments", shared=True):
-        item = _resolve_object(workspace, source_type, source_id, fun_id)
+        item = _resolve_object(workspace, source_type, source_id, fun_id, working_copy_id)
         scripts, double_encoded = _object_scripts(item)
         base_scripts = {}
         base_result = run_svn_binary(["cat", "-r", "BASE", "--", str(item["local_path"])], check=False)
@@ -395,6 +410,7 @@ def fragments(workspace: dict, *, source_type: str, source_id: str, fun_id: str 
             "sourceId": item["source_id"],
             "sourcePath": item["source_path"],
             "funId": item.get("fun_id") or "",
+            "workingCopyId": item.get("working_copy_id") or item.get("scope_entry_id") or "",
             "doubleEncoded": double_encoded,
             "fragments": [
                 {
@@ -470,6 +486,7 @@ def read(
     source_id: str,
     fun_id: str = "",
     json_pointer: str = "",
+    working_copy_id: str = "",
 ) -> dict:
     require_capability(workspace, "browse")
     # An editable read also creates an edit lease in the shared session ledger,
@@ -480,7 +497,7 @@ def read(
         blocking=True,
         timeout_seconds=DOCUMENT_LOCK_TIMEOUT_SECONDS,
     ):
-        item = _resolve_object(workspace, source_type, source_id, fun_id)
+        item = _resolve_object(workspace, source_type, source_id, fun_id, working_copy_id)
         entry = _entry(workspace, item["scope_entry_id"])
         if entry is None:
             raise SystemExit(f"SVN object is outside the current authorization scope: {item['source_path']}")
@@ -516,7 +533,10 @@ def read(
             and not external
         )
         document_key = json.dumps(
-            [item["source_table"], item["source_id"], item.get("fun_id") or "", json_pointer],
+            [
+                item.get("working_copy_id") or item.get("scope_entry_id") or "",
+                item["source_table"], item["source_id"], item.get("fun_id") or "", json_pointer,
+            ],
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -563,6 +583,7 @@ def read(
             "sourceType": item["source_table"],
             "sourceId": item["source_id"],
             "funId": item.get("fun_id") or "",
+            "workingCopyId": item.get("working_copy_id") or item.get("scope_entry_id") or "",
             "jsonPointer": json_pointer,
             "language": (
                 "json"
@@ -614,6 +635,7 @@ def _session_document(workspace: dict, session: dict, document_id: str) -> dict:
         file_record["objectType"],
         file_record["objectId"],
         file_record.get("funId") or "",
+        file_record.get("workingCopyId") or file_record.get("scopeEntryId") or "",
     )
     if item["source_path"] != document["sourcePath"]:
         raise SystemExit("SVN object path changed after the virtual document was opened")

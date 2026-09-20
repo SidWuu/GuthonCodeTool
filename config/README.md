@@ -3,7 +3,7 @@
 YAML 配置文件首行说明各自用途；`system-data.json` 只是在 DATABASE 拉取时自动生成的本地缓存，SVN 不读取它。
 
 发行模式通常不再手工复制这些模板：先执行 Nexus“设置工作空间”，再用始终可见的“添加产品或项目”向导。首次设置会创建空的
-`datasource.yaml`、`products.yaml`、`projects.yaml`，向导按源码模式补齐工作区、DATABASE 连接和首次 SVN 公共用户名；已有配置不会覆盖。DATABASE 只要求粘贴一次 MySQL/MariaDB/PostgreSQL 连接地址，再输入一次用户名和密码，其余连接字段自动解析。
+`datasource.yaml`、`products.yaml`、`projects.yaml`，向导在选择 SVN 或 DATABASE 后只生成对应 Nexus，不继续询问登录、checkout 或数据库连接；已有配置不会覆盖。SVN 登录、导入/粘贴 checkout 和范围编辑在新建 Nexus 节点内完成，DATABASE 的 datasource 后续补充。
 生成后 Nexus 会询问是否立即调整对应 YAML，因为系统 alias、`system_id`、`data_source_id` 仍须以实际谷神环境为准。
 
 以下完整示例只供维护者手工配置或查阅字段：
@@ -97,18 +97,20 @@ products:
     svn:
       # 一个产品/项目只配置一次根地址；不要把每个 checkout URL 重复写入 YAML。
       url: "https://source.example/repo/product"
-      # scope 可省略；省略时只检出 mappings 对应的 systems/datasources。
-      scope: [skill, public, datasources, systems]
+      # 导入 checkout 后会保留全部去重的精确相对路径。
+      scope: [skill, public, datasources/0000, systems/SYS-DEMO]
 ```
 
 在 Nexus 的该产品节点选择 SVN，紧凑配置直接放在已有的 `products.yaml`（项目则放在 `projects.yaml`）对应条目的
-`svn.url`/`svn.scope` 下，可以手动修改。首次没有 `svn.url` 时，把谷神平台下载的 `svnCheckoutHere.sh`
-（macOS/Linux）或 `svnCheckoutHere.bat`（Windows）放到工程 `context/`，Nexus 只解析其中的 checkout 命令作为一次性
-导入来源，脚本不会被执行。Nexus 仍自动生成 `context/authorized-scope.json`，并把唯一真实 working copy 放在
+`svn.url`/`svn.scope` 下，可以手动修改。新增 SVN 产品/项目时可在多行编辑器中逐行粘贴自己的一个或多个 SVN 地址、`<url> <localSubdir>` 或完整 checkout 命令；输入期间不解析，保存并关闭后再选择解析或编辑 SVN 范围配置。多个 checkout 地址必须归并为一个公共 `svn.url`，每条地址去掉公共前缀后的唯一相对路径逐条写入 `svn.scope`，不重复保存完整 URL。也可选择谷神平台为它下载的 `svnCheckoutHere.sh`
+（macOS/Linux）/`svnCheckoutHere.bat`（Windows）作为一次性导入来源；脚本不会被执行。未显式选择或配置的
+`context/svnCheckoutHere.*` 不会被自动读取。Nexus 仍自动生成 `context/authorized-scope.json`，并把唯一真实 working copy 放在
 `var/checkout/<配置 ID>`，因此通常不需要配置 `svn.scope_manifest`、`checkout_layout` 或 `checkout_root`。工作区配置 ID 仍须在产品/项目之间唯一。
 
-也兼容旧的逐条范围配置。新配置建议只写 `svn.url` 和分类 `scope`，程序会在内存中按
-`systems.include.mappings` 展开为精确 URL，并把展开结果写到当前工作区 `context/authorized-scope.json`；该 JSON 是内部生成文件，日常不需要手动修改。
+也兼容旧的逐条范围配置。新配置建议只写一个 `svn.url` 和精确相对路径 `scope`。没有
+未配置 `systems.include.mappings` 时全部 scope 都会进入检出清单；配置 mappings 后，程序按 alias 对系统和数据源路径做交集筛选。未配置 mappings 只影响关系来源：SCM 会根据 checkout 根目录的 `$.中文名称` 和系统/数据源 `index.md` 保守推断业务组，证据不足的 working copy 各自保留为独立业务组。展开结果写到当前工作区 `context/authorized-scope.json`；该 JSON 是内部生成文件，日常不需要手动修改。
+
+检出清单中的 scope 会逐项处理。当前账号对某个系统或数据源无读取权限，或该远端地址不存在时，Nexus 会把该项写入工作区 checkout 状态的 `skipped` 列表并继续检出其他地址；驾驶舱显示跳过数量，再次执行检出会重试。连接中断、证书/客户端故障以及全部 scope 都不可访问仍视为整体失败，不会静默跳过。
 
 紧凑配置支持的分类为 `skill`、`public`、`systems`、`datasources`，以及需要时的
 `pages`、`procedures`、`tables`、`views`、`system-script`。其中 `systems` 会拼接每个 mapping 的
@@ -161,7 +163,7 @@ projects:
 也可以每行直接写 `<url> <localSubdir>`（支持 `->` 或 `=>` 分隔）。配置文件只允许字面量 URL 和相对目录，
 不会保存用户名、密码或脚本变量；修改 `svn.url`/`scope` 后执行“从 SVN 范围配置检出/更新”即可重建当前工作区的内部清单。
 
-Nexus 的“导入 SVN checkout 配置”可选择 `.sh/.bat` 或粘贴 checkout 内容，并把根地址和分类合并到当前 `products.yaml/projects.yaml` 的 `svn`；随后“从 SVN 范围配置检出/更新”会先显示清单条目及增删改数量，确认后再写入脱敏清单、检出或更新。等价 CLI：
+Nexus 的“导入/粘贴 SVN checkout 配置”可选择 `.sh/.bat` 或多行粘贴 checkout 内容，并把根地址和分类合并到当前 `products.yaml/projects.yaml` 的 `svn`；随后“从 SVN 范围配置检出/更新”会先显示清单条目及增删改数量，确认后再写入脱敏清单、检出或更新。等价 CLI：
 
 ```bash
 .venv/bin/python scripts/guthon_tool.py source-mode --home . --workspace products.demo-product -- set --mode svn
@@ -173,10 +175,9 @@ Nexus 的“导入 SVN checkout 配置”可选择 `.sh/.bat` 或粘贴 checkout
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-config --accept-scope-change
 ```
 
-配置了 `systems.include.mappings` 时，紧凑 `scope` 是分类授权范围，实际清单只保留该映射明确声明的范围：
+配置了 `systems.include.mappings` 时，精确 `scope` 是授权上限，实际清单只保留该映射明确声明的范围：
 `systems/<SYSTEM_ID>` 聚合 `pages` 与 `system-script`，
-`datasources/<DATA_SOURCE_ID>` 聚合 `procedures`、`tables` 与 `views`，`skill/public` 作为公共目录保留。映射缺失或格式无效时会在检出前
-阻断，并要求为每个别名提供 `system_id` 和 `data_source_id`；映射 ID 不在范围配置（首次导入时则不在签出脚本）
+`datasources/<DATA_SOURCE_ID>` 聚合 `procedures`、`tables` 与 `views`，`skill/public` 作为公共目录保留。完全不配置 mappings 时检出全部精确 scope；一旦配置了 alias，则每项都必须同时提供 `system_id` 和 `data_source_id`，格式无效会在检出前阻断。映射 ID 不在范围配置（首次导入时则不在签出脚本）
 中时则要求提供同一产品、同一账号最新下载的脚本，或说明对应源码分类确实不存在。
 
 一次性脚本导入支持 UTF-8/UTF-16/GB18030 BAT 和 UTF-8 shell 脚本，只接受字面量精确 URL 和安全的相对检出目录；会忽略 `rem`、`echo` 与 shell 注释

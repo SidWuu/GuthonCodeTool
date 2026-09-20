@@ -4,42 +4,11 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  configuredSvnUsername,
-  parseDatabaseCredentials,
-  parseDatabaseUrl,
   prepareWorkspaceSetup,
   promptWorkspaceCreation,
   suggestedWorkspaceId,
   workspaceActions,
 } = require('../src/tool-workspace');
-
-test('parses database URLs and defaults their standard ports', () => {
-  assert.deepEqual(
-    parseDatabaseUrl('postgresql://postgres\\@192.168.1.183:5432/nbkcqx\\_gdsdp'),
-    {
-      type: 'postgresql',
-      host: '192.168.1.183',
-      port: 5432,
-      database: 'nbkcqx_gdsdp',
-      username: 'postgres',
-      password: '',
-    }
-  );
-  assert.equal(parseDatabaseUrl('mysql://db.local/risk').port, 3306);
-  assert.equal(parseDatabaseUrl('jdbc:postgres://db.local/risk').port, 5432);
-});
-
-test('parses combined database credentials with Chinese and English separators', () => {
-  assert.deepEqual(
-    parseDatabaseCredentials('用户名：postgres，密码：a b,:- c'),
-    { username: 'postgres', password: 'a b,:- c' }
-  );
-  assert.deepEqual(parseDatabaseCredentials('dev:secret:x'), { username: 'dev', password: 'secret:x' });
-  assert.deepEqual(parseDatabaseCredentials('dev, pass word'), { username: 'dev', password: 'pass word' });
-  assert.deepEqual(parseDatabaseCredentials('dev - pass-word'), { username: 'dev', password: 'pass-word' });
-  assert.deepEqual(parseDatabaseCredentials('dev secret value'), { username: 'dev', password: 'secret value' });
-  assert.deepEqual(parseDatabaseCredentials('用户名-postgres 密码-pass'), { username: 'postgres', password: 'pass' });
-});
 
 test('continues normal setup when the workspace is not initialized', async () => {
   const config = { get: () => '' };
@@ -109,7 +78,6 @@ test('SVN workspace actions come only from effective capabilities', () => {
 
   assert.deepEqual(actions.source.map((item) => item[1]), [
     'gushenCompletion.searchWorkspace',
-    'gushenCompletion.importSvnScope',
     'gushenCompletion.initializeSvn',
     'gushenCompletion.reindexCalls',
     'gushenCompletion.focusSvnSource',
@@ -156,19 +124,7 @@ test('suggests readable ids and stable fallback ids for Chinese names', () => {
   );
 });
 
-test('reads an existing shared SVN username', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-workspace-'));
-  fs.mkdirSync(path.join(home, 'config'));
-  fs.writeFileSync(path.join(home, 'config', 'sync.yaml'), 'svn:\n  username: "u10001"\n\nsync: {}\n');
-
-  assert.equal(configuredSvnUsername(home), 'u10001');
-  fs.rmSync(home, { recursive: true });
-});
-
-test('prompts an independent SVN project and reuses the shared username', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-workspace-'));
-  fs.mkdirSync(path.join(home, 'config'));
-  fs.writeFileSync(path.join(home, 'config', 'sync.yaml'), 'svn:\n  username: u10001\n');
+test('ends SVN creation immediately after selecting the source mode', async () => {
   const quickPicks = [
     { label: '项目', value: 'project' },
     { label: 'SVN', value: 'svn' },
@@ -180,7 +136,7 @@ test('prompts an independent SVN project and reuses the shared username', async 
     showWarningMessage: async () => undefined,
   };
 
-  const result = await promptWorkspaceCreation(window, [], home);
+  const result = await promptWorkspaceCreation(window, [], '/not/used');
 
   assert.deepEqual(result, {
     kind: 'project',
@@ -188,38 +144,28 @@ test('prompts an independent SVN project and reuses the shared username', async 
     name: '风险开发',
     sourceMode: 'svn',
   });
-  fs.rmSync(home, { recursive: true });
 });
 
-test('collects a DATABASE connection without environment-variable setup', async () => {
+test('ends DATABASE creation without prompting for a connection', async () => {
   const quickPicks = [
     { label: '产品', value: 'product' },
     { label: 'DATABASE', value: 'database' },
   ];
-  const inputs = [
-    '核心产品',
-    'core',
-    'postgresql://postgres@db.local:5433/core_db',
-    '用户名：dev，密码：secret value',
-  ];
-  let databasePrompts = 0;
+  const inputs = ['风险产品', 'risk'];
+  let prompts = 0;
   const result = await promptWorkspaceCreation({
     showQuickPick: async () => quickPicks.shift(),
-    showInputBox: async (options) => {
-      if (options.title.startsWith('粘贴数据库') || options.title.startsWith('输入数据库')) databasePrompts += 1;
+    showInputBox: async () => {
+      prompts += 1;
       return inputs.shift();
     },
   }, [], '/not/used');
 
-  assert.deepEqual(result.datasource, {
-    id: 'core-dev',
-    type: 'postgresql',
-    host: 'db.local',
-    port: 5433,
-    database: 'core_db',
-    username: 'dev',
-    password: 'secret value',
-    environment: 'dev',
+  assert.deepEqual(result, {
+    kind: 'product',
+    id: 'risk',
+    name: '风险产品',
+    sourceMode: 'database',
   });
-  assert.equal(databasePrompts, 2);
+  assert.equal(prompts, 2);
 });

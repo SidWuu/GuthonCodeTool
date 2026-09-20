@@ -222,6 +222,7 @@ class SvnCatalogTreeProvider {
       object.sourceType,
       object.sourceId,
       object.funId || '',
+      object.workingCopyId || object.scopeEntryId || '',
     ]);
   }
 
@@ -242,6 +243,8 @@ class SvnCatalogTreeProvider {
       jsonPointer: fragments?.[0]?.jsonPointer || '',
       fragmentType: fragments?.[0]?.scriptType || '',
     };
+    const workingCopyId = object.workingCopyId || object.scopeEntryId || '';
+    if (workingCopyId) identity.workingCopyId = workingCopyId;
     const element = {
       kind: opensDirectly ? 'document' : 'object',
       label: child.label,
@@ -399,11 +402,14 @@ class SvnCatalogTreeProvider {
     if (element.kind === 'object') {
       if (element.children) return element.children;
       if (!Array.isArray(element.object.fragments)) {
-        const result = await this.backend.fragments(element.workspaceKey, {
+        const identity = {
           sourceType: element.object.sourceType,
           sourceId: element.object.sourceId,
           funId: element.object.funId || '',
-        });
+        };
+        const workingCopyId = element.object.workingCopyId || element.object.scopeEntryId || '';
+        if (workingCopyId) identity.workingCopyId = workingCopyId;
+        const result = await this.backend.fragments(element.workspaceKey, identity);
         element.object.fragments = result.fragments || [];
       }
       const fragments = [...element.object.fragments].sort(compareFragmentType);
@@ -441,6 +447,9 @@ class SvnCatalogTreeProvider {
             sourcePath: element.object.sourcePath || '',
             jsonPointer: fragment.jsonPointer || '',
             fragmentType: fragment.scriptType || '',
+            ...((element.object.workingCopyId || element.object.scopeEntryId)
+              ? { workingCopyId: element.object.workingCopyId || element.object.scopeEntryId }
+              : {}),
           }],
         },
       }));

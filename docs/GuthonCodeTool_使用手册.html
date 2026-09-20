@@ -239,7 +239,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="4-填写配置并安装-guthon-team">4. 填写配置并安装 guthon-team</h2>
-<p>优先使用“添加产品或项目”向导：选择产品/项目和 DATABASE/SVN。DATABASE 连接只输入两次：先粘贴 MySQL、MariaDB 或 PostgreSQL 连接地址，再一次性输入用户名和密码；主机、端口、数据库/服务名、本地数据源 ID 和名称自动生成。首次 SVN 填一次公共用户名。添加项目不需要先创建或选择产品；项目是产品某个版本的完整导出快照，导出后作为并列的独立工作区管理。向导生成配置后会询问是否立即打开对应 YAML；系统别名、系统 ID、数据源 ID 必须按实际谷神环境确认。后续仍可在“Guthon Nexus → 工作区 → 配置文件”中单击文件名编辑。不要把数据库密码、源码或配置提交到公开仓库。</p>
+<p>优先使用“添加产品或项目”向导：选择产品/项目、填写名称和稳定 ID，再选择 DATABASE 或 SVN。选择源码来源后立即创建对应 Nexus 并结束向导，不在新增流程中读取脚本，也不要求填写数据库连接或 SVN 地址。添加项目不需要先创建或选择产品；项目是产品某个版本的完整导出快照，导出后作为并列的独立工作区管理。创建后展开对应 Nexus：SVN 工作区依次使用顶层的“设置工作区 SVN 登录”“导入/粘贴 SVN checkout 配置”和“编辑 SVN 范围配置”；DATABASE 工作区后续在配置文件中补充 datasource。系统别名、系统 ID、数据源 ID 必须按实际谷神环境确认。不要把数据库密码、源码或配置提交到公开仓库。</p>
 <ul>
 <li><code>datasource.yaml</code>：填数据库连接；只用 SVN 时按公司模板保留。</li>
 <li><code>products.yaml</code>：填产品和子系统映射。</li>
@@ -250,12 +250,14 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <p>SVN 用户按下面操作：</p>
 <ol>
 <li>在目标产品或项目上选择“源码来源：SVN”。</li>
-<li>在对应的 <code>products.yaml</code> 或 <code>projects.yaml</code> 的 <code>svn.url</code>/<code>svn.scope</code> 中维护紧凑范围；也可使用“导入 SVN checkout 配置”选择 <code>.sh/.bat</code> 或粘贴 checkout 内容，Nexus 会写入共享根地址和分类并保留原有手工配置。展开后的实际清单保存在工作区 <code>context/authorized-scope.json</code>，仅供程序使用。</li>
-<li>首次添加 SVN 产品/项目时由向导填写 <code>sync.yaml</code> 的公共用户名，后续自动复用；也可手工修改。</li>
-<li>点击“设置工作区 SVN 登录”，输入一次公共密码；Nexus 会让 SVN auth cache/系统钥匙串保存。</li>
-<li>点击“从 SVN 范围配置检出/更新”，核对范围后确认；也可以直接在配置中追加 URL 和相对目录。</li>
+<li>展开新建 Nexus，点击“设置工作区 SVN 登录”，填写公共用户名；用户名写入 <code>sync.yaml</code> 供全部工作区共用。若范围尚未配置，此时先只保存用户名。</li>
+<li>点击紧随登录入口的顶层“导入/粘贴 SVN checkout 配置”，选择 <code>.sh/.bat</code> 或在多行编辑器中粘贴 checkout 内容；保存并关闭编辑器后再解析或编辑范围。Nexus 会把同一产品的多个 checkout 地址归并为一个公共 <code>svn.url</code>，每条地址去掉公共前缀后的唯一相对路径逐条写入 <code>svn.scope</code>，重复行只保留一次。</li>
+<li>点击“编辑 SVN 范围配置”，在对应的 <code>products.yaml</code> 或 <code>projects.yaml</code> 的 <code>svn.url</code>/<code>svn.scope</code> 中确认全部精确范围。未配置 <code>systems.include.mappings</code> 时检出所有 scope；配置后按系统和数据源 ID 筛选。展开后的实际清单保存在工作区 <code>context/authorized-scope.json</code>，仅供程序使用。</li>
+<li>再次点击“设置工作区 SVN 登录”输入一次密码；密码由 SVN auth cache/系统钥匙串保存。</li>
+<li>点击“从 SVN 范围配置检出/更新”，核对范围后确认；也可以直接在配置中追加 URL 和相对目录。当前账号无权读取或远端不存在的单个 scope 会记录并跳过，其余 scope 继续检出；连接中断、整体认证失败和全部 scope 都不可访问仍会停止并报错。驾驶舱会显示跳过数量，权限补齐后再次执行即可重试。</li>
 </ol>
-<p>项目若只有一个包含全部权限目录的根 checkout 地址，建议在该项目 <code>svn.url</code> 配合分类 <code>scope</code>；旧配置也可在 <code>svn.scope</code> 中使用
+<p>删除不再需要的工作区时，在目标 PRD/PRJ 节点右键选择“删除产品或项目”。确认框会列出配置、独占数据源、数据库排查条目、工作区目录和 SVN checkout；只有点击“确认删除”后，目录才会进入系统废纸篓并定向清理配置。其他工作区和共享配置不会删除。</p>
+<p>项目若只有一个包含全部权限目录的根 checkout 地址，建议在该项目 <code>svn.url</code> 配合精确相对路径 <code>scope</code>；旧配置也可在 <code>svn.scope</code> 中使用
 <code>checkoutPaths</code> 列出要检出的 <code>skill</code>、<code>public</code>、<code>systems/&lt;SYSTEM_ID&gt;</code> 和
 <code>datasources/&lt;DATA_SOURCE_ID&gt;</code>；粘贴单根命令时 Nexus 也会按当前映射自动展开。</p>
 <p>用户名在公共 <code>sync.yaml</code> 配置一次，全部产品和项目共用，不需要分别写入产品/项目 YAML。密码只通过 stdin 临时交给 SVN，Nexus、YAML 和 VS Code SecretStorage 都不保存；检出、更新、远程检查和提交读取 SVN 系统凭据。内部 HTTPS 自签证书以非交互方式直接信任。</p>
@@ -362,7 +364,7 @@ python3 tools/guthon_team.py install --workspace "/你的本地数据目录/var"
 <li>返回项目的“工作区驾驶舱”，点击最近一次 SVN 提交查看带交付编号、revision、文件和时间的历史回执。回执只证明 SVN 提交；谷神平台最终提交及运行验证仍在平台侧完成。</li>
 </ol>
 <aside class="notice"><div class="notice-icon">!</div><div><p><code>Ctrl+S</code>/<code>Cmd+S</code> 只保存到本地；冲突必须先完成三方合并并显式标记已解决，不能直接强制提交。SVN 提交成功也不等于谷神平台已最终提交。</p></div></aside>
-<p>“谷神源码”已按业务分组：页面沿用 <code>pages/index.md</code> 顺序，PAGE 分块依次显示 GSS、JS、SQL、字段；过程函数包按包名字母排序，包内函数按函数名字母排序。可使用视图顶部的定位、跳转、搜索和刷新按钮；搜索按钮查询当前 SVN 工作区的完整本地 SQLite 索引，不依赖树节点是否展开，并且只在输入完成后执行一次查询。右键过程函数还可复制函数名或“包名.函数名”，并按索引查看全部已识别调用方，选择后跳转到对应调用行。</p>
+<p>“谷神源码”已按业务分组：页面沿用 <code>pages/index.md</code> 顺序，PAGE 分块依次显示 GSS、JS、SQL、字段；过程函数包按包名字母排序，包内函数按函数名字母排序。未配置 <code>systems.include.mappings</code> 时，SCM 根据系统/数据源根目录的 <code>$.中文名称</code> 和双方 <code>index.md</code> 保守推断业务组；证据不足的系统或数据源各自单独成组，Skill/Public 进入“公共源码”。不同数据源对应不同数据库 schema，表、视图和过程函数允许同名；索引和虚拟文档按数据源 working copy 精确区分，PAGE_ID 仍按工作区全局身份和 SVN 版本去重。可使用视图顶部的定位、跳转、搜索和刷新按钮；搜索按钮查询当前 SVN 工作区的完整本地 SQLite 索引，不依赖树节点是否展开，并且只在输入完成后执行一次查询。右键过程函数还可复制函数名或“包名.函数名”，并按索引查看全部已识别调用方，选择后跳转到对应调用行。</p>
 <p>Nexus 顶部和每个项目的“源码与索引”都提供“搜索工作区完整索引”：同一入口搜索源码名称/ID/函数以及已索引的条件、赋值、异常、表读写和调用事实。选择结果后可以打开源码，或复制 AI 上下文。默认精简版只包含对象定位、最多 3 条直接关系、最多 5 条优先级较高的事实、简短 hash 和证据边界；需要深入分析时再选择详细版。两种版本都不会默认复制整份源码。</p>
 <p>首次重建索引后，AI 先从 runtime descriptor 执行 <code>workspaceResolveCommand</code>，按当前 PRD/PRJ cwd 确认唯一工作区、provider 和 <code>index.ready</code>。索引可用时，第一次源码定位必须使用有界查询：错误、条件、字段和对象事实使用 <code>facts</code>，表或单据写入原因链使用 <code>explain</code>，对象名不明确时使用 <code>find</code>，共享函数或跨对象影响分析补 <code>context/callers</code>。DATABASE 通过 <code>query</code> 查询，SVN 通过 <code>svn</code> 查询；只有索引未初始化、明确漏项、查询证据不足或实际修改前才读取对应局部源码，不遍历完整 checkout 或 PAGE JSON。</p>
 <p>排查开发库或测试库前，在对应项目的“配置资料”选择“配置数据库排查”，输入环境、MySQL/PostgreSQL/Oracle 地址和专用只读账号；Nexus 会立即核验连接，只把非敏感映射写入 <code>database-testing.yaml</code>，密码写入操作系统凭据库。之后 AI 从 runtime descriptor 执行 <code>databaseTargetResolveCommand</code> 并传入当前 cwd：有 <code>connectionRef</code> 时直接使用内置 <code>databaseProbeCommand</code>、<code>databaseDescribeCommand</code>、<code>databaseQueryCommand</code>，只有 <code>connectionId</code> 时才依赖当前会话的 DBX。未明确环境时使用工作区默认目标；明确开发库或测试库时选择对应环境，同时比较时分别解析。“测试一下”不自动解释为测试库。内置快速查询只允许单条 SELECT，最大返回 100 行，功能验收与回归仍使用正式 <code>full</code> 数据库测试目标。</p>

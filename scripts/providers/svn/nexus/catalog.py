@@ -255,11 +255,25 @@ def scan(
     """Read authorized files; optionally stream each parsed object to an index writer."""
 
     scope = load_authorized_scope(workspace)
+    # Authorization remains the full configured upper bound. Initialization
+    # records paths that the current SVN account cannot read so indexing can
+    # continue over the accessible working copies without hiding the skip.
+    from .workspace import load_state
+
+    checkout_state = load_state(workspace, required=False)
+    skipped_ids = {
+        item.get("id")
+        for item in checkout_state.get("skipped") or []
+        if isinstance(item, dict) and item.get("id")
+    } if checkout_state.get("authorizedScopeHash") == scope.digest else set()
     selected = set(working_copy_ids or ())
     unknown = selected - {entry.id for entry in scope.entries}
     if unknown:
         raise SystemExit(f"Unknown SVN working copy ids: {', '.join(sorted(unknown))}")
-    entries = [entry for entry in scope.entries if not selected or entry.id in selected]
+    entries = [
+        entry for entry in scope.entries
+        if entry.id not in skipped_ids and (not selected or entry.id in selected)
+    ]
     objects = []
     page_objects = []
     modules = []
@@ -324,7 +338,12 @@ def scan(
                         page_objects.append(item)
                     else:
                         counts[item["source_table"]] = counts.get(item["source_table"], 0) + 1
-                        identity = (item["source_table"], item["source_id"], item.get("fun_id") or "")
+                        identity = (
+                            ("" if item["source_table"] == "page" else item["scope_entry_id"]),
+                            item["source_table"],
+                            item["source_id"],
+                            item.get("fun_id") or "",
+                        )
                         previous = identities.get(identity)
                         if previous:
                             item["status"] = "IDENTITY_AMBIGUOUS"
@@ -353,7 +372,12 @@ def scan(
         objects, ignored = resolve_page_duplicates(objects)
         for item in objects:
             counts[item["source_table"]] = counts.get(item["source_table"], 0) + 1
-            identity = (item["source_table"], item["source_id"], item.get("fun_id") or "")
+            identity = (
+                ("" if item["source_table"] == "page" else item["scope_entry_id"]),
+                item["source_table"],
+                item["source_id"],
+                item.get("fun_id") or "",
+            )
             previous = identities.get(identity)
             if previous:
                 item["status"] = "IDENTITY_AMBIGUOUS"

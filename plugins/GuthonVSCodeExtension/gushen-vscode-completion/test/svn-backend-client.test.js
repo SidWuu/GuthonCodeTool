@@ -210,10 +210,13 @@ test('loads page fragments independently from the catalog', async () => {
     getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
     spawnProcess: fakeSpawn(calls, { ok: true, fragments: [] }),
   });
-  await client.fragments('products.demo', { sourceType: 'page', sourceId: 'PG-1', funId: '' });
+  await client.fragments('products.demo', {
+    sourceType: 'page', sourceId: 'PG-1', funId: '', workingCopyId: 'systems-SYS-1',
+  });
   assert.deepEqual(calls[0].args, [
     'svn', '--home', '/home', '--workspace', 'products.demo', '--',
     'fragments', '--source-type', 'page', '--source-id', 'PG-1',
+    '--working-copy', 'systems-SYS-1',
   ]);
 });
 

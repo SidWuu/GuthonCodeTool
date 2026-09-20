@@ -2,7 +2,7 @@
   "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon workspace, source sync, metadata export, workcopy tools, API completions, hover documentation, and source navigation.",
-  "version": "2.1.0",
+  "version": "2.2.5",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,
@@ -21,6 +21,7 @@
     "onLanguage:sql",
     "onCommand:gushenCompletion.setupTool",
     "onCommand:gushenCompletion.addWorkspace",
+    "onCommand:gushenCompletion.deleteWorkspace",
     "onCommand:gushenCompletion.configureDatabaseDiagnosis",
     "onCommand:gushenCompletion.selectExecutionMode",
     "onCommand:gushenCompletion.selectWorkspaceSourceMode",
@@ -148,6 +149,7 @@
     "commands": [
       { "command": "gushenCompletion.setupTool", "title": "Guthon Nexus: 设置/切换工作空间" },
       { "command": "gushenCompletion.addWorkspace", "title": "Guthon Nexus: 添加产品或项目", "icon": "$(add)" },
+      { "command": "gushenCompletion.deleteWorkspace", "title": "Guthon Nexus: 删除产品或项目", "icon": "$(trash)" },
       { "command": "gushenCompletion.configureDatabaseDiagnosis", "title": "Guthon Nexus: 配置数据库排查", "icon": "$(database)" },
       { "command": "gushenCompletion.selectExecutionMode", "title": "Guthon Nexus: 切换运行模式" },
       { "command": "gushenCompletion.selectWorkspaceSourceMode", "title": "Guthon Nexus: 设置项目源码来源" },
@@ -202,7 +204,7 @@
       { "command": "gushenCompletion.runDiagnosis", "title": "Guthon Nexus: 执行源码逻辑排查" },
       { "command": "gushenCompletion.inspectWorkcopy", "title": "Guthon Nexus: 检查或打包 Workcopy" },
       { "command": "gushenCompletion.initializeSvn", "title": "Guthon Nexus: 从 SVN 范围配置检出/更新" },
-      { "command": "gushenCompletion.importSvnScope", "title": "Guthon Nexus: 导入 SVN checkout 配置" },
+      { "command": "gushenCompletion.importSvnScope", "title": "Guthon Nexus: 导入/粘贴 SVN checkout 配置" },
       { "command": "gushenCompletion.editSvnScope", "title": "Guthon Nexus: 编辑 SVN 范围配置" },
       { "command": "gushenCompletion.refreshSvn", "title": "Guthon Nexus: 更新指定 SVN working copy", "icon": "$(sync)" },
       { "command": "gushenCompletion.showSvnStatus", "title": "Guthon Nexus: 查看 SVN 状态与差异" },
@@ -232,6 +234,7 @@
         { "command": "gushenCompletion.refreshSvnSourceView", "when": "view == gushenCompletion.svnSourceView", "group": "navigation@6" }
       ],
       "view/item/context": [
+        { "command": "gushenCompletion.deleteWorkspace", "when": "view == gushenCompletion.toolView && viewItem == guthonWorkspace", "group": "danger@1" },
         { "command": "gushenCompletion.copySvnProcedureName", "when": "view == gushenCompletion.svnSourceView && viewItem == guthonSvnProcedure", "group": "navigation@1" },
         { "command": "gushenCompletion.copyQualifiedSvnProcedureName", "when": "view == gushenCompletion.svnSourceView && viewItem == guthonSvnProcedure", "group": "navigation@2" },
         { "command": "gushenCompletion.showSvnProcedureCallers", "when": "view == gushenCompletion.svnSourceView && viewItem == guthonSvnProcedure", "group": "navigation@3" },

@@ -29,6 +29,20 @@ from .documents import accept_refreshed_files
 
 ProgressCallback = Callable[[str], None] | None
 
+SKIPPABLE_SCOPE_ERROR_MARKERS = (
+    "E170000",  # URL does not exist.
+    "E170001",  # Authorization failed for this URL.
+    "E175013",  # Access forbidden.
+    "E200009",  # Target does not exist.
+    "E220004",  # Item is not readable.
+    "authorization failed",
+    "access forbidden",
+    "not authorized",
+    "doesn't exist",
+    "does not exist",
+    "not found",
+)
+
 
 def _progress(callback: ProgressCallback, message: str) -> None:
     if callback is not None:
@@ -96,7 +110,37 @@ def _entry_record(entry: ScopeEntry, info: dict, status_value: dict) -> dict:
     }
 
 
-def _state(workspace: dict, scope: AuthorizedScope, records: list[dict]) -> dict:
+def _scope_is_unavailable(error: BaseException) -> bool:
+    message = str(error).casefold()
+    return any(marker.casefold() in message for marker in SKIPPABLE_SCOPE_ERROR_MARKERS)
+
+
+def _skipped_record(entry: ScopeEntry, error: BaseException) -> dict:
+    lines = [line.strip() for line in str(error).splitlines() if line.strip()]
+    return {
+        "id": entry.id,
+        "category": entry.category,
+        "url": entry.url,
+        "localSubdir": entry.local_subdir,
+        "reason": lines[-1] if lines else "SVN scope is unavailable",
+    }
+
+
+def _matching_skipped(workspace: dict, scope: AuthorizedScope) -> list[dict]:
+    value = load_state(workspace, required=False)
+    if value.get("authorizedScopeHash") != scope.digest:
+        return []
+    return [item for item in value.get("skipped") or [] if isinstance(item, dict) and item.get("id")]
+
+
+def _state(
+    workspace: dict,
+    scope: AuthorizedScope,
+    records: list[dict],
+    skipped: list[dict] | None = None,
+) -> dict:
+    if not records:
+        raise SystemExit(f"No accessible SVN scope entries for {workspace['workspaceKey']}")
     repositories = {(item["repositoryRoot"], item["repositoryUuid"]) for item in records}
     if any(not root or not uuid for root, uuid in repositories):
         raise SystemExit(f"SVN repository identity is incomplete for {workspace['workspaceKey']}")
@@ -110,6 +154,7 @@ def _state(workspace: dict, scope: AuthorizedScope, records: list[dict]) -> dict
             for root, uuid in sorted(repositories)
         ],
         "workingCopies": records,
+        "skipped": list(skipped or []),
     }
 
 
@@ -124,9 +169,11 @@ def _status(
     working_copy_ids: set[str] | None = None,
 ) -> dict:
     records = []
+    skipped = _matching_skipped(workspace, scope)
+    skipped_ids = {item["id"] for item in skipped}
     candidates = [
         entry for entry in scope.entries
-        if not working_copy_ids or entry.id in working_copy_ids
+        if entry.id not in skipped_ids and (not working_copy_ids or entry.id in working_copy_ids)
     ]
     total = len(candidates)
     for index, entry in enumerate(candidates, 1):
@@ -146,7 +193,7 @@ def _status(
             f"[{index}/{total}] {label}｜{phase}｜完成 · r{info.get('revision') or '-'} · "
             f"{'干净' if current.get('clean') else '有本地修改'}",
         )
-    state = _state(workspace, scope, records)
+    state = _state(workspace, scope, records, skipped)
     state["clean"] = all(record["clean"] for record in records)
     return state
 
@@ -157,7 +204,13 @@ def _merge_refreshed_state(
     previous: dict,
     refreshed: dict,
 ) -> dict:
-    expected_ids = [entry.id for entry in scope.entries]
+    skipped = (
+        previous.get("skipped") or []
+        if previous.get("authorizedScopeHash") == scope.digest
+        else refreshed.get("skipped") or []
+    )
+    skipped_ids = {item.get("id") for item in skipped if isinstance(item, dict)}
+    expected_ids = [entry.id for entry in scope.entries if entry.id not in skipped_ids]
     previous_records = {
         item.get("id"): item
         for item in previous.get("workingCopies") or []
@@ -174,7 +227,7 @@ def _merge_refreshed_state(
     ):
         return refreshed
     ordered = [records[entry_id] for entry_id in expected_ids]
-    state = _state(workspace, scope, ordered)
+    state = _state(workspace, scope, ordered, skipped)
     state["clean"] = all(record.get("clean") for record in ordered)
     return state
 
@@ -184,12 +237,25 @@ def initialize(workspace: dict, *, on_progress: ProgressCallback = None) -> dict
     scope = load_authorized_scope(workspace)
     with operation_lock(workspace, "manifest-init"):
         records = []
+        skipped = []
         total = len(scope.entries)
         for index, entry in enumerate(scope.entries, 1):
             label = scope_entry_label(workspace, entry)
             action = "校验已有 working copy" if (entry.root / ".svn").is_dir() else "执行 SVN checkout"
             _progress(on_progress, f"[{index}/{total}] {label}｜初始化｜{action}")
-            info = _checkout_entry(workspace, entry)
+            try:
+                if not (entry.root / ".svn").is_dir():
+                    run_remote_svn(["info", entry.url], workspace["svn"])
+                info = _checkout_entry(workspace, entry)
+            except SystemExit as error:
+                if not _scope_is_unavailable(error):
+                    raise
+                skipped.append(_skipped_record(entry, error))
+                _progress(
+                    on_progress,
+                    f"[{index}/{total}] {label}｜初始化｜跳过 · 无权限或地址不存在",
+                )
+                continue
             _progress(on_progress, f"[{index}/{total}] {label}｜初始化｜检查本地状态")
             current = svn_status(entry.root)
             records.append(_entry_record(entry, info, current))
@@ -198,7 +264,7 @@ def initialize(workspace: dict, *, on_progress: ProgressCallback = None) -> dict
                 f"[{index}/{total}] {label}｜初始化｜完成 · r{info.get('revision') or '-'} · "
                 f"{'干净' if current.get('clean') else '有本地修改'}",
             )
-        state = _state(workspace, scope, records)
+        state = _state(workspace, scope, records, skipped)
         state["clean"] = all(record["clean"] for record in records)
         atomic_json(state_path(workspace), state)
         return {"ok": True, "action": "initialized", "scope": state}
@@ -235,6 +301,8 @@ def refresh(
 ) -> dict:
     require_capability(workspace, "refresh")
     scope = load_authorized_scope(workspace)
+    skipped = _matching_skipped(workspace, scope)
+    skipped_ids = {item["id"] for item in skipped}
     selected = set(working_copy_ids or ())
     requested_paths = list(dict.fromkeys(str(value or "").strip() for value in (logical_paths or ())))
     if selected and requested_paths:
@@ -242,6 +310,9 @@ def refresh(
     unknown = selected - {entry.id for entry in scope.entries}
     if unknown:
         raise SystemExit(f"Unknown SVN working copy ids: {', '.join(sorted(unknown))}")
+    unavailable = selected & skipped_ids
+    if unavailable:
+        raise SystemExit(f"SVN working copies are unavailable: {', '.join(sorted(unavailable))}")
     exact_targets: dict[str, list[tuple[Path, str, str]]] = {}
     for logical_path in requested_paths:
         entry, target, relative = resolve_authorized_path(scope, logical_path)
@@ -256,10 +327,15 @@ def refresh(
     with operation_lock(workspace, "manifest-refresh", blocking=True):
         previous_state = load_state(workspace, required=False)
         updated = []
-        candidates = [entry for entry in scope.entries if not selected or entry.id in selected]
+        candidates = [
+            entry for entry in scope.entries
+            if entry.id not in skipped_ids and (not selected or entry.id in selected)
+        ]
         total = len(candidates)
         progress_index = 0
         for entry in scope.entries:
+            if entry.id in skipped_ids:
+                continue
             _validate_existing(entry)
             if selected and entry.id not in selected:
                 continue
@@ -331,7 +407,7 @@ def refresh(
             working_copy_ids={item["id"] for item in updated},
         )
         state = _merge_refreshed_state(workspace, scope, previous_state, refreshed_state)
-        if len(state.get("workingCopies") or []) != len(scope.entries):
+        if len(state.get("workingCopies") or []) != len(scope.entries) - len(skipped_ids):
             state = _status(workspace, scope, on_progress=on_progress, phase="更新汇总")
         atomic_json(state_path(workspace), state)
         return {

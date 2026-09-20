@@ -64,6 +64,7 @@ class SvnBackendClient {
   fragments(workspaceKey, identity) {
     const args = ['fragments', '--source-type', identity.sourceType, '--source-id', identity.sourceId];
     if (identity.funId) args.push('--fun-id', identity.funId);
+    if (identity.workingCopyId) args.push('--working-copy', identity.workingCopyId);
     return this.run(workspaceKey, args);
   }
 
@@ -86,6 +87,7 @@ class SvnBackendClient {
   read(workspaceKey, identity) {
     const args = ['read', '--source-type', identity.sourceType, '--source-id', identity.sourceId];
     if (identity.funId) args.push('--fun-id', identity.funId);
+    if (identity.workingCopyId) args.push('--working-copy', identity.workingCopyId);
     if (identity.jsonPointer) args.push('--json-pointer', identity.jsonPointer);
     return this.run(workspaceKey, args);
   }

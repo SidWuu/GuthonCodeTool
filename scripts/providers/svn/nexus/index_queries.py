@@ -364,23 +364,35 @@ def catalog(workspace: dict) -> dict:
     }
 
 
-def source_object(workspace: dict, *, source_type: str, source_id: str, fun_id: str = "") -> dict:
+def source_object(
+    workspace: dict,
+    *,
+    source_type: str,
+    source_id: str,
+    fun_id: str = "",
+    working_copy_id: str = "",
+) -> dict:
     connection = _connection(workspace)
     try:
+        filters = ["provider='svn'", "source_table=?", "source_id=?", "fun_id=?"]
+        params = [source_type, source_id, fun_id]
+        if working_copy_id:
+            filters.append("working_copy_id=?")
+            params.append(working_copy_id)
         rows = connection.execute(
-            """
-            SELECT * FROM gusen_source_record
-            WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=?
-            ORDER BY source_path LIMIT 2
-            """,
-            (source_type, source_id, fun_id),
+            "SELECT * FROM gusen_source_record WHERE " + " AND ".join(filters)
+            + " ORDER BY source_path LIMIT 2",
+            params,
         ).fetchall()
     finally:
         connection.close()
     if not rows:
         raise SystemExit("SVN source is not present in the current local index; run reindex first")
     if len(rows) > 1:
-        raise SystemExit(f"SVN object identity is ambiguous: {source_type}/{source_id}/{fun_id}")
+        raise SystemExit(
+            f"SVN object identity is ambiguous: {source_type}/{source_id}/{fun_id}; "
+            "specify workingCopyId"
+        )
     return dict(rows[0])
 
 
