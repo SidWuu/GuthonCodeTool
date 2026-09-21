@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 import sqlite3
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
@@ -194,11 +195,42 @@ def _subsystem_tree_orders(workspace: dict, scope) -> dict[str, list[int]]:
 
 def _relative_source_path(entry, source_path: str) -> PurePosixPath | None:
     logical = PurePosixPath(str(source_path or ""))
+    if getattr(entry, "category", "") == "root":
+        return logical
     prefix = PurePosixPath(entry.local_subdir)
     try:
         return logical.relative_to(prefix)
     except ValueError:
         return None
+
+
+def _source_entry(entry, row: dict):
+    """Project one path inside a root checkout onto the existing source layout."""
+
+    if getattr(entry, "category", "") != "root":
+        return entry
+    parts = PurePosixPath(str(row.get("source_path") or "")).parts
+    source_type = row.get("source_table") or ""
+    if len(parts) >= 3 and parts[0] in {"systems", "datasources"}:
+        category = parts[0]
+        local_subdir = PurePosixPath(*parts[:2]).as_posix()
+    elif len(parts) >= 2:
+        category = {
+            "page": "pages",
+            "system-script": "system-script",
+            "procedure": "procedures",
+            "table": "tables",
+            "view": "views",
+        }.get(source_type, parts[0])
+        local_subdir = PurePosixPath(parts[0], parts[1]).as_posix()
+    else:
+        return entry
+    return replace(
+        entry,
+        category=category,
+        local_subdir=local_subdir,
+        root=entry.root.joinpath(*PurePosixPath(local_subdir).parts),
+    )
 
 
 def _page_index_location(entry, relative: PurePosixPath, locations: dict[str, dict]) -> dict | None:
@@ -291,7 +323,7 @@ def catalog(workspace: dict) -> dict:
             for row in connection.execute(
                 """
                 SELECT source_table, source_id, source_alias_id, fun_id, source_name, source_path,
-                       local_path, working_copy_id, scope_entry_id, status
+                       local_path, working_copy_id, scope_entry_id, system_id, data_source_id, status
                 FROM gusen_source_record
                 WHERE provider='svn'
                 ORDER BY source_path
@@ -315,21 +347,38 @@ def catalog(workspace: dict) -> dict:
         entry = entries.get(row.get("scope_entry_id") or "")
         if entry is None:
             continue
+        source_entry = _source_entry(entry, row)
+        location_key = source_entry.local_subdir
+        if row["source_table"] == "page" and location_key not in page_locations:
+            page_locations[location_key] = _page_index_locations(source_entry)
+        if row["source_table"] == "procedure" and location_key not in procedure_locations:
+            procedure_locations[location_key] = _procedure_index_locations(source_entry)
+        entry_name = (
+            _entry_name(source_entry)
+            if entry.category == "root"
+            else entry_names[entry.id]
+        )
         directories, label = _tree_metadata(
-            entry,
+            source_entry,
             row,
-            page_locations.get(entry.id) or {},
-            procedure_locations.get(entry.id) or {},
-            entry_names[entry.id],
+            page_locations.get(location_key) or page_locations.get(entry.id) or {},
+            procedure_locations.get(location_key) or procedure_locations.get(entry.id) or {},
+            entry_name,
         )
         source_type = row["source_table"]
-        relative = _relative_source_path(entry, row["source_path"])
+        relative = _relative_source_path(source_entry, row["source_path"])
         location = None
         if relative is not None:
             if source_type == "page":
-                location = _page_index_location(entry, relative, page_locations.get(entry.id) or {})
+                location = _page_index_location(
+                    source_entry,
+                    relative,
+                    page_locations.get(location_key) or page_locations.get(entry.id) or {},
+                )
             elif source_type == "procedure":
-                location = (procedure_locations.get(entry.id) or {}).get(relative.as_posix())
+                location = (
+                    procedure_locations.get(location_key) or procedure_locations.get(entry.id) or {}
+                ).get(relative.as_posix())
         if source_type == "page":
             tree_order = [*subsystem_orders[entry.id], location["order"] if location else 1_000_000]
         elif source_type == "procedure":

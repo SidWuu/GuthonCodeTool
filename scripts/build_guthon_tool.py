@@ -72,6 +72,8 @@ def main() -> int:
         str(ROOT / "scripts"),
         "--add-data",
         f"{ROOT / 'config' / 'example'}{SEP}config/example",
+        "--add-data",
+        f"{ROOT / 'VERSION'}{SEP}.",
         "--distpath",
         str(dist_path),
         "--workpath",

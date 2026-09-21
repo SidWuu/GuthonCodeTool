@@ -848,19 +848,32 @@ def _compact_scope_values(workspace: dict) -> list[str]:
 
 
 def build_manifest_from_workspace_config(workspace: dict) -> ImportResult:
-    """Expand one compact workspace SVN config into exact child working copies.
+    """Build a working-copy manifest from one workspace SVN URL.
 
-    ``svn.url`` is a repository root.  ``systems`` and ``datasources`` scope
-    names are expanded with IDs from the workspace's explicit
-    ``systems.include.mappings``.  The returned manifest is intentionally a
-    generated representation for ``context/authorized-scope.json``; users
-    should edit the compact YAML instead.
+    A Guthon product/project URL contains every directory readable by the
+    configured SVN account. New configurations therefore create one complete
+    checkout and do not derive a narrower scope from system mappings. Older
+    configurations with an explicit ``svn.scope`` remain readable.
     """
 
     settings = workspace.get("svn") or {}
     root_url = str(settings.get("scopeRootUrl") or settings.get("url") or "").strip()
     if not root_url:
         raise SystemExit(f"Missing svn.url for compact SVN scope: {workspace.get('workspaceKey') or ''}")
+    configured_scope = settings.get("scopeEntries")
+    if configured_scope is None:
+        configured_scope = settings.get("scope")
+    if configured_scope in (None, "", []):
+        return build_manifest_from_config(
+            json.dumps({"entries": [{
+                "id": "repository-root",
+                "url": root_url,
+                "localSubdir": "repository",
+                "category": "root",
+                "writable": True,
+            }]}, ensure_ascii=False),
+            str(workspace.get("workspaceKey") or ""),
+        )
     scope_values = _compact_scope_values(workspace)
     expandable_categories = {
         "systems", "datasources", "pages", "procedures", "tables", "views", "system-script"
@@ -897,13 +910,12 @@ def build_manifest_from_workspace_config(workspace: dict) -> ImportResult:
 
 
 def build_manifest_from_workspace_input(text: str, workspace: dict) -> ImportResult:
-    """Parse script/paste input, expanding a project-level checkout root.
+    """Parse script/paste input and preserve a project-level checkout root.
 
     Platform project downloads can contain one checkout command for a root
-    repository instead of one command per subsystem. When its category cannot
-    be inferred, derive the allowed child directories from the workspace's
-    explicit ``systems.include.mappings`` and feed them through the same
-    exact-URL manifest validation.
+    repository instead of one command per subsystem. Keep that URL as one
+    complete working copy; system mappings describe identities, not checkout
+    authorization.
     """
 
     workspace_key = str(workspace.get("workspaceKey") or "").strip()
@@ -913,19 +925,20 @@ def build_manifest_from_workspace_input(text: str, workspace: dict) -> ImportRes
         if "cannot infer a supported source category" not in str(script_error) and "destination must be relative" not in str(script_error):
             raise
     checkouts, duplicate_count = parse_checkout_script(text, allow_unknown_category=True)
-    if not any(checkout.category == "aggregate" for checkout in checkouts):
-        raise script_error
-    if sum(checkout.category == "aggregate" for checkout in checkouts) > 1:
+    root_categories = {"aggregate", "root"}
+    if not any(checkout.category in root_categories for checkout in checkouts):
+        raise SystemExit("SVN checkout input does not contain a supported repository address")
+    if sum(checkout.category in root_categories for checkout in checkouts) > 1:
         raise SystemExit("A project-level SVN checkout root must be specified only once")
     raw_entries = []
     for checkout in checkouts:
-        if checkout.category == "aggregate":
+        if checkout.category in root_categories:
             raw_entries.append({
+                "id": "repository-root",
                 "url": checkout.url,
-                # A downloaded root script historically includes the common
-                # directories as well. Compact YAML without ``scope`` is
-                # intentionally narrower and uses mappings only.
-                "checkoutPaths": ["skill", "public", *_workspace_checkout_paths(workspace)],
+                "localSubdir": "repository",
+                "category": "root",
+                "writable": True,
             })
         else:
             raw_entries.append({
@@ -1097,8 +1110,11 @@ def _direct_yaml_key_index(
 def _compact_scope_root(result: ImportResult) -> str:
     """Infer the shared repository root from expanded checkout entries."""
 
+    entries = result.manifest.get("entries") or []
+    if len(entries) == 1 and entries[0].get("category") == "root":
+        return str(entries[0].get("url") or "").strip().rstrip("/")
     roots = []
-    for entry in result.manifest.get("entries") or []:
+    for entry in entries:
         url = urlsplit(str(entry.get("url") or ""))
         local_parts = PurePosixPath(str(entry.get("localSubdir") or "")).parts
         if not url.scheme or not url.netloc or not local_parts:
@@ -1128,8 +1144,11 @@ def _compact_config_values(result: ImportResult, workspace: dict) -> tuple[str, 
             f"Imported SVN root URL conflicts with existing config: {root} != {inferred_root}"
         )
     root = root or inferred_root
+    entries = result.manifest.get("entries") or []
+    if len(entries) == 1 and entries[0].get("category") == "root":
+        return root, []
     scopes = []
-    for entry in result.manifest.get("entries") or []:
+    for entry in entries:
         local_subdir = normalize_scope_subdir(entry.get("localSubdir"), "imported-scope")
         if not local_subdir:
             continue
@@ -1146,11 +1165,10 @@ def _compact_config_values(result: ImportResult, workspace: dict) -> tuple[str, 
 def _render_compact_scope(root: str, scopes: list[str], indent: int) -> list[str]:
     prefix = " " * indent
     child = " " * (indent + 2)
-    return [
-        f"{prefix}url: {json.dumps(root, ensure_ascii=False)}",
-        f"{prefix}scope:",
-        *[f"{child}- {scope}" for scope in scopes],
-    ]
+    lines = [f"{prefix}url: {json.dumps(root, ensure_ascii=False)}"]
+    if scopes:
+        lines.extend([f"{prefix}scope:", *[f"{child}- {scope}" for scope in scopes]])
+    return lines
 
 
 def _merge_compact_scope_config(path: Path, workspace_key: str, result: ImportResult, workspace: dict) -> dict:
@@ -1198,11 +1216,14 @@ def _merge_compact_scope_config(path: Path, workspace_key: str, result: ImportRe
             if existing_url not in {json.dumps(root, ensure_ascii=False), root}:
                 raise SystemExit(f"SVN compact root URL conflicts with existing config: {path}")
         scope_region = _nested_key_region(lines, svn_start, svn_end, svn_indent, {"scope", "entries"})
-        if scope_region is None:
+        if scope_region is None and scopes:
             lines[svn_end:svn_end] = [
                 *_render_compact_scope(root, scopes, svn_indent + 2)[1:],
             ]
-        else:
+        elif scope_region is not None and not scopes:
+            scope_start, scope_end, _scope_indent = scope_region
+            lines[scope_start:scope_end] = []
+        elif scope_region is not None:
             scope_start, scope_end, scope_indent = scope_region
             old_line = lines[scope_start]
             comment = ""

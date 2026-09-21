@@ -17,6 +17,7 @@ from .manifest import (
     load_authorized_scope,
     scope_entry_label,
     source_category,
+    source_identity,
     source_path_writable,
     source_relative_path,
 )
@@ -60,6 +61,8 @@ def _file_revision(path: Path) -> str:
 
 def _logical_path(entry: ScopeEntry, path: Path) -> str:
     relative = path.resolve().relative_to(entry.root.resolve()).as_posix()
+    if entry.category == "root":
+        return relative
     return f"{entry.local_subdir}/{relative}" if relative != "." else entry.local_subdir
 
 
@@ -68,10 +71,19 @@ def _base_object(entry: ScopeEntry, path: Path, source_table: str, revisions: di
     digest = file_hash(path)
     revision = revisions.get(relative, "")
     logical_path = _logical_path(entry, path)
+    source_namespace = entry.id
+    working_copy_id = entry.id
+    if entry.category == "root":
+        identity = source_identity(entry, relative)
+        if identity:
+            owner = "systems" if source_table in {"page", "system-script"} else "datasources"
+            source_namespace = f"{entry.id}:{owner}/{identity}"
+            working_copy_id = source_namespace
     return {
         "provider": "svn",
-        "working_copy_id": entry.id,
+        "working_copy_id": working_copy_id,
         "scope_entry_id": entry.id,
+        "source_namespace": source_namespace,
         "source_table": source_table,
         "source_path": logical_path,
         "local_path": str(path.resolve()),
@@ -83,13 +95,13 @@ def _base_object(entry: ScopeEntry, path: Path, source_table: str, revisions: di
     }
 
 
-def _identity_from_subdir(entry: ScopeEntry) -> str:
-    return Path(entry.local_subdir).name
+def _identity_from_path(entry: ScopeEntry, path: Path) -> str:
+    return source_identity(entry, path.relative_to(entry.root))
 
 
 def _page_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) -> dict:
     result = _base_object(entry, path, "page", revisions, changes)
-    system_id = _identity_from_subdir(entry)
+    system_id = _identity_from_path(entry, path)
     if path.suffix.lower() == ".gss":
         text = decode_source(path.read_bytes())[0]
         header = header_fields(text)
@@ -156,7 +168,7 @@ def _procedure_object(entry: ScopeEntry, path: Path, revisions: dict, changes: d
         fun_id=function_id,
         source_name=header.get("description") or function_id,
         system_id="",
-        data_source_id=_identity_from_subdir(entry),
+        data_source_id=_identity_from_path(entry, path),
         scripts=[{"script_type": "procedure_script", "json_path": "", "content": text}],
     )
     if function_id != relative.name:
@@ -167,7 +179,7 @@ def _procedure_object(entry: ScopeEntry, path: Path, revisions: dict, changes: d
 def _system_script_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) -> dict:
     result = _base_object(entry, path, "system-script", revisions, changes)
     text = decode_source(path.read_bytes())[0]
-    system_id = _identity_from_subdir(entry)
+    system_id = _identity_from_path(entry, path)
     result.update(
         source_id=f"{system_id}#{path.stem}",
         source_alias_id=system_id,
@@ -199,7 +211,7 @@ def _metadata_object(
         fun_id="",
         source_name=str(data.get(name_key) or source_id),
         system_id="",
-        data_source_id=_identity_from_subdir(entry),
+        data_source_id=_identity_from_path(entry, path),
         scripts=(
             [{"script_type": "view_sql", "json_path": "/viewSql", "content": data.get("viewSql") or ""}]
             if kind == "view" and isinstance(data.get("viewSql"), str)
@@ -212,8 +224,10 @@ def _metadata_object(
 
 
 def _generic_read_only_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) -> dict:
-    result = _base_object(entry, path, entry.category, revisions, changes)
-    relative = path.relative_to(entry.root).as_posix()
+    relative_path = path.relative_to(entry.root)
+    category = source_category(entry, relative_path) or entry.category
+    result = _base_object(entry, path, category, revisions, changes)
+    relative = relative_path.as_posix()
     result.update(
         source_id=f"{entry.id}:{relative}",
         source_alias_id=entry.id,
@@ -238,7 +252,7 @@ def _object_for_file(entry: ScopeEntry, path: Path, revisions: dict, changes: di
         return _system_script_object(entry, path, revisions, changes)
     if category in {"tables", "views"} and suffix == ".json":
         return _metadata_object(entry, path, revisions, changes, category)
-    if entry.category in {"skill", "public"} and suffix in GENERIC_TEXT_SUFFIXES:
+    if category in {"skill", "public"} and suffix in GENERIC_TEXT_SUFFIXES:
         return _generic_read_only_object(entry, path, revisions, changes)
     return None
 
@@ -339,7 +353,7 @@ def scan(
                     else:
                         counts[item["source_table"]] = counts.get(item["source_table"], 0) + 1
                         identity = (
-                            ("" if item["source_table"] == "page" else item["scope_entry_id"]),
+                            ("" if item["source_table"] == "page" else item.get("source_namespace") or item["scope_entry_id"]),
                             item["source_table"],
                             item["source_id"],
                             item.get("fun_id") or "",
@@ -373,7 +387,7 @@ def scan(
         for item in objects:
             counts[item["source_table"]] = counts.get(item["source_table"], 0) + 1
             identity = (
-                ("" if item["source_table"] == "page" else item["scope_entry_id"]),
+                ("" if item["source_table"] == "page" else item.get("source_namespace") or item["scope_entry_id"]),
                 item["source_table"],
                 item["source_id"],
                 item.get("fun_id") or "",
@@ -432,7 +446,12 @@ def scan_file(workspace: dict, logical_path: str) -> dict:
     matches = []
     for entry in scope.entries:
         prefix = entry.local_subdir
-        if normalized.startswith(prefix + "/"):
+        if entry.category == "root":
+            relative = normalized
+            target = (entry.root / relative).resolve()
+            if entry.root.resolve() in target.parents:
+                matches.append((entry, target, relative))
+        elif normalized.startswith(prefix + "/"):
             relative = normalized[len(prefix) + 1:]
             target = (entry.root / relative).resolve()
             if entry.root.resolve() in target.parents:

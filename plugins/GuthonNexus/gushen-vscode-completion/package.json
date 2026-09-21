@@ -2,7 +2,7 @@
   "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon workspace, source sync, metadata export, workcopy tools, API completions, hover documentation, and source navigation.",
-  "version": "2.2.6",
+  "version": "2.3.0",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,
@@ -24,6 +24,9 @@
     "onCommand:gushenCompletion.deleteWorkspace",
     "onCommand:gushenCompletion.configureDatabaseDiagnosis",
     "onCommand:gushenCompletion.selectExecutionMode",
+    "onCommand:gushenCompletion.selectUpdateSource",
+    "onCommand:gushenCompletion.checkToolUpdate",
+    "onCommand:gushenCompletion.rollbackToolUpdate",
     "onCommand:gushenCompletion.selectWorkspaceSourceMode",
     "onCommand:gushenCompletion.setSvnCredentials",
     "onCommand:gushenCompletion.openSvnDocument",
@@ -139,6 +142,13 @@
           "default": "packaged",
           "description": "Use the packaged application or run Python scripts directly from a GuthonCodeTool source checkout."
         },
+        "gushenCompletion.updateSource": {
+          "type": "string",
+          "enum": ["github", "gitee"],
+          "enumDescriptions": ["GitHub Release", "Gitee Release"],
+          "default": "gitee",
+          "description": "Release source used only when manually checking for GuthonCodeTool application updates."
+        },
         "gushenCompletion.developmentRoot": {
           "type": "string",
           "default": "",
@@ -152,6 +162,9 @@
       { "command": "gushenCompletion.deleteWorkspace", "title": "Guthon Nexus: 删除产品或项目", "icon": "$(trash)" },
       { "command": "gushenCompletion.configureDatabaseDiagnosis", "title": "Guthon Nexus: 配置数据库排查", "icon": "$(database)" },
       { "command": "gushenCompletion.selectExecutionMode", "title": "Guthon Nexus: 切换运行模式" },
+      { "command": "gushenCompletion.selectUpdateSource", "title": "Guthon Nexus: 选择 GuthonCodeTool 更新源" },
+      { "command": "gushenCompletion.checkToolUpdate", "title": "Guthon Nexus: 检查 GuthonCodeTool 更新" },
+      { "command": "gushenCompletion.rollbackToolUpdate", "title": "Guthon Nexus: 回退 GuthonCodeTool 版本" },
       { "command": "gushenCompletion.selectWorkspaceSourceMode", "title": "Guthon Nexus: 设置项目源码来源" },
       { "command": "gushenCompletion.setSvnCredentials", "title": "Guthon Nexus: 设置工作区 SVN 登录" },
       { "command": "gushenCompletion.focusSvnSource", "title": "Guthon Nexus: 查看谷神同步源码" },
@@ -203,9 +216,9 @@
       { "command": "gushenCompletion.runDoctor", "title": "Guthon Nexus: 检查本地环境" },
       { "command": "gushenCompletion.runDiagnosis", "title": "Guthon Nexus: 执行源码逻辑排查" },
       { "command": "gushenCompletion.inspectWorkcopy", "title": "Guthon Nexus: 检查或打包 Workcopy" },
-      { "command": "gushenCompletion.initializeSvn", "title": "Guthon Nexus: 从 SVN 范围配置检出/更新" },
+      { "command": "gushenCompletion.initializeSvn", "title": "Guthon Nexus: 检出/更新完整 SVN 仓库" },
       { "command": "gushenCompletion.importSvnScope", "title": "Guthon Nexus: 导入/粘贴 SVN checkout 配置" },
-      { "command": "gushenCompletion.editSvnScope", "title": "Guthon Nexus: 编辑 SVN 范围配置" },
+      { "command": "gushenCompletion.editSvnScope", "title": "Guthon Nexus: 编辑 SVN 地址配置" },
       { "command": "gushenCompletion.refreshSvn", "title": "Guthon Nexus: 更新指定 SVN working copy", "icon": "$(sync)" },
       { "command": "gushenCompletion.showSvnStatus", "title": "Guthon Nexus: 查看 SVN 状态与差异" },
       { "command": "gushenCompletion.refreshToolView", "title": "Guthon Nexus: 刷新工具面板", "icon": "$(refresh)" }
@@ -272,7 +285,7 @@
     "build:data": "node scripts/build-data.mjs",
     "build:bridge": "node scripts/build-bridge.mjs",
     "package": "npm run build:bridge && vsce package --allow-missing-repository --skip-license --out guthon-nexus-vscode.vsix",
-    "check": "node --check src/extension.js && node --check src/tool-workspace.js && node --check scripts/build-bridge.mjs && node --check scripts/build-data.mjs",
+    "check": "node --check src/extension.js && node --check src/tool-updater.js && node --check src/tool-workspace.js && node --check scripts/build-bridge.mjs && node --check scripts/build-data.mjs",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {}

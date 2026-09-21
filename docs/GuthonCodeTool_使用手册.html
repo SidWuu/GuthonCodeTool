@@ -172,7 +172,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="1-准备与下载">1. 准备与下载</h2>
-<p>开始前准备 VS Code、Chrome、产品/项目配置，以及可访问 <a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有 GitHub 仓库</a>的账号。该仓库为私人仓库，必须先加入访问权限；无法打开或克隆时请联系我开通。DATABASE 模式还需要数据库只读账号；SVN 模式还需要 SVN 1.10+ 客户端、SVN 账号以及 <code>config/products.yaml</code> 或 <code>config/projects.yaml</code> 对应条目的紧凑 <code>svn.url</code>/<code>svn.scope</code> 配置。<code>systems</code>、<code>datasources</code> 会从 <code>systems.include.mappings</code> 拼接；省略 scope 时只检出映射目录。首次没有配置时，可使用谷神平台下载的 <code>svnCheckoutHere.sh</code> 或 <code>svnCheckoutHere.bat</code> 一次性导入，Nexus 不会执行脚本。</p>
+<p>开始前准备 VS Code、Chrome、产品/项目配置，以及可访问 <a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有 GitHub 仓库</a>的账号。该仓库为私人仓库，必须先加入访问权限；无法打开或克隆时请联系我开通。DATABASE 模式还需要数据库只读账号；SVN 模式还需要 SVN 1.10+ 客户端、SVN 账号以及 <code>config/products.yaml</code> 或 <code>config/projects.yaml</code> 对应条目的唯一 <code>svn.url</code>。该地址默认完整 checkout，不按系统映射过滤。首次没有配置时，可使用谷神平台下载的 <code>svnCheckoutHere.sh</code> 或 <code>svnCheckoutHere.bat</code> 一次性导入，Nexus 不会执行脚本。</p>
 <p>打开 <a href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">GitHub Releases</a> 或 
   <a href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Releases</a>
   ，在同一个版本下载：</p>
@@ -239,7 +239,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="4-填写配置并安装-guthon-team">4. 填写配置并安装 guthon-team</h2>
-<p>优先使用“添加产品或项目”向导：选择产品/项目、填写名称和稳定 ID，再选择 DATABASE 或 SVN。选择源码来源后立即创建对应 Nexus 并结束向导，不在新增流程中读取脚本，也不要求填写数据库连接或 SVN 地址。添加项目不需要先创建或选择产品；项目是产品某个版本的完整导出快照，导出后作为并列的独立工作区管理。创建后展开对应 Nexus：SVN 工作区依次使用顶层的“设置工作区 SVN 登录”“导入/粘贴 SVN checkout 配置”和“编辑 SVN 范围配置”；DATABASE 工作区后续在配置文件中补充 datasource。系统别名、系统 ID、数据源 ID 必须按实际谷神环境确认。不要把数据库密码、源码或配置提交到公开仓库。</p>
+<p>优先使用“添加产品或项目”向导：选择产品/项目、填写名称和稳定 ID，再选择 DATABASE 或 SVN。选择源码来源后立即创建对应 Nexus 并结束向导，不在新增流程中读取脚本，也不要求填写数据库连接或 SVN 地址。添加项目不需要先创建或选择产品；项目是产品某个版本的完整导出快照，导出后作为并列的独立工作区管理。创建后展开对应 Nexus：SVN 工作区依次使用顶层的“设置工作区 SVN 登录”“导入/粘贴 SVN checkout 配置”和“编辑 SVN 地址配置”；DATABASE 工作区后续在配置文件中补充 datasource。系统别名、系统 ID、数据源 ID 必须按实际谷神环境确认。不要把数据库密码、源码或配置提交到公开仓库。</p>
 <ul>
 <li><code>datasource.yaml</code>：填数据库连接；只用 SVN 时按公司模板保留。</li>
 <li><code>products.yaml</code>：填产品和子系统映射。</li>
@@ -250,16 +250,14 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <p>SVN 用户按下面操作：</p>
 <ol>
 <li>在目标产品或项目上选择“源码来源：SVN”。</li>
-<li>展开新建 Nexus，点击“设置工作区 SVN 登录”，填写公共用户名；用户名写入 <code>sync.yaml</code> 供全部工作区共用。若范围尚未配置，此时先只保存用户名。</li>
-<li>点击紧随登录入口的顶层“导入/粘贴 SVN checkout 配置”，选择 <code>.sh/.bat</code> 或在多行编辑器中粘贴 checkout 内容；保存并关闭编辑器后再解析或编辑范围。Nexus 会把同一产品的多个 checkout 地址归并为一个公共 <code>svn.url</code>，每条地址去掉公共前缀后的唯一相对路径逐条写入 <code>svn.scope</code>，重复行只保留一次。</li>
-<li>点击“编辑 SVN 范围配置”，在对应的 <code>products.yaml</code> 或 <code>projects.yaml</code> 的 <code>svn.url</code>/<code>svn.scope</code> 中确认全部精确范围。未配置 <code>systems.include.mappings</code> 时检出所有 scope；配置后按系统和数据源 ID 筛选。展开后的实际清单保存在工作区 <code>context/authorized-scope.json</code>，仅供程序使用。</li>
+<li>展开新建 Nexus，点击“设置工作区 SVN 登录”，填写公共用户名；用户名写入 <code>sync.yaml</code> 供全部工作区共用。若 SVN 地址尚未配置，此时先只保存用户名。</li>
+<li>点击紧随登录入口的顶层“导入/粘贴 SVN checkout 配置”，选择 <code>.sh/.bat</code> 或粘贴唯一根地址/checkout 命令；保存并关闭编辑器后解析 SVN 地址。Nexus 只写入一个 <code>svn.url</code>。</li>
+<li>点击“编辑 SVN 地址配置”，在对应的 <code>products.yaml</code> 或 <code>projects.yaml</code> 中确认唯一 <code>svn.url</code>。<code>systems.include.mappings</code> 不限制 checkout 内容。内部清单保存在工作区 <code>context/authorized-scope.json</code>，仅供程序使用。</li>
 <li>再次点击“设置工作区 SVN 登录”输入一次密码；密码由 SVN auth cache/系统钥匙串保存。</li>
-<li>点击“从 SVN 范围配置检出/更新”，核对范围后确认；也可以直接在配置中追加 URL 和相对目录。当前账号无权读取或远端不存在的单个 scope 会记录并跳过，其余 scope 继续检出；连接中断、整体认证失败和全部 scope 都不可访问仍会停止并报错。驾驶舱会显示跳过数量，权限补齐后再次执行即可重试。</li>
+<li>点击“检出/更新完整 SVN 仓库”，核对根地址后确认。Nexus 对该地址执行一次完整 checkout；地址、权限、连接或认证错误会停止并报错。</li>
 </ol>
 <p>删除不再需要的工作区时，在目标 PRD/PRJ 节点右键选择“删除产品或项目”。确认框会列出配置、独占数据源、数据库排查条目、工作区目录和 SVN checkout；只有点击“确认删除”后，目录才会进入系统废纸篓并定向清理配置。其他工作区和共享配置不会删除。</p>
-<p>项目若只有一个包含全部权限目录的根 checkout 地址，建议在该项目 <code>svn.url</code> 配合精确相对路径 <code>scope</code>；旧配置也可在 <code>svn.scope</code> 中使用
-<code>checkoutPaths</code> 列出要检出的 <code>skill</code>、<code>public</code>、<code>systems/&lt;SYSTEM_ID&gt;</code> 和
-<code>datasources/&lt;DATA_SOURCE_ID&gt;</code>；粘贴单根命令时 Nexus 也会按当前映射自动展开。</p>
+<p>项目只有一个包含全部权限目录的根 checkout 地址时，只配置 <code>svn.url</code>。旧配置中的 <code>svn.scope</code>/<code>checkoutPaths</code> 仍可读取，但不再是新工作区的默认模型。</p>
 <p>用户名在公共 <code>sync.yaml</code> 配置一次，全部产品和项目共用，不需要分别写入产品/项目 YAML。密码只通过 stdin 临时交给 SVN，Nexus、YAML 和 VS Code SecretStorage 都不保存；检出、更新、远程检查和提交读取 SVN 系统凭据。内部 HTTPS 自签证书以非交互方式直接信任。</p>
 <div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" type="button">复制</button><pre><code>products:
   &lt;产品ID&gt;:
@@ -308,7 +306,7 @@ python3 tools/guthon_team.py install --workspace "/你的本地数据目录/var"
 <li>确认产品、项目各自的数据源和子系统范围正确。</li>
 <li>点击“维护 → 检查本地环境”，确认输出没有 FAIL。</li>
 <li>展开“项目”，确认产品显示为 <code>PRD</code>、项目显示为 <code>PRJ</code>。</li>
-	<li>在每个产品或项目节点选择“源码来源：DATABASE / SVN”；DATABASE 节点点击“同步工作区全部资料”，SVN 节点点击“从 SVN 范围配置检出/更新”。</li>
+	<li>在每个产品或项目节点选择“源码来源：DATABASE / SVN”；DATABASE 节点点击“同步工作区全部资料”，SVN 节点点击“检出/更新完整 SVN 仓库”。</li>
 	<li>等待输出面板显示“完成”；如果显示 FAIL，先按提示修正后再重试。</li>
 </ol>
 <p>看到“完成”且项目树中没有红色错误即表示初始化成功。DATABASE 后续从 Workcopy 开发；SVN 后续从“谷神源码”开发。</p>
@@ -347,7 +345,7 @@ python3 tools/guthon_team.py install --workspace "/你的本地数据目录/var"
 </ol>
 <h3>SVN 模式</h3>
 <ol>
-	<li>开始开发前，点击“从 SVN 范围配置检出/更新”。输出标签会实时显示每个子系统 working copy 当前正在执行的授权、checkout/update、状态检查或索引步骤。</li>
+	<li>开始开发前，点击“检出/更新完整 SVN 仓库”。输出标签会实时显示根 working copy 当前正在执行的 checkout/update、状态检查或索引步骤。</li>
 	<li>手动执行“扫描/重建本地 SVN 索引”时，输出标签同样会显示授权范围、每个 working copy 的状态/版本/解析步骤和事务结果；同一工作区的重复重建点击会直接忽略。</li>
 <li>从“谷神源码”打开 PAGE、过程函数或系统脚本。</li>
 <li>修改后按 <code>Ctrl+S</code>（macOS 为 <code>Cmd+S</code>）保存到本地。</li>
@@ -392,15 +390,15 @@ python3 tools/guthon_team.py install --workspace "/你的本地数据目录/var"
 <section class="wiki-section">
 <h2 id="9-升级和迁移">9. 升级和迁移</h2>
 <ol>
-<li>从最新 Release 下载当前系统应用、VSIX 和 GuthonBridge。</li>
-<li>关闭正在运行的同步任务和 Bridge。</li>
-<li>用新应用替换旧应用；路径不变时 VS Code 无需重新初始化。</li>
-<li>从 VSIX 重新安装扩展，并重新加载 VS Code。</li>
-<li>替换 Bridge 前备份自己的 <code>extension/host-config.js</code>，然后重新加载 Chrome 扩展。</li>
+<li>展开 Nexus 的“运行模式”，按需点击“更新源：GitHub/Gitee”切换下载来源。</li>
+<li>确认没有同步、SVN 或 Bridge 请求正在执行，然后点击“检查更新”。Nexus 不会启动检查或定时联网。</li>
+<li>确认版本与来源后执行更新；Nexus 会校验 SHA-256、运行 <code>self-test</code>，成功后切换应用路径并重启运行中的 Bridge。</li>
+<li>新版异常时点击“回退到上一版本”；受管更新不会删除本地数据目录。</li>
+<li>Guthon Nexus VSIX、Chrome 扩展或 Guthon Testing Skill 有变更时，仍从同一 Release 安装对应组件并重新加载。</li>
 <li>在本地 <code>guthon-team</code> 仓库执行 <code>git pull --ff-only</code>，再重新运行 <code>install --workspace &lt;本地数据目录&gt;/var</code>，安全升级规范、API 索引和门禁。</li>
 <li>运行“检查本地环境”，再选择一个产品和一个项目分别执行完整同步。</li>
 </ol>
-<p>升级时不要删除“本地数据目录”。迁移电脑时，先安全复制整个本地数据目录，再在新电脑重新执行“设置工作空间”。</p>
+<p>首次使用自动更新能力仍需安装包含该功能的 Guthon Nexus。升级时不要删除“本地数据目录”。迁移电脑时，先安全复制整个本地数据目录，再在新电脑重新执行“设置工作空间”。</p>
 </section>
 
 <section class="wiki-section">

@@ -132,8 +132,8 @@ def svn_settings(
     if not isinstance(svn, dict):
         raise SystemExit(f"svn must be a mapping for {config_id}")
     scope_manifest_value = str(svn.get("scope_manifest") or "").strip()
-    # ``repository_url`` remains the legacy sparse checkout root. Compact
-    # manifest configs use ``svn.url`` and expand child paths separately.
+    # ``repository_url`` remains the legacy sparse checkout root. Manifest
+    # configs use ``svn.url``; the default is one complete root working copy.
     scope_root_value = str(svn.get("url") or svn.get("scope_url") or "").strip()
     repository_url_value = str(svn.get("repository_url") or "").strip()
     convention_manifest = not scope_manifest_value and not repository_url_value

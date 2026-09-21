@@ -14,6 +14,7 @@ SCHEMA_VERSION = 1
 STATE_VERSION = 3
 SAFE_ENTRY_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SUPPORTED_CATEGORIES = {
+    "root",
     "systems",
     "datasources",
     "pages",
@@ -37,6 +38,17 @@ def source_category(entry: "ScopeEntry", relative_path: object) -> str:
     """Return the logical source category inside one physical working copy."""
 
     relative = PurePosixPath(str(relative_path or "").replace("\\", "/"))
+    if getattr(entry, "category", "") == "root":
+        parts = relative.parts
+        if len(parts) >= 3 and parts[0] == "systems" and parts[2] in {"pages", "system-script"}:
+            return parts[2]
+        if len(parts) >= 3 and parts[0] == "datasources" and parts[2] in {"procedures", "tables", "views"}:
+            return parts[2]
+        if len(parts) >= 2 and parts[0] in {"pages", "system-script", "procedures", "tables", "views"}:
+            return parts[0]
+        if parts and parts[0] in {"skill", "public"}:
+            return parts[0]
+        return ""
     if entry.category == "systems":
         return relative.parts[0] if relative.parts and relative.parts[0] in {"pages", "system-script"} else ""
     if entry.category == "datasources":
@@ -48,6 +60,13 @@ def source_relative_path(entry: "ScopeEntry", relative_path: object) -> PurePosi
     """Strip the aggregate source directory while preserving legacy layouts."""
 
     relative = PurePosixPath(str(relative_path or "").replace("\\", "/"))
+    if getattr(entry, "category", "") == "root":
+        parts = relative.parts
+        if len(parts) >= 3 and parts[0] in {"systems", "datasources"}:
+            return PurePosixPath(*parts[3:])
+        if len(parts) >= 2 and parts[0] in {"pages", "system-script", "procedures", "tables", "views"}:
+            return PurePosixPath(*parts[2:])
+        return relative
     if getattr(entry, "category", "") in {"systems", "datasources"} and relative.parts:
         return PurePosixPath(*relative.parts[1:])
     return relative
@@ -64,6 +83,20 @@ def source_path_writable(entry: "ScopeEntry", relative_path: object) -> bool:
         and relative.suffix.lower() in WRITABLE_SOURCE_SUFFIXES[category]
         and relative.name.casefold() != "index.md"
     )
+
+
+def source_identity(entry: "ScopeEntry", relative_path: object) -> str:
+    """Return the system or datasource ID that owns a source path."""
+
+    relative = PurePosixPath(str(relative_path or "").replace("\\", "/"))
+    if getattr(entry, "category", "") == "root":
+        parts = relative.parts
+        if len(parts) >= 3 and parts[0] in {"systems", "datasources"}:
+            return parts[1]
+        if len(parts) >= 2 and parts[0] in {"pages", "system-script", "procedures", "tables", "views"}:
+            return parts[1]
+        return ""
+    return Path(entry.local_subdir).name
 
 
 @dataclass(frozen=True)
@@ -113,6 +146,7 @@ def scope_entry_label(workspace: dict, entry: ScopeEntry) -> str:
             aliases.append(str(alias))
     business_name = " / ".join(aliases) or identity
     category = {
+        "root": "完整仓库",
         "systems": "系统源码",
         "datasources": "数据源源码",
         "pages": "页面源码",
@@ -211,7 +245,7 @@ def load_authorized_scope(workspace: dict) -> AuthorizedScope:
         subdirs.append(posix_subdir)
         writable = raw.get(
             "writable",
-            category in {"systems", "datasources", "pages", "procedures", "system-script"},
+            category in {"root", "systems", "datasources", "pages", "procedures", "system-script"},
         )
         if not isinstance(writable, bool):
             raise SystemExit(f"writable must be boolean for scope entry {entry_id}")
@@ -269,7 +303,12 @@ def resolve_authorized_path(
     matches = []
     for entry in scope.entries:
         prefix = entry.local_subdir
-        if normalized == prefix:
+        if entry.category == "root":
+            target = (entry.root / normalized).resolve()
+            root = entry.root.resolve()
+            if target == root or root in target.parents:
+                matches.append((entry, target, normalized))
+        elif normalized == prefix:
             matches.append((entry, entry.root, "."))
         elif normalized.startswith(prefix + "/"):
             relative = normalized[len(prefix) + 1:]

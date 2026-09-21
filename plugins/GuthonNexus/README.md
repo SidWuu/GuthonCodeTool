@@ -127,7 +127,7 @@ Shell Command: Install 'code' command in PATH
 扩展源码在 `gushen-vscode-completion/` 子目录。修改扩展代码、规则或补全数据后，重新打包并安装：
 
 ```bash
-cd plugins/GuthonVSCodeExtension/gushen-vscode-completion
+cd plugins/GuthonNexus/gushen-vscode-completion
 npm run package
 code --install-extension guthon-nexus-vscode.vsix --force
 ```
@@ -201,7 +201,7 @@ gushen-vscode-completion/data/manual.json
 当 API 文档更新后，在扩展目录执行：
 
 ```bash
-cd plugins/GuthonVSCodeExtension/gushen-vscode-completion
+cd plugins/GuthonNexus/gushen-vscode-completion
 npm run build:data -- /path/to/api-docs
 npm test
 npm run package

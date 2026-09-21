@@ -16,19 +16,36 @@ test('continues normal setup when the workspace is not initialized', async () =>
     showWarningMessage: async () => {
       throw new Error('switch confirmation should not open');
     },
+    showOpenDialog: async () => [{ fsPath: '/new/tool/home' }],
   };
 
-  assert.equal(await prepareWorkspaceSetup(config, window, 'global'), 'setup');
+  assert.deepEqual(await prepareWorkspaceSetup(config, window), {
+    mode: 'setup',
+    toolHome: '/new/tool/home',
+  });
+});
+
+test('reselects the folder when a previous setup left an uninitialized toolHome', async () => {
+  const config = { get: () => '/incomplete/tool/home' };
+  const window = {
+    showWarningMessage: async () => {
+      throw new Error('switch confirmation should not open');
+    },
+    showOpenDialog: async () => [{ fsPath: '/retry/tool/home' }],
+  };
+
+  assert.deepEqual(await prepareWorkspaceSetup(config, window), {
+    mode: 'setup',
+    toolHome: '/retry/tool/home',
+  });
 });
 
 test('keeps an initialized workspace unless the user confirms a switch', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-workspace-'));
   fs.mkdirSync(path.join(home, 'config'));
   fs.writeFileSync(path.join(home, 'config', 'sync.yaml'), 'sync: {}');
-  const updates = [];
   const config = {
     get: () => home,
-    update: async (...args) => updates.push(args),
   };
   const window = {
     showWarningMessage: async () => undefined,
@@ -37,27 +54,26 @@ test('keeps an initialized workspace unless the user confirms a switch', async (
     },
   };
 
-  assert.equal(await prepareWorkspaceSetup(config, window, 'global'), undefined);
-  assert.deepEqual(updates, []);
+  assert.equal(await prepareWorkspaceSetup(config, window), undefined);
   fs.rmSync(home, { recursive: true });
 });
 
-test('updates toolHome after an initialized workspace switch is confirmed', async () => {
+test('returns the candidate toolHome without persisting an initialized workspace switch', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-workspace-'));
   fs.mkdirSync(path.join(home, 'config'));
   fs.writeFileSync(path.join(home, 'config', 'sync.yaml'), 'sync: {}');
-  const updates = [];
   const config = {
     get: () => home,
-    update: async (...args) => updates.push(args),
   };
   const window = {
     showWarningMessage: async () => '切换工作空间',
     showOpenDialog: async () => [{ fsPath: '/new/tool/home' }],
   };
 
-  assert.equal(await prepareWorkspaceSetup(config, window, 'global'), 'switch');
-  assert.deepEqual(updates, [['toolHome', '/new/tool/home', 'global']]);
+  assert.deepEqual(await prepareWorkspaceSetup(config, window), {
+    mode: 'switch',
+    toolHome: '/new/tool/home',
+  });
   fs.rmSync(home, { recursive: true });
 });
 

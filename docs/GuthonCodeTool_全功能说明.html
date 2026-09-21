@@ -251,7 +251,7 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
 <li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射；公开模板只保留占位符，真实表名和字段名由内部配置提供。</li>
 <li><code>sync.yaml</code>：公共 SVN 用户名、全局同步窗口、未签入源码白名单和拉取规则，不保存当前或默认工作区。</li>
 </ul>
-<p><code>setup</code> 只补齐缺失文件，不覆盖用户配置；首次创建空的 datasource/products/projects 注册表。Nexus 在工作区树、项目树和标题栏持续提供“添加产品或项目”。新增向导只收集产品/项目、名称、稳定 ID 和源码来源；选择 DATABASE 或 SVN 后立即原子追加初始工作区、创建对应 Nexus 并结束，不在向导内询问连接、登录或 checkout。项目是产品某个版本的完整导出快照，创建时不选择产品，导出后与产品并列并独立管理。SVN 后续在目标 Nexus 顶层依次使用“设置工作区 SVN 登录”“导入/粘贴 SVN checkout 配置”和“编辑 SVN 范围配置”；粘贴支持纯 URL、URL 与相对目录、完整命令、多个换行条目及 Markdown 列表前缀，输入期间不解析，保存并关闭后才提示解析或编辑范围。脚本必须由用户显式选择，未配置的 <code>context/svnCheckoutHere.*</code> 不会被探测，认证参数不会进入配置。DATABASE datasource 后续在配置文件中补充。右键 PRD/PRJ 的“删除产品或项目”先预览范围并要求模态确认，再把目录移入系统废纸篓，定向删除工作区、独占数据源和数据库排查配置。DATABASE 查询结果缓存到 <code>config/system-data.json</code>；SVN 不读取该缓存。</p>
+<p><code>setup</code> 只补齐缺失文件，不覆盖用户配置；首次创建空的 datasource/products/projects 注册表。Nexus 在工作区树、项目树和标题栏持续提供“添加产品或项目”。新增向导只收集产品/项目、名称、稳定 ID 和源码来源；选择 DATABASE 或 SVN 后立即原子追加初始工作区、创建对应 Nexus 并结束，不在向导内询问连接、登录或 checkout。项目是产品某个版本的完整导出快照，创建时不选择产品，导出后与产品并列并独立管理。SVN 后续在目标 Nexus 顶层依次使用“设置工作区 SVN 登录”“导入/粘贴 SVN checkout 配置”和“编辑 SVN 地址配置”；粘贴支持纯 URL 或完整命令，输入期间不解析，保存并关闭后才提示解析地址。脚本必须由用户显式选择，未配置的 <code>context/svnCheckoutHere.*</code> 不会被探测，认证参数不会进入配置。DATABASE datasource 后续在配置文件中补充。右键 PRD/PRJ 的“删除产品或项目”先预览范围并要求模态确认，再把目录移入系统废纸篓，定向删除工作区、独占数据源和数据库排查配置。DATABASE 查询结果缓存到 <code>config/system-data.json</code>；SVN 不读取该缓存。</p>
 <h3 id="4-2-目录契约">4.2 目录契约</h3>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>&lt;本地数据目录&gt;/
 ├── config/
@@ -274,8 +274,8 @@ workcopy              查看状态、生成差异/交付物，或预检/执行 s
             └── context/{README.md,source-mode.json,index.db,state.json,logs}/</code></pre></div>
 <p><code>PRD</code>、<code>PRJ</code> 只控制目录和 Nexus 展示顺序，真实身份始终来自配置中的 <code>workspaceKey</code>。</p>
 <p><code>var/AGENTS.md</code>、<code>var/docs/</code> 中的 11 份权威规范、<code>.guthon/</code>、<code>tools/guthon-lint</code> 和 Git Hook 均由 <code>guthon-team</code> 的一键安装写入；它们不包含在 GuthonCodeTool Release 中，也不再从内部地址单独下载。</p>
-<p>Nexus 同时展示全部产品和项目；每个节点的“源码来源：DATABASE/SVN”只切换当前工作区，并把结果写入该工程 <code>context/source-mode.json</code>。YAML 不配置模式，未设置时默认 DATABASE。SVN 工作区以 <code>config/products.yaml</code> 或 <code>config/projects.yaml</code> 对应条目的紧凑 <code>svn.url</code>/<code>svn.scope</code> 作为可编辑配置；导入 checkout 时只保留一个公共 URL，并把每条地址去掉公共前缀后的唯一相对路径逐条写入 scope。没有 <code>systems.include.mappings</code> 时检出全部精确 scope；配置映射后按系统和数据源 ID 做交集筛选。手写纯分类 <code>systems</code>、<code>datasources</code> 或省略 scope 时仍从 mappings 拼接 ID。程序把展开后的精确清单写入工作区 <code>context/authorized-scope.json</code> 供内部操作，旧的逐条条目和 <code>checkoutPaths</code> 仍兼容。初始化逐项校验远端：单个 scope 无权限或不存在时记录到 checkout 状态并继续，其余 working copy 正常检出；连接中断、整体认证失败或零个可访问 scope 仍会终止。顶层“导入/粘贴 SVN checkout 配置”位于“设置工作区 SVN 登录”之后、独立于“源码与索引”分组，可选择 <code>.sh/.bat</code> 或在编辑器中粘贴多行 checkout 内容；脚本只作为一次性导入来源，不会被执行。SVN 不创建 readonly 和 database 镜像，checkout 与 workspace 分离，凭据不会写入范围配置、清单、YAML 或日志。</p>
-<p><code>scripts/providers/svn/import_svn_scope.py</code> 与打包工具的 <code>import-svn-scope</code> 命令仍兼容把 checkout shell/BAT 转换为授权清单。它支持 shell 的反斜杠续行和 BAT 的插入符续行，只接受字面量精确 URL 与安全相对目录，忽略认证参数且不执行脚本、SVN checkout 或旧 working copy 清理；变量、绝对目录、URL/目录重叠和未知分类会阻断。已有配置可手动追加条目，执行“从 SVN 范围配置检出/更新”后会按新增、移除和变更统计更新清单。</p>
+<p>Nexus 同时展示全部产品和项目；每个节点的“源码来源：DATABASE/SVN”只切换当前工作区，并把结果写入该工程 <code>context/source-mode.json</code>。YAML 不配置模式，未设置时默认 DATABASE。SVN 工作区以 <code>config/products.yaml</code> 或 <code>config/projects.yaml</code> 对应条目的唯一 <code>svn.url</code> 作为可编辑配置；导入 checkout 时提取该根地址，不生成 scope。程序把一个 repository-root 条目写入工作区 <code>context/authorized-scope.json</code>，再完整 checkout 该地址。<code>systems.include.mappings</code> 只用于身份匹配和业务分组，不过滤目录。旧的逐条条目和 <code>checkoutPaths</code> 仍兼容。顶层“导入/粘贴 SVN checkout 配置”可选择 <code>.sh/.bat</code> 或粘贴 checkout 内容；脚本只作为一次性导入来源，不会被执行。SVN 不创建 readonly 和 database 镜像，checkout 与 workspace 分离，凭据不会写入配置、清单、YAML 或日志。</p>
+<p><code>scripts/providers/svn/import_svn_scope.py</code> 与打包工具的 <code>import-svn-scope</code> 命令仍兼容旧范围清单。新流程从 checkout shell/BAT 或粘贴内容中提取唯一字面量根 URL，忽略认证参数且不执行脚本、SVN checkout 或旧 working copy 清理；变量、绝对目录和多个根地址会阻断。执行“检出/更新完整 SVN 仓库”后会按新增、移除和变更统计更新内部清单。</p>
 <h3 id="4-3-guthon-team-规范治理">4.3 guthon-team 规范治理</h3>
 <p><a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team</a> 是私人 GitHub 仓库。使用者必须先获得仓库权限；无法访问或克隆时联系我开通。授权后执行：</p>
 <div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>git clone https://github.com/SidWuu/guthon-team.git
@@ -303,7 +303,7 @@ python3 tools/guthon_team.py install --workspace "/绝对路径/var"</code></pre
 
 <section class="section">
 <h2 id="5-源码同步与索引">5. 源码同步与索引</h2>
-<p><code>scripts/common/gusen_hub.py</code> 是工作区路由与索引的共享实现；<code>scripts/providers/database/</code> 保存数据库源码、metadata 导出和只读诊断，<code>scripts/providers/svn/</code> 保存授权清单、范围配置、working copy、虚拟编辑和 SCM。数据库 provider 按 datasource 查询源码表并维护 readonly；SVN provider 先读取 <code>products.yaml/projects.yaml</code> 中可手动编辑的紧凑 <code>svn.url</code>/<code>svn.scope</code>（首次可由 checkout shell/BAT 或粘贴内容导入），按 <code>systems.include.mappings</code> 展开并生成工作区 context 下的 <code>authorized-scope.json</code>，再聚合 <code>systems/&lt;SYSTEM_ID&gt;</code> 与 <code>datasources/&lt;DATA_SOURCE_ID&gt;</code> 等精确 URL working copy，读取 <code>pages/index.md</code> 与 <code>procedures/index.md</code> 构建业务目录，并以文件 hash、BASE revision、scope entry、源路径和 JSON Pointer 建立同一套对象/调用索引。</p>
+<p><code>scripts/common/gusen_hub.py</code> 是工作区路由与索引的共享实现；<code>scripts/providers/database/</code> 保存数据库源码、metadata 导出和只读诊断，<code>scripts/providers/svn/</code> 保存地址清单、working copy、虚拟编辑和 SCM。数据库 provider 按 datasource 查询源码表并维护 readonly；SVN provider 读取 <code>products.yaml/projects.yaml</code> 中唯一 <code>svn.url</code>（首次可由 checkout shell/BAT 或粘贴内容导入），生成一个 repository-root 清单并完整 checkout，再从根目录内识别 <code>systems/&lt;SYSTEM_ID&gt;</code>、<code>datasources/&lt;DATA_SOURCE_ID&gt;</code> 及各源码分类，读取 <code>pages/index.md</code> 与 <code>procedures/index.md</code> 构建业务目录，并以文件 hash、BASE revision、working copy、源路径和 JSON Pointer 建立对象/调用索引。</p>
 <h3 id="5-1-page-导出">5.1 PAGE 导出</h3>
 <p>PAGE 保存到 <code>{子系统}/page/{模型序号}_{模型}/{模块序号}_{模块}/{页面名 页面ID}</code>。完整 JSON 写入 <code>raw.json</code>，页面脚本、SQL、事件和组件脚本拆入 <code>scripts/</code>。</p>
 <ul>
@@ -348,7 +348,7 @@ python3 tools/guthon_team.py install --workspace "/绝对路径/var"</code></pre
 
 <section class="section">
 <h2 id="8-vs-code-扩展">8. VS Code 扩展：Guthon Nexus</h2>
-<p>扩展入口为 <code>plugins/GuthonVSCodeExtension/gushen-vscode-completion/src/extension.js</code>。</p>
+<p>扩展入口为 <code>plugins/GuthonNexus/gushen-vscode-completion/src/extension.js</code>。</p>
 <ul>
 <li>全局保存 <code>gushenCompletion.toolPath</code> 和 <code>gushenCompletion.toolHome</code>。</li>
 <li>每个产品或项目的“源码来源：DATABASE / SVN”与发行/调试运行模式正交；DATABASE/SVN 工作区始终混合展示。</li>
@@ -399,14 +399,15 @@ python3 tools/guthon_team.py install --workspace "/绝对路径/var"</code></pre
 <ol>
 <li>在 Windows 和 macOS 构建应用。</li>
 <li>运行 VS Code 扩展与 Bridge 测试并打包 VSIX、Bridge ZIP。</li>
-<li>生成中文说明并创建 GitHub Release。</li>
+<li>为两个应用生成 SHA-256 校验文件，生成中文说明并创建 GitHub Release。</li>
 <li>使用仓库 Secret 和变量创建 Gitee Release、上传相同附件。</li>
 </ol>
+<p>Guthon Nexus 的“运行模式”节点默认折叠，发行模式下显示当前应用版本、GitHub/Gitee 更新源、手动检查更新和回退入口。Nexus 不在启动时或后台定时检查；只有用户点击后才访问所选更新源。新版本下载后必须通过 SHA-256 和独立 <code>self-test</code>，再切换到受管版本目录，上一版本保留用于回退。</p>
 <div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>python -m unittest discover -s tests
-npm test  # plugins/GuthonVSCodeExtension/gushen-vscode-completion
+npm test  # plugins/GuthonNexus/gushen-vscode-completion
 npm test  # plugins/GuthonBridge
 git diff --check</code></pre></div>
-<p>修改功能时应同步检查应用命令、VS Code 侧边栏、Bridge 路由、配置模板、README、知识库和使用手册。Release 只分发应用、Guthon Nexus VSIX、Bridge 和公开 Skill，不包含真实配置、团队规范或私有 <code>var/</code>；团队规范与 <code>guthon-guard</code> 统一从 <a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有 GitHub 仓库</a>获取，访问权限联系我开通。独立 Guthon SVN Navigator 源码暂时保留，但不再触发或进入自动 Release；SVN 能力统一由 Guthon Nexus 交付。</p>
+<p>修改功能时应同步检查应用命令、VS Code 侧边栏、Bridge 路由、配置模板、README、知识库和使用手册。Release 只分发应用、应用校验文件、Guthon Nexus VSIX、Bridge 和公开 Skill，不包含真实配置、团队规范或私有 <code>var/</code>；团队规范与 <code>guthon-guard</code> 统一从 <a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有 GitHub 仓库</a>获取，访问权限联系我开通。SVN 能力统一由 Guthon Nexus 交付。</p>
 </section>
 </main>
 </div>

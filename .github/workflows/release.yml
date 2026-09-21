@@ -9,7 +9,7 @@ on:
       - "scripts/**"
       - "config/example/**"
       - "plugins/GuthonBridge/**"
-      - "plugins/GuthonVSCodeExtension/**"
+      - "plugins/GuthonNexus/**"
       - "docs/releases/**"
       - ".github/workflows/release.yml"
   workflow_dispatch:
@@ -82,8 +82,10 @@ jobs:
           node-version: "22"
 
       - name: Test and package Guthon Nexus
-        working-directory: plugins/GuthonVSCodeExtension/gushen-vscode-completion
+        working-directory: plugins/GuthonNexus/gushen-vscode-completion
         run: |
+          release_version=$(tr -d '[:space:]' < ../../../VERSION)
+          printf '{\n  "version": "%s"\n}\n' "$release_version" > tool-version.json
           npm test
           npm run check
           npm run build:bridge
@@ -147,6 +149,14 @@ jobs:
           test "$(find release -maxdepth 1 -type f | wc -l)" -eq 5
           find release -maxdepth 1 -type f -printf '%f\n' | sort
 
+      - name: Generate application checksums
+        working-directory: release
+        run: |
+          sha256sum \
+            GuthonCodeTool-windows-x64.exe \
+            GuthonCodeTool-macos-arm64.zip \
+            > GuthonCodeTool-checksums.txt
+
       - name: Generate Chinese release notes
         run: |
           version_notes="docs/releases/$RELEASE_TAG.md"
@@ -180,6 +190,7 @@ jobs:
             echo "- Guthon Nexus（DATABASE/SVN 双模式）：\`guthon-nexus-vscode.vsix\`"
             echo "- Guthon Bridge：\`GuthonCodeTool-chrome.zip\`"
             echo "- Guthon Testing Skill：\`guthon-testing.zip\`（解压到 Codex Skills 目录）"
+            echo "- 应用自动更新校验：\`GuthonCodeTool-checksums.txt\`"
             echo
             echo "## 本次变更"
             echo

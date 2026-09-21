@@ -110,4 +110,12 @@ test('Nexus lists every configured workspace and binds commands to workspaceKey'
     ]
   );
   assert.equal((extension.match(/toolItem\(\s*'添加产品或项目'/g) || []).length, 1);
+  assert.equal(extension.includes("new vscode.TreeItem('运行模式', vscode.TreeItemCollapsibleState.Collapsed)"), true);
+  assert.equal(extension.includes('`切换模式：${executionMode'), true);
+  assert.equal(extension.includes('`当前版本：${applicationVersion}`'), true);
+  assert.equal(extension.includes('`更新源：${UPDATE_SOURCES[updateSource]'), true);
+  assert.equal(extension.includes("toolItem('检查更新'"), true);
+  assert.equal(extension.includes("'回退到上一版本'"), true);
+  assert.equal(manifest.contributes.configuration.properties['gushenCompletion.updateSource'].default, 'gitee');
+  assert.equal(manifest.contributes.commands.some(({ command }) => command === 'gushenCompletion.checkToolUpdate'), true);
 });

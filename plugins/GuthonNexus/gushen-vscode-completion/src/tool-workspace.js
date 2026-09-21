@@ -2,27 +2,29 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-async function prepareWorkspaceSetup(config, window, configurationTarget) {
+async function prepareWorkspaceSetup(config, window) {
   const toolHome = config.get('toolHome', '');
-  if (!toolHome || !fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'))) return 'setup';
-
-  const confirmed = await window.showWarningMessage(
-    `当前工作空间已设置：${toolHome}\n是否切换工作空间？`,
-    { modal: true },
-    '切换工作空间'
-  );
-  if (confirmed !== '切换工作空间') return undefined;
+  const initialized = Boolean(toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml')));
+  if (initialized) {
+    const confirmed = await window.showWarningMessage(
+      `当前工作空间已设置：${toolHome}\n是否切换工作空间？`,
+      { modal: true },
+      '切换工作空间'
+    );
+    if (confirmed !== '切换工作空间') return undefined;
+  }
 
   const selected = await window.showOpenDialog({
     canSelectFiles: false,
     canSelectFolders: true,
     canSelectMany: false,
-    title: '选择新的 GuthonCodeTool 本地数据工作空间',
+    title: initialized
+      ? '选择新的 GuthonCodeTool 本地数据工作空间'
+      : '选择 GuthonCodeTool 本地数据工作空间',
   });
   if (!selected) return undefined;
 
-  await config.update('toolHome', selected[0].fsPath, configurationTarget);
-  return 'switch';
+  return { mode: initialized ? 'switch' : 'setup', toolHome: selected[0].fsPath };
 }
 
 function workspaceActions(item) {
@@ -31,7 +33,7 @@ function workspaceActions(item) {
     return {
       source: [
         ['搜索工作区完整索引', 'gushenCompletion.searchWorkspace', 'search'],
-        capability('svn.initialize') && ['从 SVN 范围配置检出/更新', 'gushenCompletion.initializeSvn', 'repo-clone'],
+        capability('svn.initialize') && ['检出/更新完整 SVN 仓库', 'gushenCompletion.initializeSvn', 'repo-clone'],
         capability('svn.reindex') && ['扫描/重建本地 SVN 索引', 'gushenCompletion.reindexCalls', 'refresh'],
         capability('svn.browse') && ['查看谷神同步源码', 'gushenCompletion.focusSvnSource', 'list-tree'],
         capability('svn.status') && ['管理本地源码变更', 'gushenCompletion.manageSvnChanges', 'source-control'],

@@ -103,6 +103,8 @@ def _mapping_error(workspace: dict, scope: dict) -> str:
 def _filter_to_configured_systems(workspace: dict, result: ImportResult) -> ImportResult:
     aliases = workspace.get("systemAliases") or []
     entries = result.manifest["entries"]
+    if any(entry.get("category") == "root" for entry in entries):
+        return result
     if not aliases or not any(
         entry["category"] in SYSTEM_CATEGORIES | DATA_SOURCE_CATEGORIES for entry in entries
     ):
@@ -200,7 +202,7 @@ def _build_workspace_manifest(
     config_hint = str(config_path or "products.yaml/projects.yaml")
     raise SystemExit(
         f"Missing SVN scope configuration for {workspace['workspaceKey']}: {config_hint}. "
-        "Add svn.url/scope to the existing products.yaml/projects.yaml or provide svnCheckoutHere.sh/.bat once to import it."
+        "Add the single svn.url to products.yaml/projects.yaml or provide svnCheckoutHere.sh/.bat once to import it."
     )
 
 

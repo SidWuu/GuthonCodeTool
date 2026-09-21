@@ -7,10 +7,24 @@ import argparse
 import importlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
 from pathlib import Path
+
+
+def application_version() -> str:
+    candidates = []
+    if getattr(sys, "_MEIPASS", None):
+        candidates.append(Path(sys._MEIPASS) / "VERSION")
+    candidates.append(Path(__file__).resolve().parents[1] / "VERSION")
+    for candidate in candidates:
+        if candidate.is_file():
+            version = candidate.read_text(encoding="utf-8").strip()
+            if re.fullmatch(r"\d+\.\d+\.\d+", version):
+                return version
+    raise SystemExit("GuthonCodeTool VERSION is missing or invalid")
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -1378,13 +1392,20 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("setup", "workspace-create", "workspace-delete", "svn-login-configure", "import-svn-scope", "workspaces", "workspace-resolve", "database-target-resolve", "database-target-configure", "database-probe", "database-describe", "database-query-readonly", "workspace-summary", "search", "context-pack", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
+        choices=("version", "setup", "workspace-create", "workspace-delete", "svn-login-configure", "import-svn-scope", "workspaces", "workspace-resolve", "database-target-resolve", "database-target-configure", "database-probe", "database-describe", "database-query-readonly", "workspace-summary", "search", "context-pack", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
     )
-    parser.add_argument("--home", required=True, help="Directory that stores local config and private source data")
+    parser.add_argument("--home", help="Directory that stores local config and private source data")
     parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")
     args, extra_args = parser.parse_known_args(argv)
     if extra_args[:1] == ["--"]:
         extra_args = extra_args[1:]
+    if args.command == "version":
+        if args.home or args.workspace or extra_args:
+            parser.error("version does not accept --home, --workspace, or extra arguments")
+        print(json.dumps({"version": application_version()}, ensure_ascii=False))
+        return 0
+    if not args.home:
+        parser.error("--home is required")
     return run(args.command, Path(args.home).expanduser().resolve(), extra_args, args.workspace)
 
 

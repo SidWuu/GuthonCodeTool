@@ -250,6 +250,8 @@ def initialize(workspace: dict, *, on_progress: ProgressCallback = None) -> dict
             except SystemExit as error:
                 if not _scope_is_unavailable(error):
                     raise
+                if len(scope.entries) == 1 or entry.category == "root":
+                    raise
                 skipped.append(_skipped_record(entry, error))
                 _progress(
                     on_progress,

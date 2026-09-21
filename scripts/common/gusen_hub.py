@@ -578,6 +578,25 @@ def update_workspace_state(config, workspace, step=None, status=None, error="", 
 
 def _svn_source_control_groups(workspace, working_copies):
     mappings = workspace.get("systemMappings") or {}
+    root_copy = next(
+        (item for item in working_copies if isinstance(item, dict) and item.get("category") == "root"),
+        None,
+    )
+    if root_copy:
+        system_ids = sorted({
+            str(mapping.get("system_id") or "").strip()
+            for mapping in mappings.values()
+            if isinstance(mapping, dict) and str(mapping.get("system_id") or "").strip()
+        })
+        return [{
+            "id": "repository-root",
+            "label": workspace.get("name") or workspace.get("workspaceKey") or "SVN 仓库",
+            "dataSourceId": "",
+            "systemIds": system_ids,
+            "systemNames": [],
+            "workingCopyIds": [str(root_copy.get("id") or "repository-root")],
+            "inferred": False,
+        }]
 
     def checkout_name(local_subdir):
         return group_inference.checkout_name(workspace["checkoutPath"] / local_subdir)
@@ -1074,6 +1093,7 @@ def workspace_matches_request(config, workspace, payload, match_origin=True):
             if not manifest_path or not manifest_path.is_file():
                 return False
             entries = load_authorized_scope(workspace).entries
+            has_repository_root = any(entry.category == "root" for entry in entries)
             authorized_system_ids = {
                 Path(entry.local_subdir).name
                 for entry in entries
@@ -1084,6 +1104,17 @@ def workspace_matches_request(config, workspace, payload, match_origin=True):
                 for entry in entries
                 if entry.category in {"datasources", "procedures", "tables", "views"}
             }
+            if has_repository_root:
+                authorized_system_ids = {
+                    str(mapping.get("system_id") or "").strip()
+                    for mapping in (workspace.get("systemMappings") or {}).values()
+                    if isinstance(mapping, dict) and str(mapping.get("system_id") or "").strip()
+                }
+                authorized_data_source_ids = {
+                    str(mapping.get("data_source_id") or "").strip()
+                    for mapping in (workspace.get("systemMappings") or {}).values()
+                    if isinstance(mapping, dict) and str(mapping.get("data_source_id") or "").strip()
+                }
             authorized_aliases = {
                 str(alias).strip()
                 for alias, mapping in (workspace.get("systemMappings") or {}).items()
@@ -1985,7 +2016,7 @@ def _delete_call_index(conn, identity):
 
 def _delete_svn_index_item(conn, workspace, row):
     row = dict(row)
-    namespace = str(row.get("scope_entry_id") or row.get("source_namespace") or "").strip()
+    namespace = str(row.get("source_namespace") or row.get("scope_entry_id") or "").strip()
     source_ids = (
         "SELECT record_id FROM gusen_source_record "
         "WHERE source_layer=? AND scope_id=? AND project_id=? AND source_namespace=? "
@@ -2028,7 +2059,7 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
             workspace["layer"],
             workspace["scopeId"],
             workspace["projectId"],
-            item.get("scope_entry_id") or item.get("working_copy_id") or "",
+            item.get("source_namespace") or item.get("scope_entry_id") or item.get("working_copy_id") or "",
             item["source_table"],
             item["source_id"],
             item["source_alias_id"],
@@ -2064,7 +2095,7 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
         "SELECT record_id FROM gusen_source_record WHERE provider='svn' AND source_path=? "
         "AND source_namespace=? AND source_table=? AND source_id=? AND fun_id=?",
         (
-            item["source_path"], item.get("scope_entry_id") or item.get("working_copy_id") or "",
+            item["source_path"], item.get("source_namespace") or item.get("scope_entry_id") or item.get("working_copy_id") or "",
             item["source_table"], item["source_id"], item.get("fun_id") or "",
         ),
     ).fetchone()

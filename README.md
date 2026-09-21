@@ -11,7 +11,7 @@ GuthonCodeTool 是谷神低代码开发平台的本地开发工具集。每个�
 ## 核心能力
 
 - 产品、项目各自拥有完整工作区，使用稳定键 `products.<id>`、`projects.<id>` 路由。
-- 数据库模式把页面、过程函数和系统脚本同步到 readonly；SVN 模式按授权清单检出一个或多个精确 URL，不复制第二份 readonly/workcopy 源码。
+- 数据库模式把页面、过程函数和系统脚本同步到 readonly；SVN 模式按唯一根地址完整检出一个 working copy，不复制第二份 readonly/workcopy 源码。
 - 每个工作区拥有独立 SQLite 轻量事实索引；除调用关系外，还记录 PAGE 片段定位、字段到表列映射、单据路由、
   表读写和条件/赋值/异常事实，不保存第二份完整源码，也不建立膨胀的源码全文倒排。
 - SVN 模式由 Nexus 的“谷神源码”聚合展示源码，并为每个工作区注册一个 SCM provider；支持 PAGE 分块、过程函数、系统脚本虚拟编辑并直接回写 checkout，表和视图保持只读。
@@ -29,7 +29,7 @@ config/                         配置模板和配置说明
 docs/                           使用手册和全功能说明
 skills/guthon-testing/          谷神需求开发、数据库快速排查与只读验证工作流
 plugins/GuthonBridge/           Chrome 扩展及本地 Bridge
-plugins/GuthonVSCodeExtension/  Guthon Nexus
+plugins/GuthonNexus/            Guthon Nexus
 scripts/
 ├── guthon_tool.py             唯一运行入口和命令编排
 ├── build_guthon_tool.py       独立应用构建入口
@@ -71,13 +71,13 @@ context/
 
 目录中的 `PRD`、`PRJ` 只控制显示顺序；程序不会通过目录名判断身份。
 
-SVN 新模式的工作区只创建 `docs` 和 `context` 等派生资料；授权清单中的多个精确 URL 检出到同一
-`var/checkout/<配置 ID>/` 逻辑根下。资源管理器保留这些原始目录供查看，日常修改从“谷神源码”进入并
+SVN 新模式的工作区只创建 `docs` 和 `context` 等派生资料；唯一根 URL 完整检出到
+`var/checkout/<配置 ID>/repository/`。资源管理器保留原始目录供查看，日常修改从“谷神源码”进入并
 回写同一份文件；过程函数节点可右键复制函数名或 `包名.函数名`，也可选择索引识别的调用方并跳转到精确调用行。不再生成额外 `source/readonly` 或 `source/workcopy` 代码副本。
 
 ## 配置
 
-发行模式优先在 Nexus 的“工作区”或“项目”区域点击“添加产品或项目”。向导只收集产品/项目、名称、稳定 ID 和源码来源；选择 SVN 或 DATABASE 后即创建对应 Nexus 并结束。新建 SVN Nexus 中的“设置工作区 SVN 登录”、“导入/粘贴 SVN checkout 配置”（支持多行粘贴）和“编辑 SVN 范围配置”用于后续配置；同一产品的多个 checkout 地址统一解析为一个公共 `svn.url`，每条地址去掉公共前缀后的唯一相对路径逐条写入 `svn.scope`，不会探测其他工作区的脚本。DATABASE Nexus 可先创建，后续再补充 datasource。生成的 `workspaceKey` 写入 `products.yaml` / `projects.yaml`；`systems.include.mappings` 可选，用于进一步筛选、命名和路由子系统。后续增加项目使用同一入口，无需重新初始化数据目录。
+发行模式优先在 Nexus 的“工作区”或“项目”区域点击“添加产品或项目”。向导只收集产品/项目、名称、稳定 ID 和源码来源；选择 SVN 或 DATABASE 后即创建对应 Nexus 并结束。新建 SVN Nexus 中的“设置工作区 SVN 登录”、“导入/粘贴 SVN checkout 配置”和“编辑 SVN 地址配置”用于后续配置；每个产品或项目只保存一个 `svn.url`，默认完整 checkout 该地址，不会探测其他工作区的脚本。DATABASE Nexus 可先创建，后续再补充 datasource。生成的 `workspaceKey` 写入 `products.yaml` / `projects.yaml`；`systems.include.mappings` 可选，只用于身份匹配、命名和路由子系统，不过滤 SVN 目录。后续增加项目使用同一入口，无需重新初始化数据目录。
 项目无需先创建或选择产品：项目是产品某个版本的完整导出快照，导出后与产品并列，拥有独立配置、源码、索引和数据源范围。
 不再需要的 PRD/PRJ 可在工作区节点右键选择“删除产品或项目”；确认框会列出精确范围，确认后相关目录进入系统废纸篓，并删除该工作区配置、独占数据源和数据库排查条目。
 
@@ -107,7 +107,7 @@ products:
     page_origins: []
 ```
 
-`mappings` 的键就是系统 alias，每项只配置一对一的 `system_id`、`data_source_id`。SVN 用它筛选范围配置（首次可由签出脚本导入）；DATABASE 仍按 alias 查询并使用本地 `system-data.json` 缓存。项目必须配置自己的数据源 ID，不能复用产品值。
+`mappings` 的键就是系统 alias，每项只配置一对一的 `system_id`、`data_source_id`。SVN 用它识别和分组完整 checkout 中的源码；DATABASE 仍按 alias 查询并使用本地 `system-data.json` 缓存。项目必须配置自己的数据源 ID，不能复用产品值。
 
 产品/项目 YAML 不设置源码模式。Nexus 在每个项目节点单独选择 DATABASE/SVN，选择结果写入该工作区
 `context/source-mode.json`，缺失时默认 DATABASE。`sync.yaml` 保存公共 SVN 用户名、全局同步窗口和安全规则，不包含当前或默认工作区。
@@ -141,9 +141,8 @@ printf '%s' '{"sql":"SELECT COUNT(*) AS total FROM DEMO_ORDER","maxRows":100}' |
 .venv/bin/python scripts/guthon_tool.py context-pack --home . --workspace products.demo-product -- --source-id '<source-id>' --fun-id '<fun-id>'
 ```
 
-SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 SVN，紧凑范围配置直接写在已有的
-`config/products.yaml`（项目写在 `config/projects.yaml`）对应条目的 `svn.url`/`svn.scope` 下，可手动编辑。
-`svn.url` 是公共根地址；导入脚本时，`svn.scope` 保存全部去重后的精确相对路径。没有 `systems.include.mappings` 时检出这些路径的全部地址；配置 mappings 后只保留匹配的系统和数据源。手写纯分类 `systems`、`datasources` 时仍从 mappings 拼接 ID；省略 `scope` 时也只检出这两类映射目录。逐项检出时，当前 SVN 账号无权读取或远端不存在的单个 scope 会被记录并跳过，其余 scope 继续；网络中断、认证整体失效等系统性错误仍会终止操作。Nexus 驾驶舱会持续显示跳过数量，后续再次执行检出会重试这些 scope。
+SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 SVN，并在已有的
+`config/products.yaml`（项目写在 `config/projects.yaml`）对应条目中配置唯一 `svn.url`。Nexus 对该地址执行一次完整 checkout；`systems.include.mappings` 不参与目录筛选。地址无效、权限不足、网络或认证失败都会终止本次 checkout 并显示错误。
 新增工作区时也可选择谷神平台为当前产品/项目下载的 `svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`
 （Windows），Nexus 只解析一次其中的 checkout 命令；脚本不会被执行，也不会从 `context/` 或其他工作区自动发现。之后检出/更新以配置为准。简明步骤见 [发行模式新增 SVN 产品或项目](docs/GuthonCodeTool_发行模式新增SVN产品项目.md)：
 
@@ -161,13 +160,13 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 .venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- delivery-status
 ```
 
-配置变更会在执行前显示新增、移除和变更数量，确认后将展开结果写入工作区 `context/authorized-scope.json` 并检出/更新；该 JSON 仅供程序使用。
+配置变更会在执行前显示新增、移除和变更数量，确认后将唯一根地址写入工作区 `context/authorized-scope.json` 并检出/更新；该 JSON 仅供程序使用。
 旧的逐条 `svn.scope`/`checkoutPaths` 写法仍兼容。用户名只在本地 <code>sync.yaml</code> 配置，密码只由 SVN 系统凭据存储；二者都不会进入配置清单、日志或参数。旧的 `sync-from-script`、`sync-from-bat` 命令仍兼容，另提供 `sync-from-config` 别名。移出配置的旧 working copy 不会自动删除。
 `import-svn-scope` 仍保留为高级手工入口，但日常不再要求配置 `svn.scope_manifest`。
 
 `svn init` 会全量建立索引；`svn refresh` 按更新结果增量刷新，遇到目录级新增/删除等无法安全定位的结构变化时
 退回全量扫描。普通浏览、虚拟编辑、SCM 和调用查询只使用本地 working copy，不查询源码数据库。
-SVN 表、视图和过程函数以 working copy（即数据源/schema）与对象名组成索引身份，因此不同数据源允许存在同名对象；Nexus 打开对象时会携带 `workingCopyId` 精确定位。PAGE_ID 仍在工作区内按版本去重。
+SVN 表、视图和过程函数以根 working copy 内识别出的数据源与对象名组成索引身份，因此不同数据源允许存在同名对象；Nexus 打开对象时会携带 `workingCopyId` 和源码路径精确定位。PAGE_ID 仍在工作区内按版本去重。
 AI 从 PRD/PRJ 目录启动时，先执行 runtime descriptor 的 `workspaceResolveCommand`，由 cwd 得到唯一
 `workspaceKey`、provider 和 `index.ready`，不从目录名猜测。索引可用时第一次源码定位必须使用有界查询：对象名不明用
 `svn find`，局部事实用 `svn facts`，表或单据写入原因用 `svn explain`，跨对象影响用 `svn context/callers`；结果直接携带
@@ -305,11 +304,11 @@ Bridge 请求携带 `workspaceKey` 时会验证页面身份；未携带时按 `p
 cd plugins/GuthonBridge
 npm test
 
-cd ../GuthonVSCodeExtension/gushen-vscode-completion
+cd ../GuthonNexus/gushen-vscode-completion
 npm test
 ```
 
-发布版本由根目录 `VERSION` 统一管理，当前从 `0.2.1` 继续迭代；每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 生成 GuthonCodeTool 应用、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill。独立 Guthon SVN Navigator 源码暂时保留，但不再触发或进入自动 Release；SVN 用户统一安装 Guthon Nexus。
+发布版本由根目录 `VERSION` 统一管理，当前从 `0.2.1` 继续迭代；每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 生成 GuthonCodeTool 应用、应用校验文件、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill，并同步到 GitHub/Gitee Release。发行模式可在 Nexus 的折叠“运行模式”节点中选择更新源并手动检查应用更新；不会启动检查或定时联网，安装前会校验 SHA-256、运行 `self-test` 并保留上一版本用于回退。
 
 ## 文档
 

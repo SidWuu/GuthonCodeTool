@@ -24,6 +24,17 @@ const { searchPickItems, workspaceCockpit } = require('./workspace-assistant');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 const { resolveDevelopmentRuntime, toolArguments, writeRuntimeDescriptor } = require('./tool-runtime');
 const {
+  UPDATE_SOURCES,
+  assetNameFor,
+  compareVersions,
+  detectCurrentVersion,
+  fetchLatestRelease,
+  installRelease,
+  readUpdateState,
+  releaseAsset,
+  writeUpdateState,
+} = require('./tool-updater');
+const {
   filterWorkspacesBySourceMode,
   selectWorkspaceSourceMode,
   sourceModeLabel,
@@ -90,6 +101,7 @@ const TOOL_LABELS = {
 };
 let toolQueue = Promise.resolve();
 const activeToolRuns = new Set();
+let applicationUpdateRunning = false;
 
 function toolRunKey(command, workspaceKey) {
   return `${command}::${workspaceKey || ''}`;
@@ -104,6 +116,10 @@ function reportToolAlreadyRunning(command, workspaceKey, labelOverride = '') {
 }
 
 function claimToolRun(command, workspaceKey, labelOverride = '') {
+  if (applicationUpdateRunning) {
+    reportToolAlreadyRunning('tool-update', '', 'GuthonCodeTool 更新或回退');
+    return null;
+  }
   const runKey = toolRunKey(command, workspaceKey);
   if (activeToolRuns.has(runKey)) {
     reportToolAlreadyRunning(command, workspaceKey, labelOverride);
@@ -239,20 +255,22 @@ async function configuredRuntime(config, mode) {
   }
 }
 
-async function configuredTool() {
+async function configuredTool(options = {}) {
   const config = vscode.workspace.getConfiguration('gushenCompletion');
   const mode = config.get('executionMode', 'packaged');
   const runtime = await configuredRuntime(config, mode);
   if (!runtime) return undefined;
-  let toolHome = config.get('toolHome', '');
+  let toolHome = options.toolHome || config.get('toolHome', '');
   if (!toolHome) {
     const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: '选择 GuthonCodeTool 本地数据目录' });
     if (!selected) return undefined;
     toolHome = selected[0].fsPath;
-    await config.update('toolHome', toolHome, vscode.ConfigurationTarget.Global);
+    if (options.persistToolHome !== false) {
+      await config.update('toolHome', toolHome, vscode.ConfigurationTarget.Global);
+    }
   }
   const tool = { ...runtime, toolHome };
-  writeRuntimeDescriptor(tool);
+  if (options.writeDescriptor !== false) writeRuntimeDescriptor(tool);
   return tool;
 }
 
@@ -262,7 +280,8 @@ async function runTool(
   askForConfirmation = true,
   workspaceKey = '',
   claimedRunRelease = null,
-  stdinPayload = undefined
+  stdinPayload = undefined,
+  configuredToolOverride = undefined
 ) {
   const label = TOOL_LABELS[command] || command;
   const release = claimedRunRelease || claimToolRun(command, workspaceKey);
@@ -274,7 +293,7 @@ async function runTool(
       return false;
     }
   }
-  const tool = await configuredTool();
+  const tool = configuredToolOverride || await configuredTool();
   if (!tool) {
     release();
     return false;
@@ -338,8 +357,9 @@ function staticItem(label, icon, description) {
 }
 
 class ToolTreeDataProvider {
-  constructor(bridge = { isRunning: () => false }) {
+  constructor(bridge = { isRunning: () => false }, context) {
     this.bridge = bridge;
+    this.context = context;
     this.changed = new vscode.EventEmitter();
     this.onDidChangeTreeData = this.changed.event;
   }
@@ -358,6 +378,11 @@ class ToolTreeDataProvider {
     const toolHome = config.get('toolHome', '');
     const executionMode = config.get('executionMode', 'packaged');
     const developmentRoot = config.get('developmentRoot', '');
+    const updateSource = config.get('updateSource', 'gitee');
+    const storageRoot = this.context.globalStorageUri.fsPath;
+    const configuredToolPath = config.get('toolPath', '');
+    const applicationVersion = await detectCurrentVersion(this.context.extensionPath, storageRoot, configuredToolPath);
+    const updateState = readUpdateState(storageRoot);
     const ready = toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'));
     const workspace = new vscode.TreeItem('工作区', vscode.TreeItemCollapsibleState.Expanded);
     workspace.iconPath = new vscode.ThemeIcon(ready ? 'pass-filled' : 'warning');
@@ -367,13 +392,32 @@ class ToolTreeDataProvider {
     configFiles.children = CONFIG_FILES
       .filter((filename) => filename !== 'database-testing.yaml' || fs.existsSync(path.join(toolHome, 'config', filename)))
       .map((filename) => toolItem(filename, 'gushenCompletion.editConfig', 'edit', undefined, [filename]));
-    workspace.children = [
+    const runtime = new vscode.TreeItem('运行模式', vscode.TreeItemCollapsibleState.Collapsed);
+    runtime.iconPath = new vscode.ThemeIcon(executionMode === 'development' ? 'beaker' : 'package');
+    runtime.description = executionMode === 'development' ? '调试模式' : '发行模式';
+    runtime.children = [
       toolItem(
-        `运行模式：${executionMode === 'development' ? '调试模式' : '发行模式'}`,
+        `切换模式：${executionMode === 'development' ? '调试模式' : '发行模式'}`,
         'gushenCompletion.selectExecutionMode',
         executionMode === 'development' ? 'beaker' : 'package',
         executionMode === 'development' ? (path.basename(developmentRoot) || '源码运行') : '打包应用'
       ),
+      staticItem(`当前版本：${applicationVersion}`, 'tag'),
+      toolItem(
+        `更新源：${UPDATE_SOURCES[updateSource]?.label || 'Gitee'}`,
+        'gushenCompletion.selectUpdateSource',
+        'cloud'
+      ),
+      toolItem('检查更新', 'gushenCompletion.checkToolUpdate', 'sync'),
+      toolItem(
+        '回退到上一版本',
+        'gushenCompletion.rollbackToolUpdate',
+        'history',
+        updateState.previousVersion ? `可回退到 ${updateState.previousVersion}` : '暂无可回退版本'
+      ),
+    ];
+    workspace.children = [
+      runtime,
       toolItem(
         ready ? '切换工作空间' : '设置工作空间',
         'gushenCompletion.setupTool',
@@ -448,7 +492,7 @@ class ToolTreeDataProvider {
           ),
           syncItem,
           item.sourceMode === 'svn' && item.scopeConfigPath && toolItem(
-            '编辑 SVN 范围配置',
+            '编辑 SVN 地址配置',
             'gushenCompletion.editSvnScope',
             'edit',
             item.scopeConfigReady ? '已配置' : '待配置',
@@ -513,7 +557,7 @@ function activate(context) {
     },
     onStateChange: () => toolView?.refresh(),
   });
-  toolView = new ToolTreeDataProvider(bridge);
+  toolView = new ToolTreeDataProvider(bridge, context);
   const toolViewDisposable = vscode.window.registerTreeDataProvider('gushenCompletion.toolView', toolView);
   const listSvnWorkspaces = async () => {
     const tool = configuredToolFromSettings();
@@ -765,19 +809,186 @@ function activate(context) {
       await svnServices.refresh();
       return vscode.window.showInformationMessage(`已切换为${selected.label}`);
     }),
+    vscode.commands.registerCommand('gushenCompletion.selectUpdateSource', async () => {
+      const config = vscode.workspace.getConfiguration('gushenCompletion');
+      const current = config.get('updateSource', 'gitee');
+      const selected = await vscode.window.showQuickPick(
+        Object.entries(UPDATE_SOURCES).map(([value, provider]) => ({
+          label: provider.label,
+          description: value === current ? '当前更新源' : '',
+          value,
+        })),
+        { title: '选择 GuthonCodeTool 更新源' }
+      );
+      if (!selected || selected.value === current) return;
+      await config.update('updateSource', selected.value, vscode.ConfigurationTarget.Global);
+      toolView.refresh();
+      return vscode.window.showInformationMessage(`GuthonCodeTool 更新源已切换为 ${selected.label}`);
+    }),
+    vscode.commands.registerCommand('gushenCompletion.checkToolUpdate', async () => {
+      const config = vscode.workspace.getConfiguration('gushenCompletion');
+      if (config.get('executionMode', 'packaged') !== 'packaged') {
+        return vscode.window.showInformationMessage('调试模式直接使用源码，不检查 GuthonCodeTool 发行版更新');
+      }
+      if (activeToolRuns.size) {
+        return vscode.window.showWarningMessage('当前有 GuthonCodeTool 或 SVN 操作正在执行，请完成后再检查更新');
+      }
+      if (applicationUpdateRunning) {
+        return vscode.window.showInformationMessage('GuthonCodeTool 更新或回退正在执行，本次点击已忽略');
+      }
+      const toolPath = config.get('toolPath', '');
+      if (!toolPath || !fs.existsSync(toolPath)) {
+        return vscode.window.showErrorMessage('当前发行模式未配置有效的 GuthonCodeTool 可执行程序');
+      }
+      const storageRoot = context.globalStorageUri.fsPath;
+      const source = config.get('updateSource', 'gitee');
+      applicationUpdateRunning = true;
+      try {
+        const release = await vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: `正在从 ${UPDATE_SOURCES[source]?.label || source} 检查更新`,
+          cancellable: false,
+        }, () => fetchLatestRelease(source));
+        const installedVersion = await detectCurrentVersion(context.extensionPath, storageRoot, toolPath);
+        if (compareVersions(release.version, installedVersion) <= 0) {
+          return vscode.window.showInformationMessage(`当前已是最新版本：${installedVersion}（${release.sourceLabel}）`);
+        }
+        const asset = releaseAsset(release, assetNameFor());
+        const size = asset.size ? `，${(asset.size / 1024 / 1024).toFixed(1)} MB` : '';
+        const confirmed = await vscode.window.showInformationMessage(
+          `发现 GuthonCodeTool ${release.version}（当前 ${installedVersion}${size}）`,
+          { modal: true, detail: `更新源：${release.sourceLabel}\n下载后将校验 SHA-256、运行 self-test，并保留当前版本用于回退。` },
+          '下载并更新'
+        );
+        if (confirmed !== '下载并更新') return false;
+        const installed = await vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: `更新 GuthonCodeTool 至 ${release.version}`,
+          cancellable: false,
+        }, (progress) => installRelease({
+          release,
+          storageRoot,
+          onProgress: (message) => progress.report({ message }),
+        }));
+        const previousState = readUpdateState(storageRoot);
+        writeUpdateState(storageRoot, {
+          activeVersion: installed.version,
+          activePath: installed.toolPath,
+          previousVersion: installedVersion,
+          previousPath: toolPath,
+          source,
+          sha256: installed.sha256,
+          updatedAt: new Date().toISOString(),
+        });
+        try {
+          await config.update('toolPath', installed.toolPath, vscode.ConfigurationTarget.Global);
+        } catch (error) {
+          writeUpdateState(storageRoot, previousState);
+          throw error;
+        }
+        const toolHome = config.get('toolHome', '');
+        const tool = { mode: 'packaged', toolPath: installed.toolPath, toolHome };
+        toolView.refresh();
+        try {
+          if (toolHome) writeRuntimeDescriptor(tool);
+          if (bridge.isRunning()) await bridge.restart(tool);
+          await svnServices.refresh();
+        } catch (error) {
+          await vscode.window.showWarningMessage(`应用已更新，但运行状态刷新失败：${error.message}`);
+        }
+        return vscode.window.showInformationMessage(`GuthonCodeTool 已更新至 ${installed.version}`);
+      } catch (error) {
+        return vscode.window.showErrorMessage(`GuthonCodeTool 更新失败：${error.message}`);
+      } finally {
+        applicationUpdateRunning = false;
+      }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.rollbackToolUpdate', async () => {
+      const config = vscode.workspace.getConfiguration('gushenCompletion');
+      if (activeToolRuns.size) {
+        return vscode.window.showWarningMessage('当前有 GuthonCodeTool 或 SVN 操作正在执行，请完成后再回退');
+      }
+      if (applicationUpdateRunning) {
+        return vscode.window.showInformationMessage('GuthonCodeTool 更新或回退正在执行，本次点击已忽略');
+      }
+      const storageRoot = context.globalStorageUri.fsPath;
+      const state = readUpdateState(storageRoot);
+      if (!state.previousPath || !state.previousVersion || !fs.existsSync(state.previousPath)) {
+        return vscode.window.showInformationMessage('暂无可回退的 GuthonCodeTool 版本');
+      }
+      const confirmed = await vscode.window.showWarningMessage(
+        `确认回退到 GuthonCodeTool ${state.previousVersion}？`,
+        { modal: true },
+        '回退'
+      );
+      if (confirmed !== '回退') return false;
+      applicationUpdateRunning = true;
+      try {
+        const currentPath = config.get('toolPath', '');
+        const currentApplicationVersion = await detectCurrentVersion(context.extensionPath, storageRoot, currentPath);
+        const previousState = state;
+        writeUpdateState(storageRoot, {
+          activeVersion: state.previousVersion,
+          activePath: state.previousPath,
+          previousVersion: currentApplicationVersion,
+          previousPath: currentPath,
+          source: state.source,
+          updatedAt: new Date().toISOString(),
+        });
+        try {
+          await config.update('toolPath', state.previousPath, vscode.ConfigurationTarget.Global);
+        } catch (error) {
+          writeUpdateState(storageRoot, previousState);
+          throw error;
+        }
+        const toolHome = config.get('toolHome', '');
+        const tool = { mode: 'packaged', toolPath: state.previousPath, toolHome };
+        toolView.refresh();
+        try {
+          if (toolHome) writeRuntimeDescriptor(tool);
+          if (bridge.isRunning()) await bridge.restart(tool);
+          await svnServices.refresh();
+        } catch (error) {
+          await vscode.window.showWarningMessage(`应用已回退，但运行状态刷新失败：${error.message}`);
+        }
+        return vscode.window.showInformationMessage(`GuthonCodeTool 已回退到 ${state.previousVersion}`);
+      } catch (error) {
+        return vscode.window.showErrorMessage(`GuthonCodeTool 回退失败：${error.message}`);
+      } finally {
+        applicationUpdateRunning = false;
+      }
+    }),
     vscode.commands.registerCommand('gushenCompletion.setupTool', async () => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
-      const setupMode = await prepareWorkspaceSetup(config, vscode.window, vscode.ConfigurationTarget.Global);
-      if (!setupMode) return;
-      const completed = await runTool(TOOL_COMMANDS.setup, [], setupMode !== 'switch');
+      const previousToolHome = config.get('toolHome', '');
+      const setup = await prepareWorkspaceSetup(config, vscode.window);
+      if (!setup) return;
+      const tool = await configuredTool({
+        toolHome: setup.toolHome,
+        persistToolHome: false,
+        writeDescriptor: false,
+      });
+      if (!tool) return;
+      const completed = await runTool(
+        TOOL_COMMANDS.setup,
+        [],
+        setup.mode !== 'switch',
+        '',
+        null,
+        undefined,
+        tool
+      );
       if (!completed) return;
-      if (setupMode === 'switch' && bridge.isRunning()) {
-        const tool = await configuredTool();
-        if (tool) await bridge.restart(tool);
+      try {
+        writeRuntimeDescriptor(tool);
+        await config.update('toolHome', tool.toolHome, vscode.ConfigurationTarget.Global);
+      } catch (error) {
+        return vscode.window.showErrorMessage(`工作空间已初始化，但 Nexus 保存配置失败：${error.message}`);
       }
+      if (bridge.isRunning() && previousToolHome !== tool.toolHome) await bridge.restart(tool);
       toolView.refresh();
       await svnServices.refresh();
-      if (setupMode === 'setup') {
+      if (setup.mode === 'setup') {
         const next = await vscode.window.showInformationMessage(
           '本地数据目录已初始化，是否现在添加第一个产品或项目？',
           '立即添加',
@@ -812,7 +1023,7 @@ function activate(context) {
       await svnServices.refresh();
 
       const nextStep = definition.sourceMode === 'svn'
-        ? '请展开该 Nexus，再设置 SVN 登录、导入/粘贴 checkout 配置或编辑 SVN 范围。'
+        ? '请展开该 Nexus，再设置 SVN 登录、导入/粘贴 checkout 配置或编辑 SVN 地址。'
         : '请后续在配置文件中补充 datasource 后再拉取源码。';
       vscode.window.showInformationMessage(`${definition.name} Nexus 已创建。${nextStep}`);
       return true;
@@ -936,12 +1147,12 @@ function activate(context) {
           void vscode.window.showErrorMessage(`未找到 SVN 项目：${workspaceKey}`);
           return false;
         }
-        svnServices.log('SVN 检出/更新', '读取 SVN 范围配置预览');
+        svnServices.log('SVN 检出/更新', '读取 SVN 地址配置预览');
         const hasScopeConfig = Boolean(workspace.scopeConfigReady);
         const hasCheckoutScript = Boolean(workspace.checkoutScriptReady);
         if (!hasScopeConfig && !hasCheckoutScript) {
           void vscode.window.showWarningMessage(
-            `未找到 SVN 范围配置：${workspace.scopeConfigPath || 'config/products.yaml/projects.yaml'}。请先在对应文件的 svn.scope 中配置，或使用“导入/粘贴 SVN checkout 配置”。`
+            `未找到 SVN 地址配置：${workspace.scopeConfigPath || 'config/products.yaml/projects.yaml'}。请先在对应文件中配置 svn.url，或使用“导入/粘贴 SVN checkout 配置”。`
           );
           return false;
         }
@@ -949,15 +1160,13 @@ function activate(context) {
         try {
           preview = await svnServices.backend.scopePreview(workspaceKey);
         } catch (error) {
-          void vscode.window.showErrorMessage(`无法解析工作区 SVN 范围配置：${error.message}`);
+          void vscode.window.showErrorMessage(`无法解析工作区 SVN 地址配置：${error.message}`);
           return false;
         }
         const changeSummary = `新增 ${preview.added}、移除 ${preview.removed}、变更 ${preview.modified}`;
-        const scopeSummary = preview.excludedBySystemAliases
-          ? `${preview.source === 'config' ? '范围配置' : '签出脚本'}共 ${preview.commands} 个地址，按 systems.include.mappings 保留 ${preview.entries} 个、排除 ${preview.excludedBySystemAliases} 个`
-          : `${preview.source === 'config' ? '范围配置' : '签出脚本'}共 ${preview.commands} 个地址，保留 ${preview.entries} 个`;
+        const scopeSummary = `${preview.source === 'config' ? '地址配置' : '签出脚本'}包含 ${preview.entries} 个仓库地址`;
         const confirmed = await vscode.window.showWarningMessage(
-          `将使用当前工程的 SVN ${preview.source === 'config' ? '范围配置（products.yaml/projects.yaml 的 svn.scope）' : '签出脚本（可复制到现有配置的 svn.scope）'}：${scopeSummary}（${changeSummary}），随后使用同一次认证检出或更新筛选后的 working copy。配置只保存 URL 和相对目录，不保存凭据。`,
+          `将使用当前工程的 SVN ${preview.source === 'config' ? '地址配置（products.yaml/projects.yaml 的 svn.url）' : '签出脚本'}：${scopeSummary}（${changeSummary}），随后检出或更新完整 working copy。系统与数据源映射不限制 checkout 内容；配置不保存凭据。`,
           { modal: true },
           '检出/更新'
         );
@@ -1011,21 +1220,21 @@ function activate(context) {
             const action = await vscode.window.showInformationMessage(
               'SVN 地址编辑器已关闭，请选择下一步。',
               { modal: true },
-              '解析 SVN 范围',
-              '编辑配置 SVN 范围'
+              '解析 SVN 地址',
+              '编辑 SVN 地址配置'
             );
-            if (action === '编辑配置 SVN 范围') {
+            if (action === '编辑 SVN 地址配置') {
               await vscode.commands.executeCommand('gushenCompletion.editSvnScope', workspaceKey);
               return { action: 'edit' };
             }
-            if (action !== '解析 SVN 范围') return;
+            if (action !== '解析 SVN 地址') return;
             const text = fs.readFileSync(input.file, 'utf8');
             if (!hasSvnScopeInput(text)) {
               const next = await vscode.window.showWarningMessage(
                 '未检测到 SVN 地址或 checkout 命令，没有执行解析。',
-                '编辑配置 SVN 范围'
+                '编辑 SVN 地址配置'
               );
-              if (next === '编辑配置 SVN 范围') {
+              if (next === '编辑 SVN 地址配置') {
                 await vscode.commands.executeCommand('gushenCompletion.editSvnScope', workspaceKey);
                 return { action: 'edit' };
               }
@@ -1037,13 +1246,15 @@ function activate(context) {
           }
         }
       } catch (error) {
-        return vscode.window.showErrorMessage(`导入 SVN 范围失败：${error.message}`);
+        return vscode.window.showErrorMessage(`导入 SVN 地址失败：${error.message}`);
       }
-      const message = result.url && Array.isArray(result.scope)
-        ? `已解析 ${result.commands || result.scope.length} 条 checkout，归并为 1 个 SVN URL 和 ${result.scope.length} 个不重复 scope${result.duplicatesSkipped ? `（跳过重复 ${result.duplicatesSkipped} 条）` : ''}：${result.scope.join('、')}。请检查配置后执行“从 SVN 范围配置检出/更新”。`
+      const message = result.url && Array.isArray(result.scope) && !result.scope.length
+        ? `已解析 SVN 根地址并写入 svn.url：${result.url}。将完整检出该地址下当前账号可见的所有目录。`
+        : result.url && Array.isArray(result.scope)
+          ? `已解析旧版显式范围配置：1 个 SVN URL、${result.scope.length} 个 scope。请检查配置后执行检出/更新。`
         : result.added
-          ? `已向 ${result.output} 添加 ${result.added} 个 SVN 范围条目，重复 ${result.duplicatesSkipped || 0} 个。请检查配置后执行“从 SVN 范围配置检出/更新”。`
-          : `没有新增 SVN 范围条目（重复 ${result.duplicatesSkipped || 0} 个）。`;
+          ? `已向 ${result.output} 添加 ${result.added} 个 SVN 地址。请检查配置后执行检出/更新。`
+          : `SVN 地址配置没有变化。`;
       vscode.window.showInformationMessage(message);
       await svnServices.refresh();
       toolView.refresh();
@@ -1051,7 +1262,7 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('gushenCompletion.editSvnScope', async (workspaceKey) => {
       const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
-      if (!workspace?.scopeConfigPath) return vscode.window.showErrorMessage('无法解析 SVN 范围配置路径');
+      if (!workspace?.scopeConfigPath) return vscode.window.showErrorMessage('无法解析 SVN 地址配置路径');
       const file = workspace.scopeConfigPath;
       if (!fs.existsSync(file)) {
         if (['products.yaml', 'projects.yaml'].includes(path.basename(file))) {
@@ -1060,7 +1271,7 @@ function activate(context) {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(
           file,
-          '# 请在当前产品/项目的 svn.scope 下维护 SVN 范围。\n',
+          '# 请在当前产品/项目的 svn.url 中维护唯一 SVN 根地址。\n',
           'utf8'
         );
         return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
