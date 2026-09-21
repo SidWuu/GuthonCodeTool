@@ -38,6 +38,9 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
     toolPath: '/tool/GuthonCodeTool',
     toolHome: home,
   });
+  // 描述符只写在 toolHome 下，与源码仓库（developmentRoot）无关。
+  assert.equal(descriptorPath, path.join(home, 'var', 'nexus', 'tool-runtime.json'));
+  assert.equal(descriptorPath.startsWith('/repo'), false);
   assert.deepEqual(JSON.parse(fs.readFileSync(descriptorPath, 'utf8')), {
     mode: 'packaged',
     command: ['/tool/GuthonCodeTool'],

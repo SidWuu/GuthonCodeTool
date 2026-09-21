@@ -22,7 +22,7 @@ description: Diagnose GuShen development or test database issues through GuthonC
 
 ## 自动解析数据库目标
 
-读取当前 GuthonCodeTool 的 `var/nexus/tool-runtime.json`，使用其中的 `databaseTargetResolveCommand`，追加 `--path <当前 cwd>`。不要自行拼接 Python、应用或配置路径，也不要把业务单号、SQL 或完整问题文本放入进程参数。
+读取本地数据目录（toolHome）的 `var/nexus/tool-runtime.json`，使用其中的 `databaseTargetResolveCommand`，追加 `--path <当前 cwd>`。`toolHome` 是保存真实 `config/` 和私有 `var/` 的目录，与工具源码仓库分开；找不到该文件时按 Nexus 的“设置工作空间”确认，不要自行拼接 Python、应用或配置路径，也不要把业务单号、SQL 或完整问题文本放入进程参数。
 
 - 明确出现“开发库、开发环境、dev”时追加 `--environment dev`。
 - 明确出现“测试库、测试环境、test”时追加 `--environment test`；“测试一下”不视为环境选择。

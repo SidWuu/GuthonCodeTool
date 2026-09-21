@@ -9,19 +9,36 @@ import vm from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+// 工具源码根：只用于定位 Nexus 插件、build 脚本等发行资源。
 const repoRoot = path.resolve(scriptDir, '..');
-const apiDir = path.join(repoRoot, 'var', 'docs', '谷神方言API');
 const extensionDir = path.join(
   repoRoot,
   'plugins',
-  'GuthonVSCodeExtension',
+  'GuthonNexus',
   'gushen-vscode-completion'
 );
 const dataDir = path.join(extensionDir, 'data');
 const buildDataScript = path.join(extensionDir, 'scripts', 'build-data.mjs');
-const syncConfigPath = path.join(repoRoot, 'config', 'sync.yaml');
 const languages = ['java', 'javascript', 'sql'];
-const protectedFiles = new Set([path.join(apiDir, 'custom.md')]);
+
+// 真实运行数据根（toolHome）只来自显式 --home 或 GUTHON_TOOL_HOME / GUTHON_HOME，
+// 不从源码目录的相对位置推断 var 或真实 config。
+function resolveToolHome(explicit) {
+  const value = String(explicit || process.env.GUTHON_TOOL_HOME || process.env.GUTHON_HOME || '').trim();
+  if (!value) {
+    throw new Error(
+      '缺少本地数据目录：请传入 --home <toolHome>，或设置 GUTHON_TOOL_HOME / GUTHON_HOME。'
+    );
+  }
+  return path.resolve(value);
+}
+
+function toolDataPaths(toolHome) {
+  return {
+    apiDir: path.join(toolHome, 'var', 'docs', '谷神方言API'),
+    syncConfigPath: path.join(toolHome, 'config', 'sync.yaml'),
+  };
+}
 
 function unquote(value) {
   const text = String(value || '').trim();
@@ -31,7 +48,8 @@ function unquote(value) {
     : text;
 }
 
-function loadApiConfig(filePath = syncConfigPath) {
+function loadApiConfig(filePath, toolHome) {
+  if (!toolHome) throw new Error('缺少 toolHome，无法解析 guthon_api bundle 路径');
   // ponytail: only this small sync.yaml section is needed; use a YAML package if it grows.
   const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
   let inApi = false;
@@ -67,7 +85,7 @@ function loadApiConfig(filePath = syncConfigPath) {
   if (!configuredFile) throw new Error(`未配置谷神 ${activeVersion} 的 bundle_file`);
   return {
     activeVersion,
-    bundleFile: path.resolve(repoRoot, configuredFile),
+    bundleFile: path.resolve(toolHome, configuredFile),
   };
 }
 
@@ -285,7 +303,7 @@ function buildApiData(model, existingIndex) {
   return { result, matched };
 }
 
-function markdownFor(language, items, version, templateDir = apiDir) {
+function markdownFor(language, items, version, templateDir) {
   const filePath = path.join(templateDir, `${language}.md`);
   const current = fs.readFileSync(filePath, 'utf8');
   const marker = '## 命名空间索引';
@@ -357,7 +375,8 @@ function apiCounts(directory) {
   return counts;
 }
 
-function changedContents(contents) {
+function changedContents(contents, protectedPaths) {
+  const protectedFiles = new Set(protectedPaths.map((target) => path.resolve(target)));
   return new Map([...contents].filter(([target, content]) =>
     !protectedFiles.has(path.resolve(target))
       && (!fs.existsSync(target) || !fs.readFileSync(target).equals(content))
@@ -388,37 +407,89 @@ function selfTest() {
   assert.equal(signature('listJoin($list<string>,$ch:string)').call, 'listJoin(list,ch)');
   assert.equal(signature('concat(str1,str2,...)').call, 'concat(str1,str2,args)');
   assert.equal(takeBalanced('x[{a:"[x]"}]y', 1), '[{a:"[x]"}]');
-  const configFile = path.join(os.tmpdir(), `guthon-api-config-${process.pid}.yaml`);
-  fs.writeFileSync(configFile, 'guthon_api:\n  active_version: "2.0"\n  bundle_files:\n    v2_0: "app.js"\n');
+
+  const savedToolHome = process.env.GUTHON_TOOL_HOME;
+  const savedHome = process.env.GUTHON_HOME;
+  delete process.env.GUTHON_TOOL_HOME;
+  delete process.env.GUTHON_HOME;
   try {
-    assert.equal(loadApiConfig(configFile).activeVersion, '2.0');
+    // 源码目录不再提供回退：缺少显式 toolHome 时必须报错。
+    assert.throws(() => resolveToolHome(''), /缺少本地数据目录/);
+    assert.equal(resolveToolHome('/tmp/tool-home').endsWith('tool-home'), true);
+    process.env.GUTHON_TOOL_HOME = '/tmp/guthon-tool-home-env';
+    assert.equal(resolveToolHome(''), path.resolve('/tmp/guthon-tool-home-env'));
+    process.env.GUTHON_HOME = '/tmp/guthon-home-env';
+    delete process.env.GUTHON_TOOL_HOME;
+    assert.equal(resolveToolHome(''), path.resolve('/tmp/guthon-home-env'));
+    assert.equal(resolveToolHome('/tmp/explicit'), path.resolve('/tmp/explicit'));
   } finally {
-    fs.rmSync(configFile, { force: true });
+    if (savedToolHome === undefined) delete process.env.GUTHON_TOOL_HOME;
+    else process.env.GUTHON_TOOL_HOME = savedToolHome;
+    if (savedHome === undefined) delete process.env.GUTHON_HOME;
+    else process.env.GUTHON_HOME = savedHome;
   }
-  assert.equal(changedContents(new Map([
-    [path.join(apiDir, 'custom.md'), Buffer.from('不得覆盖')],
-  ])).size, 0);
+
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-api-home-'));
+  try {
+    const { apiDir, syncConfigPath } = toolDataPaths(tempHome);
+    assert.equal(apiDir, path.join(tempHome, 'var', 'docs', '谷神方言API'));
+    assert.equal(syncConfigPath, path.join(tempHome, 'config', 'sync.yaml'));
+    fs.mkdirSync(path.dirname(syncConfigPath), { recursive: true });
+    fs.writeFileSync(
+      syncConfigPath,
+      'guthon_api:\n  active_version: "2.0"\n  bundle_files:\n    v2_0: "var/docs/private/guthon-api/2.0/app.js"\n'
+    );
+    const loaded = loadApiConfig(syncConfigPath, tempHome);
+    assert.equal(loaded.activeVersion, '2.0');
+    // bundle 路径相对 toolHome 解析，不再相对源码仓库解析。
+    assert.equal(loaded.bundleFile, path.join(tempHome, 'var/docs/private/guthon-api/2.0/app.js'));
+    assert.equal(changedContents(new Map([
+      [path.join(apiDir, 'custom.md'), Buffer.from('不得覆盖')],
+    ]), [path.join(apiDir, 'custom.md')]).size, 0);
+  } finally {
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
   console.log('sync_guthon_api self-test: ok');
 }
 
 function usage() {
-  console.error('用法: node scripts/sync_guthon_api.mjs [--check] [--allow-shrink]');
+  console.error('用法: node scripts/sync_guthon_api.mjs [--home <toolHome>] [--check] [--allow-shrink]');
 }
 
 function main() {
   const args = process.argv.slice(2);
   if (args.includes('--self-test')) return selfTest();
-  if (args.some((arg) => !arg.startsWith('--'))) {
+
+  const flags = [];
+  let homeArg = '';
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--home' || arg.startsWith('--home=')) {
+      const value = arg === '--home' ? args[index + 1] : arg.slice('--home='.length);
+      if (arg === '--home') index += 1;
+      if (!value || value.startsWith('--')) {
+        usage();
+        process.exitCode = 2;
+        return;
+      }
+      homeArg = value;
+      continue;
+    }
+    flags.push(arg);
+  }
+  if (flags.some((arg) => !arg.startsWith('--'))) {
     usage();
     process.exitCode = 2;
     return;
   }
 
-  const { activeVersion, bundleFile } = loadApiConfig();
+  const toolHome = resolveToolHome(homeArg);
+  const { apiDir, syncConfigPath } = toolDataPaths(toolHome);
+  const { activeVersion, bundleFile } = loadApiConfig(syncConfigPath, toolHome);
   const inputPath = bundleFile;
-  if (!fs.existsSync(inputPath)) throw new Error(`bundle 文件不存在：${path.relative(repoRoot, inputPath)}`);
-  const checkOnly = args.includes('--check');
-  const allowShrink = args.includes('--allow-shrink');
+  if (!fs.existsSync(inputPath)) throw new Error(`bundle 文件不存在：${path.relative(toolHome, inputPath)}`);
+  const checkOnly = flags.includes('--check');
+  const allowShrink = flags.includes('--allow-shrink');
   const source = fs.readFileSync(inputPath, 'utf8');
   const versionApiDir = path.join(apiDir, 'versions', activeVersion);
   const activeIndex = JSON.parse(fs.readFileSync(path.join(dataDir, 'index.json'), 'utf8'));
@@ -459,7 +530,7 @@ function main() {
     const index = fs.readFileSync(path.join(tempData, 'index.json'));
     // 根 index.json 最后替换；插件运行时只读取它，前序中断不会破坏现有补全。
     targets.set(path.join(dataDir, 'index.json'), index);
-    const changed = changedContents(targets);
+    const changed = changedContents(targets, [path.join(apiDir, 'custom.md')]);
     if (!changed.size) {
       console.log('无差异，未覆盖任何 MD 或 JSON。');
       return;

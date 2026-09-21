@@ -14,6 +14,16 @@ import tempfile
 from pathlib import Path
 
 
+def _configure_stdio_utf8() -> None:
+    """Keep the CLI protocol and human-readable output UTF-8 on every host."""
+
+    for stream_name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="strict")
+
+
 def application_version() -> str:
     candidates = []
     if getattr(sys, "_MEIPASS", None):
@@ -311,7 +321,11 @@ def _svn_progress(message: str) -> None:
 
 
 def _reindex_svn(gusen_hub, config, workspace, on_progress=None) -> dict:
-    conn = gusen_hub.connect_index(workspace["indexPath"], rebuild_incompatible=True)
+    conn = gusen_hub.connect_index_for_workspace(
+        workspace,
+        action="index-init",
+        rebuild_incompatible=True,
+    )
     try:
         result = gusen_hub.index_svn_workspace(conn, config, workspace, on_progress=on_progress)
     finally:
@@ -323,12 +337,12 @@ def _reindex_svn(gusen_hub, config, workspace, on_progress=None) -> dict:
 
 def _connect_incremental_svn_index(gusen_hub, config, workspace, on_progress=None):
     try:
-        return gusen_hub.connect_index(workspace["indexPath"])
+        return gusen_hub.connect_index_for_workspace(workspace, action="index-init")
     except gusen_hub.IndexRebuildRequired:
         if on_progress is not None:
             on_progress(f"{workspace['displayName']}｜索引｜旧索引无法原地升级，自动完整重建")
         _reindex_svn(gusen_hub, config, workspace, on_progress=on_progress)
-        return gusen_hub.connect_index(workspace["indexPath"])
+        return gusen_hub.connect_index_for_workspace(workspace, action="index-init")
 
 
 def _reindex_svn_files(
@@ -1389,6 +1403,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
 
 
 def main(argv=None) -> int:
+    _configure_stdio_utf8()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",

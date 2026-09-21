@@ -3,8 +3,7 @@ node_modules/
 __pycache__/
 .DS_Store
 *.pyc
-var/*
-!var/README.md
+var/
 config/*.yaml
 !config/*.example.yaml
 config/*.json
@@ -31,4 +30,3 @@ htmlcov/
 *.sqlite-*
 docs/superpowers/
 docs/private/
-plugins/GuthonVSCodeExtension/gushen-vscode-completion/bridge/server.js

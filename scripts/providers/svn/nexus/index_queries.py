@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import re
 from dataclasses import replace
 import sqlite3
@@ -22,10 +23,19 @@ PROCEDURE_PACKAGE = re.compile(
 SOURCE_ICONS = ("📂", "⭐", "📄", "🏠", "📦", "🧊", "🔰", "⚡", "📊", "🐳", "🌏")
 
 
-def _connection(workspace: dict) -> sqlite3.Connection:
+@contextmanager
+def _connection(workspace: dict):
     if not workspace["indexPath"].is_file():
         raise SystemExit(f"SVN call index is not initialized for {workspace['workspaceKey']}")
-    return gusen_hub.connect_index(workspace["indexPath"])
+    try:
+        with gusen_hub.index_connection(
+            workspace,
+            action="nexus-index-read",
+            readonly=True,
+        ) as connection:
+            yield connection
+    except sqlite3.Error as error:
+        raise SystemExit(f"SVN 本地索引不可用，请先重建：{error}") from error
 
 
 def _display_label(value: str) -> str:
@@ -150,7 +160,7 @@ def _entry_name(entry) -> str:
         markers = sorted(child.name[2:] for child in entry.root.iterdir() if child.name.startswith("$.") and child.name[2:])
     except OSError:
         markers = []
-    return markers[0] if markers else Path(entry.local_subdir).name
+    return markers[0] if markers else (Path(entry.local_subdir).name or entry.id)
 
 
 def _system_name(entry) -> str:
@@ -316,8 +326,7 @@ def catalog(workspace: dict) -> dict:
     scope = load_authorized_scope(workspace)
     entries = {entry.id: entry for entry in scope.entries}
     subsystem_orders = _subsystem_tree_orders(workspace, scope)
-    connection = _connection(workspace)
-    try:
+    with _connection(workspace) as connection:
         rows = [
             dict(row)
             for row in connection.execute(
@@ -330,8 +339,6 @@ def catalog(workspace: dict) -> dict:
                 """
             ).fetchall()
         ]
-    finally:
-        connection.close()
     page_locations = {}
     procedure_locations = {}
     entry_names = {}
@@ -421,8 +428,7 @@ def source_object(
     fun_id: str = "",
     working_copy_id: str = "",
 ) -> dict:
-    connection = _connection(workspace)
-    try:
+    with _connection(workspace) as connection:
         filters = ["provider='svn'", "source_table=?", "source_id=?", "fun_id=?"]
         params = [source_type, source_id, fun_id]
         if working_copy_id:
@@ -433,8 +439,6 @@ def source_object(
             + " ORDER BY source_path LIMIT 2",
             params,
         ).fetchall()
-    finally:
-        connection.close()
     if not rows:
         raise SystemExit("SVN source is not present in the current local index; run reindex first")
     if len(rows) > 1:
@@ -450,8 +454,7 @@ def definition(workspace: dict, *, alias: str, fun_id: str) -> dict:
     normalized_fun = str(fun_id or "").strip()
     if not normalized_alias or not normalized_fun:
         raise SystemExit("SVN definition requires alias and fun id")
-    connection = _connection(workspace)
-    try:
+    with _connection(workspace) as connection:
         rows = connection.execute(
             """
             SELECT source_table, source_id, source_alias_id, fun_id, source_name, source_path,
@@ -462,8 +465,6 @@ def definition(workspace: dict, *, alias: str, fun_id: str) -> dict:
             """,
             (normalized_alias, normalized_fun),
         ).fetchall()
-    finally:
-        connection.close()
     if not rows:
         return {
             "ok": True,
@@ -495,8 +496,7 @@ def definition(workspace: dict, *, alias: str, fun_id: str) -> dict:
 
 def callers(workspace: dict, *, alias: str, fun_id: str, limit=100) -> dict:
     bounded_limit = max(1, min(int(limit), 500))
-    connection = _connection(workspace)
-    try:
+    with _connection(workspace) as connection:
         rows = connection.execute(
             """
             SELECT source_table, source_id, source_alias_id, fun_id, source_name, script_type,
@@ -508,8 +508,6 @@ def callers(workspace: dict, *, alias: str, fun_id: str, limit=100) -> dict:
             """,
             (str(alias or "").strip(), str(fun_id or "").strip(), bounded_limit),
         ).fetchall()
-    finally:
-        connection.close()
     return {
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
@@ -519,16 +517,13 @@ def callers(workspace: dict, *, alias: str, fun_id: str, limit=100) -> dict:
 
 
 def find(workspace: dict, *, keyword: str, limit: int = 10) -> dict:
-    connection = _connection(workspace)
-    try:
+    with _connection(workspace) as connection:
         rows = gusen_hub.find_source_candidates(
             connection,
             workspace["scopeId"],
             keyword,
             limit,
         )
-    finally:
-        connection.close()
     return {
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
@@ -538,8 +533,7 @@ def find(workspace: dict, *, keyword: str, limit: int = 10) -> dict:
 
 
 def context(workspace: dict, *, source_id: str, fun_id: str = "", limit: int = 20) -> dict:
-    connection = _connection(workspace)
-    try:
+    with _connection(workspace) as connection:
         result = gusen_hub.query_source_context(
             connection,
             workspace["scopeId"],
@@ -547,8 +541,6 @@ def context(workspace: dict, *, source_id: str, fun_id: str = "", limit: int = 2
             fun_id,
             limit,
         )
-    finally:
-        connection.close()
     return {
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
@@ -568,8 +560,7 @@ def facts(
     limit: int = 3,
     continuation: int = 0,
 ) -> dict:
-    connection = _connection(workspace)
-    try:
+    with _connection(workspace) as connection:
         result = source_facts.query_facts(
             connection,
             workspace["scopeId"],
@@ -579,8 +570,6 @@ def facts(
             limit=limit,
             offset=continuation,
         )
-    finally:
-        connection.close()
     return {"ok": True, "workspaceKey": workspace["workspaceKey"], **result}
 
 
@@ -597,8 +586,7 @@ def explain(
     continuation: int = 0,
     include_details: bool = False,
 ) -> dict:
-    connection = _connection(workspace)
-    try:
+    with _connection(workspace) as connection:
         result = source_facts.explain_table(
             connection,
             workspace["scopeId"],
@@ -612,6 +600,4 @@ def explain(
             caller_depth=caller_depth,
             include_details=include_details,
         )
-    finally:
-        connection.close()
     return {"ok": True, "workspaceKey": workspace["workspaceKey"], **result}

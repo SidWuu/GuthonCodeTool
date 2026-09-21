@@ -47,8 +47,11 @@ def main(args=None):
         gusen_hub.set_workspace(parsed.workspace)
     workspace = gusen_hub.resolve_workspace(cfg)
     scope_id = workspace["scopeId"]
-    conn = gusen_hub.connect_index(workspace["indexPath"])
-    try:
+    with gusen_hub.index_connection(
+        workspace,
+        action="query-hub-context",
+        readonly=True,
+    ) as conn:
         if parsed.command == "find":
             result = {"scopeId": scope_id, "candidates": _rows(gusen_hub.find_source_candidates(conn, scope_id, parsed.keyword, parsed.limit))}
         elif parsed.command == "context":
@@ -82,8 +85,6 @@ def main(args=None):
                 caller_depth=parsed.caller_depth,
                 include_details=parsed.include_details,
             )
-    finally:
-        conn.close()
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

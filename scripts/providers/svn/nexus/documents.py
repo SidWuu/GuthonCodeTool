@@ -9,7 +9,7 @@ import os
 import stat
 import tempfile
 import uuid
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from common.page_projection import (
     extract_page_fields,
@@ -36,7 +36,13 @@ from providers.svn.checkout import (
 
 from .catalog import header_fields, scan
 from . import index_queries
-from .manifest import load_authorized_scope, resolve_authorized_path, source_path_writable
+from .manifest import (
+    load_authorized_scope,
+    logical_path_for_entry,
+    relative_path_for_entry,
+    resolve_authorized_path,
+    source_path_writable,
+)
 
 
 SESSION_VERSION = 1
@@ -104,15 +110,22 @@ def accept_refreshed_files(workspace: dict, refreshed: list[dict]) -> None:
         entry = entries.get(result.get("id"))
         if entry is None:
             continue
-        exact_paths = set(result.get("paths") or ())
+        exact_paths = {
+            str(path).strip().replace("\\", "/")
+            for path in result.get("paths") or ()
+            if str(path).strip()
+        }
         if exact_paths:
             affected_paths.update(exact_paths)
         else:
-            prefix = f"{entry.local_subdir}/"
-            affected_paths.update(path for path in session["files"] if path.startswith(prefix))
+            affected_paths.update(
+                path
+                for path in session["files"]
+                if _session_path_belongs_to_entry(scope, entry, path)
+            )
         for change in (result.get("after") or {}).get("changes") or ():
             relative = str(change.get("path") or "")
-            logical_path = f"{entry.local_subdir}/{relative}"
+            logical_path = logical_path_for_entry(entry, relative)
             if exact_paths and logical_path not in exact_paths:
                 continue
             path = entry.root / relative
@@ -436,6 +449,14 @@ def _relative_in_entry(entry, path: Path) -> str:
         raise SystemExit(f"SVN object escaped its authorized working copy: {path}") from error
 
 
+def _session_path_belongs_to_entry(scope, entry, logical_path: str) -> bool:
+    try:
+        resolved_entry, _path, _relative = resolve_authorized_path(scope, logical_path)
+    except SystemExit:
+        return False
+    return resolved_entry.id == entry.id
+
+
 def _is_safe_modified_file(entry, path: Path, changes: list[dict] | None = None) -> bool:
     relative = _relative_in_entry(entry, path)
     current = changes if changes is not None else svn_path_changes(entry.root, path)
@@ -456,7 +477,7 @@ def _session_change_errors(
     current_changes: list[dict] | None = None,
 ) -> list[str]:
     try:
-        relative = PurePosixPath(logical_path).relative_to(PurePosixPath(entry.local_subdir))
+        relative = relative_path_for_entry(entry, logical_path)
     except ValueError as error:
         raise SystemExit(f"SVN session path escaped its authorized working copy: {logical_path}") from error
     target = entry.root.joinpath(*relative.parts)
@@ -464,7 +485,7 @@ def _session_change_errors(
     current = current_changes if current_changes is not None else svn_path_changes(entry.root, target)
     errors = []
     for change in current:
-        logical_path = f"{entry.local_subdir}/{change['path']}"
+        logical_path = logical_path_for_entry(entry, change["path"])
         record = session["files"].get(logical_path) or {}
         path = entry.root / change["path"]
         safe = (
@@ -525,7 +546,7 @@ def read(
                     if value.get("sourcePath") != item["source_path"]
                 }
                 known_file = None
-        relative_path = PurePosixPath(item["source_path"]).relative_to(PurePosixPath(entry.local_subdir))
+        relative_path = relative_path_for_entry(entry, item["source_path"])
         editable = bool(
             workspace["capabilities"].get("svn.edit")
             and source_path_writable(entry, relative_path)
@@ -642,7 +663,7 @@ def _session_document(workspace: dict, session: dict, document_id: str) -> dict:
     entry = _entry(workspace, file_record["scopeEntryId"])
     if entry is None:
         raise SystemExit("SVN object is no longer writable in the authorization scope")
-    relative_path = PurePosixPath(item["source_path"]).relative_to(PurePosixPath(entry.local_subdir))
+    relative_path = relative_path_for_entry(entry, item["source_path"])
     if not source_path_writable(entry, relative_path):
         raise SystemExit("SVN object is no longer writable in the authorization scope")
     return {

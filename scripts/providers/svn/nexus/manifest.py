@@ -119,6 +119,30 @@ class ScopeEntry:
         }
 
 
+def logical_path_for_entry(entry: ScopeEntry, relative_path: object) -> str:
+    """Return the canonical logical path for a file inside one working copy."""
+
+    relative = PurePosixPath(str(relative_path or "").replace("\\", "/"))
+    normalized = relative.as_posix()
+    if entry.category == "root":
+        return "" if normalized == "." else normalized
+    return entry.local_subdir if normalized == "." else f"{entry.local_subdir}/{normalized}"
+
+
+def relative_path_for_entry(entry: ScopeEntry, logical_path: object) -> PurePosixPath:
+    """Return a working-copy-relative path from a canonical logical path.
+
+    A repository-root working copy intentionally exposes paths such as
+    ``datasources/0002/tables/PR_COMPANY.json`` without its physical
+    ``localSubdir`` prefix.  Other working-copy categories retain that prefix.
+    """
+
+    logical = PurePosixPath(str(logical_path or "").strip().replace("\\", "/"))
+    if entry.category == "root":
+        return logical
+    return logical.relative_to(PurePosixPath(entry.local_subdir.replace("\\", "/")))
+
+
 @dataclass(frozen=True)
 class AuthorizedScope:
     workspace_key: str
@@ -130,7 +154,7 @@ class AuthorizedScope:
 def scope_entry_label(workspace: dict, entry: ScopeEntry) -> str:
     """Return a business label for one physical SVN working copy."""
 
-    identity = Path(entry.local_subdir).name
+    identity = Path(entry.local_subdir).name or ("根目录" if entry.category == "root" else entry.id)
     aliases = []
     for alias, mapping in (workspace.get("systemMappings") or {}).items():
         if not isinstance(mapping, dict):
@@ -172,9 +196,11 @@ def normalize_scope_url(raw_url: object, entry_id: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), parsed.query, ""))
 
 
-def normalize_scope_subdir(raw_subdir: object, entry_id: str) -> str:
+def normalize_scope_subdir(raw_subdir: object, entry_id: str, *, allow_root: bool = False) -> str:
     text = str(raw_subdir or "").strip().replace("\\", "/")
     path = PurePosixPath(text)
+    if allow_root and text in {".", "./"}:
+        return "."
     if (
         not text
         or path.is_absolute()
@@ -188,7 +214,7 @@ def normalize_scope_subdir(raw_subdir: object, entry_id: str) -> str:
 def _entry_root(checkout_path: Path, local_subdir: str, entry_id: str) -> Path:
     checkout_root = checkout_path.resolve()
     root = (checkout_root / local_subdir).resolve()
-    if root == checkout_root or checkout_root not in root.parents:
+    if root != checkout_root and checkout_root not in root.parents:
         raise SystemExit(f"Scope entry escapes checkout root {entry_id}: {local_subdir}")
     return root
 
@@ -238,7 +264,15 @@ def load_authorized_scope(workspace: dict) -> AuthorizedScope:
         if url in urls:
             raise SystemExit(f"Duplicate SVN scope entry URL: {entry_id}")
         urls.add(url)
-        local_subdir = normalize_scope_subdir(raw.get("localSubdir"), entry_id)
+        local_subdir = normalize_scope_subdir(
+            raw.get("localSubdir"),
+            entry_id,
+            allow_root=category == "root",
+        )
+        if category == "root" and local_subdir != ".":
+            raise SystemExit(
+                f"Repository-root SVN scope entry must use localSubdir '.': {entry_id}"
+            )
         posix_subdir = PurePosixPath(local_subdir)
         if any(scope_paths_overlap(posix_subdir, existing) for existing in subdirs):
             raise SystemExit(f"Overlapping SVN scope localSubdir: {local_subdir}")

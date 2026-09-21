@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import re
 import sqlite3
 from pathlib import Path
@@ -9,15 +10,19 @@ from pathlib import Path
 from common import gusen_hub, source_facts
 
 
-def _connection(workspace: dict) -> sqlite3.Connection:
+@contextmanager
+def _connection(workspace: dict):
     index_path = Path(workspace["indexPath"])
     if not index_path.is_file() or not index_path.stat().st_size:
         raise SystemExit(f"本地索引尚未建立：{workspace['workspaceKey']}")
     try:
-        connection = sqlite3.connect(f"file:{index_path}?mode=ro", uri=True)
-        connection.row_factory = sqlite3.Row
-        connection.execute("SELECT 1 FROM gusen_source_record LIMIT 1").fetchone()
-        return connection
+        with gusen_hub.index_connection(
+            workspace,
+            action="workspace-assistant-read",
+            readonly=True,
+        ) as connection:
+            connection.execute("SELECT 1 FROM gusen_source_record LIMIT 1").fetchone()
+            yield connection
     except sqlite3.Error as error:
         raise SystemExit(f"本地索引不可用，请先重建：{error}") from error
 
@@ -76,8 +81,7 @@ def unified_search(workspace: dict, query: str, limit: int = 20) -> dict:
     if not normalized:
         raise SystemExit("统一搜索需要输入关键词")
     bounded_limit = max(1, min(int(limit), 50))
-    connection = _connection(workspace)
-    try:
+    with _connection(workspace) as connection:
         candidates = [
             dict(row)
             for row in gusen_hub.find_source_candidates(
@@ -115,8 +119,6 @@ def unified_search(workspace: dict, query: str, limit: int = 20) -> dict:
                     (workspace["scopeId"], *source_ids),
                 ).fetchall()
             }
-    finally:
-        connection.close()
 
     items = []
     seen = set()
@@ -218,21 +220,19 @@ def context_pack(
     """Build a copy-ready, bounded evidence package for one indexed source object."""
 
     bounded_limit = max(1, min(int(limit), 30))
-    connection = _connection(workspace)
     try:
-        context = gusen_hub.query_source_context(
-            connection, workspace["scopeId"], source_id, fun_id, bounded_limit
-        )
-        facts_result = source_facts.query_facts(
-            connection,
-            workspace["scopeId"],
-            source_id=source_id,
-            limit=min(30, bounded_limit * 4),
-        )
+        with _connection(workspace) as connection:
+            context = gusen_hub.query_source_context(
+                connection, workspace["scopeId"], source_id, fun_id, bounded_limit
+            )
+            facts_result = source_facts.query_facts(
+                connection,
+                workspace["scopeId"],
+                source_id=source_id,
+                limit=min(30, bounded_limit * 4),
+            )
     except ValueError as error:
         raise SystemExit(str(error)) from error
-    finally:
-        connection.close()
 
     source = dict(context["source"])
     candidate_facts = [

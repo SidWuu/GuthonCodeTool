@@ -183,7 +183,7 @@ readonly 使用 `<脚本序号>-<脚本类型>[-<脚本描述>]` 目录名，例
 本地映射文件：
 
 ```text
-var/nexus/bridge/manifest.json
+<本地数据目录>/var/nexus/bridge/manifest.json
 ```
 
 ## 不支持

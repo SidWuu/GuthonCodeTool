@@ -2,11 +2,21 @@
 
 GuthonCodeTool 是谷神低代码开发平台的本地开发工具集。每个产品或项目可显式选择数据库或 SVN 源码模式，并为 AI、VS Code 和 Chrome 提供统一的多工作区路由。
 
-根仓库只保存公开工具代码、配置模板和说明文档；私有源码、数据库元数据、索引和日志位于 `var/`，由 `var/.git` 单独管理。
+GuthonCodeTool 是独立工具源码仓库，只保存公开的工具代码、配置模板和说明文档。真实运行配置和私有数据在仓库之外的**本地数据目录（toolHome）**，两者物理分离：
+
+```text
+<toolHome>/
+├── GuthonCodeTool/     工具源码（本仓库）
+├── config/             真实运行配置
+├── docs/private/       维护者私有资料和谷神 API bundle
+└── var/                私有谷神工作区，独立 Git
+```
+
+工具代码只通过显式 `--home`、runtime descriptor 或 `GUTHON_HOME` / `GUTHON_TOOL_HOME` 获取 `toolHome`，不从源码仓库相对路径推断运行数据。
 
 ## AI 开发入口
 
-工具开发读取 [AGENTS.md](AGENTS.md)；谷神业务开发从独立私有工作区的 `var/AGENTS.md` 进入。排查开发库/测试库，或在功能开发后执行数据库验证时，使用 [Guthon Testing Skill](skills/guthon-testing/SKILL.md)。Skill 可调用工具内置只读连接器；已有 DBX 时也可继续使用。专项规范按任务加载，README 不维护第二套 Agent 流程。
+工具开发读取 [AGENTS.md](AGENTS.md)，先经 [AI_CODE_INDEX.md](AI_CODE_INDEX.md) 定位模块；谷神业务开发从独立私有工作区的 `<toolHome>/var/AGENTS.md` 进入。排查开发库/测试库，或在功能开发后执行数据库验证时，使用 [Guthon Testing Skill](skills/guthon-testing/SKILL.md)。Skill 可调用工具内置只读连接器；已有 DBX 时也可继续使用。专项规范按任务加载，README 不维护第二套 Agent 流程。
 
 ## 核心能力
 
@@ -33,21 +43,16 @@ plugins/GuthonNexus/            Guthon Nexus
 scripts/
 ├── guthon_tool.py             唯一运行入口和命令编排
 ├── build_guthon_tool.py       独立应用构建入口
+├── sync_guthon_api.mjs        谷神 API 文档与补全数据同步
+├── check_ai_code_index.py     校验 AI_CODE_INDEX.md 的路径
 ├── common/                    双模式共享的路由、索引、查询和 Workcopy 基础能力
 └── providers/
     ├── database/              数据库源码、metadata 导出和只读诊断
     └── svn/                   SVN 清单、working copy、虚拟编辑和 SCM
 tests/                          Python 测试
-var/
-├── AGENTS.md                   谷神任务路由规则
-├── docs/                       公共业务与开发文档
-├── tools/                      私有辅助工具
-├── nexus/                      Nexus、Bridge 公共运行状态
-├── checkout/<配置 ID>/         SVN 模式唯一源码事实来源
-└── workspace/
-    ├── PRD <产品名称>/
-    └── PRJ <项目名称>/
 ```
+
+真实配置和私有数据不在本仓库：`<toolHome>/config/` 保存运行配置，`<toolHome>/var/` 保存私有谷神工作区（含 `checkout/`、`workspace/`、`nexus/`、`tools/`），详见 [配置说明](config/README.md)。
 
 正式 Release 同时提供 `guthon-testing.zip`。其他用户无需安装 DBX/MCP：安装 GuthonCodeTool 应用和 Guthon Nexus VSIX，将压缩包中的 `guthon-testing` 解压到 Codex Skills 目录，然后在 Nexus 为目标工作区配置一次专用只读数据库账号即可。
 
@@ -72,7 +77,7 @@ context/
 目录中的 `PRD`、`PRJ` 只控制显示顺序；程序不会通过目录名判断身份。
 
 SVN 新模式的工作区只创建 `docs` 和 `context` 等派生资料；唯一根 URL 完整检出到
-`var/checkout/<配置 ID>/repository/`。资源管理器保留原始目录供查看，日常修改从“谷神源码”进入并
+`<toolHome>/var/checkout/<配置 ID>/`。资源管理器保留原始目录供查看，日常修改从“谷神源码”进入并
 回写同一份文件；过程函数节点可右键复制函数名或 `包名.函数名`，也可选择索引识别的调用方并跳转到精确调用行。不再生成额外 `source/readonly` 或 `source/workcopy` 代码副本。
 
 ## 配置
@@ -115,30 +120,32 @@ products:
 
 ## CLI
 
+以下命令在工具源码仓库根执行，`$GUTHON_HOME` 是**本地数据目录（toolHome）**而非本仓库：先 `export GUTHON_HOME=/path/to/toolHome`。工具只通过显式 `--home` 读取 `config/` 和 `var/`，不会在源码仓库里创建运行数据。
+
 准备配置并查看全部工作区：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py setup --home .
-.venv/bin/python scripts/guthon_tool.py workspace-create --home .  # JSON 从 stdin 输入
-.venv/bin/python scripts/guthon_tool.py workspaces --home .
-.venv/bin/python scripts/guthon_tool.py workspace-resolve --home .  # 从当前 cwd 解析工作区与索引状态
-.venv/bin/python scripts/guthon_tool.py database-target-resolve --home . -- --path "$PWD"  # 自动选择该 cwd 的默认诊断库
-.venv/bin/python scripts/guthon_tool.py database-target-resolve --home . -- --path "$PWD" --environment test
-.venv/bin/python scripts/guthon_tool.py database-probe --home . -- --path "$PWD"
-.venv/bin/python scripts/guthon_tool.py database-describe --home . -- --path "$PWD" --table DEMO_ORDER
-printf '%s' '{"sql":"SELECT COUNT(*) AS total FROM DEMO_ORDER","maxRows":100}' | .venv/bin/python scripts/guthon_tool.py database-query-readonly --home . -- --path "$PWD"
+.venv/bin/python scripts/guthon_tool.py setup --home "$GUTHON_HOME"
+.venv/bin/python scripts/guthon_tool.py workspace-create --home "$GUTHON_HOME"  # JSON 从 stdin 输入
+.venv/bin/python scripts/guthon_tool.py workspaces --home "$GUTHON_HOME"
+.venv/bin/python scripts/guthon_tool.py workspace-resolve --home "$GUTHON_HOME"  # 从当前 cwd 解析工作区与索引状态
+.venv/bin/python scripts/guthon_tool.py database-target-resolve --home "$GUTHON_HOME" -- --path "$PWD"  # 自动选择该 cwd 的默认诊断库
+.venv/bin/python scripts/guthon_tool.py database-target-resolve --home "$GUTHON_HOME" -- --path "$PWD" --environment test
+.venv/bin/python scripts/guthon_tool.py database-probe --home "$GUTHON_HOME" -- --path "$PWD"
+.venv/bin/python scripts/guthon_tool.py database-describe --home "$GUTHON_HOME" -- --path "$PWD" --table DEMO_ORDER
+printf '%s' '{"sql":"SELECT COUNT(*) AS total FROM DEMO_ORDER","maxRows":100}' | .venv/bin/python scripts/guthon_tool.py database-query-readonly --home "$GUTHON_HOME" -- --path "$PWD"
 ```
 
 工作区命令必须显式传入 `--workspace`：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py sync-source-all --home . --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py sync-source --home . --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py sync-all --home . --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py reindex --home . --workspace projects.demo-project
-.venv/bin/python scripts/guthon_tool.py export-markdown --home . --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py search --home . --workspace products.demo-product -- --query 订单保存
-.venv/bin/python scripts/guthon_tool.py context-pack --home . --workspace products.demo-product -- --source-id '<source-id>' --fun-id '<fun-id>'
+.venv/bin/python scripts/guthon_tool.py sync-source-all --home "$GUTHON_HOME" --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py sync-source --home "$GUTHON_HOME" --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py sync-all --home "$GUTHON_HOME" --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py reindex --home "$GUTHON_HOME" --workspace projects.demo-project
+.venv/bin/python scripts/guthon_tool.py export-markdown --home "$GUTHON_HOME" --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py search --home "$GUTHON_HOME" --workspace products.demo-product -- --query 订单保存
+.venv/bin/python scripts/guthon_tool.py context-pack --home "$GUTHON_HOME" --workspace products.demo-product -- --source-id '<source-id>' --fun-id '<fun-id>'
 ```
 
 SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 SVN，并在已有的
@@ -147,17 +154,17 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 （Windows），Nexus 只解析一次其中的 checkout 命令；脚本不会被执行，也不会从 `context/` 或其他工作区自动发现。之后检出/更新以配置为准。简明步骤见 [发行模式新增 SVN 产品或项目](docs/GuthonCodeTool_发行模式新增SVN产品项目.md)：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py source-mode --home . --workspace products.demo-product -- set --mode svn
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- scope-import  # JSON stdin: {"text":"...","source":"script"}
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- scope-preview
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-script --accept-scope-change
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- refresh
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --diff
-.venv/bin/python scripts/guthon_tool.py reindex --home . --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- find --keyword 订单保存
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- facts --keyword 保存失败
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- explain --table T_ORDER
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- delivery-status
+.venv/bin/python scripts/guthon_tool.py source-mode --home "$GUTHON_HOME" --workspace products.demo-product -- set --mode svn
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- scope-import  # JSON stdin: {"text":"...","source":"script"}
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- scope-preview
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- sync-from-script --accept-scope-change
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- refresh
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- status --diff
+.venv/bin/python scripts/guthon_tool.py reindex --home "$GUTHON_HOME" --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- find --keyword 订单保存
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- facts --keyword 保存失败
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- explain --table T_ORDER
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- delivery-status
 ```
 
 配置变更会在执行前显示新增、移除和变更数量，确认后将唯一根地址写入工作区 `context/authorized-scope.json` 并检出/更新；该 JSON 仅供程序使用。
@@ -193,16 +200,16 @@ SVN 工作区的 `sync-all` 只扫描本地 SVN 范围并更新索引和摘要�
 所有导出同样通过统一入口绑定工作区：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py export-schema --home . --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py export-bill-type --home . --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py export-system-script --home . --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py export-view --home . --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py export-schema --home "$GUTHON_HOME" --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py export-bill-type --home "$GUTHON_HOME" --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py export-system-script --home "$GUTHON_HOME" --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py export-view --home "$GUTHON_HOME" --workspace products.demo-product
 ```
 
 额外筛选参数放在 `--` 后，例如：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py export-view --home . \
+.venv/bin/python scripts/guthon_tool.py export-view --home "$GUTHON_HOME" \
   --workspace products.demo-product -- \
   --data-source-ids 0015 --view-ids V_RM_EXAMPLE
 ```
@@ -216,7 +223,7 @@ SVN 工作区的 `sync-all` 只扫描本地 SVN 范围并更新索引和摘要�
 - 自动化已知“旧文本 → 新文本”时，直接把 `sourceType/sourceId/funId/jsonPointer` 和精确 `replacements` 交给 `svn write-batch`；CLI 会自动打开目标，不再要求预先收集 `sessionId/documentId`。需要先阅读多个对象或生成完整 `content` 时，可用一次 `svn read-batch` 取得全部正文和文档 ID；旧的显式会话写法继续兼容。工具会先预检整批、拒绝同一物理文件重复出现，写入失败时恢复已写文件，成功后一次性增量更新涉及的索引。不要编写临时 Python 直接读写 checkout 或自行循环重试锁。
 
   ```bash
-  .venv/bin/python scripts/guthon_tool.py --home . \
+  .venv/bin/python scripts/guthon_tool.py --home "$GUTHON_HOME" \
     --workspace products.demo-product svn -- \
     write-batch < /tmp/guthon-svn-change-plan.json
   ```
@@ -265,10 +272,10 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
 6. 在项目的“工作区驾驶舱”查看状态并直接进入对应操作；使用“搜索工作区完整索引”跨源码身份与事实检索，选择结果后可打开源码，或复制默认精简、按需详细的 AI 上下文。
 7. 需要网页功能时从 Nexus 启动 Guthon Bridge。
 
-维护者可切换到调试模式并选择本仓库；Nexus 会直接调用 `.venv` 和 `scripts/guthon_tool.py`。当前运行模式写入：
+维护者可切换到调试模式并选择本仓库作为源码目录；Nexus 会直接调用 `.venv` 和 `scripts/guthon_tool.py`，本地数据目录仍独立选择。当前运行模式写入：
 
 ```text
-var/nexus/tool-runtime.json
+<toolHome>/var/nexus/tool-runtime.json
 ```
 
 该描述符除基础 `command`/`home` 外，还写入 cwd 无关的 `workspaceResolveCommand`、`databaseTargetResolveCommand`、`databaseProbeCommand`、`databaseDescribeCommand`、`databaseQueryCommand` 与 `linterCommand` 数组。
@@ -291,15 +298,16 @@ Bridge 请求携带 `workspaceKey` 时会验证页面身份；未携带时按 `p
 
 `scripts/providers/database/run_source_diagnosis.py` 只连接显式标记为测试、启用只读排查并声明数据库白名单的数据源，通过
 统一 CLI 的 `diagnose` 命令运行。每一步只执行单条绑定参数的 `SELECT`，在首个不满足条件的位置停止，报告写入
-`var/docs/业务排查文档/`。
+`<toolHome>/var/docs/业务排查文档/`。
 
 模板见 `config/example/source-diagnosis.example.json`。
 
 ## 验证
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py self-test --home .
-.venv/bin/python -m unittest discover -s tests
+.venv/bin/python scripts/guthon_tool.py self-test --home "$(mktemp -d)"
+PYTHONPATH=scripts .venv/bin/python -m unittest discover -s tests
+python scripts/check_ai_code_index.py
 
 cd plugins/GuthonBridge
 npm test
@@ -318,4 +326,4 @@ npm test
 - [全功能说明](docs/GuthonCodeTool_全功能说明.html)
 - [配置说明](config/README.md)
 - [Bridge 说明](plugins/GuthonBridge/README.md)
-- [私有目录说明](var/README.md)
+- [AI 代码索引](AI_CODE_INDEX.md)

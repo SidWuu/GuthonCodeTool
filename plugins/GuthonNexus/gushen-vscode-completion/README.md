@@ -154,8 +154,10 @@ data/manual.json
 Regenerate API completion data:
 
 ```bash
-npm run build:data
+npm run build:data -- /path/to/api-docs     # 或设置 GUTHON_TOOL_HOME / GUTHON_HOME 使用 <toolHome>/var/docs/谷神方言API
 ```
+
+The build script no longer walks up from the plugin directory to find a `var` folder: it uses the explicit directory argument, or resolves `<toolHome>/var/docs/谷神方言API` from `GUTHON_TOOL_HOME` / `GUTHON_HOME`, and fails with a clear error when neither is provided.
 
 Run tests:
 

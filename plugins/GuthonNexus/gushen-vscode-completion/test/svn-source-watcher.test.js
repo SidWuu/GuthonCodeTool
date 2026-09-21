@@ -11,6 +11,14 @@ test('maps a controlled working-copy file back to its logical authorized path', 
   );
 });
 
+test('maps a repository-root working copy without adding a physical subdirectory', () => {
+  const root = path.resolve('/checkout/demo');
+  assert.equal(
+    logicalSourcePath({ root, localSubdir: '.' }, path.join(root, 'datasources', '0002', 'tables', 'PR_COMPANY.json')),
+    'datasources/0002/tables/PR_COMPANY.json'
+  );
+});
+
 test('ignores files outside the working copy, SVN metadata and unsupported extensions', () => {
   const root = path.resolve('/checkout/pages/SYS-1');
   assert.equal(logicalSourcePath({ root, localSubdir: 'pages/SYS-1' }, '/outside/PG-1.json'), undefined);

@@ -9,14 +9,16 @@ YAML 配置文件首行说明各自用途；`system-data.json` 只是在 DATABAS
 以下完整示例只供维护者手工配置或查阅字段：
 
 ```bash
-cp config/example/datasource.example.yaml config/datasource.yaml
-cp config/example/products.example.yaml config/products.yaml
-cp config/example/projects.example.yaml config/projects.yaml
-cp config/example/source-tables.example.yaml config/source-tables.yaml
-cp config/example/sync.example.yaml config/sync.yaml
+cp config/example/datasource.example.yaml "$GUTHON_HOME/config/datasource.yaml"
+cp config/example/products.example.yaml "$GUTHON_HOME/config/products.yaml"
+cp config/example/projects.example.yaml "$GUTHON_HOME/config/projects.yaml"
+cp config/example/source-tables.example.yaml "$GUTHON_HOME/config/source-tables.yaml"
+cp config/example/sync.example.yaml "$GUTHON_HOME/config/sync.yaml"
 ```
 
 `datasource.yaml` 和 `system-data.json` 不提交。
+
+上面命令在工具源码仓库根执行，`config/example/` 是仓库内的公开模板；真实运行配置和 `var/` 位于仓库之外。本文后续示例中的 `$GUTHON_HOME` 就是**本地数据目录（toolHome）**，与工具源码仓库是两个目录：先 `export GUTHON_HOME=/path/to/toolHome`，工具再通过显式 `--home` 读取其中的 `config/` 和 `var/`。`python scripts/guthon_tool.py setup --home "$GUTHON_HOME"` 会按模板在 `$GUTHON_HOME/config/` 创建缺失文件。
 
 谷神数据库快速排查和功能开发后的只读验证使用独立私有映射。日常从 Nexus 项目的“配置资料 → 配置数据库排查”创建 `diagnosis-only` 目标；连接密码写入操作系统凭据库，不进入 YAML、命令参数或日志。已有 DBX 的用户也可继续填写 `connectionId`。维护者可复制模板手工建立 `full` 正式验证目标：
 
@@ -79,7 +81,7 @@ products:
 ```
 
 `database` 保持现有源码表、metadata 导出和业务诊断流程。新 `svn` 模式由审阅后的授权清单声明全部精确 URL，
-把 `var/checkout/<配置 ID>` 下的一个或多个物理 working copy 聚合为唯一源码事实来源；不再依赖 datasource 或
+把 `<toolHome>/var/checkout/<配置 ID>` 下的一个或多个物理 working copy 聚合为唯一源码事实来源；不再依赖 datasource 或
 系统别名扩大范围，也不生成额外 readonly/workcopy 代码副本。
 
 SVN 示例（紧凑配置）：
@@ -103,7 +105,7 @@ products:
 `svn.url` 下，可以手动修改。新增 SVN 产品/项目时粘贴唯一 SVN 根地址或完整 checkout 命令；输入期间不解析，保存并关闭后再解析。该地址已包含当前账号有权限的全部目录，Nexus 不按 `systems.include.mappings` 或 `scope` 缩小检出范围。也可选择谷神平台为它下载的 `svnCheckoutHere.sh`
 （macOS/Linux）/`svnCheckoutHere.bat`（Windows）作为一次性导入来源；脚本不会被执行。未显式选择的
 `context/svnCheckoutHere.*` 不会被自动读取。Nexus 自动生成只有一个根条目的 `context/authorized-scope.json`，并把唯一真实 working copy 放在
-`var/checkout/<配置 ID>`，因此通常不需要配置 `svn.scope_manifest`、`checkout_layout` 或 `checkout_root`。工作区配置 ID 仍须在产品/项目之间唯一。
+`<toolHome>/var/checkout/<配置 ID>`，因此通常不需要配置 `svn.scope_manifest`、`checkout_layout` 或 `checkout_root`。工作区配置 ID 仍须在产品/项目之间唯一。
 
 旧的逐条 `svn.scope` 配置仍可读取，但新配置只写 `svn.url`。`systems.include.mappings` 继续用于页面身份匹配和业务分组，不参与 SVN checkout 授权或目录过滤。SVN 服务端返回无权限时 checkout 直接失败，不会把同一仓库拆成多个可跳过的 scope。
 
@@ -143,13 +145,13 @@ projects:
 Nexus 的“导入/粘贴 SVN checkout 配置”可选择 `.sh/.bat` 或粘贴 checkout 内容，并把唯一根地址写入当前 `products.yaml/projects.yaml` 的 `svn.url`；随后“检出/更新完整 SVN 仓库”会先显示地址及清单变更，确认后再写入脱敏清单、检出或更新。等价 CLI：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py source-mode --home . --workspace products.demo-product -- set --mode svn
-.venv/bin/python scripts/guthon_tool.py workspace-resolve --home .  # 在 PRD/PRJ cwd 中解析身份和 index.ready
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- scope-preview
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- scope-import  # JSON stdin: {"text":"...","source":"script"}
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-script --accept-scope-change
+.venv/bin/python scripts/guthon_tool.py source-mode --home "$GUTHON_HOME" --workspace products.demo-product -- set --mode svn
+.venv/bin/python scripts/guthon_tool.py workspace-resolve --home "$GUTHON_HOME"  # 在 PRD/PRJ cwd 中解析身份和 index.ready
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- scope-preview
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- scope-import  # JSON stdin: {"text":"...","source":"script"}
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- sync-from-script --accept-scope-change
 # 已在 products.yaml/projects.yaml 配置 svn.url 后可使用同义入口：
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-config --accept-scope-change
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- sync-from-config --accept-scope-change
 ```
 
 根 working copy 中的 `systems/<SYSTEM_ID>` 与 `datasources/<DATA_SOURCE_ID>` 会被识别为业务源码目录；`skill/public` 作为公共目录保留。`systems.include.mappings` 只用于身份匹配和展示分组，不改变 checkout 内容。
@@ -169,10 +171,10 @@ YAML、授权清单、参数或日志。认证成功后由 SVN 自身按认证�
 首次初始化和日常刷新：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- sync-from-script --accept-scope-change
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- refresh
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --diff
-.venv/bin/python scripts/guthon_tool.py svn --home . --workspace products.demo-product -- status --remote
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- sync-from-script --accept-scope-change
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- refresh
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- status --diff
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- status --remote
 ```
 
 `sync-from-script` 首次检出签出脚本中筛选后的每个精确 URL，全部仓库使用同一份工作区认证；后续更新现有 working copy 并全量建索引。`sync-from-bat` 是 Windows BAT 的命令入口。`refresh` 可用重复的 `--working-copy <entry-id>` 精确选择物理
@@ -219,37 +221,39 @@ SVN 不读取 `system-data.json`。产品和项目分别在 `mappings` 中维护
 工具不设置默认工作区。工作区键来自 `products.yaml`、`projects.yaml`，所有工作区命令都必须显式传入：
 
 ```bash
-.venv/bin/python scripts/guthon_tool.py sync-all --home . --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py sync-source-all --home . --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py sync-source --home . --workspace projects.demo-project
-.venv/bin/python scripts/guthon_tool.py reindex --home . --workspace projects.demo-project
-.venv/bin/python scripts/guthon_tool.py export-markdown --home . --workspace projects.demo-project
+.venv/bin/python scripts/guthon_tool.py sync-all --home "$GUTHON_HOME" --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py sync-source-all --home "$GUTHON_HOME" --workspace products.demo-product
+.venv/bin/python scripts/guthon_tool.py sync-source --home "$GUTHON_HOME" --workspace projects.demo-project
+.venv/bin/python scripts/guthon_tool.py reindex --home "$GUTHON_HOME" --workspace projects.demo-project
+.venv/bin/python scripts/guthon_tool.py export-markdown --home "$GUTHON_HOME" --workspace projects.demo-project
 ```
 
 目录按显示名称平铺，真实身份始终使用稳定键：
 
 ```text
-var/workspace/PRD 示例产品/
-var/workspace/PRJ 示例项目/
+<toolHome>/var/workspace/PRD 示例产品/
+<toolHome>/var/workspace/PRJ 示例项目/
 ```
 
 数据库工作区独立包含 `source/readonly`、`source/workcopy`、`database/{schema,billtype,views}`、`docs` 和
 `context/index.db`。SVN 新模式不创建 readonly/workcopy 代码目录，源码来自独立的
-`var/checkout/<配置 ID>/<entry.localSubdir>`，编辑会话只在 `context` 保存身份、独立编辑租约、hash、revision 和格式元数据，
+根 working copy 的 `entry.localSubdir` 为 `"."`，因此源码直接位于
+`<toolHome>/var/checkout/<配置 ID>/`；非根 working copy 位于
+`<toolHome>/var/checkout/<配置 ID>/<entry.localSubdir>`。编辑会话只在 `context` 保存身份、独立编辑租约、hash、revision 和格式元数据，
 不保存源码正文。同一工作区的短时读写通过带超时的跨进程锁排队；批量自动修改可在 `svn write-batch` 的 JSON
 变更计划中直接填写对象身份，由 CLI 自动取得会话；需要先查看多个对象时使用 `svn read-batch`。不得用临时脚本直接改
 checkout。状态检查按 provider 的有效步骤计算：数据库为五步，SVN 为本地源码扫描一步。
 
 ## 源码逻辑排查
 
-复制排查定义模板到私有 `var/` 目录后，按已拉取源码填写参数、逻辑步骤和查询 SQL：
+复制排查定义模板到私有 `<toolHome>/var/` 目录后，按已拉取源码填写参数、逻辑步骤和查询 SQL：
 
 ```bash
-cp config/example/source-diagnosis.example.json var/diagnosis/cases/<排查名称>.json
-.venv/bin/python scripts/guthon_tool.py diagnose --home . \
-  --workspace products.demo-product -- var/diagnosis/cases/<排查名称>.json
+cp config/example/source-diagnosis.example.json "$GUTHON_HOME/var/diagnosis/cases/<排查名称>.json"
+.venv/bin/python scripts/guthon_tool.py diagnose --home "$GUTHON_HOME" \
+  --workspace products.demo-product -- "$GUTHON_HOME/var/diagnosis/cases/<排查名称>.json"
 ```
 
 排查定义中的 `database` 指定默认数据库；某一步需要查询另一个数据库时，在该步骤增加同名 `database` 覆盖。数据库必须存在于数据源的 `databases` 白名单中，脚本不会执行 `USE`。
 
-执行器只接受单条 `SELECT`，使用绑定参数，每一步在对应数据库的新只读事务中执行。首个不满足 `continue_when` 的步骤停止，报告写入 `var/docs/业务排查文档/<日期>/`。完整参数、数据库、原生 SQL 和查询结果保存在报告中；终端只输出状态、停止步骤、结论和报告路径。
+执行器只接受单条 `SELECT`，使用绑定参数，每一步在对应数据库的新只读事务中执行。首个不满足 `continue_when` 的步骤停止，报告写入 `<toolHome>/var/docs/业务排查文档/<日期>/`。完整参数、数据库、原生 SQL 和查询结果保存在报告中；终端只输出状态、停止步骤、结论和报告路径。

@@ -15,6 +15,8 @@ from common import gusen_hub
 
 
 ROOT = gusen_hub.ROOT
+# 插件补全数据属于工具源码发行资源，与本地数据目录（ROOT）无关。
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_FILES = (
     "datasource.yaml",
     "products.yaml",
@@ -22,7 +24,7 @@ CONFIG_FILES = (
     "source-tables.yaml",
     "sync.yaml",
 )
-EXTENSION_DATA = ROOT / "plugins" / "GuthonVSCodeExtension" / "gushen-vscode-completion" / "data"
+EXTENSION_DATA = SOURCE_ROOT / "plugins" / "GuthonNexus" / "gushen-vscode-completion" / "data"
 
 
 def result(name, status, message):

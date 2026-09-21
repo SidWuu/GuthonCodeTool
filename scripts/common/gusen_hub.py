@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from common import source_facts
@@ -43,6 +44,7 @@ SOURCE_MODES = {"database", "svn"}
 SOURCE_MODE_FILE = "source-mode.json"
 SOURCE_MODE_VERSION = 1
 INDEX_BUSY_TIMEOUT_MS = 30000
+INDEX_LOCK_TIMEOUT_SECONDS = INDEX_BUSY_TIMEOUT_MS / 1000
 
 
 class IndexRebuildRequired(SystemExit):
@@ -1234,11 +1236,37 @@ def _migrate_workspace_identity(conn: sqlite3.Connection) -> bool:
     return True
 
 
-def connect_index(index_db: Path, *, rebuild_incompatible: bool = False) -> sqlite3.Connection:
-    index_db.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(index_db, timeout=INDEX_BUSY_TIMEOUT_MS / 1000)
+def _index_lock_error(index_db: Path, error: sqlite3.Error) -> SystemExit:
+    return SystemExit(
+        "本地索引正在被其他进程占用，无法完成索引操作："
+        f"{Path(index_db).resolve()}。请关闭 DBX、DataGrip 或 SQLite 查看器后重试。"
+    )
+
+
+def connect_index(
+    index_db: Path,
+    *,
+    rebuild_incompatible: bool = False,
+    readonly: bool = False,
+) -> sqlite3.Connection:
+    index_db = Path(index_db)
+    if readonly:
+        if not index_db.is_file():
+            raise sqlite3.OperationalError(f"index database does not exist: {index_db}")
+        connection_target = f"{index_db.resolve().as_uri()}?mode=ro"
+        conn = sqlite3.connect(
+            connection_target,
+            uri=True,
+            timeout=INDEX_BUSY_TIMEOUT_MS / 1000,
+        )
+    else:
+        index_db.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(index_db, timeout=INDEX_BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
     conn.execute(f"PRAGMA busy_timeout={INDEX_BUSY_TIMEOUT_MS}")
+    if readonly:
+        conn.execute("PRAGMA query_only=ON")
+        return conn
     existing = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gusen_source_record'"
     ).fetchone()
@@ -1362,6 +1390,81 @@ def connect_index(index_db: Path, *, rebuild_incompatible: bool = False) -> sqli
     if call_schema_migrated:
         conn.execute("VACUUM")
     return conn
+
+
+def connect_index_for_workspace(
+    workspace: dict,
+    *,
+    action: str = "index-init",
+    rebuild_incompatible: bool = False,
+) -> sqlite3.Connection:
+    """Initialize a workspace index under the same lock used by SVN writes.
+
+    The returned connection is intentionally unlocked after schema setup. Callers
+    that perform an index transaction must acquire the operation lock around that
+    transaction, as the SVN indexing functions already do.
+    """
+
+    lock = nullcontext()
+    if workspace.get("sourceMode") == "svn":
+        lock = svn_checkout.operation_lock(
+            workspace,
+            action,
+            blocking=True,
+            timeout_seconds=INDEX_LOCK_TIMEOUT_SECONDS,
+        )
+    try:
+        with lock:
+            return connect_index(
+                workspace["indexPath"],
+                rebuild_incompatible=rebuild_incompatible,
+            )
+    except sqlite3.OperationalError as error:
+        if "locked" in str(error).lower():
+            raise _index_lock_error(workspace["indexPath"], error) from error
+        raise
+
+
+@contextmanager
+def index_connection(
+    workspace: dict,
+    *,
+    action: str = "index-read",
+    readonly: bool = True,
+    rebuild_incompatible: bool = False,
+):
+    """Use a workspace index while holding its SVN operation lock.
+
+    Read-only callers hold a shared lock for the complete SQLite query. On
+    Windows the checkout lock implementation serializes shared and exclusive
+    operations, which keeps the behavior deterministic across hosts.
+    """
+
+    lock = nullcontext()
+    if workspace.get("sourceMode") == "svn":
+        lock = svn_checkout.operation_lock(
+            workspace,
+            action,
+            shared=readonly,
+            blocking=True,
+            timeout_seconds=INDEX_LOCK_TIMEOUT_SECONDS,
+        )
+    with lock:
+        conn = None
+        try:
+            conn = connect_index(
+                workspace["indexPath"],
+                rebuild_incompatible=rebuild_incompatible,
+                readonly=readonly,
+            )
+            yield conn
+        except sqlite3.OperationalError as error:
+            if "locked" in str(error).lower():
+                raise _index_lock_error(workspace["indexPath"], error) from error
+            raise
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 def _migrate_call_index_schema(conn):
@@ -1900,8 +2003,9 @@ def run_sync_once(args=None, on_progress=None):
     sync = cfg["sync"]["sync"]
     index_path = workspace["indexPath"]
     index_name = _indexed_path(index_path)
-    conn = connect_index(
-        index_path,
+    conn = connect_index_for_workspace(
+        workspace,
+        action="index-init",
         rebuild_incompatible=(
             not parsed.init_only
             and (workspace.get("sourceMode") == "svn" or not parsed.reindex_calls)
@@ -3645,34 +3749,41 @@ def _current_work_copy_source(metadata: dict):
         return metadata, source_path, _str(source_meta.get("changeKey"))
     cfg = load_config()
     workspace = resolve_workspace(cfg, metadata.get("workspaceKey"))
-    conn = connect_index(workspace["indexPath"])
     source_type = metadata.get("source_table") or ""
     alias = metadata.get("source_alias_id") or ""
     fun = metadata.get("fun_id") or ""
     project_id = metadata.get("project_id") or ""
-    if project_id:
-        row = conn.execute(
-            """
-            SELECT * FROM gusen_source_record
-            WHERE source_layer='PROJECT' AND project_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
-            """,
-            (project_id, source_type, alias, fun),
-        ).fetchone()
+
+    def lookup(conn):
+        if project_id:
+            row = conn.execute(
+                """
+                SELECT * FROM gusen_source_record
+                WHERE source_layer='PROJECT' AND project_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
+                """,
+                (project_id, source_type, alias, fun),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT * FROM gusen_source_record
+                WHERE source_layer='PRODUCT' AND scope_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
+                """,
+                (metadata.get("scope_id") or "", source_type, alias, fun),
+            ).fetchone()
         if not row:
             return None, None, ""
         path = ROOT / row["local_path"]
         return row, path, _work_copy_change_key(row)
-    row = conn.execute(
-        """
-        SELECT * FROM gusen_source_record
-        WHERE source_layer='PRODUCT' AND scope_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
-        """,
-        (metadata.get("scope_id") or "", source_type, alias, fun),
-    ).fetchone()
-    if not row:
-        return None, None, ""
-    path = ROOT / row["local_path"]
-    return row, path, _work_copy_change_key(row)
+
+    if workspace.get("sourceMode") == "svn":
+        with index_connection(workspace, action="workcopy-status-read", readonly=True) as conn:
+            return lookup(conn)
+    conn = connect_index(workspace["indexPath"])
+    try:
+        return lookup(conn)
+    finally:
+        conn.close()
 
 
 def inspect_work_copy(path):
@@ -3708,7 +3819,11 @@ def work_copy_cli(args=None):
         if parsed.command == "save-svn" or parsed.command == "diff":
             result = writeback.save(workspace, Path(parsed.path), check_only=parsed.check or parsed.command == "diff")
             if parsed.command == "save-svn" and not parsed.check and result.get("changed"):
-                conn = connect_index(workspace["indexPath"], rebuild_incompatible=True)
+                conn = connect_index_for_workspace(
+                    workspace,
+                    action="index-init",
+                    rebuild_incompatible=True,
+                )
                 try:
                     result["reindex"] = index_svn_workspace(conn, cfg, workspace)
                 finally:
@@ -3762,17 +3877,26 @@ def create_work_copy(args=None):
     cfg = load_config()
     workspace = resolve_workspace(cfg)
     layer, scope_id, project_id, _layer_cfg = resolve_pull_scope(cfg, {"workspaceKey": workspace["workspaceKey"]})
-    conn = connect_index(workspace["indexPath"])
-    try:
-        if workspace.get("sourceMode") == "svn":
+    if workspace.get("sourceMode") == "svn":
+        with index_connection(workspace, action="workcopy-read", readonly=True) as conn:
             row = find_svn_source(conn, workspace, parsed.type, parsed.source_id, parsed.alias, parsed.fun)
-        else:
+            result = create_work_copy_from_row(conn, cfg, row, workspace)
+    else:
+        conn = connect_index(workspace["indexPath"])
+        try:
             if not parsed.alias:
                 raise SystemExit("--alias is required in database source mode")
-            row = find_work_copy_source(conn, scope_id if layer == "PRODUCT" else None, project_id or None, parsed.type, parsed.alias, parsed.fun)
-        result = create_work_copy_from_row(conn, cfg, row, workspace)
-    finally:
-        conn.close()
+            row = find_work_copy_source(
+                conn,
+                scope_id if layer == "PRODUCT" else None,
+                project_id or None,
+                parsed.type,
+                parsed.alias,
+                parsed.fun,
+            )
+            result = create_work_copy_from_row(conn, cfg, row, workspace)
+        finally:
+            conn.close()
     print(result["path"])
 
 
@@ -3827,8 +3951,7 @@ def pull_source_to_work_copy(payload: dict):
         source_type = payload.get("sourceType") or ""
         if source_type not in SVN_SOURCE_TYPES:
             raise SystemExit(f"Unsupported SVN sourceType: {source_type}")
-        conn = connect_index(workspace["indexPath"])
-        try:
+        with index_connection(workspace, action="workcopy-read", readonly=True) as conn:
             row = find_svn_source(
                 conn,
                 workspace,
@@ -3842,8 +3965,6 @@ def pull_source_to_work_copy(payload: dict):
                 key: _str(row[key]) if key in row.keys() else ""
                 for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")
             }
-        finally:
-            conn.close()
         return {
             "ok": True,
             "workspaceKey": workspace["workspaceKey"],

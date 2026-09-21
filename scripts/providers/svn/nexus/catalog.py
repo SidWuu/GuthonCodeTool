@@ -15,6 +15,7 @@ from providers.svn.dedup import resolve_page_duplicates
 from .manifest import (
     ScopeEntry,
     load_authorized_scope,
+    logical_path_for_entry,
     scope_entry_label,
     source_category,
     source_identity,
@@ -61,9 +62,7 @@ def _file_revision(path: Path) -> str:
 
 def _logical_path(entry: ScopeEntry, path: Path) -> str:
     relative = path.resolve().relative_to(entry.root.resolve()).as_posix()
-    if entry.category == "root":
-        return relative
-    return f"{entry.local_subdir}/{relative}" if relative != "." else entry.local_subdir
+    return logical_path_for_entry(entry, relative)
 
 
 def _base_object(entry: ScopeEntry, path: Path, source_table: str, revisions: dict, changes: dict) -> dict:

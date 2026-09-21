@@ -12,14 +12,15 @@ def main(args=None):
     if parsed.workspace:
         gusen_hub.set_workspace(parsed.workspace)
     workspace = gusen_hub.resolve_workspace(cfg)
-    conn = gusen_hub.connect_index(workspace["indexPath"])
-    try:
+    with gusen_hub.index_connection(
+        workspace,
+        action="export-markdown-read",
+        readonly=True,
+    ) as conn:
         if workspace["type"] == "product":
             gusen_hub.export_product_docs(conn, workspace["scopeId"])
         else:
             gusen_hub.export_project_docs(conn, workspace["projectId"])
-    finally:
-        conn.close()
 
 
 if __name__ == "__main__":

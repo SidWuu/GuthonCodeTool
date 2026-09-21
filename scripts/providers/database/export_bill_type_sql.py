@@ -174,12 +174,13 @@ def main(argv=None):
             payloads.append(json.loads(path.read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError):
             continue
-    index = gusen_hub.connect_index(workspace["indexPath"])
-    try:
+    with gusen_hub.index_connection(
+        workspace,
+        action="billtype-index",
+        readonly=False,
+    ) as index:
         summary["indexed_bill_route_count"] = source_facts.replace_workspace_bill_routes(index, payloads)
         index.commit()
-    finally:
-        index.close()
     result = {"ok": True, **summary, "outputDir": str(output_dir)}
     gusen_hub.append_pull_log(
         "billtype",

@@ -32,9 +32,10 @@ rules:
 guthon_api:
   # 当前启用的谷神版本，同时决定根目录文档和插件补全数据。
   active_version: "2.0"
-  # 各谷神版本对应的本地 app.<hash>.js 文件。
+  # 各谷神版本对应的本地 app.<hash>.js 文件；路径相对本地数据目录（toolHome），
+  # 文件放在不提交的 <toolHome>/docs/private 下。也可直接写绝对路径。
   bundle_files:
-    # 谷神 1.5 bundle 路径；文件放在不提交的 docs/private 下。
+    # 谷神 1.5 bundle 路径。
     v1_5: "docs/private/guthon-api/1.5/app.<hash>.js"
-    # 谷神 2.0 bundle 路径；文件放在不提交的 docs/private 下。
+    # 谷神 2.0 bundle 路径。
     v2_0: "docs/private/guthon-api/2.0/app.<hash>.js"

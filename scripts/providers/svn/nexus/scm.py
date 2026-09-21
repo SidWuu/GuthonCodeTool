@@ -35,6 +35,7 @@ from .documents import accept_refreshed_files, load_session, session_path
 from .manifest import (
     ScopeEntry,
     load_authorized_scope,
+    logical_path_for_entry,
     resolve_authorized_path,
     source_category,
     source_path_writable,
@@ -126,8 +127,7 @@ def _change_metadata(indexed: dict[str, dict], logical_path: str) -> dict:
 
 
 def _logical_path(entry: ScopeEntry, relative: str) -> str:
-    normalized = Path(relative).as_posix().lstrip("/")
-    return f"{entry.local_subdir}/{normalized}" if normalized not in {"", "."} else entry.local_subdir
+    return logical_path_for_entry(entry, relative).lstrip("/")
 
 
 def _entry_and_path(workspace: dict, logical_path: str) -> tuple[ScopeEntry, Path, str]:

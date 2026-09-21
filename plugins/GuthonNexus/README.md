@@ -11,7 +11,7 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口。它把工作空间设
 
 - 运行模式：普通用户使用“发行模式”；维护者使用“调试模式”直接运行源码仓库的 `.venv` 和 Python 入口。
 - 项目源码来源：每个产品/项目节点独立选择 `DATABASE / SVN`，切换后立即刷新功能树；两种 provider 的项目混合显示。
-- 运行时描述：把当前模式、命令前缀和本地数据目录写入 `var/nexus/tool-runtime.json`，供 AI 使用同一套规范调用。
+- 运行时描述：把当前模式、命令前缀和本地数据目录写入 `<本地数据目录>/var/nexus/tool-runtime.json`，供 AI 使用同一套规范调用。
 - 设置工作空间：尚未配置时选择 GuthonCodeTool 应用和本地数据目录，创建缺失配置但不覆盖已有文件。
 - 切换工作空间：已配置时同一位置显示“切换工作空间”，确认后选择新的本地数据目录；取消时保留当前工作空间。
 - 添加产品或项目：首次设置和后续开发都使用同一向导；选择 SVN 或 DATABASE 后立即创建 Nexus 并结束，不在新增向导中输入登录、checkout 或数据库连接。SVN 在新建 Nexus 节点中继续设置登录、导入/粘贴 checkout 配置和编辑范围；DATABASE 后续补充 datasource。项目作为独立版本快照创建，不要求已有产品，也不选择产品条目。
@@ -208,9 +208,15 @@ npm run package
 code --install-extension guthon-nexus-vscode.vsix --force
 ```
 
-`/path/to/api-docs` 目录需要包含 `java.md`、`javascript.md` 和 `sql.md`。
+`/path/to/api-docs` 目录需要包含 `java.md`、`javascript.md` 和 `sql.md`。省略该参数时不再从插件目录向上猜 `var`，必须提供本地数据目录（`GUTHON_TOOL_HOME` / `GUTHON_HOME`），路径为 `<本地数据目录>/var/docs/谷神方言API`。
 
 `npm run build:data` 会重新生成 `data/index.json`。
+
+谷神 API 文档和 bundle 的完整同步（含版本校验与覆盖率检查）可用仓库根脚本；它同样只从显式 `--home` 或 `GUTHON_TOOL_HOME` / `GUTHON_HOME` 获取本地数据目录：
+
+```bash
+node scripts/sync_guthon_api.mjs --home /path/to/toolHome --check
+```
 
 不会覆盖：
 

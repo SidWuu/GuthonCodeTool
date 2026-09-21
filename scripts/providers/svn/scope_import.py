@@ -242,9 +242,12 @@ def _parse_statement(
         raise SystemExit(f"Line {line_number}: variables are not allowed in an SVN checkout destination")
     if PureWindowsPath(raw_subdir).is_absolute():
         raise SystemExit(f"Line {line_number}: SVN checkout destination must be relative")
-    if allow_unknown_category and raw_subdir in {".", "./"}:
-        raw_subdir = "root"
-    local_subdir = normalize_scope_subdir(raw_subdir, f"line-{line_number}")
+    is_root_destination = raw_subdir in {".", "./"}
+    local_subdir = normalize_scope_subdir(
+        raw_subdir,
+        f"line-{line_number}",
+        allow_root=is_root_destination,
+    )
     local_category = _category_from_path(local_subdir)
     remote_category = _category_from_path(urlsplit(url).path)
     if local_category and remote_category and local_category != remote_category:
@@ -252,9 +255,9 @@ def _parse_statement(
             f"Line {line_number}: checkout category differs between URL ({remote_category}) "
             f"and destination ({local_category})"
         )
-    category = local_category or remote_category
+    category = "root" if local_subdir == "." else local_category or remote_category
     if not category and allow_unknown_category:
-        category = "aggregate"
+        category = "root" if local_subdir == "." else "aggregate"
     if not category:
         raise SystemExit(f"Line {line_number}: cannot infer a supported source category")
     return ParsedCheckout(line=line_number, url=url, local_subdir=local_subdir, category=category)
@@ -537,11 +540,15 @@ def build_manifest_from_config(text: str, workspace_key: str) -> ImportResult:
 
         for expanded in item_values:
             expanded_url = normalize_scope_url(expanded.get("url"), f"entry-{index}")
+            category = str(expanded.get("category") or "").strip().casefold()
             raw_subdir = str(expanded.get("localSubdir") or "").strip()
             if not raw_subdir:
-                raw_subdir = PurePosixPath(urlsplit(expanded_url).path).name
-            local_subdir = normalize_scope_subdir(raw_subdir, f"entry-{index}")
-            category = str(expanded.get("category") or "").strip().casefold()
+                raw_subdir = "." if category == "root" else PurePosixPath(urlsplit(expanded_url).path).name
+            local_subdir = normalize_scope_subdir(
+                raw_subdir,
+                f"entry-{index}",
+                allow_root=category == "root" or raw_subdir in {".", "./"},
+            )
             inferred_local = _category_from_path(local_subdir)
             inferred_remote = _category_from_path(urlsplit(expanded_url).path)
             if category and category not in SUPPORTED_CATEGORIES:
@@ -551,9 +558,13 @@ def build_manifest_from_config(text: str, workspace_key: str) -> ImportResult:
                     f"SVN scope entry {index}: category differs between URL ({inferred_remote}) "
                     f"and destination ({inferred_local})"
                 )
-            category = category or inferred_local or inferred_remote
+            category = category or ("root" if local_subdir == "." else inferred_local or inferred_remote)
             if not category:
                 raise SystemExit(f"SVN scope entry {index}: cannot infer a supported source category")
+            if category == "root" and local_subdir != ".":
+                raise SystemExit(
+                    f"SVN scope entry {index}: repository root must use localSubdir '.'"
+                )
             key = (expanded_url, local_subdir)
             if key in exact_seen:
                 duplicate_count += 1
@@ -687,7 +698,11 @@ def _validate_checkouts(checkouts: list[ParsedCheckout]) -> None:
 
 
 def _entry_id(checkout: ParsedCheckout, used: set[str]) -> str:
-    candidate = re.sub(r"[^A-Za-z0-9._-]+", "-", checkout.local_subdir.replace("/", "-")).strip(".-")
+    candidate = (
+        "repository-root"
+        if checkout.category == "root" and checkout.local_subdir == "."
+        else re.sub(r"[^A-Za-z0-9._-]+", "-", checkout.local_subdir.replace("/", "-")).strip(".-")
+    )
     if not candidate or not SAFE_ENTRY_ID.fullmatch(candidate):
         candidate = f"scope-{hashlib.sha256(checkout.url.encode('utf-8')).hexdigest()[:12]}"
     if candidate in used:
@@ -739,23 +754,6 @@ def parse_scope_input(text: str, workspace_key: str, source: str = "script") -> 
             return build_manifest_from_config(text, workspace_key)
         except SystemExit:
             raise script_error
-
-
-def _workspace_checkout_paths(workspace: dict) -> list[str]:
-    paths = []
-    mappings = workspace.get("systemMappings")
-    if not isinstance(mappings, dict):
-        mappings = ((workspace.get("systems") or {}).get("include") or {}).get("mappings") or {}
-    for mapping in mappings.values():
-        if not isinstance(mapping, dict):
-            continue
-        system_id = str(mapping.get("system_id") or "").strip()
-        data_source_id = str(mapping.get("data_source_id") or "").strip()
-        if system_id and f"systems/{system_id}" not in paths:
-            paths.append(f"systems/{system_id}")
-        if data_source_id and f"datasources/{data_source_id}" not in paths:
-            paths.append(f"datasources/{data_source_id}")
-    return paths
 
 
 COMPACT_SCOPE_DEFAULT = ("systems", "datasources")
@@ -868,7 +866,7 @@ def build_manifest_from_workspace_config(workspace: dict) -> ImportResult:
             json.dumps({"entries": [{
                 "id": "repository-root",
                 "url": root_url,
-                "localSubdir": "repository",
+                "localSubdir": ".",
                 "category": "root",
                 "writable": True,
             }]}, ensure_ascii=False),
@@ -936,7 +934,7 @@ def build_manifest_from_workspace_input(text: str, workspace: dict) -> ImportRes
             raw_entries.append({
                 "id": "repository-root",
                 "url": checkout.url,
-                "localSubdir": "repository",
+                "localSubdir": ".",
                 "category": "root",
                 "writable": True,
             })

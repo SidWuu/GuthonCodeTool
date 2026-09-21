@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
@@ -55,6 +56,9 @@ MANIFEST_SVN_CAPABILITY_DEFAULTS = {
     "history": True,
     "revert": True,
 }
+
+
+_OPERATION_LOCK_STATE = threading.local()
 SVN_CAPABILITY_DEFAULTS = LEGACY_SVN_CAPABILITY_DEFAULTS
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ENV_REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
@@ -320,7 +324,31 @@ def operation_lock(
         raise ValueError("SVN operation lock timeout must be positive")
     lock_path = workspace["contextDir"] / ".svn-operation.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as handle:
+    lock_key = str(lock_path.resolve())
+    held_locks = getattr(_OPERATION_LOCK_STATE, "held", None)
+    if held_locks is None:
+        held_locks = {}
+        _OPERATION_LOCK_STATE.held = held_locks
+    held = held_locks.get(lock_key)
+    if held is not None:
+        if held["shared"] and not shared:
+            raise SystemExit(
+                f"Cannot upgrade nested SVN operation lock for {workspace['workspaceKey']}"
+            )
+        held["depth"] += 1
+        try:
+            yield
+        finally:
+            held["depth"] -= 1
+            if held["depth"] == 0:
+                held_locks.pop(lock_key, None)
+        return
+    # ``msvcrt.locking`` requires a stable seekable descriptor.  Opening the
+    # file in append mode lets Windows move the CRT file position on writes,
+    # which can make the matching unlock fail with PermissionError.
+    if not lock_path.exists():
+        lock_path.touch()
+    with lock_path.open("r+b") as handle:
         deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
         while True:
             try:
@@ -356,14 +384,23 @@ def operation_lock(
             handle.truncate()
             handle.write(f"{os.getpid()} {action}\n".encode("utf-8"))
             handle.flush()
+        held_locks[lock_key] = {"shared": bool(shared), "depth": 1}
         try:
             yield
         finally:
+            held_locks.pop(lock_key, None)
             if fcntl is not None:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
             else:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                try:
+                    handle.flush()
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    # Closing the descriptor immediately afterwards releases
+                    # the Windows byte-range lock.  Do not mask the operation
+                    # result with a cleanup-only PermissionError (Errno 13).
+                    pass
 
 
 def _svn_auth(settings: dict, *, password_from_stdin=False) -> list[str]:
