@@ -2,7 +2,7 @@
   "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon workspace, source sync, metadata export, workcopy tools, API completions, hover documentation, and source navigation.",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,
@@ -217,7 +217,7 @@
     },
     "views": {
       "guthon": [
-        { "id": "gushenCompletion.toolView", "name": "Guthon Nexus" },
+        { "id": "gushenCompletion.toolView", "name": "谷神工作区" },
         { "id": "gushenCompletion.svnSourceView", "name": "谷神源码" }
       ]
     },

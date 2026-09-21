@@ -94,6 +94,7 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
 
 test('Nexus lists every configured workspace and binds commands to workspaceKey', () => {
   const extension = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.js'), 'utf8');
+  const manifest = require('../package.json');
 
   assert.equal(extension.includes("readWorkspaces(tool)"), true);
   assert.equal(extension.includes("item.displayName"), true);
@@ -101,4 +102,12 @@ test('Nexus lists every configured workspace and binds commands to workspaceKey'
   assert.equal(extension.includes("gushenCompletion.selectWorkspaceSourceMode"), true);
   assert.equal(extension.includes("sourceModeView"), false);
   assert.equal(extension.includes("syncActive"), false);
+  assert.deepEqual(
+    manifest.contributes.views.guthon.map(({ id, name }) => ({ id, name })),
+    [
+      { id: 'gushenCompletion.toolView', name: '谷神工作区' },
+      { id: 'gushenCompletion.svnSourceView', name: '谷神源码' },
+    ]
+  );
+  assert.equal((extension.match(/toolItem\(\s*'添加产品或项目'/g) || []).length, 1);
 });

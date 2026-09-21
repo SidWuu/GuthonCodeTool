@@ -380,12 +380,6 @@ class ToolTreeDataProvider {
         'folder-library',
         ready ? (path.basename(toolHome) || '已配置') : '选择本地数据目录'
       ),
-      ready && toolItem(
-        '添加产品或项目',
-        'gushenCompletion.addWorkspace',
-        'add',
-        '后续开发可随时新增'
-      ),
       configFiles,
       toolItem('打开本地数据目录', 'gushenCompletion.openToolHome', 'folder-opened'),
     ].filter(Boolean);
