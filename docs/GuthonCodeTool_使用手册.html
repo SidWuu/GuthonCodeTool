@@ -121,58 +121,74 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
   <div class="hero-inner">
     <span class="eyebrow"><span class="eyebrow-dot"></span>macOS M1 及后续型号 &amp; Windows</span>
     <h1>GuthonCodeTool<br>使用手册</h1>
-    <p>面向第一次使用和日常开发，按同一套 VS Code 操作完成下载、初始化、同步、Bridge 安装、Workcopy 开发与升级。</p>
-    <div class="hero-meta"><span>从零开始</span><span>跨平台共用</span><span>日常工作流</span><span>常见问题</span></div>
+    <p>GuthonCodeTool 将谷神工作区配置、源码同步、受控开发和交付检查集中到 VS Code。请先完成安装，再根据 DATABASE 或 SVN 路线使用 Nexus、团队治理和 Bridge。</p>
+    <div class="hero-meta"><span>安装</span><span>Nexus 双路线</span><span>团队治理</span><span>日常工作流</span></div>
     <div class="hero-actions">
-      <a class="btn btn-primary" href="#1-准备与下载">开始安装</a>
+      <a class="btn btn-primary" href="#1-安装">开始安装</a>
       <a class="btn btn-ghost" href="GuthonCodeTool_QA.html">问题解决中心</a>
       <a class="btn btn-ghost" href="GuthonCodeTool_全功能说明.html">全功能说明</a>
-      <a class="btn btn-ghost" href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">Github Release</a>
-      <a class="btn btn-ghost" href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Release</a>
-      <a class="btn btn-ghost" href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有仓库</a>
     </div>
   </div>
 </header>
 <div class="layout">
   <aside class="sidebar" id="sidebar">
-<div class="side-head"><div class="side-title"><strong>使用目录</strong><span class="chapter-count">10 章</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索章节…（按 / 聚焦）" aria-label="搜索章节"></div>
+<div class="side-head"><div class="side-title"><strong>使用目录</strong><span class="chapter-count">6 个模块</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索模块或步骤…（按 / 聚焦）" aria-label="搜索章节"></div>
 <nav class="toc" id="toc">
-<a class="toc-link" href="#1-准备与下载" data-title="1. 准备与下载">1. 准备与下载</a>
-<a class="toc-link" href="#2-安装应用和-vs-code-扩展" data-title="2. 安装应用和 vs code 扩展">2. 安装应用和 VS Code 扩展</a>
-<a class="toc-link toc-sub" href="#2-1-macos" data-title="2.1 macos">2.1 macOS</a>
-<a class="toc-link toc-sub" href="#2-2-windows" data-title="2.2 windows">2.2 Windows</a>
-<a class="toc-link toc-sub" href="#2-3-安装-vsix" data-title="2.3 安装 vsix">2.3 安装 VSIX</a>
-<a class="toc-link" href="#3-设置工作空间" data-title="3. 设置工作空间">3. 设置工作空间</a>
-<a class="toc-link" href="#4-填写配置并安装-guthon-team" data-title="4. 填写配置并安装 guthon-team">4. 填写配置并安装 guthon-team</a>
-<a class="toc-link toc-sub" href="#4-1-从私人仓库安装团队规范" data-title="4.1 从私人仓库安装团队规范">4.1 从私人仓库安装团队规范</a>
-<a class="toc-link" href="#5-首次初始化和同步" data-title="5. 首次初始化和同步">5. 首次初始化和同步</a>
-<a class="toc-link" href="#6-安装和启动-bridge" data-title="6. 安装和启动 bridge">6. 安装和启动 Bridge</a>
-<a class="toc-link toc-sub" href="#6-1-加载-chrome-扩展" data-title="6.1 加载 chrome 扩展">6.1 加载 Chrome 扩展</a>
-<a class="toc-link toc-sub" href="#6-2-启动本地服务" data-title="6.2 启动本地服务">6.2 启动本地服务</a>
-<a class="toc-link" href="#7-日常工作流" data-title="7. 日常工作流">7. 日常工作流</a>
-<a class="toc-link" href="#8-系统差异和解决步骤" data-title="8. 系统差异和解决步骤">8. 系统差异和解决步骤</a>
-<a class="toc-link" href="#9-升级和迁移" data-title="9. 升级和迁移">9. 升级和迁移</a>
-<a class="toc-link" href="#10-常见问题与验收" data-title="10. 常见问题与验收">10. 常见问题与验收</a>
+<a class="toc-link" href="#1-安装" data-title="1. 安装">1. 安装</a>
+<a class="toc-link toc-sub" href="#1-1-准备与下载" data-title="1.1 准备与下载">1.1 准备与下载</a>
+<a class="toc-link toc-sub" href="#1-2-安装应用" data-title="1.2 安装应用">1.2 安装应用</a>
+<a class="toc-link toc-sub" href="#1-3-安装-nexus" data-title="1.3 安装 Nexus">1.3 安装 Nexus</a>
+<a class="toc-link toc-sub" href="#1-4-设置工作空间" data-title="1.4 设置工作空间">1.4 设置工作空间</a>
+<a class="toc-link" href="#2-nexus" data-title="2. Nexus">2. Nexus</a>
+<a class="toc-link toc-sub" href="#2-1-创建产品或项目" data-title="2.1 创建产品或项目">2.1 创建产品或项目</a>
+<a class="toc-link toc-sub" href="#2-2-database-路线" data-title="2.2 DATABASE 路线">2.2 DATABASE 路线</a>
+<a class="toc-link toc-sub" href="#2-3-svn-路线" data-title="2.3 SVN 路线">2.3 SVN 路线</a>
+<a class="toc-link toc-sub" href="#2-4-驾驶舱与工作区管理" data-title="2.4 驾驶舱与工作区管理">2.4 驾驶舱与工作区管理</a>
+<a class="toc-link" href="#3-guthon-team" data-title="3. guthon-team">3. guthon-team</a>
+<a class="toc-link toc-sub" href="#3-1-安装治理插件" data-title="3.1 安装治理插件">3.1 安装治理插件</a>
+<a class="toc-link toc-sub" href="#3-2-信任-hook" data-title="3.2 信任 Hook">3.2 信任 Hook</a>
+<a class="toc-link toc-sub" href="#3-3-初始化并检查" data-title="3.3 初始化并检查">3.3 初始化并检查</a>
+<a class="toc-link toc-sub" href="#3-4-手动与无-hook-安装" data-title="3.4 手动与无 Hook 安装">3.4 手动与无 Hook 安装</a>
+<a class="toc-link" href="#4-bridge" data-title="4. Bridge">4. Bridge</a>
+<a class="toc-link toc-sub" href="#4-1-安装-chrome-扩展" data-title="4.1 安装 Chrome 扩展">4.1 安装 Chrome 扩展</a>
+<a class="toc-link toc-sub" href="#4-2-启动与验证" data-title="4.2 启动与验证">4.2 启动与验证</a>
+<a class="toc-link" href="#5-日常工作流" data-title="5. 日常工作流">5. 日常工作流</a>
+<a class="toc-link toc-sub" href="#5-1-database-工作流" data-title="5.1 DATABASE 工作流">5.1 DATABASE 工作流</a>
+<a class="toc-link toc-sub" href="#5-2-svn-工作流" data-title="5.2 SVN 工作流">5.2 SVN 工作流</a>
+<a class="toc-link toc-sub" href="#5-3-更新工作流" data-title="5.3 更新工作流">5.3 更新工作流</a>
+<a class="toc-link" href="#6-其他" data-title="6. 其他">6. 其他</a>
+<a class="toc-link toc-sub" href="#6-1-系统差异" data-title="6.1 系统差异">6.1 系统差异</a>
+<a class="toc-link toc-sub" href="#6-2-迁移与删除" data-title="6.2 迁移与删除">6.2 迁移与删除</a>
+<a class="toc-link toc-sub" href="#6-3-常见问题" data-title="6.3 常见问题">6.3 常见问题</a>
+<a class="toc-link toc-sub" href="#6-4-验收清单" data-title="6.4 验收清单">6.4 验收清单</a>
 <div class="no-result" id="noResult">没有匹配的章节</div>
 </nav>
 </aside>
   <main class="main">
 <div class="overview">
-<article class="overview-card"><div class="overview-number">01</div><h3>下载</h3><p>从同一 Release 获取应用、VSIX 与 GuthonBridge。</p></article>
-<article class="overview-card"><div class="overview-number">02</div><h3>初始化</h3><p>在 VS Code 侧边栏选择应用和本地数据目录。</p></article>
-<article class="overview-card"><div class="overview-number">03</div><h3>配置</h3><p>填写五个 YAML，并从 guthon-team 安装团队规范与门禁。</p></article>
-<article class="overview-card"><div class="overview-number">04</div><h3>同步</h3><p>在项目树选择产品或项目，独立同步全部资料。</p></article>
-<article class="overview-card"><div class="overview-number">05</div><h3>开发</h3><p>DATABASE 修改 Workcopy；SVN 直接从“谷神源码”打开和保存。</p></article>
-<article class="overview-card"><div class="overview-number">06</div><h3>交付</h3><p>检查差异；SVN 保存到谷神后仍在平台最终提交。</p></article>
+<article class="overview-card"><div class="overview-number">01</div><h3>安装</h3><p>下载应用和扩展，设置长期使用的本地数据目录。</p></article>
+<article class="overview-card"><div class="overview-number">02</div><h3>Nexus</h3><p>创建工作区后，按 DATABASE 或 SVN 路线独立配置。</p></article>
+<article class="overview-card"><div class="overview-number">03</div><h3>guthon-team</h3><p>安装规范、Linter、Hook，并检查治理状态。</p></article>
+<article class="overview-card"><div class="overview-number">04</div><h3>Bridge</h3><p>连接 Chrome 与 Nexus，按需使用网页辅助能力。</p></article>
+<article class="overview-card"><div class="overview-number">05</div><h3>日常工作流</h3><p>按源码模式完成同步、开发、检查和交付。</p></article>
+<article class="overview-card"><div class="overview-number">06</div><h3>其他</h3><p>查看系统差异、迁移、删除、常见问题和验收。</p></article>
 </div>
 <aside class="notice"><div class="notice-icon">i</div><div>
-<p>macOS M1 及后续型号与 Windows 的 VS Code 操作相同；只有下载的应用和 SVN 签出文件不同。</p>
-<p>GuthonCodeTool 本身不要求克隆源码、安装 Python、安装 Node.js 或创建虚拟环境；安装团队规范与门禁时，需额外准备 Git、Python 3 和已获授权的 GitHub 账号。</p>
+<p><strong>先选路线：</strong>DATABASE 从数据库导出 readonly，再在 Workcopy 开发；SVN 完整检出唯一根地址，从“谷神源码”受控编辑。两个模式的配置、同步和交付方式不同。</p>
+<p>macOS M1 及后续型号与 Windows 的 Nexus 操作相同。GuthonCodeTool 本身不要求克隆源码、安装 Python、安装 Node.js 或创建虚拟环境。</p>
 </div></aside>
 
 <section class="wiki-section">
-<h2 id="1-准备与下载">1. 准备与下载</h2>
-<p>开始前准备 VS Code、Chrome、产品/项目配置，以及可访问 <a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有 GitHub 仓库</a>的账号。该仓库为私人仓库，必须先加入访问权限；无法打开或克隆时请联系我开通。DATABASE 模式还需要数据库只读账号；SVN 模式还需要 SVN 1.10+ 客户端、SVN 账号以及 <code>config/products.yaml</code> 或 <code>config/projects.yaml</code> 对应条目的唯一 <code>svn.url</code>。该地址默认完整 checkout，不按系统映射过滤。首次没有配置时，可使用谷神平台下载的 <code>svnCheckoutHere.sh</code> 或 <code>svnCheckoutHere.bat</code> 一次性导入，Nexus 不会执行脚本。</p>
+<h2 id="1-安装">1. 安装</h2>
+<h3 id="1-1-准备与下载">1.1 准备与下载</h3>
+<p>下载前确认：</p>
+<ul>
+<li>已安装 VS Code；需要网页辅助功能时同时准备 Chrome。</li>
+<li>已取得团队 Marketplace 访问权限。实际地址请向团队管理员获取。</li>
+<li>DATABASE 用户已取得数据库只读账号。</li>
+<li>SVN 用户已安装 SVN 1.10+，并取得账号和唯一根 checkout 配置。</li>
+</ul>
+<p>SVN 首次没有地址配置时，可导入谷神平台提供的 <code>svnCheckoutHere.sh</code> 或 <code>svnCheckoutHere.bat</code>。Nexus 只解析配置，不执行脚本。</p>
 <p>打开 <a href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">GitHub Releases</a> 或 
   <a href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Releases</a>
   ，在同一个版本下载：</p>
@@ -181,17 +197,14 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>Windows x64：<code>GuthonCodeTool-windows-x64.exe</code></li>
 <li>VS Code 双模式扩展 Guthon Nexus：<code>guthon-nexus-vscode.vsix</code></li>
 <li>Chrome 扩展 Guthon Bridge：<code>GuthonCodeTool-chrome.zip</code></li>
-<li>团队规范与开发门禁：从 <a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有 GitHub 仓库</a>获取；访问权限请联系我开通。</li>
+<li>团队规范与开发门禁：通过团队 Marketplace 安装 <code>guthon-guard</code>；访问权限和 Marketplace 安装地址请向团队管理员获取。</li>
 </ul>
 <p>建议固定两个目录位置：</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button>
   <pre><code>应用目录：只放 GuthonCodeTool 应用、Guthon Bridge、Guthon Nexus
 本地数据目录：长期保存 config、var、源码、索引和 Workcopy</code></pre></div>
-</section>
-
-<section class="wiki-section">
-<h2 id="2-安装应用和-vs-code-扩展">2. 安装应用和 VS Code 扩展</h2>
-<h3 id="2-1-macos">2.1 macOS</h3>
+<h3 id="1-2-安装应用">1.2 安装应用</h3>
+<h4>macOS</h4>
 <ol>
 <li>确认 Mac 为 M1 或后续型号：可在“关于本机”中查看。</li>
 <li>解压 <code>GuthonCodeTool-macos-arm64.zip</code>，将其中的 <code>GuthonCodeTool</code> 放入固定应用目录。</li>
@@ -199,13 +212,13 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 </ol>
 <div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>chmod +x "/你的应用目录/GuthonCodeTool"</code></pre></div>
 <p>若系统阻止运行，请先确认文件来自本项目 Release，再打开“系统设置 → 隐私与安全性”，对被阻止的 GuthonCodeTool 选择“仍要打开”。</p>
-<h3 id="2-2-windows">2.2 Windows</h3>
+<h4>Windows</h4>
 <ol>
 <li>把 <code>GuthonCodeTool-windows-x64.exe</code> 放到固定目录，例如 <code>D:\GuthonCodeTool\</code>。</li>
 <li>不要放进经常清理的“下载”或临时目录。</li>
 <li>若 SmartScreen 拦截，先确认文件来自本项目 Release，再选择“更多信息 → 仍要运行”。</li>
 </ol>
-<h3 id="2-3-安装-vsix">2.3 安装 VSIX</h3>
+<h3 id="1-3-安装-nexus">1.3 安装 Nexus</h3>
 <ol>
 <li>打开 VS Code 的“扩展”面板。</li>
 <li>点击右上角 <code>...</code>，选择“从 VSIX 安装...”。</li>
@@ -213,10 +226,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>安装后执行“Developer: Reload Window”或重新启动 VS Code。</li>
 <li>确认左侧活动栏出现“Guthon Nexus”图标。</li>
 </ol>
-</section>
-
-<section class="wiki-section">
-<h2 id="3-设置工作空间">3. 设置工作空间</h2>
+<h3 id="1-4-设置工作空间">1.4 设置工作空间</h3>
 <ol>
 <li>点击 VS Code 左侧“Guthon Nexus”。</li>
 <li>展开“工作区”，单击“设置工作空间”。</li>
@@ -238,46 +248,144 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 </section>
 
 <section class="wiki-section">
-<h2 id="4-填写配置并安装-guthon-team">4. 填写配置并安装 guthon-team</h2>
-<p>优先使用“添加产品或项目”向导：选择产品/项目、填写名称和稳定 ID，再选择 DATABASE 或 SVN。选择源码来源后立即创建对应 Nexus 并结束向导，不在新增流程中读取脚本，也不要求填写数据库连接或 SVN 地址。添加项目不需要先创建或选择产品；项目是产品某个版本的完整导出快照，导出后作为并列的独立工作区管理。创建后展开对应 Nexus：SVN 工作区依次使用顶层的“设置工作区 SVN 登录”“导入/粘贴 SVN checkout 配置”和“编辑 SVN 地址配置”；DATABASE 工作区后续在配置文件中补充 datasource。系统别名、系统 ID、数据源 ID 必须按实际谷神环境确认。不要把数据库密码、源码或配置提交到公开仓库。</p>
-<ul>
-<li><code>datasource.yaml</code>：填数据库连接；只用 SVN 时按公司模板保留。</li>
-<li><code>products.yaml</code>：填产品和子系统映射。</li>
-<li><code>projects.yaml</code>：填独立项目快照、数据源和子系统映射，不包含产品工作区引用。</li>
-<li><code>source-tables.yaml</code>：直接使用公司提供的文件。</li>
-<li><code>sync.yaml</code>：直接使用公司提供的文件，有特殊要求时再修改。</li>
-</ul>
-<p>SVN 用户按下面操作：</p>
+<h2 id="2-nexus">2. Nexus</h2>
+<p>先创建产品或项目，再选择一条源码路线。DATABASE 与 SVN 的配置、同步和编辑方式不同，不要混用操作。</p>
+
+<h3 id="2-1-创建产品或项目">2.1 创建产品或项目</h3>
 <ol>
-<li>在目标产品或项目上选择“源码来源：SVN”。</li>
-<li>展开新建 Nexus，点击“设置工作区 SVN 登录”，填写公共用户名；用户名写入 <code>sync.yaml</code> 供全部工作区共用。若 SVN 地址尚未配置，此时先只保存用户名。</li>
-<li>点击紧随登录入口的顶层“导入/粘贴 SVN checkout 配置”，选择 <code>.sh/.bat</code> 或粘贴唯一根地址/checkout 命令；保存并关闭编辑器后解析 SVN 地址。Nexus 只写入一个 <code>svn.url</code>。</li>
-<li>点击“编辑 SVN 地址配置”，在对应的 <code>products.yaml</code> 或 <code>projects.yaml</code> 中确认唯一 <code>svn.url</code>。<code>systems.include.mappings</code> 不限制 checkout 内容。内部清单保存在工作区 <code>context/authorized-scope.json</code>，仅供程序使用。</li>
-<li>再次点击“设置工作区 SVN 登录”输入一次密码；密码由 SVN auth cache/系统钥匙串保存。</li>
-<li>点击“检出/更新完整 SVN 仓库”，核对根地址后确认。Nexus 对该地址执行一次完整 checkout；地址、权限、连接或认证错误会停止并报错。</li>
+<li>在 Nexus 点击“添加产品或项目”。</li>
+<li>选择产品或项目，填写名称和稳定 ID。</li>
+<li>选择源码来源：<code>DATABASE</code> 或 <code>SVN</code>。</li>
+<li>向导创建工作区后，继续完成对应路线的配置。</li>
 </ol>
-<p>删除不再需要的工作区时，在目标 PRD/PRJ 节点右键选择“删除产品或项目”。确认框会列出配置、独占数据源、数据库排查条目、工作区目录和 SVN checkout；只有点击“确认删除”后，目录才会进入系统废纸篓并定向清理配置。其他工作区和共享配置不会删除。</p>
-<p>项目只有一个包含全部权限目录的根 checkout 地址时，只配置 <code>svn.url</code>。旧配置中的 <code>svn.scope</code>/<code>checkoutPaths</code> 仍可读取，但不再是新工作区的默认模型。</p>
-<p>用户名在公共 <code>sync.yaml</code> 配置一次，全部产品和项目共用，不需要分别写入产品/项目 YAML。密码只通过 stdin 临时交给 SVN，Nexus、YAML 和 VS Code SecretStorage 都不保存；检出、更新、远程检查和提交读取 SVN 系统凭据。内部 HTTPS 自签证书以非交互方式直接信任。</p>
-<div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" type="button">复制</button><pre><code>products:
-  &lt;产品ID&gt;:
-    name: &lt;产品名称&gt;
-    datasource: &lt;数据源键&gt;
-    systems:
-      include:
-        mappings:
-          demo.system:
-            system_id: SYS-DEMO
-            data_source_id: &quot;0000&quot;
-    page_origins: []</code></pre></div>
-<p>每个子系统只需填公司提供的 <code>system_id</code> 和 <code>data_source_id</code>。产品和项目要分别填写；不确定时请向配置管理人员确认，不要猜测或复制其他项目的 ID。</p>
-<h3 id="4-1-从私人仓库安装团队规范">4.1 从私人仓库安装团队规范</h3>
-<p><code>AGENTS.md</code>、开发基线、模块规范、谷神方言 API 和开发模式不再从内部地址下载或人工逐份复制，统一由 <a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有 GitHub 仓库</a>发布。该仓库需要单独授权；GitHub 提示 404、无权访问或克隆失败时，请联系我将你的 GitHub 账号加入权限。</p>
-<p>取得权限后，将仓库克隆到固定目录并执行一键安装：</p>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>git clone https://github.com/SidWuu/guthon-team.git
-cd guthon-team
-python3 tools/guthon_team.py install --workspace "/你的本地数据目录/var"</code></pre></div>
-<p>Windows 若没有 <code>python3</code> 命令，可将最后一行改为 <code>py -3 tools/guthon_team.py install --workspace "D:\你的本地数据目录\var"</code>。安装程序会识别本机支持的 Agent，自动同步规范并安装 Linter、API 索引和 Git pre-commit；需要图形界面信任或插件确认时，按输出中的 <code>ACTION_REQUIRED</code> 操作。</p>
+<p>项目是独立导出快照，不需要先选择产品。配置文件职责如下：</p>
+<ul>
+<li><code>datasource.yaml</code>：数据库连接。</li>
+<li><code>products.yaml</code>：产品、数据源和子系统映射。</li>
+<li><code>projects.yaml</code>：独立项目快照、数据源和子系统映射。</li>
+<li><code>source-tables.yaml</code>：公司提供的源码表语义配置。</li>
+<li><code>sync.yaml</code>：公共同步规则和 SVN 用户名。</li>
+</ul>
+
+<h3 id="2-2-database-路线">2.2 DATABASE 路线</h3>
+<ol>
+<li>确认工作区显示“源码来源：DATABASE”。</li>
+<li>在 <code>datasource.yaml</code> 填写只读数据库连接。</li>
+<li>在 <code>products.yaml</code> 或 <code>projects.yaml</code> 填写 datasource、<code>system_id</code> 和 <code>data_source_id</code>。</li>
+<li>保存配置，刷新 Nexus。</li>
+<li>点击“同步工作区全部资料”。</li>
+<li>等待源码、表结构、单据类型、系统脚本和视图全部完成。</li>
+<li>后续只在 <code>source/workcopy</code> 开发；<code>source/readonly</code> 用于比较。</li>
+</ol>
+<p>系统 ID 和数据源 ID 必须由配置管理人员提供。不要猜测，也不要复制其他项目的值。需要排查开发库或测试库时，在“配置资料 → 配置数据库排查”添加专用只读连接；快速查询只允许单条 SELECT。</p>
+
+<h3 id="2-3-svn-路线">2.3 SVN 路线</h3>
+<ol>
+<li>确认工作区显示“源码来源：SVN”。</li>
+<li>点击“设置工作区 SVN 登录”，先保存公共用户名。</li>
+<li>点击“导入/粘贴 SVN checkout 配置”。选择公司提供的脚本，或粘贴唯一根地址/checkout 命令。</li>
+<li>保存并关闭编辑器，让 Nexus 解析地址。脚本只用于提取配置，不会执行。</li>
+<li>点击“编辑 SVN 地址配置”，确认只有一个 <code>svn.url</code>。</li>
+<li>再次打开“设置工作区 SVN 登录”，输入一次密码。</li>
+<li>点击“检出/更新完整 SVN 仓库”，核对根地址后执行。</li>
+<li>完成后从“谷神源码”打开 PAGE、过程函数或系统脚本。</li>
+</ol>
+<aside class="notice"><div class="notice-icon">i</div><div>
+<p>SVN 默认完整检出 <code>svn.url</code>，<code>systems.include.mappings</code> 只用于身份和业务分组，不过滤目录。</p>
+<p>用户名保存在 <code>sync.yaml</code>；密码由 SVN 凭据缓存或系统钥匙串管理，不写入 YAML。</p>
+</div></aside>
+
+<h3 id="2-4-驾驶舱与工作区管理">2.4 驾驶舱与工作区管理</h3>
+<ul>
+<li>“工作区驾驶舱”集中显示索引、同步状态、SVN working copy、本地变更和最近一次 SVN 提交。</li>
+<li>“搜索工作区完整索引”用于查找源码、调用、条件、赋值、异常和表读写事实。</li>
+<li>切换 DATABASE/SVN 只影响当前工作区，不影响其他产品或项目。</li>
+<li>删除工作区时，右键 PRD/PRJ 选择“删除产品或项目”，先核对预览范围，再确认移入废纸篓。</li>
+</ul>
+</section>
+
+<section class="wiki-section">
+<h2 id="3-guthon-team">3. guthon-team</h2>
+<h3 id="3-1-安装治理插件">3.1 安装治理插件</h3>
+<p>团队治理分成两层：本机安装 Marketplace、<code>guthon-guard</code> 插件和生命周期 Hook；工作区安装 <code>AGENTS.md</code>、规范、API 索引、Linter 与可选的 Git pre-commit。两层需要分别安装和检查。当前流程不需要克隆完整的 <code>guthon-team</code> 仓库，也不要求 GuthonCodeTool 的 <code>var/</code> 必须由本地 Git 管理。</p>
+<h4>第一次连接内网 Git</h4>
+<ol>
+<li>连接公司内网或 VPN，确认终端中可以运行 <code>git --version</code> 和 <code>python3 --version</code>。</li>
+<li>如果从未访问过内网 Git，先生成或找到本机 SSH 公钥，将公钥交给内网 Git 管理员授权。私钥只保存在本机，不能发给任何人。</li>
+<li>向管理员获取团队 Marketplace SSH 地址，再执行下面的只读命令。首次出现主机指纹时，先与管理员提供的指纹核对；无法核对时不要直接确认。</li>
+</ol>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>git ls-remote "&lt;团队 Marketplace SSH 地址&gt;" HEAD</code></pre></div>
+<p>看到一行提交哈希和 <code>HEAD</code> 表示连接成功。若提示 <code>Permission denied (publickey)</code>，说明 SSH 公钥尚未授权；先联系管理员，不要反复安装插件。</p>
+<h4>Codex 安装</h4>
+<ol>
+<li>在终端添加团队 Marketplace。添加市场与安装插件是两个独立步骤，两条命令都要执行：</li>
+</ol>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codex plugin marketplace add "&lt;团队 Marketplace SSH 地址&gt;" --ref main</code></pre></div>
+<ol start="2">
+<li>安装团队治理插件：</li>
+</ol>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codex plugin add guthon-guard@guthon-team</code></pre></div>
+<ol start="3">
+<li>如果提示已存在同名 Marketplace，先确认现有来源是否正确。只有确认是旧来源或错误来源时，才移除后重新添加；不要直接覆盖未知配置。</li>
+</ol>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codex plugin marketplace remove guthon-team
+codex plugin marketplace add "&lt;团队 Marketplace SSH 地址&gt;" --ref main
+codex plugin add guthon-guard@guthon-team</code></pre></div>
+<h4>CodeBuddy 安装</h4>
+<p>在 CodeBuddy 的对话输入框中依次执行；这些是 CodeBuddy 命令，不是在系统终端中执行：</p>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>/plugin marketplace add &lt;团队 Marketplace SSH 地址&gt;
+/plugin install guthon-guard@guthon-team --scope user
+/reload-plugins</code></pre></div>
+<p>如果只希望当前项目使用，可将 <code>--scope user</code> 改为 <code>--scope project</code>。市场添加成功但插件未安装时，规范和 Hook 仍不会生效。</p>
+
+<h3 id="3-2-信任-hook">3.2 信任 Hook</h3>
+<ol>
+<li>重新打开 Codex 或 CodeBuddy，在输入框中输入 <code>/hooks</code>。</li>
+<li>找到 <code>guthon-guard</code> 提供的 Hook，展开查看实际命令和插件来源。</li>
+<li>确认来源属于团队 Marketplace 后，将该 Hook 设为信任。</li>
+<li>关闭当前任务，再从目标 <code>var/</code> 或业务子目录打开新任务，才能触发受信任的 <code>SessionStart</code>。</li>
+</ol>
+<p>插件已安装、插件已启用、Hook 已信任、Hook 已实际执行是四个不同状态。必须完成后续工作区状态检查，不能只看到插件名称就认为治理已经生效。</p>
+
+<h3 id="3-3-初始化并检查">3.3 初始化并检查</h3>
+<ol>
+<li>确认 GuthonCodeTool 已设置本地数据目录，并且其中已经存在 <code>var/</code>。不要仅为安装治理而执行 <code>git init</code>。</li>
+<li>从 <code>&lt;本地数据目录&gt;/var</code> 或其任意业务子目录打开一个新的 Codex 或 CodeBuddy 任务，例如某个 <code>var/workspace/PRD ...</code> 目录。</li>
+<li>等待 <code>SessionStart</code> 完成。受信任的 Hook 会根据 GuthonCodeTool 标识向上定位 <code>var/</code> 并进行幂等初始化；普通目录和普通 Git 仓库不会被写入 Guthon 治理文件。</li>
+</ol>
+<p>自动初始化总会安装项目 <code>AGENTS.md</code> 和团队规范、<code>.guthon</code> 配置与版本锁、API 索引、工作区本地 Linter、<code>tools/guthon-lint</code>。只有 <code>var/</code> 本身是 Git 根时，才额外安装 Git pre-commit 并设置 <code>core.hooksPath=.githooks</code>。</p>
+
+<h4>检查治理状态</h4>
+<ol>
+<li>在新任务中输入以下提示词：</li>
+</ol>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>使用 $guthon-bootstrap 检查当前工作区治理状态，只查看，不修改</code></pre></div>
+<p>预期看到 <code>STATUS state=ready</code>。当前 Codex 使用 Skill，不要输入 <code>/guthon-guard:guthon-init</code>；该命令不会在 Codex 注册。CodeBuddy 可在输入框执行 <code>/guthon-guard:guthon-init status</code>。</p>
+<ol start="2">
+<li>如果 <code>var/</code> 使用 Git，在 <code>var/</code> 或其子目录的终端检查 Git Hook；非 Git 工作区跳过本步：</li>
+</ol>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>git config --get core.hooksPath</code></pre></div>
+<p>预期输出 <code>.githooks</code>。如果输出其他路径，不要覆盖；这说明工作区已经使用其他 Hook，需要由维护人员确认整合方式。</p>
+<ol start="3">
+<li>Git 工作区可从实际 PRD 或 PRJ 工作目录执行变更范围检查：</li>
+</ol>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>tools/guthon-lint --changed --write-target</code></pre></div>
+<p>非 Git 工作区不能使用 <code>--changed</code> 或 <code>--staged</code> 自动取得文件列表，应把本次修改的文件逐个传入，例如 <code>tools/guthon-lint "workspace/PRD 期现产品/目标文件.vm"</code>。</p>
+<ol start="4">
+<li>如果初始化更新了 <code>AGENTS.md</code>，再打开一次新任务，确保 Codex 从启动阶段加载最新版规则。</li>
+</ol>
+
+<h3 id="3-4-手动与无-hook-安装">3.4 手动与无 Hook 安装</h3>
+<p>Hook 未信任、宿主不支持 <code>SessionStart</code> 或自动识别失败时，在目标 <code>var/</code> 工作区或其子目录打开 Codex，先预览计划：</p>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>使用 $guthon-bootstrap 初始化当前 Guthon 工作区，先执行 dry-run，只展示计划</code></pre></div>
+<p>确认目标 <code>var/</code> 和文件清单正确、没有冲突后，再输入：</p>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>使用 $guthon-bootstrap 初始化当前 Guthon 工作区</code></pre></div>
+<p>只安装 AGENTS、规范、API 索引和 Linter，不配置 Git pre-commit 时，在请求中增加 <code>--no-git-hook</code>；非 Git 工作区必须使用这一模式。遇到 <code>CONFLICT</code> 时先逐个检查冲突文件，不要直接使用 <code>--force</code>；确需替换时，安装器会先将旧文件备份到 <code>.guthon/backups/bootstrap-&lt;时间戳&gt;/</code>。</p>
+<p>没有 Marketplace 或 Hook 的宿主，应使用团队随 <code>guthon-guard</code> 发布物提供的自包含安装器，不要为此克隆完整团队仓库。安装器的 <code>--workspace</code> 必须明确指向 <code>var/</code>；如果它位于 Git 仓库中，则还必须是该 Git 根：</p>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据目录/var"
+
+# 只安装基础能力，不配置 Git pre-commit
+python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据目录/var" --no-git-hook</code></pre></div>
 <p>相较只把规范文件交给 AI 阅读，<code>guthon-team</code> 还提供：</p>
 <ul>
 <li><strong>机器可执行规则：</strong><code>guthon-lint</code> 检查受保护路径、Velocity 结构、变量冲突、错误赋值、API 合法性、页面重复保存和 SQL 兼容性，不依赖 AI 是否记住全文。</li>
@@ -301,21 +409,9 @@ python3 tools/guthon_team.py install --workspace "/你的本地数据目录/var"
 </section>
 
 <section class="wiki-section">
-<h2 id="5-首次初始化和同步">5. 首次初始化和同步</h2>
-<ol>
-<li>确认产品、项目各自的数据源和子系统范围正确。</li>
-<li>点击“维护 → 检查本地环境”，确认输出没有 FAIL。</li>
-<li>展开“项目”，确认产品显示为 <code>PRD</code>、项目显示为 <code>PRJ</code>。</li>
-	<li>在每个产品或项目节点选择“源码来源：DATABASE / SVN”；DATABASE 节点点击“同步工作区全部资料”，SVN 节点点击“检出/更新完整 SVN 仓库”。</li>
-	<li>等待输出面板显示“完成”；如果显示 FAIL，先按提示修正后再重试。</li>
-</ol>
-<p>看到“完成”且项目树中没有红色错误即表示初始化成功。DATABASE 后续从 Workcopy 开发；SVN 后续从“谷神源码”开发。</p>
-</section>
-
-<section class="wiki-section">
-<h2 id="6-安装和启动-bridge">6. 安装和启动 Bridge</h2>
+<h2 id="4-bridge">4. Bridge</h2>
 <p>只使用 VS Code 同步和导出功能时可以跳过本章。需要从谷神网页拉取当前对象、复制字段或快捷跳转时才需要 Bridge。</p>
-<h3 id="6-1-加载-chrome-扩展">6.1 加载 Chrome 扩展</h3>
+<h3 id="4-1-安装-chrome-扩展">4.1 安装 Chrome 扩展</h3>
 <ol>
 <li>解压 <code>GuthonCodeTool-chrome.zip</code> 到固定目录。</li>
 <li>按内部环境修改 <code>extension/host-config.js</code>，不要扩大到无关地址。</li>
@@ -323,61 +419,100 @@ python3 tools/guthon_team.py install --workspace "/你的本地数据目录/var"
 <li>点击“加载已解压的扩展程序”，选择解压目录中的 <code>extension</code>。</li>
 <li>把 Guthon Bridge 固定到 Chrome 工具栏。</li>
 </ol>
-<h3 id="6-2-启动本地服务">6.2 启动本地服务</h3>
+<h3 id="4-2-启动与验证">4.2 启动与验证</h3>
 <ol>
 <li>打开 VS Code 左侧“Guthon Nexus”面板。</li>
 <li>展开项目顶部的“工作区驾驶舱”，查看索引、同步状态、SVN working copy、本地变更和最近一次 SVN 提交；点击状态行可直接进入对应操作。</li>
 <li>单击“启动 Guthon Bridge”。Nexus 自动使用初始化时选择的应用和本地数据目录。</li>
-<li>面板显示“运行中 · 127.0.0.1:17361”后即可使用；单击“停止 Guthon Bridge”可关闭服务。</li>
+<li>面板显示 Bridge“运行中”后即可使用；单击“停止 Guthon Bridge”可关闭服务。</li>
 </ol>
 <p>普通用户不需要安装 Node.js 或打开终端。若 Bridge 无法使用，先点击“停止 Guthon Bridge”，再重新启动；仍失败时查看“输出 → Guthon Bridge”中的第一条错误。</p>
 </section>
 
 <section class="wiki-section">
-<h2 id="7-日常工作流">7. 日常工作流</h2>
-<h3>数据库模式</h3>
+<h2 id="5-日常工作流">5. 日常工作流</h2>
+<p>每次开发先确认目标 PRD/PRJ 和源码来源。DATABASE 与 SVN 按下面各自的流程执行。</p>
+<h3 id="5-1-database-工作流">5.1 DATABASE 工作流</h3>
 <ol>
 <li>在“项目”树选择目标 PRD 或 PRJ。</li>
 <li>点击“同步工作区全部资料”。</li>
-<li>需要网页拉取时启动 Bridge，再从谷神页面拉取 Workcopy。</li>
-<li>只修改 Workcopy，完成后点击“检查或打包 Workcopy”。</li>
-<li>将确认后的内容复制回谷神平台，测试并提交。</li>
+<li>确认同步没有 FAIL，再从 Workcopy 开始开发。</li>
+<li>需要网页辅助时启动 Bridge，从谷神页面拉取目标对象。</li>
+<li>只修改 Workcopy；不要修改 readonly。</li>
+<li>完成后点击“检查或打包 Workcopy”，查看 <code>diff.md</code>。</li>
+<li>将确认后的内容复制回谷神平台，完成平台测试和提交。</li>
 </ol>
-<h3>SVN 模式</h3>
+<h3 id="5-2-svn-工作流">5.2 SVN 工作流</h3>
+<h4>开始开发</h4>
 <ol>
-	<li>开始开发前，点击“检出/更新完整 SVN 仓库”。输出标签会实时显示根 working copy 当前正在执行的 checkout/update、状态检查或索引步骤。</li>
-	<li>手动执行“扫描/重建本地 SVN 索引”时，输出标签同样会显示授权范围、每个 working copy 的状态/版本/解析步骤和事务结果；同一工作区的重复重建点击会直接忽略。</li>
+<li>点击“检出/更新完整 SVN 仓库”。</li>
+<li>等待更新和索引完成；不要重复点击正在执行的操作。</li>
 <li>从“谷神源码”打开 PAGE、过程函数或系统脚本。</li>
+</ol>
+<h4>修改与检查</h4>
+<ol>
 <li>修改后按 <code>Ctrl+S</code>（macOS 为 <code>Cmd+S</code>）保存到本地。</li>
-<li>每次打开虚拟源码都会取得独立编辑租约；同一文件已被其他会话保存时，旧编辑器会收到冲突并要求重新打开。不同文件的短时并发保存会在跨进程锁内有界排队，不需要手工循环重试。</li>
-<li>AI 或自动化已知精确替换内容时，可把对象类型、对象 ID、函数 ID/JSON Pointer 和 <code>old/new/expectedCount</code> 直接交给 <code>svn write-batch</code>，CLI 会自动取得会话；需要先阅读多个对象或生成完整内容时使用一次 <code>svn read-batch</code>。工具会整批预检、失败回滚并统一更新索引；禁止临时 Python 直接改 checkout。</li>
-<li>在“谷神源码”树查看带 <code>M</code> 和修改色的文件及父目录；打开文件后，VS Code 会按 SVN BASE 显示 GitLens 风格的色条、行背景和概览标记，点击色块可内联查看本地更改。在 VS Code“源代码管理”中点击本地变更文件可查看“SVN BASE ↔ 工作副本”，具有 Nexus 对象身份的文件行还可直接“在 Nexus 中编辑”、放弃此文件修改或提交所选 Nexus 修改；可按 <code>Ctrl</code>/<code>Cmd</code> 多选文件后一次提交，提交不经过 Git 暂存区。点击检查出的远端变更文件可查看“工作副本 ↔ SVN HEAD”。</li>
-<li>“源代码管理”在 <code>gdrm-product</code> 下直接显示始终可见的中文子系统组；每组同时管理对应数据源和映射到该数据源的系统源码。单一中文名称原样显示为“主数据”“风险管理”“共享中心”，只有国内贸易、国际贸易这种重复后缀分组显示为“贸易系统”；Skill/公共源码单列“公共源码”。</li>
-<li>提交全部修改时使用 <code>gdrm-product</code> 顶部的全部提交；只提交某个子系统时使用对应组按钮；提交一个或多个文件时先选择文件，再执行“提交所选 Nexus 修改”。SCM 顶部的 SVN 提交说明可选，留空可直接保存。</li>
-<li>“更新并合并”出现重叠文本冲突时，在冲突文件行执行“打开 SVN 三方合并”，以 SVN 旧基线、本地修改和远程修改编辑物理 checkout 结果；检查并保存结果后，再执行“标记 SVN 冲突为已解决”。该操作只执行 <code>svn resolve --accept working</code> 并刷新索引，不会自动提交。属性冲突和树冲突仍需在工作副本外部处理。</li>
-<li><code>gdrm-product</code> 与各子系统组都只保留相同的前四项操作：刷新状态、检查远端变更、提交 Nexus 修改、更新远端变更，并默认常驻显示。子系统首次显示时默认全部展开；之后仍尊重用户手动折叠状态。子系统行的提交与更新只作用于该组的数据源及其映射系统；根节点仍执行全部范围操作。</li>
-<li>提交 Nexus 修改、更新远端变更以及其他多步骤 SCM 操作会在“输出 → GuthonCodeTool”实时显示状态检查、预览、按 working copy 执行 SVN 操作、提交后索引和刷新步骤；同一工作区的重复操作会提示正在执行并忽略本次点击。</li>
-<li>同时显示 <code>var</code> 等其他 Git 仓库且整个 SVN 工作区无本地、远端变更时，第一个子系统下会显示一条不可操作的“当前无变更”占位项，防止 VS Code 原生 SCM 隐藏全部空子系统。该项不计入根节点变更数，也不参与提交或更新。</li>
-<li>看到 SVN revision 后，再到谷神平台完成最终提交。</li>
-<li>返回项目的“工作区驾驶舱”，点击最近一次 SVN 提交查看带交付编号、revision、文件和时间的历史回执。回执只证明 SVN 提交；谷神平台最终提交及运行验证仍在平台侧完成。</li>
+<li>在“谷神源码”树查看带 <code>M</code> 的文件。</li>
+<li>在“源代码管理”点击文件，查看“SVN BASE ↔ 工作副本”差异。</li>
+<li>旧编辑器提示冲突时，重新打开文件；不要强制覆盖。</li>
+</ol>
+<h4>提交或更新</h4>
+<ol>
+<li>先执行“检查远端变更”。</li>
+<li>提交全部范围：使用工作区根节点的“提交 Nexus 修改”。</li>
+<li>提交子系统：使用对应中文分组的提交按钮。</li>
+<li>提交文件：选择一个或多个文件，再执行“提交所选 Nexus 修改”。</li>
+<li>看到 SVN revision 后，到谷神平台完成最终提交和运行验证。</li>
+</ol>
+<h4>发生冲突</h4>
+<ol>
+<li>文本冲突：点击“打开 SVN 三方合并”。</li>
+<li>保存合并结果，再点击“标记 SVN 冲突为已解决”。</li>
+<li>属性冲突、树冲突、新增或删除：停止提交，交由维护人员处理。</li>
+<li>在“工作区驾驶舱”查看最近一次 SVN 提交回执。</li>
 </ol>
 <aside class="notice"><div class="notice-icon">!</div><div><p><code>Ctrl+S</code>/<code>Cmd+S</code> 只保存到本地；冲突必须先完成三方合并并显式标记已解决，不能直接强制提交。SVN 提交成功也不等于谷神平台已最终提交。</p></div></aside>
-<p>“谷神源码”已按业务分组：页面沿用 <code>pages/index.md</code> 顺序，PAGE 分块依次显示 GSS、JS、SQL、字段；过程函数包按包名字母排序，包内函数按函数名字母排序。未配置 <code>systems.include.mappings</code> 时，SCM 根据系统/数据源根目录的 <code>$.中文名称</code> 和双方 <code>index.md</code> 保守推断业务组；证据不足的系统或数据源各自单独成组，Skill/Public 进入“公共源码”。不同数据源对应不同数据库 schema，表、视图和过程函数允许同名；索引和虚拟文档按数据源 working copy 精确区分，PAGE_ID 仍按工作区全局身份和 SVN 版本去重。可使用视图顶部的定位、跳转、搜索和刷新按钮；搜索按钮查询当前 SVN 工作区的完整本地 SQLite 索引，不依赖树节点是否展开，并且只在输入完成后执行一次查询。右键过程函数还可复制函数名或“包名.函数名”，并按索引查看全部已识别调用方，选择后跳转到对应调用行。</p>
-<p>Nexus 顶部和每个项目的“源码与索引”都提供“搜索工作区完整索引”：同一入口搜索源码名称/ID/函数以及已索引的条件、赋值、异常、表读写和调用事实。选择结果后可以打开源码，或复制 AI 上下文。默认精简版只包含对象定位、最多 3 条直接关系、最多 5 条优先级较高的事实、简短 hash 和证据边界；需要深入分析时再选择详细版。两种版本都不会默认复制整份源码。</p>
-<p>首次重建索引后，AI 先从 runtime descriptor 执行 <code>workspaceResolveCommand</code>，按当前 PRD/PRJ cwd 确认唯一工作区、provider 和 <code>index.ready</code>。索引可用时，第一次源码定位必须使用有界查询：错误、条件、字段和对象事实使用 <code>facts</code>，表或单据写入原因链使用 <code>explain</code>，对象名不明确时使用 <code>find</code>，共享函数或跨对象影响分析补 <code>context/callers</code>。DATABASE 通过 <code>query</code> 查询，SVN 通过 <code>svn</code> 查询；只有索引未初始化、明确漏项、查询证据不足或实际修改前才读取对应局部源码，不遍历完整 checkout 或 PAGE JSON。</p>
-<p>排查开发库或测试库前，在对应项目的“配置资料”选择“配置数据库排查”，输入环境、MySQL/PostgreSQL/Oracle 地址和专用只读账号；Nexus 会立即核验连接，只把非敏感映射写入 <code>database-testing.yaml</code>，密码写入操作系统凭据库。之后 AI 从 runtime descriptor 执行 <code>databaseTargetResolveCommand</code> 并传入当前 cwd：有 <code>connectionRef</code> 时直接使用内置 <code>databaseProbeCommand</code>、<code>databaseDescribeCommand</code>、<code>databaseQueryCommand</code>，只有 <code>connectionId</code> 时才依赖当前会话的 DBX。未明确环境时使用工作区默认目标；明确开发库或测试库时选择对应环境，同时比较时分别解析。“测试一下”不自动解释为测试库。内置快速查询只允许单条 SELECT，最大返回 100 行，功能验收与回归仍使用正式 <code>full</code> 数据库测试目标。</p>
+
+<h3>定位源码与只读排查</h3>
+<ul>
+<li>使用“搜索工作区完整索引”查找源码、调用、条件、赋值、异常和表读写。</li>
+<li>选择搜索结果后，可打开源码或复制精简/详细 AI 上下文。</li>
+<li>排查数据库前先在“配置资料 → 配置数据库排查”选择明确环境。</li>
+<li>快速查询只用于只读证据；功能验收仍需正式测试流程。</li>
+</ul>
+
+<h3 id="5-3-更新工作流">5.3 更新工作流</h3>
+<h4>更新 GuthonCodeTool</h4>
+<ol>
+<li>确认没有同步、SVN 或 Bridge 操作正在执行。</li>
+<li>在“运行模式”选择 GitHub 或 Gitee 更新源。</li>
+<li>点击“检查更新”，确认版本后执行更新。</li>
+<li>更新异常时点击“回退到上一版本”。</li>
+<li>VSIX 或 Chrome 扩展有变化时，从同一 Release 重新安装。</li>
+</ol>
+<h4>更新 guthon-team</h4>
+<p>Codex 在终端执行：</p>
+<ol>
+<li>执行 <code>codex plugin marketplace upgrade guthon-team</code>。</li>
+<li>执行 <code>codex plugin add guthon-guard@guthon-team</code>。</li>
+<li>从目标 <code>var/</code> 或业务子目录打开新任务。</li>
+<li>运行 <code>$guthon-bootstrap status</code>，确认状态为 <code>ready</code>。</li>
+<li>如果 <code>AGENTS.md</code> 有变化，再打开一次新任务。</li>
+</ol>
+<p>CodeBuddy 在对话输入框执行 <code>/plugin marketplace update guthon-team</code>、<code>/plugin update guthon-guard@guthon-team --scope user</code> 和 <code>/reload-plugins</code>，然后从目标 <code>var/</code> 或业务子目录打开新任务。若客户端不支持更新命令，可在插件管理界面按 3.1 节重新安装；不要删除工作区中的规范文件。</p>
 </section>
 
 <section class="wiki-section">
-<h2 id="8-系统差异和解决步骤">8. 系统差异和解决步骤</h2>
-<h3>macOS</h3>
+<h2 id="6-其他">6. 其他</h2>
+<h3 id="6-1-系统差异">6.1 系统差异</h3>
+<h4>macOS</h4>
 <ul>
 <li>当前支持 M1 及后续型号，Intel Mac 不支持。</li>
 <li>应用没有执行权限：执行 <code>chmod +x</code> 后重新选择应用。</li>
 <li>Gatekeeper 阻止：确认下载来源后，在“隐私与安全性”中选择“仍要打开”。</li>
 <li>终端设置的数据库环境变量未被 VS Code 读取：从同一终端启动 VS Code，或按公司方式配置用户环境后重启 VS Code。</li>
 </ul>
-<h3>Windows</h3>
+<h4>Windows</h4>
 <ul>
 <li>当前只提供 Windows x64 EXE。</li>
 <li>SmartScreen 阻止：确认下载来源后使用“更多信息 → 仍要运行”。</li>
@@ -385,52 +520,51 @@ python3 tools/guthon_team.py install --workspace "/你的本地数据目录/var"
 <li>路径过长：使用 <code>D:\GuthonCodeToolData</code> 等短路径，并按公司策略启用长路径支持。</li>
 <li>终端环境变量未生效：关闭并重新打开 VS Code 和 PowerShell。</li>
 </ul>
-</section>
-
-<section class="wiki-section">
-<h2 id="9-升级和迁移">9. 升级和迁移</h2>
+<h3 id="6-2-迁移与删除">6.2 迁移与删除</h3>
+<h4>迁移电脑</h4>
 <ol>
-<li>展开 Nexus 的“运行模式”，按需点击“更新源：GitHub/Gitee”切换下载来源。</li>
-<li>确认没有同步、SVN 或 Bridge 请求正在执行，然后点击“检查更新”。Nexus 不会启动检查或定时联网。</li>
-<li>确认版本与来源后执行更新；Nexus 会校验 SHA-256、运行 <code>self-test</code>，成功后切换应用路径并重启运行中的 Bridge。</li>
-<li>新版异常时点击“回退到上一版本”；受管更新不会删除本地数据目录。</li>
-<li>Guthon Nexus VSIX、Chrome 扩展或 Guthon Testing Skill 有变更时，仍从同一 Release 安装对应组件并重新加载。</li>
-<li>在本地 <code>guthon-team</code> 仓库执行 <code>git pull --ff-only</code>，再重新运行 <code>install --workspace &lt;本地数据目录&gt;/var</code>，安全升级规范、API 索引和门禁。</li>
-<li>运行“检查本地环境”，再选择一个产品和一个项目分别执行完整同步。</li>
+<li>停止 Bridge、同步和 SVN 操作。</li>
+<li>安全复制整个本地数据目录。</li>
+<li>在新电脑安装同一版本的应用、Nexus 和 Bridge。</li>
+<li>执行“设置工作空间”，选择复制后的本地数据目录。</li>
+<li>运行“检查本地环境”，再分别验证一个 DATABASE 和 SVN 工作区。</li>
 </ol>
-<p>首次使用自动更新能力仍需安装包含该功能的 Guthon Nexus。升级时不要删除“本地数据目录”。迁移电脑时，先安全复制整个本地数据目录，再在新电脑重新执行“设置工作空间”。</p>
-</section>
-
-<section class="wiki-section">
-<h2 id="10-常见问题与验收">10. 常见问题与验收</h2>
+<h4>删除产品或项目</h4>
+<ol>
+<li>右键目标 PRD/PRJ，选择“删除产品或项目”。</li>
+<li>核对配置、独占数据源、数据库排查条目、工作区目录和 SVN checkout。</li>
+<li>确认无误后执行删除。目标目录会进入系统废纸篓。</li>
+<li>确认其他工作区和共享配置仍然存在。</li>
+</ol>
+<p>升级或迁移时不要删除本地数据目录。删除 guthon-team 工作区治理文件需要按锁文件逐项核验，不要直接删除整个 <code>docs/</code>、<code>tools/</code>、<code>.guthon/</code> 或 <code>.githooks/</code>。</p>
+<h3 id="6-3-常见问题">6.3 常见问题</h3>
 <p>更多 macOS、Windows、DATABASE、SVN、Nexus 与 Bridge 部署和环境问题，请进入 <a href="GuthonCodeTool_QA.html">GuthonCodeTool 问题解决中心</a>，可按系统、源码模式和错误原文搜索。</p>
-<h3>左侧没有“Guthon Nexus”图标</h3>
+<h4>左侧没有“Guthon Nexus”图标</h4>
 <p>确认 VSIX 已安装并启用，执行“Developer: Reload Window”；仍未出现时卸载旧版本后重新安装当前 Release 的 VSIX。</p>
-<h3>点击功能后提示启动失败</h3>
+<h4>点击功能后提示启动失败</h4>
 <p>重新执行“设置/切换工作空间”，选择未改名、未移动且属于当前系统的应用。macOS 同时检查执行权限。</p>
-<h3>项目树没有显示某个产品或项目</h3>
+<h4>项目树没有显示某个产品或项目</h4>
 <p>打开 <code>products.yaml</code> 或 <code>projects.yaml</code>，检查 ID、名称和 datasource 是否填写正确，保存后点击 Nexus 刷新。</p>
-<h3>Bridge 显示无法连接</h3>
+<h4>Bridge 显示无法连接</h4>
 <ol>
 <li>确认 Guthon Nexus 面板显示 Bridge“运行中”。</li>
-<li>访问 <code>http://127.0.0.1:17361/health</code>。</li>
 <li>停止后重新启动 Bridge，并在“输出 → Guthon Bridge”查看第一条错误。</li>
-<li>若错误包含 <code>EADDRINUSE</code>，关闭其他终端或旧版工具中占用 <code>17361</code> 的 Bridge，再从 Nexus 启动。</li>
+<li>若错误包含 <code>EADDRINUSE</code>，关闭其他终端或旧版工具中仍在运行的 Bridge，再从 Nexus 启动。</li>
 <li>重新加载 Chrome 扩展并刷新谷神页面。</li>
 </ol>
-<h3>Workcopy 与 readonly 不一致</h3>
+<h4>Workcopy 与 readonly 不一致</h4>
 <p>先打开 <code>diff.md</code> 确认需要保留的内容。不确定时不要覆盖，请联系负责人处理。</p>
-<h3>SVN SCM 显示“外部修改”</h3>
+<h4>SVN SCM 显示“外部修改”</h4>
 <p>点击“管理本地源码变更”查看差异，再选择保存或撤销。文本冲突使用文件行的三方合并和“标记为已解决”；如果显示属性冲突、树冲突、新增或删除，不要强制操作，请联系负责人处理。</p>
-<h3>验收清单</h3>
+<h3 id="6-4-验收清单">6.4 验收清单</h3>
 <ul>
 <li><label class="check-item"><input type="checkbox" disabled><span>应用、VSIX 和 Bridge 来自同一个 Release。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>VS Code 左侧出现“Guthon Nexus”。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>工作区显示“已配置”，五个 YAML 可以从侧边栏打开。</span></label></li>
-<li><label class="check-item"><input type="checkbox" disabled><span>已获 <code>guthon-team</code> 私有仓库权限，并通过一键安装将规范、API 索引和门禁部署到本地数据目录的 <code>var/</code>。</span></label></li>
-<li><label class="check-item"><input type="checkbox" disabled><span><code>tools/guthon-lint</code> 可执行；支持 Hook 的 Agent 已完成信任并在新任务中验证，未把“插件已安装”当作 Hook 生效证据。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>内网 Git 的 <code>git ls-remote</code> 测试成功，已通过团队 Marketplace 安装 <code>guthon-guard</code>，并将规范、API 索引和门禁部署到本地数据目录的 <code>var/</code>。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span><code>tools/guthon-lint</code> 可执行；支持 Hook 的 Agent 已完成信任并在新任务中验证；只有 <code>var/</code> 使用 Git 时才要求 <code>.githooks</code>，未把“插件已安装”当作 Hook 生效证据。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>环境检查没有 FAIL，项目树同时显示 PRD、PRJ，两个样例均完整同步成功。</span></label></li>
-<li><label class="check-item"><input type="checkbox" disabled><span>Bridge 健康检查返回 <code>{"ok":true}</code>。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>Bridge 面板显示“运行中”，Chrome 扩展能够完成一次实际连接。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>DATABASE 能拉取 Workcopy；SVN 能从“谷神源码”打开文件并在“源代码管理”查看差异。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>SVN 可以查看差异，执行全部、所选文件或单文件范围的提交/更新，并处理文本冲突三方合并。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>已明确 SVN revision 仍需在谷神平台最终提交。</span></label></li>

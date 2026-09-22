@@ -4,9 +4,9 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<meta name="description" content="GuthonCodeTool 组件架构、功能实现、数据链路、安全模型与发布维护知识库"/>
+<meta name="description" content="GuthonCodeTool 当前功能、实现原理、设计原因与维护边界的完整说明"/>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233c5ddd'/%3E%3Cpath d='M18 19h28v8H27v10h15v8H18z' fill='white'/%3E%3C/svg%3E"/>
-<title>GuthonCodeTool 内部知识库</title>
+<title>GuthonCodeTool 全功能说明</title>
 <style>
 :root{
   --bg:#f4f6fb;--surface:#fff;--surface-soft:#f8faff;--text:#172033;--muted:#65708a;
@@ -89,330 +89,361 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <div class="progress" id="progress"></div>
 <header class="hero">
 <div class="hero-inner">
-<span class="eyebrow"><span class="eyebrow-dot"></span>GuthonCodeTool Internal Wiki</span>
-<h1>GuthonCodeTool<br/>内部知识库</h1>
-<p>面向工具维护者和需要理解实现的开发人员，说明 GuthonCodeTool 的组件边界、数据链路、目录约定、安全机制、打包发布与扩展方式。</p>
-<div class="hero-meta"><span>当前版本 2.0</span><span>DATABASE + SVN</span><span>架构与实现</span><span>源码与索引</span><span>Bridge &amp; VS Code</span><span>发布与维护</span></div>
+<span class="eyebrow"><span class="eyebrow-dot"></span>GuthonCodeTool Current Capabilities</span>
+<h1>GuthonCodeTool<br/>全功能说明</h1>
+<p>完整说明当前版本提供的功能、关键实现与设计原因。内容以现有源码、配置契约和测试为准，帮助开发人员理解各模块如何协作，以及每条安全边界解决什么问题。</p>
+<div class="hero-meta"><span>DATABASE + SVN</span><span>功能与原理</span><span>安全边界</span><span>Nexus &amp; Bridge</span><span>治理与发布</span></div>
 <div class="hero-actions">
-<a class="btn btn-primary" href="#1-定位与边界">开始阅读</a>
-<a class="btn btn-ghost" href="index.html">快速开始</a>
-<a class="btn btn-ghost" href="https://github.com/SidWuu/GuthonCodeTool" target="_blank" rel="noopener">GitHub 仓库</a>
-<a class="btn btn-ghost" href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有仓库</a>
+<a class="btn btn-primary" href="#1-产品定位与设计原则">开始阅读</a>
+<a class="btn btn-ghost" href="index.html">使用手册</a>
 </div>
 </div>
 </header>
 <div class="layout">
 <aside class="sidebar" id="sidebar">
-<div class="side-head"><div class="side-title"><strong>知识库目录</strong><span class="chapter-count">10 章</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索章节…（按 / 聚焦）" aria-label="搜索章节"/></div>
+<div class="side-head"><div class="side-title"><strong>全功能目录</strong><span class="chapter-count">10 章</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索章节…（按 / 聚焦）" aria-label="搜索章节"/></div>
 <nav class="toc" id="toc">
-<a class="toc-link" href="#1-定位与边界">1. 定位与边界</a>
-<a class="toc-link toc-sub" href="#1-1-版本差异">1.1 版本差异</a>
-<a class="toc-link" href="#2-整体架构">2. 整体架构</a>
-<a class="toc-link toc-sub" href="#2-1-组件关系">2.1 组件关系</a>
-<a class="toc-link toc-sub" href="#2-2-运行链路">2.2 运行链路</a>
-<a class="toc-link" href="#3-可执行应用">3. 可执行应用</a>
-<a class="toc-link toc-sub" href="#3-1-统一命令入口">3.1 统一命令入口</a>
-<a class="toc-link toc-sub" href="#3-2-打包方式">3.2 打包方式</a>
-<a class="toc-link" href="#4-配置与本地数据">4. 配置与本地数据</a>
-<a class="toc-link toc-sub" href="#4-1-配置职责">4.1 配置职责</a>
-<a class="toc-link toc-sub" href="#4-2-目录契约">4.2 目录契约</a>
-<a class="toc-link toc-sub" href="#4-3-guthon-team-规范治理">4.3 guthon-team 规范治理</a>
-<a class="toc-link" href="#5-源码同步与索引">5. 源码同步与索引</a>
-<a class="toc-link toc-sub" href="#5-1-page-导出">5.1 PAGE 导出</a>
-<a class="toc-link toc-sub" href="#5-2-过程函数导出">5.2 过程函数导出</a>
-<a class="toc-link toc-sub" href="#5-3-调用索引">5.3 调用索引</a>
-<a class="toc-link" href="#6-平台元数据导出">6. 平台元数据导出</a>
-<a class="toc-link" href="#7-workcopy-安全模型">7. Workcopy 安全模型</a>
-<a class="toc-link" href="#8-vs-code-扩展">8. VS Code 扩展：Guthon Nexus</a>
-<a class="toc-link" href="#9-guthon-bridge">9. Chrome 扩展：Guthon Bridge</a>
-<a class="toc-link" href="#10-发布维护与验证">10. 发布、维护与验证</a>
+<a class="toc-link" href="#1-产品定位与设计原则">1. 产品定位与设计原则</a>
+<a class="toc-link toc-sub" href="#1-1-功能边界">1.1 功能边界</a>
+<a class="toc-link toc-sub" href="#1-2-核心设计选择">1.2 核心设计选择</a>
+<a class="toc-link" href="#2-运行架构">2. 运行架构</a>
+<a class="toc-link toc-sub" href="#2-1-组件职责">2.1 组件职责</a>
+<a class="toc-link toc-sub" href="#2-2-目录与调用链">2.2 目录与调用链</a>
+<a class="toc-link" href="#3-工作区与配置">3. 工作区与配置</a>
+<a class="toc-link toc-sub" href="#3-1-稳定身份与配置">3.1 稳定身份与配置</a>
+<a class="toc-link toc-sub" href="#3-2-创建切换与删除">3.2 创建、切换与删除</a>
+<a class="toc-link toc-sub" href="#3-3-命令与运行描述">3.3 命令与运行描述</a>
+<a class="toc-link" href="#4-database-模式">4. DATABASE 模式</a>
+<a class="toc-link toc-sub" href="#4-1-源码与元数据同步">4.1 源码与元数据同步</a>
+<a class="toc-link toc-sub" href="#4-2-workcopy-开发">4.2 Workcopy 开发</a>
+<a class="toc-link toc-sub" href="#4-3-只读数据库排查">4.3 只读数据库排查</a>
+<a class="toc-link" href="#5-svn-模式">5. SVN 模式</a>
+<a class="toc-link toc-sub" href="#5-1-检出与认证">5.1 检出与认证</a>
+<a class="toc-link toc-sub" href="#5-2-业务目录与虚拟文档">5.2 业务目录与虚拟文档</a>
+<a class="toc-link toc-sub" href="#5-3-受控编辑">5.3 受控编辑</a>
+<a class="toc-link toc-sub" href="#5-4-scm-冲突与交付">5.4 SCM、冲突与交付</a>
+<a class="toc-link" href="#6-索引与ai上下文">6. 索引与 AI 上下文</a>
+<a class="toc-link toc-sub" href="#6-1-工作区事实索引">6.1 工作区事实索引</a>
+<a class="toc-link toc-sub" href="#6-2-检索与有界上下文">6.2 检索与有界上下文</a>
+<a class="toc-link" href="#7-guthon-nexus">7. Guthon Nexus</a>
+<a class="toc-link toc-sub" href="#7-1-工作区驾驶舱">7.1 工作区驾驶舱</a>
+<a class="toc-link toc-sub" href="#7-2-语言与导航">7.2 语言与导航</a>
+<a class="toc-link toc-sub" href="#7-3-工具更新">7.3 工具更新</a>
+<a class="toc-link" href="#8-guthon-bridge">8. Guthon Bridge</a>
+<a class="toc-link toc-sub" href="#8-1-页面能力">8.1 页面能力</a>
+<a class="toc-link toc-sub" href="#8-2-路由与安全边界">8.2 路由与安全边界</a>
+<a class="toc-link" href="#9-guthon-team">9. guthon-team 治理</a>
+<a class="toc-link toc-sub" href="#9-1-安装与更新">9.1 安装与更新</a>
+<a class="toc-link toc-sub" href="#9-2-规范门禁">9.2 规范门禁</a>
+<a class="toc-link" href="#10-构建发布与验证">10. 构建、发布与验证</a>
+<a class="toc-link toc-sub" href="#10-1-发行物">10.1 发行物</a>
+<a class="toc-link toc-sub" href="#10-2-验证边界">10.2 验证边界</a>
 <div class="no-result" id="noResult">没有匹配的章节</div>
 </nav>
 </aside>
 <main class="main">
 <div class="feature-grid">
-<article class="feature-card"><div class="feature-icon">01</div><h3>统一运行入口</h3><p>同一套 Python 实现打包为 macOS 与 Windows 应用，由 VS Code 扩展统一调用。</p></article>
-<article class="feature-card"><div class="feature-icon">02</div><h3>本地数据隔离</h3><p>应用与私有数据分离，配置、源码、索引和日志只进入用户选择的数据目录。</p></article>
-<article class="feature-card"><div class="feature-icon">03</div><h3>双模式安全编辑</h3><p>DATABASE 使用 readonly/workcopy；SVN 直接保护授权 checkout，并通过目标文件校验阻止误覆盖。</p></article>
-<article class="feature-card"><div class="feature-icon">04</div><h3>SQLite 局部检索</h3><p>每个工作区独立索引，支持源码定位、静态调用关系和低置信动态调用记录。</p></article>
-<article class="feature-card"><div class="feature-icon">05</div><h3>双端增强</h3><p>VS Code 提供本地操作和方言能力，Bridge 增强谷神在线开发页面。</p></article>
-<article class="feature-card"><div class="feature-icon">06</div><h3>可执行规范门禁</h3><p>guthon-team 把规范升级为统一 Linter、Agent Hook、Git Hook 和可接入的 CI 门禁。</p></article>
-<article class="feature-card"><div class="feature-icon">07</div><h3>自动发行</h3><p>main 变更触发跨平台构建、插件打包、GitHub Release 与 Gitee Release 同步。</p></article>
+<article class="feature-card"><div class="feature-icon">01</div><h3>双源码模式</h3><p>DATABASE 与 SVN 共用工作区、索引和 UI，分别采用适合各自事实来源的安全模型。</p></article>
+<article class="feature-card"><div class="feature-icon">02</div><h3>稳定工作区路由</h3><p>产品和项目使用显式 workspaceKey，CLI、Nexus 与 Bridge 始终传递同一身份。</p></article>
+<article class="feature-card"><div class="feature-icon">03</div><h3>受控源码修改</h3><p>DATABASE 修改 Workcopy；SVN 校验授权、会话、版本和文件内容后原子写回。</p></article>
+<article class="feature-card"><div class="feature-icon">04</div><h3>本地事实索引</h3><p>每个工作区用独立 SQLite 保存对象、调用关系和关键事实，支持精确定位与 AI 分析。</p></article>
+<article class="feature-card"><div class="feature-icon">05</div><h3>Nexus 开发入口</h3><p>在 VS Code 中完成配置、导航、编辑、差异、冲突处理、提交和 Bridge 管理。</p></article>
+<article class="feature-card"><div class="feature-icon">06</div><h3>Bridge 页面增强</h3><p>把谷神网页身份路由到本地工作区，提供 DATABASE 拉取、元数据导出和页面辅助。</p></article>
+<article class="feature-card"><div class="feature-icon">07</div><h3>团队治理</h3><p>规范、Linter、Agent Hook 与 Git Hook 使用同一规则核心，给出可复核的诊断结果。</p></article>
+<article class="feature-card"><div class="feature-icon">08</div><h3>可验证发行</h3><p>跨平台应用、VSIX、Bridge 与 Skill 统一构建，更新经过校验、自检并支持回退。</p></article>
 </div>
 <blockquote>
-<p>本文解释功能为什么这样实现，以及修改功能时应进入哪些代码路径。</p>
-<p>普通用户从零安装和日常操作请查看：<a href="GuthonCodeTool_使用手册.html">GuthonCodeTool 使用手册</a>。</p>
-<p>工具仓库：<a href="https://github.com/SidWuu/GuthonCodeTool">GitHub</a> · <a href="https://gitee.com/sidwu/GuthonCodeTool">Gitee 镜像</a>；团队规范与门禁：<a href="https://github.com/SidWuu/guthon-team">guthon-team 私有 GitHub 仓库</a>（需要授权，联系我开通）。</p>
+<p>本文只记录仓库当前仍存在的功能。操作步骤请进入<a href="GuthonCodeTool_使用手册.html">快速开始</a>；本文用于理解功能原理、设计取舍和维护边界。</p>
 </blockquote>
 
 <section class="section">
-<h2 id="1-定位与边界">1. 定位与边界</h2>
-<p>GuthonCodeTool 把谷神平台中的 PAGE、过程函数、表结构、单据类型、视图和系统脚本整理到本地，形成可检索、可比较、可供 AI 分析的私有开发工作区。</p>
-<h3 id="1-1-版本差异">1.1 版本差异</h3>
-<blockquote>
-<p><strong>1.0</strong> 是原 DATABASE 源码版，只支持从数据库读取和拉取谷神源码；<strong>2.0</strong> 是当前版本，在完整保留 DATABASE 模式的基础上，新增 SVN 源码检出、更新、索引、受控编辑和交付能力。</p>
-</blockquote>
-<table class="comparison-table">
-<thead><tr><th>1.0 · DATABASE 源码版</th><th>2.0 · DATABASE + SVN 双模式版（当前）</th></tr></thead>
-<tbody>
-<tr><td><strong>源码来源：</strong>只支持连接数据库，从谷神源码表读取 PAGE、过程函数和系统脚本。</td><td><strong>源码来源：</strong>保留 DATABASE 拉取，同时支持按授权范围从 SVN 检出或更新源码。</td></tr>
-<tr><td><strong>本地结构：</strong>生成 <code>source/readonly</code>，开发修改进入 <code>source/workcopy</code>。</td><td><strong>本地结构：</strong>DATABASE 继续使用 readonly/workcopy；SVN 直接以授权 checkout 为唯一源码事实，不再复制第二份源码。</td></tr>
-<tr><td><strong>编辑方式：</strong>修改 Workcopy，检查差异后再人工复制回谷神平台。</td><td><strong>编辑方式：</strong>DATABASE 沿用 Workcopy；SVN 通过 Nexus 虚拟文档和受控批量写入直接修改 checkout，并校验对象身份、源码 hash、BASE revision 和路径范围。</td></tr>
-<tr><td><strong>更新与冲突：</strong>重新拉取时比较 readonly/workcopy，避免覆盖本地修改。</td><td><strong>更新与冲突：</strong>支持 SVN BASE、本地工作副本与 SVN HEAD 差异，提供远端检查、精确更新和文本三方合并。</td></tr>
-<tr><td><strong>索引与导航：</strong>从数据库导出的源码构建工作区索引。</td><td><strong>索引与导航：</strong>DATABASE 与 SVN 共用统一 SQLite 事实索引、工作区驾驶舱、完整索引搜索、调用关系和精简 AI 上下文。</td></tr>
-<tr><td><strong>交付方式：</strong>生成 Workcopy 差异或交付包，由开发人员回到平台处理。</td><td><strong>交付方式：</strong>SVN SCM 支持产品、子系统、所选文件和单文件提交，记录 revision 与交付回执；SVN 提交后仍需在谷神平台完成最终提交和运行验证。</td></tr>
-</tbody>
-</table>
-<ul>
-<li>工具负责读取、整理和索引源码；DATABASE 生成安全 Workcopy，SVN 由 Nexus 提供受控虚拟编辑。</li>
-<li>每个项目的工作区驾驶舱聚合索引就绪度、同步状态、SVN working copy、本地变更和最近一次 SVN 提交；各状态行可直接进入对应操作。完整索引搜索同时查询源码身份与事实索引。</li>
-<li>每个工作区显式选择 database 或 svn provider；SVN 只有用户执行初始化后才按授权清单中的精确 URL 检出。</li>
-<li>DATABASE 开发只修改 <code>source/workcopy</code>；SVN 不生成额外代码副本，虚拟文档直接回写授权 checkout 原文件。</li>
-<li>SVN 的“管理本地源码变更”提供类 Git 差异、多选/全选保存和撤销；SCM 在产品节点下直接显示默认展开的中文子系统组，聚合同一 <code>DATA_SOURCE_ID</code> 的数据源及系统 working copy，并支持产品全部、子系统和单文件级提交/更新。单一名称原样显示，只有 <code>0008</code> 下国内贸易、国际贸易这类共同后缀分组显示为“贸易系统”，Skill/public 单列“公共源码”。产品与子系统行都只保留刷新状态、检查远端变更、提交 Nexus 修改、更新远端变更四项操作并默认常驻显示；子系统提交与更新按组限制 working copy，根节点保留全部范围。检查远端变更后，点击远端文件打开“工作副本 ↔ SVN HEAD”双栏差异，更新仍需用户明确点击对应按钮。“保存到谷神”固定可用，SVN 提交说明可选，跨 working copy 分组执行精确文件 <code>svn commit</code>，成功仍表示“待谷神平台最终提交”。检出/更新和手动重建索引在输出标签逐项显示实际处理范围；同一工作区的重复重建点击会直接忽略；“谷神源码”树高亮本地修改文件及父目录，虚拟编辑器使用 VS Code 原生 SCM Quick Diff 按 SVN BASE 标出新增、修改与删除位置，点击色块可内联查看本地更改。公共用户名读取 <code>sync.yaml</code> 的 <code>svn.username</code>；Nexus 输入密码后只通过 stdin 交给 SVN auth cache/系统钥匙串保存。内部 HTTPS 自签证书由非交互命令直接信任。</li>
-<li>数据库连接、源码、业务文档和运行索引均为本地私有内容，不进入公开仓库或 Release。</li>
-<li><code>AGENTS.md</code>、开发基线、方言 API、开发模式及其机器门禁由 <code>guthon-team</code> 私有 GitHub 仓库统一分发，不再依赖内部地址或人工复制。</li>
-<li>Python 脚本继续作为开发与测试入口；普通用户只使用打包应用、VSIX 和 Bridge。</li>
-</ul>
-</section>
-
-<section class="section">
-<h2 id="2-整体架构">2. 整体架构</h2>
-<h3 id="2-1-组件关系">2.1 组件关系</h3>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>VS Code 侧边栏 ──spawn──▶ GuthonCodeTool 应用
-                                  │
-Chrome 扩展 ──HTTP──▶ Bridge ─────┘
-                                  │
-                                  ▼
-	                    数据库 / 源码表 或 SVN working copy
-                                  │
-                                  ▼
-                   workspace / nexus</code></pre></div>
+<h2 id="1-产品定位与设计原则">1. 产品定位与设计原则</h2>
+<h3 id="1-1-功能边界">1.1 功能边界</h3>
+<p>GuthonCodeTool 把谷神平台的源码与元数据整理为按产品或项目隔离的本地工作区。开发人员可以同步 PAGE、过程函数、系统脚本及数据库元数据，也可以从已授权的 SVN 仓库检出源码；随后通过本地索引完成搜索、跳转、调用关系分析、差异审阅和受控修改。</p>
 <div class="plugin-highlight">
-<div><strong>GuthonCodeTool 应用</strong><span>以同一 Python 入口执行 DATABASE 同步和 SVN checkout、虚拟编辑、SCM、索引操作。</span></div>
-<div><strong>VS Code 扩展：Guthon Nexus</strong><span>提供双源码模式、多项目功能树、“谷神源码”与每个 SVN 工作区的单一 SCM provider。</span></div>
-<div><strong>Chrome 扩展：Guthon Bridge</strong><span>把谷神网页上下文转换为本地工具调用，并提供字段复制等页面能力。</span></div>
+<div><strong>工具负责</strong><span>工作区路由、源码同步、索引、受控编辑、差异与交付证据，以及 Nexus、Bridge 和 AI 所需的本地能力。</span></div>
+<div><strong>平台负责</strong><span>谷神页面中的最终提交、编译、运行和业务验证。SVN revision 或静态检查通过都不能替代这些结果。</span></div>
+<div><strong>本地私有</strong><span>真实配置、凭据、源码、索引、日志和业务资料只保存在显式选择的本地数据目录中。</span></div>
 </div>
-<h3 id="2-2-运行链路">2.2 运行链路</h3>
-<ol>
-<li>VS Code 扩展保存应用路径和本地数据目录。</li>
-<li>用户确认操作后，扩展使用 <code>spawn</code> 启动应用并传入 <code>--home</code>。</li>
-<li>应用设置 <code>GUTHON_HOME</code>，所有配置和私有输出均相对于该目录解析。</li>
-<li>Nexus 节点和 CLI 显式传入 <code>workspaceKey</code>；DATABASE 解析 readonly/Workcopy，SVN 解析授权 working copy 与独立 <code>context/index.db</code>。</li>
-<li>Bridge 使用显式工作区或页面身份路由；所有同步操作进入全局串行队列。</li>
-</ol>
-</section>
-
-<section class="section">
-<h2 id="3-可执行应用">3. 可执行应用</h2>
-<h3 id="3-1-统一命令入口">3.1 统一命令入口</h3>
-<p><code>scripts/guthon_tool.py</code> 是打包应用入口。macOS 与 Windows 仅文件格式不同，命令和业务逻辑相同。</p>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>setup                 创建缺失配置，不覆盖已有文件
-workspace-create      从 stdin JSON 原子追加产品/项目、数据源和源码模式
-workspaces            列出全部产品、项目和同步状态
-workspace-resolve     从 cwd 解析唯一工作区、provider 与索引状态
-database-target-resolve  从 cwd 和可选 dev/test 环境解析私有数据库诊断目标
-database-target-configure 从 stdin 配置并验证内置只读目标，密码进入系统凭据库
-database-probe/describe/query-readonly  核验连接、读取结构、执行有界单条 SELECT
-search                统一查询源码身份与索引事实
-context-pack          默认生成精简 AI 上下文；--detailed 可生成详细版本
-route                 按 Bridge 页面身份解析工作区
-workspace-summary     返回源码模式和有效 capabilities
-svn                   从 products/projects.yaml 的 svn.url/scope 管理精确授权 working copy，或执行更新、状态与差异操作
-sync-source-all       拉取所有源码并重建索引
-sync-source           拉取显式工作区源码
-sync-all              依次同步源码、表结构、单据类型、系统脚本和视图
-reindex               从 DATABASE readonly 或 SVN 授权 checkout 重建索引
-export-markdown       导出源码索引文档
-export-schema         导出表结构
-export-bill-type      导出单据类型
-export-system-script  导出系统脚本
-export-view           导出视图
-query / diagnose      查询局部上下文 / 执行只读排查
-create-workcopy       按索引创建或打开对象 Workcopy
-workcopy              查看状态、生成差异/交付物，或预检/执行 save-svn</code></pre></div>
-<p><code>workspace-resolve</code> 是 Agent 的轻量启动入口，从当前 PRD/PRJ cwd 返回唯一 <code>workspaceKey</code>、provider、<code>index.ready</code> 和首选有界查询；不读取源码正文。<code>database-target-resolve</code> 再按 cwd 和可选 <code>dev/test</code> 环境，从私有 <code>config/database-testing.yaml</code> 返回目标及其内置 <code>connectionRef</code> 或可选 DBX <code>connectionId</code>。内置 <code>probe/describe/query-readonly</code> 支持 MySQL、PostgreSQL、Oracle，只接受单条 SELECT，限制 100 行，校验 database/schema 和可见表，并始终回滚只读事务；密码仅存于系统凭据库。未明确环境时使用 <code>defaults.diagnosisTargetId</code>，明确环境时使用 <code>defaults.byEnvironment</code>。解析失败或存在歧义会终止，不按连接名或历史状态猜测。</p>
-<h3 id="3-2-打包方式">3.2 打包方式</h3>
-<p><code>scripts/build_guthon_tool.py</code> 使用 PyInstaller <code>--onefile</code>，内置配置模板和运行所需 Python 模块。构建必须在目标系统执行：Windows 生成 EXE，macOS 生成 ARM64 Mach-O。</p>
-<ul>
-<li>Windows 发行物：<code>GuthonCodeTool-windows-x64.exe</code>。</li>
-<li>macOS 发行物：<code>GuthonCodeTool-macos-arm64.zip</code>，支持 M1 及后续型号。</li>
-<li>应用本身不保存用户配置，升级时直接替换应用文件即可。</li>
-</ul>
-<p>Guthon Nexus 默认使用发行模式调用应用。维护者可切换到调试模式，直接运行源码仓库的虚拟环境和 Python 入口；面板命令与 Bridge 请求都会在每次执行时加载最新脚本，因此日常修改无需重建应用。切换模式不会改变本地数据目录。</p>
-</section>
-
-<section class="section">
-<h2 id="4-配置与本地数据">4. 配置与本地数据</h2>
-<h3 id="4-1-配置职责">4.1 配置职责</h3>
-<ul>
-<li><code>datasource.yaml</code>：产品、项目和只读排查数据源；敏感值可引用环境变量。</li>
-<li><code>products.yaml</code>：产品名称、数据源、子系统范围、可选页面来源和可选 SVN 契约；不配置源码模式。</li>
-<li><code>projects.yaml</code>：独立项目快照的名称、数据源、子系统范围、可选页面来源和可选 SVN 契约；不包含产品工作区引用，也不配置源码模式。</li>
-<li><code>source-tables.yaml</code>：PAGE、过程函数和系统脚本的语义字段映射；公开模板只保留占位符，真实表名和字段名由内部配置提供。</li>
-<li><code>sync.yaml</code>：公共 SVN 用户名、全局同步窗口、未签入源码白名单和拉取规则，不保存当前或默认工作区。</li>
-</ul>
-<p><code>setup</code> 只补齐缺失文件，不覆盖用户配置；首次创建空的 datasource/products/projects 注册表。Nexus 在工作区树、项目树和标题栏持续提供“添加产品或项目”。新增向导只收集产品/项目、名称、稳定 ID 和源码来源；选择 DATABASE 或 SVN 后立即原子追加初始工作区、创建对应 Nexus 并结束，不在向导内询问连接、登录或 checkout。项目是产品某个版本的完整导出快照，创建时不选择产品，导出后与产品并列并独立管理。SVN 后续在目标 Nexus 顶层依次使用“设置工作区 SVN 登录”“导入/粘贴 SVN checkout 配置”和“编辑 SVN 地址配置”；粘贴支持纯 URL 或完整命令，输入期间不解析，保存并关闭后才提示解析地址。脚本必须由用户显式选择，未配置的 <code>context/svnCheckoutHere.*</code> 不会被探测，认证参数不会进入配置。DATABASE datasource 后续在配置文件中补充。右键 PRD/PRJ 的“删除产品或项目”先预览范围并要求模态确认，再把目录移入系统废纸篓，定向删除工作区、独占数据源和数据库排查配置。DATABASE 查询结果缓存到 <code>config/system-data.json</code>；SVN 不读取该缓存。</p>
-<h3 id="4-2-目录契约">4.2 目录契约</h3>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>&lt;本地数据目录&gt;/
-├── config/
-│   ├── datasource.yaml
-│   ├── products.yaml
-│   ├── projects.yaml
-│   ├── source-tables.yaml
-│   └── sync.yaml
-└── var/
-    ├── AGENTS.md
-    ├── docs/
-    ├── tools/
-    ├── nexus/{bridge,tool-runtime.json}
-    ├── checkout/&lt;配置 ID&gt;/            # SVN 唯一源码事实来源
-    └── workspace/
-        └── &lt;PRD或PRJ 工程&gt;/
-            ├── docs/
-            ├── source/{readonly,workcopy}/       # 仅 DATABASE
-            ├── database/{schema,billtype,views}/ # 仅 DATABASE
-            └── context/{README.md,source-mode.json,index.db,state.json,logs}/</code></pre></div>
-<p><code>PRD</code>、<code>PRJ</code> 只控制目录和 Nexus 展示顺序，真实身份始终来自配置中的 <code>workspaceKey</code>。</p>
-<p><code>var/AGENTS.md</code>、<code>var/docs/</code> 中的 11 份权威规范、<code>.guthon/</code>、<code>tools/guthon-lint</code> 和 Git Hook 均由 <code>guthon-team</code> 的一键安装写入；它们不包含在 GuthonCodeTool Release 中，也不再从内部地址单独下载。</p>
-<p>Nexus 同时展示全部产品和项目；每个节点的“源码来源：DATABASE/SVN”只切换当前工作区，并把结果写入该工程 <code>context/source-mode.json</code>。YAML 不配置模式，未设置时默认 DATABASE。SVN 工作区以 <code>config/products.yaml</code> 或 <code>config/projects.yaml</code> 对应条目的唯一 <code>svn.url</code> 作为可编辑配置；导入 checkout 时提取该根地址，不生成 scope。程序把一个 repository-root 条目写入工作区 <code>context/authorized-scope.json</code>，再完整 checkout 该地址。<code>systems.include.mappings</code> 只用于身份匹配和业务分组，不过滤目录。旧的逐条条目和 <code>checkoutPaths</code> 仍兼容。顶层“导入/粘贴 SVN checkout 配置”可选择 <code>.sh/.bat</code> 或粘贴 checkout 内容；脚本只作为一次性导入来源，不会被执行。SVN 不创建 readonly 和 database 镜像，checkout 与 workspace 分离，凭据不会写入配置、清单、YAML 或日志。</p>
-<p><code>scripts/providers/svn/import_svn_scope.py</code> 与打包工具的 <code>import-svn-scope</code> 命令仍兼容旧范围清单。新流程从 checkout shell/BAT 或粘贴内容中提取唯一字面量根 URL，忽略认证参数且不执行脚本、SVN checkout 或旧 working copy 清理；变量、绝对目录和多个根地址会阻断。执行“检出/更新完整 SVN 仓库”后会按新增、移除和变更统计更新内部清单。</p>
-<h3 id="4-3-guthon-team-规范治理">4.3 guthon-team 规范治理</h3>
-<p><a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team</a> 是私人 GitHub 仓库。使用者必须先获得仓库权限；无法访问或克隆时联系我开通。授权后执行：</p>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>git clone https://github.com/SidWuu/guthon-team.git
-cd guthon-team
-python3 tools/guthon_team.py install --workspace "/绝对路径/var"</code></pre></div>
-<p>仓库以 <code>standards/var/</code> 维护唯一一套权威规范正文，以 <code>standards.json</code> 记录版本和逐文件 SHA-256；<code>install/bootstrap</code> 将规范、<code>.guthon/config.json</code>、私有 API 索引、独立 Linter、<code>tools/guthon-lint</code> 和 Git pre-commit 安装到业务工作区，并按本机已有客户端安装或提示配置 <code>guthon-guard</code>。</p>
+<h3 id="1-2-核心设计选择">1.2 核心设计选择</h3>
 <table class="comparison-table">
-<thead><tr><th>只使用 AI 规范文件</th><th>使用 guthon-team</th></tr></thead>
+<thead><tr><th>设计</th><th>原因</th></tr></thead>
 <tbody>
-<tr><td>依赖 AI 主动读取、正确理解并始终记住</td><td>规范保留业务语义，可机械判断的部分由同一 <code>guthon-lint</code> 自动检查</td></tr>
-<tr><td>上下文变长或更换 Agent 后容易遗漏、误解</td><td>支持 Hook 的 Agent 在写前、写后和任务结束时检查；其他 Agent 复用 CLI</td></tr>
-<tr><td>只能提示“不要这样写”</td><td>可阻止受保护路径写入、非法 API、Velocity 结构错误、错误赋值、重复保存和不兼容 SQL</td></tr>
-<tr><td>人工复制容易版本漂移或覆盖本地调整</td><td>版本、哈希和锁文件可审计；安全升级会保护人工修改，强制更新前先备份</td></tr>
-<tr><td>不同 Agent 可能各自解释或复制一套规则</td><td>Codex、ZCode、WorkBuddy/CodeBuddy、Git Hook 和可接入的 CI 共享同一规则核心</td></tr>
-<tr><td>平台 API 容易被通用语言经验替代或猜测</td><td>从私有方言文档生成 API 索引，索引缺失或调用不存在时明确拒绝</td></tr>
-<tr><td>AI 声称“已遵守”但缺少证据</td><td>输出稳定诊断码、文件位置和检查结果，便于复核与回归</td></tr>
-<tr><td>全局规则可能误伤普通项目</td><td>仅在同时存在 <code>.guthon/config.json</code> 与 <code>tools/guthon-lint</code> 的已初始化谷神工作区启用</td></tr>
+<tr><td><strong>一个工作区只选择一个源码 provider</strong><br/>DATABASE 或 SVN。</td><td>防止同一对象同时出现两个事实来源，避免同步、编辑和交付时无法判断哪一份有效。</td></tr>
+<tr><td><strong>产品与项目使用稳定 workspaceKey</strong><br/><code>products.&lt;id&gt;</code> 或 <code>projects.&lt;id&gt;</code>。</td><td>目录名、显示名和当前窗口都会变化；稳定键能让 CLI、Nexus、Bridge、数据库目标和索引指向同一边界。</td></tr>
+<tr><td><strong>工具源码与运行数据分离</strong></td><td>升级或切换开发/发行入口时不搬迁私有数据，也不会把业务源码和凭据误带入公开仓库。</td></tr>
+<tr><td><strong>DATABASE 与 SVN 使用不同写入模型</strong></td><td>数据库导出是快照，适合 readonly/workcopy；SVN checkout 本身已有版本基线，再复制一份会制造额外冲突。</td></tr>
+<tr><td><strong>AI 默认读取索引与有界证据</strong></td><td>减少扫描和上下文体积，同时保留路径、对象身份、调用位置和 hash，使结论可回到源码核验。</td></tr>
+<tr><td><strong>所有高风险操作显式触发</strong></td><td>源码覆盖、SVN 更新、提交、撤销和工具升级都会改变本地或远端状态，必须由开发人员明确选择范围。</td></tr>
 </tbody>
 </table>
-<blockquote>
-<p>核心提升不是增加更多提示词，而是形成“规范提供语义、Linter 提供判定、Hook 提供时机、Git/CI 提供兜底”的治理链。</p>
-<p>Linter 通过只证明已覆盖的静态规则通过，不代表数据库结果、平台编译、SVN 提交或业务流程已经验证；插件显示已安装也不等于 Hook 已生效，首次安装或内容更新后仍需完成信任并在新任务中验证。</p>
-</blockquote>
 </section>
 
 <section class="section">
-<h2 id="5-源码同步与索引">5. 源码同步与索引</h2>
-<p><code>scripts/common/gusen_hub.py</code> 是工作区路由与索引的共享实现；<code>scripts/providers/database/</code> 保存数据库源码、metadata 导出和只读诊断，<code>scripts/providers/svn/</code> 保存地址清单、working copy、虚拟编辑和 SCM。数据库 provider 按 datasource 查询源码表并维护 readonly；SVN provider 读取 <code>products.yaml/projects.yaml</code> 中唯一 <code>svn.url</code>（首次可由 checkout shell/BAT 或粘贴内容导入），生成一个 repository-root 清单并完整 checkout，再从根目录内识别 <code>systems/&lt;SYSTEM_ID&gt;</code>、<code>datasources/&lt;DATA_SOURCE_ID&gt;</code> 及各源码分类，读取 <code>pages/index.md</code> 与 <code>procedures/index.md</code> 构建业务目录，并以文件 hash、BASE revision、working copy、源路径和 JSON Pointer 建立对象/调用索引。</p>
-<h3 id="5-1-page-导出">5.1 PAGE 导出</h3>
-<p>PAGE 保存到 <code>{子系统}/page/{模型序号}_{模型}/{模块序号}_{模块}/{页面名 页面ID}</code>。完整 JSON 写入 <code>raw.json</code>，页面脚本、SQL、事件和组件脚本拆入 <code>scripts/</code>。</p>
+<h2 id="2-运行架构">2. 运行架构</h2>
+<h3 id="2-1-组件职责">2.1 组件职责</h3>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>Guthon Nexus（VS Code）
+  ├─ 启动 GuthonCodeTool CLI
+  ├─ 展示工作区、源码、索引与 SCM
+  └─ 管理 Bridge 和工具版本
+           │
+           ▼
+GuthonCodeTool（Python CLI 与共享实现）
+  ├─ 工作区解析、同步、索引、Workcopy
+  ├─ DATABASE provider
+  └─ SVN provider
+           ▲
+           │ 本机请求
+Guthon Bridge（Chrome 扩展 + 本地服务）
+  └─ 把当前谷神页面路由到明确工作区</code></pre></div>
 <ul>
-<li>模型和模块序号补齐三位，并按父模型链还原目录。</li>
-<li>项目导出快照中的独立 <code>@inherit();</code> 使用同一快照内的产品脚本字段，不引用产品工作区。</li>
-<li>空的服务组件 <code>compScript</code> 仍生成空 <code>compScript.vm</code>。</li>
+<li><strong>统一 CLI：</strong><code>scripts/guthon_tool.py</code> 负责编排命令；<code>scripts/common/gusen_hub.py</code> 复用工作区解析、同步状态、索引和 Workcopy 规则。</li>
+<li><strong>DATABASE provider：</strong>读取配置的数据源，导出源码及元数据，并提供受限的只读数据库排查。</li>
+<li><strong>SVN provider：</strong>管理根检出、授权清单、虚拟对象投影、文件写入、SCM、冲突和交付回执。</li>
+<li><strong>Nexus：</strong>只通过参数数组启动工具，不经过 Shell；因此路径、空格和 Windows/macOS 参数行为一致。</li>
+<li><strong>Bridge：</strong>由 Nexus 使用 VS Code 自带的 Node 运行环境启停，普通用户无需另装运行时。</li>
 </ul>
-<h3 id="5-2-过程函数导出">5.2 过程函数导出</h3>
-<p>过程函数保存到 <code>{子系统}/procedure/{过程别名}/{函数名}/source.vm</code>。项目继承标记使用配置映射的产品脚本；多个子系统共用数据源时只保存一份实体源码，其余目录使用链接。</p>
-<h3 id="5-3-调用索引">5.3 调用索引</h3>
-<p>每个工作区使用自己的 <code>context/index.db</code>。索引记录源码对象、静态调用、低置信动态调用、PAGE 片段定位、字段与表列映射、单据路由、表读写及条件/赋值/异常事实；Nexus 的 SVN 虚拟文档使用它提供 F12/转到定义和查找引用，AI 仍以显式 <code>workspaceKey</code> 查询局部上下文。</p>
-<p>调用边表只保存 <code>source_record_id</code>、目标身份和脚本定位字段，来源产品、项目、对象身份、名称和时间由源码主表按显式唯一整数 <code>record_id</code> 关联，不依赖可能被 SQLite 整理改写的隐式 rowid，也不再逐边重复。目标覆盖索引用于调用方查询，来源索引用于被调用关系和增量重建；兼容视图维持原查询与导出字段。旧索引首次连接时事务迁移并整理空闲页，无需删除本地索引。</p>
-<p>SVN PAGE、过程函数、系统脚本、表和视图直接从授权 checkout 流式派生索引。不同数据源对应不同数据库 schema，普通对象以数据源 working copy 与对象身份组成索引主键，允许表、视图和过程函数同名；虚拟文档继续携带 <code>workingCopyId</code> 精确打开目标。PAGE_ID 保持工作区全局身份并按 SVN 版本去重。虚拟保存、原文件变化、revert 和 commit 按物理文件增量刷新；update 无法安全识别结构变化时退回全量扫描。全量扫描在单事务内完成，失败回滚并保留旧索引。索引只保存有界证据、hash、真实相对路径、JSON Pointer 和关系，不保存第二份可编辑源码，也不建立源码全文倒排。</p>
-<p>AI 查询分两步：<code>svn facts</code> 按关键词、表或源码身份返回少量事实；<code>svn explain</code> 按表或单据号返回写入位置、控制条件和有界调用者链，并用 continuation token 续查。默认结果不携带完整源码，事实不足或实际修改前才按返回的路径和片段读取 checkout。</p>
-<p>“谷神源码”的 catalog 只读取该 SQLite 索引，展开单个 PAGE 时才懒解析目标 JSON 的方法、事件、字段和 SQL。PAGE/系统脚本根目录的 <code>$.&lt;中文子系统名&gt;</code> 作为中文分组；PAGE 层级及末级名使用 <code>index.md</code>，过程函数、系统脚本、表和视图保留原源码目录。全量 <code>source-index.md</code>、<code>invoke-index.md</code> 和 <code>dynamic-invoke-points.md</code> 只在显式执行 <code>export-markdown</code> 时生成，不属于普通扫描和运行时查询链路。</p>
+<h3 id="2-2-目录与调用链">2.2 目录与调用链</h3>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>&lt;toolHome&gt;/
+├── GuthonCodeTool/                 # 可公开、可替换的工具源码
+├── config/                         # 真实运行配置
+├── docs/private/                   # 本机私有资料
+└── var/                            # 独立的私有工作区
+    ├── AGENTS.md
+    ├── tools/guthon-lint
+    ├── nexus/{bridge,tool-runtime.json}
+    ├── checkout/&lt;配置 ID&gt;/         # SVN working copy
+    └── workspace/&lt;工程&gt;/
+        ├── source/{readonly,workcopy}/  # 仅 DATABASE
+        ├── database/                   # 仅 DATABASE
+        └── context/{index.db,state.json,source-mode.json,logs}/</code></pre></div>
+<p><code>toolHome</code> 只能由 <code>--home</code>、运行描述文件或对应环境变量显式提供。源码不能沿父目录猜测 <code>config</code> 或 <code>var</code>，因为这种猜测会让开发仓库、发行应用和用户数据相互污染。</p>
+<p>Nexus 将当前应用入口、toolHome 和运行模式写入运行描述文件。Bridge 与其他入口读取同一描述，保证一次切换对所有组件生效。配置和工作区分别按请求加载，不使用全局“当前工作区”。</p>
 </section>
 
 <section class="section">
-<h2 id="6-平台元数据导出">6. 平台元数据导出</h2>
+<h2 id="3-工作区与配置">3. 工作区与配置</h2>
+<h3 id="3-1-稳定身份与配置">3.1 稳定身份与配置</h3>
 <ul>
-<li><strong>表结构：</strong><code>scripts/providers/database/export_table_schema_sql.py</code> 查询 <code>gd_tables</code>、<code>gd_tables_field</code> 和 <code>gd_system</code>。</li>
-<li><strong>单据类型：</strong><code>scripts/providers/database/export_bill_type_sql.py</code> 查询 <code>gd_bill_type</code> 和 <code>gd_system</code>。</li>
-<li><strong>视图：</strong><code>scripts/providers/database/export_view_sql.py</code> 读取 <code>gdp_tables_views.VIEW_SQL</code>。</li>
-<li><strong>系统脚本：</strong><code>scripts/providers/database/export_system_script_sql.py</code> 按本机语义映射查询；同一项目导出快照的 JavaScript 同时存在产品脚本与项目覆盖时，固定按产品脚本在前、项目覆盖在后合并。</li>
+<li><code>datasource.yaml</code>：数据源注册和 DATABASE 连接引用。</li>
+<li><code>products.yaml</code>：产品名称、稳定 ID、数据源、子系统范围和可选 SVN 根地址。</li>
+<li><code>projects.yaml</code>：项目快照的独立配置。项目与产品并列管理，不保存产品工作区引用。</li>
+<li><code>source-tables.yaml</code>：DATABASE 源码表及语义字段映射。</li>
+<li><code>sync.yaml</code>：公共同步规则、SVN 用户名、拉取校验和白名单；不保存默认工作区。</li>
+<li><code>context/source-mode.json</code>：当前工作区的 DATABASE/SVN 选择；缺失时采用 DATABASE。</li>
 </ul>
-<p>四类导出均复用目标工作区的数据源与子系统范围。<code>sync-all</code> 固定按“源码 → 表结构 → 单据类型 → 系统脚本 → 视图”执行；任一步失败或同步期间配置摘要变化即停止。五步全部成功后才把该工作区标为 <code>SYNCED</code>。</p>
-<p>本段导出命令仅适用于数据库模式。SVN 模式把 <code>tables/</code>、<code>views/</code> 作为只读索引对象，系统脚本可投影/写回；当前仓库没有正式 billtype 数据，因此 SVN 模式不伪造单据类型导出，也不提供业务 <code>diagnose</code>。</p>
-</section>
-
-<section class="section">
-<h2 id="7-workcopy-安全模型">7. DATABASE Workcopy 与 SVN 编辑安全模型</h2>
+<p>所有调用方必须传递同一 <code>workspaceKey</code>。Bridge 在缺少该键时只能根据页面身份查找候选；如果存在多个匹配项，选择仅对当前请求有效，不写入全局状态。这样多个产品、项目和窗口可以同时工作而不串线。</p>
+<h3 id="3-2-创建切换与删除">3.2 创建、切换与删除</h3>
 <ol>
-<li>从 readonly 创建 Workcopy，同时保存用于定位 readonly 的 <code>source-meta.json</code>。</li>
-<li>再次拉取时直接比较最新 readonly 与 workcopy；存在差异时保留 workcopy 并生成差异报告。</li>
-<li>readonly 与 workcopy 的任何差异都统一保留 workcopy；需要接受 readonly 覆盖时关闭拉取校验。</li>
-<li><code>workcopy status</code> 查看状态，<code>diff</code> 更新差异，<code>package</code> 生成交付清单。</li>
+<li><strong>首次设置：</strong><code>setup</code> 只创建缺失的公开模板和空注册表，不覆盖已有配置。</li>
+<li><strong>添加工作区：</strong>向导收集产品/项目、名称、稳定 ID 和源码模式，随后原子写入相关注册表。DATABASE 和 SVN 的连接细节在对应模块继续配置。</li>
+<li><strong>切换 toolHome：</strong>Nexus 先在候选目录执行设置与验证，通过后才保存新目录。失败或取消不会破坏当前可用配置。</li>
+<li><strong>切换源码模式：</strong>只更新目标工作区的 <code>source-mode.json</code>，不会影响其他工作区。</li>
+<li><strong>删除工作区：</strong>先显示目录、配置和独占资源的精确范围；确认后把工作区目录移入系统废纸篓，并只删除对应注册项和专属配置。</li>
 </ol>
-<p><code>sync.yaml</code> 的 <code>rules.pull_diff_check</code> 缺省为 <code>true</code>。设为 <code>false</code> 后，Bridge 每次拉取都会直接覆盖目标工作区的 readonly/workcopy，且不生成 <code>source-meta.json</code> 或差异文件。</p>
-<p><code>pull_auto_add_git</code> 只暂存本次新生成、未跟踪且未被忽略的文件，不暂存已有文件修改，也不强制添加忽略文件。</p>
-<p>以上 Workcopy 规则只属于 DATABASE。SVN 不保留 readonly/workcopy 代码副本；Nexus 会话账本只保存对象身份、独立编辑租约、源 hash、BASE revision、编码/BOM/换行和 JSON Pointer。每次打开可写虚拟文档都会生成独立租约：同一完整文件已有其他保存时拒绝旧租约覆盖；同一 PAGE 物理 JSON 的其他片段已更新但当前片段未变时，可在最新文件上安全重放。短时读写通过带超时的跨进程锁排队。虚拟保存前验证授权路径与目标文件 hash，随后保留权限并最小化原子回写原文件；自动化可用 <code>svn read-batch</code> 一次读取多个对象，也可在 <code>svn write-batch</code> 的 JSON 计划中直接填写对象身份并由 CLI 自动取得会话，随后预检全部目标、失败恢复已写文件、成功统一增量更新索引。SCM 按业务状态聚合多个 working copy。安全的外部已跟踪文本修改可进入变更管理器审阅、保存或撤销；SVN 更新改变干净文件时，或通过 Nexus 明确更新并安全合并时，当前结果会成为新的编辑会话基线，可继续在 Nexus 中修改。保存到谷神时只检查所选文件自身是否存在远端新版本，同一 working copy 中无关文件的远端变化不会阻断提交。重叠文本冲突通过物理 checkout 三方合并并显式标记已解决；新增、删除、未跟踪、属性冲突和树冲突仍会被阻断。跨 working copy 的保存按组依次提交并产生多个 revision，不伪装成原子提交。</p>
+<p>项目删除不会连带删除产品；共享数据源也不会因某个工作区删除而被误删。该设计把“身份”“物理目录”和“可共享资源”分别核对，避免用目录递归推断业务关系。</p>
+<h3 id="3-3-命令与运行描述">3.3 命令与运行描述</h3>
+<p>统一 CLI 覆盖以下功能族：</p>
+<div class="plugin-highlight">
+<div><strong>设置与路由</strong><span><code>setup</code>、<code>workspace-create/delete</code>、<code>workspaces</code>、<code>workspace-resolve</code>、<code>workspace-summary</code>、<code>source-mode</code>、<code>route</code>。</span></div>
+<div><strong>同步与索引</strong><span><code>sync-source</code>、<code>sync-source-all</code>、<code>sync-all</code>、<code>pull</code>、<code>reindex</code>、<code>search</code>、<code>context-pack</code>。</span></div>
+<div><strong>数据与源码</strong><span>元数据导出、数据库目标解析与只读查询、Workcopy 操作，以及完整的 <code>svn</code> 命令族。</span></div>
+</div>
+<p><code>workspace-resolve</code> 可从当前工作目录返回唯一工作区、provider、索引就绪度和下一步建议，不读取源码正文。它用于让 Agent 先确定边界，再执行小范围检索；若路径无法唯一对应工作区则明确失败。</p>
 </section>
 
 <section class="section">
-<h2 id="8-vs-code-扩展">8. VS Code 扩展：Guthon Nexus</h2>
-<p>扩展入口为 <code>plugins/GuthonNexus/gushen-vscode-completion/src/extension.js</code>。</p>
-<ul>
-<li>全局保存 <code>gushenCompletion.toolPath</code> 和 <code>gushenCompletion.toolHome</code>。</li>
-<li>每个产品或项目的“源码来源：DATABASE / SVN”与发行/调试运行模式正交；DATABASE/SVN 工作区始终混合展示。</li>
-<li>每个节点绑定自己的 <code>workspaceKey</code> 和状态，菜单完全由 workspace summary 返回的有效 capabilities 生成。</li>
-<li>“谷神源码”树按业务类别展示 SVN 模式的 PAGE 脚本/SQL/字段、过程函数、系统脚本、表和视图；PAGE 层级和同级顺序来自 <code>pages/index.md</code>，分块固定按 GSS、JS、SQL、字段排列；过程函数包名称来自 <code>procedures/index.md</code>，包按包名字母排序、包内函数按函数名字母排序。未编入索引的对象排在已索引内容之后。PAGE <code>raw.json</code> 的 <code>serviceEvents</code>（如 <code>beforeSaveScript</code>、<code>afterSaveScript</code>、<code>beforeSqlSelectScript</code>）按 GSS 后端分块展示，可写虚拟文档直接回写 checkout；仅独立 PAGE GSS 服务组件在编辑器标签中用索引中文名称替代 ID，有函数名的过程函数仍显示英文函数名。过程函数右键菜单支持复制函数名、复制“包名.函数名”，以及按该稳定身份列出索引识别的调用位置并跳转到精确调用行。</li>
-<li>SVN 目录 catalog 从本地索引加载并在扩展内缓存；PAGE 分块按页面懒加载，树展开不触发整个 checkout 的 SVN 和文件扫描。</li>
-<li>虚拟文档打开和保存的 SVN 安全检查限定为目标文件和独立编辑租约，不用同 working copy 的无关变更阻断当前文件；同文件旧租约不得继承其他编辑器更新后的 hash。</li>
-<li>PAGE 独立 GSS 服务组件保存时严格保护自动生成身份头，只忽略 VS Code 造成的等价换行差异，并分别保留原始头部和正文的换行布局。</li>
-<li>“谷神源码”树顶部“跳转”接受模块及其方法、字段、SQL、事件等任意子节点，沿父级解析所属模块后按 <code>workspaceKey + checkoutPath + sourcePath</code> 精确显示到资源管理器，并拒绝越出当前 checkout 的路径；同一命令保留在右键菜单，取消名称末尾的行内图标。</li>
-<li>顶部“定位”把当前打开的 SVN 虚拟分块或 checkout 物理文件反向映射到 Nexus 树，自动展开父级并选中节点；PAGE 定位只懒解析目标页面。</li>
-<li>“谷神源码”树还提供展开所选、收缩所选、刷新和水平滚动；原搜索按钮已改为“搜索当前 SVN 工作区完整索引”，只在输入完成后查询一次本地 SQLite，不依赖过程函数或页面是否已展开，也不扫描 checkout。</li>
-<li>项目驾驶舱的“搜索工作区完整索引”跨源码身份和本地事实索引返回同一结果列表；结果可打开源码，或复制默认精简、按需详细的 AI 上下文。精简版只保留最多 3 条直接关系、5 条高价值事实和简短 hash；两种版本都不隐式复制整份源码，并明确证据边界。</li>
-<li>每个 SVN workspace 只注册一个 SCM provider，底层 working copy 不拆成多个顶层项目；provider 内按 <code>DATA_SOURCE_ID</code> 生成始终可见的中文子系统资源组，组同时持有数据源 working copy 与所有映射系统 working copy，并另设公共源码组。显式 <code>systems.include.mappings</code> 优先；未配置时，<code>group_inference.py</code> 先按 <code>$.中文名称</code> 的高置信相似性关联，再仅在未占用数据源中比较 <code>pages/index.md</code>/<code>procedures/index.md</code> 业务词证据。证据不足的系统或数据源各自保留为独立业务组，不强制归类。provider 与资源组暴露相同按钮，分别执行全部范围与子系统范围操作。中文名称只用于展示和分组，不扩大授权清单。单文件更新只作用于授权范围内且仍为远程变更的精确物理路径；远端差异通过认证后的 <code>svn cat -r HEAD</code> 读取内存内容，与当前 working copy 双栏比较。PAGE 默认使用脚本、SQL、字段可读差异，原始 JSON 差异仍可显式打开；本地修改比较 SVN BASE 与 working copy，远端修改比较 working copy 与 SVN HEAD，均不生成临时源码副本。具有 Nexus 对象身份的文件行提供“在 Nexus 中编辑”“查看差异”“放弃此文件修改”和“提交所选 Nexus 修改”，支持 SCM 原生多选后复用 selection token、源 hash 与远端状态复核执行精确文件提交，不引入 Git 暂存。文本冲突行使用 SVN 的旧基线、本地和远程冲突工件打开 VS Code 三方合并，结果直接写回物理 checkout；用户保存并确认后才执行 <code>svn resolve --accept working</code>、增量索引和 SCM 刷新。属性冲突与树冲突继续阻断。</li>
-<li>SCM 的状态检查、Nexus 预览与提交、SVN 更新、提交后增量索引和状态刷新均向 GuthonCodeTool 输出通道流式写入阶段日志；同一工作区的重叠 SCM 操作会被拦截并提示已有操作正在执行，避免重复点击形成并发操作。</li>
-<li>每次成功的 SVN 保存追加一条持久交付回执，记录交付编号、分组 revision、文件和提交时间；驾驶舱显示最近一次提交。回执只证明 SVN 提交，谷神平台最终提交及运行验证不在 Nexus 内重复登记。</li>
-<li>VS Code 原生 SCM 在多个 repository 并存时会过滤没有资源的全部资源组。若 SVN 工作区整体无本地或远端变更，扩展仅在第一个子系统注入一条禁用的“当前无变更”显示资源，使所有子系统仍进入 SCM 树；provider 变更计数保持为零，提交、更新和候选筛选均忽略该占位项。</li>
-<li><code>.gss</code> 注册为独立 Guthon GSS 语言，在 Java grammar 上注入 Velocity/GSS 指令与变量，并继续接入 Nexus 补全、悬停、定义和引用；兼容 <code>.vm</code> 保持 Java。远端状态只在显式云操作时查询；更新发现 <code>incomplete</code> 或 working-copy 管理锁时只执行无删除/还原参数的标准 <code>svn cleanup</code> 后复检。</li>
-<li><code>var</code> 私有 Git 明确忽略根级 <code>checkout/</code>，只管理配置、上下文、索引资料和 DATABASE 工作区；SVN 源码只在 Nexus/SVN SCM 中审阅和提交，不形成第二套 Git 历史。</li>
-<li>虚拟保存只等待目标文件校验、原子写回和单文件增量索引；SCM 使用保存结果增量刷新，受控文件监听事件不重复索引，完整扫描留给手工刷新、更新和提交前检查。</li>
-<li>受控虚拟保存不再发出伪外部变更事件，因此同一文档可连续保存；真实 checkout 外部变化仍推进虚拟版本并保留后端 hash 覆盖保护。</li>
-<li>放弃本地修改只验证 selection token、会话 hash 和本地 SVN 状态后回退到 BASE，不被远端较新 revision 阻断；保存到谷神仍要求远端状态安全。</li>
-<li>同步、检出、提交、撤销等会改变源码状态的操作先弹出确认；“添加产品或项目”向导按刚输入的值直接生成本地配置，不再叠加重复确认；打开配置和目录保持单击。</li>
-<li>未配置时显示“设置工作空间”，已配置时自动显示“切换工作空间”；只有确认并选中新目录后才更新全局 <code>toolHome</code>，取消时保留原工作空间。</li>
-<li>“添加产品或项目”既用于首次配置，也用于开发过程中持续新增项目；已有 YAML 通过定向追加保留注释和其他条目。</li>
-<li>使用 <code>spawn</code> 直接传递命令、<code>--home</code> 和 <code>--workspace</code>，不经过 Shell，因此 macOS 与 Windows 参数一致。</li>
-<li>提供 Java、JavaScript、SQL 补全和 API 悬浮说明；<code>.gss</code> 与兼容保留的 <code>.vm</code> 都关联 Java 语言模式和 Java 高亮，并通过 workspace 调用索引提供过程函数转到定义和查找引用。</li>
-<li>补全数据在 <code>data/index.json</code>，手工片段在 <code>data/manual.json</code>，路由规则在 <code>rules.json</code>。</li>
-</ul>
-</section>
-
-<section class="section">
-<h2 id="9-guthon-bridge">9. Chrome 扩展：Guthon Bridge</h2>
-<p>Bridge 由 Chrome 扩展和监听 <code>127.0.0.1:17361</code> 的本地服务组成。服务入口为 <code>plugins/GuthonBridge/bridge/server.js</code>，随 VSIX 打包并由 Guthon Nexus 使用 VS Code 自带的 Node 运行环境启停。</p>
-<ul>
-<li>Nexus 直接把当前系统应用和本地数据目录传给 Bridge；用户不需要手工设置 <code>GUTHON_TOOL_PATH</code> 或 <code>GUTHON_TOOL_HOME</code>。</li>
-<li>请求携带 <code>workspaceKey</code> 时验证页面身份；未携带时按 <code>pageOrigin + dataSourceId + systemId</code> 匹配，多个候选由 Chrome 只为当前请求选择。</li>
-<li>页面提供过程函数/PAGE 拉取、表结构、单据类型、视图、系统脚本、复制模式和字段平移。</li>
-<li>源码拉取和数据库导出只在数据库工作区显示；SVN 工作区前端隐藏、服务端旧接口再次拒绝，复制与跳转能力保留。</li>
-<li>允许访问的平台范围由 <code>extension/host-config.js</code> 的 CIDR、域名后缀和路径前缀控制。</li>
-<li>Bridge 不提供 SVN 第二条源码拉取或写入链路；Nexus 的受控 SVN commit 也不代替谷神平台最终提交。</li>
-</ul>
-<p>普通用户不需要单独安装 Node.js。<code>GuthonCodeTool-chrome.zip</code> 只负责安装 Chrome 扩展，本地服务由 Guthon Nexus 启动；命令行启动仅保留给仓库源码调试。</p>
-</section>
-
-<section class="section">
-<h2 id="10-发布维护与验证">10. 发布、维护与验证</h2>
-<p><code>.github/workflows/release.yml</code> 在 main 的工具、配置模板、插件或工作流变化后自动执行：</p>
+<h2 id="4-database-模式">4. DATABASE 模式</h2>
+<h3 id="4-1-源码与元数据同步">4.1 源码与元数据同步</h3>
+<p>DATABASE provider 根据目标工作区的数据源、子系统范围和语义映射读取 PAGE、过程函数与系统脚本，生成结构化的 <code>source/readonly</code>。PAGE 保存原始 JSON，同时拆出 GSS、JavaScript、SQL、事件和组件脚本；过程函数按包与函数组织；项目快照内的继承关系只使用同一快照的数据，不跨到产品工作区。</p>
+<p>元数据导出包含表结构、单据类型、系统脚本和视图。<code>sync-all</code> 固定执行“源码与索引 → 表结构 → 单据类型 → 系统脚本 → 视图”。任一步失败或执行期间配置摘要改变，后续步骤都会停止；只有全部成功才把工作区标记为 <code>SYNCED</code>。这样“同步完成”代表一个一致快照，而不是五个时间点不同的局部结果。</p>
+<h3 id="4-2-workcopy-开发">4.2 Workcopy 开发</h3>
 <ol>
-<li>在 Windows 和 macOS 构建应用。</li>
-<li>运行 VS Code 扩展与 Bridge 测试并打包 VSIX、Bridge ZIP。</li>
-<li>为两个应用生成 SHA-256 校验文件，生成中文说明并创建 GitHub Release。</li>
-<li>使用仓库 Secret 和变量创建 Gitee Release、上传相同附件。</li>
+<li>从 readonly 创建目标对象的 Workcopy，并保存来源身份。</li>
+<li>开发人员只修改 <code>source/workcopy</code>，readonly 始终表示最近一次数据库导出。</li>
+<li><code>workcopy status</code> 汇总状态，<code>diff</code> 生成差异，<code>package</code> 生成可交付清单。</li>
+<li>再次拉取时，默认直接比较新 readonly 与现有 workcopy；存在差异便保留 workcopy，防止覆盖开发修改。</li>
 </ol>
-<p>Guthon Nexus 的“运行模式”节点默认折叠，发行模式下显示当前应用版本、GitHub/Gitee 更新源、手动检查更新和回退入口。Nexus 不在启动时或后台定时检查；只有用户点击后才访问所选更新源。新版本下载后必须通过 SHA-256 和独立 <code>self-test</code>，再切换到受管版本目录，上一版本保留用于回退。</p>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>python -m unittest discover -s tests
-npm test  # plugins/GuthonNexus/gushen-vscode-completion
-npm test  # plugins/GuthonBridge
-git diff --check</code></pre></div>
-<p>修改功能时应同步检查应用命令、VS Code 侧边栏、Bridge 路由、配置模板、README、知识库和使用手册。Release 只分发应用、应用校验文件、Guthon Nexus VSIX、Bridge 和公开 Skill，不包含真实配置、团队规范或私有 <code>var/</code>；团队规范与 <code>guthon-guard</code> 统一从 <a href="https://github.com/SidWuu/guthon-team" target="_blank" rel="noopener">guthon-team 私有 GitHub 仓库</a>获取，访问权限联系我开通。SVN 能力统一由 Guthon Nexus 交付。</p>
+<p><code>rules.pull_diff_check</code> 默认启用。只有显式关闭时才允许拉取覆盖 workcopy。自动 Git 暂存也只处理本次新生成且原本未跟踪的目标文件，不会暂存已有修改、其他工作区文件或被忽略内容。</p>
+<p>采用双目录是因为数据库导出没有版本控制工作副本。readonly 提供可重建基线，workcopy 保留人工修改，两者的差异就是需要审阅和回填平台的内容。</p>
+<h3 id="4-3-只读数据库排查">4.3 只读数据库排查</h3>
+<p>工具可按工作区、开发/测试环境和私有目标配置解析数据库连接，并支持 MySQL、PostgreSQL 与 Oracle。密码写入系统凭据库，配置只保存连接引用；每个目标可限制可见 database、schema 和表。</p>
+<ul>
+<li><code>database-probe</code>：验证驱动、连接和只读能力。</li>
+<li><code>database-describe</code>：在白名单内读取表结构，避免猜测字段。</li>
+<li><code>database-query-readonly</code>：只接受单条 SELECT，限制返回行数并始终回滚事务。</li>
+<li>可选 DBX 连接只在配置了 <code>connectionId</code> 时使用；缺失绑定会明确报告，不自动猜测其他连接。</li>
+</ul>
+<p><code>diagnose</code> 还提供配置驱动的源码逻辑排查：它只允许显式标记为测试、启用只读诊断并声明数据库白名单的数据源，按模板逐步执行绑定参数的单条 SELECT，在首个不满足条件的位置停止并生成本地排查报告。该能力适合重复执行的固定检查链；临时问题则使用目标解析、结构描述和有界查询逐步取证。</p>
+<p>这些限制使数据库能力适合诊断和验证，而不会把开发工具变成任意 SQL 执行器。查询命中只证明数据库证据，不等同于页面结果或已部署版本验证。</p>
+</section>
+
+<section class="section">
+<h2 id="5-svn-模式">5. SVN 模式</h2>
+<h3 id="5-1-检出与认证">5.1 检出与认证</h3>
+<p>每个 SVN 工作区配置一个仓库根地址，并完整检出为一个 <code>repository-root</code>。系统和数据源映射只负责对象身份、中文名称与业务分组，不裁剪检出目录。完整根检出保证跨子系统引用、公共源码和同名对象都有共同 revision 基线。</p>
+<ul>
+<li>可从文件选择或粘贴 checkout 内容导入根地址；工具只解析字面量地址，不执行脚本。</li>
+<li>变量、多个根地址或不安全的本地目标会被拒绝，避免把导入功能变成命令执行入口。</li>
+<li>公共用户名保存在同步配置；密码经标准输入交给 SVN 认证缓存或系统钥匙串，不进入 YAML、日志、命令参数或编辑会话。</li>
+<li>检出、更新、清理和重建索引都显示实际处理范围；同一工作区的重叠操作通过操作锁阻止。</li>
+</ul>
+<h3 id="5-2-业务目录与虚拟文档">5.2 业务目录与虚拟文档</h3>
+<p>SVN checkout 是唯一源码事实。工具从其中识别系统、数据源、PAGE、过程函数、系统脚本、表和视图，写入工作区独立 SQLite 索引。Nexus 的“谷神源码”树只读取索引；展开单个 PAGE 时才解析目标 JSON，因此大型仓库不会在每次展开树节点时全量扫描。</p>
+<table class="comparison-table">
+<thead><tr><th>对象与展示</th><th>编辑边界</th></tr></thead>
+<tbody>
+<tr><td><strong>PAGE：</strong>按索引中的模型、模块和页面顺序展示，内部固定分为 GSS、JavaScript、SQL、字段及服务事件。</td><td>脚本与 SQL 以虚拟文档投影，可受控写回原始 JSON；字段用于定位和分析。</td></tr>
+<tr><td><strong>过程函数：</strong>按包名和函数名组织，支持复制稳定身份、跳转与调用位置。</td><td>函数源码可以受控编辑，写回对应物理文件。</td></tr>
+<tr><td><strong>系统脚本：</strong>按业务子系统分组。</td><td>可受控编辑和提交。</td></tr>
+<tr><td><strong>表与视图：</strong>作为结构和引用事实进入索引。</td><td>只读展示，不通过虚拟文档改写定义。</td></tr>
+</tbody>
+</table>
+<h3 id="5-3-受控编辑">5.3 受控编辑</h3>
+<p>打开可写虚拟文档时，后端创建独立编辑租约，记录 workspace、对象身份、授权相对路径、文件 hash、SVN BASE revision、JSON Pointer、编码、BOM 和换行风格。保存时按以下顺序处理：</p>
+<ol>
+<li>重新核对工作区、provider、对象身份和路径，拒绝越出授权 checkout。</li>
+<li>检查物理文件、当前片段、文件 hash 与 BASE 状态；缓存标签缺少会话或仍显示只读时，Nexus 先强制重新加载一次，再由后端作最终判定。</li>
+<li>同一 PAGE 的其他片段发生变化但当前片段未变时，在最新 JSON 上安全重放；同一片段已经变化则拒绝旧租约覆盖。</li>
+<li>保留编码、BOM、换行和文件权限，以最小范围原子替换，再按物理文件增量刷新索引。</li>
+</ol>
+<p><code>svn read-batch</code> 可以一次读取多个对象；<code>write-batch</code> 会先预检全部目标，拒绝同一物理文件出现两次，任一写入失败时恢复已写文件，全部成功后统一更新索引。短时读写使用带超时的跨进程锁，长操作使用工作区操作锁，解决 Nexus、CLI 和自动化同时访问同一 checkout 的竞争。</p>
+<h3 id="5-4-scm-冲突与交付">5.4 SCM、冲突与交付</h3>
+<ul>
+<li>每个工作区注册一个 SCM provider；内部按中文业务子系统分组，同组可聚合数据源与多个系统 working copy，公共源码单独成组。</li>
+<li>本地差异比较 SVN BASE 与 working copy；远端差异比较 working copy 与 SVN HEAD。PAGE 默认显示脚本、SQL 和字段的可读差异，也可查看原始 JSON。</li>
+<li>支持全部、业务组、原生多选和单文件范围的提交或更新。提交前复核 selection token、文件 hash、当前 SVN 状态和目标文件远端变化，不使用 Git 暂存区。</li>
+<li>放弃修改只回退所选文件到 BASE；远端已有新 revision 不会阻止本地撤销，但提交仍会检查目标文件远端安全性。</li>
+<li>重叠文本冲突可用三方合并处理，保存并确认后才标记 resolved；新增、删除、未跟踪、属性和树冲突继续阻断。</li>
+</ul>
+<p>跨 working copy 的提交按组依次执行，会产生多个 revision，不伪装成原子事务。每次成功提交都追加持久交付回执，记录交付编号、revision、文件和时间。回执只证明 SVN 已提交；平台最终提交、编译和业务运行仍需独立验证。</p>
+</section>
+
+<section class="section">
+<h2 id="6-索引与ai上下文">6. 索引与 AI 上下文</h2>
+<h3 id="6-1-工作区事实索引">6.1 工作区事实索引</h3>
+<p>每个工作区维护自己的 <code>context/index.db</code>，DATABASE 从 readonly 建索引，SVN 从授权 checkout 流式建索引。索引保存：</p>
+<ul>
+<li>源码对象身份、真实相对路径、物理 working copy、内容 hash 和对象定位信息。</li>
+<li>静态调用、低置信动态调用、调用位置和目标身份。</li>
+<li>PAGE 片段、字段到表列、单据路由、表读写、条件、赋值和异常事实。</li>
+<li>SVN 对象的 JSON Pointer、BASE 信息和支持增量刷新的文件关联。</li>
+</ul>
+<p>同名对象用数据源、working copy 与业务身份组成键；PAGE ID 保持工作区全局身份。全量重建在单个事务内完成，失败会回滚并保留旧索引；虚拟保存、撤销和提交按文件增量更新，只有无法安全识别结构变化时才回退到全量扫描。</p>
+<p>索引不保存第二份可编辑源码，也不建立源码全文倒排。这样避免索引成为隐蔽副本，并把结果始终锚定到可核验的真实文件。</p>
+<h3 id="6-2-检索与有界上下文">6.2 检索与有界上下文</h3>
+<div class="plugin-highlight">
+<div><strong>统一搜索</strong><span><code>search</code> 同时查询源码身份和事实索引；结果可打开精确源码位置。</span></div>
+<div><strong>关系查询</strong><span><code>svn definition/callers/find/context</code> 提供定义、引用、调用链和局部上下文。</span></div>
+<div><strong>事实解释</strong><span><code>svn facts/explain</code> 返回写入位置、控制条件、表关系和有界调用者链。</span></div>
+</div>
+<p><code>context-pack</code> 默认生成精简上下文，只保留少量直接关系、高价值事实、路径和短 hash；需要更多证据时再请求详细版本或 continuation token。该流程让 AI 先根据稳定身份和事实缩小范围，再读取准确片段，避免把整个业务仓库塞入上下文后凭相似名称猜测。</p>
+<p>Markdown 源码索引和调用索引只在显式执行导出命令时生成，不属于 Nexus 日常运行链路。运行时以 SQLite 为事实来源，可以快速增量更新，也避免大量派生文件污染私有 Git。</p>
+</section>
+
+<section class="section">
+<h2 id="7-guthon-nexus">7. Guthon Nexus</h2>
+<h3 id="7-1-工作区驾驶舱">7.1 工作区驾驶舱</h3>
+<p>Guthon Nexus 是统一 VS Code 扩展，DATABASE 与 SVN 工作区同时出现在同一侧边栏。每个节点绑定自己的 workspaceKey，菜单由 CLI 返回的有效 capabilities 决定，因此没有配置的功能不会显示为可执行操作。</p>
+<ul>
+<li>配置或切换 toolHome、添加/删除产品和项目、切换源码来源、打开配置与目录。</li>
+<li>显示同步状态、索引就绪度、SVN working copy、本地/远端变更和最近交付回执。</li>
+<li>执行 DATABASE 同步、元数据导出、Workcopy 管理和只读数据库排查。</li>
+<li>执行 SVN 检出、更新、索引、业务目录浏览、虚拟编辑、差异、冲突处理和精确提交。</li>
+<li>搜索当前工作区完整索引，并复制精简或详细 AI 上下文。</li>
+<li>启动、停止和检查 Bridge；管理发行/调试运行模式。</li>
+</ul>
+<p>“谷神源码”树支持展开、收缩、刷新、水平滚动、索引搜索、从树跳到资源管理器，以及从当前虚拟文档或物理文件反向定位树节点。路径跳转会核对 workspace、checkout 和 sourcePath，拒绝越界。</p>
+<h3 id="7-2-语言与导航">7.2 语言与导航</h3>
+<ul>
+<li><code>.gss</code> 是独立 Guthon GSS 语言，在 Java 语法基础上注入 Velocity/GSS 指令和变量；兼容的 <code>.vm</code> 保持 Java 关联。</li>
+<li>Java、JavaScript、SQL 提供谷神 API 补全与悬停说明；路由规则根据上下文选择 <code>sqltools</code>、<code>sql</code> 或 <code>sqlh</code> 等 API 族。</li>
+<li>过程函数、PAGE 虚拟文档和索引对象支持转到定义、查找引用与调用位置。</li>
+<li>补全索引、人工片段和路由规则分别维护，使自动生成 API 与项目特定规则可以独立更新。</li>
+<li>SCM 使用 VS Code Quick Diff 以 SVN BASE 标出增删改，点击装饰即可内联查看。</li>
+</ul>
+<p>语言服务依赖工作区索引而不是扫描所有文件。这样定义与引用能绑定到明确的数据源和对象身份，同名函数也不会仅凭文本匹配跳错位置。</p>
+<h3 id="7-3-工具更新">7.3 工具更新</h3>
+<p>运行模式节点默认折叠。发行模式显示当前工具版本、GitHub/Gitee 更新源、手动检查和回退；默认使用 Gitee。工具不会在启动时或后台定时联网，只有用户点击检查才访问所选来源。</p>
+<ol>
+<li>下载候选发行物和校验文件。</li>
+<li>验证 SHA-256，阻止损坏或被替换的文件。</li>
+<li>在临时 toolHome 执行独立 <code>self-test</code>，避免候选版本污染真实配置。</li>
+<li>安装到扩展全局存储的版本目录，通过后原子切换当前入口。</li>
+<li>保留上一可用版本，发生问题时由用户手动回退。</li>
+</ol>
+<p>开发模式直接调用源码仓库的 Python 入口，方便维护者即时验证；切换运行模式不改变 toolHome。工具路径设置采用“候选 → 设置与验证 → 持久化”，避免一次失败配置把后续启动锁死。</p>
+</section>
+
+<section class="section">
+<h2 id="8-guthon-bridge">8. Guthon Bridge</h2>
+<h3 id="8-1-页面能力">8.1 页面能力</h3>
+<p>Guthon Bridge 由 Chrome 扩展和 Nexus 管理的本地服务组成，把谷神在线开发页面的身份转换为 GuthonCodeTool 命令。当前页面能力包括：</p>
+<ul>
+<li>在 DATABASE 工作区拉取 PAGE、过程函数和系统脚本。</li>
+<li>导出表结构、单据类型、视图和系统脚本元数据。</li>
+<li>在过程函数和模块后台脚本中识别静态过程方法，按住 Ctrl（macOS 为 Cmd）点击即可打开对应函数；也可查看索引识别的调用位置。</li>
+<li>根据页面所属模块路由到正确产品或项目。</li>
+<li>复制模式，以及字段复制、粘贴和平移等页面辅助。</li>
+<li>显示本地工具执行结果，并把具体同步工作交给统一 CLI。</li>
+</ul>
+<p>SVN 工作区不提供网页源码拉取或数据库元数据导出。SVN 的检出、编辑、索引和提交只在 Nexus 内完成，避免 Bridge 再建立一条绕过 SCM 安全检查的源码写入链路。</p>
+<h3 id="8-2-路由与安全边界">8.2 路由与安全边界</h3>
+<ul>
+<li>请求携带 workspaceKey 时，Bridge 继续核对页面身份；缺失时根据页面来源、数据源和系统查找候选。</li>
+<li>存在多个候选时由用户为当前请求选择，不写入全局默认，也不影响其他页面。</li>
+<li>允许访问的页面范围由扩展的来源、域名后缀和路径规则限制。</li>
+<li>所有本地请求只在回环接口通信；文档和 UI 不需要暴露监听地址。</li>
+<li>Nexus 把当前应用入口和 toolHome 传给 Bridge，用户无需手工配置环境变量或安装 Node.js。</li>
+</ul>
+<p>Bridge 只提供页面增强和 DATABASE 拉取，不向平台自动写回源码，也不执行 SVN commit。该边界让在线页面、本地工作区和版本控制各自只有一个明确写入入口。</p>
+</section>
+
+<section class="section">
+<h2 id="9-guthon-team">9. guthon-team 治理</h2>
+<h3 id="9-1-安装与更新">9.1 安装与更新</h3>
+<p>团队治理通过团队 Marketplace 中的 <code>guthon-guard</code> 插件分发。插件在新任务的 SessionStart 阶段检查工作区并幂等初始化：已是当前版本时不重复写入，缺失或版本更新时补齐规范、Linter、API 索引和配置。支持 Hook 的客户端还需对插件 Hook 完成信任；不支持 Marketplace 或 Hook 的环境可使用同一发行物中的独立安装器。</p>
+<p>治理安装面向业务 <code>var</code> 工作区，不写入 GuthonCodeTool 源码仓库。核心 AGENTS、规范正文和 <code>guthon-lint</code> 即使没有 Marketplace 或 Hook 也能使用，Hook 只负责自动选择检查时机。</p>
+<h3 id="9-2-规范门禁">9.2 规范门禁</h3>
+<div class="plugin-highlight">
+<div><strong>规范层</strong><span>AGENTS 与权威标准说明业务语义、开发模式、方言 API 和允许的写入范围。</span></div>
+<div><strong>判定层</strong><span><code>guthon-lint</code> 用稳定诊断码检查受保护路径、非法 API、Velocity 结构、赋值、重复保存和 SQL 兼容性。</span></div>
+<div><strong>时机层</strong><span>Agent Hook 在任务与工具生命周期检查，Git Hook 在提交前兜底；需要时可把同一 CLI 接入 CI。</span></div>
+</div>
+<p>版本清单和文件哈希用于判断规范是否完整、是否被本地修改以及升级是否安全。人工修改不会被静默覆盖；强制更新前先备份。私有 API 索引使工具能明确判断函数是否存在，避免用通用语言经验猜测谷神方言。</p>
+<p>治理采用“语义规范 + 可执行 Linter + 生命周期 Hook + Git/CI 兜底”，因为提示词只能提醒，不能稳定证明每次修改都经过同一规则。Linter 通过只代表已覆盖的静态规则通过，不代表数据库、平台编译、SVN 或业务流程已经验证。</p>
+</section>
+
+<section class="section">
+<h2 id="10-构建发布与验证">10. 构建、发布与验证</h2>
+<h3 id="10-1-发行物">10.1 发行物</h3>
+<p>Python 应用使用 PyInstaller 单文件构建，并内置公开配置模板与版本信息。构建必须在目标系统执行，以生成 Windows x64 应用和 macOS ARM64 应用。发布流程同时完成：</p>
+<ul>
+<li>运行 Python、Nexus 与 Bridge 的相关测试。</li>
+<li>打包 Guthon Nexus VSIX 和 Guthon Bridge Chrome ZIP。</li>
+<li>打包公开的 <code>guthon-testing</code> Skill。</li>
+<li>为应用生成校验文件，并向 GitHub 与 Gitee Release 上传相同附件。</li>
+</ul>
+<p>Release 不包含真实配置、凭据、业务源码、私有索引、日志或 guthon-team 内容。工具应用可以替换升级，用户的 toolHome 保持不动。</p>
+<h3 id="10-2-验证边界">10.2 验证边界</h3>
+<table class="comparison-table">
+<thead><tr><th>验证证据</th><th>能够证明的范围</th></tr></thead>
+<tbody>
+<tr><td>Python、Nexus 或 Bridge 自动化测试</td><td>源码级命令、路由和组件行为；不能证明已安装 VSIX、真实浏览器或远端服务。</td></tr>
+<tr><td>打包应用 <code>self-test</code></td><td>发行物可启动、可解析内置资源并能在临时目录完成基础设置。</td></tr>
+<tr><td>SQLite 索引与静态事实</td><td>当前本地源码快照中的对象、关系和可识别规则；不能证明运行时分支一定执行。</td></tr>
+<tr><td>数据库只读查询</td><td>指定目标和时点的数据库记录；不能证明页面版本、缓存或业务流程结果。</td></tr>
+<tr><td>SVN revision 与交付回执</td><td>所列文件已经提交到对应 revision；不能证明谷神平台最终提交、编译和运行成功。</td></tr>
+<tr><td><code>guthon-lint</code> 通过</td><td>已实现的静态治理规则没有发现问题；不能替代平台或业务验证。</td></tr>
+</tbody>
+</table>
+<p>维护功能时先用 <code>AI_CODE_INDEX.md</code> 定位最小模块，并同步检查 CLI、配置、Nexus、Bridge、测试和两份 HTML 手册。删除或改名后全局搜索失效引用。文档至少执行 HTML 结构检查、定向敏感信息检查和 <code>git diff --check</code>；代码修改再按影响范围运行 Python、Nexus、Bridge、打包或真实环境验证。</p>
 </section>
 </main>
+
 </div>
 <div class="toolbar"><button class="round-btn" id="themeBtn" title="切换深浅主题" aria-label="切换深浅主题">◐</button><button class="round-btn" id="topBtn" title="回到顶部" aria-label="回到顶部">↑</button></div>
-<footer class="footer">GuthonCodeTool 内部知识库 · 架构、实现与维护参考</footer>
+<footer class="footer">GuthonCodeTool 全功能说明 · 当前功能、实现原理与设计原因</footer>
 <script>
 const root=document.documentElement;
 const themeBtn=document.getElementById('themeBtn');
