@@ -184,7 +184,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <p>下载前确认：</p>
 <ul>
 <li>已安装 VS Code；需要网页辅助功能时同时准备 Chrome。</li>
-<li>已取得团队 Marketplace 访问权限。实际地址请向团队管理员获取。</li>
+<li>已取得内网 Git 个人账号，并能登录团队内部发布的 <code>&lt;内网 Git Web 地址&gt;</code>；管理员已为账号授予团队仓库权限。</li>
 <li>DATABASE 用户已取得数据库只读账号。</li>
 <li>SVN 用户已安装 SVN 1.10+，并取得账号和唯一根 checkout 配置。</li>
 </ul>
@@ -197,7 +197,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>Windows x64：<code>GuthonCodeTool-windows-x64.exe</code></li>
 <li>VS Code 双模式扩展 Guthon Nexus：<code>guthon-nexus-vscode.vsix</code></li>
 <li>Chrome 扩展 Guthon Bridge：<code>GuthonCodeTool-chrome.zip</code></li>
-<li>团队规范与开发门禁：通过团队 Marketplace 安装 <code>guthon-guard</code>；访问权限和 Marketplace 安装地址请向团队管理员获取。</li>
+<li>团队规范与开发门禁：成员使用自己的内网 Git 账号和 SSH 公钥，通过团队 Marketplace 安装 <code>guthon-guard</code>。</li>
 </ul>
 <p>建议固定两个目录位置：</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button>
@@ -311,11 +311,14 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h4>第一次连接内网 Git</h4>
 <ol>
 <li>连接公司内网或 VPN，确认终端中可以运行 <code>git --version</code> 和 <code>python3 --version</code>。</li>
-<li>如果从未访问过内网 Git，先生成或找到本机 SSH 公钥，将公钥交给内网 Git 管理员授权。私钥只保存在本机，不能发给任何人。</li>
-<li>向管理员获取团队 Marketplace SSH 地址，再执行下面的只读命令。首次出现主机指纹时，先与管理员提供的指纹核对；无法核对时不要直接确认。</li>
+<li>查看本机是否已有 SSH 公钥。macOS/Linux 执行 <code>ls ~/.ssh/*.pub</code>；Windows PowerShell 执行 <code>Get-ChildItem $env:USERPROFILE\.ssh\*.pub</code>。</li>
+<li>如果没有公钥，在终端执行 <code>ssh-keygen -t ed25519</code> 并按提示保存。如果默认文件已经存在，不要覆盖仍在使用的密钥。</li>
+<li>复制对应 <code>.pub</code> 文件的完整内容。macOS/Linux 可执行 <code>cat ~/.ssh/id_ed25519.pub</code>；Windows PowerShell 可执行 <code>Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub</code>。实际文件名不同时按真实路径调整。没有 <code>.pub</code> 后缀的私钥必须只保存在本机，不能上传或发送。</li>
+<li>使用自己的账号登录团队内部发布的 <code>&lt;内网 Git Web 地址&gt;</code>，进入“用户设置 → SSH / GPG 公钥”，点击“增加密钥”，填写设备标题并粘贴公钥。</li>
+<li>执行下面的只读命令。首次出现主机指纹时，先与团队公布的指纹核对；无法核对时不要直接确认。</li>
 </ol>
 <div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>git ls-remote "&lt;团队 Marketplace SSH 地址&gt;" HEAD</code></pre></div>
-<p>看到一行提交哈希和 <code>HEAD</code> 表示连接成功。若提示 <code>Permission denied (publickey)</code>，说明 SSH 公钥尚未授权；先联系管理员，不要反复安装插件。</p>
+<p>看到一行提交哈希和 <code>HEAD</code> 表示连接成功。若提示 <code>Permission denied (publickey)</code>，先检查公钥是否添加到了当前登录的个人账号；公钥正确但仍无权访问时，再联系管理员检查账号或仓库权限。</p>
 <h4>Codex 安装</h4>
 <ol>
 <li>在终端添加团队 Marketplace。添加市场与安装插件是两个独立步骤，两条命令都要执行：</li>
