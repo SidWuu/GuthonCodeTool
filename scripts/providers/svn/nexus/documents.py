@@ -568,7 +568,7 @@ def read(
             if not known_file or known_file.get("refreshAccepted"):
                 session["files"][item["source_path"]] = {
                     "scopeEntryId": entry.id,
-                    "workingCopyId": entry.id,
+                    "workingCopyId": item.get("working_copy_id") or item.get("scope_entry_id") or entry.id,
                     "objectType": item["source_table"],
                     "objectId": item["source_id"],
                     "funId": item.get("fun_id") or "",
@@ -869,7 +869,7 @@ def _commit_prepared(workspace: dict, session: dict, prepared: dict) -> dict:
         "sessionId": session["sessionId"],
         "documentId": prepared["documentId"],
         "sourcePath": prepared["item"]["source_path"],
-        "workingCopyId": prepared["entry"].id,
+        "workingCopyId": prepared["item"].get("working_copy_id") or prepared["entry"].id,
         "sourceHash": after_hash,
         "documentHash": prepared["document"]["expectedDocumentHash"],
         "status": prepared["state"],
