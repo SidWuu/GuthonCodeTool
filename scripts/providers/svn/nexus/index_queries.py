@@ -439,8 +439,35 @@ def source_object(
             + " ORDER BY source_path LIMIT 2",
             params,
         ).fetchall()
-    if not rows:
-        raise SystemExit("SVN source is not present in the current local index; run reindex first")
+        if not rows:
+            candidates = connection.execute(
+                "SELECT source_id, fun_id, working_copy_id FROM gusen_source_record "
+                "WHERE provider='svn' AND source_table=? "
+                "AND (source_alias_id=? OR source_id=?) "
+                "ORDER BY source_id, fun_id LIMIT 3",
+                (source_type, source_id, source_id),
+            ).fetchall()
+            if len(candidates) == 1:
+                candidate = candidates[0]
+                raise SystemExit(
+                    f"SVN object identity did not match the index: "
+                    f"{source_type}/{source_id}/{fun_id}. "
+                    f"Use sourceId={candidate['source_id']}, funId={candidate['fun_id']} "
+                    f"and workingCopyId={candidate['working_copy_id']} "
+                    "from the index result."
+                )
+            if candidates:
+                raise SystemExit(
+                    f"SVN object identity is incomplete or ambiguous: "
+                    f"{source_type}/{source_id}/{fun_id}. "
+                    "Use svn find and select its exact sourceId, funId and workingCopyId."
+                )
+            raise SystemExit(
+                f"SVN object was not found in the local index: "
+                f"{source_type}/{source_id}/{fun_id}. "
+                "Use svn find to confirm the object identity; reindex only if the "
+                "authorized working copy contains it but the index does not."
+            )
     if len(rows) > 1:
         raise SystemExit(
             f"SVN object identity is ambiguous: {source_type}/{source_id}/{fun_id}; "
