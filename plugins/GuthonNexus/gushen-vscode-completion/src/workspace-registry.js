@@ -24,4 +24,42 @@ function readWorkspaces(tool, spawnProcess = spawn) {
   });
 }
 
-module.exports = { readWorkspaces };
+class WorkspaceRegistry {
+  constructor(read = readWorkspaces) {
+    this.read = read;
+    this.key = '';
+    this.value = undefined;
+    this.pending = undefined;
+    this.generation = 0;
+  }
+
+  get(tool) {
+    const key = JSON.stringify([tool.toolPath, tool.toolEntry || '', tool.toolHome]);
+    if (this.key !== key) {
+      this.invalidate();
+      this.key = key;
+    }
+    if (this.value) return Promise.resolve(this.value);
+    if (this.pending) return this.pending;
+    const generation = this.generation;
+    const pending = Promise.resolve().then(() => this.read(tool));
+    this.pending = pending;
+    pending.then(
+      (value) => {
+        if (this.generation === generation) this.value = value;
+      },
+      () => {}
+    ).finally(() => {
+      if (this.pending === pending) this.pending = undefined;
+    });
+    return pending;
+  }
+
+  invalidate() {
+    this.generation += 1;
+    this.value = undefined;
+    this.pending = undefined;
+  }
+}
+
+module.exports = { readWorkspaces, WorkspaceRegistry };

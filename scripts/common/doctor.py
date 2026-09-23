@@ -9,14 +9,11 @@ import json
 import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 from common import gusen_hub
 
 
 ROOT = gusen_hub.ROOT
-# 插件补全数据属于工具源码发行资源，与本地数据目录（ROOT）无关。
-SOURCE_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_FILES = (
     "datasource.yaml",
     "products.yaml",
@@ -24,7 +21,7 @@ CONFIG_FILES = (
     "source-tables.yaml",
     "sync.yaml",
 )
-EXTENSION_DATA = SOURCE_ROOT / "plugins" / "GuthonNexus" / "gushen-vscode-completion" / "data"
+EXTENSION_DATA = "plugins/GuthonNexus/gushen-vscode-completion/data"
 
 
 def result(name, status, message):
@@ -74,11 +71,13 @@ def run_checks(bridge_port=17361):
         checks.append(result("database-readonly", "PASS", "MySQL/PostgreSQL/Oracle + system credential store"))
 
     try:
-        index = json.loads((EXTENSION_DATA / "index.json").read_text(encoding="utf-8"))
-        manual = json.loads((EXTENSION_DATA / "manual.json").read_text(encoding="utf-8"))
+        from guthon_tool import bundled_bytes
+
+        index = json.loads(bundled_bytes(f"{EXTENSION_DATA}/index.json"))
+        manual = json.loads(bundled_bytes(f"{EXTENSION_DATA}/manual.json"))
         counts = ", ".join(f"{language}={len(index.get(language, []))}" for language in ("java", "javascript", "sql"))
         checks.append(result("vscode-data", "PASS", f"{counts}, manual={sum(map(len, manual.values()))}"))
-    except (OSError, ValueError, TypeError) as error:
+    except (OSError, KeyError, ValueError, TypeError) as error:
         checks.append(result("vscode-data", "FAIL", str(error)))
 
     try:

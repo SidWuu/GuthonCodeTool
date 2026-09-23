@@ -1,17 +1,22 @@
 const http = require("http");
 const { spawn } = require("child_process");
+const { ToolProcessClient } = require("../src/tool-process-client");
 const fs = require("fs");
 const path = require("path");
 
 const PORT = Number(process.env.GUTHON_BRIDGE_PORT || 17361);
 const ROOT = path.resolve(__dirname, "..", "..", "..");
 const HUB_TOOL_HOME = process.env.GUTHON_TOOL_HOME || "";
-const BRIDGE_STATE_DIR = path.join(HUB_TOOL_HOME || ROOT, "var", "nexus", "bridge");
+if (!HUB_TOOL_HOME || !path.isAbsolute(HUB_TOOL_HOME)) {
+  throw new Error("GUTHON_TOOL_HOME 必须是显式本地数据目录绝对路径");
+}
+const BRIDGE_STATE_DIR = path.join(HUB_TOOL_HOME, "var", "nexus", "bridge");
 const MANIFEST_PATH = path.join(BRIDGE_STATE_DIR, "manifest.json");
 const DEFAULT_HUB_PYTHON = path.join(ROOT, ".venv", "bin", "python");
 const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_PYTHON) ? DEFAULT_HUB_PYTHON : "python3");
 const HUB_TOOL = process.env.GUTHON_TOOL_PATH || "";
 const HUB_TOOL_ENTRY = process.env.GUTHON_TOOL_ENTRY || "";
+const HUB_TOOL_MODE = process.env.GUTHON_TOOL_MODE || "packaged";
 const DEFAULT_TOOL_ENTRY = path.join(ROOT, "scripts", "guthon_tool.py");
 const HUB_PULL_SCRIPT = process.env.GUTHON_HUB_PULL_SCRIPT || path.join(ROOT, "scripts", "providers", "database", "pull_source_to_work_copy.py");
 const TABLE_SCHEMA_SCRIPT = process.env.GUTHON_TABLE_SCHEMA_SCRIPT || path.join(ROOT, "scripts", "providers", "database", "export_table_schema_sql.py");
@@ -21,6 +26,9 @@ const SYSTEM_SCRIPT_EXPORT_SCRIPT = process.env.GUTHON_SYSTEM_SCRIPT_EXPORT_SCRI
 const HUB_QUERY_SCRIPT = process.env.GUTHON_HUB_QUERY_SCRIPT || path.join(ROOT, "scripts", "common", "query_hub_context.py");
 const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(BRIDGE_STATE_DIR, "pull-log.ndjson");
 let commandQueue = Promise.resolve();
+const toolProcessClient = new ToolProcessClient({
+  env: { ...process.env, GUTHON_SUPPRESS_PULL_LOG: "1" },
+});
 
 function readManifest() {
   if (!fs.existsSync(MANIFEST_PATH)) {
@@ -224,20 +232,13 @@ function runJsonCommand(args, errorLabel, input) {
 function runToolCommand(command, args, errorLabel, input, workspaceKey = "") {
   const executable = HUB_TOOL || HUB_PYTHON;
   const entry = HUB_TOOL ? HUB_TOOL_ENTRY : DEFAULT_TOOL_ENTRY;
-  const home = HUB_TOOL_HOME || ROOT;
-  return runJsonProcess(
-    executable,
-    [
-      ...(entry ? [entry] : []),
-      command,
-      "--home",
-      home,
-      ...(workspaceKey ? ["--workspace", workspaceKey] : []),
-      ...(args.length ? ["--", ...args] : [])
-    ],
-    errorLabel,
-    input
-  );
+  const home = HUB_TOOL_HOME;
+  return toolProcessClient.request(
+    { mode: HUB_TOOL_MODE, toolPath: executable, toolEntry: entry, toolHome: home },
+    command, args, workspaceKey, input
+  ).catch((error) => {
+    throw new Error(commandErrorMessage(errorLabel, error.message));
+  });
 }
 
 async function resolveRequestWorkspace(payload) {
@@ -606,4 +607,8 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`谷神桥接服务已启动：http://127.0.0.1:${PORT}`);
+});
+
+process.on("SIGTERM", () => {
+  void toolProcessClient.stop().finally(() => server.close());
 });

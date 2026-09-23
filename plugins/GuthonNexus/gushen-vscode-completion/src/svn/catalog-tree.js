@@ -200,14 +200,28 @@ class SvnCatalogTreeProvider {
     this.decorationChanged.fire();
   }
 
+  refreshRoots() {
+    this.workspaceNodes = null;
+    this.changed.fire();
+  }
+
   refresh(workspaceKey) {
     if (workspaceKey) this.catalogs.delete(workspaceKey);
     else this.catalogs.clear();
     if (workspaceKey) this.changeStates.delete(workspaceKey);
     else this.changeStates.clear();
     this.workspaceNodes = null;
-    this.objectElements.clear();
-    this.sourcePathElements.clear();
+    if (workspaceKey) {
+      for (const key of this.objectElements.keys()) {
+        if (JSON.parse(key)[0] === workspaceKey) this.objectElements.delete(key);
+      }
+      for (const key of this.sourcePathElements.keys()) {
+        if (key.startsWith(`${workspaceKey}\n`)) this.sourcePathElements.delete(key);
+      }
+    } else {
+      this.objectElements.clear();
+      this.sourcePathElements.clear();
+    }
     this.changed.fire();
     // VS Code can request a decoration for an existing TreeItem before the
     // refreshed tree has produced its replacement TreeItem. Keep the URI to

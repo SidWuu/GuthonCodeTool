@@ -24,6 +24,7 @@
     "onCommand:gushenCompletion.deleteWorkspace",
     "onCommand:gushenCompletion.configureDatabaseDiagnosis",
     "onCommand:gushenCompletion.selectExecutionMode",
+    "onCommand:gushenCompletion.restartDevelopmentToolHost",
     "onCommand:gushenCompletion.selectUpdateSource",
     "onCommand:gushenCompletion.checkToolUpdate",
     "onCommand:gushenCompletion.rollbackToolUpdate",
@@ -138,9 +139,9 @@
         },
         "gushenCompletion.executionMode": {
           "type": "string",
-          "enum": ["packaged", "development"],
+          "enum": ["packaged", "source-development", "script"],
           "default": "packaged",
-          "description": "Use the packaged application or run Python scripts directly from a GuthonCodeTool source checkout."
+          "description": "Use the packaged app, local source checkout, or Release Python zipapp."
         },
         "gushenCompletion.updateSource": {
           "type": "string",
@@ -153,6 +154,16 @@
           "type": "string",
           "default": "",
           "description": "Absolute path to the GuthonCodeTool source checkout used in development mode."
+        },
+        "gushenCompletion.scriptPythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute Python executable path for Release zipapp debug mode."
+        },
+        "gushenCompletion.scriptToolPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to GuthonCodeTool-python.pyz for debug mode."
         }
       }
     },
@@ -162,6 +173,7 @@
       { "command": "gushenCompletion.deleteWorkspace", "title": "Guthon Nexus: 删除产品或项目", "icon": "$(trash)" },
       { "command": "gushenCompletion.configureDatabaseDiagnosis", "title": "Guthon Nexus: 配置数据库排查", "icon": "$(database)" },
       { "command": "gushenCompletion.selectExecutionMode", "title": "Guthon Nexus: 切换运行模式" },
+      { "command": "gushenCompletion.restartDevelopmentToolHost", "title": "Guthon Nexus: 重启开发 ToolHost" },
       { "command": "gushenCompletion.selectUpdateSource", "title": "Guthon Nexus: 选择 GuthonCodeTool 更新源" },
       { "command": "gushenCompletion.checkToolUpdate", "title": "Guthon Nexus: 检查 GuthonCodeTool 更新" },
       { "command": "gushenCompletion.rollbackToolUpdate", "title": "Guthon Nexus: 回退 GuthonCodeTool 版本" },

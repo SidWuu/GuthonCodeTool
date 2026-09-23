@@ -604,6 +604,29 @@ def svn_status(checkout_path: Path, include_diff=False, remote=False, settings=N
     return output
 
 
+def svn_scm_status_lightweight(checkout_path: Path, *, remote=False, settings=None) -> dict:
+    """Read only the fields consumed by the Nexus SCM display."""
+    info_xml = ET.fromstring(run_svn(["info", "--xml", str(checkout_path)]).stdout)
+    entry = info_xml.find("entry")
+    if entry is None:
+        raise SystemExit(f"Invalid svn info output for {checkout_path}")
+    status_args = ["status", "--xml"]
+    if remote:
+        status_args.append("--show-updates")
+        status_result = run_remote_svn([*status_args, str(checkout_path)], settings or {})
+    else:
+        status_result = run_svn([*status_args, str(checkout_path)])
+    changes, remote_changes = _status_changes(ET.fromstring(status_result.stdout), checkout_path)
+    return {
+        "revision": entry.get("revision") or "",
+        "clean": not changes,
+        "changes": changes,
+        "remoteChecked": bool(remote),
+        "remoteChanges": remote_changes,
+        "outOfDate": bool(remote_changes),
+    }
+
+
 def _values(record: dict, *keys) -> set[str]:
     output = set()
     for key in keys:

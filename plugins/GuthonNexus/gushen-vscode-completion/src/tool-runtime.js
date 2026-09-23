@@ -8,8 +8,26 @@ function resolveDevelopmentRuntime(root, platform = process.platform) {
     ? path.join(root, '.venv', 'Scripts', 'python.exe')
     : path.join(root, '.venv', 'bin', 'python');
   const missing = [toolPath, toolEntry].filter((candidate) => !fs.existsSync(candidate));
-  if (missing.length) throw new Error(`调试目录缺少：${missing.join('、')}`);
-  return { mode: 'development', toolEntry, toolPath };
+  if (missing.length) throw new Error(`开发目录缺少：${missing.join('、')}`);
+  return { mode: 'source-development', toolEntry, toolPath };
+}
+
+function normalizeExecutionMode(mode) {
+  return mode === 'development' ? 'source-development' : mode;
+}
+
+function isFile(filePath) {
+  try { return fs.statSync(filePath).isFile(); } catch { return false; }
+}
+
+function resolveScriptRuntime(pythonPath, scriptPath) {
+  if (!path.isAbsolute(pythonPath || '') || !isFile(pythonPath)) {
+    throw new Error('调试模式需要有效的 Python 绝对路径');
+  }
+  if (!path.isAbsolute(scriptPath || '') || path.extname(scriptPath).toLowerCase() !== '.pyz' || !isFile(scriptPath)) {
+    throw new Error('调试模式需要有效的 GuthonCodeTool .pyz 绝对路径');
+  }
+  return { mode: 'script', toolPath: pythonPath, toolEntry: scriptPath };
 }
 
 function toolArguments(tool, command, extraArgs = [], workspaceKey = '') {
@@ -30,7 +48,9 @@ function writeRuntimeDescriptor(tool) {
   const command = [tool.toolPath, ...(tool.toolEntry ? [tool.toolEntry] : [])];
   fs.writeFileSync(descriptorPath, `${JSON.stringify({
     mode: tool.mode,
+    protocolVersion: 1,
     command,
+    codeSource: tool.toolEntry || tool.toolPath,
     home: tool.toolHome,
     workspaceResolveCommand: [...command, 'workspace-resolve', '--home', tool.toolHome],
     databaseTargetResolveCommand: [...command, 'database-target-resolve', '--home', tool.toolHome],
@@ -42,4 +62,7 @@ function writeRuntimeDescriptor(tool) {
   return descriptorPath;
 }
 
-module.exports = { resolveDevelopmentRuntime, toolArguments, writeRuntimeDescriptor };
+module.exports = {
+  normalizeExecutionMode, resolveDevelopmentRuntime, resolveScriptRuntime,
+  toolArguments, writeRuntimeDescriptor,
+};

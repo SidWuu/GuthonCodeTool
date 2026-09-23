@@ -221,16 +221,23 @@ test("pullHubSource uses the configured Python tool entry in development mode", 
   const toolEntry = path.join(tmp, "fake-tool.js");
   const toolHome = path.join(tmp, "home");
   const logPath = path.join(tmp, "pull-log.ndjson");
+  const startsPath = path.join(tmp, "tool-starts.txt");
   fs.writeFileSync(
     toolEntry,
     `
 const args = process.argv.slice(2);
-if (args[0] !== "pull" || args[1] !== "--home" || args[2] !== ${JSON.stringify(toolHome)} || args[3] !== "--workspace" || args[4] !== "projects.demo-project") {
+require('node:fs').appendFileSync(${JSON.stringify(startsPath)}, 'start\\n');
+if (JSON.stringify(args) !== JSON.stringify(["serve", "--stdio", "--home", ${JSON.stringify(toolHome)}])) {
   process.stderr.write(JSON.stringify(args));
   process.exit(2);
 }
-process.stdin.resume();
-process.stdin.on("end", () => process.stdout.write(JSON.stringify({ ok: true, mode: "development" })));
+const readline = require('node:readline');
+process.stdout.write(JSON.stringify({ type: 'ready', protocolVersion: 1 }) + '\\n');
+readline.createInterface({ input: process.stdin }).on('line', line => {
+  const request = JSON.parse(line);
+  if (request.command !== 'pull' || request.workspaceKey !== 'projects.demo-project') process.exit(3);
+  process.stdout.write(JSON.stringify({ id: request.id, type: 'result', ok: true, result: { ok: true, mode: 'development' } }) + '\\n');
+});
 `,
     "utf8",
   );
@@ -259,6 +266,13 @@ process.stdin.on("end", () => process.stdout.write(JSON.stringify({ ok: true, mo
     assert.equal(response.status, 200, data.message);
     assert.equal(data.ok, true);
     assert.equal(data.mode, "development");
+    const second = await fetch(`http://127.0.0.1:${port}/pullHubSource`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceKey: "projects.demo-project", sourceType: "procedure", alias: "demo.pkg", funId: "save" }),
+    });
+    assert.equal((await second.json()).mode, "development");
+    assert.equal(fs.readFileSync(startsPath, "utf8").trim().split("\n").length, 1);
   } finally {
     server.kill();
   }
@@ -273,21 +287,22 @@ test("routeWorkspace validates page identity and strips local paths", async () =
     toolEntry,
     `
 const args = process.argv.slice(2);
-const expected = ["route", "--home", ${JSON.stringify(toolHome)}];
+const expected = ["serve", "--stdio", "--home", ${JSON.stringify(toolHome)}];
 if (JSON.stringify(args) !== JSON.stringify(expected)) {
   process.stderr.write(JSON.stringify(args));
   process.exit(2);
 }
-let raw = "";
-process.stdin.on("data", chunk => raw += chunk);
-process.stdin.on("end", () => {
-  const payload = JSON.parse(raw);
+const readline = require('node:readline');
+process.stdout.write(JSON.stringify({ type: 'ready', protocolVersion: 1 }) + '\\n');
+readline.createInterface({ input: process.stdin }).on('line', line => {
+  const request = JSON.parse(line);
+  const payload = request.input;
+  if (request.command !== 'route') process.exit(3);
   if (payload.workspaceKey !== "products.demo" || payload.checkoutPath !== "/must/not/be/forwarded") process.exit(3);
-  process.stdout.write(JSON.stringify({
-    ok: true,
-    workspaceKey: "products.demo",
+  process.stdout.write(JSON.stringify({ id: request.id, type: 'result', ok: true, result: {
+    ok: true, workspaceKey: "products.demo",
     workspace: { workspaceKey: "products.demo", sourceMode: "svn", root: "/private/root", checkoutPath: "/private/checkout" }
-  }));
+  } }) + '\\n');
 });
 `,
     "utf8",
@@ -697,7 +712,7 @@ test("bridge defaults hub python to repo venv when present", () => {
 
   assert.equal(serverScript.includes('path.join(ROOT, ".venv", "bin", "python")'), true);
   assert.equal(serverScript.includes("fs.existsSync(DEFAULT_HUB_PYTHON)"), true);
-  assert.equal(serverScript.includes('path.join(HUB_TOOL_HOME || ROOT, "var", "nexus", "bridge")'), true);
+  assert.equal(serverScript.includes('path.join(HUB_TOOL_HOME, "var", "nexus", "bridge")'), true);
 });
 
 test("user-facing messages use concise Chinese", () => {

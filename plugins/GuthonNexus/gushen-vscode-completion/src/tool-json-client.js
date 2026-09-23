@@ -2,14 +2,20 @@ const { spawn } = require('node:child_process');
 const { toolArguments } = require('./tool-runtime');
 
 class ToolJsonClient {
-  constructor({ getTool, spawnProcess = spawn }) {
+  constructor({ getTool, spawnProcess = spawn, processClient }) {
     this.getTool = getTool;
     this.spawnProcess = spawnProcess;
+    this.processClient = processClient;
   }
 
   async run(workspaceKey, command, args = [], input) {
     const tool = await this.getTool();
     if (!tool) throw new Error('请先配置 GuthonCodeTool 运行模式和本地数据目录');
+    if (this.processClient) {
+      const payload = await this.processClient.request(tool, command, args, workspaceKey, input);
+      if (payload?.ok !== true) throw new Error('后端返回 ok=false');
+      return payload;
+    }
     return new Promise((resolve, reject) => {
       const child = this.spawnProcess(
         tool.toolPath,

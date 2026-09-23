@@ -27,6 +27,7 @@ from providers.svn.checkout import (
     run_svn_binary,
     svn_info,
     svn_path_changes,
+    svn_scm_status_lightweight,
     svn_status,
 )
 from common.source_format import decode_source
@@ -275,7 +276,7 @@ def status(
     for index, entry in enumerate(entries, 1):
         label = scope_entry_label(workspace, entry)
         _progress(on_progress, f"[{index}/{total}] {label}｜SCM 状态｜{phase}")
-        current = svn_status(entry.root, remote=remote, settings=workspace["svn"])
+        current = svn_scm_status_lightweight(entry.root, remote=remote, settings=workspace["svn"])
         working_copies.append(
             {
                 "id": entry.id,

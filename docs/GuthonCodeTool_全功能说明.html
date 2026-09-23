@@ -372,7 +372,8 @@ Guthon Bridge（Chrome 扩展 + 本地服务）
 <li>安装到扩展全局存储的版本目录，通过后原子切换当前入口。</li>
 <li>保留上一可用版本，发生问题时由用户手动回退。</li>
 </ol>
-<p>开发模式直接调用源码仓库的 Python 入口，方便维护者即时验证；切换运行模式不改变 toolHome。工具路径设置采用“候选 → 设置与验证 → 持久化”，避免一次失败配置把后续启动锁死。</p>
+<p>开发模式使用源码仓库的 .venv 与 Python 入口；调试模式使用经 SHA-256 校验的 Release pyz 和本地 Python 3.12+；发行模式继续使用 macOS/Windows 可运行包。三种模式复用同一 ToolHost 协议，切换模式不改变 toolHome。当前调试模式需要本地 Python；隔离运行环境的一键下载资产尚未交付。</p>
+<p>Nexus 和 Bridge 各自复用一个常驻 ToolHost。工作区列表在 Nexus 视图间共享，普通界面刷新不触发全部 SVN SCM 扫描；本地状态与远程检查由不同命令触发。日常 SCM 状态只使用必要的 svn info/status，更新和写回仍走完整安全检查。</p>
 </section>
 
 <section class="section">

@@ -182,3 +182,49 @@ test('accepts VS Code create-and-overwrite flags only for an existing backend ob
   ]);
   provider.dispose();
 });
+
+test('revalidates a stale readonly virtual tab before rejecting save', async () => {
+  class EventEmitter {
+    constructor() { this.event = () => {}; }
+    dispose() {}
+  }
+  const vscode = {
+    EventEmitter,
+    FileType: { File: 1 },
+    FileChangeType: { Changed: 1 },
+    FileSystemError: { NoPermissions: (message) => new Error(message) },
+  };
+  const uri = {
+    authority: 'products.demo',
+    query: 'sourceType=page&sourceId=PG-GSS-1&workingCopyId=systems-SYS-1',
+    toString: () => 'guthon-svn-edit://products.demo/采购计划删除.gss?sourceType=page',
+  };
+  let reads = 0;
+  const writes = [];
+  const backend = {
+    async read() {
+      reads += 1;
+      return reads === 1
+        ? { editable: false, content: 'before' }
+        : {
+          editable: true,
+          sessionId: 'session',
+          documentId: 'document',
+          sourcePath: 'systems/SYS-1/pages/采购计划删除.gss',
+          content: 'before',
+        };
+    },
+    async write(...args) {
+      writes.push(args);
+      return { ok: true, changed: true };
+    },
+  };
+  const provider = new SvnVirtualFileSystem({ vscode, backend });
+
+  await provider.readFile(uri);
+  await provider.writeFile(uri, Buffer.from('after'), { overwrite: true });
+
+  assert.equal(reads, 2);
+  assert.deepEqual(writes, [['products.demo', 'session', 'document', 'after']]);
+  provider.dispose();
+});

@@ -359,6 +359,22 @@ test('decorates only changed fragments and clears cached file states on refresh'
   provider.dispose();
 });
 
+test('refreshing one workspace preserves another catalog', () => {
+  const provider = new SvnCatalogTreeProvider({
+    vscode: { EventEmitter: class { constructor() { this.event = () => {}; } fire() {} dispose() {} } },
+    backend: {},
+    listSvnWorkspaces: async () => [],
+  });
+  provider.catalogs.set('products.a', { objects: [] });
+  provider.catalogs.set('products.b', { objects: [] });
+  provider.refresh('products.a');
+  assert.equal(provider.catalogs.has('products.a'), false);
+  assert.equal(provider.catalogs.has('products.b'), true);
+  provider.refreshRoots();
+  assert.equal(provider.catalogs.has('products.b'), true);
+  provider.dispose();
+});
+
 test('keeps file decorations available while the catalog tree is refreshing', () => {
   class EventEmitter {
     constructor() { this.event = () => {}; }

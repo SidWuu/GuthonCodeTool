@@ -235,7 +235,8 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>选择长期保存私有数据的本地数据目录；可以选择空目录。</li>
 <li>等待输出面板显示 <code>GuthonCodeTool 完成：setup</code>。</li>
 </ol>
-<p>设置后，入口会变为“切换工作空间”。普通用户保持“发行模式”即可；只有工具维护人员才需要使用“调试模式”。切换工作空间不会删除原目录。</p>
+<p>设置后，入口会变为“切换工作空间”。普通用户保持“发行模式”即可；维护者可选“开发模式”（仓库源码与 .venv），已有 Python 3.12+ 的开发人员可选“调试模式”（Release 的 .pyz 与校验文件）。调试模式会检查脚本、依赖、自检和 ToolHost 协议；隔离 Python 运行环境的一键下载尚未交付。切换工作空间不会删除原目录。</p>
+<p>Nexus 和 Bridge 各自复用一个常驻 ToolHost。普通“刷新 Guthon Nexus”只更新工作区列表和界面，不扫描全部 SVN working copy；需要检查本地变更时使用“刷新 SVN 变更”，需要访问远端时使用“检查 SVN 远程变更”。</p>
 <p>设置工作空间会创建缺失的五个配置文件，不会覆盖已经存在的配置；首次创建的 datasource/products/projects 注册表为空。设置后点击“添加产品或项目”，后续开发新增项目也使用同一入口，不必重新初始化或切换数据目录。</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/
 ├── config/

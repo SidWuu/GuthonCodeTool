@@ -4,13 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib
+import io
 import json
 import os
 import re
-import shutil
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 
@@ -25,19 +27,24 @@ def _configure_stdio_utf8() -> None:
 
 
 def application_version() -> str:
-    candidates = []
-    if getattr(sys, "_MEIPASS", None):
-        candidates.append(Path(sys._MEIPASS) / "VERSION")
-    candidates.append(Path(__file__).resolve().parents[1] / "VERSION")
-    for candidate in candidates:
-        if candidate.is_file():
-            version = candidate.read_text(encoding="utf-8").strip()
-            if re.fullmatch(r"\d+\.\d+\.\d+", version):
-                return version
+    try:
+        version = bundled_bytes("VERSION").decode("utf-8").strip()
+    except (OSError, KeyError, zipfile.BadZipFile) as error:
+        raise SystemExit("GuthonCodeTool VERSION is missing or invalid") from error
+    if re.fullmatch(r"\d+\.\d+\.\d+", version):
+        return version
     raise SystemExit("GuthonCodeTool VERSION is missing or invalid")
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
+
+
+def bundled_bytes(relative: str) -> bytes:
+    archive = Path(sys.argv[0]).expanduser()
+    if archive.suffix.lower() == ".pyz" and archive.is_file():
+        with zipfile.ZipFile(archive) as bundle:
+            return bundle.read(relative)
+    return (resource_root() / relative).read_bytes()
 CONFIG_FILES = (
     "datasource.yaml",
     "products.yaml",
@@ -88,6 +95,20 @@ SVN_BROWSE_ACTIONS = {
     "auth-cache",
     "delivery-status",
 }
+TOOLHOST_READ_COMMANDS = {
+    "version", "workspaces", "workspace-resolve", "workspace-summary", "route",
+    "database-target-resolve", "database-probe", "database-describe",
+    "database-query-readonly", "search", "context-pack", "query", "doctor",
+}
+CLI_COMMANDS = (
+    "version", "serve", "setup", "workspace-create", "workspace-delete",
+    "svn-login-configure", "import-svn-scope", "workspaces", "workspace-resolve",
+    "database-target-resolve", "database-target-configure", "database-probe",
+    "database-describe", "database-query-readonly", "workspace-summary", "search",
+    "context-pack", "source-mode", "route", "init", "svn", "sync-source-all",
+    "sync-source", "reindex", "sync-all", "pull", "export-markdown",
+    *SCRIPT_COMMANDS, "self-test",
+)
 GLOBAL_COMMANDS = {
     "setup",
     "workspace-create",
@@ -117,20 +138,20 @@ def resource_root() -> Path:
 
 
 def setup_config(home: Path) -> list[Path]:
-    template_dir = resource_root() / "config" / "example"
     config_dir = home / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     created = []
     for filename in CONFIG_FILES:
         target = config_dir / filename
-        template = template_dir / filename.replace(".yaml", ".example.yaml")
         if not target.exists():
             if filename in EMPTY_REGISTRY_FILES:
                 target.write_text(EMPTY_REGISTRY_FILES[filename], encoding="utf-8")
-            elif not template.exists():
-                raise SystemExit(f"Missing bundled config template: {template}")
             else:
-                shutil.copyfile(template, target)
+                template_name = f"config/example/{filename.replace('.yaml', '.example.yaml')}"
+                try:
+                    target.write_bytes(bundled_bytes(template_name))
+                except (OSError, KeyError, zipfile.BadZipFile) as error:
+                    raise SystemExit(f"Missing bundled config template: {template_name}") from error
             created.append(target)
     return created
 
@@ -1402,12 +1423,92 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
     raise SystemExit(f"Unsupported command: {command}")
 
 
+def _toolhost_request_kind(command: str, args: list[str]) -> str:
+    if command in TOOLHOST_READ_COMMANDS:
+        return "read"
+    if command == "svn" and args and args[0] in SVN_BROWSE_ACTIONS - {"auth-cache"}:
+        return "read"
+    return "write"
+
+
+def serve_stdio(home: Path) -> int:
+    protocol_input = sys.stdin
+    protocol_output = sys.stdout
+    os.environ["GUTHON_HOME"] = str(home)
+    protocol_output.write(json.dumps({
+        "type": "ready", "protocolVersion": 1, "version": application_version(),
+        "pid": os.getpid(),
+    }, ensure_ascii=False) + "\n")
+    protocol_output.flush()
+    for line in protocol_input:
+        request_id = None
+        try:
+            request = json.loads(line)
+            if not isinstance(request, dict):
+                raise ValueError("request must be a JSON object")
+            request_id = request.get("id")
+            command = request.get("command")
+            args = request.get("args", [])
+            workspace_key = request.get("workspaceKey", "")
+            if not isinstance(request_id, str) or not request_id:
+                raise ValueError("id must be a non-empty string")
+            if not isinstance(command, str) or command not in CLI_COMMANDS or command in {"serve", "self-test"}:
+                raise ValueError("unsupported command")
+            if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
+                raise ValueError("args must be a string array")
+            if not isinstance(workspace_key, str):
+                raise ValueError("workspaceKey must be a string")
+            if request.get("requestKind") != _toolhost_request_kind(command, args):
+                raise ValueError("requestKind does not match command")
+            payload = request.get("input")
+            capture = io.StringIO()
+            old_input = sys.stdin
+            protocol_output.flush()
+            saved_stdout_fd = os.dup(1)
+            try:
+                with tempfile.TemporaryFile() as native_stdout:
+                    os.dup2(native_stdout.fileno(), 1)
+                    try:
+                        sys.stdin = io.StringIO("" if payload is None else json.dumps(payload, ensure_ascii=False))
+                        with contextlib.redirect_stdout(capture):
+                            if command == "version":
+                                print(json.dumps({"version": application_version()}, ensure_ascii=False))
+                                code = 0
+                            else:
+                                code = run(command, home, args, workspace_key or None)
+                    finally:
+                        os.dup2(saved_stdout_fd, 1)
+                    native_stdout.seek(0)
+                    native_text = native_stdout.read().decode("utf-8", errors="replace")
+            finally:
+                sys.stdin = old_input
+                os.close(saved_stdout_fd)
+            if native_text:
+                print(native_text, file=sys.stderr, end="", flush=True)
+            output = capture.getvalue()
+            if code not in (None, 0):
+                raise RuntimeError(f"Command failed with exit code {code}")
+            try:
+                result = json.loads(output)
+            except json.JSONDecodeError:
+                result = {"stdout": output}
+            response = {"id": request_id, "type": "result", "ok": True, "result": result}
+        except (Exception, SystemExit) as error:
+            response = {"id": request_id, "type": "result", "ok": False, "error": {
+                "code": "INVALID_REQUEST" if isinstance(error, ValueError) else "COMMAND_FAILED",
+                "message": str(error),
+            }}
+        protocol_output.write(json.dumps(response, ensure_ascii=False) + "\n")
+        protocol_output.flush()
+    return 0
+
+
 def main(argv=None) -> int:
     _configure_stdio_utf8()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("version", "setup", "workspace-create", "workspace-delete", "svn-login-configure", "import-svn-scope", "workspaces", "workspace-resolve", "database-target-resolve", "database-target-configure", "database-probe", "database-describe", "database-query-readonly", "workspace-summary", "search", "context-pack", "source-mode", "route", "init", "svn", "sync-source-all", "sync-source", "reindex", "sync-all", "pull", "export-markdown", *SCRIPT_COMMANDS, "self-test"),
+        choices=CLI_COMMANDS,
     )
     parser.add_argument("--home", help="Directory that stores local config and private source data")
     parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")
@@ -1421,6 +1522,10 @@ def main(argv=None) -> int:
         return 0
     if not args.home:
         parser.error("--home is required")
+    if args.command == "serve":
+        if args.workspace or extra_args != ["--stdio"]:
+            parser.error("serve requires --stdio and does not accept --workspace or extra arguments")
+        return serve_stdio(Path(args.home).expanduser().resolve())
     return run(args.command, Path(args.home).expanduser().resolve(), extra_args, args.workspace)
 
 

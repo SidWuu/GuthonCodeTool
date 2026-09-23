@@ -144,7 +144,14 @@ class SvnVirtualFileSystem {
 
   async writeFile(uri, content, options) {
     const key = uri.toString();
-    const record = await this._load(uri);
+    let record = await this._load(uri);
+    // A virtual tab can outlive a refresh/reindex that changes a document from
+    // read-only back to editable (for example after a clean SVN update or a
+    // stale session is discarded).  Revalidate once before rejecting the save;
+    // the backend still applies the complete authorization/status/hash checks.
+    if (!record.value.editable || !record.value.sessionId || !record.value.documentId) {
+      record = await this._load(uri, true);
+    }
     if (!record.value.editable || !record.value.sessionId || !record.value.documentId) {
       throw this.vscode.FileSystemError.NoPermissions('当前 SVN 虚拟文档只读');
     }

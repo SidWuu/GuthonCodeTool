@@ -131,7 +131,7 @@ code{font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace;font-size:.
       <pre id="supportTemplate">操作系统与架构：
 GuthonCodeTool 版本：
 Guthon Nexus VSIX 版本：
-运行模式：发行模式 / 调试模式
+运行模式：开发模式 / 调试模式 / 发行模式
 workspaceKey：
 源码模式：DATABASE / SVN
 操作入口：
@@ -182,7 +182,7 @@ const qaItems=[
   {id:"config-yaml",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"保存 YAML 后提示解析失败",lead:"缩进、引号或把带前导零的 ID 写成数字是高频原因。",symptom:"环境检查的 config 项为 FAIL，或项目列表无法刷新。",checks:["查看输出中的具体文件和行号。","检查缩进是否只用空格。","检查 <code>0000</code> 等 ID 是否加引号。"],steps:["修复第一处 YAML 语法错误。","将 <code>system_id</code>、<code>data_source_id</code> 保持为字符串。","保存后重新运行环境检查。"],verify:"config 检查为 PASS，所有预期 workspace 都能被解析。"},
   {id:"config-workspace-key",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"workspaceKey 应该怎么填写或判断？",lead:"工作区身份来自配置，不从 PRD/PRJ 目录名推断。",symptom:"命令路由到错误项目，或提示找不到工作区。",checks:["产品使用 <code>products.&lt;id&gt;</code>。","项目使用 <code>projects.&lt;id&gt;</code>。","确认 ID 与 YAML 顶层条目一致。"],steps:["从 Nexus 项目节点或配置文件读取准确 key。","CLI、Bridge 和诊断操作始终传递同一个 key。"],verify:"工作区解析结果只返回一个目标，并显示正确 provider 和路径。",avoid:"不要恢复全局 ACTIVE 或用目录名称猜测默认工作区。"},
   {id:"config-password",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"数据库或 SVN 密码应该写在哪里？",lead:"密码只进入操作系统凭据库，不进入 YAML、参数或日志。",symptom:"配置文件只有用户名或 connectionRef，看不到密码字段。",checks:["DATABASE 使用 Nexus 的数据库配置向导。","SVN 使用“设置工作区 SVN 登录”。"],steps:["通过 Nexus 输入密码。","让系统凭据库或 SVN 原生认证缓存保存。","YAML 只保留非敏感路由信息。"],verify:"重启 VS Code 后能够使用系统凭据，不需要在配置中出现明文密码。",avoid:"不要把密码写入 YAML、授权清单、脚本参数、日志或公开仓库。"},
-  {id:"config-present-not-active",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"配置文件存在，为什么功能仍未生效？",lead:"“文件存在”只能证明已配置，不能证明运行入口读取成功。",symptom:"YAML、插件或规则文件都在，但运行结果与预期不一致。",checks:["确认运行时实际使用的数据目录。","确认 Nexus 当前是发行模式还是调试模式。","运行环境检查或目标功能，取得实际执行证据。"],steps:["先证明配置被当前运行入口读取。","再证明对应命令实际执行。","最后用结果或状态验证业务效果。"],verify:"形成“配置存在 → 已接线 → 已执行 → 结果符合预期”的完整证据链。"},
+  {id:"config-present-not-active",category:"工作空间与配置",os:["mac","windows"],mode:"all",title:"配置文件存在，为什么功能仍未生效？",lead:"“文件存在”只能证明已配置，不能证明运行入口读取成功。",symptom:"YAML、插件或规则文件都在，但运行结果与预期不一致。",checks:["确认运行时实际使用的数据目录。","确认 Nexus 当前是开发、调试还是发行模式。","运行环境检查或目标功能，取得实际执行证据。"],steps:["先证明配置被当前运行入口读取。","再证明对应命令实际执行。","最后用结果或状态验证业务效果。"],verify:"形成“配置存在 → 已接线 → 已执行 → 结果符合预期”的完整证据链。"},
 
   {id:"database-connect",category:"DATABASE",os:["mac","windows"],mode:"database",title:"DATABASE 连接或快速排查配置失败",lead:"先区分地址、账号、驱动、凭据库和网络问题。",symptom:"配置数据库排查或同步时连接失败。",checks:["核对数据库类型、主机、端口、数据库或服务名。","确认使用专用只读账号。","查看原始数据库错误码。"],steps:["用 Nexus 向导重新输入连接地址和账号。","让向导执行即时连接验证。","按错误码分别处理网络、认证或目标库名称问题。"],verify:"配置向导验证成功，后续只读 probe 能返回目标数据库身份。",avoid:"不要为了通过验证给账号增加写权限。"},
   {id:"database-credential-store",category:"DATABASE",os:["mac","windows"],mode:"database",title:"环境检查提示 credential store unavailable",lead:"只读数据库密码必须有可用的操作系统凭据存储。",symptom:"doctor 的 database-readonly 项为 FAIL，并包含 credential store unavailable。",checks:["确认当前桌面会话可以使用系统钥匙串或凭据管理器。","确认不是在缺少用户会话的受限终端中运行。"],steps:["在正常登录的桌面会话中重启 VS Code。","重新执行数据库配置向导并保存密码。","仍失败时按公司系统策略修复钥匙串/凭据管理器。"],verify:"环境检查的 database-readonly 项为 PASS。",avoid:"不要改成在配置文件中保存明文密码。"},

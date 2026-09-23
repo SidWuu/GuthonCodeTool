@@ -31,17 +31,17 @@ Each project starts with a `工作区驾驶舱`. It summarizes local-index readi
 
 Every successful SVN save appends a durable delivery receipt instead of overwriting the previous save state. Nexus displays recent receipt IDs, revisions, files, and commit times. A receipt proves the SVN commit only; the separate Guthon platform submission and runtime validation remain outside Nexus tracking.
 
-`工作区` → `运行模式` defaults to `发行模式`. Maintainers can switch to `调试模式` and select a GuthonCodeTool source checkout containing `.venv` and `scripts/guthon_tool.py`. Sidebar commands and Bridge requests then run the current Python sources directly; switching back reuses the saved packaged application and the same data directory.
+`工作区` → `运行模式` defaults to `发行模式`. Maintainers can switch to `开发模式` and select a GuthonCodeTool source checkout containing `.venv` and `scripts/guthon_tool.py`. `调试模式` uses a local Python and the verified Release `.pyz`; the mode menu can reselect both files. Sidebar commands and Bridge requests use the selected runtime; switching back reuses the saved packaged application and the same data directory.
 
 `运行模式` is a collapsed node. It shows the selected mode, current GuthonCodeTool application version, the configurable GitHub/Gitee update source, an explicit update check, and the previous-version rollback action. Nexus never checks for application updates on startup or on a timer. A manual update downloads only the current platform asset, verifies it against `GuthonCodeTool-checksums.txt`, runs the packaged `self-test` in a temporary home, switches to a versioned directory in extension global storage, and keeps the former executable for rollback.
 
-Nexus writes the selected runtime to `<本地数据目录>/var/nexus/tool-runtime.json`. Its `command` array is either the packaged executable or the development Python executable plus `scripts/guthon_tool.py`; `home` is the shared local data directory. The descriptor also exposes workspace/target resolution and built-in database probe/describe/query commands, plus `linterCommand`, so AI tools resolve cwd and use either a private built-in read-only target or an optional exact DBX connection without guessing paths or names.
+Nexus writes the selected runtime to `<本地数据目录>/var/nexus/tool-runtime.json`. Its `command` array uses the packaged executable, the source checkout's `.venv` plus `scripts/guthon_tool.py`, or a local Python plus the verified Release `.pyz`. The descriptor records the mode, code source, protocol version and shared `home`. It also exposes workspace/target resolution, built-in database probe/describe/query commands and `linterCommand`, so AI tools resolve cwd without guessing paths or names.
 
 Each project exposes `配置资料 → 配置数据库排查`. The wizard accepts a MySQL/PostgreSQL/Oracle URL, environment and a dedicated read-only login, verifies the connection, writes only non-secret routing data to `database-testing.yaml`, and stores the password in the operating-system credential store. Expand `工作区` → `配置文件` to edit generated configuration files directly in VS Code.
 
 Synchronization, checkout, submit, revert, and other operations that can change source state ask for confirmation. The add-workspace wizard writes only the values just entered and does not add a redundant confirmation; opening configuration files and local folders remains single-click.
 
-The sidebar also starts and stops Guthon Bridge with VS Code's bundled Node runtime. It automatically passes the active packaged or development runtime and local data directory, so users do not need to set Bridge environment variables. Switching a workspace or execution mode restarts a running Bridge.
+The sidebar also starts and stops Guthon Bridge with VS Code's bundled Node runtime. It passes the active runtime and local data directory. Nexus and Bridge each keep one ToolHost; ordinary view refresh shares a workspace snapshot and does not scan every SVN working copy. Switching a workspace or execution mode restarts a running Bridge.
 
 Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `query`, `diagnose`, `doctor`, `export-markdown`, and each metadata export command. Workspace commands include an explicit key, for example `command + ["query", "--home", home, "--workspace", "projects.demo-project", "--", "callers", "--alias", "<别名>", "--fun", "<函数>"]`.
 
@@ -58,7 +58,7 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 - Runs environment checks and readonly source diagnosis.
 - Inspects workcopy status, generates diffs, and packages delivery files.
 - Starts and stops Guthon Bridge without a separate Node.js installation or terminal command.
-- Switches between the packaged application and live Python source development.
+- Switches between packaged, source development and verified Python zipapp modes. The zipapp currently requires a suitable local Python installation; managed Python runtime downloads are not yet shipped.
 - Lists mixed DATABASE/SVN projects together and lets each project select its own source provider.
 - Aggregates exact-URL SVN working copies into one business source tree and one SCM provider per workspace, with Chinese datasource-subsystem resource groups plus a separate public-source group.
 - Distinguishes same-named tables, views, and procedures by their datasource working copy/schema and carries `workingCopyId` through virtual-document reads; PAGE identities remain workspace-global and revision-deduplicated.

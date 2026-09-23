@@ -3,7 +3,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { resolveDevelopmentRuntime, toolArguments, writeRuntimeDescriptor } = require('../src/tool-runtime');
+const {
+  normalizeExecutionMode, resolveDevelopmentRuntime, resolveScriptRuntime,
+  toolArguments, writeRuntimeDescriptor,
+} = require('../src/tool-runtime');
 
 test('resolves the repository virtualenv and Python entry point', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-runtime-'));
@@ -14,7 +17,7 @@ test('resolves the repository virtualenv and Python entry point', () => {
 
   const runtime = resolveDevelopmentRuntime(root, 'darwin');
 
-  assert.equal(runtime.mode, 'development');
+  assert.equal(runtime.mode, 'source-development');
   assert.equal(runtime.toolPath, path.join(root, '.venv', 'bin', 'python'));
   assert.equal(runtime.toolEntry, path.join(root, 'scripts', 'guthon_tool.py'));
 });
@@ -43,7 +46,9 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
   assert.equal(descriptorPath.startsWith('/repo'), false);
   assert.deepEqual(JSON.parse(fs.readFileSync(descriptorPath, 'utf8')), {
     mode: 'packaged',
+    protocolVersion: 1,
     command: ['/tool/GuthonCodeTool'],
+    codeSource: '/tool/GuthonCodeTool',
     home,
     workspaceResolveCommand: ['/tool/GuthonCodeTool', 'workspace-resolve', '--home', home],
     databaseTargetResolveCommand: ['/tool/GuthonCodeTool', 'database-target-resolve', '--home', home],
@@ -54,14 +59,16 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
   });
 
   writeRuntimeDescriptor({
-    mode: 'development',
+    mode: 'source-development',
     toolPath: '/repo/.venv/bin/python',
     toolEntry: '/repo/scripts/guthon_tool.py',
     toolHome: home,
   });
   assert.deepEqual(JSON.parse(fs.readFileSync(descriptorPath, 'utf8')), {
-    mode: 'development',
+    mode: 'source-development',
+    protocolVersion: 1,
     command: ['/repo/.venv/bin/python', '/repo/scripts/guthon_tool.py'],
+    codeSource: '/repo/scripts/guthon_tool.py',
     home,
     workspaceResolveCommand: [
       '/repo/.venv/bin/python',
@@ -95,11 +102,25 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
   fs.rmSync(home, { recursive: true });
 });
 
+test('migrates the old development setting and keeps script paths separate', () => {
+  assert.equal(normalizeExecutionMode('development'), 'source-development');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-script-'));
+  const python = path.join(root, 'python');
+  const script = path.join(root, 'GuthonCodeTool-python.pyz');
+  fs.writeFileSync(python, '');
+  fs.writeFileSync(script, '');
+  assert.deepEqual(resolveScriptRuntime(python, script), {
+    mode: 'script', toolPath: python, toolEntry: script,
+  });
+  assert.throws(() => resolveScriptRuntime(python, path.join(root, 'other.zip')), /\.pyz/);
+  fs.rmSync(root, { recursive: true });
+});
+
 test('Nexus lists every configured workspace and binds commands to workspaceKey', () => {
   const extension = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.js'), 'utf8');
   const manifest = require('../package.json');
 
-  assert.equal(extension.includes("readWorkspaces(tool)"), true);
+  assert.equal(extension.includes("workspaceRegistry.get(tool)"), true);
   assert.equal(extension.includes("item.displayName"), true);
   assert.equal(extension.includes("[item.workspaceKey]"), true);
   assert.equal(extension.includes("gushenCompletion.selectWorkspaceSourceMode"), true);
@@ -114,7 +135,7 @@ test('Nexus lists every configured workspace and binds commands to workspaceKey'
   );
   assert.equal((extension.match(/toolItem\(\s*'添加产品或项目'/g) || []).length, 1);
   assert.equal(extension.includes("new vscode.TreeItem('运行模式', vscode.TreeItemCollapsibleState.Collapsed)"), true);
-  assert.equal(extension.includes('`切换模式：${executionMode'), true);
+  assert.equal(extension.includes('`切换模式：${modeLabel'), true);
   assert.equal(extension.includes('`当前版本：${applicationVersion}`'), true);
   assert.equal(extension.includes('`更新源：${UPDATE_SOURCES[updateSource]'), true);
   assert.equal(extension.includes("toolItem('检查更新'"), true);

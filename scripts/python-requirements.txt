@@ -1,0 +1,4 @@
+PyMySQL==1.2.0
+psycopg[binary]==3.3.5
+oracledb==26.0.0
+keyring==25.7.0

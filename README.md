@@ -264,21 +264,20 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
 1. 安装发布包中的 VSIX，执行 `Developer: Reload Window`。
 2. 打开左侧 “Guthon Nexus”，选择应用和长期保留的本地数据目录。
 3. 编辑 `config/*.yaml`。
-4. 展开目标 `PRD`、`PRJ`，在该节点选择“源码来源：DATABASE / SVN”；全部产品和项目始终混合显示，运行模式仍独立
-   保留“发行模式 / 调试模式”。
+4. 展开目标 `PRD`、`PRJ`，在该节点选择“源码来源：DATABASE / SVN”；全部产品和项目始终混合显示。运行模式独立选择开发、调试或发行。
 5. DATABASE 项目继续执行同步、诊断和 Workcopy；SVN 项目从“谷神源码”虚拟编辑，并在单一 SCM 项目中查看
    本地/远程变更，执行全部、所选文件或单文件范围的提交/更新、部分保存、放弃修改和文本冲突三方合并。PAGE 默认以脚本、SQL、字段的可读投影打开 VS Code 双栏 Diff，
    同时保留原始 JSON 差异入口；配置 `systems.include.mappings` 时按声明关系分组；未配置时根据系统/数据源根目录的 `$.中文名称` 和 `pages/index.md`/`procedures/index.md` 内容保守推断，证据不足的系统或数据源各自保留为独立业务组，Skill/Public 进入“公共源码”；页面目录、叶子顺序及 SCM 名称复用 `pages/index.md`，PAGE 分块按 GSS、JS、SQL、字段排列；过程函数包名称复用 `procedures/index.md`，包和包内函数分别按名称字母排序；`.gss` 使用独立 Guthon GSS 高亮与既有补全。
 6. 在项目的“工作区驾驶舱”查看状态并直接进入对应操作；使用“搜索工作区完整索引”跨源码身份与事实检索，选择结果后可打开源码，或复制默认精简、按需详细的 AI 上下文。
 7. 需要网页功能时从 Nexus 启动 Guthon Bridge。
 
-维护者可切换到调试模式并选择本仓库作为源码目录；Nexus 会直接调用 `.venv` 和 `scripts/guthon_tool.py`，本地数据目录仍独立选择。当前运行模式写入：
+维护者可切换到开发模式并选择本仓库作为源码目录；Nexus 使用仓库 `.venv` 和 `scripts/guthon_tool.py`。调试模式使用 Release 的 `GuthonCodeTool-python.pyz` 和用户选择的 64 位 Python 3.12+，选择前需准备同目录的 `GuthonCodeTool-checksums.txt`；Nexus 校验脚本、环境、自检和 ToolHost 握手。发行模式继续使用不依赖系统 Python 的 macOS/Windows 应用。三种模式共用本地数据目录。当前运行模式写入：
 
 ```text
 <toolHome>/var/nexus/tool-runtime.json
 ```
 
-该描述符除基础 `command`/`home` 外，还写入 cwd 无关的 `workspaceResolveCommand`、`databaseTargetResolveCommand`、`databaseProbeCommand`、`databaseDescribeCommand`、`databaseQueryCommand` 与 `linterCommand` 数组。
+该描述符除基础 `command`/`home` 外，还写入模式、代码来源、ToolHost 协议版本，以及 cwd 无关的 `workspaceResolveCommand`、`databaseTargetResolveCommand`、`databaseProbeCommand`、`databaseDescribeCommand`、`databaseQueryCommand` 与 `linterCommand` 数组。
 Agent 不再拼装 `../../scripts` 或 `../../tools/guthon-lint`；从具体 PRD/PRJ cwd 运行 `--changed` 时，Linter 只检查当前
 workspace，Git pre-commit 的 `--staged` 仍检查整个暂存集合。
 
@@ -316,7 +315,9 @@ cd ../GuthonNexus/gushen-vscode-completion
 npm test
 ```
 
-发布版本由根目录 `VERSION` 统一管理，当前从 `0.2.1` 继续迭代；每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 生成 GuthonCodeTool 应用、应用校验文件、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill，并同步到 GitHub/Gitee Release。发行模式可在 Nexus 的折叠“运行模式”节点中选择更新源并手动检查应用更新；不会启动检查或定时联网，安装前会校验 SHA-256、运行 `self-test` 并保留上一版本用于回退。
+发布版本由根目录 `VERSION` 统一管理，每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 构建 macOS/Windows 应用、Python zipapp、依赖清单、校验文件、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill，并同步到 GitHub/Gitee Release。发行模式可在 Nexus 的折叠“运行模式”节点中选择更新源并手动检查应用更新；不会启动检查或定时联网，安装前会校验 SHA-256、运行 `self-test` 并保留上一版本用于回退。调试模式目前使用用户提供且校验通过的本地 Python；隔离运行环境的一键下载资产尚未交付。
+
+Nexus 与 Bridge 各自维护一个常驻 ToolHost。普通工作区请求复用该进程；工作区列表在 Nexus 两棵树之间共享。普通 Nexus 刷新只重新读取工作区并重绘，不扫描全部 SVN working copy；“刷新 SVN 变更”和“检查 SVN 远程变更”仍是独立操作。SVN 日常 SCM 展示只执行必要的 `svn info --xml` 与 `svn status --xml`，写回和更新安全检查继续使用完整状态路径。
 
 ## 文档
 

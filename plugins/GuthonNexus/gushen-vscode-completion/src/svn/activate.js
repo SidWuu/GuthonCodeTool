@@ -239,6 +239,8 @@ function activateSvn({
   context,
   getTool,
   listSvnWorkspaces,
+  invalidateWorkspaces = () => {},
+  processClient,
   onToolTreeChanged,
   claimOperation,
 }) {
@@ -253,7 +255,7 @@ function activateSvn({
     operationOutput.append(String(value));
   };
   const backendOutput = { onOutput: streamBackendOutput };
-  const backend = new SvnBackendClient({ getTool });
+  const backend = new SvnBackendClient({ getTool, processClient });
   const catalogTree = new SvnCatalogTreeProvider({ vscode, backend, listSvnWorkspaces });
   const diffContent = new SvnDiffContentProvider({ vscode });
   const quickDiff = new SvnQuickDiffProvider({ vscode, backend, contentProvider: diffContent });
@@ -790,15 +792,12 @@ function activateSvn({
       workspaceKey || '',
       async () => {
         log('刷新 SVN 源码视图', workspaceKey ? `开始 · ${workspaceKey}` : '开始 · 全部工作区');
-        catalogTree.refresh(workspaceKey);
-        if (workspaceKey) virtualFs.invalidate(workspaceKey, true);
-        const workspaces = await listSvnWorkspaces();
         if (workspaceKey) {
-          const workspace = workspaces.find((item) => item.workspaceKey === workspaceKey);
-          if (workspace) await scm.refresh(workspace, backendOutput);
+          catalogTree.refresh(workspaceKey);
+          virtualFs.invalidate(workspaceKey, true);
         } else {
-          for (const workspace of workspaces) virtualFs.invalidate(workspace.workspaceKey, true);
-          await scm.refreshAll(workspaces, backendOutput);
+          invalidateWorkspaces();
+          await refreshWorkspaceList();
         }
         log('刷新 SVN 源码视图', '完成');
       }
@@ -924,13 +923,25 @@ function activateSvn({
     })),
   ];
 
-  async function refresh() {
-    catalogTree.refresh();
+  async function refresh(workspaceKey = '') {
+    catalogTree.refresh(workspaceKey);
     const workspaces = await listSvnWorkspaces();
-    for (const workspace of workspaces) virtualFs.invalidate(workspace.workspaceKey, true);
-    const statuses = await scm.refreshAll(workspaces);
+    const selected = workspaceKey
+      ? workspaces.filter((workspace) => workspace.workspaceKey === workspaceKey)
+      : workspaces;
+    for (const workspace of selected) virtualFs.invalidate(workspace.workspaceKey, true);
+    const statuses = workspaceKey
+      ? await Promise.all(selected.map((workspace) => scm.refresh(workspace)))
+      : await scm.refreshAll(workspaces);
     sourceWatcher.sync(workspaces);
     return statuses;
+  }
+
+  async function refreshWorkspaceList() {
+    const workspaces = await listSvnWorkspaces();
+    scm.syncWorkspaces(workspaces);
+    sourceWatcher.sync(workspaces);
+    catalogTree.refreshRoots();
   }
 
   const disposable = {
@@ -951,13 +962,14 @@ function activateSvn({
     },
   };
   context.subscriptions.push(disposable);
-  refresh().catch(() => {});
+  refreshWorkspaceList().catch(() => {});
   return {
     backend,
     backendOutput,
     catalogTree,
     log,
     refresh,
+    refreshWorkspaceList,
     saveDirtyDocuments,
     selectedWorkspaceKey() {
       return workspaceKeyFromElement(treeView.selection?.[0]);

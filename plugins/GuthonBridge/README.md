@@ -34,7 +34,7 @@ plugins/GuthonBridge/
 
 ## 启动 Bridge
 
-普通用户在 Guthon Nexus 左侧面板单击“启动 Guthon Bridge”。Nexus 会复用当前运行模式和本地数据目录，并使用 VS Code 自带的 Node 运行环境启动服务，不需要安装 Node.js、设置环境变量或打开终端。发行模式调用已选择的 GuthonCodeTool 应用；调试模式直接调用源码仓库的 `.venv` 和 Python 入口，每次拉取使用最新脚本。切换本地数据目录或运行模式时，运行中的 Bridge 会自动重启。
+普通用户在 Guthon Nexus 左侧面板单击“启动 Guthon Bridge”。Nexus 会传入当前运行模式和显式本地数据目录，并使用 VS Code 自带的 Node 运行环境启动服务，不需要安装 Node.js、设置环境变量或打开终端。发行模式使用打包应用，开发模式使用仓库 `.venv` 与源码，调试模式使用本地 Python 与经校验的 Release pyz。Bridge 在自身生命周期内复用一个常驻 ToolHost；开发源码修改后需重启 ToolHost 才生效。切换本地数据目录或运行模式时，运行中的 Bridge 会自动重启。
 
 Bridge 请求携带 `workspaceKey` 时会验证页面身份；未携带时按 `pageOrigin + dataSourceId + systemId` 匹配产品、项目配置。唯一候选直接使用，多个候选由 Chrome 扩展下拉选择，并按 `协议 + 主机 + /guthon` 记住最近一次选择；切换谷神地址或候选失效时重新选择。
 
@@ -46,7 +46,7 @@ Bridge 请求携带 `workspaceKey` 时会验证页面身份；未携带时按 `p
 npm run start:bridge
 ```
 
-未设置 `GUTHON_TOOL_PATH` 时，源码调试模式继续回退到仓库中的 Python 脚本。
+直接启动 Bridge 时必须显式设置绝对路径 `GUTHON_TOOL_HOME`。未设置 `GUTHON_TOOL_PATH` 时，开发环境可使用仓库中的 Python 脚本；Nexus 启动时会传入所选运行入口。
 
 默认监听：
 

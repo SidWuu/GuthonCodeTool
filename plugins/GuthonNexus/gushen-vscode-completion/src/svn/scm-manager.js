@@ -316,6 +316,14 @@ class SvnScmManager {
     return results;
   }
 
+  syncWorkspaces(workspaces) {
+    const expected = new Set(workspaces.map((workspace) => workspace.workspaceKey));
+    for (const workspace of workspaces) this.ensure(workspace);
+    for (const workspaceKey of this.providers.keys()) {
+      if (!expected.has(workspaceKey)) this.remove(workspaceKey);
+    }
+  }
+
   applySaved(result) {
     const record = this.record(result?.workspaceKey);
     const current = record?.status;

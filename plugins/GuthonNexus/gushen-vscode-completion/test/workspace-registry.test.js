@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
-const { readWorkspaces } = require('../src/workspace-registry');
+const { readWorkspaces, WorkspaceRegistry } = require('../src/workspace-registry');
 
 function spawnResult({ stdout = '', stderr = '', code = 0 } = {}) {
   return (_command, _args, _options) => {
@@ -34,4 +34,52 @@ test('rejects an invalid workspace registry instead of silently showing no proje
     ),
     /工作区列表无效/
   );
+});
+
+test('shares one request across views and invalidates after a workspace change', async () => {
+  let reads = 0;
+  let finish;
+  const registry = new WorkspaceRegistry(() => {
+    reads += 1;
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  const tool = { toolPath: '/tool', toolHome: '/home' };
+  const first = registry.get(tool);
+  const second = registry.get(tool);
+  await Promise.resolve();
+  assert.equal(reads, 1);
+  finish([{ workspaceKey: 'products.a' }]);
+  assert.deepEqual(await first, await second);
+  assert.deepEqual(await registry.get(tool), [{ workspaceKey: 'products.a' }]);
+  assert.equal(reads, 1);
+  registry.invalidate();
+  const next = registry.get(tool);
+  await Promise.resolve();
+  finish([{ workspaceKey: 'products.b' }]);
+  assert.deepEqual(await next, [{ workspaceKey: 'products.b' }]);
+  assert.equal(reads, 2);
+});
+
+test('does not cache a failed request or an old result after invalidation', async () => {
+  let reads = 0;
+  let finish;
+  const registry = new WorkspaceRegistry(() => {
+    reads += 1;
+    return new Promise((resolve, reject) => { finish = { resolve, reject }; });
+  });
+  const tool = { toolPath: '/tool', toolHome: '/home' };
+  const failed = registry.get(tool);
+  await Promise.resolve();
+  finish.reject(new Error('offline'));
+  await assert.rejects(failed, /offline/);
+  const stale = registry.get(tool);
+  await Promise.resolve();
+  registry.invalidate();
+  finish.resolve([{ workspaceKey: 'products.old' }]);
+  await stale;
+  const current = registry.get(tool);
+  await Promise.resolve();
+  finish.resolve([{ workspaceKey: 'products.new' }]);
+  assert.deepEqual(await current, [{ workspaceKey: 'products.new' }]);
+  assert.equal(reads, 3);
 });

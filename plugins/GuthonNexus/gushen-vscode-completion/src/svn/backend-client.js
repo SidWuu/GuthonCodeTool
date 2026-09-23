@@ -11,14 +11,22 @@ function backendErrorMessage(stderr, stdout, code) {
 }
 
 class SvnBackendClient {
-  constructor({ getTool, spawnProcess = spawn }) {
+  constructor({ getTool, spawnProcess = spawn, processClient }) {
     this.getTool = getTool;
     this.spawnProcess = spawnProcess;
+    this.processClient = processClient;
   }
 
   async run(workspaceKey, args, input, { onOutput } = {}) {
     const tool = await this.getTool();
     if (!tool) throw new Error('请先配置 GuthonCodeTool 运行模式和本地数据目录');
+    if (this.processClient) {
+      const payload = await this.processClient.request(tool, 'svn', args, workspaceKey, input, { onOutput });
+      if (payload?.ok !== true) {
+        throw new Error(payload?.errors?.map((item) => item.error).join('; ') || '后端返回 ok=false');
+      }
+      return payload;
+    }
     return new Promise((resolve, reject) => {
       const child = this.spawnProcess(
         tool.toolPath,

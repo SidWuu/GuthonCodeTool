@@ -7,5 +7,8 @@ const source = path.resolve(extensionRoot, '..', '..', 'GuthonBridge', 'bridge',
 const target = path.join(extensionRoot, 'bridge', 'server.js');
 
 fs.mkdirSync(path.dirname(target), { recursive: true });
-fs.copyFileSync(source, target);
+const original = fs.readFileSync(source, 'utf8');
+const sourceImport = '../../GuthonNexus/gushen-vscode-completion/src/tool-process-client';
+if (!original.includes(sourceImport)) throw new Error('Bridge ToolProcessClient import was not found');
+fs.writeFileSync(target, original.replace(sourceImport, '../src/tool-process-client'), 'utf8');
 console.log(`Bundled Guthon Bridge: ${target}`);

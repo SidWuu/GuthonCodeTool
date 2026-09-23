@@ -35,6 +35,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | SVN 索引与浏览 | `scripts/providers/svn/nexus/catalog.py` | `scripts/providers/svn/nexus/documents.py` | `tests/test_svn_nexus_workspace.py` |
 | SVN SCM/差异/写回 | `scripts/providers/svn/nexus/scm.py` | `scripts/providers/svn/writeback.py` | `tests/test_svn_provider.py` |
 | Nexus 运行模式/toolHome | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-runtime.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-workspace.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/tool-runtime.test.js` |
+| ToolHost 与三运行模式 | `scripts/guthon_tool.py` | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-process-client.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/script-runtime.js`、`scripts/build_script_tool.py` | `tests/test_toolhost.py`、`tests/test_build_script_tool.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/tool-process-client.test.js` |
 | Nexus UI 命令 | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` | `plugins/GuthonNexus/gushen-vscode-completion/package.json` | `plugins/GuthonNexus/gushen-vscode-completion/test/rules.test.js` |
 | Nexus SVN 集成 | `plugins/GuthonNexus/gushen-vscode-completion/src/svn/backend-client.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/svn/scm-manager.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/svn-backend-client.test.js` |
 | Bridge 服务端 | `plugins/GuthonBridge/bridge/server.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/bridge-process.js` | `plugins/GuthonBridge/bridge/server.test.js` |
@@ -79,7 +80,7 @@ SVN：
 
 ## Guthon Nexus
 
-`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` 是命令与视图注册入口；`tool-runtime.js` 决定 development/packaged 命令并写入 runtime descriptor；`tool-workspace.js` 负责设置/切换工作空间；`workspace-registry.js` 与 `workspace-assistant.js` 维护工作区列表；`bridge-process.js` 启停 Bridge；`definition.js`、`selector.js`、`rules.js`、`tool-json-client.js`、`source-mode.js`、`database-config.js`、`tool-updater.js` 分别承担跳转、选择器、补全规则、CLI JSON 调用、源码模式、数据库配置与自更新。
+`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` 是命令与视图注册入口；`tool-runtime.js` 决定 source-development/script/packaged 命令并写入 runtime descriptor；`tool-process-client.js` 复用 ToolHost；`script-runtime.js` 校验本地 Python 与 pyz；`tool-workspace.js` 负责设置/切换工作空间；`workspace-registry.js` 与 `workspace-assistant.js` 维护工作区列表；`bridge-process.js` 启停 Bridge；`definition.js`、`selector.js`、`rules.js`、`tool-json-client.js`、`source-mode.js`、`database-config.js`、`tool-updater.js` 分别承担跳转、选择器、补全规则、ToolHost JSON 调用、源码模式、数据库配置与发行应用自更新。
 
 ## Guthon Bridge
 
@@ -88,6 +89,7 @@ SVN：
 ## Build and release
 
 - `scripts/build_guthon_tool.py`：PyInstaller 打包，只打包 `config/example` 与 `VERSION`。
+- `scripts/build_script_tool.py`：构建不含第三方依赖和私有数据的 Python zipapp；`scripts/check_toolhost.py` 验证连续请求。
 - `GuthonCodeTool.spec`：打包配置。
 - `scripts/sync_guthon_api.mjs`：从 `<toolHome>/config/sync.yaml` 读取谷神版本，更新 `<toolHome>/var/docs/谷神方言API/` 与插件补全数据。
 - `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs`：从 API 文档目录生成 `plugins/GuthonNexus/gushen-vscode-completion/data/index.json`。

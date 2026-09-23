@@ -1,6 +1,5 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
 const vscode = require('vscode');
 const {
   filterItems,
@@ -22,7 +21,12 @@ const { promptDatabaseDiagnosis } = require('./database-config');
 const { ToolJsonClient } = require('./tool-json-client');
 const { searchPickItems, workspaceCockpit } = require('./workspace-assistant');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
-const { resolveDevelopmentRuntime, toolArguments, writeRuntimeDescriptor } = require('./tool-runtime');
+const {
+  normalizeExecutionMode, resolveDevelopmentRuntime, resolveScriptRuntime,
+  writeRuntimeDescriptor,
+} = require('./tool-runtime');
+const { ToolProcessClient } = require('./tool-process-client');
+const { probeScriptRuntime } = require('./script-runtime');
 const {
   UPDATE_SOURCES,
   assetNameFor,
@@ -39,7 +43,7 @@ const {
   selectWorkspaceSourceMode,
   sourceModeLabel,
 } = require('./source-mode');
-const { readWorkspaces } = require('./workspace-registry');
+const { WorkspaceRegistry } = require('./workspace-registry');
 const { activateSvn, selectEditableIdentity, sourceModuleElement } = require('./svn/activate');
 const { clearLegacyCredentials, promptForPassword } = require('./svn/credentials');
 const { workspaceKeyFromSourceControlId } = require('./svn/scm-manager');
@@ -224,9 +228,10 @@ function createHoverProvider(context) {
   };
 }
 
-async function configuredRuntime(config, mode) {
+async function configuredRuntime(config, mode, options = {}) {
   let runtime;
-  if (mode === 'development') {
+  mode = normalizeExecutionMode(mode);
+  if (mode === 'source-development') {
     let developmentRoot = config.get('developmentRoot', '');
     try {
       runtime = resolveDevelopmentRuntime(developmentRoot);
@@ -243,6 +248,69 @@ async function configuredRuntime(config, mode) {
       await config.update('developmentRoot', developmentRoot, vscode.ConfigurationTarget.Global);
     }
     return runtime;
+  } else if (mode === 'script') {
+    let pythonPath = config.get('scriptPythonPath', '');
+    let scriptPath = config.get('scriptToolPath', '');
+    async function selectScriptFiles() {
+      const python = await vscode.window.showOpenDialog({
+        canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+        title: '选择本地 Python 可执行文件',
+      });
+      if (!python) return false;
+      pythonPath = python[0].fsPath;
+      const script = await vscode.window.showOpenDialog({
+        canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+        filters: { 'GuthonCodeTool 调试脚本': ['pyz'] },
+        title: '选择 GuthonCodeTool-python.pyz',
+      });
+      if (!script) return false;
+      scriptPath = script[0].fsPath;
+      return true;
+    }
+    if (options.selectScript && !await selectScriptFiles()) return undefined;
+    try {
+      runtime = resolveScriptRuntime(pythonPath, scriptPath);
+    } catch (error) {
+      if (options.selectScript) {
+        vscode.window.showErrorMessage(error.message);
+        return undefined;
+      }
+      if (!await selectScriptFiles()) return undefined;
+      try {
+        runtime = resolveScriptRuntime(pythonPath, scriptPath);
+      } catch (error) {
+        vscode.window.showErrorMessage(error.message);
+        return undefined;
+      }
+    }
+    if (options.probeScript) {
+      let probe;
+      try {
+        probe = await probeScriptRuntime(runtime);
+      } catch (error) {
+        const choice = await vscode.window.showErrorMessage(
+          `调试环境不可用：${error.message}`, '重新选择 Python 和脚本'
+        );
+        if (choice === '重新选择 Python 和脚本' && !options.selectScript) {
+          return configuredRuntime(config, mode, { ...options, selectScript: true });
+        }
+        return undefined;
+      }
+      if (probe.missingProviders.length) {
+        const chosen = await vscode.window.showWarningMessage(
+          `调试脚本 ${probe.version} 的核心功能可用，但部分功能依赖缺失：${probe.missingProviders.join('；')}`,
+          { modal: true }, '继续使用核心功能'
+        );
+        if (chosen !== '继续使用核心功能') return undefined;
+      }
+    }
+    if (config.get('scriptPythonPath', '') !== pythonPath) {
+      await config.update('scriptPythonPath', pythonPath, vscode.ConfigurationTarget.Global);
+    }
+    if (config.get('scriptToolPath', '') !== scriptPath) {
+      await config.update('scriptToolPath', scriptPath, vscode.ConfigurationTarget.Global);
+    }
+    return runtime;
   } else {
     let toolPath = config.get('toolPath', '');
     if (!toolPath || !fs.existsSync(toolPath)) {
@@ -257,7 +325,7 @@ async function configuredRuntime(config, mode) {
 
 async function configuredTool(options = {}) {
   const config = vscode.workspace.getConfiguration('gushenCompletion');
-  const mode = config.get('executionMode', 'packaged');
+  const mode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
   const runtime = await configuredRuntime(config, mode);
   if (!runtime) return undefined;
   let toolHome = options.toolHome || config.get('toolHome', '');
@@ -274,7 +342,8 @@ async function configuredTool(options = {}) {
   return tool;
 }
 
-async function runTool(
+async function runToolCommand(
+  processClient,
   command,
   extraArgs = [],
   askForConfirmation = true,
@@ -300,26 +369,25 @@ async function runTool(
   }
   const output = vscode.window.createOutputChannel('GuthonCodeTool');
   output.show(true);
-  const execute = () => new Promise((resolve) => {
-    output.appendLine(`运行：${command}${workspaceKey ? ` · ${workspaceKey}` : ''}（${tool.mode === 'development' ? '调试模式' : '发行模式'}）`);
-    const child = spawn(tool.toolPath, toolArguments(tool, command, extraArgs, workspaceKey), {
-      shell: false,
-      env: process.env,
-    });
-    child.stdout.on('data', (data) => output.append(data.toString()));
-    child.stderr.on('data', (data) => output.append(data.toString()));
-    child.stdin.end(stdinPayload === undefined ? '' : JSON.stringify(stdinPayload));
-    child.on('error', (error) => {
-      vscode.window.showErrorMessage(`GuthonCodeTool 启动失败：${error.message}`);
-      resolve(false);
-    });
-    child.on('close', (code) => {
-      const message = code === 0 ? `GuthonCodeTool 完成：${command}` : `GuthonCodeTool 失败（退出码 ${code}）：${command}`;
-      output.appendLine(message);
-      (code === 0 ? vscode.window.showInformationMessage : vscode.window.showErrorMessage)(message);
-      resolve(code === 0);
-    });
-  });
+  const execute = async () => {
+    output.appendLine(`运行：${command}${workspaceKey ? ` · ${workspaceKey}` : ''}（${{
+      'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
+    }[tool.mode] || tool.mode}）`);
+    try {
+      const result = await processClient.request(tool, command, extraArgs, workspaceKey, stdinPayload, {
+        onOutput: (value) => output.append(value),
+      });
+      if (result?.stdout) output.append(result.stdout);
+      else output.appendLine(JSON.stringify(result, null, 2));
+      output.appendLine(`GuthonCodeTool 完成：${command}`);
+      vscode.window.showInformationMessage(`GuthonCodeTool 完成：${command}`);
+      return true;
+    } catch (error) {
+      output.appendLine(`GuthonCodeTool 失败：${error.message}`);
+      vscode.window.showErrorMessage(`GuthonCodeTool 失败：${error.message}`);
+      return false;
+    }
+  };
   const pending = toolQueue.then(execute, execute);
   toolQueue = pending.catch(() => false);
   return pending.finally(release);
@@ -330,10 +398,12 @@ function configuredToolFromSettings() {
   const toolHome = config.get('toolHome', '');
   if (!toolHome || !fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'))) return undefined;
   try {
-    const mode = config.get('executionMode', 'packaged');
-    const runtime = mode === 'development'
+    const mode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
+    const runtime = mode === 'source-development'
       ? resolveDevelopmentRuntime(config.get('developmentRoot', ''))
-      : { mode: 'packaged', toolPath: config.get('toolPath', '') };
+      : mode === 'script'
+        ? resolveScriptRuntime(config.get('scriptPythonPath', ''), config.get('scriptToolPath', ''))
+        : { mode: 'packaged', toolPath: config.get('toolPath', '') };
     if (!runtime.toolPath || !fs.existsSync(runtime.toolPath)) return undefined;
     return { ...runtime, toolHome };
   } catch {
@@ -357,9 +427,10 @@ function staticItem(label, icon, description) {
 }
 
 class ToolTreeDataProvider {
-  constructor(bridge = { isRunning: () => false }, context) {
+  constructor(bridge = { isRunning: () => false }, context, workspaceRegistry = new WorkspaceRegistry()) {
     this.bridge = bridge;
     this.context = context;
+    this.workspaceRegistry = workspaceRegistry;
     this.changed = new vscode.EventEmitter();
     this.onDidChangeTreeData = this.changed.event;
   }
@@ -376,8 +447,9 @@ class ToolTreeDataProvider {
     if (element) return element.children || [];
     const config = vscode.workspace.getConfiguration('gushenCompletion');
     const toolHome = config.get('toolHome', '');
-    const executionMode = config.get('executionMode', 'packaged');
+    const executionMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
     const developmentRoot = config.get('developmentRoot', '');
+    const scriptToolPath = config.get('scriptToolPath', '');
     const updateSource = config.get('updateSource', 'gitee');
     const storageRoot = this.context.globalStorageUri.fsPath;
     const configuredToolPath = config.get('toolPath', '');
@@ -393,14 +465,21 @@ class ToolTreeDataProvider {
       .filter((filename) => filename !== 'database-testing.yaml' || fs.existsSync(path.join(toolHome, 'config', filename)))
       .map((filename) => toolItem(filename, 'gushenCompletion.editConfig', 'edit', undefined, [filename]));
     const runtime = new vscode.TreeItem('运行模式', vscode.TreeItemCollapsibleState.Collapsed);
-    runtime.iconPath = new vscode.ThemeIcon(executionMode === 'development' ? 'beaker' : 'package');
-    runtime.description = executionMode === 'development' ? '调试模式' : '发行模式';
+    const modeLabel = {
+      'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
+    }[executionMode] || '发行模式';
+    runtime.iconPath = new vscode.ThemeIcon(executionMode === 'packaged' ? 'package' : 'beaker');
+    runtime.description = modeLabel;
     runtime.children = [
       toolItem(
-        `切换模式：${executionMode === 'development' ? '调试模式' : '发行模式'}`,
+        `切换模式：${modeLabel}`,
         'gushenCompletion.selectExecutionMode',
-        executionMode === 'development' ? 'beaker' : 'package',
-        executionMode === 'development' ? (path.basename(developmentRoot) || '源码运行') : '打包应用'
+        executionMode === 'packaged' ? 'package' : 'beaker',
+        executionMode === 'source-development'
+          ? (path.basename(developmentRoot) || '源码仓库')
+          : executionMode === 'script'
+            ? (path.basename(scriptToolPath) || 'Release 脚本')
+            : '打包应用'
       ),
       staticItem(`当前版本：${applicationVersion}`, 'tag'),
       toolItem(
@@ -431,7 +510,7 @@ class ToolTreeDataProvider {
     projects.iconPath = new vscode.ThemeIcon('folder-library');
     const tool = configuredToolFromSettings();
     try {
-      const workspaces = tool ? await readWorkspaces(tool) : [];
+      const workspaces = tool ? await this.workspaceRegistry.get(tool) : [];
       projects.children = [toolItem(
         '添加产品或项目',
         'gushenCompletion.addWorkspace',
@@ -531,6 +610,12 @@ class ToolTreeDataProvider {
 }
 
 function activate(context) {
+  const processClient = new ToolProcessClient();
+  const runTool = (...args) => runToolCommand(processClient, ...args);
+  const initialConfig = vscode.workspace.getConfiguration('gushenCompletion');
+  if (initialConfig.get('executionMode', 'packaged') === 'development') {
+    void initialConfig.update('executionMode', 'source-development', vscode.ConfigurationTarget.Global);
+  }
   const provider = createProvider(context);
   const selector = createDocumentSelector(SUPPORTED_LANGUAGES, SUPPORTED_SCHEMES);
   const disposable = vscode.languages.registerCompletionItemProvider(
@@ -547,6 +632,13 @@ function activate(context) {
     createHoverProvider(context)
   );
   const bridgeOutput = vscode.window.createOutputChannel('Guthon Bridge');
+  const workspaceRegistry = new WorkspaceRegistry(async (tool) => {
+    const result = await processClient.request(tool, 'workspaces');
+    if (result?.ok !== true || !Array.isArray(result.workspaces)) {
+      throw new Error('工作区列表无效：缺少 ok=true 或 workspaces 数组');
+    }
+    return result.workspaces;
+  });
   let toolView;
   const bridge = createBridgeProcess({
     scriptPath: resolveBridgeScript(context.extensionPath),
@@ -557,12 +649,12 @@ function activate(context) {
     },
     onStateChange: () => toolView?.refresh(),
   });
-  toolView = new ToolTreeDataProvider(bridge, context);
+  toolView = new ToolTreeDataProvider(bridge, context, workspaceRegistry);
   const toolViewDisposable = vscode.window.registerTreeDataProvider('gushenCompletion.toolView', toolView);
   const listSvnWorkspaces = async () => {
     const tool = configuredToolFromSettings();
     if (!tool) return [];
-    return filterWorkspacesBySourceMode(await readWorkspaces(tool), 'svn');
+    return filterWorkspacesBySourceMode(await workspaceRegistry.get(tool), 'svn');
   };
   const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
   void clearLegacyCredentials(context.secrets, toolHome).catch(() => {});
@@ -571,11 +663,18 @@ function activate(context) {
     context,
     getTool: async () => configuredToolFromSettings(),
     listSvnWorkspaces,
+    invalidateWorkspaces: () => workspaceRegistry.invalidate(),
+    processClient,
     onToolTreeChanged: () => toolView.refresh(),
     claimOperation: (workspaceKey, label) => claimToolRun(TOOL_COMMANDS.svn, workspaceKey, label),
   });
+  const refreshToolData = () => {
+    workspaceRegistry.invalidate();
+    toolView.refresh();
+  };
   const assistantClient = new ToolJsonClient({
     getTool: async () => configuredToolFromSettings(),
+    processClient,
   });
 
   const copyAiContext = async (workspaceKey, identity, detailed = false) => {
@@ -592,7 +691,7 @@ function activate(context) {
   const selectWorkspace = async (workspaceKey = '', sourceMode = '') => {
     const tool = configuredToolFromSettings();
     if (!tool) throw new Error('请先配置 GuthonCodeTool');
-    const allWorkspaces = await readWorkspaces(tool);
+    const allWorkspaces = await workspaceRegistry.get(tool);
     const workspaces = sourceMode
       ? filterWorkspacesBySourceMode(allWorkspaces, sourceMode)
       : allWorkspaces;
@@ -721,8 +820,8 @@ function activate(context) {
         { username: username.trim() }
       );
       if (!usernameConfigured) return false;
-      toolView.refresh();
-      await svnServices.refresh();
+      refreshToolData();
+      await svnServices.refreshWorkspaceList();
       if (!workspace.scopeConfigReady && !workspace.checkoutScriptReady) {
         return vscode.window.showInformationMessage(
           '公共 SVN 用户名已保存。请先导入/粘贴 checkout 配置，再次点击此入口保存密码。'
@@ -786,8 +885,8 @@ function activate(context) {
       });
       if (!selected) return;
       if (!await runTool(TOOL_COMMANDS.sourceMode, ['set', '--mode', selected], false, workspaceKey)) return;
-      toolView.refresh();
-      await svnServices.refresh();
+      refreshToolData();
+      await svnServices.refreshWorkspaceList();
       return vscode.window.showInformationMessage(
         `已将 ${workspaceKey} 设为 ${selected === 'svn' ? 'SVN' : 'DATABASE'}。请在该 Nexus 节点中继续配置。`
       );
@@ -796,18 +895,36 @@ function activate(context) {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
       const selected = await vscode.window.showQuickPick([
         { label: '发行模式', description: '调用打包的 GuthonCodeTool 应用', value: 'packaged' },
-        { label: '调试模式', description: '直接调用源码仓库中的 Python 脚本', value: 'development' },
+        { label: '开发模式', description: '使用 clone 仓库中的 .venv 和源码', value: 'source-development' },
+        { label: '调试模式', description: '使用本地 Python 和 Release 单文件 .pyz', value: 'script' },
+        { label: '重新选择调试环境', description: '重新选择本地 Python 和 .pyz', value: 'script', selectScript: true },
       ], { title: '选择 Guthon Nexus 运行模式' });
       if (!selected) return;
-      const runtime = await configuredRuntime(config, selected.value);
+      const runtime = await configuredRuntime(config, selected.value, { probeScript: true, selectScript: selected.selectScript });
       if (!runtime) return;
+      await processClient.stop();
       await config.update('executionMode', selected.value, vscode.ConfigurationTarget.Global);
       const toolHome = config.get('toolHome', '');
       if (toolHome) writeRuntimeDescriptor({ ...runtime, toolHome });
       if (bridge.isRunning()) await bridge.restart({ ...runtime, toolHome });
-      toolView.refresh();
-      await svnServices.refresh();
+      refreshToolData();
+      svnServices.catalogTree.refresh();
+      await svnServices.refreshWorkspaceList();
       return vscode.window.showInformationMessage(`已切换为${selected.label}`);
+    }),
+    vscode.commands.registerCommand('gushenCompletion.restartDevelopmentToolHost', async () => {
+      const mode = normalizeExecutionMode(vscode.workspace.getConfiguration('gushenCompletion').get('executionMode', 'packaged'));
+      if (mode !== 'source-development') {
+        return vscode.window.showInformationMessage('此命令仅用于开发模式');
+      }
+      await processClient.stop();
+      if (bridge.isRunning()) {
+        const currentTool = configuredToolFromSettings();
+        if (currentTool) await bridge.restart(currentTool);
+      }
+      refreshToolData();
+      await svnServices.refreshWorkspaceList();
+      return vscode.window.showInformationMessage('开发 ToolHost 已切换到当前源码');
     }),
     vscode.commands.registerCommand('gushenCompletion.selectUpdateSource', async () => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
@@ -822,7 +939,7 @@ function activate(context) {
       );
       if (!selected || selected.value === current) return;
       await config.update('updateSource', selected.value, vscode.ConfigurationTarget.Global);
-      toolView.refresh();
+      refreshToolData();
       return vscode.window.showInformationMessage(`GuthonCodeTool 更新源已切换为 ${selected.label}`);
     }),
     vscode.commands.registerCommand('gushenCompletion.checkToolUpdate', async () => {
@@ -843,6 +960,7 @@ function activate(context) {
       const storageRoot = context.globalStorageUri.fsPath;
       const source = config.get('updateSource', 'gitee');
       applicationUpdateRunning = true;
+      let bridgeWasRunning = false;
       try {
         const release = await vscode.window.withProgress({
           location: vscode.ProgressLocation.Notification,
@@ -861,6 +979,9 @@ function activate(context) {
           '下载并更新'
         );
         if (confirmed !== '下载并更新') return false;
+        bridgeWasRunning = bridge.isRunning();
+        if (bridgeWasRunning) await bridge.stop();
+        await processClient.stop();
         const installed = await vscode.window.withProgress({
           location: vscode.ProgressLocation.Notification,
           title: `更新 GuthonCodeTool 至 ${release.version}`,
@@ -888,16 +1009,21 @@ function activate(context) {
         }
         const toolHome = config.get('toolHome', '');
         const tool = { mode: 'packaged', toolPath: installed.toolPath, toolHome };
-        toolView.refresh();
+        refreshToolData();
         try {
+          svnServices.catalogTree.refresh();
           if (toolHome) writeRuntimeDescriptor(tool);
-          if (bridge.isRunning()) await bridge.restart(tool);
-          await svnServices.refresh();
+          if (bridgeWasRunning) bridge.start(tool);
+          await svnServices.refreshWorkspaceList();
         } catch (error) {
           await vscode.window.showWarningMessage(`应用已更新，但运行状态刷新失败：${error.message}`);
         }
         return vscode.window.showInformationMessage(`GuthonCodeTool 已更新至 ${installed.version}`);
       } catch (error) {
+        if (bridgeWasRunning && !bridge.isRunning()) {
+          const currentTool = configuredToolFromSettings();
+          if (currentTool) bridge.start(currentTool);
+        }
         return vscode.window.showErrorMessage(`GuthonCodeTool 更新失败：${error.message}`);
       } finally {
         applicationUpdateRunning = false;
@@ -923,7 +1049,10 @@ function activate(context) {
       );
       if (confirmed !== '回退') return false;
       applicationUpdateRunning = true;
+      const bridgeWasRunning = bridge.isRunning();
       try {
+        if (bridgeWasRunning) await bridge.stop();
+        await processClient.stop();
         const currentPath = config.get('toolPath', '');
         const currentApplicationVersion = await detectCurrentVersion(context.extensionPath, storageRoot, currentPath);
         const previousState = state;
@@ -943,16 +1072,21 @@ function activate(context) {
         }
         const toolHome = config.get('toolHome', '');
         const tool = { mode: 'packaged', toolPath: state.previousPath, toolHome };
-        toolView.refresh();
+        refreshToolData();
         try {
+          svnServices.catalogTree.refresh();
           if (toolHome) writeRuntimeDescriptor(tool);
-          if (bridge.isRunning()) await bridge.restart(tool);
-          await svnServices.refresh();
+          if (bridgeWasRunning) bridge.start(tool);
+          await svnServices.refreshWorkspaceList();
         } catch (error) {
           await vscode.window.showWarningMessage(`应用已回退，但运行状态刷新失败：${error.message}`);
         }
         return vscode.window.showInformationMessage(`GuthonCodeTool 已回退到 ${state.previousVersion}`);
       } catch (error) {
+        if (bridgeWasRunning && !bridge.isRunning()) {
+          const currentTool = configuredToolFromSettings();
+          if (currentTool) bridge.start(currentTool);
+        }
         return vscode.window.showErrorMessage(`GuthonCodeTool 回退失败：${error.message}`);
       } finally {
         applicationUpdateRunning = false;
@@ -980,14 +1114,16 @@ function activate(context) {
       );
       if (!completed) return;
       try {
+        if (previousToolHome !== tool.toolHome) await processClient.stop();
         writeRuntimeDescriptor(tool);
         await config.update('toolHome', tool.toolHome, vscode.ConfigurationTarget.Global);
       } catch (error) {
         return vscode.window.showErrorMessage(`工作空间已初始化，但 Nexus 保存配置失败：${error.message}`);
       }
       if (bridge.isRunning() && previousToolHome !== tool.toolHome) await bridge.restart(tool);
-      toolView.refresh();
-      await svnServices.refresh();
+      refreshToolData();
+      if (previousToolHome !== tool.toolHome) svnServices.catalogTree.refresh();
+      await svnServices.refreshWorkspaceList();
       if (setup.mode === 'setup') {
         const next = await vscode.window.showInformationMessage(
           '本地数据目录已初始化，是否现在添加第一个产品或项目？',
@@ -1004,7 +1140,7 @@ function activate(context) {
       if (!tool) return false;
       let workspaces;
       try {
-        workspaces = await readWorkspaces(tool);
+        workspaces = await workspaceRegistry.get(tool);
       } catch (error) {
         return vscode.window.showErrorMessage(`读取现有产品/项目失败：${error.message}`);
       }
@@ -1019,8 +1155,8 @@ function activate(context) {
         definition
       );
       if (!created) return false;
-      toolView.refresh();
-      await svnServices.refresh();
+      refreshToolData();
+      await svnServices.refreshWorkspaceList();
 
       const nextStep = definition.sourceMode === 'svn'
         ? '请展开该 Nexus，再设置 SVN 登录、导入/粘贴 checkout 配置或编辑 SVN 地址。'
@@ -1078,8 +1214,8 @@ function activate(context) {
           `目录已移入系统废纸篓，但配置删除失败：${error.message}。配置仍保留，可直接重试删除；已移入废纸篓的目录无需先恢复。`
         );
       }
-      toolView.refresh();
-      await svnServices.refresh();
+      refreshToolData();
+      await svnServices.refreshWorkspaceList();
       return vscode.window.showInformationMessage(`已删除 ${plan.displayName}，相关目录可从系统废纸篓恢复。`);
     }),
     vscode.commands.registerCommand('gushenCompletion.configureDatabaseDiagnosis', async (workspaceKey) => {
@@ -1096,7 +1232,7 @@ function activate(context) {
         null,
         definition
       );
-      if (completed) toolView.refresh();
+      if (completed) refreshToolData();
       return completed;
     }),
     vscode.commands.registerCommand('gushenCompletion.startBridge', async () => {
@@ -1180,8 +1316,8 @@ function activate(context) {
         );
         release = null;
         if (completed) {
-          await svnServices.refresh();
-          toolView.refresh();
+          refreshToolData();
+          await svnServices.refresh(workspaceKey);
         }
         return completed;
       } finally {
@@ -1256,8 +1392,8 @@ function activate(context) {
           ? `已向 ${result.output} 添加 ${result.added} 个 SVN 地址。请检查配置后执行检出/更新。`
           : `SVN 地址配置没有变化。`;
       vscode.window.showInformationMessage(message);
-      await svnServices.refresh();
-      toolView.refresh();
+      refreshToolData();
+      await svnServices.refreshWorkspaceList();
       return result;
     }),
     vscode.commands.registerCommand('gushenCompletion.editSvnScope', async (workspaceKey) => {
@@ -1305,7 +1441,8 @@ function activate(context) {
           release = null;
           if (completed) {
             svnServices.scm.clearRemote(workspaceKey);
-            await svnServices.refresh();
+            refreshToolData();
+            await svnServices.refresh(workspaceKey);
           }
           return completed;
         }
@@ -1373,8 +1510,8 @@ function activate(context) {
         release = null;
         if (completed) {
           svnServices.scm.clearRemote(workspaceKey);
-          await svnServices.refresh();
-          toolView.refresh();
+          refreshToolData();
+          await svnServices.refresh(workspaceKey);
         }
         return completed;
       } finally {
@@ -1394,8 +1531,8 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.openWorkspace', (workspaceRoot) =>
       vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(workspaceRoot))),
     vscode.commands.registerCommand('gushenCompletion.refreshToolView', async () => {
+      workspaceRegistry.invalidate();
       toolView.refresh();
-      await svnServices.refresh();
     }),
     vscode.commands.registerCommand('gushenCompletion.editConfig', async (filename) => {
       const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
@@ -1418,6 +1555,7 @@ function activate(context) {
     toolView.changed,
     bridgeOutput,
     bridge,
+    processClient,
     ...toolCommands
   );
 }
