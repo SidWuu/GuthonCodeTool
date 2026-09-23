@@ -206,16 +206,18 @@ jobs:
             exit 0
           fi
 
-          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" \
-            --jq .commit.message > commit-notes.md
+          git log -1 --format=%B "$GITHUB_SHA" > commit-notes.md
           sed -i -E \
             -e '1s/^\[build\][[:space:]]*//' \
             -e '/^[[:space:]]*\[build\][[:space:]]*$/d' \
             commit-notes.md
-          gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
             -f tag_name="$RELEASE_TAG" \
             -f target_commitish="$GITHUB_SHA" \
-            --jq .body > generated-notes.md
+            --jq .body > generated-notes.md || [ ! -s generated-notes.md ]; then
+            echo "::warning::GitHub 自动发布说明不可用，继续使用提交说明"
+            : > generated-notes.md
+          fi
           sed -i \
             -e 's/^## What'\''s Changed$/## GitHub 自动汇总/' \
             -e 's/^## New Contributors$/## 新贡献者/' \
