@@ -94,6 +94,7 @@ SVN_BROWSE_ACTIONS = {
     "scope-preview",
     "auth-cache",
     "delivery-status",
+    "page-query",
 }
 TOOLHOST_READ_COMMANDS = {
     "version", "workspaces", "workspace-resolve", "workspace-summary", "route",
@@ -101,7 +102,7 @@ TOOLHOST_READ_COMMANDS = {
     "database-query-readonly", "search", "context-pack", "query", "doctor",
 }
 CLI_COMMANDS = (
-    "version", "serve", "setup", "workspace-create", "workspace-delete",
+    "version", "serve", "mcp", "setup", "workspace-create", "workspace-delete",
     "svn-login-configure", "import-svn-scope", "workspaces", "workspace-resolve",
     "database-target-resolve", "database-target-configure", "database-probe",
     "database-describe", "database-query-readonly", "workspace-summary", "search",
@@ -723,6 +724,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 "status",
                 "catalog",
                 "fragments",
+                "page-query",
                 "read",
                 "read-batch",
                 "write",
@@ -1002,6 +1004,98 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 fun_id=parsed.fun_id,
                 working_copy_id=parsed.working_copy[0] if len(parsed.working_copy) == 1 else "",
             )
+        elif parsed.action == "page-query":
+            if not manifest_layout:
+                raise SystemExit("svn page-query requires manifest-working-copies")
+            try:
+                payload = json.load(sys.stdin)
+            except json.JSONDecodeError as error:
+                raise SystemExit("svn page-query requires a JSON stdin payload") from error
+            if not isinstance(payload, dict) or not isinstance(payload.get("name"), str):
+                raise SystemExit("svn page-query requires a tool name and arguments object")
+            arguments = payload.get("arguments", {})
+            if not isinstance(arguments, dict):
+                raise SystemExit("svn page-query arguments must be an object")
+            if arguments.get("workspaceKey", workspace["workspaceKey"]) != workspace["workspaceKey"]:
+                raise SystemExit("svn page-query workspaceKey differs from the selected workspace")
+            from providers.svn.nexus import page_nodes
+
+            name = payload["name"]
+            identity_keys = {"workspaceKey", "sourceNamespace", "sourceId", "funId"}
+            allowed_by_name = {
+                "get_index_status": {"workspaceKey"},
+                "search_sources": {"workspaceKey", "keyword", "sourceType", "limit", "cursor"},
+                "list_page_nodes": identity_keys | {"nodeType", "eventScope", "limit", "cursor"},
+                "read_page_nodes": identity_keys | {"targets", "maxChars"},
+                "list_page_fields": identity_keys | {"regionType", "fieldId", "limit", "cursor"},
+                "get_page_field": identity_keys | {"target", "maxChars"},
+                "list_page_field_relations": identity_keys | {"sourceFieldId", "targetFieldId", "limit", "cursor"},
+                "check_page_field_references": identity_keys | {"semanticFieldId", "limit"},
+                "get_source_context": identity_keys | {"limit"},
+            }
+            if name not in allowed_by_name:
+                raise SystemExit("Unsupported svn page-query tool name")
+            if unknown := set(arguments) - allowed_by_name[name]:
+                raise SystemExit("Unknown svn page-query arguments: " + ", ".join(sorted(unknown)))
+            namespace = arguments.get("sourceNamespace", "")
+            source_id = arguments.get("sourceId", "")
+            fun_id = arguments.get("funId", "")
+            if name not in {"get_index_status", "search_sources"}:
+                if any(not isinstance(value, str) or not value.strip() or len(value) > 512
+                       for value in (namespace, source_id)) or not isinstance(fun_id, str):
+                    raise SystemExit("svn page-query requires sourceNamespace and sourceId")
+            try:
+                if name == "get_index_status":
+                    result = page_nodes.index_status(workspace)
+                elif name == "search_sources":
+                    result = page_nodes.search_sources(
+                        workspace, keyword=arguments.get("keyword", ""),
+                        source_type=arguments.get("sourceType", ""),
+                        limit=arguments.get("limit", 20), cursor=arguments.get("cursor", ""),
+                    )
+                elif name == "list_page_nodes":
+                    result = page_nodes.list_nodes(
+                        workspace, source_namespace=namespace, source_id=source_id, fun_id=fun_id,
+                        node_type=arguments.get("nodeType", ""), event_scope=arguments.get("eventScope", ""),
+                        limit=arguments.get("limit", 50), cursor=arguments.get("cursor", ""),
+                    )
+                elif name == "read_page_nodes":
+                    result = page_nodes.read_nodes(
+                        workspace, source_namespace=namespace, source_id=source_id, fun_id=fun_id,
+                        targets=arguments.get("targets"), max_chars=arguments.get("maxChars", 12_000),
+                    )
+                elif name == "list_page_fields":
+                    result = page_nodes.list_fields(
+                        workspace, source_namespace=namespace, source_id=source_id, fun_id=fun_id,
+                        region_type=arguments.get("regionType", ""), field_id=arguments.get("fieldId", ""),
+                        limit=arguments.get("limit", 50), cursor=arguments.get("cursor", ""),
+                    )
+                elif name == "get_page_field":
+                    result = page_nodes.get_field(
+                        workspace, source_namespace=namespace, source_id=source_id, fun_id=fun_id,
+                        target=arguments.get("target"), max_chars=arguments.get("maxChars", 12_000),
+                    )
+                elif name == "list_page_field_relations":
+                    result = page_nodes.list_field_relations(
+                        workspace, source_namespace=namespace, source_id=source_id, fun_id=fun_id,
+                        source_field_id=arguments.get("sourceFieldId", ""),
+                        target_field_id=arguments.get("targetFieldId", ""),
+                        limit=arguments.get("limit", 50), cursor=arguments.get("cursor", ""),
+                    )
+                elif name == "check_page_field_references":
+                    result = page_nodes.field_reference_diagnostics(
+                        workspace, source_namespace=namespace, source_id=source_id, fun_id=fun_id,
+                        semantic_field_id=arguments.get("semanticFieldId", ""),
+                        limit=arguments.get("limit", 20),
+                    )
+                elif name == "get_source_context":
+                    result = page_nodes.source_context(
+                        workspace, source_namespace=namespace, source_id=source_id, fun_id=fun_id,
+                        limit=arguments.get("limit", 10),
+                    )
+            except page_nodes.PageIndexError as error:
+                raise SystemExit(f"{error.code}: {error}") from error
+            result = {"ok": True, **result}
         elif parsed.action in {"read", "read-batch"}:
             if not manifest_layout:
                 raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
@@ -1452,7 +1546,7 @@ def serve_stdio(home: Path) -> int:
             workspace_key = request.get("workspaceKey", "")
             if not isinstance(request_id, str) or not request_id:
                 raise ValueError("id must be a non-empty string")
-            if not isinstance(command, str) or command not in CLI_COMMANDS or command in {"serve", "self-test"}:
+            if not isinstance(command, str) or command not in CLI_COMMANDS or command in {"serve", "mcp", "self-test"}:
                 raise ValueError("unsupported command")
             if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
                 raise ValueError("args must be a string array")
@@ -1526,6 +1620,18 @@ def main(argv=None) -> int:
         if args.workspace or extra_args != ["--stdio"]:
             parser.error("serve requires --stdio and does not accept --workspace or extra arguments")
         return serve_stdio(Path(args.home).expanduser().resolve())
+    if args.command == "mcp":
+        if args.workspace or extra_args not in (
+            ["--stdio"], ["--stdio", "--read-only"], ["--stdio", "--enable-page-write"]
+        ):
+            parser.error("mcp requires --stdio; optional --read-only disables local SVN source writes")
+        home = Path(args.home).expanduser().resolve()
+        os.environ["GUTHON_HOME"] = str(home)
+        from providers.svn.nexus.mcp_server import serve_stdio as serve_mcp_stdio
+
+        return serve_mcp_stdio(
+            home, application_version(), enable_writes="--read-only" not in extra_args,
+        )
     return run(args.command, Path(args.home).expanduser().resolve(), extra_args, args.workspace)
 
 

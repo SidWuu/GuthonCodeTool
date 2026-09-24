@@ -58,6 +58,61 @@ async function selectEditableIdentity(vscode, backend, identity) {
   };
 }
 
+async function showPageSemanticNodes(vscode, backend, virtualFs, element) {
+  const sourceElement = sourceModuleElement(element);
+  const object = sourceElement?.object;
+  if (object?.sourceType !== 'page' || !String(object.sourcePath || '').toLowerCase().endsWith('.json')) {
+    throw new Error('请先在 SVN 源码树中选择一个 PAGE JSON');
+  }
+  if (!object.sourceNamespace || !object.sourceId) {
+    throw new Error('PAGE 缺少完整命名空间身份，请刷新 SVN 源码树');
+  }
+  const locator = {
+    sourceNamespace: object.sourceNamespace,
+    sourceId: object.sourceId,
+    funId: object.funId || '',
+  };
+  let cursor = '';
+  while (true) {
+    const listing = await backend.pageQuery(sourceElement.workspaceKey, 'list_page_nodes', {
+      ...locator, limit: 100, ...(cursor ? { cursor } : {}),
+    });
+    const choices = (listing.nodes || []).map((node) => ({
+      label: node.label || node.jsonPointer,
+      description: node.nodeType,
+      detail: node.jsonPointer,
+      node,
+    }));
+    if (listing.nextCursor) {
+      choices.push({ label: '$(arrow-down) 下一页节点', description: '继续按页加载', nextCursor: listing.nextCursor });
+    }
+    if (!choices.length) throw new Error('此 PAGE 没有可列出的语义节点');
+    const selected = await vscode.window.showQuickPick(choices, {
+      title: '选择 PAGE 语义节点', matchOnDescription: true, matchOnDetail: true,
+    });
+    if (!selected) return undefined;
+    if (selected.nextCursor) {
+      cursor = selected.nextCursor;
+      continue;
+    }
+    const node = selected.node;
+    const target = node.semanticNodeId
+      ? { semanticNodeId: node.semanticNodeId }
+      : { jsonPointer: node.jsonPointer, indexedSourceHash: listing.indexedSourceHash };
+    await backend.pageQuery(sourceElement.workspaceKey, 'read_page_nodes', {
+      ...locator, targets: [target], maxChars: 24_000,
+    });
+    return virtualFs.open({
+      workspaceKey: sourceElement.workspaceKey, sourceType: 'page',
+      sourceId: object.sourceId, funId: object.funId || '',
+      sourcePath: object.sourcePath, jsonPointer: node.jsonPointer,
+      fragmentType: node.nodeType === 'SQL' ? 'sql'
+        : node.nodeType === 'FIELD_COLLECTION' ? 'fields' : '',
+      workingCopyId: object.workingCopyId || object.scopeEntryId || '',
+    });
+  }
+}
+
 function showBlockedWorkingCopies(vscode, preview) {
   const blockers = preview.blockers || [];
   if (!blockers.length) return;
@@ -770,6 +825,8 @@ function activateSvn({
     })),
     vscode.commands.registerCommand('gushenCompletion.showSvnProcedureCallers', withError((element) =>
       showProcedureCallers(vscode, backend, virtualFs, element))),
+    vscode.commands.registerCommand('gushenCompletion.showSvnPageNodes', withError((element) =>
+      showPageSemanticNodes(vscode, backend, virtualFs, element || treeView.selection[0]))),
     vscode.commands.registerCommand('gushenCompletion.showSvnDeliveryReceipt', withError(showDeliveryReceipt)),
     vscode.commands.registerCommand('gushenCompletion.jumpSelectedSvnSource', withError(async () => {
       const element = sourceModuleElement(treeView.selection[0]);
@@ -994,6 +1051,7 @@ module.exports = {
   selectCandidates,
   selectEditableIdentity,
   showProcedureCallers,
+  showPageSemanticNodes,
   showBlockedWorkingCopies,
   sourceModuleElement,
   workspaceKeyFromElement,

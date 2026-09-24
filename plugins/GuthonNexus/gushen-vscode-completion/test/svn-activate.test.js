@@ -14,6 +14,7 @@ const {
   selectCandidates,
   selectEditableIdentity,
   showProcedureCallers,
+  showPageSemanticNodes,
   sourceModuleElement,
   workspaceKeyFromElement,
 } = require('../src/svn/activate');
@@ -172,6 +173,65 @@ test('opens the only PAGE JSON fragment directly and leaves PAGE GSS unchanged',
   });
   assert.equal(await selectEditableIdentity(vscode, backend, pageGss), pageGss);
   assert.equal(pickCalled, false);
+});
+
+test('pages through source-checked PAGE nodes before opening the selected virtual fragment', async () => {
+  const queries = [];
+  const opened = [];
+  let picks = 0;
+  const vscode = { window: { async showQuickPick(items) {
+    picks += 1;
+    return picks === 1 ? items.at(-1) : items[0];
+  } } };
+  const backend = { async pageQuery(workspaceKey, name, args) {
+    queries.push({ workspaceKey, name, args });
+    if (name === 'read_page_nodes') return { nodes: [{ content: 'return true;' }] };
+    if (!args.cursor) return {
+      indexedSourceHash: 'hash-1', nextCursor: 'next-page',
+      nodes: [{ jsonPointer: '/one', nodeType: 'SCRIPT', label: 'one', semanticNodeId: 'node-1' }],
+    };
+    return {
+      indexedSourceHash: 'hash-1', nextCursor: null,
+      nodes: [{ jsonPointer: '/two', nodeType: 'SQL', label: 'two', semanticNodeId: 'node-2' }],
+    };
+  } };
+  const virtualFs = { async open(identity) { opened.push(identity); return identity; } };
+  const element = {
+    workspaceKey: 'products.demo',
+    object: {
+      sourceType: 'page', sourceNamespace: 'pages-SYS-1', sourceId: 'PG-1',
+      sourcePath: 'pages/SYS-1/PG-1.json', workingCopyId: 'pages-SYS-1',
+    },
+  };
+  const result = await showPageSemanticNodes(vscode, backend, virtualFs, element);
+  assert.equal(picks, 2);
+  assert.equal(queries[1].args.cursor, 'next-page');
+  assert.deepEqual(queries[2].args.targets, [{ semanticNodeId: 'node-2' }]);
+  assert.equal(result.jsonPointer, '/two');
+  assert.equal(result.fragmentType, 'sql');
+  assert.equal(opened[0].workingCopyId, 'pages-SYS-1');
+});
+
+test('opens a PAGE field collection as JSON after source verification', async () => {
+  const calls = [];
+  const vscode = { window: { async showQuickPick(items) { return items[0]; } } };
+  const backend = { async pageQuery(_workspaceKey, name, args) {
+    calls.push({ name, args });
+    return name === 'list_page_nodes'
+      ? { indexedSourceHash: 'hash-1', nodes: [{
+        jsonPointer: '/fields', nodeType: 'FIELD_COLLECTION', label: 'fields',
+      }] }
+      : { nodes: [{ content: '[]' }] };
+  } };
+  const virtualFs = { async open(identity) { return identity; } };
+  const selected = await showPageSemanticNodes(vscode, backend, virtualFs, {
+    workspaceKey: 'products.demo', object: {
+      sourceType: 'page', sourceNamespace: 'pages-SYS-1', sourceId: 'PG-1',
+      sourcePath: 'pages/SYS-1/PG-1.json', workingCopyId: 'pages-SYS-1',
+    },
+  });
+  assert.equal(selected.fragmentType, 'fields');
+  assert.deepEqual(calls[1].args.targets, [{ jsonPointer: '/fields', indexedSourceHash: 'hash-1' }]);
 });
 
 test('find references derives the current procedure identity from a stable virtual URI', () => {
@@ -350,6 +410,8 @@ test('runs native tree actions after focusing the SVN source view', async () => 
     ]
   );
   assert(procedureMenus.slice(0, 3).every((item) => item.when.includes('guthonSvnProcedure')));
+  assert(sourceMenus.some((item) => item.command === 'gushenCompletion.showSvnPageNodes'
+    && item.when.includes('guthonSvnPage')));
 });
 
 test('maps the active virtual editor back to its Nexus source identity', () => {

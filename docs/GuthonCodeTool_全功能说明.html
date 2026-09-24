@@ -92,7 +92,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <span class="eyebrow"><span class="eyebrow-dot"></span>GuthonCodeTool Current Capabilities</span>
 <h1>GuthonCodeTool<br/>全功能说明</h1>
 <p>完整说明当前版本提供的功能、关键实现与设计原因。内容以现有源码、配置契约和测试为准，帮助开发人员理解各模块如何协作，以及每条安全边界解决什么问题。</p>
-<div class="hero-meta"><span>DATABASE + SVN</span><span>功能与原理</span><span>安全边界</span><span>Nexus &amp; Bridge</span><span>治理与发布</span></div>
+<div class="hero-meta"><span>DATABASE + SVN</span><span>功能与原理</span><span>安全边界</span><span>Nexus · Bridge · MCP</span><span>治理与发布</span></div>
 <div class="hero-actions">
 <a class="btn btn-primary" href="#1-产品定位与设计原则">开始阅读</a>
 <a class="btn btn-ghost" href="index.html">使用手册</a>
@@ -101,7 +101,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 </header>
 <div class="layout">
 <aside class="sidebar" id="sidebar">
-<div class="side-head"><div class="side-title"><strong>全功能目录</strong><span class="chapter-count">10 章</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索章节…（按 / 聚焦）" aria-label="搜索章节"/></div>
+<div class="side-head"><div class="side-title"><strong>全功能目录</strong><span class="chapter-count">11 章</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索章节…（按 / 聚焦）" aria-label="搜索章节"/></div>
 <nav class="toc" id="toc">
 <a class="toc-link" href="#1-产品定位与设计原则">1. 产品定位与设计原则</a>
 <a class="toc-link toc-sub" href="#1-1-功能边界">1.1 功能边界</a>
@@ -132,12 +132,16 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <a class="toc-link" href="#8-guthon-bridge">8. Guthon Bridge</a>
 <a class="toc-link toc-sub" href="#8-1-页面能力">8.1 页面能力</a>
 <a class="toc-link toc-sub" href="#8-2-路由与安全边界">8.2 路由与安全边界</a>
-<a class="toc-link" href="#9-guthon-team">9. guthon-team 治理</a>
-<a class="toc-link toc-sub" href="#9-1-安装与更新">9.1 安装与更新</a>
-<a class="toc-link toc-sub" href="#9-2-规范门禁">9.2 规范门禁</a>
-<a class="toc-link" href="#10-构建发布与验证">10. 构建、发布与验证</a>
-<a class="toc-link toc-sub" href="#10-1-发行物">10.1 发行物</a>
-<a class="toc-link toc-sub" href="#10-2-验证边界">10.2 验证边界</a>
+<a class="toc-link" href="#9-guthon-svn-mcp">9. Guthon SVN MCP</a>
+<a class="toc-link toc-sub" href="#9-1-入口与能力">9.1 入口与能力</a>
+<a class="toc-link toc-sub" href="#9-2-共享索引与安全边界">9.2 共享索引与安全边界</a>
+<a class="toc-link toc-sub" href="#9-3-开发状态与验证">9.3 开发状态与验证</a>
+<a class="toc-link" href="#10-guthon-team">10. guthon-team 治理</a>
+<a class="toc-link toc-sub" href="#10-1-安装与更新">10.1 安装与更新</a>
+<a class="toc-link toc-sub" href="#10-2-规范门禁">10.2 规范门禁</a>
+<a class="toc-link" href="#11-构建发布与验证">11. 构建、发布与验证</a>
+<a class="toc-link toc-sub" href="#11-1-发行物">11.1 发行物</a>
+<a class="toc-link toc-sub" href="#11-2-验证边界">11.2 验证边界</a>
 <div class="no-result" id="noResult">没有匹配的章节</div>
 </nav>
 </aside>
@@ -149,8 +153,9 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <article class="feature-card"><div class="feature-icon">04</div><h3>本地事实索引</h3><p>每个工作区用独立 SQLite 保存对象、调用关系和关键事实，支持精确定位与 AI 分析。</p></article>
 <article class="feature-card"><div class="feature-icon">05</div><h3>Nexus 开发入口</h3><p>在 VS Code 中完成配置、导航、编辑、差异、冲突处理、提交和 Bridge 管理。</p></article>
 <article class="feature-card"><div class="feature-icon">06</div><h3>Bridge 页面增强</h3><p>把谷神网页身份路由到本地工作区，提供 DATABASE 拉取、元数据导出和页面辅助。</p></article>
-<article class="feature-card"><div class="feature-icon">07</div><h3>团队治理</h3><p>规范、Linter、Agent Hook 与 Git Hook 使用同一规则核心，给出可复核的诊断结果。</p></article>
-<article class="feature-card"><div class="feature-icon">08</div><h3>可验证发行</h3><p>跨平台应用、VSIX、Bridge 与 Skill 统一构建，更新经过校验、自检并支持回退。</p></article>
+<article class="feature-card"><div class="feature-icon">07</div><h3>SVN MCP 服务</h3><p>AI 客户端通过独立 stdio 入口查询 SVN PAGE 与过程函数，并受控修改本地源码。</p></article>
+<article class="feature-card"><div class="feature-icon">08</div><h3>团队治理</h3><p>规范、Linter、Agent Hook 与 Git Hook 使用同一规则核心，给出可复核的诊断结果。</p></article>
+<article class="feature-card"><div class="feature-icon">09</div><h3>可验证发行</h3><p>跨平台应用、VSIX、Bridge 与 Skill 分别构建与验证，更新经过校验、自检并支持回退。</p></article>
 </div>
 <blockquote>
 <p>本文只记录仓库当前仍存在的功能。操作步骤请进入<a href="GuthonCodeTool_使用手册.html">快速开始</a>；本文用于理解功能原理、设计取舍和维护边界。</p>
@@ -161,7 +166,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <h3 id="1-1-功能边界">1.1 功能边界</h3>
 <p>GuthonCodeTool 把谷神平台的源码与元数据整理为按产品或项目隔离的本地工作区。开发人员可以同步 PAGE、过程函数、系统脚本及数据库元数据，也可以从已授权的 SVN 仓库检出源码；随后通过本地索引完成搜索、跳转、调用关系分析、差异审阅和受控修改。</p>
 <div class="plugin-highlight">
-<div><strong>工具负责</strong><span>工作区路由、源码同步、索引、受控编辑、差异与交付证据，以及 Nexus、Bridge 和 AI 所需的本地能力。</span></div>
+<div><strong>工具负责</strong><span>工作区路由、源码同步、索引、受控编辑、差异与交付证据，以及 Nexus、Bridge 和 SVN MCP 所需的共享本地能力。</span></div>
 <div><strong>平台负责</strong><span>谷神页面中的最终提交、编译、运行和业务验证。SVN revision 或静态检查通过都不能替代这些结果。</span></div>
 <div><strong>本地私有</strong><span>真实配置、凭据、源码、索引、日志和业务资料只保存在显式选择的本地数据目录中。</span></div>
 </div>
@@ -170,7 +175,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <thead><tr><th>设计</th><th>原因</th></tr></thead>
 <tbody>
 <tr><td><strong>一个工作区只选择一个源码 provider</strong><br/>DATABASE 或 SVN。</td><td>防止同一对象同时出现两个事实来源，避免同步、编辑和交付时无法判断哪一份有效。</td></tr>
-<tr><td><strong>产品与项目使用稳定 workspaceKey</strong><br/><code>products.&lt;id&gt;</code> 或 <code>projects.&lt;id&gt;</code>。</td><td>目录名、显示名和当前窗口都会变化；稳定键能让 CLI、Nexus、Bridge、数据库目标和索引指向同一边界。</td></tr>
+<tr><td><strong>产品与项目使用稳定 workspaceKey</strong><br/><code>products.&lt;id&gt;</code> 或 <code>projects.&lt;id&gt;</code>。</td><td>目录名、显示名和当前窗口都会变化；稳定键能让 CLI、Nexus、Bridge、MCP、数据库目标和索引指向同一边界。</td></tr>
 <tr><td><strong>工具源码与运行数据分离</strong></td><td>升级或切换开发/发行入口时不搬迁私有数据，也不会把业务源码和凭据误带入公开仓库。</td></tr>
 <tr><td><strong>DATABASE 与 SVN 使用不同写入模型</strong></td><td>数据库导出是快照，适合 readonly/workcopy；SVN checkout 本身已有版本基线，再复制一份会制造额外冲突。</td></tr>
 <tr><td><strong>AI 默认读取索引与有界证据</strong></td><td>减少扫描和上下文体积，同时保留路径、对象身份、调用位置和 hash，使结论可回到源码核验。</td></tr>
@@ -182,26 +187,18 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <section class="section">
 <h2 id="2-运行架构">2. 运行架构</h2>
 <h3 id="2-1-组件职责">2.1 组件职责</h3>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>Guthon Nexus（VS Code）
-  ├─ 启动 GuthonCodeTool CLI
-  ├─ 展示工作区、源码、索引与 SCM
-  └─ 管理 Bridge 和工具版本
-           │
-           ▼
-GuthonCodeTool（Python CLI 与共享实现）
-  ├─ 工作区解析、同步、索引、Workcopy
-  ├─ DATABASE provider
-  └─ SVN provider
-           ▲
-           │ 本机请求
-Guthon Bridge（Chrome 扩展 + 本地服务）
-  └─ 把当前谷神页面路由到明确工作区</code></pre></div>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>Guthon Nexus（VS Code） ──┐ 展示工作区、源码、索引与 SCM；管理 Bridge
+Guthon Bridge（Chrome） ──┼─→ GuthonCodeTool（Python CLI 与共享实现）
+AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同步、索引、Workcopy
+  独立 stdio 进程              ├─ DATABASE provider
+                             └─ SVN provider → 授权 checkout + context/index.db</code></pre></div>
 <ul>
 <li><strong>统一 CLI：</strong><code>scripts/guthon_tool.py</code> 负责编排命令；<code>scripts/common/gusen_hub.py</code> 复用工作区解析、同步状态、索引和 Workcopy 规则。</li>
 <li><strong>DATABASE provider：</strong>读取配置的数据源，导出源码及元数据，并提供受限的只读数据库排查。</li>
 <li><strong>SVN provider：</strong>管理根检出、授权清单、虚拟对象投影、文件写入、SCM、冲突和交付回执。</li>
 <li><strong>Nexus：</strong>只通过参数数组启动工具，不经过 Shell；因此路径、空格和 Windows/macOS 参数行为一致。</li>
 <li><strong>Bridge：</strong>由 Nexus 使用 VS Code 自带的 Node 运行环境启停，普通用户无需另装运行时。</li>
+<li><strong>SVN MCP：</strong>由已配置的 AI 客户端独立启动 stdio 服务；对显式 SVN 工作区调用共享 PAGE/过程函数查询与受控修改服务，默认暴露写入工具，但每次写入仍需授权和编辑租约。</li>
 </ul>
 <h3 id="2-2-目录与调用链">2.2 目录与调用链</h3>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>&lt;toolHome&gt;/
@@ -218,7 +215,7 @@ Guthon Bridge（Chrome 扩展 + 本地服务）
         ├── database/                   # 仅 DATABASE
         └── context/{index.db,state.json,source-mode.json,logs}/</code></pre></div>
 <p><code>toolHome</code> 只能由 <code>--home</code>、运行描述文件或对应环境变量显式提供。源码不能沿父目录猜测 <code>config</code> 或 <code>var</code>，因为这种猜测会让开发仓库、发行应用和用户数据相互污染。</p>
-<p>Nexus 将当前应用入口、toolHome 和运行模式写入运行描述文件。Bridge 与其他入口读取同一描述，保证一次切换对所有组件生效。配置和工作区分别按请求加载，不使用全局“当前工作区”。</p>
+<p>Nexus 将当前应用入口、toolHome 和运行模式写入运行描述文件，Bridge 据此使用同一工作空间。MCP 客户端需单独配置可执行入口及显式 toolHome；它不会因 Nexus 切换模式而自动重写客户端配置。配置和工作区分别按请求加载，不使用全局“当前工作区”。</p>
 </section>
 
 <section class="section">
@@ -327,10 +324,12 @@ Guthon Bridge（Chrome 扩展 + 本地服务）
 <li>源码对象身份、真实相对路径、物理 working copy、内容 hash 和对象定位信息。</li>
 <li>静态调用、低置信动态调用、调用位置和目标身份。</li>
 <li>PAGE 片段、字段到表列、单据路由、表读写、条件、赋值和异常事实。</li>
+<li>SVN PAGE 的可重建脚本、SQL、字段集合节点目录与界面字段目录，包含当前 JSON Pointer、局部语义身份、区域、解析版本与索引 generation；正文仍从授权 working copy 按需读取。无原生身份的数据源列不进入界面字段目录。</li>
 <li>SVN 对象的 JSON Pointer、BASE 信息和支持增量刷新的文件关联。</li>
 </ul>
 <p>同名对象用数据源、working copy 与业务身份组成键；PAGE ID 保持工作区全局身份。全量重建在单个事务内完成，失败会回滚并保留旧索引；虚拟保存、撤销和提交按文件增量更新，只有无法安全识别结构变化时才回退到全量扫描。</p>
 <p>索引不保存第二份可编辑源码，也不建立源码全文倒排。这样避免索引成为隐蔽副本，并把结果始终锚定到可核验的真实文件。</p>
+<p>SVN MCP、Nexus 和 CLI 使用同一份可重建索引，MCP 的独立入口、工具能力和开发边界见第 9 章。PAGE 语义投影与 SVN 对象目录分别报告就绪状态；旧索引需由目标工作区显式全量重建后才提供对应查询；索引 generation 变化会使旧分页游标失效。</p>
 <h3 id="6-2-检索与有界上下文">6.2 检索与有界上下文</h3>
 <div class="plugin-highlight">
 <div><strong>统一搜索</strong><span><code>search</code> 同时查询源码身份和事实索引；结果可打开精确源码位置。</span></div>
@@ -401,11 +400,35 @@ Guthon Bridge（Chrome 扩展 + 本地服务）
 </section>
 
 <section class="section">
-<h2 id="9-guthon-team">9. guthon-team 治理</h2>
-<h3 id="9-1-安装与更新">9.1 安装与更新</h3>
+<h2 id="9-guthon-svn-mcp">9. Guthon SVN MCP</h2>
+<p>SVN MCP 与 Nexus、Bridge 同属 GuthonCodeTool 的用户入口，但职责不同：Nexus 服务 VS Code 中的开发与 SVN SCM，Bridge 服务受限谷神网页，MCP 服务 AI 客户端对已授权 SVN PAGE 和过程函数的定位、证据读取和受控源码修改。MCP 是共享服务的协议适配，不建立第二套索引、授权清单或文件写回路径。推荐客户端别名为 <code>guthon-svn</code>；旧 <code>guthon-page</code> 别名仍可指向同一入口，迁移不应重复启动两个服务。</p>
+<h3 id="9-1-入口与能力">9.1 入口与能力</h3>
+<p>客户端以 <code>mcp --stdio --home &lt;toolHome&gt;</code> 启动独立进程；当前固定使用 MCP <code>2025-11-25</code> 的 stdio/JSON-RPC 生命周期。<code>--home</code> 明确目标数据目录，每次工具调用再传 <code>workspaceKey</code>；PAGE 查询还需精确 <code>sourceNamespace</code>、<code>sourceId</code>，必要时带 <code>funId</code>；过程函数必须带完整 <code>sourceNamespace + sourceId + funId + workingCopyId</code>。运行入口可用发行应用、Release pyz 或源码开发环境，但客户端配置分别指向各自实际存在的可执行文件和绝对路径。</p>
+<div class="plugin-highlight">
+<div><strong>运行与定位</strong><span><code>get_runtime_status</code>、<code>resolve_workspace</code>、<code>get_index_status</code>、<code>search_sources</code>。</span></div>
+<div><strong>节点与字段</strong><span><code>list_page_nodes</code>、<code>read_page_nodes</code>、<code>list_page_fields</code>、<code>get_page_field</code>。</span></div>
+<div><strong>关系与上下文</strong><span><code>list_page_field_relations</code>、<code>check_page_field_references</code>、<code>get_source_context</code>。</span></div>
+<div><strong>过程函数</strong><span><code>get_source_index_status</code>、<code>read_procedure</code>、<code>list_procedure_callers</code>。</span></div>
+</div>
+<p>以上 14 个工具本身只读，默认服务另提供 10 个受控编辑/恢复工具；如需纯查询进程，可用 <code>--read-only</code> 将工具发现限制到这 14 个。对象搜索与目录查询有界分页；PAGE 目录节点只给身份、Pointer、类型和 hash，正文须经授权文件与索引新鲜度校验后定点读取。过程函数按偏移和最大字符数读取，不创建编辑租约；调用方证据在重名目标无法区分时拒绝归因。结果携带来源身份和索引 generation，失效游标会被拒绝。PAGE 查询服务由 CLI <code>svn page-query</code> 和 Nexus 后端复用；Nexus 源码树的“浏览 PAGE 语义节点”命令按页选择并再次复核源码后打开现有虚拟文档，尚无独立 MCP 面板。</p>
+<h3 id="9-2-共享索引与安全边界">9.2 共享索引与安全边界</h3>
+<ul>
+<li>MCP 只面向显式配置的 SVN manifest 工作区。PAGE 需完整页面身份；过程函数还必须带 <code>workingCopyId</code>。不能只凭显示名称或目录位置猜测。</li>
+<li><code>context/index.db</code> 保存可重建的 SVN 对象目录、PAGE 节点、界面字段和保守关系投影；PAGE JSON、过程函数、脚本与 SQL 正文仍以授权 working copy 为准。无原生身份的数据源列仍通过字段集合按需读取。对象目录就绪不依赖 PAGE 语义投影就绪。</li>
+<li>字段关系仅确认显式 <code>selectCodefieldId</code> 等有证据的子集，并保留未解析 <code>otherSetFields</code> 诊断。动态、继承与反射组引用尚未形成完整闭包，<code>check_page_field_references</code> 不能批准字段删除。</li>
+<li>MCP 不自动安装到客户端，不修改既有 MCP 配置，也不决定 AI 何时调用。工具是否可见及是否主动调用取决于客户端连接和 guthon-team 的工具路由规则。</li>
+</ul>
+<h3 id="9-3-开发状态与验证">9.3 开发状态与验证</h3>
+<p>PAGE 提供 <code>open_page_node_edit</code>、<code>preview_page_nodes</code>、<code>update_page_nodes</code>、<code>get_page_operation</code>、<code>resume_page_operation</code> 五个工具，限定稳定的同页脚本/SQL 字符串节点。过程函数提供 <code>open_procedure_edit</code>、<code>preview_procedure</code>、<code>update_procedure</code>、<code>get_procedure_operation</code>、<code>resume_procedure_operation</code> 五个工具，限定完整身份匹配的一份授权物理文件。工具可见不等于目标可写：编辑令牌绑定授权、会话和源码快照；预览不落盘，正式写入重新校验 <code>edit</code> 能力、当前源码、索引及 SVN 状态，再以 <code>idempotencyKey</code> 记录操作。只改本地 SVN working copy，后续记录索引与 diff 核验，不执行 SVN commit。字段数组、任意 PAGE JSON 结构和反射组不能由当前 MCP 修改。</p>
+<p>查询链路已通过本地协议往返、zipapp 和临时 macOS 单文件可执行包的启动/工具发现测试；PAGE 节点与过程函数写入已在临时 SVN 夹具中验证。真实工作区索引曾经只读核对为 <code>READY</code>，但这不等于正式发行包、已安装 VSIX、真实 MCP 客户端、Windows 或真实源码写入验收。完整字段关系、跨文件补偿/故障矩阵、字段增删移动和反射组写入仍未交付；使用默认写入能力时应人工核对 SVN diff，不把工具响应当作平台运行证明。具体配置和调用顺序见<a href="GuthonCodeTool_使用手册.html#5-mcp">使用手册第 5 章</a>。</p>
+</section>
+
+<section class="section">
+<h2 id="10-guthon-team">10. guthon-team 治理</h2>
+<h3 id="10-1-安装与更新">10.1 安装与更新</h3>
 <p>团队治理通过团队 Marketplace 中的 <code>guthon-guard</code> 插件分发。插件在新任务的 SessionStart 阶段检查工作区并幂等初始化：已是当前版本时不重复写入，缺失或版本更新时补齐规范、Linter、API 索引和配置。支持 Hook 的客户端还需对插件 Hook 完成信任；不支持 Marketplace 或 Hook 的环境可使用同一发行物中的独立安装器。</p>
 <p>治理安装面向业务 <code>var</code> 工作区，不写入 GuthonCodeTool 源码仓库。核心 AGENTS、规范正文和 <code>guthon-lint</code> 即使没有 Marketplace 或 Hook 也能使用，Hook 只负责自动选择检查时机。</p>
-<h3 id="9-2-规范门禁">9.2 规范门禁</h3>
+<h3 id="10-2-规范门禁">10.2 规范门禁</h3>
 <div class="plugin-highlight">
 <div><strong>规范层</strong><span>AGENTS 与权威标准说明业务语义、开发模式、方言 API 和允许的写入范围。</span></div>
 <div><strong>判定层</strong><span><code>guthon-lint</code> 用稳定诊断码检查受保护路径、非法 API、Velocity 结构、赋值、重复保存和 SQL 兼容性。</span></div>
@@ -416,8 +439,8 @@ Guthon Bridge（Chrome 扩展 + 本地服务）
 </section>
 
 <section class="section">
-<h2 id="10-构建发布与验证">10. 构建、发布与验证</h2>
-<h3 id="10-1-发行物">10.1 发行物</h3>
+<h2 id="11-构建发布与验证">11. 构建、发布与验证</h2>
+<h3 id="11-1-发行物">11.1 发行物</h3>
 <p>Python 应用使用 PyInstaller 单文件构建，并内置公开配置模板与版本信息。构建必须在目标系统执行，以生成 Windows x64 应用和 macOS ARM64 应用。发布流程同时完成：</p>
 <ul>
 <li>运行 Python、Nexus 与 Bridge 的相关测试。</li>
@@ -426,11 +449,12 @@ Guthon Bridge（Chrome 扩展 + 本地服务）
 <li>为应用生成校验文件，并向 GitHub 与 Gitee Release 上传相同附件。</li>
 </ul>
 <p>Release 不包含真实配置、凭据、业务源码、私有索引、日志或 guthon-team 内容。工具应用可以替换升级，用户的 toolHome 保持不动。</p>
-<h3 id="10-2-验证边界">10.2 验证边界</h3>
+<h3 id="11-2-验证边界">11.2 验证边界</h3>
 <table class="comparison-table">
 <thead><tr><th>验证证据</th><th>能够证明的范围</th></tr></thead>
 <tbody>
 <tr><td>Python、Nexus 或 Bridge 自动化测试</td><td>源码级命令、路由和组件行为；不能证明已安装 VSIX、真实浏览器或远端服务。</td></tr>
+<tr><td>MCP stdio 协议测试与临时打包握手</td><td>初始化、默认 24 工具发现和本地查询；临时 SVN 夹具另验证 PAGE 节点及过程函数写入，仍不能证明真实客户端路由、已安装 VSIX、Windows 或真实工作区写入。</td></tr>
 <tr><td>打包应用 <code>self-test</code></td><td>发行物可启动、可解析内置资源并能在临时目录完成基础设置。</td></tr>
 <tr><td>SQLite 索引与静态事实</td><td>当前本地源码快照中的对象、关系和可识别规则；不能证明运行时分支一定执行。</td></tr>
 <tr><td>数据库只读查询</td><td>指定目标和时点的数据库记录；不能证明页面版本、缓存或业务流程结果。</td></tr>
@@ -438,7 +462,7 @@ Guthon Bridge（Chrome 扩展 + 本地服务）
 <tr><td><code>guthon-lint</code> 通过</td><td>已实现的静态治理规则没有发现问题；不能替代平台或业务验证。</td></tr>
 </tbody>
 </table>
-<p>维护功能时先用 <code>AI_CODE_INDEX.md</code> 定位最小模块，并同步检查 CLI、配置、Nexus、Bridge、测试和两份 HTML 手册。删除或改名后全局搜索失效引用。文档至少执行 HTML 结构检查、定向敏感信息检查和 <code>git diff --check</code>；代码修改再按影响范围运行 Python、Nexus、Bridge、打包或真实环境验证。</p>
+<p>维护功能时先用 <code>AI_CODE_INDEX.md</code> 定位最小模块，并同步检查 CLI、配置、Nexus、Bridge、MCP、测试和两份 HTML 手册。删除或改名后全局搜索失效引用。文档至少执行 HTML 结构检查、定向敏感信息检查和 <code>git diff --check</code>；代码修改再按影响范围运行 Python、Nexus、Bridge、MCP、打包或真实环境验证。</p>
 </section>
 </main>
 

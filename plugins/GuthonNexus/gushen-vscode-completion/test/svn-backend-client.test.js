@@ -84,6 +84,19 @@ test('reads multiple SVN documents through one backend call', async () => {
   assert.deepEqual(JSON.parse(calls[0].input), { targets });
 });
 
+test('routes PAGE semantic queries through the shared read-only backend action', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls),
+  });
+  const arguments_ = { sourceNamespace: 'pages-SYS-1', sourceId: 'PG-1', limit: 20 };
+  await client.pageQuery('projects.demo', 'list_page_nodes', arguments_);
+  assert.equal(calls[0].args.at(-1), 'page-query');
+  assert.deepEqual(JSON.parse(calls[0].input), { name: 'list_page_nodes', arguments: arguments_ });
+  assert.equal(calls[0].args.includes('PG-1'), false);
+});
+
 test('writes an identity batch without command-line session ids', async () => {
   const calls = [];
   const client = new SvnBackendClient({

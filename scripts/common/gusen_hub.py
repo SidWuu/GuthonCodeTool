@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import uuid
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
@@ -2245,6 +2246,42 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
         )
 
 
+def _advance_page_semantic_generation(conn, *, full_rebuild=False):
+    """Publish one visible PAGE projection snapshot in the surrounding SVN transaction."""
+
+    if full_rebuild:
+        conn.execute(
+            "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+            ("page_node_schema_version", str(source_facts.PAGE_NODE_SCHEMA_VERSION)),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+            ("page_node_projection_version", source_facts.PAGE_NODE_PARSER_VERSION),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+            ("page_field_schema_version", str(source_facts.PAGE_FIELD_SCHEMA_VERSION)),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+            ("page_field_projection_version", source_facts.PAGE_FIELD_PARSER_VERSION),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+            ("page_field_relation_schema_version", str(source_facts.PAGE_FIELD_RELATION_SCHEMA_VERSION)),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+            ("page_field_relation_projection_version", source_facts.PAGE_FIELD_RELATION_PARSER_VERSION),
+        )
+    generation = uuid.uuid4().hex
+    for state_key in ("source_catalog_generation", "page_semantic_generation"):
+        conn.execute(
+            "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+            (state_key, generation),
+        )
+
+
 def _cleanup_database_source_after_svn_index(workspace):
     """Remove an inactive DATABASE mirror only after a successful SVN index build."""
 
@@ -2306,6 +2343,7 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
                         "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
                         ("svn_revision", scan["revision"]),
                     )
+                    _advance_page_semantic_generation(conn, full_rebuild=True)
                     conn.commit()
                     progress("索引事务已提交")
             except Exception:
@@ -2338,6 +2376,7 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
                         "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
                         ("svn_revision", scan["revision"]),
                     )
+                    _advance_page_semantic_generation(conn, full_rebuild=True)
                     conn.commit()
                     progress("扫描结果事务已提交")
                 except Exception:
@@ -2496,6 +2535,7 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
             for item in scan["objects"]:
                 if item["source_path"] not in skipped:
                     _insert_svn_index_item(conn, workspace, item, indexed_time)
+            _advance_page_semantic_generation(conn)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -2534,6 +2574,7 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
                     "WHERE provider='svn' AND source_path=?",
                     (_now(), scanned["path"]),
                 )
+                _advance_page_semantic_generation(conn)
                 conn.commit()
                 return {
                     "mode": "svn-incremental-scan",
@@ -2594,6 +2635,7 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
                 _delete_svn_index_item(conn, workspace, row)
             if item:
                 _insert_svn_index_item(conn, workspace, item, _now())
+            _advance_page_semantic_generation(conn)
             conn.commit()
         except Exception:
             conn.rollback()

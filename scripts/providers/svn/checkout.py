@@ -348,7 +348,10 @@ def operation_lock(
     # which can make the matching unlock fail with PermissionError.
     if not lock_path.exists():
         lock_path.touch()
-    with lock_path.open("r+b") as handle:
+    # A POSIX shared flock needs only a readable descriptor.  Keep exclusive
+    # operations and Windows on the seekable writable descriptor they require.
+    open_mode = "rb" if shared and fcntl is not None else "r+b"
+    with lock_path.open(open_mode) as handle:
         deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
         while True:
             try:

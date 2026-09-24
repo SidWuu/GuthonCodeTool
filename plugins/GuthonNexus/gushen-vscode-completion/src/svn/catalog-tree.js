@@ -381,6 +381,9 @@ class SvnCatalogTreeProvider {
     if (['document', 'object', 'fragment'].includes(element.kind)) {
       item.contextValue = element.object?.sourceType === 'procedure'
         ? 'guthonSvnProcedure'
+        : element.object?.sourceType === 'page'
+          && String(element.object?.sourcePath || '').toLowerCase().endsWith('.json')
+          ? 'guthonSvnPage'
         : 'guthonSvnSource';
     }
     if (element.command) item.command = element.command;

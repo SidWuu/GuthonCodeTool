@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass
 
 
@@ -23,6 +24,9 @@ SCRIPT_KEYS = {
     "sql",
 }
 EVENT_SUPERS = {"serviceEvents": "superServiceEvents", "pageEvents": "superPageEvents"}
+PAGE_NODE_PARSER_VERSION = "page-nodes-v1"
+PAGE_FIELD_PARSER_VERSION = "page-fields-v1"
+PAGE_FIELD_RELATION_PARSER_VERSION = "page-field-relations-v2"
 SERVICE_EVENT_KEYS = {"beforeSave", "afterSave", "beforeSqlSelect"}
 INHERIT_MARKER = re.compile(r"(?m)^[ \t]*(?:return[ \t]+)?@?inherit\(\);[ \t]*\r?$")
 
@@ -42,6 +46,54 @@ class ScriptField:
         result["original_hash"] = text_hash(self.original_value)
         result["effective_hash"] = text_hash(self.effective_value)
         return result
+
+
+@dataclass(frozen=True)
+class PageNode:
+    """A PAGE locator; semantic_node_id is scoped to the containing PAGE object."""
+
+    json_pointer: str
+    node_type: str
+    label: str
+    semantic_node_id: str | None
+    identity_stability: str
+    event_scope: str | None
+    owner_type: str
+    owner_id: str | None
+
+
+@dataclass(frozen=True)
+class PageFieldEntity:
+    """One UI field with an explicit PAGE locator and native identity evidence."""
+
+    json_pointer: str
+    collection_pointer: str
+    ordinal: int
+    region_type: str
+    component_type: str
+    field_id: str
+    native_id: str
+    native_guid: str
+    table_id: str
+    column_id: str
+    label: str
+    semantic_field_id: str | None
+    identity_stability: str
+
+
+@dataclass(frozen=True)
+class PageFieldRelation:
+    """Explicit selectBox evidence; resolution never implies complete reference coverage."""
+
+    source_pointer: str
+    collection_pointer: str
+    source_field_id: str
+    relation_type: str
+    target_field_id: str
+    target_pointer: str | None
+    resolution: str
+    confidence: str
+    evidence_pointer: str
 
 
 def text_hash(value: str) -> str:
@@ -186,8 +238,8 @@ def extract_page_scripts(value) -> list[ScriptField]:
     return fields
 
 
-def extract_page_fields(value) -> list[dict]:
-    """Return editable PAGE field collections with stable JSON Pointers."""
+def extract_page_fields(value, *, include_content: bool = True) -> list[dict]:
+    """Return PAGE field collections; materialize content only for document callers."""
 
     fields = []
 
@@ -203,7 +255,7 @@ def extract_page_fields(value) -> list[dict]:
                             "json_pointer": json_pointer(child_parts),
                             "script_type": "fields",
                             "label": " / ".join(next_labels[-3:]) or "字段",
-                            "content": json.dumps(child, ensure_ascii=False, indent=2),
+                            "content": json.dumps(child, ensure_ascii=False, indent=2) if include_content else None,
                         }
                     )
                 else:
@@ -214,6 +266,232 @@ def extract_page_fields(value) -> list[dict]:
 
     walk(value, [], [])
     return fields
+
+
+def _list_item_identity(
+    items: list, item: object, collection_key: str, counts_cache: dict
+) -> tuple[str | None, str | None, bool]:
+    if not isinstance(item, dict):
+        return None, None, False
+    keys = ("fieldId", "guid", "id") if collection_key == "fields" else ("guid", "id")
+    for key in keys:
+        candidate = item.get(key)
+        if isinstance(candidate, bool) or not isinstance(candidate, (str, int)):
+            continue
+        value = str(candidate).strip()
+        if not value:
+            continue
+        cache_key = (id(items), key)
+        if cache_key not in counts_cache:
+            counts_cache[cache_key] = Counter(
+                str(other[key]).strip()
+                for other in items
+                if isinstance(other, dict)
+                and not isinstance(other.get(key), bool)
+                and isinstance(other.get(key), (str, int))
+                and str(other[key]).strip()
+            )
+        return key, value, counts_cache[cache_key][value] != 1
+    return None, None, False
+
+
+def _semantic_location(value, pointer: str, counts_cache: dict) -> tuple[str | None, str, str, str | None]:
+    current = value
+    parent_key = ""
+    path: list[list[str]] = []
+    stability = "STABLE"
+    owner_type = "PAGE"
+    owner_id = None
+    for part in pointer_parts(pointer):
+        if isinstance(current, dict):
+            current = current[part]
+            parent_key = part
+            path.append(["key", part])
+        elif isinstance(current, list):
+            index = int(part)
+            item = current[index]
+            key, item_id, duplicate = _list_item_identity(current, item, parent_key, counts_cache)
+            if key is None:
+                if stability == "STABLE":
+                    stability = "UNSTABLE"
+            elif duplicate:
+                stability = "AMBIGUOUS"
+            else:
+                path.append(["item", key, item_id])
+            owner_type = {"fields": "FIELD", "buttons": "BUTTON", "views": "VIEW"}.get(parent_key, "LIST_ITEM")
+            owner_id = item_id if key and not duplicate else None
+            current = item
+            parent_key = ""
+        else:
+            raise KeyError(pointer)
+    semantic_node_id = None
+    if stability == "STABLE":
+        semantic_path = json.dumps(path, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        semantic_node_id = "page-node:v1:" + hashlib.sha256(semantic_path).hexdigest()
+    return semantic_node_id, stability, owner_type, owner_id
+
+
+def extract_page_nodes(value) -> list[PageNode]:
+    """Describe existing script/SQL/field-collection projections without loading their content into the locator.
+
+    Array positions are never semantic identities. An array item needs a unique,
+    non-label native key at every array level; otherwise the locator is read-only
+    and must be re-resolved from its current JSON Pointer and source hash.
+    """
+
+    if not isinstance(value, dict):
+        raise ValueError("PAGE JSON root must be an object")
+    nodes = []
+    counts_cache = {}
+    for field in extract_page_scripts(value):
+        semantic_id, stability, owner_type, owner_id = _semantic_location(value, field.json_pointer, counts_cache)
+        parts = pointer_parts(field.json_pointer)
+        event_scope = next(
+            ("SERVICE" if part == "serviceEvents" else "PAGE" for part in reversed(parts[:-1])
+             if part in EVENT_SUPERS),
+            None,
+        )
+        nodes.append(PageNode(
+            json_pointer=field.json_pointer,
+            node_type="SQL" if field.key == "sql" else "SCRIPT",
+            label=field.display_name,
+            semantic_node_id=semantic_id,
+            identity_stability=stability,
+            event_scope=event_scope,
+            owner_type=owner_type,
+            owner_id=owner_id,
+        ))
+    for field in extract_page_fields(value, include_content=False):
+        semantic_id, stability, owner_type, owner_id = _semantic_location(value, field["json_pointer"], counts_cache)
+        nodes.append(PageNode(
+            json_pointer=field["json_pointer"],
+            node_type="FIELD_COLLECTION",
+            label=field["label"],
+            semantic_node_id=semantic_id,
+            identity_stability=stability,
+            event_scope=None,
+            owner_type=owner_type,
+            owner_id=owner_id,
+        ))
+    return nodes
+
+
+def extract_page_field_entities(value) -> list[PageFieldEntity]:
+    """Describe UI fields only; datasource projection columns have no native field identity.
+
+    The region comes from the enclosing component's explicit type. Unknown
+    component types remain UNKNOWN rather than being inferred from labels.
+    """
+
+    if not isinstance(value, dict):
+        raise ValueError("PAGE JSON root must be an object")
+    regions = {
+        "input-box": "FORM",
+        "search-box": "SEARCH",
+        "table-main": "MAIN_TABLE",
+        "table-item": "DETAIL_TABLE",
+    }
+    fields = []
+    counts_cache = {}
+    for collection in extract_page_fields(value, include_content=False):
+        collection_pointer = collection["json_pointer"]
+        parent_pointer = collection_pointer.rpartition("/")[0]
+        parent = pointer_value(value, parent_pointer)
+        if not isinstance(parent, dict) or not isinstance(parent.get("type"), str):
+            continue  # datasource.fields belongs to source projection, not a UI field region
+        component_type = parent["type"]
+        region_type = regions.get(component_type, "UNKNOWN")
+        items = pointer_value(value, collection_pointer)
+        for ordinal, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            pointer = f"{collection_pointer}/{ordinal}"
+            semantic_id, stability, _owner_type, _owner_id = _semantic_location(value, pointer, counts_cache)
+
+            def native(key: str) -> str:
+                candidate = item.get(key)
+                return (str(candidate).strip() if isinstance(candidate, (str, int))
+                        and not isinstance(candidate, bool) else "")
+
+            fields.append(PageFieldEntity(
+                json_pointer=pointer,
+                collection_pointer=collection_pointer,
+                ordinal=ordinal,
+                region_type=region_type,
+                component_type=component_type,
+                field_id=native("fieldId"),
+                native_id=native("id"),
+                native_guid=native("guid"),
+                table_id=native("tbId"),
+                column_id=native("fdId"),
+                label=native("label") or native("disName"),
+                semantic_field_id=semantic_id,
+                identity_stability=stability,
+            ))
+    return fields
+
+
+def extract_page_field_relations(
+    value, fields: list[PageFieldEntity] | None = None,
+) -> list[PageFieldRelation]:
+    """Resolve selectCodefieldId; retain unparsed mapping text as dependency evidence."""
+
+    fields = fields if fields is not None else extract_page_field_entities(value)
+    by_collection: dict[tuple[str, str], list[PageFieldEntity]] = {}
+    by_page: dict[str, list[PageFieldEntity]] = {}
+    for field in fields:
+        if field.field_id:
+            by_collection.setdefault((field.collection_pointer, field.field_id), []).append(field)
+            by_page.setdefault(field.field_id, []).append(field)
+    relations = []
+    for field in fields:
+        source = pointer_value(value, field.json_pointer)
+        select = source.get("selectBox") if isinstance(source, dict) else None
+        if not isinstance(select, dict):
+            continue
+        other_set_fields = select.get("otherSetFields")
+        if other_set_fields:
+            relations.append(PageFieldRelation(
+                source_pointer=field.json_pointer,
+                collection_pointer=field.collection_pointer,
+                source_field_id=field.field_id,
+                relation_type="OTHER_SET_FIELDS_UNPARSED",
+                target_field_id="",
+                target_pointer=None,
+                resolution="UNPARSED",
+                confidence="LOW",
+                evidence_pointer=field.json_pointer + "/selectBox/otherSetFields",
+            ))
+        raw_target = select.get("selectCodefieldId")
+        if isinstance(raw_target, bool) or not isinstance(raw_target, (str, int)):
+            continue
+        target_id = str(raw_target).strip()
+        if not target_id:
+            continue
+        same_collection = by_collection.get((field.collection_pointer, target_id), [])
+        same_page = by_page.get(target_id, [])
+        if target_id == field.field_id:
+            resolution, confidence, target = "SELF_REFERENCE", "LOW", None
+        elif len(same_collection) == 1:
+            resolution, confidence, target = "RESOLVED_COLLECTION", "HIGH", same_collection[0].json_pointer
+        elif len(same_collection) > 1 or len(same_page) > 1:
+            resolution, confidence, target = "AMBIGUOUS", "LOW", None
+        elif len(same_page) == 1:
+            resolution, confidence, target = "POSSIBLE_PAGE", "MEDIUM", same_page[0].json_pointer
+        else:
+            resolution, confidence, target = "MISSING", "LOW", None
+        relations.append(PageFieldRelation(
+            source_pointer=field.json_pointer,
+            collection_pointer=field.collection_pointer,
+            source_field_id=field.field_id,
+            relation_type="SELECT_CODE_FIELD",
+            target_field_id=target_id,
+            target_pointer=target,
+            resolution=resolution,
+            confidence=confidence,
+            evidence_pointer=field.json_pointer + "/selectBox/selectCodefieldId",
+        ))
+    return relations
 
 
 class _JsonStringLocator:

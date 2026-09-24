@@ -331,7 +331,7 @@ def catalog(workspace: dict) -> dict:
             dict(row)
             for row in connection.execute(
                 """
-                SELECT source_table, source_id, source_alias_id, fun_id, source_name, source_path,
+                SELECT source_table, source_namespace, source_id, source_alias_id, fun_id, source_name, source_path,
                        local_path, working_copy_id, scope_entry_id, system_id, data_source_id, status
                 FROM gusen_source_record
                 WHERE provider='svn'
@@ -397,6 +397,7 @@ def catalog(workspace: dict) -> dict:
         counts[source_type] = counts.get(source_type, 0) + 1
         objects.append({
             "sourceType": source_type,
+            "sourceNamespace": row["source_namespace"],
             "sourceId": row["source_id"],
             "sourceAliasId": row["source_alias_id"],
             "funId": row.get("fun_id") or "",

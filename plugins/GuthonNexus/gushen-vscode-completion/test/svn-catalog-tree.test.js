@@ -327,6 +327,13 @@ test('decorates modified SVN sources and their parent directories', async () => 
   });
 
   const sourceItem = provider.getTreeItem(directory.children[0]);
+  const pageElement = provider._sourceElement({
+    kind: 'source', label: '示例页面', object: {
+      sourceType: 'page', sourceId: 'PG-1', sourcePath: 'pages/SYS-1/PG-1.json',
+      fragments: [], status: 'OK',
+    },
+  }, directory, 'products.demo');
+  assert.equal(provider.getTreeItem(pageElement).contextValue, 'guthonSvnPage');
   const directoryItem = provider.getTreeItem(directory);
   assert.equal(sourceItem.contextValue, 'guthonSvnProcedure');
   assert.equal(provider.provideFileDecoration(sourceItem.resourceUri).badge, 'M');

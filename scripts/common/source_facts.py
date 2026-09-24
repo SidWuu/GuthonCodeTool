@@ -6,6 +6,15 @@ import hashlib
 import json
 import re
 
+from common.page_projection import (
+    PAGE_FIELD_PARSER_VERSION, PAGE_FIELD_RELATION_PARSER_VERSION, PAGE_NODE_PARSER_VERSION,
+    extract_page_field_entities, extract_page_field_relations, extract_page_nodes, pointer_value,
+)
+
+PAGE_NODE_SCHEMA_VERSION = 1
+PAGE_FIELD_SCHEMA_VERSION = 1
+PAGE_FIELD_RELATION_SCHEMA_VERSION = 1
+
 
 MAX_FACTS_PER_FRAGMENT = 2_000
 MAX_EVIDENCE_CHARS = 240
@@ -70,6 +79,57 @@ def setup_schema(conn) -> None:
             json_pointer TEXT NOT NULL DEFAULT '',
             confidence TEXT NOT NULL DEFAULT 'MEDIUM'
         );
+        -- PAGE 节点目录：只存语义定位和有界元数据，正文从授权源码按需读取。
+        CREATE TABLE IF NOT EXISTS gusen_page_node (
+            source_record_id INTEGER NOT NULL,
+            json_pointer TEXT NOT NULL,
+            node_type TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            content_hash TEXT NOT NULL,
+            semantic_node_id TEXT,
+            identity_stability TEXT NOT NULL,
+            event_scope TEXT,
+            owner_type TEXT NOT NULL,
+            owner_id TEXT,
+            parser_version TEXT NOT NULL,
+            PRIMARY KEY (source_record_id, json_pointer)
+        );
+        -- 只索引具有组件宿主的 UI 字段；无原生身份的数据源列保留在按需读取的字段集合中。
+        CREATE TABLE IF NOT EXISTS gusen_page_field (
+            source_record_id INTEGER NOT NULL,
+            json_pointer TEXT NOT NULL,
+            collection_pointer TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            region_type TEXT NOT NULL,
+            component_type TEXT NOT NULL,
+            field_id TEXT NOT NULL DEFAULT '',
+            native_id TEXT NOT NULL DEFAULT '',
+            native_guid TEXT NOT NULL DEFAULT '',
+            table_id TEXT NOT NULL DEFAULT '',
+            column_id TEXT NOT NULL DEFAULT '',
+            label TEXT NOT NULL DEFAULT '',
+            content_hash TEXT NOT NULL,
+            semantic_field_id TEXT,
+            identity_stability TEXT NOT NULL,
+            parser_version TEXT NOT NULL,
+            PRIMARY KEY (source_record_id, json_pointer)
+        );
+        -- 记录显式 selectBox 指向与未解析映射证据；不当作删除保护的完整闭包。
+        CREATE TABLE IF NOT EXISTS gusen_page_field_relation (
+            relation_id INTEGER PRIMARY KEY,
+            source_record_id INTEGER NOT NULL,
+            source_pointer TEXT NOT NULL,
+            collection_pointer TEXT NOT NULL,
+            source_field_id TEXT NOT NULL DEFAULT '',
+            relation_type TEXT NOT NULL,
+            target_field_id TEXT NOT NULL,
+            target_pointer TEXT,
+            resolution TEXT NOT NULL,
+            confidence TEXT NOT NULL,
+            evidence_pointer TEXT NOT NULL,
+            parser_version TEXT NOT NULL,
+            UNIQUE(source_record_id, evidence_pointer, relation_type)
+        );
         -- 单据路由表：关联数据源、单据类型和业务表，支持按单据快速定位源码入口。
         CREATE TABLE IF NOT EXISTS gusen_bill_route (
             route_id INTEGER PRIMARY KEY,
@@ -121,6 +181,20 @@ def setup_schema(conn) -> None:
             ON gusen_source_fragment(source_record_id, json_pointer);
         CREATE INDEX IF NOT EXISTS gusen_page_relation_source_idx
             ON gusen_page_relation(source_record_id, source_fragment_id, relation_type);
+        CREATE INDEX IF NOT EXISTS gusen_page_node_type_idx
+            ON gusen_page_node(source_record_id, node_type, json_pointer);
+        CREATE INDEX IF NOT EXISTS gusen_page_node_identity_idx
+            ON gusen_page_node(source_record_id, semantic_node_id);
+        CREATE INDEX IF NOT EXISTS gusen_page_field_region_idx
+            ON gusen_page_field(source_record_id, region_type, collection_pointer, ordinal);
+        CREATE INDEX IF NOT EXISTS gusen_page_field_identity_idx
+            ON gusen_page_field(source_record_id, semantic_field_id);
+        CREATE INDEX IF NOT EXISTS gusen_page_field_native_idx
+            ON gusen_page_field(source_record_id, field_id);
+        CREATE INDEX IF NOT EXISTS gusen_page_field_relation_source_idx
+            ON gusen_page_field_relation(source_record_id, source_pointer, relation_id);
+        CREATE INDEX IF NOT EXISTS gusen_page_field_relation_target_idx
+            ON gusen_page_field_relation(source_record_id, target_field_id, relation_id);
         CREATE INDEX IF NOT EXISTS gusen_bill_route_lookup_idx
             ON gusen_bill_route(data_source_id, bill_type_code, table_name);
         CREATE INDEX IF NOT EXISTS gusen_data_access_table_idx
@@ -147,6 +221,9 @@ def setup_schema(conn) -> None:
 
 
 def clear_source_details(conn, source_record_id: int) -> None:
+    conn.execute("DELETE FROM gusen_page_field_relation WHERE source_record_id=?", (source_record_id,))
+    conn.execute("DELETE FROM gusen_page_field WHERE source_record_id=?", (source_record_id,))
+    conn.execute("DELETE FROM gusen_page_node WHERE source_record_id=?", (source_record_id,))
     conn.execute("DELETE FROM gusen_page_relation WHERE source_record_id=?", (source_record_id,))
     conn.execute("DELETE FROM gusen_bill_route WHERE source_record_id=?", (source_record_id,))
     conn.execute("DELETE FROM gusen_data_access WHERE source_record_id=?", (source_record_id,))
@@ -156,6 +233,9 @@ def clear_source_details(conn, source_record_id: int) -> None:
 
 def clear_all_details(conn, *, preserve_external_bill_routes: bool = False) -> None:
     for table in (
+        "gusen_page_field_relation",
+        "gusen_page_field",
+        "gusen_page_node",
         "gusen_page_relation",
         "gusen_data_access",
         "gusen_logic_fact",
@@ -572,6 +652,7 @@ def _insert_page_metadata(conn, source_record_id: int, page_data: dict, fragment
                 """,
                 (source_record_id, None, relation_type, source_key, target_key, pointer, "HIGH"),
             )
+
     for pointer, fragment_id in list(fragments.items()):
         if not pointer:
             continue
@@ -591,6 +672,67 @@ def _insert_page_metadata(conn, source_record_id: int, page_data: dict, fragment
                 """,
                 (source_record_id, fragment_id, relation_type, source_key, target_key, pointer, "MEDIUM"),
             )
+
+
+def _insert_page_nodes(conn, source_record_id: int, page_data: dict) -> None:
+    for node in extract_page_nodes(page_data):
+        content = pointer_value(page_data, node.json_pointer)
+        content_text = content if isinstance(content, str) else json.dumps(
+            content, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        conn.execute(
+            """
+            INSERT INTO gusen_page_node(
+                source_record_id, json_pointer, node_type, label, content_hash,
+                semantic_node_id, identity_stability, event_scope, owner_type, owner_id, parser_version
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                source_record_id, node.json_pointer, node.node_type, node.label[:240],
+                _hash_text(content_text), node.semantic_node_id, node.identity_stability, node.event_scope,
+                node.owner_type, node.owner_id, PAGE_NODE_PARSER_VERSION,
+            ),
+        )
+
+
+def _insert_page_fields(conn, source_record_id: int, page_data: dict, fields: list) -> None:
+    for field in fields:
+        content = pointer_value(page_data, field.json_pointer)
+        content_hash = _hash_text(json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        conn.execute(
+            """
+            INSERT INTO gusen_page_field(
+                source_record_id, json_pointer, collection_pointer, ordinal, region_type,
+                component_type, field_id, native_id, native_guid, table_id, column_id,
+                label, content_hash, semantic_field_id, identity_stability, parser_version
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                source_record_id, field.json_pointer, field.collection_pointer, field.ordinal,
+                field.region_type, field.component_type, field.field_id, field.native_id,
+                field.native_guid, field.table_id, field.column_id, field.label[:240], content_hash,
+                field.semantic_field_id, field.identity_stability, PAGE_FIELD_PARSER_VERSION,
+            ),
+        )
+
+
+def _insert_page_field_relations(conn, source_record_id: int, page_data: dict, fields: list) -> None:
+    for relation in extract_page_field_relations(page_data, fields):
+        conn.execute(
+            """
+            INSERT INTO gusen_page_field_relation(
+                source_record_id, source_pointer, collection_pointer, source_field_id,
+                relation_type, target_field_id, target_pointer, resolution, confidence,
+                evidence_pointer, parser_version
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                source_record_id, relation.source_pointer, relation.collection_pointer,
+                relation.source_field_id, relation.relation_type, relation.target_field_id,
+                relation.target_pointer, relation.resolution, relation.confidence,
+                relation.evidence_pointer, PAGE_FIELD_RELATION_PARSER_VERSION,
+            ),
+        )
 
 
 def _bill_type_rows(value, inherited_data_source=""):
@@ -666,7 +808,11 @@ def index_source_details(
             continue
         facts = _insert_logic_facts(conn, source_record_id, fragment_id, content, label)
         _insert_data_accesses(conn, source_record_id, fragment_id, content, facts, label)
-    if page_data:
+    if isinstance(page_data, dict):
+        _insert_page_nodes(conn, source_record_id, page_data)
+        fields = extract_page_field_entities(page_data)
+        _insert_page_fields(conn, source_record_id, page_data, fields)
+        _insert_page_field_relations(conn, source_record_id, page_data, fields)
         _insert_page_metadata(conn, source_record_id, page_data, fragments)
     if public_data is not None:
         _insert_bill_routes(conn, source_record_id, public_data)

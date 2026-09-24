@@ -76,6 +76,10 @@ class SvnBackendClient {
     return this.run(workspaceKey, args);
   }
 
+  pageQuery(workspaceKey, name, args = {}) {
+    return this.run(workspaceKey, ['page-query'], { name, arguments: args });
+  }
+
   scopePreview(workspaceKey) {
     return this.run(workspaceKey, ['scope-preview']);
   }

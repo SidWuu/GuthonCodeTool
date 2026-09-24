@@ -121,8 +121,8 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
   <div class="hero-inner">
     <span class="eyebrow"><span class="eyebrow-dot"></span>macOS M1 及后续型号 &amp; Windows</span>
     <h1>GuthonCodeTool<br>使用手册</h1>
-    <p>GuthonCodeTool 将谷神工作区配置、源码同步、受控开发和交付检查集中到 VS Code。请先完成安装，再根据 DATABASE 或 SVN 路线使用 Nexus、团队治理和 Bridge。</p>
-    <div class="hero-meta"><span>安装</span><span>Nexus 双路线</span><span>团队治理</span><span>日常工作流</span></div>
+    <p>GuthonCodeTool 将谷神工作区配置、源码同步、受控开发和交付检查集中到本地工具链。请先完成安装，再根据 DATABASE 或 SVN 路线使用 Nexus、Bridge 和独立的 SVN MCP 服务。</p>
+    <div class="hero-meta"><span>安装</span><span>Nexus 双路线</span><span>Bridge 网页辅助</span><span>SVN MCP</span><span>团队治理</span></div>
     <div class="hero-actions">
       <a class="btn btn-primary" href="#1-安装">开始安装</a>
       <a class="btn btn-ghost" href="GuthonCodeTool_QA.html">问题解决中心</a>
@@ -132,7 +132,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 </header>
 <div class="layout">
   <aside class="sidebar" id="sidebar">
-<div class="side-head"><div class="side-title"><strong>使用目录</strong><span class="chapter-count">6 个模块</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索模块或步骤…（按 / 聚焦）" aria-label="搜索章节"></div>
+<div class="side-head"><div class="side-title"><strong>使用目录</strong><span class="chapter-count">7 个模块</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索模块或步骤…（按 / 聚焦）" aria-label="搜索章节"></div>
 <nav class="toc" id="toc">
 <a class="toc-link" href="#1-安装" data-title="1. 安装">1. 安装</a>
 <a class="toc-link toc-sub" href="#1-1-准备与下载" data-title="1.1 准备与下载">1.1 准备与下载</a>
@@ -152,15 +152,21 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <a class="toc-link" href="#4-bridge" data-title="4. Bridge">4. Bridge</a>
 <a class="toc-link toc-sub" href="#4-1-安装-chrome-扩展" data-title="4.1 安装 Chrome 扩展">4.1 安装 Chrome 扩展</a>
 <a class="toc-link toc-sub" href="#4-2-启动与验证" data-title="4.2 启动与验证">4.2 启动与验证</a>
-<a class="toc-link" href="#5-日常工作流" data-title="5. 日常工作流">5. 日常工作流</a>
-<a class="toc-link toc-sub" href="#5-1-database-工作流" data-title="5.1 DATABASE 工作流">5.1 DATABASE 工作流</a>
-<a class="toc-link toc-sub" href="#5-2-svn-工作流" data-title="5.2 SVN 工作流">5.2 SVN 工作流</a>
-<a class="toc-link toc-sub" href="#5-3-更新工作流" data-title="5.3 更新工作流">5.3 更新工作流</a>
-<a class="toc-link" href="#6-其他" data-title="6. 其他">6. 其他</a>
-<a class="toc-link toc-sub" href="#6-1-系统差异" data-title="6.1 系统差异">6.1 系统差异</a>
-<a class="toc-link toc-sub" href="#6-2-迁移与删除" data-title="6.2 迁移与删除">6.2 迁移与删除</a>
-<a class="toc-link toc-sub" href="#6-3-常见问题" data-title="6.3 常见问题">6.3 常见问题</a>
-<a class="toc-link toc-sub" href="#6-4-验收清单" data-title="6.4 验收清单">6.4 验收清单</a>
+<a class="toc-link" href="#5-mcp" data-title="5. SVN MCP">5. SVN MCP</a>
+<a class="toc-link toc-sub" href="#5-1-准备索引" data-title="5.1 准备索引">5.1 准备索引</a>
+<a class="toc-link toc-sub" href="#5-2-配置客户端" data-title="5.2 配置客户端">5.2 配置客户端</a>
+<a class="toc-link toc-sub" href="#5-3-查询与排错" data-title="5.3 查询与排错">5.3 查询与排错</a>
+<a class="toc-link toc-sub" href="#5-4-受控修改-page-节点" data-title="5.4 受控修改 PAGE 节点">5.4 受控修改 PAGE 节点</a>
+<a class="toc-link toc-sub" href="#5-5-受控修改过程函数" data-title="5.5 受控修改过程函数">5.5 受控修改过程函数</a>
+<a class="toc-link" href="#6-日常工作流" data-title="6. 日常工作流">6. 日常工作流</a>
+<a class="toc-link toc-sub" href="#6-1-database-工作流" data-title="6.1 DATABASE 工作流">6.1 DATABASE 工作流</a>
+<a class="toc-link toc-sub" href="#6-2-svn-工作流" data-title="6.2 SVN 工作流">6.2 SVN 工作流</a>
+<a class="toc-link toc-sub" href="#6-3-更新工作流" data-title="6.3 更新工作流">6.3 更新工作流</a>
+<a class="toc-link" href="#7-其他" data-title="7. 其他">7. 其他</a>
+<a class="toc-link toc-sub" href="#7-1-系统差异" data-title="7.1 系统差异">7.1 系统差异</a>
+<a class="toc-link toc-sub" href="#7-2-迁移与删除" data-title="7.2 迁移与删除">7.2 迁移与删除</a>
+<a class="toc-link toc-sub" href="#7-3-常见问题" data-title="7.3 常见问题">7.3 常见问题</a>
+<a class="toc-link toc-sub" href="#7-4-验收清单" data-title="7.4 验收清单">7.4 验收清单</a>
 <div class="no-result" id="noResult">没有匹配的章节</div>
 </nav>
 </aside>
@@ -170,8 +176,9 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <article class="overview-card"><div class="overview-number">02</div><h3>Nexus</h3><p>创建工作区后，按 DATABASE 或 SVN 路线独立配置。</p></article>
 <article class="overview-card"><div class="overview-number">03</div><h3>guthon-team</h3><p>安装规范、Linter、Hook，并检查治理状态。</p></article>
 <article class="overview-card"><div class="overview-number">04</div><h3>Bridge</h3><p>连接 Chrome 与 Nexus，按需使用网页辅助能力。</p></article>
-<article class="overview-card"><div class="overview-number">05</div><h3>日常工作流</h3><p>按源码模式完成同步、开发、检查和交付。</p></article>
-<article class="overview-card"><div class="overview-number">06</div><h3>其他</h3><p>查看系统差异、迁移、删除、常见问题和验收。</p></article>
+<article class="overview-card"><div class="overview-number">05</div><h3>SVN MCP</h3><p>让 AI 客户端查询 SVN PAGE 和过程函数，并受控修改本地源码。</p></article>
+<article class="overview-card"><div class="overview-number">06</div><h3>日常工作流</h3><p>按源码模式完成同步、开发、检查和交付。</p></article>
+<article class="overview-card"><div class="overview-number">07</div><h3>其他</h3><p>查看系统差异、迁移、删除、常见问题和验收。</p></article>
 </div>
 <aside class="notice"><div class="notice-icon">i</div><div>
 <p><strong>先选路线：</strong>DATABASE 从数据库导出 readonly，再在 Workcopy 开发；SVN 完整检出唯一根地址，从“谷神源码”受控编辑。两个模式的配置、同步和交付方式不同。</p>
@@ -434,9 +441,79 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 </section>
 
 <section class="wiki-section">
-<h2 id="5-日常工作流">5. 日常工作流</h2>
+<h2 id="5-mcp">5. SVN MCP</h2>
+<p>SVN MCP 与 Nexus、Bridge 并列，是供支持 MCP 的 AI 客户端快捷查询和受控修改源码的本地服务。它由客户端单独启动一个 stdio 进程，不依赖 Chrome，也不会自动改写客户端配置。当前只面向已配置的 <strong>SVN manifest 工作区</strong>；默认提供 14 个只读工具和 10 个 PAGE/过程函数编辑与恢复工具，复用 Nexus/CLI 的授权范围和 <code>context/index.db</code>，不另建索引，也不提交 SVN。</p>
+<h3 id="5-1-准备索引">5.1 准备索引</h3>
+<ol>
+<li>先按 2.3 节在 Nexus 创建 SVN 工作区，完成授权根检出与索引；记下配置中的完整 <code>workspaceKey</code>，例如 <code>products.&lt;id&gt;</code>，不要用显示名或 PRD 目录名代替。</li>
+<li>确认当前应用或开发版包含 <code>mcp --stdio</code> 入口。旧发行包不会因更新手册而自动获得 MCP。</li>
+<li>客户端连接后，PAGE 操作先调用 <code>get_index_status</code>，过程函数操作先调用 <code>get_source_index_status</code>。目标索引为 <code>READY</code> 才继续；若为 <code>REBUILD_REQUIRED</code>，核对目标工作区后显式执行一次索引重建，再重新检查状态。重建会更新该工作区的 <code>context/index.db</code>，不会修改 SVN 源码或提交 SVN。过程函数对象索引就绪不要求 PAGE 语义投影同时就绪。</li>
+</ol>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>/应用目录/GuthonCodeTool reindex --home /本地数据目录 --workspace products.&lt;id&gt;</code></pre></div>
+<p>上行是 macOS 发行应用示意；Windows 把命令换成已安装的 <code>GuthonCodeTool-windows-x64.exe</code> 并使用本机绝对路径。只有状态提示需要重建时才运行，不把 MCP 查询当成自动迁移入口。</p>
+<h3 id="5-2-配置客户端">5.2 配置客户端</h3>
+<p>在支持 stdio MCP 的 Harness 中新增一个独立服务，命令和每个参数分别填写；使用真实的<strong>绝对路径</strong>，不要把 <code>~</code>、<code>$GUTHON_HOME</code> 或整条 Shell 命令作为可执行文件。以下示例选用发行应用；如果路径包含空格，在配置中仍把可执行文件作为一个 <code>command</code> 值，不自行拆分。</p>
+<h4>Codex（桌面应用、CLI、IDE 扩展）</h4>
+<p>编辑个人 <code>~/.codex/config.toml</code>，在已有内容后添加下列服务表，不要覆盖原有配置。Codex 的桌面应用、CLI 和 IDE 扩展共用此配置；也可放在可信任项目的 <code>.codex/config.toml</code>，但包含个人本地路径的配置通常更适合放在个人文件中。配置格式以 <a href="https://developers.openai.com/codex/mcp" target="_blank" rel="noopener noreferrer">Codex 官方 MCP 文档</a>为准。</p>
+<div class="code-wrap"><span class="code-lang">toml</span><button class="copy-btn" type="button">复制</button><pre><code>[mcp_servers."guthon-svn"]
+command = "/应用目录/GuthonCodeTool"
+args = ["mcp", "--stdio", "--home", "/本地数据目录"]</code></pre></div>
+<p>也可以只用 Codex CLI 添加一次（与手工编辑 TOML 二选一，避免重复配置）：</p>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codex mcp add guthon-svn -- /应用目录/GuthonCodeTool mcp --stdio --home /本地数据目录
+codex mcp list</code></pre></div>
+<p>命令行示例假设替换后的绝对路径不含空格；含空格时分别给可执行文件路径和数据目录路径加引号。<code>codex mcp list</code> 用于核对注册项；随后新开 Codex 任务，确认工具列表中出现 <code>guthon-svn</code>，再调用 <code>get_runtime_status</code> 和目标工作区的索引状态工具。列表中存在注册项不等于 MCP 进程已正常启动或索引已经 <code>READY</code>。原有 <code>guthon-page</code> 只是客户端别名，若仍指向同一可执行入口可继续使用；迁移时先删除或停用旧注册项，再新增 <code>guthon-svn</code>，避免同一服务重复启动，勿覆盖其他 MCP 服务。</p>
+<h4>ZCode</h4>
+<p>打开“设置 → MCP 服务器 → 新建 MCP 服务器”，作用域选“用户”（本机各工作区共用）或“工作区”，名称填 <code>guthon-svn</code>、类型选 <code>stdio（本地命令）</code>，命令填应用绝对路径，参数依次填 <code>mcp</code>、<code>--stdio</code>、<code>--home</code>、本地数据目录绝对路径；添加后确认已启用。若已按上面步骤配置 Codex，可在同一页面点“导入”，从 Codex CLI 配置中只勾选 <code>guthon-svn</code> 导入，不必重复手填。详见 <a href="https://zcode.z.ai/cn/docs/mcp-services" target="_blank" rel="noopener noreferrer">ZCode 官方 MCP 文档</a>。</p>
+<p>手工配置 ZCode 时，用户级原生文件为 <code>~/.zcode/cli/config.json</code>、工作区级为 <code>&lt;项目根&gt;/.zcode/config.json</code>，服务放在 <code>mcp.servers</code>；也可在“完整配置”模式粘贴下方 <code>mcpServers</code> JSON。但同一作用域内一旦原生 <code>.zcode</code> 配置已有 MCP 服务，<code>.agents/mcp.json</code> 不再合并加载，不要把两处各写一半。个人绝对路径建议保存在用户级配置，避免提交到项目仓库。</p>
+<h4>CodeBuddy（IDE / CodeBuddy Code）</h4>
+<p>在 CodeBuddy IDE 侧栏打开“CodeBuddy Settings → MCP → Add MCP”，把下列配置加入 JSON 文件，保存后在服务旁点击“Try to Run”检查状态；随后在 Craft Agent 中提出 PAGE 或过程函数查询/修改任务。CodeBuddy Code CLI 可将同一配置保存到个人 <code>~/.codebuddy/.mcp.json</code>，或仅对某项目放在 <code>&lt;项目根&gt;/.mcp.json</code>；已有文件时合并 <code>mcpServers</code> 对象，不覆盖其他服务。项目级 MCP 首次连接可能要求用户批准。参见 <a href="https://www.codebuddy.cn/docs/ide/User-guide/MCP" target="_blank" rel="noopener noreferrer">CodeBuddy IDE MCP 文档</a>与 <a href="https://www.codebuddy.ai/docs/cli/mcp" target="_blank" rel="noopener noreferrer">CodeBuddy Code MCP 文档</a>。</p>
+<div class="code-wrap"><span class="code-lang">json</span><button class="copy-btn" type="button">复制</button><pre><code>{
+  "mcpServers": {
+    "guthon-svn": {
+      "type": "stdio",
+      "command": "/应用目录/GuthonCodeTool",
+      "args": ["mcp", "--stdio", "--home", "/本地数据目录"]
+    }
+  }
+}</code></pre></div>
+<p>CodeBuddy Code CLI 也可只执行一次下列命令代替手工编辑 JSON；<code>codebuddy mcp list</code> 核对已注册服务，在交互任务中用 <code>/mcp</code> 查看连接诊断：</p>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codebuddy mcp add --scope user guthon-svn -- /应用目录/GuthonCodeTool mcp --stdio --home /本地数据目录
+codebuddy mcp list</code></pre></div>
+<p>以上命令行示例同样要求替换真实绝对路径；路径含空格时分别加引号。其他支持 stdio MCP 的 Harness 可按自身官方配置入口复用 <code>command</code> 与 <code>args</code>，不能假设都接受 CodeBuddy 的 <code>mcpServers</code> JSON 或 CLI 命令。</p>
+<p>Windows 把 <code>command</code> 指向应用 EXE、<code>--home</code> 后的参数指向本地数据目录；JSON 中的反斜杠要写成双反斜杠，TOML 中可使用正斜杠或正确转义的反斜杠。维护者使用源码开发版时，把 <code>command</code> 换为仓库 <code>.venv</code> 中 Python 的绝对路径，并在 <code>args</code> 最前面加上 <code>/源码仓库/scripts/guthon_tool.py</code>。需要强制只读时，在 <code>--stdio</code> 后加 <code>--read-only</code>，客户端便只发现 14 个查询工具。MCP 服务和 Nexus 可共用同一 toolHome，但客户端连接与工具调用路由须在对应客户端或 guthon-team 中另行配置；安装 GuthonCodeTool 本身不会让 AI 自动调用。</p>
+<h4>在 AI 任务中调用</h4>
+<p>连接成功后，向 Harness 明确目标和使用方式。例如：“请使用 <code>guthon-svn</code> MCP，在 <code>workspaceKey=products.&lt;id&gt;</code> 中查询某 PAGE 的脚本/SQL 或某过程函数；先检查对应索引状态和精确身份，再读取当前源码并给出证据。修改时先预览，再以唯一幂等键写入本地 SVN working copy，查询 operation 状态并审阅 SVN diff；不要提交 SVN。”</p>
+<p>AI 是否主动选用 MCP 取决于 Harness 的工具发现、审批设置和任务/项目规则。将 PAGE、过程函数查询与受控修改的路由写入团队规则（如 guthon-team），可提高主动选用率；规则仍须要求显式 <code>workspaceKey</code>、身份核对及修改前后检查，不能以“已安装 MCP”代替这些步骤。若工具未出现，Codex 先查 <code>codex mcp list</code>，ZCode 查“设置 → MCP 服务器”的启用状态，CodeBuddy IDE 用“Try to Run”、CodeBuddy Code 用 <code>/mcp</code> 查诊断；再检查路径、作用域/项目信任和进程启动错误，不要直接重建索引。</p>
+<h3 id="5-3-查询与排错">5.3 查询与排错</h3>
+<ol>
+<li>重启或重载 MCP 客户端，确认发现 <code>guthon-svn</code> 及默认 24 个工具。先调用 <code>get_runtime_status</code>，再以明确 <code>workspaceKey</code> 调用 PAGE 的 <code>get_index_status</code> 或过程函数的 <code>get_source_index_status</code>。</li>
+<li>用 <code>search_sources</code> 搜索 PAGE 名称或 ID，并设 <code>sourceType=page</code>、较小的 <code>limit</code>。从结果复制真实 <code>sourceNamespace</code>、<code>sourceId</code> 和 <code>funId</code>；同名对象不猜第一个。</li>
+<li>以完整身份调用 <code>list_page_nodes</code> 或 <code>list_page_fields</code>；从目录选择稳定的 <code>semanticNodeId</code>/<code>semanticFieldId</code>，再用 <code>read_page_nodes</code>/<code>get_page_field</code> 定点读取。若改用 <code>jsonPointer</code>，同时传目录返回的 <code>indexedSourceHash</code>。</li>
+<li>需要局部证据时调用 <code>get_source_context</code> 或 <code>list_page_field_relations</code>；<code>check_page_field_references</code> 只提示显式和未解析引用风险，不能证明字段可安全删除。</li>
+</ol>
+<div class="code-wrap"><span class="code-lang">json</span><button class="copy-btn" type="button">复制</button><pre><code>{"name":"get_index_status","arguments":{"workspaceKey":"products.&lt;id&gt;"}}
+{"name":"search_sources","arguments":{"workspaceKey":"products.&lt;id&gt;","sourceType":"page","keyword":"页面名或 PAGE ID","limit":20}}
+{"name":"list_page_nodes","arguments":{"workspaceKey":"products.&lt;id&gt;","sourceNamespace":"从搜索结果复制","sourceId":"从搜索结果复制","funId":"从搜索结果复制","limit":20}}</code></pre></div>
+<p>过程函数先以 <code>sourceType=procedure</code> 调用 <code>search_sources</code>，复制结果中的完整 <code>sourceNamespace</code>、<code>sourceId</code>、<code>funId</code> 和 <code>workingCopyId</code>，再用 <code>read_procedure</code> 按 <code>offset</code>/<code>maxChars</code> 有界读取；如需调用方证据，用 <code>list_procedure_callers</code>。同名或多 working copy 不猜第一个；调用方索引无法区分同别名目标时会拒绝归因。</p>
+<p>以上是依次调用的工具名与参数示意，不是直接粘贴到普通终端的命令。<code>MISSING</code> 表示先完成目标 SVN 工作区索引，<code>PARTIAL</code> 表示先处理陈旧来源并刷新；不要把非 <code>READY</code> 当作空结果。结果含 <code>nextCursor</code> 时才继续翻页；<code>CURSOR_STALE</code> 要从第一页重查，<code>SOURCE_STALE</code>/<code>INDEX_STALE</code> 要先核对授权源码和目标工作区索引，不能沿用旧 Pointer。MCP 查询不代替 Nexus 的 SVN 差异审阅、平台运行或业务验收。</p>
+<h3 id="5-4-受控修改-page-节点">5.4 受控修改 PAGE 节点</h3>
+<p>默认 MCP 允许 AI 对<strong>已授权 SVN working copy 中的稳定脚本/SQL 字符串节点</strong>发起本地修改。目录里的字段集合、界面字段、任意 PAGE JSON 属性及反射组不能经当前 MCP 写入。操作前应确认目标 <code>workspaceKey</code>、PAGE 身份、当前文件差异和工作区 <code>edit</code> 能力；仅仅发现写入工具不代表某个对象已获写入许可。</p>
+<ol>
+<li>从 <code>list_page_nodes</code> 的结果选定 <code>identityStability=STABLE</code> 且 <code>nodeType=SCRIPT</code> 或 <code>SQL</code> 的目标，调用 <code>open_page_node_edit</code> 获取绑定当前源码与授权状态的短期 <code>editToken</code>。</li>
+<li>用 <code>preview_page_nodes</code> 提交 <code>editToken</code> 和新 <code>content</code>，检查候选 hash、变更摘要和错误；预览不落盘，也不保证后续写入时源码仍未变化。</li>
+<li>确认修改后用同一批 token 和内容调用 <code>update_page_nodes</code>，提供调用方生成并保存的唯一 <code>idempotencyKey</code>（8–128 个无空格的可打印 ASCII 字符）。多个节点必须属于同一份 PAGE，服务会重新预检并一次写入本地文件。</li>
+<li>保存返回的 <code>operationId</code>。响应丢失时先用 <code>get_page_operation</code> 按原 <code>idempotencyKey</code> 查询，不要换 key 盲目重试；后置索引或 diff 核验未完成时按 <code>operationId</code> 调用 <code>resume_page_operation</code>。</li>
+<li>最后在 Nexus 的 SCM 中人工审阅 SVN diff，并按项目流程验证；MCP 不执行 SVN commit，也不把本地写入当作谷神平台提交或运行成功。</li>
+</ol>
+<h3 id="5-5-受控修改过程函数">5.5 受控修改过程函数</h3>
+<p>过程函数写入只针对完整身份确定且获授权的 SVN working copy 物理文件。调用 <code>open_procedure_edit</code> 获取短期 <code>editToken</code>，以 <code>preview_procedure</code> 提交完整 <code>content</code> 或精确 <code>replacements</code> 检查候选 hash（预览不落盘），再以同一 token、候选和唯一 <code>idempotencyKey</code> 调用 <code>update_procedure</code>。响应丢失时用 <code>get_procedure_operation</code> 按原 key 查询；后置索引或 SVN diff 核验未完成时，用返回的 <code>operationId</code> 调用 <code>resume_procedure_operation</code>。最后人工审阅目标文件 diff；不可将本地写入等同平台运行成功，也不可通过 MCP 提交 SVN。</p>
+<aside class="notice"><div class="notice-icon">!</div><div><p>写入依赖编辑租约、源码/索引 hash、授权范围和 SVN 状态的再次核对。真实 MCP 客户端、已安装 VSIX、Windows 与强杀故障矩阵尚未完成验收；出现未完成或外部改动时先查看 operation 状态和实际 diff，不强行覆盖。字段增删移动与反射组写入仍未开放。</p></div></aside>
+</section>
+
+<section class="wiki-section">
+<h2 id="6-日常工作流">6. 日常工作流</h2>
 <p>每次开发先确认目标 PRD/PRJ 和源码来源。DATABASE 与 SVN 按下面各自的流程执行。</p>
-<h3 id="5-1-database-工作流">5.1 DATABASE 工作流</h3>
+<h3 id="6-1-database-工作流">6.1 DATABASE 工作流</h3>
 <ol>
 <li>在“项目”树选择目标 PRD 或 PRJ。</li>
 <li>点击“同步工作区全部资料”。</li>
@@ -446,7 +523,7 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 <li>完成后点击“检查或打包 Workcopy”，查看 <code>diff.md</code>。</li>
 <li>将确认后的内容复制回谷神平台，完成平台测试和提交。</li>
 </ol>
-<h3 id="5-2-svn-工作流">5.2 SVN 工作流</h3>
+<h3 id="6-2-svn-工作流">6.2 SVN 工作流</h3>
 <h4>开始开发</h4>
 <ol>
 <li>点击“检出/更新完整 SVN 仓库”。</li>
@@ -481,11 +558,12 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 <ul>
 <li>使用“搜索工作区完整索引”查找源码、调用、条件、赋值、异常和表读写。</li>
 <li>选择搜索结果后，可打开源码或复制精简/详细 AI 上下文。</li>
+<li>需要 AI 直接定位 SVN PAGE 节点、过程函数、界面字段和引用证据，或受控修改 PAGE 脚本/SQL 节点与过程函数时，按第 5 章配置 SVN MCP；PAGE 查询层也供 CLI <code>svn page-query</code> 和 Nexus 后端复用。Nexus 的 SVN 源码树可对 PAGE JSON 执行“浏览 PAGE 语义节点”，按页选择并源码复核后打开现有虚拟文档。</li>
 <li>排查数据库前先在“配置资料 → 配置数据库排查”选择明确环境。</li>
 <li>快速查询只用于只读证据；功能验收仍需正式测试流程。</li>
 </ul>
 
-<h3 id="5-3-更新工作流">5.3 更新工作流</h3>
+<h3 id="6-3-更新工作流">6.3 更新工作流</h3>
 <h4>更新 GuthonCodeTool</h4>
 <ol>
 <li>确认没有同步、SVN 或 Bridge 操作正在执行。</li>
@@ -507,8 +585,8 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 </section>
 
 <section class="wiki-section">
-<h2 id="6-其他">6. 其他</h2>
-<h3 id="6-1-系统差异">6.1 系统差异</h3>
+<h2 id="7-其他">7. 其他</h2>
+<h3 id="7-1-系统差异">7.1 系统差异</h3>
 <h4>macOS</h4>
 <ul>
 <li>当前支持 M1 及后续型号，Intel Mac 不支持。</li>
@@ -524,7 +602,7 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 <li>路径过长：使用 <code>D:\GuthonCodeToolData</code> 等短路径，并按公司策略启用长路径支持。</li>
 <li>终端环境变量未生效：关闭并重新打开 VS Code 和 PowerShell。</li>
 </ul>
-<h3 id="6-2-迁移与删除">6.2 迁移与删除</h3>
+<h3 id="7-2-迁移与删除">7.2 迁移与删除</h3>
 <h4>迁移电脑</h4>
 <ol>
 <li>停止 Bridge、同步和 SVN 操作。</li>
@@ -541,7 +619,7 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 <li>确认其他工作区和共享配置仍然存在。</li>
 </ol>
 <p>升级或迁移时不要删除本地数据目录。删除 guthon-team 工作区治理文件需要按锁文件逐项核验，不要直接删除整个 <code>docs/</code>、<code>tools/</code>、<code>.guthon/</code> 或 <code>.githooks/</code>。</p>
-<h3 id="6-3-常见问题">6.3 常见问题</h3>
+<h3 id="7-3-常见问题">7.3 常见问题</h3>
 <p>更多 macOS、Windows、DATABASE、SVN、Nexus 与 Bridge 部署和环境问题，请进入 <a href="GuthonCodeTool_QA.html">GuthonCodeTool 问题解决中心</a>，可按系统、源码模式和错误原文搜索。</p>
 <h4>左侧没有“Guthon Nexus”图标</h4>
 <p>确认 VSIX 已安装并启用，执行“Developer: Reload Window”；仍未出现时卸载旧版本后重新安装当前 Release 的 VSIX。</p>
@@ -560,7 +638,7 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 <p>先打开 <code>diff.md</code> 确认需要保留的内容。不确定时不要覆盖，请联系负责人处理。</p>
 <h4>SVN SCM 显示“外部修改”</h4>
 <p>点击“管理本地源码变更”查看差异，再选择保存或撤销。文本冲突使用文件行的三方合并和“标记为已解决”；如果显示属性冲突、树冲突、新增或删除，不要强制操作，请联系负责人处理。</p>
-<h3 id="6-4-验收清单">6.4 验收清单</h3>
+<h3 id="7-4-验收清单">7.4 验收清单</h3>
 <ul>
 <li><label class="check-item"><input type="checkbox" disabled><span>应用、VSIX 和 Bridge 来自同一个 Release。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>VS Code 左侧出现“Guthon Nexus”。</span></label></li>
@@ -569,6 +647,7 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 <li><label class="check-item"><input type="checkbox" disabled><span><code>tools/guthon-lint</code> 可执行；支持 Hook 的 Agent 已完成信任并在新任务中验证；只有 <code>var/</code> 使用 Git 时才要求 <code>.githooks</code>，未把“插件已安装”当作 Hook 生效证据。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>环境检查没有 FAIL，项目树同时显示 PRD、PRJ，两个样例均完整同步成功。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>Bridge 面板显示“运行中”，Chrome 扩展能够完成一次实际连接。</span></label></li>
+<li><label class="check-item"><input type="checkbox" disabled><span>如启用 SVN MCP，客户端已发现默认 24 个工具，并以明确 <code>workspaceKey</code> 查询到 <code>READY</code> 的目标索引；写入仅用于授权 PAGE 脚本/SQL 节点或精确过程函数，操作后人工核对 SVN diff。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>DATABASE 能拉取 Workcopy；SVN 能从“谷神源码”打开文件并在“源代码管理”查看差异。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>SVN 可以查看差异，执行全部、所选文件或单文件范围的提交/更新，并处理文本冲突三方合并。</span></label></li>
 <li><label class="check-item"><input type="checkbox" disabled><span>已明确 SVN revision 仍需在谷神平台最终提交。</span></label></li>
