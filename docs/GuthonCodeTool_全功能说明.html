@@ -403,7 +403,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <h2 id="9-guthon-svn-mcp">9. Guthon SVN MCP</h2>
 <p>SVN MCP 与 Nexus、Bridge 同属 GuthonCodeTool 的用户入口，但职责不同：Nexus 服务 VS Code 中的开发与 SVN SCM，Bridge 服务受限谷神网页，MCP 服务 AI 客户端对已授权 SVN PAGE 和过程函数的定位、证据读取和受控源码修改。MCP 是共享服务的协议适配，不建立第二套索引、授权清单或文件写回路径。推荐客户端别名为 <code>guthon-svn</code>；旧 <code>guthon-page</code> 别名仍可指向同一入口，迁移不应重复启动两个服务。</p>
 <h3 id="9-1-入口与能力">9.1 入口与能力</h3>
-<p>客户端以 <code>mcp --stdio --home &lt;toolHome&gt;</code> 启动独立进程；当前固定使用 MCP <code>2025-11-25</code> 的 stdio/JSON-RPC 生命周期。<code>--home</code> 明确目标数据目录，每次工具调用再传 <code>workspaceKey</code>；PAGE 查询还需精确 <code>sourceNamespace</code>、<code>sourceId</code>，必要时带 <code>funId</code>；过程函数必须带完整 <code>sourceNamespace + sourceId + funId + workingCopyId</code>。运行入口可用发行应用、Release pyz 或源码开发环境，但客户端配置分别指向各自实际存在的可执行文件和绝对路径。</p>
+<p>客户端以 <code>mcp --stdio --home &lt;toolHome&gt;</code> 启动独立进程；stdio 握手支持 MCP <code>2025-03-26</code>、<code>2025-06-18</code> 与 <code>2025-11-25</code>；不支持无握手的新版协议，客户端须确认服务端返回的版本。<code>--home</code> 明确目标数据目录，每次工具调用再传 <code>workspaceKey</code>；PAGE 查询还需精确 <code>sourceNamespace</code>、<code>sourceId</code>，必要时带 <code>funId</code>；过程函数必须带完整 <code>sourceNamespace + sourceId + funId + workingCopyId</code>。运行入口可用发行应用、Release pyz 或源码开发环境，但客户端配置分别指向各自实际存在的可执行文件和绝对路径。</p>
 <p>默认发现 <strong>27 个工具</strong>：14 个只读查询工具，以及 13 个编辑流程工具。加 <code>--read-only</code> 时只发现前 14 个；后 13 个中的“打开”和“预览”虽然不修改源码，也会随编辑流程一起隐藏。</p>
 <h4>只读查询（14 个）</h4>
 <table class="comparison-table">

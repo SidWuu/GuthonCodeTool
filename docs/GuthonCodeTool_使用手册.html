@@ -444,6 +444,7 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 <section class="wiki-section">
 <h2 id="5-mcp">5. SVN MCP</h2>
 <p>SVN MCP 与 Nexus、Bridge 并列，是供支持 MCP 的 AI 客户端快捷查询和受控修改源码的本地服务。它由客户端单独启动一个 stdio 进程，不依赖 Chrome，也不会自动改写客户端配置。当前只面向已配置的 <strong>SVN manifest 工作区</strong>；默认提供 14 个只读工具和 13 个 PAGE/过程函数编辑与恢复工具，复用 Nexus/CLI 的授权范围和 <code>context/index.db</code>，不另建索引，也不提交 SVN。</p>
+<p>stdio 握手支持 MCP <code>2025-03-26</code>、<code>2025-06-18</code> 与 <code>2025-11-25</code>。客户端应核对服务端协商返回的版本；本入口不支持新版无握手生命周期，也不会把未知版本原样回显为“已支持”。</p>
 <h3 id="5-1-准备索引">5.1 准备索引</h3>
 <ol>
 <li>先按 2.3 节在 Nexus 创建 SVN 工作区，完成授权根检出与索引；记下配置中的完整 <code>workspaceKey</code>，例如 <code>products.&lt;id&gt;</code>，不要用显示名或 PRD 目录名代替。</li>
