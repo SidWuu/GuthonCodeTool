@@ -2211,14 +2211,21 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
     public_data = None
     if local_path.suffix.lower() == ".json":
         try:
-            parsed = json.loads(decode_source(local_path.read_bytes())[0])
+            raw_json = local_path.read_bytes()
+            if (item["source_table"] == "page"
+                    and hashlib.sha256(raw_json).hexdigest() != item["source_hash"]):
+                raise ValueError(f"PAGE projection source changed during scan: {item['source_path']}")
+            parsed = json.loads(decode_source(raw_json)[0])
             parsed = json.loads(parsed) if isinstance(parsed, str) else parsed
             if item["source_table"] == "page" and isinstance(parsed, dict):
                 page_data = parsed
             elif item["source_table"] == "public":
                 public_data = parsed
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as error:
+            if item["source_table"] == "page":
+                raise ValueError(f"PAGE projection source cannot be parsed: {item['source_path']}") from error
+        if item["source_table"] == "page" and page_data is None:
+            raise ValueError(f"PAGE projection source is not an object: {item['source_path']}")
     detail_index = source_facts.index_source_details(
         conn,
         source_record_id,

@@ -716,3 +716,52 @@ def replace_json_value(text: str, pointer: str, new_value, expected=None) -> str
     output = text[:start] + token + text[end:]
     json.loads(output)
     return output
+
+
+def insert_json_array_item(text: str, pointer: str, index: int, item: dict, expected: list) -> str:
+    """Insert one field token without serializing any existing array element."""
+
+    spans = _JsonValueLocator(text).locate()
+    if pointer not in spans:
+        raise KeyError(f"JSON Pointer not found: {pointer}")
+    start, end, current = spans[pointer]
+    if not isinstance(current, list) or current != expected or not 0 <= index <= len(current):
+        raise ValueError(f"JSON array changed or insertion index is invalid: {pointer}")
+    if not isinstance(item, dict):
+        raise ValueError("Inserted PAGE field must be an object")
+    raw_array = text[start:end]
+    newline = "\r\n" if "\r\n" in raw_array else "\n"
+    pretty = "\n" in raw_array
+    if current:
+        item_spans = [spans[f"{pointer}/{number}"] for number in range(len(current))]
+        first_start = item_spans[0][0]
+        line_start = text.rfind("\n", start, first_start) + 1
+        indent = text[line_start:first_start] if line_start > start else ""
+        compact_gap = (text[item_spans[0][1]:item_spans[1][0]]
+                       if len(item_spans) > 1 else ", ")
+        separator = "," + newline + indent if pretty else (
+            compact_gap if compact_gap.startswith(",") else ", "
+        )
+    else:
+        item_spans = []
+        closing_line = text.rfind("\n", start, end) + 1
+        closing_indent = text[closing_line:end - 1] if closing_line > start else ""
+        indent = closing_indent + "  " if pretty else ""
+        separator = ""
+    token = json.dumps(item, ensure_ascii=False, indent=2 if pretty else None,
+                       separators=None if pretty else (",", ":"))
+    if pretty:
+        token = token.replace("\n", newline + indent)
+    if not current:
+        replacement = ("[" + newline + indent + token + newline + closing_indent + "]"
+                       if pretty else "[" + token + "]")
+        output = text[:start] + replacement + text[end:]
+    elif index == len(current):
+        position = item_spans[-1][1]
+        output = text[:position] + separator + token + text[position:]
+    else:
+        position = item_spans[index][0]
+        output = text[:position] + token + separator + text[position:]
+    if pointer_value(json.loads(output), pointer) != [*current[:index], item, *current[index:]]:
+        raise ValueError("PAGE field insertion did not produce the expected array")
+    return output

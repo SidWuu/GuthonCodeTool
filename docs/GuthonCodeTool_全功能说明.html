@@ -357,7 +357,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <ul>
 <li><code>.gss</code> 是独立 Guthon GSS 语言，在 Java 语法基础上注入 Velocity/GSS 指令和变量；兼容的 <code>.vm</code> 保持 Java 关联。</li>
 <li>Java、JavaScript、SQL 提供谷神 API 补全与悬停说明；路由规则根据上下文选择 <code>sqltools</code>、<code>sql</code> 或 <code>sqlh</code> 等 API 族。</li>
-<li>过程函数、PAGE 虚拟文档和索引对象支持转到定义、查找引用与调用位置。</li>
+<li>过程函数调用可转到索引中的定义；过程函数内的 <code>@子方法(...)</code> 可转到当前源码的 <code>#function</code> 声明。定义跳转与“谷神源码”树使用同一虚拟文档，支持从编辑器定位树节点；索引对象也支持查找引用与调用位置。</li>
 <li>补全索引、人工片段和路由规则分别维护，使自动生成 API 与项目特定规则可以独立更新。</li>
 <li>SCM 使用 VS Code Quick Diff 以 SVN BASE 标出增删改，点击装饰即可内联查看。</li>
 </ul>
@@ -404,13 +404,47 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <p>SVN MCP 与 Nexus、Bridge 同属 GuthonCodeTool 的用户入口，但职责不同：Nexus 服务 VS Code 中的开发与 SVN SCM，Bridge 服务受限谷神网页，MCP 服务 AI 客户端对已授权 SVN PAGE 和过程函数的定位、证据读取和受控源码修改。MCP 是共享服务的协议适配，不建立第二套索引、授权清单或文件写回路径。推荐客户端别名为 <code>guthon-svn</code>；旧 <code>guthon-page</code> 别名仍可指向同一入口，迁移不应重复启动两个服务。</p>
 <h3 id="9-1-入口与能力">9.1 入口与能力</h3>
 <p>客户端以 <code>mcp --stdio --home &lt;toolHome&gt;</code> 启动独立进程；当前固定使用 MCP <code>2025-11-25</code> 的 stdio/JSON-RPC 生命周期。<code>--home</code> 明确目标数据目录，每次工具调用再传 <code>workspaceKey</code>；PAGE 查询还需精确 <code>sourceNamespace</code>、<code>sourceId</code>，必要时带 <code>funId</code>；过程函数必须带完整 <code>sourceNamespace + sourceId + funId + workingCopyId</code>。运行入口可用发行应用、Release pyz 或源码开发环境，但客户端配置分别指向各自实际存在的可执行文件和绝对路径。</p>
-<div class="plugin-highlight">
-<div><strong>运行与定位</strong><span><code>get_runtime_status</code>、<code>resolve_workspace</code>、<code>get_index_status</code>、<code>search_sources</code>。</span></div>
-<div><strong>节点与字段</strong><span><code>list_page_nodes</code>、<code>read_page_nodes</code>、<code>list_page_fields</code>、<code>get_page_field</code>。</span></div>
-<div><strong>关系与上下文</strong><span><code>list_page_field_relations</code>、<code>check_page_field_references</code>、<code>get_source_context</code>。</span></div>
-<div><strong>过程函数</strong><span><code>get_source_index_status</code>、<code>read_procedure</code>、<code>list_procedure_callers</code>。</span></div>
-</div>
-<p>以上 14 个工具本身只读，默认服务另提供 10 个受控编辑/恢复工具；如需纯查询进程，可用 <code>--read-only</code> 将工具发现限制到这 14 个。对象搜索与目录查询有界分页；PAGE 目录节点只给身份、Pointer、类型和 hash，正文须经授权文件与索引新鲜度校验后定点读取。过程函数按偏移和最大字符数读取，不创建编辑租约；调用方证据在重名目标无法区分时拒绝归因。结果携带来源身份和索引 generation，失效游标会被拒绝。PAGE 查询服务由 CLI <code>svn page-query</code> 和 Nexus 后端复用；Nexus 源码树的“浏览 PAGE 语义节点”命令按页选择并再次复核源码后打开现有虚拟文档，尚无独立 MCP 面板。</p>
+<p>默认发现 <strong>27 个工具</strong>：14 个只读查询工具，以及 13 个编辑流程工具。加 <code>--read-only</code> 时只发现前 14 个；后 13 个中的“打开”和“预览”虽然不修改源码，也会随编辑流程一起隐藏。</p>
+<h4>只读查询（14 个）</h4>
+<table class="comparison-table">
+<thead><tr><th>工具</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td><code>get_runtime_status</code></td><td>查看本地服务版本、协议和工作区数量。</td></tr>
+<tr><td><code>resolve_workspace</code></td><td>核对显式工作区键；未指定时只在唯一候选下解析。</td></tr>
+<tr><td><code>get_index_status</code></td><td>检查 PAGE 节点、字段和关系投影状态；<code>projectionGapCount</code> 标记有片段却缺少语义节点的 JSON PAGE，不将其误报为 <code>READY</code>。</td></tr>
+<tr><td><code>get_source_index_status</code></td><td>独立检查 SVN 对象目录，不依赖 PAGE 投影就绪。</td></tr>
+<tr><td><code>search_sources</code></td><td>分页检索 PAGE、过程函数等索引对象及精确身份。</td></tr>
+<tr><td><code>read_procedure</code></td><td>按偏移有界读取当前过程函数源码，不创建编辑租约。</td></tr>
+<tr><td><code>list_procedure_callers</code></td><td>读取精确过程函数的有界调用方索引证据。</td></tr>
+<tr><td><code>list_page_nodes</code></td><td>分页列出 PAGE 脚本、SQL 与字段集合节点，不返回整页 JSON。</td></tr>
+<tr><td><code>read_page_nodes</code></td><td>从授权源码定点读取所选 PAGE 节点正文。</td></tr>
+<tr><td><code>list_page_fields</code></td><td>分页列出有组件宿主的 UI 字段身份、区域和集合位置。</td></tr>
+<tr><td><code>get_page_field</code></td><td>按稳定身份或附带源码 hash 的 Pointer 读取单个 UI 字段。</td></tr>
+<tr><td><code>list_page_field_relations</code></td><td>列出显式字段关联及未解析映射证据。</td></tr>
+<tr><td><code>check_page_field_references</code></td><td>报告字段引用风险；结果不能作为删除许可。</td></tr>
+<tr><td><code>get_source_context</code></td><td>读取 PAGE 的有界事实与调用上下文摘要。</td></tr>
+</tbody>
+</table>
+<h4>受控编辑与操作恢复（13 个，默认可见）</h4>
+<table class="comparison-table">
+<thead><tr><th>工具</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td><code>open_page_node_edit</code></td><td>为稳定 PAGE 脚本或 SQL 节点取得短期编辑令牌。</td></tr>
+<tr><td><code>preview_page_nodes</code></td><td>预检一个 PAGE 内的节点候选修改，不写源码。</td></tr>
+<tr><td><code>update_page_nodes</code></td><td>以幂等键将同页节点候选写入授权 SVN working copy。</td></tr>
+<tr><td><code>open_page_field_insert</code></td><td>准备同一 UI 字段集合内的单字段新增或拷贝，并冻结候选身份与位置。</td></tr>
+<tr><td><code>preview_page_field_insert</code></td><td>预检已冻结的字段候选，不写源码。</td></tr>
+<tr><td><code>insert_page_field</code></td><td>以幂等键插入该字段；不覆盖原有字段内容。</td></tr>
+<tr><td><code>get_page_operation</code></td><td>按操作 ID 或幂等键查询 PAGE 节点/字段写入阶段及当前核验状态。</td></tr>
+<tr><td><code>resume_page_operation</code></td><td>继续已记录 PAGE 操作的索引和 SVN diff 后置核验，不重写源码。</td></tr>
+<tr><td><code>open_procedure_edit</code></td><td>按完整过程函数身份取得短期编辑令牌。</td></tr>
+<tr><td><code>preview_procedure</code></td><td>预检过程函数完整候选或精确替换，不写源码。</td></tr>
+<tr><td><code>update_procedure</code></td><td>以幂等键写入一份授权过程函数物理文件。</td></tr>
+<tr><td><code>get_procedure_operation</code></td><td>按操作 ID 或幂等键查询过程函数写入阶段。</td></tr>
+<tr><td><code>resume_procedure_operation</code></td><td>继续过程函数写后的索引和 SVN diff 核验，不重写源码。</td></tr>
+</tbody>
+</table>
+<p>对象搜索与目录查询有界分页；PAGE 目录只给身份、Pointer、类型和 hash，正文仍须从授权源码定点读取。过程函数按偏移和最大字符数读取，重名目标无法区分时拒绝归因。结果携带来源身份和索引 generation，失效游标会被拒绝。PAGE 查询服务由 CLI <code>svn page-query</code> 和 Nexus 后端复用；Nexus 源码树的“浏览 PAGE 语义节点”命令按页选择并再次复核源码后打开现有虚拟文档，尚无独立 MCP 面板。</p>
 <h3 id="9-2-共享索引与安全边界">9.2 共享索引与安全边界</h3>
 <ul>
 <li>MCP 只面向显式配置的 SVN manifest 工作区。PAGE 需完整页面身份；过程函数还必须带 <code>workingCopyId</code>。不能只凭显示名称或目录位置猜测。</li>
@@ -419,8 +453,8 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <li>MCP 不自动安装到客户端，不修改既有 MCP 配置，也不决定 AI 何时调用。工具是否可见及是否主动调用取决于客户端连接和 guthon-team 的工具路由规则。</li>
 </ul>
 <h3 id="9-3-开发状态与验证">9.3 开发状态与验证</h3>
-<p>PAGE 提供 <code>open_page_node_edit</code>、<code>preview_page_nodes</code>、<code>update_page_nodes</code>、<code>get_page_operation</code>、<code>resume_page_operation</code> 五个工具，限定稳定的同页脚本/SQL 字符串节点。过程函数提供 <code>open_procedure_edit</code>、<code>preview_procedure</code>、<code>update_procedure</code>、<code>get_procedure_operation</code>、<code>resume_procedure_operation</code> 五个工具，限定完整身份匹配的一份授权物理文件。工具可见不等于目标可写：编辑令牌绑定授权、会话和源码快照；预览不落盘，正式写入重新校验 <code>edit</code> 能力、当前源码、索引及 SVN 状态，再以 <code>idempotencyKey</code> 记录操作。只改本地 SVN working copy，后续记录索引与 diff 核验，不执行 SVN commit。字段数组、任意 PAGE JSON 结构和反射组不能由当前 MCP 修改。</p>
-<p>查询链路已通过本地协议往返、zipapp 和临时 macOS 单文件可执行包的启动/工具发现测试；PAGE 节点与过程函数写入已在临时 SVN 夹具中验证。真实工作区索引曾经只读核对为 <code>READY</code>，但这不等于正式发行包、已安装 VSIX、真实 MCP 客户端、Windows 或真实源码写入验收。完整字段关系、跨文件补偿/故障矩阵、字段增删移动和反射组写入仍未交付；使用默认写入能力时应人工核对 SVN diff，不把工具响应当作平台运行证明。具体配置和调用顺序见<a href="GuthonCodeTool_使用手册.html#5-mcp">使用手册第 5 章</a>。</p>
+<p>PAGE 提供 <code>open_page_node_edit</code>、<code>preview_page_nodes</code>、<code>update_page_nodes</code>、<code>get_page_operation</code>、<code>resume_page_operation</code> 五个工具，限定稳定的同页脚本/SQL 字符串节点；另提供 <code>open_page_field_insert</code>、<code>preview_page_field_insert</code>、<code>insert_page_field</code>，只允许同一已识别 UI 字段集合内的单字段新增或拷贝，并共用 PAGE operation 查询/恢复。过程函数提供 <code>open_procedure_edit</code>、<code>preview_procedure</code>、<code>update_procedure</code>、<code>get_procedure_operation</code>、<code>resume_procedure_operation</code> 五个工具，限定完整身份匹配的一份授权物理文件。工具可见不等于目标可写：编辑令牌绑定授权、会话和源码快照；预览不落盘，正式写入重新校验 <code>edit</code> 能力、当前源码、索引及 SVN 状态，再以 <code>idempotencyKey</code> 记录操作。只改本地 SVN working copy，后续记录索引与 diff 核验，不执行 SVN commit。跨 PAGE/集合拷贝、字段整体覆盖、任意 PAGE JSON 结构和反射组不能由当前 MCP 修改。</p>
+<p>查询链路已通过本地协议往返、zipapp 和临时 macOS 单文件可执行包的启动/工具发现测试；PAGE 节点、单字段新增/拷贝与过程函数写入已在临时 SVN 夹具中验证。真实 SVN 工作副本中完成了 27 个 MCP 工具的 stdio 调用验证，测试改动已受控撤销且未提交 SVN；曾发现 269 个 JSON PAGE 投影缺口，改进状态诊断并重建该工作区索引后，<code>projectionGapCount=0</code>、状态恢复为 <code>READY</code>。这不等于正式发行包、已安装 VSIX、AI 自动选用工具、Windows 或平台运行验收。完整字段关系、跨文件补偿/故障矩阵、字段删除/移动和反射组写入仍未交付；使用默认写入能力时应人工核对 SVN diff，不把工具响应当作平台运行证明。具体配置和调用顺序见<a href="GuthonCodeTool_使用手册.html#5-mcp">使用手册第 5 章</a>。</p>
 </section>
 
 <section class="section">
@@ -454,7 +488,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <thead><tr><th>验证证据</th><th>能够证明的范围</th></tr></thead>
 <tbody>
 <tr><td>Python、Nexus 或 Bridge 自动化测试</td><td>源码级命令、路由和组件行为；不能证明已安装 VSIX、真实浏览器或远端服务。</td></tr>
-<tr><td>MCP stdio 协议测试与临时打包握手</td><td>初始化、默认 24 工具发现和本地查询；临时 SVN 夹具另验证 PAGE 节点及过程函数写入，仍不能证明真实客户端路由、已安装 VSIX、Windows 或真实工作区写入。</td></tr>
+<tr><td>MCP stdio 协议、临时打包及真实 SVN 验证</td><td>初始化、27 工具发现、临时夹具与真实工作副本的 PAGE 节点/字段新增与拷贝/过程函数本地写入；测试改动已撤销，未提交 SVN。不能证明 AI 自动路由、已安装 VSIX、Windows 或平台运行。</td></tr>
 <tr><td>打包应用 <code>self-test</code></td><td>发行物可启动、可解析内置资源并能在临时目录完成基础设置。</td></tr>
 <tr><td>SQLite 索引与静态事实</td><td>当前本地源码快照中的对象、关系和可识别规则；不能证明运行时分支一定执行。</td></tr>
 <tr><td>数据库只读查询</td><td>指定目标和时点的数据库记录；不能证明页面版本、缓存或业务流程结果。</td></tr>

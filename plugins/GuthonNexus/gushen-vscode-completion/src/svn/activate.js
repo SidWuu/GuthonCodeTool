@@ -3,7 +3,7 @@ const { SvnBackendClient } = require('./backend-client');
 const { fragmentLabel, SvnCatalogTreeProvider } = require('./catalog-tree');
 const { SvnScmManager, workspaceKeyFromSourceControlId } = require('./scm-manager');
 const { decodeIdentity, SCHEME, SvnVirtualFileSystem } = require('./virtual-fs');
-const { procedureTargetAt } = require('../definition');
+const { localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt } = require('../definition');
 const { SvnSourceWatcher } = require('./source-watcher');
 const {
   DIFF_SCHEME,
@@ -404,17 +404,17 @@ function activateSvn({
     [{ scheme: SCHEME, language: 'guthon-gss' }, { scheme: SCHEME, language: 'java' }, { scheme: SCHEME, language: 'javascript' }],
     {
       async provideDefinition(document, position) {
-        const target = procedureTargetAt(document.getText(), document.offsetAt(position));
+        const source = document.getText();
+        const offset = document.offsetAt(position);
+        const localOffset = localFunctionDefinitionAt(source, offset);
+        if (localOffset !== null) {
+          return new vscode.Location(document.uri, document.positionAt(localOffset));
+        }
+        const target = procedureTargetAt(source, offset);
         if (!target) return undefined;
         const result = await backend.definition(document.uri.authority, target.alias, target.fun);
         if (!result.definition) return undefined;
-        const uri = virtualFs.uriFor({
-          workspaceKey: document.uri.authority,
-          sourceType: result.definition.sourceType,
-          sourceId: result.definition.sourceId,
-          funId: result.definition.funId || '',
-          jsonPointer: '',
-        });
+        const uri = virtualFs.uriFor(procedureDefinitionIdentity(document.uri.authority, result.definition));
         return new vscode.Location(uri, new vscode.Position(0, 0));
       },
     }

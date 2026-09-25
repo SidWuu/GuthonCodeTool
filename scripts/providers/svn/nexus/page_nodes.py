@@ -59,7 +59,7 @@ def _require_ready(conn) -> str:
             or not generation
             or conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
                             "AND name IN ('gusen_page_node', 'gusen_page_field', "
-                            "'gusen_page_field_relation')").fetchone()[0] != 3):
+                            "'gusen_page_field_relation', 'gusen_source_fragment')").fetchone()[0] != 4):
         raise PageIndexError(
             "INDEX_REBUILD_REQUIRED", "PAGE node directory requires a full local SVN reindex",
             next_action="Run the existing SVN reindex command for this workspace",
@@ -95,14 +95,17 @@ def index_status(workspace: dict) -> dict:
         return {"workspaceKey": workspace["workspaceKey"], "buildStatus": "MISSING",
                 "indexGeneration": None, "schemaVersion": None,
                 "parserVersion": source_facts.PAGE_NODE_PARSER_VERSION,
+                "projectionGapCount": 0,
                 "requiredAction": "svn-reindex"}
     with _connection(workspace) as conn:
         tables = {row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name IN ('gusen_page_node', 'gusen_page_field', 'gusen_page_field_relation')"
+            "AND name IN ('gusen_page_node', 'gusen_page_field', 'gusen_page_field_relation', "
+            "'gusen_source_fragment')"
         )}
         schema, version, field_schema, field_version, relation_schema, relation_version, generation = _state(conn)
-        if (tables != {'gusen_page_node', 'gusen_page_field', 'gusen_page_field_relation'}
+        if (tables != {'gusen_page_node', 'gusen_page_field', 'gusen_page_field_relation',
+                       'gusen_source_fragment'}
                 or schema != str(source_facts.PAGE_NODE_SCHEMA_VERSION)
                 or version != source_facts.PAGE_NODE_PARSER_VERSION
                 or field_schema != str(source_facts.PAGE_FIELD_SCHEMA_VERSION)
@@ -114,6 +117,7 @@ def index_status(workspace: dict) -> dict:
             field_count = 0
             relation_count = 0
             stale = 0
+            projection_gaps = 0
         else:
             count = conn.execute("SELECT COUNT(*) FROM gusen_page_node").fetchone()[0]
             field_count = conn.execute("SELECT COUNT(*) FROM gusen_page_field").fetchone()[0]
@@ -121,7 +125,16 @@ def index_status(workspace: dict) -> dict:
             stale = conn.execute(
                 "SELECT COUNT(*) FROM gusen_source_record WHERE provider='svn' AND status='STALE'"
             ).fetchone()[0]
-            status = "PARTIAL" if stale else "READY"
+            projection_gaps = conn.execute(
+                "SELECT COUNT(*) FROM gusen_source_record AS source "
+                "WHERE source.provider='svn' AND source.source_table='page' "
+                "AND source.source_path LIKE '%.json' "
+                "AND EXISTS (SELECT 1 FROM gusen_source_fragment AS fragment "
+                "            WHERE fragment.source_record_id=source.record_id) "
+                "AND NOT EXISTS (SELECT 1 FROM gusen_page_node AS node "
+                "                WHERE node.source_record_id=source.record_id)"
+            ).fetchone()[0]
+            status = "PARTIAL" if stale or projection_gaps else "READY"
     return {
         "workspaceKey": workspace["workspaceKey"],
         "buildStatus": status,
@@ -139,7 +152,8 @@ def index_status(workspace: dict) -> dict:
         "expectedFieldRelationParserVersion": source_facts.PAGE_FIELD_RELATION_PARSER_VERSION,
         "fieldRelationCount": relation_count,
         "staleSourceCount": stale,
-        "requiredAction": "svn-reindex" if status == "REBUILD_REQUIRED" else "",
+        "projectionGapCount": projection_gaps,
+        "requiredAction": "svn-reindex" if status == "REBUILD_REQUIRED" or projection_gaps else "",
     }
 
 
@@ -165,6 +179,16 @@ def _page_record(conn, source_namespace: str, source_id: str, fun_id: str = "") 
     if record["status"] not in {"OK", "SVN_DIRTY"}:
         raise PageIndexError("SOURCE_STALE", f"PAGE source status is {record['status']}",
                              retryable=True, next_action="Refresh the exact PAGE index entry")
+    if (record["source_path"].lower().endswith(".json")
+            and conn.execute("SELECT 1 FROM gusen_source_fragment "
+                             "WHERE source_record_id=? LIMIT 1", (record["record_id"],)).fetchone()
+            and not conn.execute("SELECT 1 FROM gusen_page_node "
+                                 "WHERE source_record_id=? LIMIT 1", (record["record_id"],)).fetchone()):
+        raise PageIndexError(
+            "INDEX_STALE", "PAGE source has indexed fragments but no semantic nodes",
+            retryable=True,
+            next_action="Refresh the exact PAGE with svn reindex-file --path " + record["source_path"],
+        )
     return record
 
 

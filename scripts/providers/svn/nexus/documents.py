@@ -16,6 +16,7 @@ from pathlib import Path
 from common.page_projection import (
     extract_page_fields,
     extract_page_scripts,
+    insert_json_array_item,
     json_string_token,
     pointer_value,
     replace_json_strings,
@@ -1165,8 +1166,10 @@ def resume_page_node_operation(workspace: dict, config: dict, *, operation_id: s
         }
 
 
-def _page_operation_request_hash(session_id: str, changes: list[dict]) -> str:
+def _page_operation_request_hash(session_id: str, changes: list[dict], field_insert=None) -> str:
     request = {"sessionId": session_id, "changes": changes}
+    if field_insert is not None:
+        request["fieldInsert"] = field_insert
     return _text_hash(json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
@@ -1359,12 +1362,12 @@ def write_batch(workspace: dict, *, session_id: str, changes: list[dict]) -> dic
 def write_page_nodes_batch(
     workspace: dict, *, session_id: str, changes: list[dict],
     idempotency_key: str | None = None, dry_run: bool = False,
+    field_insert: dict | None = None,
 ) -> dict:
     """Apply several leased PAGE string fragments to one source snapshot and physical file.
 
-    This shared primitive is also called by the opt-in MCP adapter through
-    page_mutation. Field-array structural operations remain unavailable; the
-    caller must advance index and diff stages before reporting completion.
+    The optional single-field insertion uses the same lease and operation
+    ledger, while preserving every existing field token in the source text.
     """
 
     require_capability(workspace, "edit")
@@ -1372,9 +1375,14 @@ def write_page_nodes_batch(
         raise SystemExit(f"PAGE node batch requires 1–{MAX_BATCH_CHANGES} changes")
     if not isinstance(dry_run, bool) or (dry_run and idempotency_key is not None):
         raise SystemExit("PAGE dry run must not reserve an idempotencyKey")
+    if field_insert is not None and (not isinstance(field_insert, dict)
+                                     or set(field_insert) != {"index", "field"}
+                                     or len(changes) != 1):
+        raise SystemExit("PAGE field insertion requires one exact field candidate")
     operation_path = _page_operation_path(workspace, idempotency_key) if idempotency_key is not None else None
     try:
-        request_hash = _page_operation_request_hash(session_id, changes) if operation_path else ""
+        request_hash = (_page_operation_request_hash(session_id, changes, field_insert)
+                        if operation_path else "")
     except (TypeError, ValueError) as error:
         raise SystemExit("PAGE node batch request must contain JSON-compatible values") from error
     with operation_lock(
@@ -1411,9 +1419,10 @@ def write_page_nodes_batch(
             pointer = item["document"].get("jsonPointer") or ""
             if (item["item"]["source_table"] != "page"
                     or item["path"].suffix.lower() != ".json"
-                    or item["document"].get("fragmentType") not in PAGE_FRAGMENT_TYPES - {"page-fields"}
+                    or item["document"].get("fragmentType") not in
+                    ({"page-fields"} if field_insert is not None else PAGE_FRAGMENT_TYPES - {"page-fields"})
                     or not pointer):
-                raise SystemExit("PAGE node batch accepts only leased PAGE script/SQL string fragments")
+                raise SystemExit("PAGE batch target is not an allowed leased fragment")
             if pointer in pointers:
                 raise SystemExit(f"PAGE node batch repeats JSON Pointer: {pointer}")
             pointers.add(pointer)
@@ -1428,19 +1437,31 @@ def write_page_nodes_batch(
         data = json.loads(source_text)
         if not isinstance(data, dict):
             raise SystemExit("Double-encoded PAGE JSON is read-only")
-        expected = {item["document"]["jsonPointer"]: pointer_value(data, item["document"]["jsonPointer"])
-                    for item in prepared}
-        replacements = {item["document"]["jsonPointer"]: item["content"] for item in prepared}
         base_source_text = _base_source_text(first["path"])
-        encoded_replacements = {}
-        for item in prepared:
-            if base_source_text is not None and item["content"] == item["baseContent"]:
-                base_token = _base_json_string_token(
-                    base_source_text, item["document"]["jsonPointer"]
-                )
-                if base_token:
-                    encoded_replacements[item["document"]["jsonPointer"]] = base_token
-        after_text = replace_json_strings(source_text, replacements, expected, encoded_replacements)
+        if field_insert is not None:
+            pointer = first["document"]["jsonPointer"]
+            original_fields = pointer_value(data, pointer)
+            candidate_fields = json.loads(first["content"])
+            index, field = field_insert["index"], field_insert["field"]
+            if (not isinstance(original_fields, list) or isinstance(index, bool)
+                    or not isinstance(index, int) or not 0 <= index <= len(original_fields)
+                    or not isinstance(field, dict)
+                    or candidate_fields != [*original_fields[:index], field, *original_fields[index:]]):
+                raise SystemExit("PAGE field candidate is not one insertion into the leased collection")
+            after_text = insert_json_array_item(source_text, pointer, index, field, original_fields)
+        else:
+            expected = {item["document"]["jsonPointer"]: pointer_value(data, item["document"]["jsonPointer"])
+                        for item in prepared}
+            replacements = {item["document"]["jsonPointer"]: item["content"] for item in prepared}
+            encoded_replacements = {}
+            for item in prepared:
+                if base_source_text is not None and item["content"] == item["baseContent"]:
+                    base_token = _base_json_string_token(
+                        base_source_text, item["document"]["jsonPointer"]
+                    )
+                    if base_token:
+                        encoded_replacements[item["document"]["jsonPointer"]] = base_token
+            after_text = replace_json_strings(source_text, replacements, expected, encoded_replacements)
         parsed_after = json.loads(after_text)
         if str(parsed_after.get("pageId") or first["item"]["source_id"]) != first["item"]["source_id"]:
             raise SystemExit("PAGE identity changed during node batch save")

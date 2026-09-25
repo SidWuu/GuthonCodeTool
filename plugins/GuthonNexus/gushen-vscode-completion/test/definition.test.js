@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { procedureTargetAt, selectDefinitionPaths } = require('../src/definition');
+const { localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt, selectDefinitionPaths } = require('../src/definition');
+const { SvnCatalogTreeProvider } = require('../src/svn/catalog-tree');
+const { documentFilename, encodeIdentity } = require('../src/svn/virtual-fs');
 
 function at(source, word) {
   return procedureTargetAt(source, source.indexOf(word) + 1);
@@ -19,6 +21,33 @@ test('resolves invoke and bound procedure calls at the method name', () => {
 test('uses the latest binding for a procedure variable', () => {
   const source = "#set($proc=$vs.proc.find('first'))\n#setup\n#set($proc=$vs.proc.find('second'))\n$proc.run();";
   assert.deepEqual(at(source, 'run'), { alias: 'second', fun: 'run' });
+});
+
+test('resolves a procedure local function call to its #function declaration', () => {
+  const source = '@refreshPursaleOccupancy($form);\n#function refreshPursaleOccupancy($form)\n#end';
+  assert.equal(localFunctionDefinitionAt(source, source.indexOf('refreshPursaleOccupancy') + 2),
+    source.lastIndexOf('refreshPursaleOccupancy'));
+  assert.equal(localFunctionDefinitionAt('@missing($form);\n#function other($form)\n#end', 2), null);
+  assert.equal(localFunctionDefinitionAt(source, source.indexOf('$form')), null);
+});
+
+test('definition and Nexus tree use the same procedure virtual document identity', () => {
+  const workspaceKey = 'products.demo';
+  const definition = {
+    sourceType: 'procedure', sourceId: 'demo.pkg#save', funId: 'save',
+    sourcePath: 'datasources/DS-1/procedures/demo/save.vm', workingCopyId: 'wc-1',
+  };
+  const provider = new SvnCatalogTreeProvider({
+    vscode: { EventEmitter: class { constructor() { this.event = () => {}; } } },
+  });
+  const element = provider._sourceElement({
+    label: 'save', object: { ...definition, fragments: [{ jsonPointer: '', scriptType: 'vm' }] },
+  }, null, workspaceKey);
+  const fromTree = element.command.arguments[0];
+  const fromDefinition = procedureDefinitionIdentity(workspaceKey, definition);
+  assert.equal(documentFilename(fromDefinition), documentFilename(fromTree));
+  assert.equal(encodeIdentity(fromDefinition), encodeIdentity(fromTree));
+  assert.equal(fromDefinition.workingCopyId, 'wc-1');
 });
 
 test('prefers the current project scope before duplicate mirrors', () => {

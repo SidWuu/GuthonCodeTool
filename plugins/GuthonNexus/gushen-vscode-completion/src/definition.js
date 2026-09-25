@@ -30,6 +30,34 @@ function procedureTargetAt(source, offset) {
   return null;
 }
 
+function localFunctionDefinitionAt(source, offset) {
+  const calls = /@([A-Za-z_]\w*)\s*\(/g;
+  for (const call of source.matchAll(calls)) {
+    const start = call.index + 1;
+    if (offset < start || offset > start + call[1].length) continue;
+    const definitions = /^[ \t]*#function[ \t]+([A-Za-z_]\w*)[ \t]*\(/gm;
+    for (const definition of source.matchAll(definitions)) {
+      if (definition[1] === call[1]) {
+        return definition.index + definition[0].indexOf(definition[1]);
+      }
+    }
+    return null;
+  }
+  return null;
+}
+
+function procedureDefinitionIdentity(workspaceKey, definition) {
+  return {
+    workspaceKey,
+    sourceType: definition.sourceType,
+    sourceId: definition.sourceId,
+    funId: definition.funId || '',
+    sourcePath: definition.sourcePath || '',
+    workingCopyId: definition.workingCopyId || definition.scopeEntryId || '',
+    jsonPointer: '',
+  };
+}
+
 function sourceInfo(filePath) {
   const match = path.normalize(filePath).replaceAll('\\', '/').match(PROCEDURE_PATH);
   return match && { owner: match[1], kind: match[2], layer: match[3], business: match[4] };
@@ -57,4 +85,4 @@ function selectDefinitionPaths(paths, currentPath) {
     .map((item) => item.filePath);
 }
 
-module.exports = { procedureTargetAt, selectDefinitionPaths };
+module.exports = { localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt, selectDefinitionPaths };

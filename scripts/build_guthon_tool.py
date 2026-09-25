@@ -45,6 +45,7 @@ HIDDEN_IMPORTS = (
     "providers.svn.nexus.manifest",
     "providers.svn.nexus.mcp_server",
     "providers.svn.nexus.page_mutation",
+    "providers.svn.nexus.page_field_mutation",
     "providers.svn.nexus.page_nodes",
     "providers.svn.nexus.procedure_mutation",
     "providers.svn.nexus.procedure_sources",
