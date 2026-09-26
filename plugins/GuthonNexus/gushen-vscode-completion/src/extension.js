@@ -369,10 +369,11 @@ async function runToolCommand(
   }
   const output = vscode.window.createOutputChannel('GuthonCodeTool');
   output.show(true);
+  const modeLabel = {
+    'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
+  }[tool.mode] || tool.mode;
   const execute = async () => {
-    output.appendLine(`运行：${command}${workspaceKey ? ` · ${workspaceKey}` : ''}（${{
-      'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
-    }[tool.mode] || tool.mode}）`);
+    output.appendLine(`运行：${command}${workspaceKey ? ` · ${workspaceKey}` : ''}（${modeLabel}）`);
     try {
       const result = await processClient.request(tool, command, extraArgs, workspaceKey, stdinPayload, {
         onOutput: (value) => output.append(value),
@@ -383,8 +384,9 @@ async function runToolCommand(
       vscode.window.showInformationMessage(`GuthonCodeTool 完成：${command}`);
       return true;
     } catch (error) {
-      output.appendLine(`GuthonCodeTool 失败：${error.message}`);
-      vscode.window.showErrorMessage(`GuthonCodeTool 失败：${error.message}`);
+      const target = workspaceKey ? ` · ${workspaceKey}` : '';
+      output.appendLine(`${label}失败${target}（${modeLabel}）：${error.message}`);
+      vscode.window.showErrorMessage(`${label}失败${target}（${modeLabel}）：${error.message}。详情见“输出 → GuthonCodeTool”`);
       return false;
     }
   };
@@ -468,6 +470,13 @@ class ToolTreeDataProvider {
     const modeLabel = {
       'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
     }[executionMode] || '发行模式';
+    const entryPath = executionMode === 'source-development'
+      ? (developmentRoot ? path.join(developmentRoot, 'scripts', 'guthon_tool.py') : '')
+      : executionMode === 'script' ? scriptToolPath : configuredToolPath;
+    const entryItem = staticItem('当前入口', 'file-code', entryPath ? path.basename(entryPath) : '未配置');
+    entryItem.tooltip = entryPath || '尚未选择工具入口';
+    const homeItem = staticItem('本地数据目录', 'folder', toolHome ? path.basename(toolHome) : '未配置');
+    homeItem.tooltip = toolHome || '尚未选择本地数据目录';
     runtime.iconPath = new vscode.ThemeIcon(executionMode === 'packaged' ? 'package' : 'beaker');
     runtime.description = modeLabel;
     runtime.children = [
@@ -481,7 +490,9 @@ class ToolTreeDataProvider {
             ? (path.basename(scriptToolPath) || 'Release 脚本')
             : '打包应用'
       ),
-      staticItem(`当前版本：${applicationVersion}`, 'tag'),
+      staticItem(`当前版本：${applicationVersion}`, 'tag', executionMode === 'packaged' ? '' : '发行应用'),
+      entryItem,
+      homeItem,
       toolItem(
         `更新源：${UPDATE_SOURCES[updateSource]?.label || 'Gitee'}`,
         'gushenCompletion.selectUpdateSource',
@@ -944,8 +955,11 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('gushenCompletion.checkToolUpdate', async () => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
-      if (config.get('executionMode', 'packaged') !== 'packaged') {
-        return vscode.window.showInformationMessage('调试模式直接使用源码，不检查 GuthonCodeTool 发行版更新');
+      const executionMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
+      if (executionMode !== 'packaged') {
+        const source = executionMode === 'script' ? 'Release pyz 和本地 Python' : '仓库源码和 .venv';
+        const label = executionMode === 'script' ? '调试模式' : '开发模式';
+        return vscode.window.showInformationMessage(`${label}使用${source}，不检查 GuthonCodeTool 发行版更新`);
       }
       if (activeToolRuns.size) {
         return vscode.window.showWarningMessage('当前有 GuthonCodeTool 或 SVN 操作正在执行，请完成后再检查更新');

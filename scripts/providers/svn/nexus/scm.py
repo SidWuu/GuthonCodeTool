@@ -219,7 +219,7 @@ def _delivery_markdown(workspace: dict, deliveries: list[dict]) -> str:
         "",
         "## 证据边界",
         "",
-        "本回执只证明列出的文件已完成 SVN commit；谷神平台最终提交及运行结果不在 Nexus 跟踪范围内。",
+        "列出的文件已完成 SVN commit 并取得 revision，即视为本次源码交付成功；编译、发布和业务运行结果不在 Nexus 跟踪范围内。",
     ])
     return "\n".join(lines).rstrip() + "\n"
 

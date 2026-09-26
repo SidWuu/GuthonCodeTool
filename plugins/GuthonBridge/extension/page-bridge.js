@@ -1109,13 +1109,14 @@
   function inspectCurrentPageSource() {
     const selectedTab = getSelectedTabInfo();
     const sourceName = String(selectedTab?.label || "").trim() || "源码片段";
+    const activePageCode = getActivePageTabCode();
     const candidates = [];
     for (const vm of getAllVueInstances()) {
       if (vm.fun || vm.localFun) {
         continue;
       }
       const pageId = findDeepFirst(vm, ["pageId"]);
-      if (!pageId) {
+      if (!pageId || (activePageCode && String(pageId) !== activePageCode)) {
         continue;
       }
       const pageVersion = findDeepFirst(vm, ["pageVersion", "versionMac", "version"]) || "";
@@ -1142,7 +1143,7 @@
     if (current) {
       return current;
     }
-    const pageCode = getCurrentPageCode();
+    const pageCode = activePageCode || getCurrentPageCode();
     if (!pageCode) {
       throw new Error("当前模块开发页面没有识别到页面编码");
     }
@@ -1198,20 +1199,13 @@
   }
 
   function inspectCurrentHubSource() {
-    if (isSystemScriptPage()) {
-      return { mode: "system-scripts", ...inspectSystemScriptTarget() };
+    const activeProcedureTab = document.querySelector('[role="tab"][aria-selected="true"][id^="tab-PR-"]');
+    if (activeProcedureTab && isVisible(activeProcedureTab)) {
+      return { dataSourceId: getDataSourceId(), ...inspectCurrentProcedure() };
     }
-    if (isViewManagementPage()) {
-      return { mode: "views", ...inspectViewTarget() };
-    }
-    if (isBillTypePage()) {
-      return { mode: "billtype", ...inspectBillTypeTarget() };
-    }
-    if (isDataTableManagementPage()) {
-      return { mode: "table-schema", ...inspectTableSchemaTarget() };
-    }
-    if (location.href.includes("/gdpaas/dev/modules")) {
-      const pageCode = getCurrentPageCode();
+    const activePageCode = getActivePageTabCode();
+    if (activePageCode || location.href.includes("/gdpaas/dev/modules")) {
+      const pageCode = activePageCode || getCurrentPageCode();
       if (!pageCode) {
         throw new Error("当前模块开发页面没有识别到页面编码");
       }
@@ -1226,6 +1220,18 @@
         funId: "",
         resolvedBy: "module-page-code"
       };
+    }
+    if (isSystemScriptPage()) {
+      return { mode: "system-scripts", ...inspectSystemScriptTarget() };
+    }
+    if (isViewManagementPage()) {
+      return { mode: "views", ...inspectViewTarget() };
+    }
+    if (isBillTypePage()) {
+      return { mode: "billtype", ...inspectBillTypeTarget() };
+    }
+    if (isDataTableManagementPage()) {
+      return { mode: "table-schema", ...inspectTableSchemaTarget() };
     }
     return { dataSourceId: getDataSourceId(), ...inspectCurrentProcedure() };
   }
@@ -1514,15 +1520,16 @@
   }
 
   function getCurrentPageCode() {
-    const pane = Array.from(document.querySelectorAll('[role="tabpanel"][id^="pane-PG-"]')).find(isVisible);
-    if (pane) {
-      return pane.id.replace(/^pane-/, "");
-    }
-    const selected = document.querySelector('.el-tabs__item[aria-selected="true"][id^="tab-PG-"]');
-    if (selected?.id) {
-      return selected.id.replace(/^tab-/, "");
-    }
+    const activePageCode = getActivePageTabCode();
+    if (activePageCode) return activePageCode;
     return getPageCodeFromVue() || getPageCodeFromUrl();
+  }
+
+  function getActivePageTabCode() {
+    const selected = document.querySelector('[role="tab"][aria-selected="true"][id^="tab-PG-"]');
+    if (selected?.id && isVisible(selected)) return selected.id.replace(/^tab-/, "");
+    const pane = Array.from(document.querySelectorAll('[role="tabpanel"][id^="pane-PG-"]')).find(isVisible);
+    return pane ? pane.id.replace(/^pane-/, "") : "";
   }
 
   function formatFieldLine(field) {
@@ -1970,7 +1977,7 @@
   }
 
   function inspectCurrent() {
-    return location.href.includes("/gdpaas/dev/modules")
+    return location.href.includes("/gdpaas/dev/modules") || getActivePageTabCode()
       ? inspectCurrentPageSource()
       : inspectCurrentProcedure();
   }

@@ -40,8 +40,9 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | ToolHost 与三运行模式 | `scripts/guthon_tool.py` | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-process-client.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/script-runtime.js`、`scripts/build_script_tool.py` | `tests/test_toolhost.py`、`tests/test_build_script_tool.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/tool-process-client.test.js` |
 | Nexus UI 命令 | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` | `plugins/GuthonNexus/gushen-vscode-completion/package.json` | `plugins/GuthonNexus/gushen-vscode-completion/test/rules.test.js` |
 | Nexus SVN 集成 | `plugins/GuthonNexus/gushen-vscode-completion/src/svn/backend-client.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/svn/scm-manager.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/svn-backend-client.test.js` |
+| Nexus 方言辅助、影响预览与 PAGE/过程函数定位 | `plugins/GuthonNexus/gushen-vscode-completion/src/svn/editor-assistance.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/svn/impact-preview.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/page-locator.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/activate.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/editor-assistance.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/impact-preview.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/page-locator.test.js` |
 | Bridge 服务端 | `plugins/GuthonBridge/bridge/server.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/bridge-process.js` | `plugins/GuthonBridge/bridge/server.test.js` |
-| Chrome Bridge 扩展 | `plugins/GuthonBridge/extension/content.js` | `plugins/GuthonBridge/extension/page-bridge.js` | `plugins/GuthonBridge/extension/fields-mover-core.test.js` |
+| Chrome Bridge 扩展与 PAGE/过程函数定位入口 | `plugins/GuthonBridge/extension/content.js`、`plugins/GuthonBridge/extension/popup.js` | `plugins/GuthonBridge/extension/page-bridge.js`、`plugins/GuthonBridge/extension/nexus-locator.js`、`plugins/GuthonBridge/extension/background.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/page-locator.js` | `plugins/GuthonBridge/bridge/server.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/page-locator.test.js` |
 | 发行构建 | `scripts/build_guthon_tool.py` | `GuthonCodeTool.spec` | `tests/test_build_guthon_tool.py` |
 | 谷神 API 补全数据 | `scripts/sync_guthon_api.mjs` | `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs` | 两个脚本的 `--self-test` |
 | 工具自更新 | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-updater.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/tool-updater.test.js` |
@@ -88,12 +89,13 @@ SVN：
 
 ## Guthon Bridge
 
-`plugins/GuthonBridge/bridge/server.js` 是本地服务入口，读取 `GUTHON_TOOL_HOME`；`plugins/GuthonBridge/extension/` 下 `content.js`、`background.js`、`page-bridge.js`、`workspace-selection.js` 分别负责页面注入、后台路由、页面桥与工作区选择。
+`plugins/GuthonBridge/bridge/server.js` 是本地服务入口，读取 `GUTHON_TOOL_HOME`；`plugins/GuthonBridge/extension/` 下 `content.js`、`background.js`、`page-bridge.js`、`workspace-selection.js` 分别负责页面注入与页签变化刷新、后台路由、页面桥与工作区选择。`nexus-locator.js` 为弹窗和页面左下角入口生成 PAGE/过程函数 URI，Nexus `activate.js` 的 URI handler 复用 `page-locator.js` 的精确定位流程。
 
 ## Build and release
 
 - `scripts/build_guthon_tool.py`：PyInstaller 打包，只打包 `config/example` 与 `VERSION`。
 - `scripts/build_script_tool.py`：构建不含第三方依赖和私有数据的 Python zipapp；`scripts/check_toolhost.py` 验证连续请求。
+- `scripts/check_release_smoke.py`：用临时 toolHome 检查源码、zipapp 或应用的版本、自检、初始化与 MCP 工具发现；`scripts/check_public_docs.mjs` 校验三份公开 HTML 后再部署 Pages。
 - `GuthonCodeTool.spec`：打包配置。
 - `scripts/sync_guthon_api.mjs`：从 `<toolHome>/config/sync.yaml` 读取谷神版本，更新 `<toolHome>/var/docs/谷神方言API/` 与插件补全数据。
 - `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs`：从 API 文档目录生成 `plugins/GuthonNexus/gushen-vscode-completion/data/index.json`。

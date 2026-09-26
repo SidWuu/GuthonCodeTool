@@ -104,6 +104,40 @@ body.guthon-bridge-popup {
   background: #e6a23c;
 }
 
+.guthon-bridge-popup .action-nexus {
+  display: inline-flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  border-color: #b7d8ff;
+  border-radius: 8px;
+  color: #1d5fb7;
+  background: #fff;
+  white-space: nowrap;
+}
+
+.guthon-bridge-popup .action-nexus:hover,
+.guthon-bridge-popup .action-nexus:focus-visible {
+  border-color: #409eff;
+  color: #1552a2;
+  background: #eaf4ff;
+}
+
+.guthon-bridge-popup .action-nexus-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: #fff;
+  background: #409eff;
+  font-size: 16px;
+  line-height: 1;
+}
+
 .guthon-bridge-popup #closeBtn {
   width: 28px;
   height: 28px;
@@ -185,8 +219,24 @@ body.guthon-bridge-popup {
 }
 
 .guthon-bridge-inline:not([data-mode="module"]) .guthon-bridge-module-only {
-  visibility: hidden;
-  pointer-events: none;
+  display: none;
+}
+
+.guthon-bridge-inline:not([data-mode="module"]):not([data-mode="procedure"]) .guthon-bridge-nexus-button {
+  display: none;
+}
+
+.guthon-bridge-inline .guthon-bridge-nexus-button {
+  border-color: #9ecbff;
+  color: #1d5fb7;
+  background: #ecf5ff;
+}
+
+.guthon-bridge-inline .guthon-bridge-nexus-button:hover,
+.guthon-bridge-inline .guthon-bridge-nexus-button:focus-visible {
+  border-color: #409eff;
+  color: #fff;
+  background: #409eff;
 }
 
 .guthon-bridge-inline:not([data-mode="system-scripts"]) .guthon-bridge-system-script-only {

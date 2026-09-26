@@ -1647,11 +1647,13 @@ def query_source_context(conn, scope_id, source_id, fun_id="", limit=20):
     ).fetchall()
     incoming = conn.execute(
         """
-        SELECT source_layer, source_table, source_id, source_alias_id, fun_id, script_type, json_path, line_no,
-               invoke_type, confidence
-        FROM gusen_invoke_call_detail
-        WHERE scope_id=? AND target_alias_id=? AND target_fun_id=?
-        ORDER BY source_layer, source_alias_id, fun_id, line_no
+        SELECT c.source_layer, c.source_table, c.source_id, c.source_alias_id, c.fun_id,
+               c.script_type, c.json_path, c.line_no, c.invoke_type, c.confidence,
+               s.source_namespace, s.source_path, s.working_copy_id
+        FROM gusen_invoke_call_detail c
+        JOIN gusen_source_record s ON s.record_id=c.source_record_id
+        WHERE c.scope_id=? AND c.target_alias_id=? AND c.target_fun_id=?
+        ORDER BY c.source_layer, c.source_alias_id, c.fun_id, c.line_no
         LIMIT ?
         """,
         (scope_id, source["source_alias_id"], source["fun_id"], limit),
@@ -4030,87 +4032,87 @@ def pull_source_to_work_copy(payload: dict):
     layer, scope_id, project_id, layer_cfg = resolve_pull_scope(cfg, payload)
     rules = cfg["sync"].get("rules") or {}
     pull_diff_check = rules.get("pull_diff_check", True)
-    conn = connect_index(workspace["indexPath"])
-    sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload, rules)
-    ds_name = layer_cfg["datasource"]
-    ds = cfg["datasource"]["datasource"][ds_name]
-    with db_connect(ds) as remote:
-        system_scope = resolve_system_scope(remote, cfg, ds_name, workspace)
-        model_paths = load_model_paths(remote, cfg["source_tables"]) if payload["sourceType"] == PAGE_SOURCE_TYPE else {}
-        with remote.cursor() as cur:
-            cur.execute(sql, params)
-            row = cur.fetchone()
-            rows = [row] if row else []
-            if row and row["source_table"] == PAGE_SOURCE_TYPE and row.get("mk_id") and rules.get("pull_more_page", False):
-                module_sql, module_params = module_page_sql(cfg["source_tables"], row, rules)
-                cur.execute(module_sql, module_params)
-                rows = cur.fetchall()
-    for candidate in rows:
-        if candidate["source_table"] == PAGE_SOURCE_TYPE:
-            candidate["model_path"] = model_paths.get(_str(candidate.get("model_id")))
-    if not row:
-        if project_id:
-            found = find_work_copy_source(
-                conn, None, project_id, payload["sourceType"], payload.get("alias") or payload.get("sourceId") or "", payload.get("funId") or ""
+    with index_connection(workspace, action="workcopy-pull", readonly=False) as conn:
+        sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload, rules)
+        ds_name = layer_cfg["datasource"]
+        ds = cfg["datasource"]["datasource"][ds_name]
+        with db_connect(ds) as remote:
+            system_scope = resolve_system_scope(remote, cfg, ds_name, workspace)
+            model_paths = load_model_paths(remote, cfg["source_tables"]) if payload["sourceType"] == PAGE_SOURCE_TYPE else {}
+            with remote.cursor() as cur:
+                cur.execute(sql, params)
+                row = cur.fetchone()
+                rows = [row] if row else []
+                if row and row["source_table"] == PAGE_SOURCE_TYPE and row.get("mk_id") and rules.get("pull_more_page", False):
+                    module_sql, module_params = module_page_sql(cfg["source_tables"], row, rules)
+                    cur.execute(module_sql, module_params)
+                    rows = cur.fetchall()
+        for candidate in rows:
+            if candidate["source_table"] == PAGE_SOURCE_TYPE:
+                candidate["model_path"] = model_paths.get(_str(candidate.get("model_id")))
+        if not row:
+            if project_id:
+                found = find_work_copy_source(
+                    conn, None, project_id, payload["sourceType"], payload.get("alias") or payload.get("sourceId") or "", payload.get("funId") or ""
+                )
+                work_result = create_work_copy_from_row(conn, cfg, found, workspace, diff_check=pull_diff_check)
+                return {
+                    "ok": True,
+                    "workspaceKey": workspace["workspaceKey"],
+                    "changed": False,
+                    "message": "拉取成功, 已覆盖 workcopy" if not pull_diff_check else "拉取成功, 已保留本地修改" if work_result["localChanged"] else "拉取成功, 无变更",
+                    "workCopyPath": work_result["path"],
+                    "workCopyStatus": work_result["state"],
+                    "workCopyAction": work_result["action"],
+                    "localChanged": work_result["localChanged"],
+                    "gitAddStatus": work_result.get("gitAddStatus", "DISABLED"),
+                    "gitAdded": work_result.get("gitAdded", 0),
+                    "pulled": 1,
+                    "source": {key: _str(found[key]) if key in found.keys() else "" for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},
+                }
+            allowed = ", ".join(rules.get("allow_unchecked_check_out_user_ids") or []) or "none"
+            raise SystemExit(
+                "Source not found or filtered. "
+                f"type={payload.get('sourceType')}, sourceId={payload.get('sourceId') or ''}, "
+                f"alias={payload.get('alias') or ''}, funId={payload.get('funId') or ''}. "
+                f"Allowed source must be checked in or checked out by configured users: {allowed}."
             )
-            work_result = create_work_copy_from_row(conn, cfg, found, workspace, diff_check=pull_diff_check)
-            return {
-                "ok": True,
-                "workspaceKey": workspace["workspaceKey"],
-                "changed": False,
-                "message": "拉取成功, 已覆盖 workcopy" if not pull_diff_check else "拉取成功, 已保留本地修改" if work_result["localChanged"] else "拉取成功, 无变更",
-                "workCopyPath": work_result["path"],
-                "workCopyStatus": work_result["state"],
-                "workCopyAction": work_result["action"],
-                "localChanged": work_result["localChanged"],
-                "gitAddStatus": work_result.get("gitAddStatus", "DISABLED"),
-                "gitAdded": work_result.get("gitAdded", 0),
-                "pulled": 1,
-                "source": {key: _str(found[key]) if key in found.keys() else "" for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},
-            }
-        allowed = ", ".join(rules.get("allow_unchecked_check_out_user_ids") or []) or "none"
-        raise SystemExit(
-            "Source not found or filtered. "
-            f"type={payload.get('sourceType')}, sourceId={payload.get('sourceId') or ''}, "
-            f"alias={payload.get('alias') or ''}, funId={payload.get('funId') or ''}. "
-            f"Allowed source must be checked in or checked out by configured users: {allowed}."
-        )
-    rows = [candidate for candidate in rows if _included(layer_cfg, candidate)]
-    if not rows:
-        raise SystemExit("Source is outside configured include scope")
-    work_results = []
-    changed = False
-    for candidate in rows:
-        changed = upsert_source(
-            conn,
-            candidate,
-            layer,
-            scope_id,
-            project_id,
-            layer_cfg,
-            system_scope,
-            force=not pull_diff_check or bool(payload.get("force")),
-        ) or changed
-    conn.commit()
-    for candidate in rows:
-        work_results.append(create_work_copy_from_row(conn, cfg, candidate, workspace, diff_check=pull_diff_check))
-    conn.commit()
-    work_copy_path = os.path.commonpath([result["path"] for result in work_results])
-    local_changed = any(result["localChanged"] for result in work_results)
-    return {
-        "ok": True,
-        "workspaceKey": workspace["workspaceKey"],
-        "changed": changed,
-        "message": "拉取成功, 已覆盖 readonly/workcopy" if not pull_diff_check else "拉取成功, 已保留本地修改" if local_changed else "拉取成功" if changed else "拉取成功, 无变更",
-        "workCopyPath": work_copy_path,
-        "workCopyStatus": work_results[0]["state"] if len(work_results) == 1 else "MULTIPLE",
-        "workCopyAction": work_results[0]["action"] if len(work_results) == 1 else "MULTIPLE",
-        "localChanged": local_changed,
-        "gitAddStatus": work_results[0].get("gitAddStatus", "DISABLED") if len(work_results) == 1 else "MULTIPLE",
-        "gitAdded": sum(result.get("gitAdded", 0) for result in work_results),
-        "pulled": len(work_results),
-        "source": {key: _str(row.get(key)) for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},
-    }
+        rows = [candidate for candidate in rows if _included(layer_cfg, candidate)]
+        if not rows:
+            raise SystemExit("Source is outside configured include scope")
+        work_results = []
+        changed = False
+        for candidate in rows:
+            changed = upsert_source(
+                conn,
+                candidate,
+                layer,
+                scope_id,
+                project_id,
+                layer_cfg,
+                system_scope,
+                force=not pull_diff_check or bool(payload.get("force")),
+            ) or changed
+        conn.commit()
+        for candidate in rows:
+            work_results.append(create_work_copy_from_row(conn, cfg, candidate, workspace, diff_check=pull_diff_check))
+        conn.commit()
+        work_copy_path = os.path.commonpath([result["path"] for result in work_results])
+        local_changed = any(result["localChanged"] for result in work_results)
+        return {
+            "ok": True,
+            "workspaceKey": workspace["workspaceKey"],
+            "changed": changed,
+            "message": "拉取成功, 已覆盖 readonly/workcopy" if not pull_diff_check else "拉取成功, 已保留本地修改" if local_changed else "拉取成功" if changed else "拉取成功, 无变更",
+            "workCopyPath": work_copy_path,
+            "workCopyStatus": work_results[0]["state"] if len(work_results) == 1 else "MULTIPLE",
+            "workCopyAction": work_results[0]["action"] if len(work_results) == 1 else "MULTIPLE",
+            "localChanged": local_changed,
+            "gitAddStatus": work_results[0].get("gitAddStatus", "DISABLED") if len(work_results) == 1 else "MULTIPLE",
+            "gitAdded": sum(result.get("gitAdded", 0) for result in work_results),
+            "pulled": len(work_results),
+            "source": {key: _str(row.get(key)) for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},
+        }
 
 
 def resolve_pull_scope(cfg: dict, payload: dict):

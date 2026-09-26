@@ -300,6 +300,63 @@ def search_sources(
     }
 
 
+def search_page_fields(
+    workspace: dict, *, source_namespace: str, field_id_prefix: str,
+    limit: int = 50, cursor: str = "",
+) -> dict:
+    """Find source-backed UI field names across PAGEs in one namespace, without inferring relations."""
+
+    require_capability(workspace, "browse")
+    if not isinstance(source_namespace, str) or not source_namespace.strip() or len(source_namespace) > 512:
+        raise PageIndexError("INVALID_FILTER", "sourceNamespace is required")
+    if not isinstance(field_id_prefix, str) or not 1 <= len(field_id_prefix) <= 128:
+        raise PageIndexError("INVALID_FILTER", "fieldIdPrefix must contain 1–128 characters")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_PAGE_SIZE:
+        raise PageIndexError("INVALID_LIMIT", f"limit must be between 1 and {MAX_PAGE_SIZE}")
+    _require_index_file(workspace)
+    with _connection(workspace) as conn:
+        generation = _require_ready(conn)
+        query = [workspace["workspaceKey"], source_namespace, field_id_prefix]
+        after = _decode_cursor(cursor, generation, query, key_length=3) if cursor else None
+        if after and not after[2].isdecimal():
+            raise PageIndexError("INVALID_CURSOR", "PAGE field search cursor has no valid position")
+        clauses = ["s.provider='svn'", "s.source_table='page'", "s.source_namespace=?",
+                   "substr(f.field_id, 1, ?) = ?"]
+        params: list[object] = [source_namespace, len(field_id_prefix), field_id_prefix]
+        if after:
+            clauses.append("(s.source_id, f.json_pointer, f.rowid) > (?, ?, ?)")
+            params.extend([after[0], after[1], int(after[2])])
+        rows = conn.execute(
+            "SELECT s.source_id, s.fun_id, s.source_namespace, s.source_path, s.source_hash, "
+            "s.working_copy_id, f.rowid AS field_row_id, f.field_id, f.label, f.region_type, "
+            "f.json_pointer, f.collection_pointer, f.table_id, f.column_id "
+            "FROM gusen_page_field f JOIN gusen_source_record s ON s.record_id=f.source_record_id "
+            "WHERE " + " AND ".join(clauses)
+            + " ORDER BY s.source_id, f.json_pointer, f.rowid LIMIT ?",
+            (*params, limit + 1),
+        ).fetchall()
+    visible = rows[:limit]
+    has_more = len(rows) > limit
+    next_cursor = _encode_cursor(generation, query, [
+        visible[-1]["source_id"], visible[-1]["json_pointer"], str(visible[-1]["field_row_id"]),
+    ]) if has_more else None
+    return {
+        "workspaceKey": workspace["workspaceKey"], "sourceNamespace": source_namespace,
+        "fieldIdPrefix": field_id_prefix, "indexGeneration": generation,
+        "coverage": "INDEXED_UI_FIELDS_ONLY", "relationResolution": "UNVERIFIED",
+        "fields": [{
+            "sourceType": "page", "sourceNamespace": row["source_namespace"],
+            "sourceId": row["source_id"], "funId": row["fun_id"],
+            "sourcePath": row["source_path"], "indexedSourceHash": row["source_hash"],
+            "workingCopyId": row["working_copy_id"], "fieldId": row["field_id"],
+            "label": row["label"], "regionType": row["region_type"],
+            "jsonPointer": row["json_pointer"], "collectionPointer": row["collection_pointer"],
+            "tableId": row["table_id"], "columnId": row["column_id"],
+        } for row in visible],
+        "complete": not has_more, "truncated": has_more, "nextCursor": next_cursor,
+    }
+
+
 def list_nodes(
     workspace: dict, *, source_namespace: str, source_id: str, fun_id: str = "",
     node_type: str = "", event_scope: str = "", limit: int = 50, cursor: str = "",
@@ -370,7 +427,8 @@ def _field_descriptor(row) -> dict:
 
 def list_fields(
     workspace: dict, *, source_namespace: str, source_id: str, fun_id: str = "",
-    region_type: str = "", field_id: str = "", limit: int = 50, cursor: str = "",
+    region_type: str = "", field_id: str = "", field_id_prefix: str = "",
+    limit: int = 50, cursor: str = "",
 ) -> dict:
     """List typed UI fields; datasource projection columns stay in their source collection."""
 
@@ -381,11 +439,16 @@ def list_fields(
         raise PageIndexError("INVALID_FILTER", "Unknown PAGE field region")
     if not isinstance(field_id, str) or len(field_id) > 128:
         raise PageIndexError("INVALID_FILTER", "fieldId is invalid")
+    if not isinstance(field_id_prefix, str) or len(field_id_prefix) > 128:
+        raise PageIndexError("INVALID_FILTER", "fieldIdPrefix is invalid")
     _require_index_file(workspace)
     with _connection(workspace) as conn:
         generation = _require_ready(conn)
         record = _page_record(conn, source_namespace, source_id, fun_id)
-        query = [workspace["workspaceKey"], source_namespace, source_id, fun_id, region_type, field_id]
+        query = [workspace["workspaceKey"], source_namespace, source_id, fun_id,
+                 region_type, field_id]
+        if field_id_prefix:
+            query.append(field_id_prefix)
         after = _decode_cursor(cursor, generation, query, key_length=4) if cursor else None
         if after and not after[2].isdecimal():
             raise PageIndexError("INVALID_CURSOR", "PAGE field cursor has no valid ordinal")
@@ -397,6 +460,9 @@ def list_fields(
         if field_id:
             clauses.append("field_id=?")
             params.append(field_id)
+        if field_id_prefix:
+            clauses.append("substr(field_id, 1, ?) = ?")
+            params.extend((len(field_id_prefix), field_id_prefix))
         if after:
             clauses.append("(region_type, collection_pointer, ordinal, json_pointer) > (?, ?, ?, ?)")
             params.extend([after[0], after[1], int(after[2]), after[3]])
@@ -724,13 +790,19 @@ def source_context(
             (record_id, limit + 1),
         ).fetchall()
         accesses = conn.execute(
-            "SELECT table_name, operation, confidence, evidence FROM gusen_data_access "
-            "WHERE source_record_id=? ORDER BY table_name, operation, access_id LIMIT ?",
+            "SELECT a.table_name, a.operation, a.confidence, a.evidence, a.line_no, "
+            "f.json_pointer, f.fragment_type FROM gusen_data_access a "
+            "LEFT JOIN gusen_source_fragment f ON f.fragment_id=a.source_fragment_id "
+            "AND f.source_record_id=a.source_record_id "
+            "WHERE a.source_record_id=? ORDER BY a.table_name, a.operation, a.access_id LIMIT ?",
             (record_id, limit + 1),
         ).fetchall()
         facts = conn.execute(
-            "SELECT fact_kind, subject, value_text, confidence, line_start FROM gusen_logic_fact "
-            "WHERE source_record_id=? ORDER BY fact_kind, line_start, fact_id LIMIT ?",
+            "SELECT l.fact_kind, l.subject, l.value_text, l.confidence, l.line_start, "
+            "f.json_pointer, f.fragment_type FROM gusen_logic_fact l "
+            "LEFT JOIN gusen_source_fragment f ON f.fragment_id=l.source_fragment_id "
+            "AND f.source_record_id=l.source_record_id "
+            "WHERE l.source_record_id=? ORDER BY l.fact_kind, l.line_start, l.fact_id LIMIT ?",
             (record_id, limit + 1),
         ).fetchall()
         node_count = conn.execute(

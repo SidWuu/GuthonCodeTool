@@ -22,6 +22,7 @@ from common.page_projection import (
     replace_json_strings,
     replace_json_value,
 )
+from common.source_facts import compare_page_evidence
 from common.source_format import (
     decode_source,
     encode_source,
@@ -1509,7 +1510,9 @@ def write_page_nodes_batch(
             return {
                 "ok": True, "dryRun": True, "workspaceKey": workspace["workspaceKey"],
                 "sourcePath": first["item"]["source_path"],
+                "workingCopyId": first["item"].get("working_copy_id") or first["entry"].id,
                 "beforeHash": first["sourceHash"], "candidateSourceHash": combined["afterHash"],
+                "evidenceDelta": compare_page_evidence(data, parsed_after),
                 "changed": physical_changed, "byteDelta": len(after_bytes) - len(first["sourceBytes"]),
                 "nodes": [{"jsonPointer": item["jsonPointer"], "changed": item["changed"]}
                           for item in results],

@@ -36,6 +36,7 @@ test('classifies SVN mutations as writes so they cannot be replayed as reads', (
   assert.equal(requestKind('svn', ['auth-cache']), 'write');
   assert.equal(requestKind('svn', ['refresh']), 'write');
   assert.equal(requestKind('svn', ['scm-status']), 'read');
+  assert.equal(requestKind('svn', ['page-query']), 'read');
 });
 
 test('restarts a crashed read once and never replays an uncertain write', async () => {

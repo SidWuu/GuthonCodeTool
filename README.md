@@ -81,6 +81,10 @@ SVN 新模式的工作区只创建 `docs` 和 `context` 等派生资料；唯一
 `<toolHome>/var/checkout/<配置 ID>/`。资源管理器保留原始目录供查看，日常修改从“谷神源码”进入并
 回写同一份文件；过程函数节点可右键复制函数名或 `包名.函数名`，也可选择索引识别的调用方并跳转到精确调用行。过程函数调用支持转到索引中的定义，`@子方法(...)` 支持跳转到当前源码中的 `#function` 声明；从定义打开的源码可在“谷神源码”树中定位，并与树节点共用编辑器文档。不再生成额外 `source/readonly` 或 `source/workcopy` 代码副本。
 
+Nexus 虚拟编辑器对当前 GSS 中重复的本地 `#function` 和当前 PAGE 字段集合中重复的 `fieldId` 给出警告；`@` 调用补全当前文档的函数，`selectCodefieldId` 先补全当前集合，再用精确 PAGE 索引补充其他集合的候选并显示来源。源码树的 PAGE JSON、过程函数可执行“预览源码影响”查看表访问、显式字段关系、逻辑事实和调用线索；“浏览影响证据”可从 PAGE 字段关系、表访问、逻辑事实或过程函数调用位置跳回虚拟源码。预览显示索引代次与源码哈希，结果有界且可能截断；它不证明字段可安全删除，也不代表平台运行验证。PAGE 节点还可按字面前缀查找同一命名空间中其他 PAGE 的字段，候选关系均标为未验证；命令面板可按完整 PAGE ID 或过程函数的包名与函数名精确定位本地源码，Bridge 弹窗及页面左下角按钮也能传入当前页签身份，均需明确选择 SVN 工作区。
+
+MCP 的 PAGE 脚本/SQL 修改与字段插入预检在同一源码快照上比较表访问、显式字段关系，返回新增/移除数量、有界明细、working copy、预检前源码哈希及候选哈希；预检不会写入物理文件，提交前应核对差异。
+
 ## 配置
 
 发行模式优先在 Nexus 的“工作区”或“项目”区域点击“添加产品或项目”。向导只收集产品/项目、名称、稳定 ID 和源码来源；选择 SVN 或 DATABASE 后即创建对应 Nexus 并结束。新建 SVN Nexus 中的“设置工作区 SVN 登录”、“导入/粘贴 SVN checkout 配置”和“编辑 SVN 地址配置”用于后续配置；每个产品或项目只保存一个 `svn.url`，默认完整 checkout 该地址，不会探测其他工作区的脚本。DATABASE Nexus 可先创建，后续再补充 datasource。生成的 `workspaceKey` 写入 `products.yaml` / `projects.yaml`；`systems.include.mappings` 可选，只用于身份匹配、命名和路由子系统，不过滤 SVN 目录。后续增加项目使用同一入口，无需重新初始化数据目录。
@@ -152,7 +156,7 @@ printf '%s' '{"sql":"SELECT COUNT(*) AS total FROM DEMO_ORDER","maxRows":100}' |
 SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 SVN，并在已有的
 `config/products.yaml`（项目写在 `config/projects.yaml`）对应条目中配置唯一 `svn.url`。Nexus 对该地址执行一次完整 checkout；`systems.include.mappings` 不参与目录筛选。地址无效、权限不足、网络或认证失败都会终止本次 checkout 并显示错误。
 新增工作区时也可选择谷神平台为当前产品/项目下载的 `svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`
-（Windows），Nexus 只解析一次其中的 checkout 命令；脚本不会被执行，也不会从 `context/` 或其他工作区自动发现。之后检出/更新以配置为准。简明步骤见 [发行模式新增 SVN 产品或项目](docs/GuthonCodeTool_发行模式新增SVN产品项目.md)：
+（Windows），Nexus 只解析一次其中的 checkout 命令；脚本不会被执行，也不会从 `context/` 或其他工作区自动发现。之后检出/更新以配置为准。操作步骤见 [使用手册的 SVN 路线](docs/GuthonCodeTool_使用手册.html#2-3-svn-路线)：
 
 ```bash
 .venv/bin/python scripts/guthon_tool.py source-mode --home "$GUTHON_HOME" --workspace products.demo-product -- set --mode svn
@@ -174,7 +178,7 @@ SVN MCP 是与 Nexus、Bridge 并列的 AI 查询和受控源码修改入口，�
 .venv/bin/python scripts/guthon_tool.py mcp --stdio --home "$GUTHON_HOME"
 ```
 
-默认提供 27 个工具：14 个只读工具（含独立的 SVN 对象索引状态、过程函数有界读取与调用方证据）和 13 个受控编辑/恢复工具；`--read-only` 仅暴露 14 个只读工具。PAGE 写入限于授权 SVN working copy 中稳定的脚本/SQL 字符串节点及同一已识别 UI 字段集合内的单字段新增/拷贝，不支持任意 PAGE JSON、跨集合复制或反射组修改。过程函数按 `workspaceKey + sourceNamespace + sourceId + funId + workingCopyId` 精确定位，先读取、取得编辑租约、预览，再以幂等键写入本地物理文件并核对索引和 SVN diff；不提交 SVN。字段目录仅索引有组件宿主的界面字段；无原生身份的数据源列仍从字段集合按需读取。关系查询保留显式 `selectCodefieldId` 指向及未解析的 `otherSetFields` 证据；引用检查始终不批准自动删除，不能作为完整引用证明。stdio 握手支持 MCP `2025-03-26`、`2025-06-18` 和 `2025-11-25`；不回显未支持版本，客户端须确认协商结果。工具要求显式 `workspaceKey`。PAGE 语义索引和 SVN 对象索引分别用 `get_index_status`、`get_source_index_status` 检查；`REBUILD_REQUIRED` 需显式重建，`PARTIAL` 且 `projectionGapCount>0` 表示某些 JSON PAGE 有片段但缺少语义节点，可先按精确 `sourcePath` 执行 `svn reindex-file --path`，范围较多时重建工作区索引。缺口目标会返回 `INDEX_STALE`，不会误作空 PAGE。MCP 不会自行迁移真实索引。索引 generation 改变时旧分页游标会被拒绝。Nexus 的现有编辑入口不受影响。
+默认提供 28 个工具：15 个只读工具（含独立的 SVN 对象索引状态、过程函数有界读取与调用方证据）和 13 个受控编辑/恢复工具；`--read-only` 仅暴露 15 个只读工具。PAGE 写入限于授权 SVN working copy 中稳定的脚本/SQL 字符串节点及同一已识别 UI 字段集合内的单字段新增/拷贝，不支持任意 PAGE JSON、跨集合复制或反射组修改。过程函数按 `workspaceKey + sourceNamespace + sourceId + funId + workingCopyId` 精确定位，先读取、取得编辑租约、预览，再以幂等键写入本地物理文件并核对索引和 SVN diff；不提交 SVN。字段目录仅索引有组件宿主的界面字段；无原生身份的数据源列仍从字段集合按需读取。关系查询保留显式 `selectCodefieldId` 指向及未解析的 `otherSetFields` 证据；引用检查始终不批准自动删除，不能作为完整引用证明。stdio 握手支持 MCP `2025-03-26`、`2025-06-18` 和 `2025-11-25`；不回显未支持版本，客户端须确认协商结果。工具要求显式 `workspaceKey`。PAGE 语义索引和 SVN 对象索引分别用 `get_index_status`、`get_source_index_status` 检查；`REBUILD_REQUIRED` 需显式重建，`PARTIAL` 且 `projectionGapCount>0` 表示某些 JSON PAGE 有片段但缺少语义节点，可先按精确 `sourcePath` 执行 `svn reindex-file --path`，范围较多时重建工作区索引。缺口目标会返回 `INDEX_STALE`，不会误作空 PAGE。MCP 不会自行迁移真实索引。索引 generation 改变时旧分页游标会被拒绝。Nexus 的现有编辑入口不受影响。
 
 同一只读 PAGE 服务也可由 `svn page-query` 使用 JSON stdin 调用，并供 Nexus 后端按相同结果结构查询。Nexus 源码版的 SVN 源码树可对 PAGE JSON 使用“浏览 PAGE 语义节点”命令按页选择，再经过源码复核打开现有虚拟文档；尚无独立新面板，已安装 VSIX 需重新打包安装后才包含此命令。示例：
 
@@ -182,7 +186,9 @@ SVN MCP 是与 Nexus、Bridge 并列的 AI 查询和受控源码修改入口，�
 echo '{"name":"list_page_nodes","arguments":{"sourceNamespace":"pages-SYS-1","sourceId":"PG-1","limit":20}}' | .venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- page-query
 ```
 
-PAGE 节点写入流程为 `open_page_node_edit → preview_page_nodes → update_page_nodes → get_page_operation / resume_page_operation`；字段新增/拷贝为 `open_page_field_insert → preview_page_field_insert → insert_page_field → get_page_operation / resume_page_operation`；过程函数为 `open_procedure_edit → preview_procedure → update_procedure → get_procedure_operation / resume_procedure_operation`。新增字段始终生成新 `id`；仅当候选原有 `guid` 键时才生成新 `guid`，省略时保持省略。正式写入要求工作区 `edit` 能力、授权文件、未过期的编辑令牌、当前源码与索引一致及调用方提供 `idempotencyKey`；响应丢失后先用该 key 查询原 operation，避免盲目重写。写入仅保存到本地 SVN working copy，**不会提交 SVN**。需要强制只读的客户端可在 `--stdio` 后加 `--read-only`，此时只发现 14 个查询工具。字段删除、移动和反射组写入仍不开放；真实工作区已通过 27 个工具的本地调用验证并受控撤销测试改动，但已安装 VSIX、Windows、AI 自主路由与故障矩阵尚未完成验收，使用写入后必须人工核对 SVN diff，不把工具响应当作平台运行结果。
+`list_page_fields` 另支持可选 `fieldIdPrefix`，按字面前缀在精确 PAGE 内分页筛选；与 `fieldId` 的精确匹配不同，`%` 和 `_` 不作为通配符。
+
+PAGE 节点写入流程为 `open_page_node_edit → preview_page_nodes → update_page_nodes → get_page_operation / resume_page_operation`；字段新增/拷贝为 `open_page_field_insert → preview_page_field_insert → insert_page_field → get_page_operation / resume_page_operation`；过程函数为 `open_procedure_edit → preview_procedure → update_procedure → get_procedure_operation / resume_procedure_operation`。新增字段始终生成新 `id`；仅当候选原有 `guid` 键时才生成新 `guid`，省略时保持省略。正式写入要求工作区 `edit` 能力、授权文件、未过期的编辑令牌、当前源码与索引一致及调用方提供 `idempotencyKey`；响应丢失后先用该 key 查询原 operation，避免盲目重写。写入仅保存到本地 SVN working copy，**不会提交 SVN**。需要强制只读的客户端可在 `--stdio` 后加 `--read-only`，此时只发现 15 个查询工具。字段删除、移动和反射组写入仍不开放；真实工作区已通过 28 个工具的本地调用验证并受控撤销测试改动，但已安装 VSIX、Windows、AI 自主路由与故障矩阵尚未完成验收，使用写入后必须人工核对 SVN diff，不把工具响应当作平台运行结果。
 
 配置变更会在执行前显示新增、移除和变更数量，确认后将唯一根地址写入工作区 `context/authorized-scope.json` 并检出/更新；该 JSON 仅供程序使用。
 旧的逐条 `svn.scope`/`checkoutPaths` 写法仍兼容。用户名只在本地 <code>sync.yaml</code> 配置，密码只由 SVN 系统凭据存储；二者都不会进入配置清单、日志或参数。旧的 `sync-from-script`、`sync-from-bat` 命令仍兼容，另提供 `sync-from-config` 别名。移出配置的旧 working copy 不会自动删除。
@@ -263,13 +269,12 @@ SVN 工作区的 `sync-all` 只扫描本地 SVN 范围并更新索引和摘要�
   SVN 源码差异、更新、放弃与提交只由 Nexus/SVN SCM 处理，禁止用 `git add -f` 把 checkout 纳入第二套版本历史。
 - `rules.pull_diff_check` 缺省为 `true`，再次拉取会直接比较 readonly 与 workcopy，存在差异时保留 workcopy 并生成差异报告；设为 `false` 会直接覆盖 readonly/workcopy。
 - SVN 的“管理本地源码变更”列出 Nexus 与外部产生的本地修改，支持类 Git 差异、多选/全选保存和撤销；SCM 文件行支持多选后直接“提交所选 Nexus 修改”，不增加 Git 式暂存区；跨
-  working copy 时按组依次执行并产生多个 revision。“保存到谷神”是 SVN 模式核心能力，提交成功仅表示谷神草稿
-  已保存，仍需在谷神平台执行最终提交。SVN 提交说明可选，SCM 顶部和分组提供“提交全部 Nexus 修改 / 更新全部远程变更”，每个
+  working copy 时按组依次执行并产生多个 revision。“保存到谷神”是 SVN 模式核心能力；目标文件提交成功并取得 revision，即视为本次源码交付成功。SVN 提交说明可选，SCM 顶部和分组提供“提交全部 Nexus 修改 / 更新全部远程变更”，每个
   Nexus 修改和远程变更行也提供所选文件提交/单文件更新；重叠更新产生文本冲突时，可从冲突文件行打开 VS Code 三方合并，保存物理 checkout 结果后显式标记 SVN 冲突为已解决。单文件更新只执行授权范围内的精确路径。检出/更新会在输出标签逐项显示
   每个子系统 working copy 的授权、checkout/update、状态检查和索引步骤；“谷神源码”树用 SVN 状态装饰修改文件及父目录，
   打开虚拟源码后按 SVN BASE 在行号槽、整行背景和概览标尺高亮新增、修改与删除位置。
   手动重建本地 SVN 索引同样逐阶段输出；同一工作区的相同操作进行中再次点击会直接忽略。
-  每次 SVN 提交都会生成独立交付编号并保留回执历史，驾驶舱直接显示最近一次 revision 和文件数。回执仅证明 SVN 提交；谷神平台最终提交和运行结果不在 Nexus 内重复登记。
+  每次 SVN 提交都会生成独立交付编号并保留回执历史，驾驶舱直接显示最近一次 revision 和文件数。回执是本次源码交付成功的证据；编译、发布与业务运行结果属于后续独立验证，不在 Nexus 内重复登记。
 - 数据库模式不自动回写谷神平台，交付内容仍由人工复制、保存、提交和签入。
 
 目标对象明确时，DATABASE 可通过 Bridge 拉取，SVN 可直接从 Nexus 的“谷神源码”打开；不需要先执行全量同步。目标不明确或需要影响分析时，再查询该工作区的局部索引。
@@ -295,6 +300,7 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
 ```
 
 该描述符除基础 `command`/`home` 外，还写入模式、代码来源、ToolHost 协议版本，以及 cwd 无关的 `workspaceResolveCommand`、`databaseTargetResolveCommand`、`databaseProbeCommand`、`databaseDescribeCommand`、`databaseQueryCommand` 与 `linterCommand` 数组。
+Nexus 的“运行模式”节点可核对当前入口路径、发行应用版本和本地数据目录。命令失败时提示目标 `workspaceKey`，首条失败阶段和完整输出保留在“输出 → GuthonCodeTool”。PAGE 语义节点遇到 `INDEX_STALE`、`PARTIAL` 或 `REBUILD_REQUIRED` 时，可按提示刷新当前 PAGE 或重建工作区索引，再重新浏览。
 Agent 不再拼装 `../../scripts` 或 `../../tools/guthon-lint`；从具体 PRD/PRJ cwd 运行 `--changed` 时，Linter 只检查当前
 workspace，Git pre-commit 的 `--staged` 仍检查整个暂存集合。
 
@@ -306,6 +312,7 @@ Bridge 默认监听 `127.0.0.1:17361`，支持：
 - SVN 工作区的旧源码拉取/数据库导出按钮自动隐藏，服务端也会拒绝旧接口；checkout、虚拟编辑、索引和 SCM
   集中在 Nexus。Bridge 本身继续保留页面身份路由和与源码拉取无关的页面能力。
 - 模块页面字段复制。
+- 在模块开发页从当前激活的 PAGE 页签取页面编码，交给 Nexus 按精确索引定位；Nexus 仍要求选择 SVN 工作区和多候选源码。
 - 请求级工作区自动匹配和歧义选择。
 
 Bridge 请求携带 `workspaceKey` 时会验证页面身份；未携带时按 `pageOrigin + dataSourceId + systemId` 匹配配置。多个候选只影响当前请求，不保存默认绑定。详细说明见 [plugins/GuthonBridge/README.md](plugins/GuthonBridge/README.md)。
@@ -333,15 +340,10 @@ npm test
 ```
 
 发布版本由根目录 `VERSION` 统一管理，每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 构建 macOS/Windows 应用、Python zipapp、依赖清单、校验文件、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill，并同步到 GitHub/Gitee Release。发行模式可在 Nexus 的折叠“运行模式”节点中选择更新源并手动检查应用更新；不会启动检查或定时联网，安装前会校验 SHA-256、运行 `self-test` 并保留上一版本用于回退。调试模式目前使用用户提供且校验通过的本地 Python；隔离运行环境的一键下载资产尚未交付。
+构建时通过 `scripts/check_release_smoke.py` 对 zipapp 和两平台应用执行临时 toolHome 自检、初始化、MCP 握手与工具发现；实机联调遇到安装或功能问题时参阅[在线问题解决中心](https://sidwuu.github.io/GuthonCodeTool/GuthonCodeTool_QA.html)。
 
 Nexus 与 Bridge 各自维护一个常驻 ToolHost。普通工作区请求复用该进程；工作区列表在 Nexus 两棵树之间共享。普通 Nexus 刷新只重新读取工作区并重绘，不扫描全部 SVN working copy；“刷新 SVN 变更”和“检查 SVN 远程变更”仍是独立操作。SVN 日常 SCM 展示只执行必要的 `svn info --xml` 与 `svn status --xml`，写回和更新安全检查继续使用完整状态路径。
 
 ## 文档
 
-- [在线文档（GitHub Pages）](https://sidwuu.github.io/GuthonCodeTool/)
-- [使用手册](docs/GuthonCodeTool_使用手册.html)
-- [问题解决中心（QA）](docs/GuthonCodeTool_QA.html)
-- [全功能说明](docs/GuthonCodeTool_全功能说明.html)
-- [配置说明](config/README.md)
-- [Bridge 说明](plugins/GuthonBridge/README.md)
-- [AI 代码索引](AI_CODE_INDEX.md)
+- [在线文档](https://sidwuu.github.io/GuthonCodeTool/)

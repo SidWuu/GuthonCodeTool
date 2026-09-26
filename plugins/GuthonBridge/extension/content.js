@@ -7,6 +7,10 @@ const TOOLBAR_REFRESH_INTERVAL_MS = 30000;
 
 let gIntervalId = null;
 let gRefreshInFlight = null;
+let gRefreshRequested = false;
+let gToolbarObserver = null;
+let gToolbarRefreshTimer = null;
+let gObservedToolbarContext = "";
 let gTreeScrollListenerInstalled = false;
 let gSystemScriptSelectionInstalled = false;
 
@@ -36,6 +40,12 @@ function stopExtensionLoops() {
     clearInterval(gIntervalId);
     gIntervalId = null;
   }
+  if (gToolbarRefreshTimer !== null) {
+    clearTimeout(gToolbarRefreshTimer);
+    gToolbarRefreshTimer = null;
+  }
+  gToolbarObserver?.disconnect();
+  gToolbarObserver = null;
 }
 
 function isSupportedGuthonPage() {
@@ -218,11 +228,18 @@ function isVisible(element) {
 }
 
 function isProcedureRoute() {
-  return location.hash.includes("/gdpaas/dev/procedure_develop");
+  return location.hash.includes("/gdpaas/dev/procedure_develop") || isVisible(
+    document.querySelector('[role="tab"][aria-selected="true"][id^="tab-PR-"]')
+  );
 }
 
 function isModuleRoute() {
-  return location.hash.includes("/gdpaas/dev/modules");
+  if (isVisible(document.querySelector('[role="tab"][aria-selected="true"][id^="tab-PR-"]'))) return false;
+  if (location.hash.includes("/gdpaas/dev/modules")) return true;
+  const activePageTab = document.querySelector('[role="tab"][aria-selected="true"][id^="tab-PG-"]');
+  return Boolean(activePageTab && isVisible(activePageTab)) || Array.from(
+    document.querySelectorAll('[role="tabpanel"][id^="pane-PG-"]')
+  ).some(isVisible);
 }
 
 function isDataTableRoute() {
@@ -538,13 +555,28 @@ function removeNode(id) {
   document.getElementById(id)?.remove();
 }
 
+async function locateCurrentInNexus(root, button) {
+  button.disabled = true;
+  try {
+    const inspected = await runPageCommand("inspect-hub-source");
+    if (!inspected?.ok) throw new Error(inspected?.message || "未识别到当前谷神对象");
+    const result = await sendRuntimeMessage({ type: "open-nexus", target: inspected.data });
+    if (!result?.ok) throw new Error(result?.message || "未能打开 Nexus");
+    setMessage(root, `已发送 ${result.description}，请在 Nexus 选择 SVN 工作区`, "success");
+  } catch (error) {
+    setMessage(root, `Nexus 定位失败：${error?.message || String(error)}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function installSourcePullButton() {
   if (!isSupportedGuthonPage() || (!isProcedureRoute() && !isModuleRoute() && !isDataTableRoute() && !isBillTypeRoute() && !isViewRoute() && !isSystemScriptRoute())) {
     return;
   }
 
   let root = document.getElementById(FLOATING_ROOT_ID);
-  if (root && root.dataset.sharedButtons !== "true") {
+  if (root && (root.dataset.sharedButtons !== "true" || !root.querySelector(".guthon-bridge-nexus-button"))) {
     root.remove();
     root = null;
   }
@@ -594,6 +626,10 @@ function installSourcePullButton() {
     });
     fieldsMover.append(copyFieldsButton, pasteFieldsButton);
     root.appendChild(fieldsMover);
+    const nexusButton = makeNativeButton("Nexus 定位", "guthon-bridge-nexus-button");
+    nexusButton.title = "在 Nexus 中定位当前 PAGE 或过程函数";
+    nexusButton.addEventListener("click", () => locateCurrentInNexus(root, nexusButton));
+    root.appendChild(nexusButton);
     const message = document.createElement("div");
     message.className = "guthon-bridge-message";
     message.dataset.tone = "idle";
@@ -1153,9 +1189,6 @@ async function refreshToolbarButtons() {
     installTreeAutoScroll();
     installSystemScriptSelection();
 
-    if (isModuleRoute() || isProcedureRoute()) {
-      await ensurePageBridge();
-    }
     if (isModuleRoute() || isProcedureRoute() || isDataTableRoute() || isBillTypeRoute() || isViewRoute() || isSystemScriptRoute()) {
       installSourcePullButton();
       await applyInlineWorkspaceMode();
@@ -1173,14 +1206,61 @@ async function refreshToolbarButtons() {
 
 function refreshToolbarButtonsSafely() {
   if (gRefreshInFlight) {
+    gRefreshRequested = true;
     return gRefreshInFlight;
   }
   gRefreshInFlight = refreshToolbarButtons()
     .catch(() => {})
     .finally(() => {
       gRefreshInFlight = null;
+      if (gRefreshRequested) {
+        gRefreshRequested = false;
+        refreshToolbarButtonsSafely();
+      }
     });
   return gRefreshInFlight;
+}
+
+function toolbarContextMarker() {
+  const activeTabs = Array.from(document.querySelectorAll('[role="tab"][aria-selected="true"]'))
+    .map((tab) => tab.id || tab.textContent?.trim() || "");
+  return `${location.hash}\n${activeTabs.join("|")}`;
+}
+
+function observeToolbarContext() {
+  if (!document.body || gToolbarObserver) return;
+  gObservedToolbarContext = toolbarContextMarker();
+  gToolbarObserver = new MutationObserver((mutations) => {
+    const rootMissingAfterPageChange = location.hash.includes("/gdpaas/")
+      && !document.getElementById(FLOATING_ROOT_ID)
+      && mutations.some((mutation) => mutation.type === "childList"
+        && !mutation.target.closest?.(`#${COPY_OVERLAY_ID}, #${FIELDS_MOVER_OVERLAY_ID}, #${CALLERS_OVERLAY_ID}`));
+    const tabsChanged = mutations.some((mutation) => {
+      if (mutation.type === "attributes") {
+        return mutation.target.matches?.('[role="tab"], [role="tabpanel"]')
+          || mutation.target.closest?.('[role="tablist"]');
+      }
+      return [...mutation.addedNodes, ...mutation.removedNodes].some((node) => node.nodeType === 1
+        && (node.matches?.('[role="tab"], [role="tabpanel"], [role="tablist"]')
+          || node.querySelector?.('[role="tab"], [role="tabpanel"], [role="tablist"]')));
+    });
+    if (!tabsChanged && !rootMissingAfterPageChange) return;
+    const context = toolbarContextMarker();
+    const contextChanged = context !== gObservedToolbarContext;
+    gObservedToolbarContext = context;
+    if (!contextChanged && !rootMissingAfterPageChange) return;
+    if (gToolbarRefreshTimer !== null) return;
+    gToolbarRefreshTimer = setTimeout(() => {
+      gToolbarRefreshTimer = null;
+      refreshToolbarButtonsSafely();
+    }, 80);
+  });
+  gToolbarObserver.observe(document.body, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ["aria-selected", "class", "style"]
+  });
 }
 
 window.addEventListener("hashchange", refreshToolbarButtonsSafely);
@@ -1223,5 +1303,6 @@ window.addEventListener("message", (event) => {
   }
 });
 
+observeToolbarContext();
 refreshToolbarButtonsSafely();
 gIntervalId = setInterval(refreshToolbarButtonsSafely, TOOLBAR_REFRESH_INTERVAL_MS);

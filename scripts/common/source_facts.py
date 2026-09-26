@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter
 
 from common.page_projection import (
     PAGE_FIELD_PARSER_VERSION, PAGE_FIELD_RELATION_PARSER_VERSION, PAGE_NODE_PARSER_VERSION,
-    extract_page_field_entities, extract_page_field_relations, extract_page_nodes, pointer_value,
+    extract_page_field_entities, extract_page_field_relations, extract_page_nodes,
+    extract_page_scripts, pointer_value,
 )
 
 PAGE_NODE_SCHEMA_VERSION = 1
@@ -548,6 +550,58 @@ def _data_accesses(content: str, facts: list[dict]) -> list[dict]:
                 }
             )
     return accesses
+
+
+def compare_page_evidence(before: dict, after: dict, *, limit: int = 50) -> dict:
+    """Compare two leased PAGE snapshots with the same extractors used by the index.
+
+    The caller binds source path, working copy and before/candidate hashes. These
+    source-backed facts are a bounded preview, not a complete dependency graph.
+    """
+
+    def collect(page: dict) -> tuple[Counter, Counter]:
+        accesses = Counter()
+        for script in extract_page_scripts(page):
+            content = script.effective_value
+            for access in _data_accesses(content, _logic_facts(content, script.display_name)):
+                accesses[(script.json_pointer, access["table_name"].upper(),
+                          access["operation"], access["access_kind"])] += 1
+        relations = Counter(
+            (relation.collection_pointer, relation.source_field_id,
+             relation.relation_type, relation.target_field_id, relation.resolution)
+            for relation in extract_page_field_relations(page)
+        )
+        return accesses, relations
+
+    before_accesses, before_relations = collect(before)
+    after_accesses, after_relations = collect(after)
+
+    def changes(old: Counter, new: Counter, names: tuple[str, ...]) -> dict:
+        added, removed = new - old, old - new
+
+        def sample(values: Counter) -> list[dict]:
+            rows = []
+            for row in sorted(values):
+                rows.extend(dict(zip(names, row)) for _ in range(min(values[row], limit - len(rows))))
+                if len(rows) >= limit:
+                    break
+            return rows
+
+        added_count, removed_count = sum(added.values()), sum(removed.values())
+        return {
+            "addedCount": added_count, "removedCount": removed_count,
+            "added": sample(added), "removed": sample(removed),
+            "truncated": added_count > limit or removed_count > limit,
+        }
+
+    return {
+        "parserVersion": "page-evidence-v1",
+        "tableAccesses": changes(before_accesses, after_accesses,
+                                 ("jsonPointer", "tableName", "operation", "accessKind")),
+        "fieldRelations": changes(before_relations, after_relations,
+                                  ("collectionPointer", "sourceFieldId", "relationType",
+                                   "targetFieldId", "resolution")),
+    }
 
 
 def _insert_data_accesses(

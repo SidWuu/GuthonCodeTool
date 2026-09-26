@@ -8,6 +8,7 @@ const pullPageBtn = document.getElementById("pullPageBtn");
 const pullHubBtn = document.getElementById("pullHubBtn");
 const copyFieldsBtn = document.getElementById("copyFieldsBtn");
 const pasteFieldsBtn = document.getElementById("pasteFieldsBtn");
+const locateNexusBtn = document.getElementById("locateNexusBtn");
 const forceRefreshBtn = document.getElementById("forceRefreshBtn");
 const closeBtn = document.getElementById("closeBtn");
 const OUTPUT_DIR_STORAGE_KEY = "guthonBridgeOutputDir";
@@ -50,10 +51,6 @@ function buildObjectKey(target) {
 
 function isSupportedGuthonUrl(url) {
   return Boolean(globalThis.GuthonBridgeHost?.isAllowed(url));
-}
-
-function isModuleUrl(url) {
-  return String(url || "").includes("/gdpaas/dev/modules");
 }
 
 function isProcedureUrl(url) {
@@ -210,7 +207,7 @@ async function resolveCurrentTarget() {
     throw new Error(result?.message || "未识别到当前过程函数");
   }
   const target = {
-    mode: isModuleUrl(tab.url) ? "page-source" : result.data.mode || "procedure",
+    mode: result.data.mode || "procedure",
     pageId: result.data.pageId || "",
     pageVersion: result.data.pageVersion || "",
     procedureKeyword: result.data.procedureKeyword || result.data.procedureName || "",
@@ -233,7 +230,7 @@ async function resolveHubSourceTarget() {
     throw new Error(result?.message || "未识别到源码表查询条件");
   }
   const target = {
-    mode: isModuleUrl(tab.url) ? "page-source" : result.data.mode || "procedure",
+    mode: result.data.mode || "procedure",
     pageId: result.data.pageId || "",
     procedureId: result.data.procedureId || "",
     procedureKeyword: result.data.procedureKeyword || result.data.procedureName || "",
@@ -330,7 +327,7 @@ async function runCommand(command) {
 
 async function openCopyMode() {
   const tab = await getActiveTab();
-  if (!tab.url || !isSupportedGuthonUrl(tab.url) || !isModuleUrl(tab.url)) {
+  if (!tab.url || !isSupportedGuthonUrl(tab.url)) {
     throw new Error("当前标签页不是模块开发页面");
   }
   const response = await chrome.tabs.sendMessage(tab.id, { type: "show-copy-overlay" });
@@ -342,7 +339,7 @@ async function openCopyMode() {
 
 async function runFieldsMover(type) {
   const tab = await getActiveTab();
-  if (!tab.url || !isSupportedGuthonUrl(tab.url) || !isModuleUrl(tab.url)) {
+  if (!tab.url || !isSupportedGuthonUrl(tab.url) || (await resolveHubSourceTarget()).mode !== "page-source") {
     throw new Error("当前标签页不是模块开发页面");
   }
   const response = await chrome.tabs.sendMessage(tab.id, { type });
@@ -395,7 +392,7 @@ async function runHubPull(force = false, pullAllSystemScripts = false) {
       }
     );
   }
-  const pageSource = isModuleUrl((await getActiveTab()).url) || target.mode === "page-source";
+  const pageSource = target.mode === "page-source";
   const payload = {
     sourceType: pageSource ? "page" : "procedure",
     sourceId: pageSource ? target.pageId || target.procedureId || "" : target.procedureId || "",
@@ -419,7 +416,7 @@ pullPageBtn.addEventListener("click", async () => {
   try {
     const tab = await getActiveTab();
     pageUrl = tab.url || "";
-    if (isModuleUrl(tab.url)) {
+    if ((await resolveHubSourceTarget()).mode === "page-source") {
       setStatus(`正在打开复制模式...\n${tab.url}`);
       await openCopyMode();
       setStatus("复制模式已打开");
@@ -512,6 +509,17 @@ pasteFieldsBtn.addEventListener("click", async () => {
   }
 });
 
+locateNexusBtn.addEventListener("click", async () => {
+  try {
+    const target = await resolveHubSourceTarget();
+    const locator = GuthonBridgeNexusLocator.build(target);
+    await chrome.tabs.create({ url: locator.uri });
+    setStatus(`已向 Nexus 发送 ${locator.description}\n请在 Nexus 中选择 SVN 工作区和源码`);
+  } catch (error) {
+    setStatus(`定位失败\n${error.message}\n可在 Nexus 命令面板手动定位 PAGE 或过程函数`);
+  }
+});
+
 forceRefreshBtn.addEventListener("click", async () => {
   try {
     if (forceRefreshBtn.textContent.includes("全部脚本")) {
@@ -545,25 +553,19 @@ async function initializePopup() {
   copyFieldsBtn.disabled = true;
   pasteFieldsBtn.disabled = true;
   forceRefreshBtn.disabled = true;
+  locateNexusBtn.hidden = true;
   const stored = await chrome.storage?.local?.get?.(OUTPUT_DIR_STORAGE_KEY);
   outputDirEl.value =
     stored?.[OUTPUT_DIR_STORAGE_KEY] || localStorage.getItem(OUTPUT_DIR_STORAGE_KEY) || "";
   const tab = await getActiveTab();
-  if (tab.url && isSupportedGuthonUrl(tab.url) && isModuleUrl(tab.url)) {
-    setPopupMode("module");
-    setStatus("当前页面是模块开发");
-    pullPageBtn.disabled = false;
-    pullHubBtn.disabled = false;
-    copyFieldsBtn.disabled = false;
-    pasteFieldsBtn.disabled = false;
-    forceRefreshBtn.disabled = false;
-    return;
-  }
   setPopupMode("procedure");
   setStatus(isProcedureUrl(tab.url) ? "正在识别当前过程函数..." : "正在识别当前谷神对象...");
   try {
     const target = await resolveHubSourceTarget();
-    setPopupMode(target.mode === "table-schema" ? "table-schema" : target.mode === "billtype" ? "billtype" : target.mode === "views" ? "views" : target.mode === "system-scripts" ? "system-scripts" : "procedure");
+    setPopupMode(target.mode === "table-schema" ? "table-schema" : target.mode === "billtype" ? "billtype" : target.mode === "views" ? "views" : target.mode === "system-scripts" ? "system-scripts" : target.mode === "page-source" ? "module" : "procedure");
+    locateNexusBtn.hidden = !GuthonBridgeNexusLocator.isSupported(target);
+    locateNexusBtn.querySelector(".action-nexus-label").textContent = target.mode === "page-source"
+      ? "在 Nexus 中打开 PAGE" : "在 Nexus 中打开过程函数";
     setStatus(
       [
         target.mode === "system-scripts"
@@ -608,6 +610,8 @@ async function initializePopup() {
     pullPageBtn.disabled = target.mode === "table-schema" || target.mode === "billtype" || target.mode === "views" || target.mode === "system-scripts";
     pullHubBtn.disabled = false;
     forceRefreshBtn.disabled = target.mode === "table-schema" || target.mode === "billtype" || target.mode === "views";
+    copyFieldsBtn.disabled = target.mode !== "page-source";
+    pasteFieldsBtn.disabled = target.mode !== "page-source";
   } catch (error) {
     setResolvedTarget(null);
     setStatus(`识别失败\n${error.message}`);

@@ -5,6 +5,12 @@ const { SvnScmManager, workspaceKeyFromSourceControlId } = require('./scm-manage
 const { decodeIdentity, SCHEME, SvnVirtualFileSystem } = require('./virtual-fs');
 const { localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt } = require('../definition');
 const { SvnSourceWatcher } = require('./source-watcher');
+const { registerEditorAssistance } = require('./editor-assistance');
+const { impactEvidenceChoices, impactMarkdown, loadImpact } = require('./impact-preview');
+const {
+  findExactPageCandidates, findExactProcedureCandidates,
+  procedureFromFullName, sourceLocatorFromUri,
+} = require('./page-locator');
 const {
   DIFF_SCHEME,
   SvnDiffContentProvider,
@@ -72,11 +78,34 @@ async function showPageSemanticNodes(vscode, backend, virtualFs, element) {
     sourceId: object.sourceId,
     funId: object.funId || '',
   };
+  const queryPage = async (name, args) => {
+    try {
+      return await backend.pageQuery(sourceElement.workspaceKey, name, args);
+    } catch (error) {
+      const message = String(error.message || '');
+      if (!/INDEX_STALE|REBUILD_REQUIRED|PARTIAL/.test(message)) throw error;
+      const rebuildRequired = message.includes('REBUILD_REQUIRED');
+      const choices = rebuildRequired || !object.sourcePath
+        ? ['重建工作区索引']
+        : ['刷新此 PAGE 索引', '重建工作区索引'];
+      const selected = await vscode.window.showWarningMessage(
+        `PAGE 索引需要刷新（${sourceElement.workspaceKey}）：${message}。完成后请重试浏览。`,
+        ...choices
+      );
+      if (selected === '刷新此 PAGE 索引') {
+        await backend.reindexFile(sourceElement.workspaceKey, object.sourcePath);
+      } else if (selected === '重建工作区索引') {
+        await vscode.commands.executeCommand('gushenCompletion.reindexCalls', sourceElement.workspaceKey);
+      }
+      return undefined;
+    }
+  };
   let cursor = '';
   while (true) {
-    const listing = await backend.pageQuery(sourceElement.workspaceKey, 'list_page_nodes', {
+    const listing = await queryPage('list_page_nodes', {
       ...locator, limit: 100, ...(cursor ? { cursor } : {}),
     });
+    if (!listing) return undefined;
     const choices = (listing.nodes || []).map((node) => ({
       label: node.label || node.jsonPointer,
       description: node.nodeType,
@@ -99,9 +128,10 @@ async function showPageSemanticNodes(vscode, backend, virtualFs, element) {
     const target = node.semanticNodeId
       ? { semanticNodeId: node.semanticNodeId }
       : { jsonPointer: node.jsonPointer, indexedSourceHash: listing.indexedSourceHash };
-    await backend.pageQuery(sourceElement.workspaceKey, 'read_page_nodes', {
+    const read = await queryPage('read_page_nodes', {
       ...locator, targets: [target], maxChars: 24_000,
     });
+    if (!read) return undefined;
     return virtualFs.open({
       workspaceKey: sourceElement.workspaceKey, sourceType: 'page',
       sourceId: object.sourceId, funId: object.funId || '',
@@ -289,6 +319,44 @@ function activeSourceIdentity(workspaces, document) {
   return undefined;
 }
 
+async function indexedPageFieldCandidates(vscode, backend, catalogTree, virtualFs, document, prefix, token) {
+  const identity = decodeIdentity(document.uri);
+  const opened = virtualFs.cache.get(document.uri.toString())?.value;
+  if (!opened?.sourcePath || !opened.sourceHash || token?.isCancellationRequested) return { fields: [] };
+  const siblingDirty = vscode.workspace.textDocuments.some((candidate) => {
+    if (!candidate.isDirty || candidate.uri.scheme !== SCHEME || candidate.uri.toString() === document.uri.toString()) {
+      return false;
+    }
+    const other = decodeIdentity(candidate.uri);
+    return other.workspaceKey === identity.workspaceKey && other.sourceType === 'page'
+      && other.sourceId === identity.sourceId && other.workingCopyId === identity.workingCopyId;
+  });
+  if (siblingDirty) return { fields: [] };
+  const element = sourceModuleElement(await catalogTree.locate({
+    ...identity, sourcePath: opened.sourcePath,
+  }));
+  const object = element?.object;
+  if (object?.sourceType !== 'page' || !object.sourceNamespace
+      || object.sourceId !== identity.sourceId || object.sourcePath !== opened.sourcePath
+      || (object.workingCopyId || object.scopeEntryId || '') !== (identity.workingCopyId || '')) {
+    return { fields: [] };
+  }
+  if (token?.isCancellationRequested) return { fields: [] };
+  const result = await backend.pageQuery(identity.workspaceKey, 'list_page_fields', {
+    sourceNamespace: object.sourceNamespace,
+    sourceId: object.sourceId,
+    funId: object.funId || '',
+    fieldIdPrefix: prefix,
+    limit: 100,
+  });
+  if (result.sourcePath !== opened.sourcePath || result.indexedSourceHash !== opened.sourceHash
+      || token?.isCancellationRequested) return { fields: [] };
+  return {
+    fields: (result.fields || []).filter((field) => field.collectionPointer !== identity.jsonPointer),
+    truncated: result.truncated,
+  };
+}
+
 function activateSvn({
   vscode,
   context,
@@ -419,6 +487,11 @@ function activateSvn({
       },
     }
   );
+  const editorAssistance = registerEditorAssistance(vscode, {
+    pageFieldCandidates: (document, prefix, token) => indexedPageFieldCandidates(
+      vscode, backend, catalogTree, virtualFs, document, prefix, token
+    ),
+  });
   const referenceRegistration = vscode.languages.registerReferenceProvider(
     [{ scheme: SCHEME, language: 'guthon-gss' }, { scheme: SCHEME, language: 'java' }, { scheme: SCHEME, language: 'javascript' }],
     {
@@ -523,7 +596,7 @@ function activateSvn({
     const message = (scm.inputMessage(workspaceKey) || '').trim();
     log(operation, `准备提交 ${candidateIds.length} 个文件，涉及 ${workingCopyCount} 个 working copy`);
     const confirmed = await vscode.window.showWarningMessage(
-      `将保存 ${candidateIds.length} 个文件，分为 ${workingCopyCount} 次 SVN 提交；谷神平台仍需最终提交。`,
+      `将保存 ${candidateIds.length} 个文件，分为 ${workingCopyCount} 次 SVN 提交；全部提交成功即完成本次源码交付。`,
       { modal: true },
       '保存到谷神'
     );
@@ -544,7 +617,7 @@ function activateSvn({
     onToolTreeChanged?.();
     log(operation, `完成 · ${result.groups.length} 个 working copy · revision ${result.revisions.join('、')}`);
     notifyInformation(vscode,
-      `已保存到谷神 · ${result.groups.length} 个 working copy · revision ${result.revisions.join('、')} · 待谷神平台最终提交`
+      `源码交付成功 · ${result.groups.length} 个 working copy · revision ${result.revisions.join('、')}`
     );
   };
   const saveNexusChanges = async (workspaceValue, sourcePathValue) => {
@@ -808,6 +881,57 @@ function activateSvn({
     return result;
   };
 
+  async function locateSourceByTarget(target) {
+    const isPage = target.type === 'page';
+    const subject = isPage ? 'PAGE' : '过程函数';
+    const workspaces = await listSvnWorkspaces();
+    if (!workspaces.length) throw new Error('没有已配置的 SVN 工作区');
+    const chosenWorkspace = await vscode.window.showQuickPick(
+      workspaces.map((workspace) => ({
+        label: workspace.displayName || workspace.workspaceKey,
+        description: workspace.workspaceKey,
+        workspaceKey: workspace.workspaceKey,
+      })),
+      { title: `选择${subject}所在的 SVN 工作区`, matchOnDescription: true }
+    );
+    if (!chosenWorkspace) return undefined;
+    const sources = isPage
+      ? await findExactPageCandidates(backend, chosenWorkspace.workspaceKey, target.pageId)
+      : await findExactProcedureCandidates(backend, chosenWorkspace.workspaceKey, target.alias, target.funId);
+    if (!sources.length) {
+      throw new Error(`当前工作区索引中没有精确匹配的${subject}，请核对身份或刷新索引`);
+    }
+    const selected = sources.length === 1 ? sources[0] : (await vscode.window.showQuickPick(
+      sources.map((source) => ({
+        label: isPage ? (source.sourceName || source.sourceId) : `${source.sourceAliasId}.${source.funId}`,
+        description: `${source.sourceNamespace} · ${source.workingCopyId}`,
+        detail: source.sourcePath,
+        source,
+      })),
+      { title: `选择精确${subject}源码`, matchOnDescription: true, matchOnDetail: true }
+    ))?.source;
+    if (!selected) return undefined;
+    const identity = { workspaceKey: chosenWorkspace.workspaceKey, ...selected };
+    const element = await catalogTree.locate(identity);
+    if (!element || element.object?.sourcePath !== selected.sourcePath
+      || element.object.sourceNamespace !== selected.sourceNamespace
+      || element.object.sourceId !== selected.sourceId
+      || (element.object.funId || '') !== (selected.funId || '')
+      || element.object.workingCopyId !== selected.workingCopyId) {
+      throw new Error(`${subject}索引与源码树不一致，请刷新源码树和索引后重试`);
+    }
+    await treeView.reveal(element, { focus: true, select: true, expand: false });
+    const editable = await selectEditableIdentity(vscode, backend, identity);
+    return editable ? virtualFs.open(editable) : undefined;
+  }
+
+  const uriHandler = vscode.window.registerUriHandler({
+    handleUri: withError(async (uri) => {
+      const target = sourceLocatorFromUri(uri);
+      if (target) await locateSourceByTarget(target);
+    }),
+  });
+
   const commands = [
     vscode.commands.registerCommand('gushenCompletion.openSvnDocument', withError((identity) =>
       virtualFs.open(identity))),
@@ -827,6 +951,109 @@ function activateSvn({
       showProcedureCallers(vscode, backend, virtualFs, element))),
     vscode.commands.registerCommand('gushenCompletion.showSvnPageNodes', withError((element) =>
       showPageSemanticNodes(vscode, backend, virtualFs, element || treeView.selection[0]))),
+    vscode.commands.registerCommand('gushenCompletion.showSvnImpactPreview', withError(async (element) => {
+      const sourceElement = sourceModuleElement(element || treeView.selection[0]);
+      if (!sourceElement) throw new Error('请先在 SVN 源码树选择 PAGE 或过程函数');
+      const markdown = await impactMarkdown(backend, {
+        workspaceKey: sourceElement.workspaceKey,
+        ...sourceElement.object,
+      });
+      const document = await vscode.workspace.openTextDocument({ language: 'markdown', content: markdown });
+      return vscode.window.showTextDocument(document, { preview: true });
+    })),
+    vscode.commands.registerCommand('gushenCompletion.browseSvnImpactEvidence', withError(async (element) => {
+      const sourceElement = sourceModuleElement(element || treeView.selection[0]);
+      if (!sourceElement) throw new Error('请先在 SVN 源码树选择 PAGE 或过程函数');
+      const evidence = await loadImpact(backend, {
+        workspaceKey: sourceElement.workspaceKey,
+        ...sourceElement.object,
+      });
+      const choices = impactEvidenceChoices(evidence);
+      if (!choices.length) {
+        notifyInformation(vscode, '当前有界索引结果中没有可跳转的字段关系或调用位置');
+        return undefined;
+      }
+      const selected = await vscode.window.showQuickPick(choices, {
+        title: '浏览源码影响证据',
+        matchOnDescription: true,
+        matchOnDetail: true,
+      });
+      return selected ? virtualFs.open(selected.source, { lineNumber: selected.lineNumber }) : undefined;
+    })),
+    vscode.commands.registerCommand('gushenCompletion.locateSvnPageById', withError(async () => {
+      const pageId = await vscode.window.showInputBox({
+        title: '按页面编码定位本地 PAGE',
+        prompt: '输入当前谷神平台显示的 PAGE ID',
+        ignoreFocusOut: true,
+      });
+      if (!pageId) return undefined;
+      return locateSourceByTarget({ type: 'page', pageId });
+    })),
+    vscode.commands.registerCommand('gushenCompletion.locateSvnProcedureByName', withError(async () => {
+      const fullName = await vscode.window.showInputBox({
+        title: '按包名和函数名定位本地过程函数',
+        prompt: '输入完整的包名.函数名，例如 demo.pkg.save',
+        ignoreFocusOut: true,
+      });
+      if (!fullName) return undefined;
+      return locateSourceByTarget(procedureFromFullName(fullName));
+    })),
+    vscode.commands.registerCommand('gushenCompletion.searchCrossPageFields', withError(async (element) => {
+      const sourceElement = sourceModuleElement(element || treeView.selection[0]);
+      const source = sourceElement?.object;
+      if (source?.sourceType !== 'page' || !source.sourceNamespace) {
+        throw new Error('请先在 SVN 源码树选择一个 PAGE');
+      }
+      const prefix = await vscode.window.showInputBox({
+        title: '查找同一命名空间中其他 PAGE 的字段',
+        prompt: '按 fieldId 字面前缀查询；同名不代表存在字段引用关系',
+      });
+      if (!prefix) return undefined;
+      let cursor = '';
+      while (true) {
+        const result = await backend.pageQuery(sourceElement.workspaceKey, 'search_page_fields', {
+          sourceNamespace: source.sourceNamespace, fieldIdPrefix: prefix, limit: 100,
+          ...(cursor ? { cursor } : {}),
+        });
+        const choices = (result.fields || []).filter((field) => field.sourceId !== source.sourceId)
+          .map((field) => ({
+            label: `${field.fieldId} · ${field.label || field.regionType}`,
+            description: field.sourceId,
+            detail: `${field.sourcePath} · ${field.collectionPointer} · ${field.tableId || '?'}.${field.columnId || '?'} · 关系未验证`,
+            field,
+          }));
+        if (result.nextCursor) choices.push({
+          label: '$(arrow-down) 下一页候选', description: '继续搜索同一命名空间',
+          nextCursor: result.nextCursor,
+        });
+        if (!choices.length) {
+          notifyInformation(vscode, '当前索引中没有其他 PAGE 的匹配字段');
+          return undefined;
+        }
+        const selected = await vscode.window.showQuickPick(choices, {
+          title: '跨 PAGE 字段候选 · 仅供发现，关系未验证',
+          matchOnDescription: true, matchOnDetail: true,
+        });
+        if (!selected) return undefined;
+        if (selected.nextCursor) { cursor = selected.nextCursor; continue; }
+        const field = selected.field;
+        const current = await backend.pageQuery(sourceElement.workspaceKey, 'get_source_context', {
+          sourceNamespace: field.sourceNamespace, sourceId: field.sourceId, funId: field.funId || '', limit: 1,
+        });
+        if (current.sourcePath !== field.sourcePath
+            || current.indexedSourceHash !== field.indexedSourceHash
+            || current.indexGeneration !== result.indexGeneration) {
+          throw new Error('字段候选索引或源码已变化，请重新查询');
+        }
+        return virtualFs.open({
+          workspaceKey: sourceElement.workspaceKey, sourceType: 'page',
+          sourceNamespace: field.sourceNamespace, sourceId: field.sourceId,
+          funId: field.funId || '', sourcePath: field.sourcePath,
+          workingCopyId: field.workingCopyId, jsonPointer: field.collectionPointer,
+          fragmentType: 'fields',
+        });
+      }
+    })),
     vscode.commands.registerCommand('gushenCompletion.showSvnDeliveryReceipt', withError(showDeliveryReceipt)),
     vscode.commands.registerCommand('gushenCompletion.jumpSelectedSvnSource', withError(async () => {
       const element = sourceModuleElement(treeView.selection[0]);
@@ -1008,7 +1235,9 @@ function activateSvn({
       fileSystemRegistration.dispose();
       diffContentRegistration.dispose();
       definitionRegistration.dispose();
+      editorAssistance.dispose();
       referenceRegistration.dispose();
+      uriHandler.dispose();
       for (const command of commands) command.dispose();
       virtualFs.dispose();
       diffContent.dispose();
@@ -1039,6 +1268,7 @@ function activateSvn({
 module.exports = {
   activeSourceIdentity,
   activateSvn,
+  indexedPageFieldCandidates,
   nexusCandidateIds,
   notifyInformation,
   openSvnConflictMerge,

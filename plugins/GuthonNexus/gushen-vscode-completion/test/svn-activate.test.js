@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   activeSourceIdentity,
+  indexedPageFieldCandidates,
   callerIdentity,
   callerLabel,
   nexusCandidateIds,
@@ -18,6 +19,42 @@ const {
   sourceModuleElement,
   workspaceKeyFromElement,
 } = require('../src/svn/activate');
+
+test('indexed PAGE field candidates use exact virtual identity and exclude the open collection', async () => {
+  const uri = {
+    scheme: 'guthon-svn-edit', authority: 'products.demo',
+    query: new URLSearchParams({ sourceType: 'page', sourceId: 'PG-1', workingCopyId: 'wc-1', jsonPointer: '/views/0/fields' }).toString(),
+    toString: () => 'guthon-svn-edit://products.demo/PG-1',
+  };
+  const document = { uri, isDirty: true };
+  const vscode = { workspace: { textDocuments: [document] } };
+  const virtualFs = { cache: new Map([[uri.toString(), { value: { sourcePath: 'pages/PG-1.json', sourceHash: 'hash-1' } }]]) };
+  const catalogTree = { async locate(identity) {
+    assert.equal(identity.sourcePath, 'pages/PG-1.json');
+    return { object: { sourceType: 'page', sourceNamespace: 'pages-SYS-1', sourceId: 'PG-1',
+      sourcePath: 'pages/PG-1.json', workingCopyId: 'wc-1' } };
+  } };
+  const calls = [];
+  const backend = { async pageQuery(...args) {
+    calls.push(args);
+    return { sourcePath: 'pages/PG-1.json', indexedSourceHash: 'hash-1', truncated: false,
+      fields: [
+        { fieldId: 'code', collectionPointer: '/views/0/fields' },
+        { fieldId: 'country', collectionPointer: '/views/1/fields' },
+      ] };
+  } };
+  const result = await indexedPageFieldCandidates(vscode, backend, catalogTree, virtualFs, document, 'co');
+  assert.deepEqual(result.fields.map((field) => field.fieldId), ['country']);
+  assert.deepEqual(calls[0], ['products.demo', 'list_page_fields', {
+    sourceNamespace: 'pages-SYS-1', sourceId: 'PG-1', funId: '', fieldIdPrefix: 'co', limit: 100,
+  }]);
+  vscode.workspace.textDocuments.push({
+    isDirty: true, uri: { ...uri, query: new URLSearchParams({ sourceType: 'page', sourceId: 'PG-1',
+      workingCopyId: 'wc-1', jsonPointer: '/views/1/fields' }).toString(), toString: () => 'sibling' },
+  });
+  assert.deepEqual(await indexedPageFieldCandidates(vscode, backend, catalogTree, virtualFs, document, 'co'), { fields: [] });
+  assert.equal(calls.length, 1);
+});
 
 test('shows completion notifications without keeping an SVN operation claimed', () => {
   let resolveNotification;
@@ -232,6 +269,48 @@ test('opens a PAGE field collection as JSON after source verification', async ()
   });
   assert.equal(selected.fragmentType, 'fields');
   assert.deepEqual(calls[1].args.targets, [{ jsonPointer: '/fields', indexedSourceHash: 'hash-1' }]);
+});
+
+test('offers exact PAGE reindex when a semantic query reports stale source', async () => {
+  const calls = [];
+  const vscode = { window: { async showWarningMessage(message, ...choices) {
+    calls.push({ message, choices });
+    return '刷新此 PAGE 索引';
+  } } };
+  const backend = {
+    async pageQuery() { throw new Error('INDEX_STALE: source changed'); },
+    async reindexFile(workspaceKey, sourcePath) { calls.push({ workspaceKey, sourcePath }); },
+  };
+  const result = await showPageSemanticNodes(vscode, backend, {}, {
+    workspaceKey: 'products.demo', object: {
+      sourceType: 'page', sourceNamespace: 'pages-SYS-1', sourceId: 'PG-1',
+      sourcePath: 'pages/SYS-1/PG-1.json',
+    },
+  });
+  assert.equal(result, undefined);
+  assert.deepEqual(calls[0].choices, ['刷新此 PAGE 索引', '重建工作区索引']);
+  assert.deepEqual(calls[1], {
+    workspaceKey: 'products.demo', sourcePath: 'pages/SYS-1/PG-1.json',
+  });
+});
+
+test('offers workspace rebuild for incompatible PAGE index', async () => {
+  const commands = [];
+  const vscode = {
+    window: { async showWarningMessage(_message, ...choices) {
+      assert.deepEqual(choices, ['重建工作区索引']);
+      return choices[0];
+    } },
+    commands: { async executeCommand(...args) { commands.push(args); } },
+  };
+  const backend = { async pageQuery() { throw new Error('REBUILD_REQUIRED'); } };
+  await showPageSemanticNodes(vscode, backend, {}, {
+    workspaceKey: 'products.demo', object: {
+      sourceType: 'page', sourceNamespace: 'pages-SYS-1', sourceId: 'PG-1',
+      sourcePath: 'pages/SYS-1/PG-1.json',
+    },
+  });
+  assert.deepEqual(commands, [['gushenCompletion.reindexCalls', 'products.demo']]);
 });
 
 test('find references derives the current procedure identity from a stable virtual URI', () => {

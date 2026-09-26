@@ -1,6 +1,6 @@
 const BRIDGE_BASE = "http://127.0.0.1:17361";
 
-importScripts("host-config.js");
+importScripts("host-config.js", "nexus-locator.js");
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.tabs.query({}, (tabs) => {
@@ -16,7 +16,7 @@ chrome.runtime.onInstalled.addListener(() => {
       }).catch(() => {});
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ["host-config.js", "workspace-selection.js", "content.js"]
+        files: ["host-config.js", "nexus-locator.js", "workspace-selection.js", "content.js"]
       }).catch(() => {});
     });
   });
@@ -39,6 +39,14 @@ async function postJson(path, payload) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    if (message.type === "open-nexus") {
+      if (sender.tab && !GuthonBridgeHost.isAllowed(sender.tab.url)) {
+        throw new Error("当前标签页不是受信任的谷神开发平台");
+      }
+      const locator = GuthonBridgeNexusLocator.build(message.target);
+      await chrome.tabs.create({ url: locator.uri });
+      return sendResponse({ ok: true, description: locator.description });
+    }
     if (message.type === "bridge-health") {
       const response = await fetch(`${BRIDGE_BASE}/health`);
       return sendResponse(await response.json());

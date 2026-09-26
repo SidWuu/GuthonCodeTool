@@ -9,7 +9,7 @@ const READ_COMMANDS = new Set([
 const SVN_READ_ACTIONS = new Set([
   'catalog', 'fragments', 'read', 'read-batch', 'status', 'scm-status', 'diff',
   'history', 'definition', 'callers', 'find', 'context', 'facts', 'explain',
-  'scope-preview', 'delivery-status',
+  'scope-preview', 'delivery-status', 'page-query',
 ]);
 
 function requestKind(command, args = []) {

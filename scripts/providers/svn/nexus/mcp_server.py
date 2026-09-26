@@ -55,8 +55,13 @@ TOOLS = [
                            "indexedSourceHash": STRING}, "additionalProperties": False}},
            "maxChars": INTEGER}, ["workspaceKey", "sourceNamespace", "sourceId", "targets"]),
     _tool("list_page_fields", "List typed UI fields; datasource projection columns remain collection-only.",
-          {**PAGE, "regionType": STRING, "fieldId": STRING, "limit": INTEGER, "cursor": STRING},
+          {**PAGE, "regionType": STRING, "fieldId": STRING, "fieldIdPrefix": STRING,
+           "limit": INTEGER, "cursor": STRING},
           ["workspaceKey", "sourceNamespace", "sourceId"]),
+    _tool("search_page_fields", "Search source-backed UI field names across PAGEs in one namespace; relations remain unverified.",
+          {"workspaceKey": STRING, "sourceNamespace": STRING, "fieldIdPrefix": STRING,
+           "limit": INTEGER, "cursor": STRING},
+          ["workspaceKey", "sourceNamespace", "fieldIdPrefix"]),
     _tool("get_page_field", "Read one source-backed UI field with identity and hash evidence.",
           {**PAGE, "target": {"type": "object", "properties": {
               "semanticFieldId": STRING, "jsonPointer": STRING, "indexedSourceHash": STRING,
@@ -76,7 +81,7 @@ WRITE_TOOLS = [
     _tool("open_page_node_edit", "Create a short, source-bound edit lease for one stable script or SQL node.",
           {**PAGE, "semanticNodeId": STRING},
           ["workspaceKey", "sourceNamespace", "sourceId", "semanticNodeId"], read_only=False),
-    _tool("preview_page_nodes", "Validate leased script or SQL changes and return a candidate hash without writing source.",
+    _tool("preview_page_nodes", "Validate leased script or SQL changes and return candidate hash plus bounded table/field evidence delta without writing source.",
           {"workspaceKey": STRING,
            "changes": {"type": "array", "items": {"type": "object", "properties": {
                "editToken": STRING, "content": STRING,
@@ -96,7 +101,7 @@ WRITE_TOOLS = [
            "afterSemanticFieldId": STRING},
           ["workspaceKey", "sourceNamespace", "sourceId", "collectionPointer",
            "indexedSourceHash", "action"], read_only=False),
-    _tool("preview_page_field_insert", "Preview a frozen single-field insertion without writing the PAGE.",
+    _tool("preview_page_field_insert", "Preview a frozen single-field insertion and bounded evidence delta without writing the PAGE.",
           {"workspaceKey": STRING, "editToken": STRING}, ["workspaceKey", "editToken"]),
     _tool("insert_page_field", "Insert the frozen field locally with an idempotency key; never commit SVN.",
           {"workspaceKey": STRING, "editToken": STRING, "idempotencyKey": STRING},
@@ -342,6 +347,13 @@ class PageMcpServer:
                     "warnings": ["Field post-write verification is pending; resume by operationId"],
                 }
         source_namespace = _require_string(arguments, "sourceNamespace")
+        if name == "search_page_fields":
+            return page_nodes.search_page_fields(
+                workspace, source_namespace=source_namespace,
+                field_id_prefix=_require_string(arguments, "fieldIdPrefix"),
+                limit=_optional_int(arguments, "limit", 50),
+                cursor=_require_string(arguments, "cursor", optional=True),
+            )
         source_id = _require_string(arguments, "sourceId")
         fun_id = _require_string(arguments, "funId", optional=True)
         if name == "open_page_node_edit":
@@ -390,6 +402,7 @@ class PageMcpServer:
                 workspace, source_namespace=source_namespace, source_id=source_id, fun_id=fun_id,
                 region_type=_require_string(arguments, "regionType", optional=True),
                 field_id=_require_string(arguments, "fieldId", optional=True),
+                field_id_prefix=_require_string(arguments, "fieldIdPrefix", optional=True),
                 limit=_optional_int(arguments, "limit", 50),
                 cursor=_require_string(arguments, "cursor", optional=True),
             )

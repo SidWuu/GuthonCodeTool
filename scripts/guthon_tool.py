@@ -1025,9 +1025,10 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             allowed_by_name = {
                 "get_index_status": {"workspaceKey"},
                 "search_sources": {"workspaceKey", "keyword", "sourceType", "limit", "cursor"},
+                "search_page_fields": {"workspaceKey", "sourceNamespace", "fieldIdPrefix", "limit", "cursor"},
                 "list_page_nodes": identity_keys | {"nodeType", "eventScope", "limit", "cursor"},
                 "read_page_nodes": identity_keys | {"targets", "maxChars"},
-                "list_page_fields": identity_keys | {"regionType", "fieldId", "limit", "cursor"},
+                "list_page_fields": identity_keys | {"regionType", "fieldId", "fieldIdPrefix", "limit", "cursor"},
                 "get_page_field": identity_keys | {"target", "maxChars"},
                 "list_page_field_relations": identity_keys | {"sourceFieldId", "targetFieldId", "limit", "cursor"},
                 "check_page_field_references": identity_keys | {"semanticFieldId", "limit"},
@@ -1040,7 +1041,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             namespace = arguments.get("sourceNamespace", "")
             source_id = arguments.get("sourceId", "")
             fun_id = arguments.get("funId", "")
-            if name not in {"get_index_status", "search_sources"}:
+            if name not in {"get_index_status", "search_sources", "search_page_fields"}:
                 if any(not isinstance(value, str) or not value.strip() or len(value) > 512
                        for value in (namespace, source_id)) or not isinstance(fun_id, str):
                     raise SystemExit("svn page-query requires sourceNamespace and sourceId")
@@ -1052,6 +1053,12 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                         workspace, keyword=arguments.get("keyword", ""),
                         source_type=arguments.get("sourceType", ""),
                         limit=arguments.get("limit", 20), cursor=arguments.get("cursor", ""),
+                    )
+                elif name == "search_page_fields":
+                    result = page_nodes.search_page_fields(
+                        workspace, source_namespace=namespace,
+                        field_id_prefix=arguments.get("fieldIdPrefix", ""),
+                        limit=arguments.get("limit", 50), cursor=arguments.get("cursor", ""),
                     )
                 elif name == "list_page_nodes":
                     result = page_nodes.list_nodes(
@@ -1068,6 +1075,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     result = page_nodes.list_fields(
                         workspace, source_namespace=namespace, source_id=source_id, fun_id=fun_id,
                         region_type=arguments.get("regionType", ""), field_id=arguments.get("fieldId", ""),
+                        field_id_prefix=arguments.get("fieldIdPrefix", ""),
                         limit=arguments.get("limit", 50), cursor=arguments.get("cursor", ""),
                     )
                 elif name == "get_page_field":

@@ -41,6 +41,19 @@ test('routes SVN backend calls through the selected packaged runtime and workspa
   assert.equal(calls[0].options.shell, false);
 });
 
+test('queries bounded source context in the selected SVN workspace', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({
+    getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls),
+  });
+  await client.context('products.demo', 'Package#run', 'run', 20);
+  assert.deepEqual(calls[0].args, [
+    'svn', '--home', '/home', '--workspace', 'products.demo', '--',
+    'context', '--source-id', 'Package#run', '--fun-id', 'run', '--limit', '20',
+  ]);
+});
+
 test('passes virtual source text only through stdin', async () => {
   const calls = [];
   const client = new SvnBackendClient({

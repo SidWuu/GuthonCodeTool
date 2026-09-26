@@ -782,7 +782,7 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(background.includes('chrome.runtime.onInstalled.addListener'), true);
   assert.equal(background.includes('files: ["bridge.css"]'), true);
   assert.equal(background.includes('files: ["fields-mover-core.js", "page-bridge.js"]'), true);
-  assert.equal(background.includes('files: ["host-config.js", "workspace-selection.js", "content.js"]'), true);
+  assert.equal(background.includes('files: ["host-config.js", "nexus-locator.js", "workspace-selection.js", "content.js"]'), true);
   assert.equal(background.includes('world: "MAIN"'), true);
   assert.equal(script.includes("拉取单据类型"), true);
   assert.equal(script.includes("workspaceSelectionRequired"), true);
@@ -793,10 +793,127 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(html.includes('src="workspace-selection.js"'), true);
   assert.equal(html.includes('href="bridge.css"'), true);
   assert.equal(runHubPullScript.includes("resolveCurrentTarget"), false);
-  assert.equal(runHubPullScript.includes('const pageSource = isModuleUrl((await getActiveTab()).url) || target.mode === "page-source";'), true);
-  assert.equal(script.includes('mode: isModuleUrl(tab.url) ? "page-source" : result.data.mode || "procedure"'), true);
+  assert.equal(runHubPullScript.includes('const pageSource = target.mode === "page-source";'), true);
+  assert.equal(script.includes('mode: result.data.mode || "procedure"'), true);
+  assert.equal(pageBridge.includes('getActivePageTabCode()'), true);
+  assert.equal(html.includes('id="locateNexusBtn"'), true);
+  assert.equal(script.includes('chrome.tabs.create({ url: locator.uri })'), true);
   assert.equal(html.includes("closeBtn"), true);
   assert.equal(script.includes("window.close()"), true);
+});
+
+test("Nexus links carry only the current PAGE or procedure identity", () => {
+  const locator = require("../extension/nexus-locator.js");
+  const page = locator.build({ mode: "page-source", pageId: "PG-1234-5678", workspaceKey: "products.demo" });
+  assert.equal(page.uri, "vscode://gushen-local.guthon-nexus-vscode/locate-page?pageId=PG-1234-5678");
+  const procedure = locator.build({ mode: "procedure", procedureId: "PR-1",
+    procedureKeyword: "com.golden.demo.common", funId: "saveForecast", workspaceKey: "products.demo" });
+  assert.equal(procedure.uri, "vscode://gushen-local.guthon-nexus-vscode/locate-procedure?alias=com.golden.demo.common&funId=saveForecast");
+  assert.equal(procedure.uri.includes("PR-1"), false);
+  assert.equal(procedure.uri.includes("products.demo"), false);
+  assert.equal(locator.isSupported({ mode: "procedure", procedureKeyword: "com.demo", funId: "" }), false);
+  assert.throws(() => locator.build({ mode: "table-schema" }), /暂不支持/);
+});
+
+test("SPA module tab is identified by the active PAGE tab without the old route", () => {
+  const script = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const start = script.indexOf("function isModuleRoute()");
+  const end = script.indexOf("function isDataTableRoute()", start);
+  const context = {
+    location: { hash: "#/admin" },
+    isVisible: (element) => Boolean(element?.visible),
+    document: {
+      querySelector: (selector) => selector.includes('tab-PG-') ? { id: "tab-PG-1234", visible: true } : null,
+      querySelectorAll: () => []
+    }
+  };
+  vm.runInNewContext(`${script.slice(start, end)}\nglobalThis.isModuleRoute = isModuleRoute;`, context);
+  assert.equal(context.isModuleRoute(), true);
+  context.document.querySelector = () => null;
+  context.document.querySelectorAll = () => [{ id: "pane-PG-OLD", visible: false }];
+  assert.equal(context.isModuleRoute(), false);
+});
+
+test("late SPA tabs trigger the floating toolbar refresh without waiting for the fallback interval", () => {
+  const script = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const start = script.indexOf("function toolbarContextMarker()");
+  const end = script.indexOf('window.addEventListener("hashchange"', start);
+  const scheduled = [];
+  let observer;
+  let refreshes = 0;
+  let activeTabs = [];
+  let root = null;
+  const context = {
+    location: { hash: "#/gdpaas/dev/modules" },
+    FLOATING_ROOT_ID: "guthon-bridge-floating-root",
+    COPY_OVERLAY_ID: "guthon-bridge-copy-overlay",
+    FIELDS_MOVER_OVERLAY_ID: "guthon-bridge-fields-mover-overlay",
+    CALLERS_OVERLAY_ID: "guthon-bridge-callers-overlay",
+    gToolbarObserver: null,
+    gToolbarRefreshTimer: null,
+    gObservedToolbarContext: "",
+    document: {
+      body: {},
+      querySelectorAll: () => activeTabs,
+      getElementById: () => root,
+    },
+    MutationObserver: class {
+      constructor(callback) { observer = callback; }
+      observe() {}
+    },
+    setTimeout: (callback) => { scheduled.push(callback); return scheduled.length; },
+    refreshToolbarButtonsSafely: () => { refreshes += 1; },
+  };
+  vm.runInNewContext(`${script.slice(start, end)}\nglobalThis.observeToolbarContext = observeToolbarContext;`, context);
+  context.observeToolbarContext();
+  activeTabs = [{ id: "tab-gdpaas_dev_modules" }, { id: "tab-PG-1234" }];
+  const childListChange = { type: "childList", target: { closest: () => null }, addedNodes: [], removedNodes: [] };
+  observer([childListChange]);
+  observer([childListChange]);
+  assert.equal(scheduled.length, 1);
+  scheduled.shift()();
+  assert.equal(refreshes, 1);
+  root = {};
+  observer([childListChange]);
+  assert.equal(scheduled.length, 0);
+});
+
+test("active PAGE identity wins over stale management navigation state", () => {
+  const script = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
+  const start = script.indexOf("  function inspectCurrentHubSource()");
+  const end = script.indexOf("  function putMapValue", start);
+  const context = {
+    location: { href: "https://example.test/guthon/index.html#/admin" },
+    document: { querySelector: () => null },
+    isVisible: () => false,
+    getActivePageTabCode: () => "PG-1234-5678",
+    getCurrentPageCode: () => "PG-OLD",
+    getDataSourceId: () => "DS-1",
+    isSystemScriptPage: () => false,
+    isViewManagementPage: () => false,
+    isBillTypePage: () => false,
+    isDataTableManagementPage: () => true
+  };
+  vm.runInNewContext(`${script.slice(start, end)}\nglobalThis.inspectCurrentHubSource = inspectCurrentHubSource;`, context);
+  const result = context.inspectCurrentHubSource();
+  assert.equal(result.mode, "page-source");
+  assert.equal(result.pageId, "PG-1234-5678");
+});
+
+test("active procedure identity wins over stale module URL", () => {
+  const script = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
+  const start = script.indexOf("  function inspectCurrentHubSource()");
+  const end = script.indexOf("  function putMapValue", start);
+  const context = {
+    location: { href: "https://example.test/guthon/index.html#/gdpaas/dev/modules" },
+    document: { querySelector: () => ({ id: "tab-PR-123@save", visible: true }) },
+    isVisible: (node) => node.visible,
+    getDataSourceId: () => "DS-1",
+    inspectCurrentProcedure: () => ({ procedureKeyword: "demo.pkg", funId: "save" }),
+    getActivePageTabCode: () => "PG-OLD"
+  };
+  vm.runInNewContext(`${script.slice(start, end)}\nglobalThis.inspectCurrentHubSource = inspectCurrentHubSource;`, context);
+  assert.equal(context.inspectCurrentHubSource().funId, "save");
 });
 
 test("workspace selection reuses the same Guthon address and an available candidate", () => {
@@ -880,8 +997,8 @@ test("extension manifest injects the floating pull button on Guthon pages", () =
     {
       matches: ["http://*/*", "https://*/*"],
       css: ["bridge.css"],
-      js: ["host-config.js", "workspace-selection.js", "content.js"],
-      run_at: "document_idle"
+      js: ["host-config.js", "nexus-locator.js", "workspace-selection.js", "content.js"],
+      run_at: "document_end"
     }
   ]);
   assert.deepEqual(manifest.web_accessible_resources, [
@@ -1129,7 +1246,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("SCHEMA_ROOT_ID"), false);
   assert.equal(contentScript.includes("BILLTYPE_ROOT_ID"), false);
   assert.equal(contentScript.includes('style.dataset.version = "20260723c"'), false);
-  assert.equal(css.includes("visibility: hidden"), true);
+  assert.equal(css.includes('.guthon-bridge-inline:not([data-mode="module"]) .guthon-bridge-module-only {\n  display: none;'), true);
   assert.equal(contentScript.includes("root.dataset.positioned"), false);
   assert.equal(contentScript.includes('root.dataset.sharedButtons = "true"'), true);
   assert.equal(contentScript.includes("exportCurrentTableSchema(root, sourceButton)"), true);
@@ -1192,7 +1309,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(fs.readFileSync(BRIDGE_CSS_PATH, "utf8").includes("z-index: 2147483646"), true);
 });
 
-test("floating pull waits for page bridge injection before posting commands", () => {
+test("floating controls mount before workspace checks while commands inject the page bridge on demand", () => {
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
 
   assert.equal(contentScript.includes("function getRuntime()"), true);
@@ -1202,7 +1319,10 @@ test("floating pull waits for page bridge injection before posting commands", ()
   assert.equal(contentScript.includes("return { ok: false, message: error?.message || String(error) };"), true);
   assert.equal(contentScript.includes('injectPageScript("fields-mover-core.js")'), true);
   assert.equal(contentScript.includes('injectPageScript("page-bridge.js")'), true);
-  assert.equal(contentScript.includes("if (isModuleRoute() || isProcedureRoute())"), true);
+  const refresh = contentScript.slice(contentScript.indexOf("async function refreshToolbarButtons()"),
+    contentScript.indexOf("function refreshToolbarButtonsSafely()"));
+  assert.ok(refresh.indexOf("installSourcePullButton();") < refresh.indexOf("await applyInlineWorkspaceMode();"));
+  assert.equal(refresh.includes("await ensurePageBridge();"), false);
 });
 
 test("popup waits for storage.local output directory persistence", () => {
@@ -1211,7 +1331,7 @@ test("popup waits for storage.local output directory persistence", () => {
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
   const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
 
-  assert.equal(popupScript.includes("function isModuleUrl"), true);
+  assert.equal(popupScript.includes('target.mode === "page-source" ? "module"'), true);
   assert.equal(popupScript.includes("打开复制模式"), true);
   assert.equal(popupScript.includes('chrome.tabs.sendMessage(tab.id, { type: "show-copy-overlay" })'), true);
   assert.equal(popupScript.includes("async function persistOutputDir"), true);
@@ -1231,7 +1351,7 @@ test("popup waits for storage.local output directory persistence", () => {
   assert.equal(popupScript.includes("runHubPull(true)"), true);
   assert.equal(popupScript.includes("forceRefreshBtn.hidden = !canPullSource && !isSystemScripts"), true);
   assert.equal(popupScript.includes('pullHubBtn.parentElement.classList.toggle("full-width", !canPullSource)'), true);
-  assert.equal(popupScript.includes('setStatus("当前页面是模块开发")'), true);
+  assert.equal(popupScript.includes('"已识别当前模块源码片段"'), true);
   assert.equal(popupScript.includes("copyFieldsBtn.hidden = !isModule"), true);
   assert.equal(popupScript.includes("pasteFieldsBtn.hidden = !isModule"), true);
   assert.equal(contentScript.includes('message?.type === "show-fields-mover"'), true);

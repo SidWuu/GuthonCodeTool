@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - "docs/GuthonCodeTool_*.html"
+      - "README.md"
+      - "scripts/check_public_docs.mjs"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -28,6 +30,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Check public documentation
+        run: node scripts/check_public_docs.mjs
 
       - name: Prepare static site
         shell: bash

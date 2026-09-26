@@ -176,6 +176,12 @@ class SvnBackendClient {
     ]);
   }
 
+  context(workspaceKey, sourceId, funId = '', limit = 20) {
+    return this.run(workspaceKey, [
+      'context', '--source-id', sourceId, '--fun-id', funId, '--limit', String(limit),
+    ]);
+  }
+
   reindexFile(workspaceKey, sourcePath, options = {}) {
     return this.run(workspaceKey, ['reindex-file', '--path', sourcePath], undefined, options);
   }
