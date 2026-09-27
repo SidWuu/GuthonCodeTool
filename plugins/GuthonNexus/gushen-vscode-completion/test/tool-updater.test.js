@@ -137,3 +137,46 @@ test('downloads, verifies, self-tests and installs a Windows release', async () 
     fs.rmSync(root, { recursive: true });
   }
 });
+
+for (const archiveEntry of ['GuthonCodeTool', 'dist/GuthonCodeTool']) test(`installs a macOS release containing ${archiveEntry}`, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-updater-macos-'));
+  const artifact = Buffer.from('macOS archive fixture');
+  const hash = crypto.createHash('sha256').update(artifact).digest('hex');
+  const server = http.createServer((request, response) => {
+    if (request.url === '/checksums') response.end(`${hash}  GuthonCodeTool-macos-arm64.zip\n`);
+    else if (request.url === '/application') response.end(artifact);
+    else { response.statusCode = 404; response.end(); }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const installed = await installRelease({
+      release: {
+        sourceLabel: '测试源',
+        version: '0.2.5',
+        assets: [
+          { name: 'GuthonCodeTool-checksums.txt', url: `${baseUrl}/checksums` },
+          { name: 'GuthonCodeTool-macos-arm64.zip', url: `${baseUrl}/application`, size: artifact.length },
+        ],
+      },
+      storageRoot: root,
+      platform: 'darwin',
+      arch: 'arm64',
+      processRunner: async (command, args) => {
+        if (command === '/usr/bin/ditto') {
+          const extracted = path.join(args[3], archiveEntry);
+          fs.mkdirSync(path.dirname(extracted), { recursive: true });
+          fs.writeFileSync(extracted, 'packaged macOS application');
+          return { stdout: '' };
+        }
+        return args[0] === 'version' ? { stdout: '{"version":"0.2.5"}\n' } : { stdout: '' };
+      },
+    });
+    assert.equal(fs.readFileSync(installed.toolPath, 'utf8'), 'packaged macOS application');
+    assert.equal(installed.toolPath, path.join(root, 'runtime', '0.2.5', 'GuthonCodeTool'));
+    assert.deepEqual(fs.readdirSync(path.dirname(installed.toolPath)), ['GuthonCodeTool']);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(root, { recursive: true });
+  }
+});

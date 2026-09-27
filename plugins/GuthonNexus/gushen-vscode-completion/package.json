@@ -2,7 +2,7 @@
   "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon workspace, source sync, metadata export, workcopy tools, API completions, hover documentation, and source navigation.",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,

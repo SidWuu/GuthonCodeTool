@@ -103,7 +103,9 @@ jobs:
 
       - name: Prepare macOS application
         if: runner.os == 'macOS'
-        run: ditto -c -k --keepParent dist/GuthonCodeTool "${{ matrix.asset }}"
+        run: |
+          (cd dist && ditto --norsrc -c -k GuthonCodeTool "$GITHUB_WORKSPACE/${{ matrix.asset }}")
+          test "$(unzip -Z -1 "${{ matrix.asset }}")" = "GuthonCodeTool"
 
       - uses: actions/upload-artifact@v7
         with:

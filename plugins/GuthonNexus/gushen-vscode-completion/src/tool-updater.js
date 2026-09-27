@@ -137,10 +137,10 @@ function runProcess(command, args, options = {}) {
   });
 }
 
-async function verifyExecutable(executablePath, expectedVersion, processRunner) {
+async function verifyExecutable(executablePath, expectedVersion, processRunner = runProcess) {
   const versionResult = await processRunner(executablePath, ['version']);
   const packagedVersion = normalizeVersion(JSON.parse(versionResult.stdout).version);
-  if (packagedVersion !== expectedVersion) {
+  if (expectedVersion && packagedVersion !== expectedVersion) {
     throw new Error(`应用版本不一致：Release ${expectedVersion}，应用 ${packagedVersion}`);
   }
   const selfTestHome = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-update-test-'));
@@ -149,6 +149,7 @@ async function verifyExecutable(executablePath, expectedVersion, processRunner) 
   } finally {
     fs.rmSync(selfTestHome, { recursive: true, force: true });
   }
+  return packagedVersion;
 }
 
 async function installRelease({
@@ -204,7 +205,12 @@ async function installRelease({
       onProgress('解压 macOS 应用');
       await processRunner('/usr/bin/ditto', ['-x', '-k', archivePath, stagingDir]);
       executablePath = path.join(stagingDir, 'GuthonCodeTool');
-      if (!fs.existsSync(executablePath)) throw new Error('macOS 压缩包中缺少 GuthonCodeTool');
+      if (!fs.existsSync(executablePath)) {
+        const legacyExecutable = path.join(stagingDir, 'dist', 'GuthonCodeTool');
+        if (!fs.existsSync(legacyExecutable)) throw new Error('macOS 压缩包中缺少 GuthonCodeTool');
+        fs.renameSync(legacyExecutable, executablePath);
+        fs.rmdirSync(path.join(stagingDir, 'dist'));
+      }
       fs.chmodSync(executablePath, 0o755);
     } else {
       executablePath = path.join(stagingDir, 'GuthonCodeTool.exe');
@@ -283,6 +289,7 @@ module.exports = {
   detectCurrentVersion,
   fetchLatestRelease,
   installRelease,
+  verifyExecutable,
   normalizeVersion,
   parseChecksums,
   readBundledVersion,

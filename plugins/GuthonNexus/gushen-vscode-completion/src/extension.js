@@ -34,6 +34,7 @@ const {
   detectCurrentVersion,
   fetchLatestRelease,
   installRelease,
+  verifyExecutable,
   readUpdateState,
   releaseAsset,
   writeUpdateState,
@@ -233,6 +234,11 @@ async function configuredRuntime(config, mode, options = {}) {
   mode = normalizeExecutionMode(mode);
   if (mode === 'source-development') {
     let developmentRoot = config.get('developmentRoot', '');
+    if (options.selectDevelopment) {
+      const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: '选择 GuthonCodeTool 源码仓库根目录' });
+      if (!selected) return undefined;
+      developmentRoot = selected[0].fsPath;
+    }
     try {
       runtime = resolveDevelopmentRuntime(developmentRoot);
     } catch {
@@ -245,6 +251,8 @@ async function configuredRuntime(config, mode, options = {}) {
         vscode.window.showErrorMessage(error.message);
         return undefined;
       }
+    }
+    if (config.get('developmentRoot', '') !== developmentRoot) {
       await config.update('developmentRoot', developmentRoot, vscode.ConfigurationTarget.Global);
     }
     return runtime;
@@ -313,10 +321,25 @@ async function configuredRuntime(config, mode, options = {}) {
     return runtime;
   } else {
     let toolPath = config.get('toolPath', '');
-    if (!toolPath || !fs.existsSync(toolPath)) {
+    let selectPackaged = options.selectPackaged || !toolPath || !fs.existsSync(toolPath);
+    if (!selectPackaged && options.probePackaged) {
+      try {
+        await verifyExecutable(toolPath);
+      } catch (error) {
+        vscode.window.showWarningMessage(`当前发行应用不可用：${error.message}。请重新选择。`);
+        selectPackaged = true;
+      }
+    }
+    if (selectPackaged) {
       const selected = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: false, canSelectMany: false, title: '选择 GuthonCodeTool 可执行程序' });
       if (!selected) return undefined;
       toolPath = selected[0].fsPath;
+      try {
+        await verifyExecutable(toolPath);
+      } catch (error) {
+        vscode.window.showErrorMessage(`所选发行应用不可用：${error.message}`);
+        return undefined;
+      }
       await config.update('toolPath', toolPath, vscode.ConfigurationTarget.Global);
     }
     return { mode: 'packaged', toolPath };
@@ -475,8 +498,10 @@ class ToolTreeDataProvider {
       : executionMode === 'script' ? scriptToolPath : configuredToolPath;
     const entryItem = staticItem('当前入口', 'file-code', entryPath ? path.basename(entryPath) : '未配置');
     entryItem.tooltip = entryPath || '尚未选择工具入口';
+    entryItem.command = { command: 'gushenCompletion.selectExecutionMode', title: '切换工具入口', arguments: [true] };
     const homeItem = staticItem('本地数据目录', 'folder', toolHome ? path.basename(toolHome) : '未配置');
     homeItem.tooltip = toolHome || '尚未选择本地数据目录';
+    homeItem.command = { command: 'gushenCompletion.setupTool', title: '切换工作空间' };
     runtime.iconPath = new vscode.ThemeIcon(executionMode === 'packaged' ? 'package' : 'beaker');
     runtime.description = modeLabel;
     runtime.children = [
@@ -902,26 +927,37 @@ function activate(context) {
         `已将 ${workspaceKey} 设为 ${selected === 'svn' ? 'SVN' : 'DATABASE'}。请在该 Nexus 节点中继续配置。`
       );
     }),
-    vscode.commands.registerCommand('gushenCompletion.selectExecutionMode', async () => {
+    vscode.commands.registerCommand('gushenCompletion.selectExecutionMode', async (selectEntry = false) => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
-      const selected = await vscode.window.showQuickPick([
+      const currentMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
+      const modes = [
         { label: '发行模式', description: '调用打包的 GuthonCodeTool 应用', value: 'packaged' },
         { label: '开发模式', description: '使用 clone 仓库中的 .venv 和源码', value: 'source-development' },
         { label: '调试模式', description: '使用本地 Python 和 Release 单文件 .pyz', value: 'script' },
-        { label: '重新选择调试环境', description: '重新选择本地 Python 和 .pyz', value: 'script', selectScript: true },
-      ], { title: '选择 Guthon Nexus 运行模式' });
+      ];
+      const selected = selectEntry
+        ? modes.find((item) => item.value === currentMode)
+        : await vscode.window.showQuickPick(modes, { title: '选择 Guthon Nexus 运行模式' });
       if (!selected) return;
-      const runtime = await configuredRuntime(config, selected.value, { probeScript: true, selectScript: selected.selectScript });
+      const runtime = await configuredRuntime(config, selected.value, {
+        probeScript: true,
+        probePackaged: true,
+        selectScript: selectEntry,
+        selectPackaged: selectEntry,
+        selectDevelopment: selectEntry,
+      });
       if (!runtime) return;
       await processClient.stop();
-      await config.update('executionMode', selected.value, vscode.ConfigurationTarget.Global);
+      if (!selectEntry) {
+        await config.update('executionMode', selected.value, vscode.ConfigurationTarget.Global);
+      }
       const toolHome = config.get('toolHome', '');
       if (toolHome) writeRuntimeDescriptor({ ...runtime, toolHome });
       if (bridge.isRunning()) await bridge.restart({ ...runtime, toolHome });
       refreshToolData();
       svnServices.catalogTree.refresh();
       await svnServices.refreshWorkspaceList();
-      return vscode.window.showInformationMessage(`已切换为${selected.label}`);
+      return vscode.window.showInformationMessage(selectEntry ? '已更新当前入口' : `已切换为${selected.label}`);
     }),
     vscode.commands.registerCommand('gushenCompletion.restartDevelopmentToolHost', async () => {
       const mode = normalizeExecutionMode(vscode.workspace.getConfiguration('gushenCompletion').get('executionMode', 'packaged'));

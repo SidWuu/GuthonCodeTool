@@ -95,12 +95,12 @@ SVN：
 
 - `scripts/build_guthon_tool.py`：PyInstaller 打包，只打包 `config/example` 与 `VERSION`。
 - `scripts/build_script_tool.py`：构建不含第三方依赖和私有数据的 Python zipapp；`scripts/check_toolhost.py` 验证连续请求。
-- `scripts/check_release_smoke.py`：用临时 toolHome 检查源码、zipapp 或应用的版本、自检、初始化与 MCP 工具发现；`scripts/check_public_docs.mjs` 校验三份公开 HTML 后再部署 Pages。
+- `scripts/check_release_smoke.py`：用临时 toolHome 检查源码、zipapp 或应用的版本、自检、初始化与 MCP 工具发现；`scripts/check_public_docs.mjs` 校验四份公开 HTML 与图片引用后再部署 Pages。
 - `GuthonCodeTool.spec`：打包配置。
 - `scripts/sync_guthon_api.mjs`：从 `<toolHome>/config/sync.yaml` 读取谷神版本，更新 `<toolHome>/var/docs/谷神方言API/` 与插件补全数据。
 - `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs`：从 API 文档目录生成 `plugins/GuthonNexus/gushen-vscode-completion/data/index.json`。
 - `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-bridge.mjs`：生成 `plugins/GuthonBridge/bridge/server.js`。
-- `docs/GuthonCodeTool_使用手册.html`、`docs/GuthonCodeTool_全功能说明.html`、`docs/GuthonCodeTool_QA.html`：用户手册、全功能说明与 QA 页，行为变化时同步。
+- `docs/GuthonCodeTool_使用手册.html`、`docs/GuthonCodeTool_Windows安装步骤.html`、`docs/GuthonCodeTool_全功能说明.html`、`docs/GuthonCodeTool_QA.html`：用户手册、Windows 安装子页面、全功能说明与 QA 页，行为变化时同步。
 
 ## Validation
 

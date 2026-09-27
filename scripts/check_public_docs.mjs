@@ -10,6 +10,7 @@ const pageNames = [
   'GuthonCodeTool_使用手册.html',
   'GuthonCodeTool_全功能说明.html',
   'GuthonCodeTool_QA.html',
+  'GuthonCodeTool_Windows安装步骤.html',
 ];
 const pages = new Map();
 const errors = [];
@@ -52,6 +53,9 @@ function checkLink(source, href) {
 
 for (const [name, page] of pages) {
   for (const [, href] of page.body.matchAll(/<a\b[^>]*\bhref="([^"]+)"/gi)) checkLink(name, href);
+  for (const [, src] of page.body.matchAll(/<img\b[^>]*\bsrc="([^"]+)"/gi)) {
+    if (!fs.existsSync(path.join(docsDir, src))) errors.push(`${name}: missing image ${src}`);
+  }
 }
 
 const qaScript = pages.get('GuthonCodeTool_QA.html').html.match(

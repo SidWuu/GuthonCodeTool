@@ -300,7 +300,7 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
 ```
 
 该描述符除基础 `command`/`home` 外，还写入模式、代码来源、ToolHost 协议版本，以及 cwd 无关的 `workspaceResolveCommand`、`databaseTargetResolveCommand`、`databaseProbeCommand`、`databaseDescribeCommand`、`databaseQueryCommand` 与 `linterCommand` 数组。
-Nexus 的“运行模式”节点可核对当前入口路径、发行应用版本和本地数据目录。命令失败时提示目标 `workspaceKey`，首条失败阶段和完整输出保留在“输出 → GuthonCodeTool”。PAGE 语义节点遇到 `INDEX_STALE`、`PARTIAL` 或 `REBUILD_REQUIRED` 时，可按提示刷新当前 PAGE 或重建工作区索引，再重新浏览。
+Nexus 的“运行模式”节点可核对当前入口路径、发行应用版本和本地数据目录。点击“切换模式”选择发行、开发或调试模式；点击“当前入口”只重新选择并验证当前模式的发行应用、开发源码仓库或调试环境；点击“本地数据目录”可切换工作空间。命令失败时提示目标 `workspaceKey`，首条失败阶段和完整输出保留在“输出 → GuthonCodeTool”。PAGE 语义节点遇到 `INDEX_STALE`、`PARTIAL` 或 `REBUILD_REQUIRED` 时，可按提示刷新当前 PAGE 或重建工作区索引，再重新浏览。
 Agent 不再拼装 `../../scripts` 或 `../../tools/guthon-lint`；从具体 PRD/PRJ cwd 运行 `--changed` 时，Linter 只检查当前
 workspace，Git pre-commit 的 `--staged` 仍检查整个暂存集合。
 

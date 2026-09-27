@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "docs/GuthonCodeTool_*.html"
+      - "docs/windows-install-images/**"
       - "README.md"
       - "scripts/check_public_docs.mjs"
       - ".github/workflows/pages.yml"
@@ -47,10 +48,13 @@ jobs:
           cp "docs/GuthonCodeTool_使用手册.html" "_site/GuthonCodeTool_使用手册.html"
           cp "docs/GuthonCodeTool_QA.html" "_site/GuthonCodeTool_QA.html"
           cp "docs/GuthonCodeTool_全功能说明.html" "_site/GuthonCodeTool_全功能说明.html"
+          cp "docs/GuthonCodeTool_Windows安装步骤.html" "_site/GuthonCodeTool_Windows安装步骤.html"
+          cp -R "docs/windows-install-images" "_site/windows-install-images"
           touch "_site/.nojekyll"
           test -s "_site/index.html"
           test -s "_site/GuthonCodeTool_QA.html"
           test -s "_site/GuthonCodeTool_全功能说明.html"
+          test -s "_site/GuthonCodeTool_Windows安装步骤.html"
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
