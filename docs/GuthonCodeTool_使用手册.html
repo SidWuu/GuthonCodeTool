@@ -208,10 +208,12 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>按需使用数据库开发/测试库验证时，下载 <code>guthon-testing.zip</code> 并按 Skill 说明安装。</li>
 <li>团队规范与开发门禁由独立的团队 Marketplace 分发 <code>guthon-guard</code>，不在 GuthonCodeTool Release 中。</li>
 </ul>
-<p>建议固定两个目录位置：</p>
+<p>macOS 可分别固定应用目录和本地数据目录；Windows 建议使用一个根目录，在其下放发行版 EXE 与 <code>var</code> 等运行数据。图文步骤见<a href="GuthonCodeTool_Windows安装步骤.html">Windows 安装步骤</a>。</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button>
-  <pre><code>应用目录：只放可替换的 GuthonCodeTool 应用；VSIX 安装到 VS Code，Chrome 扩展由浏览器加载
-本地数据目录：长期保存 config、var、源码、索引和 Workcopy</code></pre></div>
+  <pre><code>Windows 根目录：D:\Develop\GuthonWork\
+├── GuthonCodeTool-windows-x64.exe
+├── config\  # 设置工作空间后生成
+└── var\     # 运行数据、源码、索引和 Workcopy</code></pre></div>
 <h3 id="1-2-安装应用">1.2 安装应用</h3>
 <h4>macOS</h4>
 <ol>
@@ -223,7 +225,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <p>若系统阻止运行，请先确认文件来自本项目 Release，再打开“系统设置 → 隐私与安全性”，对被阻止的 GuthonCodeTool 选择“仍要打开”。</p>
 <h4>Windows</h4>
 <ol>
-<li>把 <code>GuthonCodeTool-windows-x64.exe</code> 放到固定目录，例如 <code>D:\GuthonCodeTool\</code>。</li>
+<li>把 <code>GuthonCodeTool-windows-x64.exe</code> 放到工作区根目录，例如 <code>D:\Develop\GuthonWork\</code>。</li>
 <li>不要放进经常清理的“下载”或临时目录。</li>
 <li>若 SmartScreen 拦截，先确认文件来自本项目 Release，再选择“更多信息 → 仍要运行”。</li>
 </ol>
@@ -264,7 +266,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h3 id="2-1-创建产品或项目">2.1 创建产品或项目</h3>
 <ol>
 <li>在 Nexus 点击“添加产品或项目”。</li>
-<li>选择产品或项目，填写名称和稳定 ID。</li>
+<li>选择产品或项目并填写名称；ID 会自动生成，建议改为易读且稳定的 ID。</li>
 <li>选择源码来源：<code>DATABASE</code> 或 <code>SVN</code>。</li>
 <li>向导创建工作区后，继续完成对应路线的配置。</li>
 </ol>
