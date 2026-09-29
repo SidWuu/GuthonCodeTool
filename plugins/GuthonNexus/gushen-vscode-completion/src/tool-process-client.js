@@ -11,6 +11,14 @@ const SVN_READ_ACTIONS = new Set([
   'history', 'definition', 'callers', 'find', 'context', 'facts', 'explain',
   'scope-preview', 'delivery-status', 'page-query',
 ]);
+const DEFAULT_TIMEOUT_MS = 120000;
+const SVN_INDEX_TIMEOUT_MS = 30 * 60 * 1000;
+
+function requestTimeoutMs(command, args = []) {
+  return command === 'reindex'
+    || (command === 'svn' && ['sync-from-config', 'init', 'refresh'].includes(args[0]))
+    ? SVN_INDEX_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+}
 
 function requestKind(command, args = []) {
   return READ_COMMANDS.has(command) || (command === 'svn' && SVN_READ_ACTIONS.has(args[0]))
@@ -172,7 +180,7 @@ class ToolProcessClient {
         return await new Promise((resolve, reject) => {
           this.jobs.push({
             id, kind, resolve, reject, settled: false,
-            timeoutMs: options.timeoutMs || 120000,
+            timeoutMs: options.timeoutMs || requestTimeoutMs(command, args),
             onOutput: options.onOutput,
             request: { id, command, args, workspaceKey, input, requestKind: kind },
           });
@@ -224,4 +232,4 @@ class ToolProcessClient {
   }
 }
 
-module.exports = { ToolProcessClient, requestKind, runtimeKey };
+module.exports = { ToolProcessClient, requestKind, requestTimeoutMs, runtimeKey };

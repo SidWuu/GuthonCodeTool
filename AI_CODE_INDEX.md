@@ -35,6 +35,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | SVN 索引与浏览 | `scripts/providers/svn/nexus/catalog.py` | `scripts/providers/svn/nexus/documents.py`（会话写入与内部 PAGE 操作记录） | `tests/test_svn_nexus_workspace.py` |
 | SVN PAGE 语义节点/界面字段与 MCP | `scripts/providers/svn/nexus/page_nodes.py` | `scripts/common/page_projection.py`、`scripts/common/source_facts.py`、`scripts/providers/svn/nexus/page_mutation.py`（节点编辑租约）、`scripts/providers/svn/nexus/page_field_mutation.py`（单字段新增/拷贝）、`scripts/providers/svn/nexus/mcp_server.py`、`scripts/guthon_tool.py` | `tests/test_page_semantics.py`、`tests/test_page_mcp.py`、`tests/test_svn_nexus_workspace.py` |
 | SVN 过程函数 MCP 读写 | `scripts/providers/svn/nexus/procedure_sources.py` | `scripts/providers/svn/nexus/procedure_mutation.py`、`scripts/providers/svn/nexus/documents.py`（共享租约/写回与操作记录）、`scripts/providers/svn/nexus/mcp_server.py` | `tests/test_svn_nexus_workspace.py`、`tests/test_page_mcp.py` |
+| SVN 项目继承源码 | `scripts/common/inheritance.py` | `scripts/common/page_projection.py`、`scripts/providers/svn/nexus/inheritance_sources.py`、`scripts/providers/svn/nexus/catalog.py`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/inheritance-view.js` | `tests/test_svn_inheritance.py`、`tests/test_svn_nexus_workspace.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/inheritance-view.test.js` |
 | SVN SCM/差异/写回 | `scripts/providers/svn/nexus/scm.py` | `scripts/providers/svn/writeback.py` | `tests/test_svn_provider.py` |
 | Nexus 运行模式/toolHome | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-runtime.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-workspace.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/tool-runtime.test.js` |
 | ToolHost 与三运行模式 | `scripts/guthon_tool.py` | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-process-client.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/script-runtime.js`、`scripts/build_script_tool.py` | `tests/test_toolhost.py`、`tests/test_build_script_tool.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/tool-process-client.test.js` |
@@ -58,6 +59,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `scripts/common/workspace_assistant.py` | 工作区摘要、就绪状态与助手输出。 |
 | `scripts/common/source_facts.py` | 源码身份、事实解析与可重建 PAGE 节点/界面字段投影。 |
 | `scripts/common/page_projection.py` | PAGE 虚拟文档投影、共享脚本/字段集合提取、语义节点/界面字段描述符及保留已有字段原文的单项插入。 |
+| `scripts/common/inheritance.py` | 过程函数与 PAGE 项目脚本的继承标记识别、有效内容派生与来源片段；派生结果不作为可写物理文件。 |
 | `scripts/common/source_format.py` | 源码编解码与格式元数据。 |
 | `scripts/common/export_hub_markdown.py` | 全量 Markdown 导出。 |
 | `scripts/common/run_sync_once.py` / `scripts/common/sync_workspace_all.py` | 单次同步与全工作区同步入口。 |
@@ -81,6 +83,7 @@ SVN：
 - `scripts/providers/svn/writeback.py`：受控写回与差异校验。
 - `scripts/providers/svn/nexus/page_nodes.py`、`page_mutation.py`、`page_field_mutation.py`、`mcp_server.py`：PAGE 节点/界面字段有界查询、未解析映射及引用风险诊断、源码新鲜度核验、编辑租约、受控节点写入及同集合单字段新增/拷贝；MCP 提供显式 `--read-only`，CLI `svn page-query` 和 Nexus 后端共用查询层。
 - `scripts/providers/svn/nexus/procedure_sources.py`、`procedure_mutation.py`：独立于 PAGE 投影的 SVN 对象索引就绪检查、过程函数无会话有界读取/调用方证据、精确身份编辑租约、预览和幂等本地写入；共用 `documents.py` 的授权与物理文件写回内核。
+- `scripts/providers/svn/nexus/inheritance_sources.py`：基于授权索引与两层源码哈希，有界读取项目原文、产品原文和只读展开内容；`catalog.py` 将 `.inherit.gss` 记为独立物理产品层，但从逻辑过程函数目录和可写入口排除。
 - `scripts/providers/svn/nexus/catalog.py`、`documents.py`、`index_queries.py`、`manifest.py`、`scm.py`、`workspace.py`、`bootstrap.py`：Nexus 目录、文档与内部 PAGE 操作记录、有界查询、清单、SCM 与工作区初始化。
 
 ## Guthon Nexus

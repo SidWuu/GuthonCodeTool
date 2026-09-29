@@ -82,6 +82,7 @@ def source_path_writable(entry: "ScopeEntry", relative_path: object) -> bool:
         and category in WRITABLE_SOURCE_CATEGORIES
         and relative.suffix.lower() in WRITABLE_SOURCE_SUFFIXES[category]
         and relative.name.casefold() != "index.md"
+        and not (category == "procedures" and relative.name.casefold().endswith(".inherit.gss"))
     )
 
 

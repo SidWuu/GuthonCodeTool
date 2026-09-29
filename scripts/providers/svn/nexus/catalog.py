@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from common.page_projection import extract_page_fields, extract_page_scripts
+from common.inheritance import procedure_body, project as project_inheritance
 from common.source_format import decode_source
 from providers.svn.checkout import file_hash, run_svn, svn_path_changes, svn_status
 from providers.svn.dedup import resolve_page_duplicates
@@ -24,7 +25,7 @@ from .manifest import (
 )
 
 
-HEADER_FIELD = re.compile(r"(?m)^\s*\*\s*@(?P<key>[A-Za-z]+)\s+(?P<value>.*?)\s*$")
+HEADER_FIELD = re.compile(r"(?m)^[ \t]*\*[ \t]*@(?P<key>[A-Za-z]+)[ \t]*(?P<value>[^\r\n]*)\r?$")
 TEXT_SUFFIXES = {".gss", ".js", ".vm", ".sql"}
 GENERIC_TEXT_SUFFIXES = {*TEXT_SUFFIXES, ".json", ".md", ".txt", ".yaml", ".yml"}
 
@@ -135,6 +136,7 @@ def _page_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) 
                     "json_path": field.json_pointer,
                     "content": field.effective_value,
                     "label": field.display_name,
+                    "originMap": list(field.origin_segments),
                 }
                 for field in extract_page_scripts(data)
             ],
@@ -155,12 +157,48 @@ def _page_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) 
 
 
 def _procedure_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) -> dict:
-    result = _base_object(entry, path, "procedure", revisions, changes)
+    inherited = path.name.casefold().endswith(".inherit.gss")
+    result = _base_object(entry, path, "procedure-inherit" if inherited else "procedure", revisions, changes)
     text = decode_source(path.read_bytes())[0]
     header = header_fields(text)
     relative = source_relative_path(entry, path.relative_to(entry.root)).with_suffix("")
+    if inherited:
+        relative = relative.with_name(relative.name[:-len(".inherit")])
     package = header.get("packageId") or ".".join(relative.parts[:-1])
     function_id = header.get("functionId") or relative.name
+    indexed_script = text
+    origin_map = []
+    if not inherited:
+        parent_path = path.with_name(path.stem + ".inherit.gss")
+        parent_present = (parent_path.is_file() and not parent_path.is_symlink()
+                          and parent_path.resolve().is_relative_to(entry.root.resolve()))
+        parent_text = decode_source(parent_path.read_bytes())[0] if parent_present else None
+        parent_body, parent_offset = procedure_body(parent_text) if parent_text is not None else (None, 0)
+        if parent_text is not None and parent_text.lstrip("\ufeff").startswith("/**") and parent_offset == 0:
+            parent_body = None
+        parent_header = header_fields(parent_text) if parent_text is not None else {}
+        parent_identity_matches = (
+            not parent_header.get("packageId") or parent_header["packageId"] == package
+        ) and (
+            not parent_header.get("functionId") or parent_header["functionId"] == function_id
+        )
+        projection = project_inheritance(
+            text, parent_body if parent_identity_matches else None, product_offset=parent_offset,
+        )
+        if not parent_identity_matches:
+            result["status"] = "INHERIT_IDENTITY_MISMATCH"
+        if projection["status"] == "ACTIVE":
+            indexed_script = projection["effective"]
+            parent_source_path = _logical_path(entry, parent_path)
+            for segment in projection["segments"]:
+                is_product = segment["layer"] == "product"
+                original = parent_text if is_product else text
+                rendered = indexed_script[segment["start"]:segment["end"]]
+                leading = len(rendered) - len(rendered.lstrip("\r\n"))
+                origin_map.append({**segment,
+                                   "sourceLine": original.count("\n", 0, segment["sourceStart"] + leading) + 1,
+                                   "sourcePath": parent_source_path if is_product else result["source_path"],
+                                   "sourceHash": file_hash(parent_path) if is_product else result["source_hash"]})
     result.update(
         source_id=f"{package}#{function_id}",
         source_alias_id=package,
@@ -168,7 +206,8 @@ def _procedure_object(entry: ScopeEntry, path: Path, revisions: dict, changes: d
         source_name=header.get("description") or function_id,
         system_id="",
         data_source_id=_identity_from_path(entry, path),
-        scripts=[{"script_type": "procedure_script", "json_path": "", "content": text}],
+        scripts=[] if inherited else [{"script_type": "procedure_script", "json_path": "",
+                                       "content": indexed_script, "originMap": origin_map}],
     )
     if function_id != relative.name:
         result["status"] = "IDENTITY_MISMATCH"
@@ -322,9 +361,13 @@ def scan(
         change_map = {change["path"]: change for change in current.get("changes") or []}
         if on_progress is not None:
             on_progress(f"[{index}/{total}] {label}｜索引｜解析授权文件")
+        scanned_files = 0
         for path in sorted(entry.root.rglob("*")):
             if not path.is_file() or ".svn" in path.parts:
                 continue
+            scanned_files += 1
+            if on_progress is not None and scanned_files % 250 == 0:
+                on_progress(f"[{index}/{total}] {label}｜索引｜已扫描 {scanned_files} 个文件")
             relative = path.relative_to(entry.root).as_posix()
             logical_category = source_category(entry, relative) or entry.category
             if collect_modules:
@@ -377,7 +420,7 @@ def scan(
                 )
         if on_progress is not None:
             on_progress(
-                f"[{index}/{total}] {label}｜索引｜完成 · "
+                f"[{index}/{total}] {label}｜索引｜文件扫描完成 · "
                 f"对象 {sum(counts.values()) - before_count} · 错误 {len(errors) - before_errors}"
             )
 
@@ -410,8 +453,12 @@ def scan(
         page_objects, ignored = resolve_page_duplicates(page_objects)
         counts["page"] = len(page_objects)
         if on_object is not None:
-            for item in page_objects:
+            if on_progress is not None:
+                on_progress(f"索引｜开始写入 {len(page_objects)} 个 PAGE 对象")
+            for page_index, item in enumerate(page_objects, 1):
                 on_object(item)
+                if on_progress is not None and page_index % 250 == 0:
+                    on_progress(f"索引｜已写入 PAGE 对象 {page_index}/{len(page_objects)}")
 
     ignored_paths = {item["path"] for item in ignored}
     for module in modules:

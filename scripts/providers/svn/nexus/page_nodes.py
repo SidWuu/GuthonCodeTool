@@ -265,7 +265,7 @@ def search_sources(
         after = _decode_cursor(cursor, generation, query, key_length=5) if cursor else None
         if after and not after[-1].isdecimal():
             raise PageIndexError("INVALID_CURSOR", "Source search cursor has no valid record position")
-        clauses = ["provider='svn'", "(instr(lower(source_id), ?) > 0 OR "
+        clauses = ["provider='svn'", "source_table<>'procedure-inherit'", "(instr(lower(source_id), ?) > 0 OR "
                    "instr(lower(source_alias_id), ?) > 0 OR "
                    "instr(lower(COALESCE(source_name, '')), ?) > 0)"]
         params: list[object] = [keyword.lower(), keyword.lower(), keyword.lower()]
@@ -785,13 +785,13 @@ def source_context(
         _checked_raw(workspace, record)
         record_id = record["record_id"]
         fragments = conn.execute(
-            "SELECT fragment_type, json_pointer, label, content_hash FROM gusen_source_fragment "
+            "SELECT fragment_type, json_pointer, label, content_hash, origin_map_json FROM gusen_source_fragment "
             "WHERE source_record_id=? ORDER BY fragment_type, json_pointer LIMIT ?",
             (record_id, limit + 1),
         ).fetchall()
         accesses = conn.execute(
             "SELECT a.table_name, a.operation, a.confidence, a.evidence, a.line_no, "
-            "f.json_pointer, f.fragment_type FROM gusen_data_access a "
+            "f.json_pointer, f.fragment_type, f.origin_map_json FROM gusen_data_access a "
             "LEFT JOIN gusen_source_fragment f ON f.fragment_id=a.source_fragment_id "
             "AND f.source_record_id=a.source_record_id "
             "WHERE a.source_record_id=? ORDER BY a.table_name, a.operation, a.access_id LIMIT ?",
@@ -799,7 +799,7 @@ def source_context(
         ).fetchall()
         facts = conn.execute(
             "SELECT l.fact_kind, l.subject, l.value_text, l.confidence, l.line_start, "
-            "f.json_pointer, f.fragment_type FROM gusen_logic_fact l "
+            "f.json_pointer, f.fragment_type, f.origin_map_json FROM gusen_logic_fact l "
             "LEFT JOIN gusen_source_fragment f ON f.fragment_id=l.source_fragment_id "
             "AND f.source_record_id=l.source_record_id "
             "WHERE l.source_record_id=? ORDER BY l.fact_kind, l.line_start, l.fact_id LIMIT ?",
@@ -809,14 +809,30 @@ def source_context(
             "SELECT COUNT(*) FROM gusen_page_node WHERE source_record_id=?", (record_id,)
         ).fetchone()[0]
     truncated = any(len(rows) > limit for rows in (fragments, accesses, facts))
+    def with_origin(row):
+        result = dict(row)
+        segments = json.loads(result.pop("origin_map_json") or "[]")
+        result["originMap"] = segments
+        line = result.get("line_no", result.get("line_start"))
+        if isinstance(line, int) and line > 0 and segments:
+            matched = next((segment for segment in reversed(segments)
+                            if segment.get("effectiveLine", 0) <= line), None)
+            if matched:
+                result["sourceOrigin"] = {
+                    "layer": matched["layer"],
+                    "sourcePath": matched.get("sourcePath") or record["source_path"],
+                    "jsonPointer": matched.get("jsonPointer") or result.get("json_pointer") or "",
+                    "sourceLine": matched.get("sourceLine", 1) + line - matched.get("effectiveLine", 1),
+                }
+        return result
     return {
         "workspaceKey": workspace["workspaceKey"], "sourceNamespace": source_namespace,
         "sourceType": "page", "sourceId": source_id, "funId": fun_id,
         "sourcePath": record["source_path"], "indexedSourceHash": record["source_hash"],
         "indexGeneration": generation, "nodeCount": node_count,
-        "fragments": [dict(row) for row in fragments[:limit]],
-        "tableAccesses": [dict(row) for row in accesses[:limit]],
-        "logicFacts": [dict(row) for row in facts[:limit]],
+        "fragments": [with_origin(row) for row in fragments[:limit]],
+        "tableAccesses": [with_origin(row) for row in accesses[:limit]],
+        "logicFacts": [with_origin(row) for row in facts[:limit]],
         "complete": not truncated, "truncated": truncated,
         "truncation": {"fragments": len(fragments) > limit,
                        "tableAccesses": len(accesses) > limit,

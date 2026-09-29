@@ -54,6 +54,11 @@ TOOLS = [
             "properties": {"semanticNodeId": STRING, "jsonPointer": STRING,
                            "indexedSourceHash": STRING}, "additionalProperties": False}},
            "maxChars": INTEGER}, ["workspaceKey", "sourceNamespace", "sourceId", "targets"]),
+    _tool("read_inherited_source", "Read exact project and product originals with a source-mapped derived script; no edit lease.",
+          {**PAGE, "sourceType": {"type": "string", "enum": ["procedure", "page"]},
+           "workingCopyId": STRING, "jsonPointer": STRING, "indexedSourceHash": STRING,
+           "offset": INTEGER, "maxChars": INTEGER},
+          ["workspaceKey", "sourceType", "sourceNamespace", "sourceId"]),
     _tool("list_page_fields", "List typed UI fields; datasource projection columns remain collection-only.",
           {**PAGE, "regionType": STRING, "fieldId": STRING, "fieldIdPrefix": STRING,
            "limit": INTEGER, "cursor": STRING},
@@ -117,12 +122,14 @@ WRITE_TOOLS = [
           ["workspaceKey", "sourceNamespace", "sourceId", "funId", "workingCopyId"], read_only=False),
     _tool("preview_procedure", "Preview one leased procedure candidate without writing source.",
           {"workspaceKey": STRING, "editToken": STRING, "content": STRING,
+           "expectedProductHash": STRING,
            "replacements": {"type": "array", "items": {"type": "object", "properties": {
                "old": STRING, "new": STRING, "expectedCount": INTEGER,
            }, "required": ["old", "new"], "additionalProperties": False}}},
           ["workspaceKey", "editToken"]),
     _tool("update_procedure", "Write one leased SVN procedure locally with an idempotency key; never commit SVN.",
           {"workspaceKey": STRING, "editToken": STRING, "idempotencyKey": STRING,
+           "expectedProductHash": STRING,
            "content": STRING,
            "replacements": {"type": "array", "items": {"type": "object", "properties": {
                "old": STRING, "new": STRING, "expectedCount": INTEGER,
@@ -273,6 +280,7 @@ class PageMcpServer:
                 "edit_token": _require_string(arguments, "editToken"),
                 "content": arguments.get("content"),
                 "replacements": arguments.get("replacements"),
+                "expected_product_hash": _require_string(arguments, "expectedProductHash", optional=True),
             }
             if name == "preview_procedure":
                 return procedure_mutation.preview_procedure(workspace, **candidate)
@@ -396,6 +404,18 @@ class PageMcpServer:
             return page_nodes.read_nodes(
                 workspace, source_namespace=source_namespace, source_id=source_id, fun_id=fun_id,
                 targets=arguments.get("targets"), max_chars=_optional_int(arguments, "maxChars", 12_000),
+            )
+        if name == "read_inherited_source":
+            from . import inheritance_sources
+
+            return inheritance_sources.read_inherited_source(
+                workspace, source_type=_require_string(arguments, "sourceType"),
+                source_namespace=source_namespace, source_id=source_id, fun_id=fun_id,
+                working_copy_id=_require_string(arguments, "workingCopyId", optional=True),
+                json_pointer_value=_require_string(arguments, "jsonPointer", optional=True),
+                indexed_source_hash=_require_string(arguments, "indexedSourceHash", optional=True),
+                offset=_optional_int(arguments, "offset", 0),
+                max_chars=_optional_int(arguments, "maxChars", 12_000),
             )
         if name == "list_page_fields":
             return page_nodes.list_fields(

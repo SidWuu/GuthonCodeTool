@@ -1235,8 +1235,11 @@ function activate(context) {
         plan.databaseTestingConfigured ? '数据库排查配置：将删除当前工作区条目' : '数据库排查配置：无',
         ...existingDirectories.map((item) => `${item.label}：${item.path}`),
       ].join('\n');
+      const docsWarning = plan.kind === 'projects' && plan.docsHasFiles
+        ? '\n\n项目 docs 目录中存在文件，请检查是否需要备份。'
+        : '';
       const confirmed = await vscode.window.showWarningMessage(
-        `确认删除 ${plan.displayName}（${workspaceKey}）？\n\n${details}\n\n目录将移入系统废纸篓；未提交的本地源码修改也会一并移走。其他产品、项目和共享配置不会删除。`,
+        `确认删除 ${plan.displayName}（${workspaceKey}）？\n\n${details}${docsWarning}\n\n目录将移入系统废纸篓；未提交的本地源码修改也会一并移走。其他产品、项目和共享配置不会删除。`,
         { modal: true },
         '确认删除'
       );

@@ -68,6 +68,7 @@ def setup_schema(conn) -> None:
             coordinate_kind TEXT NOT NULL DEFAULT 'fragment-line',
             line_count INTEGER NOT NULL DEFAULT 0,
             content_hash TEXT NOT NULL,
+            origin_map_json TEXT NOT NULL DEFAULT '[]',
             UNIQUE(source_record_id, json_pointer, fragment_type)
         );
         -- PAGE 关系表：记录字段、组件、映射键等 PAGE 元素之间的结构关系与置信度。
@@ -213,6 +214,9 @@ def setup_schema(conn) -> None:
         columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
         if "source_fragment_id" not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN source_fragment_id INTEGER")
+    fragment_columns = {row["name"] for row in conn.execute("PRAGMA table_info(gusen_source_fragment)")}
+    if "origin_map_json" not in fragment_columns:
+        conn.execute("ALTER TABLE gusen_source_fragment ADD COLUMN origin_map_json TEXT NOT NULL DEFAULT '[]'")
     fts = conn.execute("SELECT 1 FROM sqlite_master WHERE name='gusen_fact_fts'").fetchone()
     if fts:
         conn.execute("DROP TABLE gusen_fact_fts")
@@ -310,11 +314,11 @@ def _insert_fragment(conn, source_record_id: int, script: dict) -> int:
         """
         INSERT OR REPLACE INTO gusen_source_fragment(
             fragment_id, source_record_id, fragment_type, json_pointer, label, language,
-            coordinate_kind, line_count, content_hash
+            coordinate_kind, line_count, content_hash, origin_map_json
         ) VALUES(
             (SELECT fragment_id FROM gusen_source_fragment
              WHERE source_record_id=? AND json_pointer=? AND fragment_type=?),
-            ?,?,?,?,?,?,?,?
+            ?,?,?,?,?,?,?,?,?
         )
         """,
         (
@@ -329,6 +333,7 @@ def _insert_fragment(conn, source_record_id: int, script: dict) -> int:
             "fragment-line",
             len(content.splitlines()),
             _hash_text(content),
+            json.dumps(script.get("originMap") or [], ensure_ascii=False, separators=(",", ":")),
         ),
     )
     row = conn.execute(

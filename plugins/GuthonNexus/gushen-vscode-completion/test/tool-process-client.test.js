@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
-const { ToolProcessClient, requestKind } = require('../src/tool-process-client');
+const { ToolProcessClient, requestKind, requestTimeoutMs } = require('../src/tool-process-client');
 
 const fakeHost = `
 const readline = require('node:readline');
@@ -37,6 +37,14 @@ test('classifies SVN mutations as writes so they cannot be replayed as reads', (
   assert.equal(requestKind('svn', ['refresh']), 'write');
   assert.equal(requestKind('svn', ['scm-status']), 'read');
   assert.equal(requestKind('svn', ['page-query']), 'read');
+});
+
+test('allows full SVN checkout and indexing to exceed the normal ToolHost wait', () => {
+  assert.equal(requestTimeoutMs('svn', ['sync-from-config']), 30 * 60 * 1000);
+  assert.equal(requestTimeoutMs('svn', ['init']), 30 * 60 * 1000);
+  assert.equal(requestTimeoutMs('svn', ['refresh']), 30 * 60 * 1000);
+  assert.equal(requestTimeoutMs('reindex'), 30 * 60 * 1000);
+  assert.equal(requestTimeoutMs('svn', ['write']), 120000);
 });
 
 test('restarts a crashed read once and never replays an uncertain write', async () => {

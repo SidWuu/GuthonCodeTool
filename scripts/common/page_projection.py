@@ -8,6 +8,8 @@ import re
 from collections import Counter
 from dataclasses import asdict, dataclass
 
+from common.inheritance import project as project_inheritance
+
 
 SCRIPT_KEYS = {
     "script",
@@ -24,7 +26,7 @@ SCRIPT_KEYS = {
     "sql",
 }
 EVENT_SUPERS = {"serviceEvents": "superServiceEvents", "pageEvents": "superPageEvents"}
-PAGE_NODE_PARSER_VERSION = "page-nodes-v1"
+PAGE_NODE_PARSER_VERSION = "page-nodes-v2"
 PAGE_FIELD_PARSER_VERSION = "page-fields-v1"
 PAGE_FIELD_RELATION_PARSER_VERSION = "page-field-relations-v2"
 SERVICE_EVENT_KEYS = {"beforeSave", "afterSave", "beforeSqlSelect"}
@@ -40,6 +42,7 @@ class ScriptField:
     projection_name: str
     original_value: str
     effective_value: str
+    origin_segments: tuple[dict, ...] = ()
 
     def to_dict(self):
         result = asdict(self)
@@ -135,10 +138,9 @@ def is_script_key(key, event_type: str | None = None) -> bool:
     )
 
 
-def resolve_inherited_script(script: str, inherited: str) -> str:
-    if not INHERIT_MARKER.search(script):
-        return script
-    return INHERIT_MARKER.sub(lambda _match: inherited.rstrip("\r\n"), script)
+def resolve_inherited_script(script: str, inherited: str | None) -> str:
+    projection = project_inheritance(script, inherited)
+    return projection["effective"] if projection["status"] == "ACTIVE" else script
 
 
 def script_extension(key: str, event_type: str | None) -> str:
@@ -203,12 +205,24 @@ def extract_page_scripts(value) -> list[ScriptField]:
             for key, child in current.items():
                 child_parts = parts + [key]
                 if is_script_key(key, event_type) and isinstance(child, str):
-                    inherited = (inherited_scripts or {}).get(key, "")
+                    inherited = (inherited_scripts or {}).get(key)
                     if key == "script":
-                        inherited = current.get("superScript", "")
-                    inherited = inherited if isinstance(inherited, str) else ""
-                    effective = resolve_inherited_script(child, inherited)
+                        inherited = current.get("superScript")
+                    inherited = inherited if isinstance(inherited, str) else None
+                    projection = project_inheritance(child, inherited)
+                    effective = projection["effective"] if projection["status"] == "ACTIVE" else child
                     pointer = json_pointer(child_parts)
+                    super_parts = list(child_parts)
+                    if "pageEvents" in super_parts:
+                        super_parts[super_parts.index("pageEvents")] = "superPageEvents"
+                    elif "serviceEvents" in super_parts:
+                        super_parts[super_parts.index("serviceEvents")] = "superServiceEvents"
+                    elif key == "script":
+                        super_parts[-1] = "superScript"
+                    super_pointer = json_pointer(super_parts)
+                    origins = tuple({**segment, "jsonPointer":
+                                     super_pointer if segment["layer"] == "product" else pointer}
+                                    for segment in projection["segments"])
                     fields.append(
                         ScriptField(
                             json_pointer=pointer,
@@ -218,6 +232,7 @@ def extract_page_scripts(value) -> list[ScriptField]:
                             projection_name=_projection_name(next_display, key, event_type, pointer),
                             original_value=child,
                             effective_value=effective,
+                            origin_segments=origins,
                         )
                     )
                 elif key not in EVENT_SUPERS.values():

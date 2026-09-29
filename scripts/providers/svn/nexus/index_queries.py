@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
 from common import gusen_hub, source_facts
+from common.inheritance import SOURCE_CATALOG_VERSION
 
 from .manifest import load_authorized_scope, source_relative_path
 
@@ -327,6 +328,11 @@ def catalog(workspace: dict) -> dict:
     entries = {entry.id: entry for entry in scope.entries}
     subsystem_orders = _subsystem_tree_orders(workspace, scope)
     with _connection(workspace) as connection:
+        parser = connection.execute(
+            "SELECT state_value FROM gusen_sync_state WHERE state_key='source_catalog_parser_version'"
+        ).fetchone()
+        if not parser or parser[0] != SOURCE_CATALOG_VERSION:
+            raise SystemExit("SVN source catalog requires a full local reindex")
         rows = [
             dict(row)
             for row in connection.execute(
@@ -334,7 +340,7 @@ def catalog(workspace: dict) -> dict:
                 SELECT source_table, source_namespace, source_id, source_alias_id, fun_id, source_name, source_path,
                        local_path, working_copy_id, scope_entry_id, system_id, data_source_id, status
                 FROM gusen_source_record
-                WHERE provider='svn'
+                WHERE provider='svn' AND source_table<>'procedure-inherit'
                 ORDER BY source_path
                 """
             ).fetchall()
@@ -488,7 +494,7 @@ def definition(workspace: dict, *, alias: str, fun_id: str) -> dict:
             SELECT source_table, source_id, source_alias_id, fun_id, source_name, source_path,
                    working_copy_id, scope_entry_id, status
             FROM gusen_source_record
-            WHERE provider='svn' AND source_alias_id=? AND fun_id=?
+            WHERE provider='svn' AND source_table<>'procedure-inherit' AND source_alias_id=? AND fun_id=?
             ORDER BY source_table, source_id
             """,
             (normalized_alias, normalized_fun),

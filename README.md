@@ -89,7 +89,7 @@ MCP 的 PAGE 脚本/SQL 修改与字段插入预检在同一源码快照上比�
 
 发行模式优先在 Nexus 的“工作区”或“项目”区域点击“添加产品或项目”。向导只收集产品/项目、名称、稳定 ID 和源码来源；选择 SVN 或 DATABASE 后即创建对应 Nexus 并结束。新建 SVN Nexus 中的“设置工作区 SVN 登录”、“导入/粘贴 SVN checkout 配置”和“编辑 SVN 地址配置”用于后续配置；每个产品或项目只保存一个 `svn.url`，默认完整 checkout 该地址，不会探测其他工作区的脚本。DATABASE Nexus 可先创建，后续再补充 datasource。生成的 `workspaceKey` 写入 `products.yaml` / `projects.yaml`；`systems.include.mappings` 可选，只用于身份匹配、命名和路由子系统，不过滤 SVN 目录。后续增加项目使用同一入口，无需重新初始化数据目录。
 项目无需先创建或选择产品：项目是产品某个版本的完整导出快照，导出后与产品并列，拥有独立配置、源码、索引和数据源范围。
-不再需要的 PRD/PRJ 可在工作区节点右键选择“删除产品或项目”；确认框会列出精确范围，确认后相关目录进入系统废纸篓，并删除该工作区配置、独占数据源和数据库排查条目。
+不再需要的 PRD/PRJ 可在工作区节点右键选择“删除产品或项目”；确认框会列出精确范围。删除项目时，如项目 `docs/` 下存在文件，还会提示检查是否需要备份。确认后相关目录进入系统废纸篓，并删除该工作区配置、独占数据源和数据库排查条目。
 
 `setup` 对首次使用生成空的 datasource/products/projects 注册表，并保留 source-tables/sync 模板；已有文件绝不覆盖。维护者也可手工复制完整示例：
 
@@ -178,7 +178,7 @@ SVN MCP 是与 Nexus、Bridge 并列的 AI 查询和受控源码修改入口，�
 .venv/bin/python scripts/guthon_tool.py mcp --stdio --home "$GUTHON_HOME"
 ```
 
-默认提供 28 个工具：15 个只读工具（含独立的 SVN 对象索引状态、过程函数有界读取与调用方证据）和 13 个受控编辑/恢复工具；`--read-only` 仅暴露 15 个只读工具。PAGE 写入限于授权 SVN working copy 中稳定的脚本/SQL 字符串节点及同一已识别 UI 字段集合内的单字段新增/拷贝，不支持任意 PAGE JSON、跨集合复制或反射组修改。过程函数按 `workspaceKey + sourceNamespace + sourceId + funId + workingCopyId` 精确定位，先读取、取得编辑租约、预览，再以幂等键写入本地物理文件并核对索引和 SVN diff；不提交 SVN。字段目录仅索引有组件宿主的界面字段；无原生身份的数据源列仍从字段集合按需读取。关系查询保留显式 `selectCodefieldId` 指向及未解析的 `otherSetFields` 证据；引用检查始终不批准自动删除，不能作为完整引用证明。stdio 握手支持 MCP `2025-03-26`、`2025-06-18` 和 `2025-11-25`；不回显未支持版本，客户端须确认协商结果。工具要求显式 `workspaceKey`。PAGE 语义索引和 SVN 对象索引分别用 `get_index_status`、`get_source_index_status` 检查；`REBUILD_REQUIRED` 需显式重建，`PARTIAL` 且 `projectionGapCount>0` 表示某些 JSON PAGE 有片段但缺少语义节点，可先按精确 `sourcePath` 执行 `svn reindex-file --path`，范围较多时重建工作区索引。缺口目标会返回 `INDEX_STALE`，不会误作空 PAGE。MCP 不会自行迁移真实索引。索引 generation 改变时旧分页游标会被拒绝。Nexus 的现有编辑入口不受影响。
+默认提供 29 个工具：16 个只读工具（含独立的 SVN 对象索引状态、过程函数有界读取与调用方证据）和 13 个受控编辑/恢复工具；`--read-only` 仅暴露 16 个只读工具。PAGE 写入限于授权 SVN working copy 中稳定的脚本/SQL 字符串节点及同一已识别 UI 字段集合内的单字段新增/拷贝，不支持任意 PAGE JSON、跨集合复制或反射组修改。过程函数按 `workspaceKey + sourceNamespace + sourceId + funId + workingCopyId` 精确定位，先读取、取得编辑租约、预览，再以幂等键写入本地物理文件并核对索引和 SVN diff；不提交 SVN。字段目录仅索引有组件宿主的界面字段；无原生身份的数据源列仍从字段集合按需读取。关系查询保留显式 `selectCodefieldId` 指向及未解析的 `otherSetFields` 证据；引用检查始终不批准自动删除，不能作为完整引用证明。stdio 握手支持 MCP `2025-03-26`、`2025-06-18` 和 `2025-11-25`；不回显未支持版本，客户端须确认协商结果。工具要求显式 `workspaceKey`。PAGE 语义索引和 SVN 对象索引分别用 `get_index_status`、`get_source_index_status` 检查；`REBUILD_REQUIRED` 需显式重建，`PARTIAL` 且 `projectionGapCount>0` 表示某些 JSON PAGE 有片段但缺少语义节点，可先按精确 `sourcePath` 执行 `svn reindex-file --path`，范围较多时重建工作区索引。缺口目标会返回 `INDEX_STALE`，不会误作空 PAGE。MCP 不会自行迁移真实索引。索引 generation 改变时旧分页游标会被拒绝。Nexus 的现有编辑入口不受影响。
 
 同一只读 PAGE 服务也可由 `svn page-query` 使用 JSON stdin 调用，并供 Nexus 后端按相同结果结构查询。Nexus 源码版的 SVN 源码树可对 PAGE JSON 使用“浏览 PAGE 语义节点”命令按页选择，再经过源码复核打开现有虚拟文档；尚无独立新面板，已安装 VSIX 需重新打包安装后才包含此命令。示例：
 
@@ -188,12 +188,15 @@ echo '{"name":"list_page_nodes","arguments":{"sourceNamespace":"pages-SYS-1","so
 
 `list_page_fields` 另支持可选 `fieldIdPrefix`，按字面前缀在精确 PAGE 内分页筛选；与 `fieldId` 的精确匹配不同，`%` 和 `_` 不作为通配符。
 
-PAGE 节点写入流程为 `open_page_node_edit → preview_page_nodes → update_page_nodes → get_page_operation / resume_page_operation`；字段新增/拷贝为 `open_page_field_insert → preview_page_field_insert → insert_page_field → get_page_operation / resume_page_operation`；过程函数为 `open_procedure_edit → preview_procedure → update_procedure → get_procedure_operation / resume_procedure_operation`。新增字段始终生成新 `id`；仅当候选原有 `guid` 键时才生成新 `guid`，省略时保持省略。正式写入要求工作区 `edit` 能力、授权文件、未过期的编辑令牌、当前源码与索引一致及调用方提供 `idempotencyKey`；响应丢失后先用该 key 查询原 operation，避免盲目重写。写入仅保存到本地 SVN working copy，**不会提交 SVN**。需要强制只读的客户端可在 `--stdio` 后加 `--read-only`，此时只发现 15 个查询工具。字段删除、移动和反射组写入仍不开放；真实工作区已通过 28 个工具的本地调用验证并受控撤销测试改动，但已安装 VSIX、Windows、AI 自主路由与故障矩阵尚未完成验收，使用写入后必须人工核对 SVN diff，不把工具响应当作平台运行结果。
+SVN 项目过程函数的 `.gss` 与 `.inherit.gss` 会按同目录同名归为一个逻辑函数；产品文件只读。Nexus 默认打开项目原文，可在过程函数或 PAGE 项目脚本上使用“查看展开后的继承源码”查看只读来源视图。MCP `read_inherited_source` 按精确身份有界返回项目原文、产品原文、展开片段、来源位置和两层哈希；读取前需完成一次完整索引重建。只改项目补充逻辑时保留标记；若需修改产品逻辑，先核对完整展开候选及控制流，移除标记后只写项目 `.gss` 或 PAGE 项目脚本字段。过程函数移除有效标记时，`preview_procedure` 和 `update_procedure` 必须传入读取所得的 `expectedProductHash`，并复核产品原文未变化。`return @inherit();` 等不能自动证明等价的情况会标为不可自动物化。产品层与派生视图不能写入，写入后仍须审阅 SVN diff。
+
+PAGE 节点写入流程为 `open_page_node_edit → preview_page_nodes → update_page_nodes → get_page_operation / resume_page_operation`；字段新增/拷贝为 `open_page_field_insert → preview_page_field_insert → insert_page_field → get_page_operation / resume_page_operation`；过程函数为 `open_procedure_edit → preview_procedure → update_procedure → get_procedure_operation / resume_procedure_operation`。新增字段始终生成新 `id`；仅当候选原有 `guid` 键时才生成新 `guid`，省略时保持省略。正式写入要求工作区 `edit` 能力、授权文件、未过期的编辑令牌、当前源码与索引一致及调用方提供 `idempotencyKey`；响应丢失后先用该 key 查询原 operation，避免盲目重写。写入仅保存到本地 SVN working copy，**不会提交 SVN**。需要强制只读的客户端可在 `--stdio` 后加 `--read-only`，此时只发现 16 个查询工具。字段删除、移动和反射组写入仍不开放；此前版本的真实工作区曾完成 28 个工具的本地调用验证及受控撤销测试。本轮已完成 VSIX 安装、真实项目本地索引重建和两层源码只读抽样；Windows、AI 自主路由、真实项目的 Nexus 展开交互与故障矩阵仍需验收。使用写入后必须人工核对 SVN diff，不把工具响应当作平台运行结果。
 
 配置变更会在执行前显示新增、移除和变更数量，确认后将唯一根地址写入工作区 `context/authorized-scope.json` 并检出/更新；该 JSON 仅供程序使用。
 旧的逐条 `svn.scope`/`checkoutPaths` 写法仍兼容。用户名只在本地 <code>sync.yaml</code> 配置，密码只由 SVN 系统凭据存储；二者都不会进入配置清单、日志或参数。旧的 `sync-from-script`、`sync-from-bat` 命令仍兼容，另提供 `sync-from-config` 别名。移出配置的旧 working copy 不会自动删除。
 `import-svn-scope` 仍保留为高级手工入口，但日常不再要求配置 `svn.scope_manifest`。
 
+大型仓库的检出/更新会继续等待完整索引扫描，并在输出中定期显示已扫描文件数；若操作仍中断，应先读取工作区与索引状态，再决定是否重试。
 `svn init` 会全量建立索引；`svn refresh` 按更新结果增量刷新，遇到目录级新增/删除等无法安全定位的结构变化时
 退回全量扫描。普通浏览、虚拟编辑、SCM 和调用查询只使用本地 working copy，不查询源码数据库。
 SVN 表、视图和过程函数以根 working copy 内识别出的数据源与对象名组成索引身份，因此不同数据源允许存在同名对象；Nexus 打开对象时会携带 `workingCopyId` 和源码路径精确定位。PAGE_ID 仍在工作区内按版本去重。

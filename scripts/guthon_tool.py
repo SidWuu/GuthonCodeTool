@@ -1028,6 +1028,8 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 "search_page_fields": {"workspaceKey", "sourceNamespace", "fieldIdPrefix", "limit", "cursor"},
                 "list_page_nodes": identity_keys | {"nodeType", "eventScope", "limit", "cursor"},
                 "read_page_nodes": identity_keys | {"targets", "maxChars"},
+                "read_inherited_source": identity_keys | {"sourceType", "workingCopyId", "jsonPointer",
+                                                          "indexedSourceHash", "offset", "maxChars"},
                 "list_page_fields": identity_keys | {"regionType", "fieldId", "fieldIdPrefix", "limit", "cursor"},
                 "get_page_field": identity_keys | {"target", "maxChars"},
                 "list_page_field_relations": identity_keys | {"sourceFieldId", "targetFieldId", "limit", "cursor"},
@@ -1070,6 +1072,17 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     result = page_nodes.read_nodes(
                         workspace, source_namespace=namespace, source_id=source_id, fun_id=fun_id,
                         targets=arguments.get("targets"), max_chars=arguments.get("maxChars", 12_000),
+                    )
+                elif name == "read_inherited_source":
+                    from providers.svn.nexus import inheritance_sources
+
+                    result = inheritance_sources.read_inherited_source(
+                        workspace, source_type=arguments.get("sourceType", ""),
+                        source_namespace=namespace, source_id=source_id, fun_id=fun_id,
+                        working_copy_id=arguments.get("workingCopyId", ""),
+                        json_pointer_value=arguments.get("jsonPointer", ""),
+                        indexed_source_hash=arguments.get("indexedSourceHash", ""),
+                        offset=arguments.get("offset", 0), max_chars=arguments.get("maxChars", 12_000),
                     )
                 elif name == "list_page_fields":
                     result = page_nodes.list_fields(

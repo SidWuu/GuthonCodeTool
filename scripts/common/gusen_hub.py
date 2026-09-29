@@ -19,6 +19,7 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from common import source_facts
+from common.inheritance import SOURCE_CATALOG_VERSION
 from common.source_format import decode_source
 from providers.svn import checkout as svn_checkout
 from providers.svn import group_inference
@@ -2261,6 +2262,10 @@ def _advance_page_semantic_generation(conn, *, full_rebuild=False):
     if full_rebuild:
         conn.execute(
             "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+            ("source_catalog_parser_version", SOURCE_CATALOG_VERSION),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
             ("page_node_schema_version", str(source_facts.PAGE_NODE_SCHEMA_VERSION)),
         )
         conn.execute(
@@ -2583,6 +2588,13 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
                     "WHERE provider='svn' AND source_path=?",
                     (_now(), scanned["path"]),
                 )
+                if scanned["path"].casefold().endswith(".inherit.gss"):
+                    child_path = scanned["path"][:-len(".inherit.gss")] + ".gss"
+                    conn.execute(
+                        "UPDATE gusen_source_record SET status='STALE', indexed_time=? "
+                        "WHERE provider='svn' AND source_table='procedure' AND source_path=?",
+                        (_now(), child_path),
+                    )
                 _advance_page_semantic_generation(conn)
                 conn.commit()
                 return {
@@ -2644,6 +2656,19 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
                 _delete_svn_index_item(conn, workspace, row)
             if item:
                 _insert_svn_index_item(conn, workspace, item, _now())
+                if item["source_table"] == "procedure-inherit":
+                    child_path = item["source_path"][:-len(".inherit.gss")] + ".gss"
+                    child_scan = catalog.scan_file(workspace, child_path)
+                    child_item = child_scan.get("object")
+                    if child_item and child_item["source_table"] == "procedure" and not child_scan["errors"]:
+                        previous_child = conn.execute(
+                            "SELECT source_table, source_id, fun_id, scope_entry_id, source_namespace "
+                            "FROM gusen_source_record WHERE provider='svn' AND source_path=?",
+                            (child_path,),
+                        ).fetchall()
+                        for child_row in previous_child:
+                            _delete_svn_index_item(conn, workspace, child_row)
+                        _insert_svn_index_item(conn, workspace, child_item, _now())
             _advance_page_semantic_generation(conn)
             conn.commit()
         except Exception:

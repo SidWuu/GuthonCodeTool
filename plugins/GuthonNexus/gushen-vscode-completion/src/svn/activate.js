@@ -3,6 +3,7 @@ const { SvnBackendClient } = require('./backend-client');
 const { fragmentLabel, SvnCatalogTreeProvider } = require('./catalog-tree');
 const { SvnScmManager, workspaceKeyFromSourceControlId } = require('./scm-manager');
 const { decodeIdentity, SCHEME, SvnVirtualFileSystem } = require('./virtual-fs');
+const { SCHEME: INHERIT_SCHEME, SvnInheritanceView } = require('./inheritance-view');
 const { localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt } = require('../definition');
 const { SvnSourceWatcher } = require('./source-watcher');
 const { registerEditorAssistance } = require('./editor-assistance');
@@ -426,6 +427,7 @@ function activateSvn({
     onSaved: (workspaceKey, result, uri) => {
       catalogTree.refresh(workspaceKey);
       virtualFs.invalidate(workspaceKey, false, uri);
+      inheritanceView.invalidate(workspaceKey);
       const savedIdentity = decodeIdentity(uri);
       if (!scm.applySaved({ ...result, ...savedIdentity })) {
         refreshWorkspaceScm(workspaceKey).catch((error) => {
@@ -441,6 +443,7 @@ function activateSvn({
     onChanged: async (workspaceKey, result) => {
       catalogTree.refresh(workspaceKey);
       virtualFs.invalidate(workspaceKey, true);
+      inheritanceView.invalidate(workspaceKey);
       try {
         await refreshWorkspaceScm(workspaceKey);
       } catch (error) {
@@ -464,6 +467,10 @@ function activateSvn({
     isCaseSensitive: true,
     isReadonly: false,
   });
+  const inheritanceView = new SvnInheritanceView({ vscode, backend });
+  const inheritanceRegistration = vscode.workspace.registerTextDocumentContentProvider(
+    INHERIT_SCHEME, inheritanceView
+  );
   const diffContentRegistration = vscode.workspace.registerTextDocumentContentProvider(
     DIFF_SCHEME,
     diffContent
@@ -933,6 +940,39 @@ function activateSvn({
   });
 
   const commands = [
+    vscode.commands.registerCommand('gushenCompletion.showSvnInheritedSource', withError(async (element) => {
+      const selected = element || treeView.selection[0];
+      const source = sourceModuleElement(selected);
+      const object = source?.object;
+      if (!object || !['procedure', 'page'].includes(object.sourceType)) {
+        throw new Error('请先选择过程函数或 PAGE 项目脚本');
+      }
+      let pointer = selected?.fragment?.jsonPointer || '';
+      if (object.sourceType === 'page') {
+        if (!String(object.sourcePath || '').toLowerCase().endsWith('.json')) {
+          throw new Error('请选择 PAGE JSON 中的项目事件脚本');
+        }
+        if (!pointer) {
+          const listing = await backend.fragments(source.workspaceKey, object);
+          const candidates = (listing.fragments || []).filter((item) => item.jsonPointer
+            && !['fields', 'sql'].includes(item.scriptType));
+          const picked = await vscode.window.showQuickPick(candidates.map((item) => ({
+            label: fragmentLabel(item), description: item.jsonPointer, pointer: item.jsonPointer,
+          })), { title: '选择要展开的 PAGE 项目脚本', matchOnDescription: true });
+          pointer = picked?.pointer || '';
+        }
+        if (!pointer) return undefined;
+      }
+      return inheritanceView.open({
+        workspaceKey: source.workspaceKey,
+        sourceType: object.sourceType,
+        sourceNamespace: object.sourceNamespace,
+        sourceId: object.sourceId,
+        funId: object.funId || '',
+        workingCopyId: object.workingCopyId || object.scopeEntryId || '',
+        jsonPointer: pointer,
+      });
+    })),
     vscode.commands.registerCommand('gushenCompletion.openSvnDocument', withError((identity) =>
       virtualFs.open(identity))),
     vscode.commands.registerCommand('gushenCompletion.openSvnChangeInNexus', withError(openSvnChangeInNexus)),
@@ -1233,6 +1273,7 @@ function activateSvn({
       treeView.dispose();
       fileDecorationRegistration.dispose();
       fileSystemRegistration.dispose();
+      inheritanceRegistration.dispose();
       diffContentRegistration.dispose();
       definitionRegistration.dispose();
       editorAssistance.dispose();
@@ -1240,6 +1281,7 @@ function activateSvn({
       uriHandler.dispose();
       for (const command of commands) command.dispose();
       virtualFs.dispose();
+      inheritanceView.dispose();
       diffContent.dispose();
       sourceWatcher.dispose();
       catalogTree.dispose();

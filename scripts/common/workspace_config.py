@@ -361,12 +361,18 @@ def workspace_deletion_plan(home: Path, workspace_key: str, gusen_hub) -> dict:
             raise SystemExit(f"Unsafe workspace deletion path: {path}")
         if not any(item["path"] == str(path) for item in directories):
             directories.append({"label": label, "path": str(path), "exists": path.exists()})
+    docs_has_files = False
+    if kind == "projects":
+        docs_path = workspace_root / "docs"
+        if docs_path.is_dir() and not docs_path.is_symlink():
+            docs_has_files = any(files for _, _, files in os.walk(docs_path))
     database_testing = home / "config" / "database-testing.yaml"
     return {
         "ok": True,
         "workspaceKey": key,
         "displayName": f"{'PRD' if kind == 'products' else 'PRJ'} {workspace_name}",
         "kind": kind,
+        "docsHasFiles": docs_has_files,
         "workspaceConfigPath": str(config_path),
         "datasourceConfigPath": str(home / "config" / "datasource.yaml"),
         "datasourceIds": datasource_ids,

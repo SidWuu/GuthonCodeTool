@@ -9,6 +9,8 @@ import uuid
 from pathlib import Path
 
 from common import gusen_hub
+from common.inheritance import project as project_inheritance
+from common.source_format import decode_source
 from providers.svn.checkout import (
     atomic_json, file_hash, operation_lock, require_capability, run_svn_binary,
     svn_path_changes,
@@ -44,8 +46,10 @@ def _operation_by_id(workspace: dict, operation_id: str) -> tuple[Path, dict]:
     return path, record
 
 
-def _request_hash(edit_token: str, content: str | None, replacements: list | None) -> str:
-    payload = {"editToken": edit_token, "content": content, "replacements": replacements}
+def _request_hash(edit_token: str, content: str | None, replacements: list | None,
+                  expected_product_hash: str) -> str:
+    payload = {"editToken": edit_token, "content": content, "replacements": replacements,
+               "expectedProductHash": expected_product_hash}
     try:
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True,
                              separators=(",", ":")).encode("utf-8")
@@ -55,7 +59,7 @@ def _request_hash(edit_token: str, content: str | None, replacements: list | Non
 
 
 def _candidate(workspace: dict, session: dict, token: dict, *, content: str | None,
-               replacements: list | None) -> dict:
+               replacements: list | None, expected_product_hash: str = "") -> dict:
     if (content is None) == (replacements is None):
         raise page_nodes.PageIndexError("INVALID_TARGETS", "Provide exactly one content or replacements")
     if content is not None and not isinstance(content, str):
@@ -90,6 +94,29 @@ def _candidate(workspace: dict, session: dict, token: dict, *, content: str | No
                                         next_action="Reopen the exact procedure and inspect SVN diff") from error
     if prepared["item"]["source_table"] != "procedure" or prepared["sourceHash"] != token["sourceHash"]:
         raise page_nodes.PageIndexError("SOURCE_STALE", "Procedure source changed during preflight")
+    before = decode_source(prepared["sourceBytes"])[0]
+    after = decode_source(prepared["afterBytes"])[0]
+    before_projection = project_inheritance(before, "")
+    after_projection = project_inheritance(after, "")
+    if before_projection["status"] == "ACTIVE" and after_projection["status"] != "ACTIVE":
+        if not expected_product_hash:
+            raise page_nodes.PageIndexError(
+                "PRODUCT_HASH_REQUIRED", "Removing an active inherit marker requires the product source hash",
+                next_action="Read both layers with read_inherited_source, then preview the full project candidate",
+            )
+    if expected_product_hash:
+        from . import inheritance_sources
+
+        inherited = inheritance_sources.read_inherited_source(
+            workspace, source_type="procedure", source_namespace=token["sourceNamespace"],
+            source_id=token["sourceId"], fun_id=token["funId"],
+            working_copy_id=token["workingCopyId"],
+        )
+        if inherited["product"]["sourceHash"] != expected_product_hash:
+            raise page_nodes.PageIndexError(
+                "SOURCE_STALE", "Inherited product source changed since the candidate was prepared",
+                next_action="Read both layers again and rebuild the full project candidate",
+            )
     return prepared
 
 
@@ -136,7 +163,7 @@ def open_procedure_edit(
 
 def preview_procedure(
     workspace: dict, *, edit_token: str, content: str | None = None,
-    replacements: list | None = None,
+    replacements: list | None = None, expected_product_hash: str = "",
 ) -> dict:
     require_capability(workspace, "edit")
     with operation_lock(workspace, "procedure-edit-preview", blocking=True,
@@ -145,7 +172,8 @@ def preview_procedure(
         token = session["procedureEditTokens"].get(edit_token)
         if not token:
             raise page_nodes.PageIndexError("EDIT_TOKEN_INVALID", "Procedure edit token is missing or expired")
-        prepared = _candidate(workspace, session, token, content=content, replacements=replacements)
+        prepared = _candidate(workspace, session, token, content=content, replacements=replacements,
+                              expected_product_hash=expected_product_hash)
         return {
             "workspaceKey": workspace["workspaceKey"], "sourceType": "procedure",
             "sourceNamespace": token["sourceNamespace"], "sourceId": token["sourceId"],
@@ -160,10 +188,11 @@ def preview_procedure(
 def update_procedure(
     workspace: dict, *, edit_token: str, idempotency_key: str,
     content: str | None = None, replacements: list | None = None,
+    expected_product_hash: str = "",
 ) -> dict:
     require_capability(workspace, "edit")
     operation_path = _operation_path(workspace, idempotency_key)
-    request_hash = _request_hash(edit_token, content, replacements)
+    request_hash = _request_hash(edit_token, content, replacements, expected_product_hash)
     with operation_lock(workspace, "procedure-edit-write", blocking=True,
                         timeout_seconds=documents.DOCUMENT_LOCK_TIMEOUT_SECONDS):
         operation = documents._load_recorded_operation(operation_path, "Procedure")
@@ -181,7 +210,8 @@ def update_procedure(
         token = session["procedureEditTokens"].get(edit_token)
         if not token:
             raise page_nodes.PageIndexError("EDIT_TOKEN_INVALID", "Procedure edit token is missing or expired")
-        prepared = _candidate(workspace, session, token, content=content, replacements=replacements)
+        prepared = _candidate(workspace, session, token, content=content, replacements=replacements,
+                              expected_product_hash=expected_product_hash)
         if operation and (operation["sourcePath"] != token["sourcePath"]
                           or operation["beforeHash"] != prepared["sourceHash"]
                           or operation["afterHash"] != prepared["afterHash"]):

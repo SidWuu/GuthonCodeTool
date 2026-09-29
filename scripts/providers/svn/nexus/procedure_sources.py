@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
+from common.inheritance import SOURCE_CATALOG_VERSION
 from common.source_format import decode_source
 from providers.svn.checkout import require_capability
 
@@ -32,6 +33,13 @@ def source_index_status(workspace: dict) -> dict:
         procedure_count = conn.execute(
             "SELECT COUNT(*) FROM gusen_source_record WHERE provider='svn' AND source_table='procedure'"
         ).fetchone()[0]
+        parser = conn.execute(
+            "SELECT state_value FROM gusen_sync_state WHERE state_key='source_catalog_parser_version'"
+        ).fetchone()
+        if not parser or parser[0] != SOURCE_CATALOG_VERSION:
+            return {"workspaceKey": workspace["workspaceKey"], "buildStatus": "REBUILD_REQUIRED",
+                    "indexGeneration": generation, "procedureCount": procedure_count,
+                    "staleSourceCount": 0, "requiredAction": "svn-reindex"}
         stale_count = conn.execute(
             "SELECT COUNT(*) FROM gusen_source_record WHERE provider='svn' AND status='STALE'"
         ).fetchone()[0]
