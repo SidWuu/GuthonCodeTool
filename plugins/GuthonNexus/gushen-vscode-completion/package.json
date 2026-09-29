@@ -248,7 +248,7 @@
       { "command": "gushenCompletion.editSvnScope", "title": "Guthon Nexus: 编辑 SVN 地址配置" },
       { "command": "gushenCompletion.refreshSvn", "title": "Guthon Nexus: 更新指定 SVN working copy", "icon": "$(sync)" },
       { "command": "gushenCompletion.showSvnStatus", "title": "Guthon Nexus: 查看 SVN 状态与差异" },
-      { "command": "gushenCompletion.refreshToolView", "title": "Guthon Nexus: 刷新工具面板", "icon": "$(refresh)" }
+      { "command": "gushenCompletion.refreshToolView", "title": "Guthon Nexus: 刷新已有工作空间状态", "icon": "$(refresh)" }
     ],
     "viewsContainers": {
       "activitybar": [

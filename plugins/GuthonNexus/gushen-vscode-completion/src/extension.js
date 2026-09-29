@@ -708,6 +708,11 @@ function activate(context) {
     workspaceRegistry.invalidate();
     toolView.refresh();
   };
+  const refreshLocalWorkspaceViews = async () => {
+    refreshToolData();
+    svnServices.catalogTree.refresh();
+    await svnServices.refreshWorkspaceList();
+  };
   const assistantClient = new ToolJsonClient({
     getTool: async () => configuredToolFromSettings(),
     processClient,
@@ -1145,35 +1150,44 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.setupTool', async () => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
       const previousToolHome = config.get('toolHome', '');
-      const setup = await prepareWorkspaceSetup(config, vscode.window);
+      let setup;
+      try {
+        setup = await prepareWorkspaceSetup(config, vscode.window);
+      } catch (error) {
+        return vscode.window.showErrorMessage(error.message);
+      }
       if (!setup) return;
+      if (setup.mode === 'refresh') return refreshLocalWorkspaceViews();
       const tool = await configuredTool({
         toolHome: setup.toolHome,
         persistToolHome: false,
         writeDescriptor: false,
       });
       if (!tool) return;
-      const completed = await runTool(
-        TOOL_COMMANDS.setup,
-        [],
-        setup.mode !== 'switch',
-        '',
-        null,
-        undefined,
-        tool
-      );
-      if (!completed) return;
+      let workspaces;
+      if (setup.mode === 'switch') {
+        try {
+          const result = await processClient.request(tool, 'workspaces');
+          if (result?.ok !== true || !Array.isArray(result.workspaces)) {
+            throw new Error('工作区列表无效：缺少 ok=true 或 workspaces 数组');
+          }
+          workspaces = result.workspaces;
+        } catch (error) {
+          return vscode.window.showErrorMessage(`读取已有工作空间失败：${error.message}`);
+        }
+      } else {
+        const completed = await runTool(TOOL_COMMANDS.setup, [], true, '', null, undefined, tool);
+        if (!completed) return;
+      }
       try {
         if (previousToolHome !== tool.toolHome) await processClient.stop();
         writeRuntimeDescriptor(tool);
         await config.update('toolHome', tool.toolHome, vscode.ConfigurationTarget.Global);
       } catch (error) {
-        return vscode.window.showErrorMessage(`工作空间已初始化，但 Nexus 保存配置失败：${error.message}`);
+        return vscode.window.showErrorMessage(`Nexus 保存工作空间配置失败：${error.message}`);
       }
       if (bridge.isRunning() && previousToolHome !== tool.toolHome) await bridge.restart(tool);
-      refreshToolData();
-      if (previousToolHome !== tool.toolHome) svnServices.catalogTree.refresh();
-      await svnServices.refreshWorkspaceList();
+      await refreshLocalWorkspaceViews();
       if (setup.mode === 'setup') {
         const next = await vscode.window.showInformationMessage(
           '本地数据目录已初始化，是否现在添加第一个产品或项目？',
@@ -1183,6 +1197,9 @@ function activate(context) {
         if (next === '立即添加') {
           return vscode.commands.executeCommand('gushenCompletion.addWorkspace');
         }
+      }
+      if (setup.mode === 'switch') {
+        return vscode.window.showInformationMessage(`已读取 ${workspaces.length} 个产品或项目及其现有索引状态`);
       }
     }),
     vscode.commands.registerCommand('gushenCompletion.addWorkspace', async () => {
@@ -1584,8 +1601,7 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.openWorkspace', (workspaceRoot) =>
       vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(workspaceRoot))),
     vscode.commands.registerCommand('gushenCompletion.refreshToolView', async () => {
-      workspaceRegistry.invalidate();
-      toolView.refresh();
+      await refreshLocalWorkspaceViews();
     }),
     vscode.commands.registerCommand('gushenCompletion.editConfig', async (filename) => {
       const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');

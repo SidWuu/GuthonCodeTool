@@ -2,15 +2,32 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function existingWorkspaceConfig(toolHome) {
+  const configDir = path.join(toolHome, 'config');
+  const required = ['sync.yaml', 'products.yaml', 'projects.yaml'];
+  const missing = required.filter((name) => {
+    try { return !fs.statSync(path.join(configDir, name)).isFile(); }
+    catch { return true; }
+  });
+  if (missing.length) throw new Error(`所选目录缺少已有工作空间配置：${missing.join('、')}。请选择包含 config 和 var 的本地数据目录`);
+  try {
+    if (fs.statSync(path.join(toolHome, 'var')).isDirectory()) return;
+  } catch { /* Report the same validation error below. */ }
+  throw new Error('所选目录缺少已有的 var 工作空间。请选择包含 config 和 var 的本地数据目录');
+}
+
 async function prepareWorkspaceSetup(config, window) {
   const toolHome = config.get('toolHome', '');
   const initialized = Boolean(toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml')));
   if (initialized) {
     const confirmed = await window.showWarningMessage(
-      `当前工作空间已设置：${toolHome}\n是否切换工作空间？`,
+      `当前工作空间已设置：${toolHome}\n请选择刷新当前状态或切换工作空间。`,
       { modal: true },
+      '刷新当前状态',
       '切换工作空间'
     );
+    if (confirmed === '刷新当前状态') return { mode: 'refresh', toolHome };
     if (confirmed !== '切换工作空间') return undefined;
   }
 
@@ -22,9 +39,14 @@ async function prepareWorkspaceSetup(config, window) {
       ? '选择新的 GuthonCodeTool 本地数据工作空间'
       : '选择 GuthonCodeTool 本地数据工作空间',
   });
-  if (!selected) return undefined;
+  if (!selected?.length) return undefined;
 
-  return { mode: initialized ? 'switch' : 'setup', toolHome: selected[0].fsPath };
+  const selectedHome = selected[0].fsPath;
+  if (fs.existsSync(path.join(selectedHome, 'config', 'sync.yaml'))) {
+    existingWorkspaceConfig(selectedHome);
+    return { mode: 'switch', toolHome: selectedHome };
+  }
+  return { mode: 'setup', toolHome: selectedHome };
 }
 
 function workspaceActions(item) {
@@ -123,6 +145,7 @@ async function promptWorkspaceCreation(window, workspaces, _toolHome, now = new 
 }
 
 module.exports = {
+  existingWorkspaceConfig,
   prepareWorkspaceSetup,
   promptWorkspaceCreation,
   suggestedWorkspaceId,

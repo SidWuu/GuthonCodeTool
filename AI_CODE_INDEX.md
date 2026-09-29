@@ -58,6 +58,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `scripts/common/workspace_config.py` | 工作区创建/删除与 YAML 读写。 |
 | `scripts/common/workspace_assistant.py` | 工作区摘要、就绪状态与助手输出。 |
 | `scripts/common/source_facts.py` | 源码身份、事实解析与可重建 PAGE 节点/界面字段投影。 |
+| `scripts/common/index_schema_comments.py` | SQLite 索引表及字段的可查询注释。 |
 | `scripts/common/page_projection.py` | PAGE 虚拟文档投影、共享脚本/字段集合提取、语义节点/界面字段描述符及保留已有字段原文的单项插入。 |
 | `scripts/common/inheritance.py` | 过程函数与 PAGE 项目脚本的继承标记识别、有效内容派生与来源片段；派生结果不作为可写物理文件。 |
 | `scripts/common/source_format.py` | 源码编解码与格式元数据。 |
@@ -88,7 +89,7 @@ SVN：
 
 ## Guthon Nexus
 
-`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` 是命令与视图注册入口；`tool-runtime.js` 决定 source-development/script/packaged 命令并写入 runtime descriptor；`tool-process-client.js` 复用 ToolHost；`script-runtime.js` 校验本地 Python 与 pyz；`tool-workspace.js` 负责设置/切换工作空间；`workspace-registry.js` 与 `workspace-assistant.js` 维护工作区列表；`bridge-process.js` 启停 Bridge；`definition.js`、`selector.js`、`rules.js`、`tool-json-client.js`、`source-mode.js`、`database-config.js`、`tool-updater.js` 分别承担跳转、选择器、补全规则、ToolHost JSON 调用、源码模式、数据库配置与发行应用自更新。
+`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` 是命令与视图注册入口；`tool-runtime.js` 决定 source-development/script/packaged 命令并写入 runtime descriptor；`tool-process-client.js` 复用 ToolHost；`script-runtime.js` 校验本地 Python 与 pyz；`tool-workspace.js` 负责设置/切换及接入已有工作空间；`workspace-registry.js` 与 `workspace-assistant.js` 维护工作区列表；`bridge-process.js` 启停 Bridge；`definition.js`、`selector.js`、`rules.js`、`tool-json-client.js`、`source-mode.js`、`database-config.js`、`tool-updater.js` 分别承担跳转、选择器、补全规则、ToolHost JSON 调用、源码模式、数据库配置与发行应用自更新。
 
 ## Guthon Bridge
 

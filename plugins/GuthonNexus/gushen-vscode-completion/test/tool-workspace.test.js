@@ -10,6 +10,43 @@ const {
   workspaceActions,
 } = require('../src/tool-workspace');
 
+test('attaches an existing data directory without creating or changing its files', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-existing-'));
+  try {
+    fs.mkdirSync(path.join(home, 'config'));
+    for (const name of ['sync.yaml', 'products.yaml', 'projects.yaml']) {
+      fs.writeFileSync(path.join(home, 'config', name), `${name}: existing\n`);
+    }
+    const index = path.join(home, 'var', 'workspace', 'product', 'context', 'index.db');
+    fs.mkdirSync(path.dirname(index), { recursive: true });
+    fs.writeFileSync(index, 'existing-index');
+    const before = fs.statSync(index).mtimeMs;
+    const selected = await prepareWorkspaceSetup({ get: () => '' }, {
+      showOpenDialog: async () => [{ fsPath: home }],
+    });
+    assert.deepEqual(selected, { mode: 'switch', toolHome: home });
+    assert.equal(fs.readFileSync(index, 'utf8'), 'existing-index');
+    assert.equal(fs.statSync(index).mtimeMs, before);
+  } finally {
+    fs.rmSync(home, { recursive: true });
+  }
+});
+
+test('rejects a directory without existing workspace configuration', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-existing-'));
+  try {
+    fs.mkdirSync(path.join(home, 'config'));
+    fs.writeFileSync(path.join(home, 'config', 'sync.yaml'), 'sync: {}');
+    await assert.rejects(
+      prepareWorkspaceSetup({ get: () => '' }, { showOpenDialog: async () => [{ fsPath: home }] }),
+      /缺少已有工作空间配置/
+    );
+    assert.deepEqual(fs.readdirSync(home), ['config']);
+  } finally {
+    fs.rmSync(home, { recursive: true });
+  }
+});
+
 test('continues normal setup when the workspace is not initialized', async () => {
   const config = { get: () => '' };
   const window = {
@@ -58,23 +95,45 @@ test('keeps an initialized workspace unless the user confirms a switch', async (
   fs.rmSync(home, { recursive: true });
 });
 
-test('returns the candidate toolHome without persisting an initialized workspace switch', async () => {
+test('returns an existing candidate without persisting an initialized workspace switch', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-workspace-'));
+  const nextHome = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-workspace-'));
   fs.mkdirSync(path.join(home, 'config'));
   fs.writeFileSync(path.join(home, 'config', 'sync.yaml'), 'sync: {}');
+  fs.mkdirSync(path.join(nextHome, 'config'));
+  fs.mkdirSync(path.join(nextHome, 'var'));
+  for (const name of ['sync.yaml', 'products.yaml', 'projects.yaml']) {
+    fs.writeFileSync(path.join(nextHome, 'config', name), `${name}: existing\n`);
+  }
   const config = {
     get: () => home,
   };
   const window = {
     showWarningMessage: async () => '切换工作空间',
-    showOpenDialog: async () => [{ fsPath: '/new/tool/home' }],
+    showOpenDialog: async () => [{ fsPath: nextHome }],
   };
 
   assert.deepEqual(await prepareWorkspaceSetup(config, window), {
     mode: 'switch',
-    toolHome: '/new/tool/home',
+    toolHome: nextHome,
   });
   fs.rmSync(home, { recursive: true });
+  fs.rmSync(nextHome, { recursive: true });
+});
+
+test('refreshes the current data directory without opening a folder picker', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-workspace-'));
+  try {
+    fs.mkdirSync(path.join(home, 'config'));
+    fs.writeFileSync(path.join(home, 'config', 'sync.yaml'), 'sync: {}');
+    const selected = await prepareWorkspaceSetup({ get: () => home }, {
+      showWarningMessage: async () => '刷新当前状态',
+      showOpenDialog: async () => { throw new Error('folder picker should not open'); },
+    });
+    assert.deepEqual(selected, { mode: 'refresh', toolHome: home });
+  } finally {
+    fs.rmSync(home, { recursive: true });
+  }
 });
 
 test('SVN workspace actions come only from effective capabilities', () => {

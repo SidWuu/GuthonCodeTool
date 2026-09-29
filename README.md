@@ -77,6 +77,8 @@ context/
 
 目录中的 `PRD`、`PRJ` 只控制显示顺序；程序不会通过目录名判断身份。
 
+`context/index.db` 是 SQLite 数据库。建索引时会在 `gusen_schema_comment` 中写入索引表和字段的中文说明；`column_name=''` 表示表说明，可用 `SELECT table_name, column_name, comment FROM gusen_schema_comment WHERE table_name='gusen_source_record'` 查询。已有索引再次初始化时也会补齐说明。
+
 SVN 新模式的工作区只创建 `docs` 和 `context` 等派生资料；唯一根 URL 完整检出到
 `<toolHome>/var/checkout/<配置 ID>/`。资源管理器保留原始目录供查看，日常修改从“谷神源码”进入并
 回写同一份文件；过程函数节点可右键复制函数名或 `包名.函数名`，也可选择索引识别的调用方并跳转到精确调用行。过程函数调用支持转到索引中的定义，`@子方法(...)` 支持跳转到当前源码中的 `#function` 声明；从定义打开的源码可在“谷神源码”树中定位，并与树节点共用编辑器文档。不再生成额外 `source/readonly` 或 `source/workcopy` 代码副本。
@@ -288,6 +290,7 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
 
 1. 安装发布包中的 VSIX，执行 `Developer: Reload Window`。
 2. 打开左侧 “Guthon Nexus”，选择应用和长期保留的本地数据目录。
+   VS Code 与 CodeBuddy 同机使用时，在第二个 IDE 执行“设置/切换工作空间”，选择第一个 IDE 使用的同一数据目录；Nexus 读取现有产品、项目、工作区状态及 `context/index.db`，不重新创建项目、不拉取源码或重建索引。以后新增项目或索引有变化时，点击工作区视图的“刷新已有工作空间状态”。
 3. 编辑 `config/*.yaml`。
 4. 展开目标 `PRD`、`PRJ`，在该节点选择“源码来源：DATABASE / SVN”；全部产品和项目始终混合显示。运行模式独立选择开发、调试或发行。
 5. DATABASE 项目继续执行同步、诊断和 Workcopy；SVN 项目从“谷神源码”虚拟编辑，并在单一 SCM 项目中查看

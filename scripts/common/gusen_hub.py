@@ -18,7 +18,7 @@ import uuid
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
-from common import source_facts
+from common import index_schema_comments, source_facts
 from common.inheritance import SOURCE_CATALOG_VERSION
 from common.source_format import decode_source
 from providers.svn import checkout as svn_checkout
@@ -1387,6 +1387,7 @@ def connect_index(
     source_facts.setup_schema(conn)
     conn.commit()
     call_schema_migrated = _migrate_call_index_schema(conn)
+    index_schema_comments.setup_schema_comments(conn)
     conn.execute("DROP TABLE IF EXISTS gusen_effective_source")
     conn.commit()
     if call_schema_migrated:

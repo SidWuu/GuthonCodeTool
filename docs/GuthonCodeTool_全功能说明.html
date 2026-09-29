@@ -329,6 +329,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <li>SVN PAGE 的可重建脚本、SQL、字段集合节点目录与界面字段目录，包含当前 JSON Pointer、局部语义身份、区域、解析版本与索引 generation；正文仍从授权 working copy 按需读取。无原生身份的数据源列不进入界面字段目录。</li>
 <li>SVN 对象的 JSON Pointer、BASE 信息和支持增量刷新的文件关联。</li>
 </ul>
+<p>SQLite 不支持原生表/字段注释；索引初始化会在 <code>gusen_schema_comment</code> 中保存中文说明。按 <code>table_name</code> 查询时，<code>column_name=''</code> 是表说明，其余行是字段说明；已有索引再次初始化时会补齐。</p>
 <p>同名对象用数据源、working copy 与业务身份组成键；PAGE ID 保持工作区全局身份。全量重建在单个事务内完成，失败会回滚并保留旧索引；虚拟保存、撤销和提交按文件增量更新，只有无法安全识别结构变化时才回退到全量扫描。</p>
 <p>索引不保存第二份可编辑源码，也不建立源码全文倒排。这样避免索引成为隐蔽副本，并把结果始终锚定到可核验的真实文件。</p>
 <p>SVN MCP、Nexus 和 CLI 使用同一份可重建索引，MCP 的独立入口、工具能力和开发边界见第 9 章。PAGE 语义投影与 SVN 对象目录分别报告就绪状态；旧索引需由目标工作区显式全量重建后才提供对应查询；索引 generation 变化会使旧分页游标失效。</p>
@@ -346,6 +347,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <h2 id="7-guthon-nexus">7. Guthon Nexus</h2>
 <h3 id="7-1-工作区驾驶舱">7.1 工作区驾驶舱</h3>
 <p>Guthon Nexus 是统一 VS Code 扩展，DATABASE 与 SVN 工作区同时出现在同一侧边栏。每个节点绑定自己的 workspaceKey，菜单由 CLI 返回的有效 capabilities 决定，因此没有配置的功能不会显示为可执行操作。</p>
+<p>VS Code 与 CodeBuddy 的扩展设置各自保存；“设置/切换工作空间”可让另一端选择同一 toolHome，读取已有产品/项目配置、状态和 SQLite 源码索引，不新建工作区或重建索引。“刷新已有工作空间状态”会清理 Nexus 的工作区及源码树缓存并重读本地数据，不执行 SVN 更新或全量扫描。</p>
 <ul>
 <li>配置或切换 toolHome、添加/删除产品和项目、切换源码来源、打开配置与目录。</li>
 <li>显示同步状态、索引就绪度、SVN working copy、本地/远端变更和最近交付回执。</li>
