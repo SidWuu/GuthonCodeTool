@@ -6,7 +6,12 @@ const {
   documentFilename,
   encodeIdentity,
   SvnVirtualFileSystem,
+  utf16Offset,
 } = require('../src/svn/virtual-fs');
+
+test('maps Python source offsets after non-BMP characters into editor offsets', () => {
+  assert.equal(utf16Offset('项目😀@inherit();', 3), 4);
+});
 
 test('encodes only stable object identity in SVN virtual URIs', () => {
   const identity = {
@@ -226,5 +231,82 @@ test('revalidates a stale readonly virtual tab before rejecting save', async () 
 
   assert.equal(reads, 2);
   assert.deepEqual(writes, [['products.demo', 'session', 'document', 'after']]);
+  provider.dispose();
+});
+
+test('opens inherited source inline and preserves marker when only project text changes', async () => {
+  class EventEmitter { constructor() { this.event = () => {}; } dispose() {} }
+  const vscode = { EventEmitter, FileType: { File: 1 },
+    FileSystemError: { NoPermissions: (message) => new Error(message) } };
+  const uri = { authority: 'projects.demo', query: 'sourceType=procedure&sourceId=pkg%23save&funId=save&workingCopyId=wc',
+    toString: () => 'guthon-svn-edit://projects.demo/save.gss' };
+  const project = 'before();\n@inherit();\nafter();';
+  const effective = 'before();\nproduct();\nafter();';
+  const writes = [];
+  const backend = {
+    read: async () => ({ editable: true, sessionId: 's', documentId: 'd',
+      sourceNamespace: 'datasources/1', sourcePath: 'pkg/save.gss', content: project }),
+    pageQuery: async (_workspace, name, args) => {
+      assert.equal(name, 'read_inherited_source');
+      assert.equal(args.sourceNamespace, 'datasources/1');
+      return { inheritanceStatus: 'ACTIVE', indexGeneration: 'gen',
+        project: { sourceHash: 'project-hash' }, product: { sourceHash: 'product-hash' },
+        segments: [
+          { layer: 'project', start: 0, end: 10, sourceStart: 0, sourceEnd: 10 },
+          { layer: 'product', start: 10, end: 20, sourceStart: 10, sourceEnd: 21 },
+          { layer: 'project', start: 20, end: effective.length, sourceStart: 21, sourceEnd: project.length },
+        ],
+        effective: { content: effective }, projectOriginal: { content: project },
+        productOriginal: { content: 'product();' }, complete: true };
+    },
+    write: async (...args) => { writes.push(args); return { changed: true }; },
+  };
+  const provider = new SvnVirtualFileSystem({ vscode, backend });
+  assert.equal((await provider.readFile(uri)).toString(), effective);
+  assert.equal(await provider.diffBaseContent(uri, project), effective);
+  provider.trackDocumentChange({ document: { uri }, contentChanges: [
+    { rangeOffset: 0, rangeLength: 0, text: 'custom();\n' },
+  ] });
+  await provider.writeFile(uri, Buffer.from(`custom();\n${effective}`), {});
+  assert.equal(writes[0][3], `custom();\n${project}`);
+  assert.equal(writes[0][4], undefined);
+  await provider.writeFile(uri, Buffer.from(`new();\ncustom();\n${effective}`), {});
+  assert.equal(writes[1][3], `new();\ncustom();\n${project}`);
+  provider.trackDocumentChange({ document: { uri }, contentChanges: [
+    { rangeOffset: 0, rangeLength: `new();\ncustom();\n${effective}`.length,
+      text: `other();\n${effective}` },
+  ] });
+  await provider.writeFile(uri, Buffer.from(`other();\n${effective}`), {});
+  assert.equal(writes[2][3], `other();\n${project}`);
+  provider.dispose();
+});
+
+test('materializes edited product source with its checked hash', async () => {
+  class EventEmitter { constructor() { this.event = () => {}; } dispose() {} }
+  const vscode = { EventEmitter, FileType: { File: 1 },
+    FileSystemError: { NoPermissions: (message) => new Error(message) } };
+  const uri = { authority: 'projects.demo', query: 'sourceType=page&sourceId=PG-1&jsonPointer=%2FpageEvents%2FonOpen%2Fscript',
+    toString: () => 'guthon-svn-edit://projects.demo/onOpen.gss' };
+  const writes = [];
+  const provider = new SvnVirtualFileSystem({ vscode, backend: {
+    read: async () => ({ editable: true, sessionId: 's', documentId: 'd',
+      sourceNamespace: 'pages/1', sourcePath: 'PG-1.json', content: '@inherit();' }),
+    pageQuery: async () => ({ inheritanceStatus: 'ACTIVE', indexGeneration: 'gen',
+      project: { sourceHash: 'page-hash' }, product: { sourceHash: 'page-hash' },
+      segments: [
+        { layer: 'project', start: 0, end: 0, sourceStart: 0, sourceEnd: 0 },
+        { layer: 'product', start: 0, end: 10, sourceStart: 0, sourceEnd: 11 },
+        { layer: 'project', start: 10, end: 10, sourceStart: 11, sourceEnd: 11 },
+      ], effective: { content: 'product();' }, projectOriginal: { content: '@inherit();' },
+      productOriginal: { content: 'product();' }, complete: true }),
+    write: async (...args) => { writes.push(args); return { changed: true }; },
+  } });
+  assert.equal((await provider.readFile(uri)).toString(), 'product();');
+  provider.trackDocumentChange({ document: { uri }, contentChanges: [
+    { rangeOffset: 0, rangeLength: 7, text: 'changed' },
+  ] });
+  await provider.writeFile(uri, Buffer.from('changed();'), {});
+  assert.equal(writes[0][3], 'changed();');
+  assert.deepEqual(writes[0][4], { expectedProductHash: 'page-hash' });
   provider.dispose();
 });

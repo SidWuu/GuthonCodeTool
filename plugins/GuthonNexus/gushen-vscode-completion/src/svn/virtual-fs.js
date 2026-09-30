@@ -1,6 +1,10 @@
 const SCHEME = 'guthon-svn-edit';
 const GENERIC_SOURCE_EXTENSIONS = new Set(['json', 'md', 'txt', 'yaml', 'yml', 'gss', 'js', 'vm', 'sql']);
 
+function utf16Offset(value, codePointOffset) {
+  return Array.from(value).slice(0, codePointOffset).join('').length;
+}
+
 function sourceIdExtension(identity) {
   const match = String(identity.sourceId || '').match(/\.([A-Za-z0-9]+)$/);
   const extension = match?.[1]?.toLowerCase() || '';
@@ -99,7 +103,70 @@ class SvnVirtualFileSystem {
       throw this.vscode.FileSystemError.FileNotFound(uri);
     }
     const value = await this.backend.read(identity.workspaceKey, identity);
-    const record = { identity, value, updatedAt: Date.now() };
+    let inheritance;
+    if (value.editable && identity.workspaceKey.startsWith('projects.')
+      && ['procedure', 'page'].includes(identity.sourceType)
+      && (identity.sourceType === 'procedure' || identity.jsonPointer)
+      && /@?inherit\s*\(/.test(value.content)
+      && this.backend.pageQuery) {
+      let offset = 0;
+      let first;
+      const chunks = { effective: [], projectOriginal: [], productOriginal: [] };
+      for (;;) {
+        const result = await this.backend.pageQuery(identity.workspaceKey, 'read_inherited_source', {
+          sourceType: identity.sourceType,
+          sourceNamespace: value.sourceNamespace || identity.sourceNamespace || '',
+          sourceId: identity.sourceId,
+          funId: identity.funId || '',
+          ...(identity.sourceType === 'procedure'
+            ? { workingCopyId: identity.workingCopyId || value.workingCopyId }
+            : { jsonPointer: identity.jsonPointer }),
+          offset, maxChars: 24_000,
+        });
+        first ||= result;
+        if (result.project?.sourceHash !== first.project?.sourceHash
+          || result.product?.sourceHash !== first.product?.sourceHash
+          || result.indexGeneration !== first.indexGeneration) {
+          throw new Error('继承源码读取期间发生变化，请重新打开项目源码');
+        }
+        for (const name of Object.keys(chunks)) chunks[name].push(result[name]?.content || '');
+        if (result.complete) break;
+        offset = result.nextOffset;
+        if (!Number.isInteger(offset) || offset > 1_000_000) {
+          throw new Error('继承源码超过编辑器展开上限，请使用分段读取接口');
+        }
+      }
+      if (first.inheritanceStatus === 'ACTIVE') {
+        const projectOriginal = chunks.projectOriginal.join('');
+        if (projectOriginal !== value.content) {
+          throw new Error('项目源码与继承索引不一致，请刷新索引后重开');
+        }
+        const product = first.segments.find((segment) => segment.layer === 'product');
+        if (!product || !first.product?.sourceHash) {
+          throw new Error('继承产品源码缺少精确来源，无法展开编辑');
+        }
+        const effective = chunks.effective.join('');
+        const markerStart = utf16Offset(projectOriginal, first.segments[0].sourceEnd);
+        const markerEnd = utf16Offset(projectOriginal,
+          first.segments[first.segments.length - 1].sourceStart);
+        const productStart = utf16Offset(effective, product.start);
+        const productEnd = utf16Offset(effective, product.end);
+        inheritance = {
+          projectOriginal,
+          productHash: first.product.sourceHash,
+          productText: effective.slice(productStart, productEnd),
+          start: productStart, end: productEnd,
+          marker: projectOriginal.slice(markerStart, markerEnd),
+          productTouched: false,
+          materializable: !first.diagnostic,
+          diagnostic: first.diagnostic || '',
+        };
+        value.content = effective;
+      } else if (first.inheritanceStatus !== 'INACTIVE') {
+        value.inheritanceDiagnostic = `继承状态 ${first.inheritanceStatus}：${first.diagnostic || '请核对两层源码和本地索引'}`;
+      }
+    }
+    const record = { identity, value, inheritance, updatedAt: Date.now() };
     this.cache.set(key, record);
     this.onLoaded?.(uri, value);
     return record;
@@ -107,7 +174,9 @@ class SvnVirtualFileSystem {
 
   async open(identity, options = {}) {
     const uri = this.uriFor(identity);
-    const record = await this._load(uri, true);
+    const alreadyDirty = this.vscode.workspace.textDocuments?.some((document) =>
+      document.uri.toString() === uri.toString() && document.isDirty);
+    const record = await this._load(uri, !alreadyDirty);
     const document = await this.vscode.workspace.openTextDocument(uri);
     const editor = await this.vscode.window.showTextDocument(document, { preview: false });
     const requestedLine = Number(options.lineNumber);
@@ -123,6 +192,8 @@ class SvnVirtualFileSystem {
         ? '原文件存在 Nexus 会话外修改，已以只读方式打开'
         : '当前对象在 SVN 模式下只读';
       this.vscode.window.showWarningMessage(reason);
+    } else if (record.value.inheritanceDiagnostic) {
+      this.vscode.window.showWarningMessage(record.value.inheritanceDiagnostic);
     }
     return uri;
   }
@@ -156,22 +227,61 @@ class SvnVirtualFileSystem {
       throw this.vscode.FileSystemError.NoPermissions('当前 SVN 虚拟文档只读');
     }
     const text = Buffer.from(content).toString('utf8');
+    const inherited = record.inheritance;
+    let unchangedProduct = false;
+    if (inherited) {
+      const found = inherited.productText ? text.indexOf(inherited.productText) : -1;
+      unchangedProduct = Boolean(inherited.productText)
+        && !inherited.productTouched
+        && text.slice(inherited.start, inherited.end) === inherited.productText;
+      if (!unchangedProduct) {
+        unchangedProduct = found >= 0 && text.indexOf(inherited.productText, found + 1) < 0;
+      }
+      if (unchangedProduct) {
+        inherited.start = found;
+        inherited.end = found + inherited.productText.length;
+      } else if (!inherited.productText) {
+        unchangedProduct = !inherited.productTouched;
+      }
+    }
+    const productTouched = inherited && !unchangedProduct;
+    const sourceText = inherited && !productTouched
+      ? text.slice(0, inherited.start) + inherited.marker + text.slice(inherited.end)
+      : text;
+    if (productTouched && !inherited.materializable) {
+      const choice = await this.vscode.window.showWarningMessage(
+        '此处的 return inherit 无法自动证明与展开后的控制流等价。请审查完整源码后再保存到项目文件。',
+        { modal: true }, '已核对控制流，继续保存'
+      );
+      if (choice !== '已核对控制流，继续保存') {
+        throw this.vscode.FileSystemError.NoPermissions('需要先核对继承函数的控制流');
+      }
+    }
     this.onWillSave?.(record.identity.workspaceKey, record.value.sourcePath);
     const result = this.onOutput
       ? await this.backend.write(
         record.identity.workspaceKey,
         record.value.sessionId,
         record.value.documentId,
-        text,
-        { onOutput: this.onOutput }
+        sourceText,
+        { onOutput: this.onOutput,
+          ...(productTouched ? { expectedProductHash: inherited.productHash } : {}) }
       )
-      : await this.backend.write(
-        record.identity.workspaceKey,
-        record.value.sessionId,
-        record.value.documentId,
-        text
-      );
+      : productTouched
+        ? await this.backend.write(record.identity.workspaceKey, record.value.sessionId,
+          record.value.documentId, sourceText, { expectedProductHash: inherited.productHash })
+        : await this.backend.write(record.identity.workspaceKey, record.value.sessionId,
+          record.value.documentId, sourceText);
     record.value.content = text;
+    if (inherited) {
+      if (productTouched) record.inheritance = undefined;
+      else {
+        inherited.projectOriginal = sourceText;
+        if (record.identity.sourceType === 'page' && result.sourceHash) {
+          inherited.productHash = result.sourceHash;
+        }
+      }
+    }
     record.value.baseContent = result.baseContent ?? record.value.baseContent;
     record.value.lineChanges = result.lineChanges || [];
     this.cache.set(key, record);
@@ -180,11 +290,43 @@ class SvnVirtualFileSystem {
     // or firing an external-change event here makes the next save look stale.
     // Checkout changes made outside this provider still flow through
     // invalidate(..., true), which reloads the record and emits Changed.
-    await this.onSaved?.(record.identity.workspaceKey, result, uri);
+    await this.onSaved?.(record.identity.workspaceKey, result, uri, Boolean(inherited));
   }
 
   watch() {
     return new this.vscode.Disposable(() => {});
+  }
+
+  trackDocumentChange(event) {
+    const record = this.cache.get(event.document.uri.toString());
+    const inherited = record?.inheritance;
+    if (!inherited) return;
+    for (const change of event.contentChanges || []) {
+      const start = change.rangeOffset;
+      const end = start + change.rangeLength;
+      const delta = change.text.length - change.rangeLength;
+      if (end <= inherited.start) {
+        inherited.start += delta;
+        inherited.end += delta;
+      } else if (start >= inherited.end) {
+        continue;
+      } else {
+        inherited.productTouched = true;
+        inherited.start = Math.min(inherited.start, start);
+        inherited.end = Math.max(inherited.end + delta, start + change.text.length);
+      }
+    }
+  }
+
+  async diffBaseContent(uri, physicalBase) {
+    await this._load(uri);
+    const inherited = this.cache.get(uri.toString())?.inheritance;
+    const marker = inherited?.marker;
+    if (!marker || typeof physicalBase !== 'string') return physicalBase;
+    const position = physicalBase.indexOf(marker);
+    if (position < 0 || physicalBase.indexOf(marker, position + 1) >= 0) return physicalBase;
+    return physicalBase.slice(0, position) + inherited.productText
+      + physicalBase.slice(position + marker.length);
   }
 
   readDirectory() { throw this.vscode.FileSystemError.FileNotADirectory(); }
@@ -223,4 +365,5 @@ module.exports = {
   documentExtension,
   documentFilename,
   encodeIdentity,
+  utf16Offset,
 };

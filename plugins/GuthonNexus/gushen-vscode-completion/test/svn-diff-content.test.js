@@ -209,6 +209,25 @@ test('provides SVN BASE to VS Code Quick Diff for checkout files', async () => {
   contentProvider.dispose();
 });
 
+test('uses the same inherited projection for virtual editor Quick Diff baseline', async () => {
+  const vscode = { Uri: { from: fakeUri } };
+  const contentProvider = new SvnDiffContentProvider({ vscode });
+  const quickDiff = new SvnQuickDiffProvider({
+    vscode, contentProvider,
+    backend: { read: async () => ({ sourcePath: 'pkg/save.gss',
+      baseContent: 'before();\n@inherit();\nafter();' }) },
+    projectBase: (_uri, base) => base.replace('@inherit();', 'product();'),
+  });
+  quickDiff.setWorkspace({ workspaceKey: 'projects.demo', checkoutPath: '/checkout/demo' });
+  const uri = fakeUri({ scheme: 'guthon-svn-edit', authority: 'projects.demo',
+    path: '/save.gss', query: 'sourceType=procedure&sourceId=pkg%23save&funId=save' });
+  const original = await quickDiff.provideOriginalResource(uri);
+  assert.equal(contentProvider.provideTextDocumentContent(original),
+    'before();\nproduct();\nafter();');
+  quickDiff.dispose();
+  contentProvider.dispose();
+});
+
 test('reverts one native Quick Diff block while preserving the rest of the file', async () => {
   class Range {
     constructor(startLine, startCharacter, endLine, endCharacter) {

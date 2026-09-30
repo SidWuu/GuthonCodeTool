@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from common.inheritance import project as project_inheritance
 from common.page_projection import (
     extract_page_fields,
     extract_page_scripts,
@@ -457,6 +458,7 @@ def fragments(
             "ok": True,
             "workspaceKey": workspace["workspaceKey"],
             "sourceType": item["source_table"],
+            "sourceNamespace": item.get("source_namespace") or "",
             "sourceId": item["source_id"],
             "sourcePath": item["source_path"],
             "funId": item.get("fun_id") or "",
@@ -647,6 +649,7 @@ def read(
             "sessionId": session["sessionId"] if editable else "",
             "documentId": document_id if editable else "",
             "sourceType": item["source_table"],
+            "sourceNamespace": item.get("source_namespace") or "",
             "sourceId": item["source_id"],
             "funId": item.get("fun_id") or "",
             "workingCopyId": item.get("working_copy_id") or item.get("scope_entry_id") or "",
@@ -1276,7 +1279,8 @@ def _recover_page_operation_local_write(workspace: dict, operation_path: Path, o
     return _recover_recorded_local_write(workspace, operation_path, operation)
 
 
-def write(workspace: dict, *, session_id: str, document_id: str, content: str) -> dict:
+def write(workspace: dict, *, session_id: str, document_id: str, content: str,
+          expected_product_hash: str = "") -> dict:
     require_capability(workspace, "edit")
     with operation_lock(
         workspace,
@@ -1292,6 +1296,34 @@ def write(workspace: dict, *, session_id: str, document_id: str, content: str) -
             document_id=document_id,
             content=content,
         )
+        item = prepared["item"]
+        pointer = prepared["document"].get("jsonPointer") or ""
+        if item["source_table"] == "procedure" or (item["source_table"] == "page" and pointer):
+            before = decode_source(prepared["sourceBytes"])[0]
+            after = decode_source(prepared["afterBytes"])[0]
+            if pointer:
+                before = pointer_value(json.loads(before), pointer)
+                after = pointer_value(json.loads(after), pointer)
+            if (isinstance(before, str) and isinstance(after, str)
+                    and project_inheritance(before, "")["status"] == "ACTIVE"
+                    and project_inheritance(after, "")["status"] != "ACTIVE"
+                    and not expected_product_hash):
+                raise SystemExit("Removing an active inherit marker requires expectedProductHash")
+        if expected_product_hash:
+            from . import inheritance_sources
+
+            if item["source_table"] not in {"procedure", "page"}:
+                raise SystemExit("Product hash applies only to procedure or PAGE scripts")
+            inherited = inheritance_sources.read_inherited_source(
+                workspace, source_type=item["source_table"],
+                source_namespace=item["source_namespace"], source_id=item["source_id"],
+                fun_id=item.get("fun_id") or "",
+                working_copy_id=(item.get("working_copy_id") or item.get("scope_entry_id") or "")
+                if item["source_table"] == "procedure" else "",
+                json_pointer_value=prepared["document"].get("jsonPointer") or "",
+            )
+            if inherited["product"]["sourceHash"] != expected_product_hash:
+                raise SystemExit("Inherited product source changed; reopen and review the full source")
         try:
             result = _commit_prepared(workspace, session, prepared)
             atomic_json(session_path(workspace), session)

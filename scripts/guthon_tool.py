@@ -1207,6 +1207,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     session_id=session_id,
                     document_id=document_id,
                     content=payload["content"],
+                    expected_product_hash=str(payload.get("expectedProductHash") or ""),
                 )
                 source_paths = [result["sourcePath"]] if result.get("written") else []
             else:

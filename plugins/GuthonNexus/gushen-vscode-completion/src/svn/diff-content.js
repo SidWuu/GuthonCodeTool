@@ -102,10 +102,11 @@ function relativeSourcePath(rootPath, filePath) {
 }
 
 class SvnQuickDiffProvider {
-  constructor({ vscode, backend, contentProvider }) {
+  constructor({ vscode, backend, contentProvider, projectBase }) {
     this.vscode = vscode;
     this.backend = backend;
     this.contentProvider = contentProvider;
+    this.projectBase = projectBase;
     this.workspaces = new Map();
     this.statuses = new Map();
     this.label = 'SVN 本地更改（工作副本）';
@@ -159,10 +160,14 @@ class SvnQuickDiffProvider {
       : await this.backend.diff(source.workspaceKey, source.sourcePath);
     if (token?.isCancellationRequested) return undefined;
     const sourcePath = result.sourcePath || source.sourcePath || source.identity.sourceId;
+    const baseContent = source.identity && this.projectBase
+      ? await this.projectBase(uri, result.baseContent || '')
+      : result.baseContent || '';
+    if (token?.isCancellationRequested) return undefined;
     return this.contentProvider.storeOriginal(
       source.workspaceKey,
       sourcePath,
-      result.baseContent || ''
+      baseContent
     );
   }
 

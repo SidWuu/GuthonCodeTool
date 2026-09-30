@@ -112,7 +112,7 @@ class SvnBackendClient {
     return this.run(
       workspaceKey,
       ['write', '--session', sessionId, '--document', documentId],
-      { content },
+      { content, ...(options.expectedProductHash ? { expectedProductHash: options.expectedProductHash } : {}) },
       options
     );
   }

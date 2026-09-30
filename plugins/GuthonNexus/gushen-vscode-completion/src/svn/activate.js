@@ -382,7 +382,11 @@ function activateSvn({
   const backend = new SvnBackendClient({ getTool, processClient });
   const catalogTree = new SvnCatalogTreeProvider({ vscode, backend, listSvnWorkspaces });
   const diffContent = new SvnDiffContentProvider({ vscode });
-  const quickDiff = new SvnQuickDiffProvider({ vscode, backend, contentProvider: diffContent });
+  let virtualFs;
+  const quickDiff = new SvnQuickDiffProvider({
+    vscode, backend, contentProvider: diffContent,
+    projectBase: (uri, base) => virtualFs.diffBaseContent(uri, base),
+  });
   const scm = new SvnScmManager({
     vscode,
     backend,
@@ -419,14 +423,24 @@ function activateSvn({
     return true;
   }
   let sourceWatcher;
-  const virtualFs = new SvnVirtualFileSystem({
+  virtualFs = new SvnVirtualFileSystem({
     vscode,
     backend,
     onWillSave: (workspaceKey, sourcePath) => sourceWatcher?.suppress(workspaceKey, sourcePath),
     onOutput: streamBackendOutput,
-    onSaved: (workspaceKey, result, uri) => {
+    onSaved: async (workspaceKey, result, uri, wasInherited) => {
+      if (wasInherited && result.written) {
+        try {
+          await backend.reindexFile(workspaceKey, result.sourcePath, backendOutput);
+        } catch (error) {
+          vscode.window.showWarningMessage(`继承源码已保存，但文件索引更新失败：${error.message}`);
+        }
+      }
       catalogTree.refresh(workspaceKey);
       virtualFs.invalidate(workspaceKey, false, uri);
+      if (vscode.window.activeTextEditor?.document.uri.toString() === uri.toString()) {
+        decorateInheritedEditor(vscode.window.activeTextEditor);
+      }
       inheritanceView.invalidate(workspaceKey);
       const savedIdentity = decodeIdentity(uri);
       if (!scm.applySaved({ ...result, ...savedIdentity })) {
@@ -467,6 +481,42 @@ function activateSvn({
     isCaseSensitive: true,
     isReadonly: false,
   });
+  const productOriginDecoration = vscode.window.createTextEditorDecorationType({
+    backgroundColor: 'rgba(92, 119, 149, 0.22)',
+    borderLeft: '2px solid rgba(120, 151, 181, 0.55)',
+    isWholeLine: true,
+    rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+  });
+  const projectOriginDecoration = vscode.window.createTextEditorDecorationType({
+    backgroundColor: 'rgba(148, 138, 110, 0.07)',
+    isWholeLine: true,
+    rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+  });
+  function decorateInheritedEditor(editor) {
+    if (!editor || editor.document.uri.scheme !== SCHEME) return;
+    const inherited = virtualFs.cache.get(editor.document.uri.toString())?.inheritance;
+    if (!inherited) {
+      editor.setDecorations(productOriginDecoration, []);
+      editor.setDecorations(projectOriginDecoration, []);
+      return;
+    }
+    const span = (start, end) => new vscode.Range(
+      editor.document.positionAt(start), editor.document.positionAt(end)
+    );
+    editor.setDecorations(productOriginDecoration, [span(inherited.start, inherited.end)]);
+    editor.setDecorations(projectOriginDecoration, [
+      span(0, inherited.start), span(inherited.end, editor.document.getText().length),
+    ]);
+  }
+  const activeEditorRegistration = vscode.window.onDidChangeActiveTextEditor(decorateInheritedEditor);
+  const documentChangeRegistration = vscode.workspace.onDidChangeTextDocument((event) => {
+    if (event.document.uri.scheme !== SCHEME) return;
+    virtualFs.trackDocumentChange(event);
+    if (vscode.window.activeTextEditor?.document === event.document) {
+      decorateInheritedEditor(vscode.window.activeTextEditor);
+    }
+  });
+  decorateInheritedEditor(vscode.window.activeTextEditor);
   const inheritanceView = new SvnInheritanceView({ vscode, backend });
   const inheritanceRegistration = vscode.workspace.registerTextDocumentContentProvider(
     INHERIT_SCHEME, inheritanceView
@@ -1273,6 +1323,10 @@ function activateSvn({
       treeView.dispose();
       fileDecorationRegistration.dispose();
       fileSystemRegistration.dispose();
+      activeEditorRegistration.dispose();
+      documentChangeRegistration.dispose();
+      productOriginDecoration.dispose();
+      projectOriginDecoration.dispose();
       inheritanceRegistration.dispose();
       diffContentRegistration.dispose();
       definitionRegistration.dispose();
