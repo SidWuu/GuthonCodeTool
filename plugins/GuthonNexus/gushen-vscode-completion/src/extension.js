@@ -478,7 +478,10 @@ class ToolTreeDataProvider {
     const updateSource = config.get('updateSource', 'gitee');
     const storageRoot = this.context.globalStorageUri.fsPath;
     const configuredToolPath = config.get('toolPath', '');
-    const applicationVersion = await detectCurrentVersion(this.context.extensionPath, storageRoot, configuredToolPath);
+    // 开发/调试模式运行仓库源码或本地 pyz，不参与发行版更新与回退，版本统一显示为最新。
+    const applicationVersion = executionMode === 'packaged'
+      ? await detectCurrentVersion(this.context.extensionPath, storageRoot, configuredToolPath)
+      : '最新';
     const updateState = readUpdateState(storageRoot);
     const ready = toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'));
     const workspace = new vscode.TreeItem('工作区', vscode.TreeItemCollapsibleState.Expanded);
@@ -515,7 +518,7 @@ class ToolTreeDataProvider {
             ? (path.basename(scriptToolPath) || 'Release 脚本')
             : '打包应用'
       ),
-      staticItem(`当前版本：${applicationVersion}`, 'tag', executionMode === 'packaged' ? '' : '发行应用'),
+      staticItem(`当前版本：${applicationVersion}`, 'tag'),
       entryItem,
       homeItem,
       toolItem(
