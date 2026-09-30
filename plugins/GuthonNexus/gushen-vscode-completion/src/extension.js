@@ -22,7 +22,7 @@ const { ToolJsonClient } = require('./tool-json-client');
 const { searchPickItems, workspaceCockpit } = require('./workspace-assistant');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 const {
-  normalizeExecutionMode, resolveDevelopmentRuntime, resolveScriptRuntime,
+  normalizeExecutionMode, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime,
   writeRuntimeDescriptor,
 } = require('./tool-runtime');
 const { ToolProcessClient } = require('./tool-process-client');
@@ -107,6 +107,15 @@ const TOOL_LABELS = {
 let toolQueue = Promise.resolve();
 const activeToolRuns = new Set();
 let applicationUpdateRunning = false;
+let toolOutputChannel = null;
+
+// 复用同一个输出通道：每条命令都新建通道会持续泄漏，并反复把焦点抢到输出面板。
+function toolOutput() {
+  if (!toolOutputChannel) {
+    toolOutputChannel = vscode.window.createOutputChannel('GuthonCodeTool');
+  }
+  return toolOutputChannel;
+}
 
 function toolRunKey(command, workspaceKey) {
   return `${command}::${workspaceKey || ''}`;
@@ -114,9 +123,7 @@ function toolRunKey(command, workspaceKey) {
 
 function reportToolAlreadyRunning(command, workspaceKey, labelOverride = '') {
   const message = `已有${labelOverride || TOOL_LABELS[command] || command}正在执行：${workspaceKey || '当前工作区'}，本次点击已忽略。`;
-  const output = vscode.window.createOutputChannel('GuthonCodeTool');
-  output.show(true);
-  output.appendLine(message);
+  toolOutput().appendLine(message);
   vscode.window.showInformationMessage(message);
 }
 
@@ -146,11 +153,28 @@ function loadRules(context) {
   return readJson(rulesPath);
 }
 
+let completionDataCache = null;
+
 function loadData(context) {
-  const generatedData = readJson(path.join(context.extensionPath, 'data', 'index.json'));
-  const manualDataPath = path.join(context.extensionPath, 'data', 'manual.json');
+  const dataDir = path.join(context.extensionPath, 'data');
+  const indexPath = path.join(dataDir, 'index.json');
+  const manualDataPath = path.join(dataDir, 'manual.json');
+  // 补全与悬停都会读取这份数据；按文件签名缓存，避免每次请求同步解析数百 KB JSON。
+  const signature = [indexPath, manualDataPath]
+    .map((file) => {
+      try {
+        const stats = fs.statSync(file);
+        return `${stats.size}:${stats.mtimeMs}`;
+      } catch {
+        return 'missing';
+      }
+    })
+    .join('|');
+  if (completionDataCache?.signature === signature) return completionDataCache.value;
   const manualData = fs.existsSync(manualDataPath) ? readJson(manualDataPath) : {};
-  return mergeCompletionData(generatedData, manualData);
+  const value = mergeCompletionData(readJson(indexPath), manualData);
+  completionDataCache = { signature, value };
+  return value;
 }
 
 function completionRange(document, position, currentWord) {
@@ -320,8 +344,8 @@ async function configuredRuntime(config, mode, options = {}) {
     }
     return runtime;
   } else {
-    let toolPath = config.get('toolPath', '');
-    let selectPackaged = options.selectPackaged || !toolPath || !fs.existsSync(toolPath);
+    let toolPath = resolvePackagedTool(config.get('toolPath', ''));
+    let selectPackaged = options.selectPackaged || !toolPath;
     if (!selectPackaged && options.probePackaged) {
       try {
         await verifyExecutable(toolPath);
@@ -331,9 +355,17 @@ async function configuredRuntime(config, mode, options = {}) {
       }
     }
     if (selectPackaged) {
-      const selected = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: false, canSelectMany: false, title: '选择 GuthonCodeTool 可执行程序' });
+      const selected = await vscode.window.showOpenDialog({
+        canSelectFiles: true, canSelectFolders: true, canSelectMany: false,
+        title: '选择 GuthonCodeTool 应用（macOS 可选中解压出的 GuthonCodeTool 文件夹）',
+      });
       if (!selected) return undefined;
-      toolPath = selected[0].fsPath;
+      const candidate = resolvePackagedTool(selected[0].fsPath);
+      if (!candidate) {
+        vscode.window.showErrorMessage('所选路径不是 GuthonCodeTool 应用：请选择可执行文件，或包含它的 GuthonCodeTool 文件夹');
+        return undefined;
+      }
+      toolPath = candidate;
       try {
         await verifyExecutable(toolPath);
       } catch (error) {
@@ -390,8 +422,7 @@ async function runToolCommand(
     release();
     return false;
   }
-  const output = vscode.window.createOutputChannel('GuthonCodeTool');
-  output.show(true);
+  const output = toolOutput();
   const modeLabel = {
     'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
   }[tool.mode] || tool.mode;
@@ -408,6 +439,7 @@ async function runToolCommand(
       return true;
     } catch (error) {
       const target = workspaceKey ? ` · ${workspaceKey}` : '';
+      output.show(true);
       output.appendLine(`${label}失败${target}（${modeLabel}）：${error.message}`);
       vscode.window.showErrorMessage(`${label}失败${target}（${modeLabel}）：${error.message}。详情见“输出 → GuthonCodeTool”`);
       return false;
@@ -428,7 +460,7 @@ function configuredToolFromSettings() {
       ? resolveDevelopmentRuntime(config.get('developmentRoot', ''))
       : mode === 'script'
         ? resolveScriptRuntime(config.get('scriptPythonPath', ''), config.get('scriptToolPath', ''))
-        : { mode: 'packaged', toolPath: config.get('toolPath', '') };
+        : { mode: 'packaged', toolPath: resolvePackagedTool(config.get('toolPath', '')) };
     if (!runtime.toolPath || !fs.existsSync(runtime.toolPath)) return undefined;
     return { ...runtime, toolHome };
   } catch {
@@ -477,7 +509,7 @@ class ToolTreeDataProvider {
     const scriptToolPath = config.get('scriptToolPath', '');
     const updateSource = config.get('updateSource', 'gitee');
     const storageRoot = this.context.globalStorageUri.fsPath;
-    const configuredToolPath = config.get('toolPath', '');
+    const configuredToolPath = resolvePackagedTool(config.get('toolPath', ''));
     // 开发/调试模式运行仓库源码或本地 pyz，不参与发行版更新与回退，版本统一显示为最新。
     const applicationVersion = executionMode === 'packaged'
       ? await detectCurrentVersion(this.context.extensionPath, storageRoot, configuredToolPath)
@@ -1011,8 +1043,8 @@ function activate(context) {
       if (applicationUpdateRunning) {
         return vscode.window.showInformationMessage('GuthonCodeTool 更新或回退正在执行，本次点击已忽略');
       }
-      const toolPath = config.get('toolPath', '');
-      if (!toolPath || !fs.existsSync(toolPath)) {
+      const toolPath = resolvePackagedTool(config.get('toolPath', ''));
+      if (!toolPath) {
         return vscode.window.showErrorMessage('当前发行模式未配置有效的 GuthonCodeTool 可执行程序');
       }
       const storageRoot = context.globalStorageUri.fsPath;
@@ -1097,7 +1129,8 @@ function activate(context) {
       }
       const storageRoot = context.globalStorageUri.fsPath;
       const state = readUpdateState(storageRoot);
-      if (!state.previousPath || !state.previousVersion || !fs.existsSync(state.previousPath)) {
+      const rollbackPath = resolvePackagedTool(state.previousPath || '');
+      if (!rollbackPath || !state.previousVersion) {
         return vscode.window.showInformationMessage('暂无可回退的 GuthonCodeTool 版本');
       }
       const confirmed = await vscode.window.showWarningMessage(
@@ -1111,25 +1144,25 @@ function activate(context) {
       try {
         if (bridgeWasRunning) await bridge.stop();
         await processClient.stop();
-        const currentPath = config.get('toolPath', '');
+        const currentPath = resolvePackagedTool(config.get('toolPath', '')) || config.get('toolPath', '');
         const currentApplicationVersion = await detectCurrentVersion(context.extensionPath, storageRoot, currentPath);
         const previousState = state;
         writeUpdateState(storageRoot, {
           activeVersion: state.previousVersion,
-          activePath: state.previousPath,
+          activePath: rollbackPath,
           previousVersion: currentApplicationVersion,
           previousPath: currentPath,
           source: state.source,
           updatedAt: new Date().toISOString(),
         });
         try {
-          await config.update('toolPath', state.previousPath, vscode.ConfigurationTarget.Global);
+          await config.update('toolPath', rollbackPath, vscode.ConfigurationTarget.Global);
         } catch (error) {
           writeUpdateState(storageRoot, previousState);
           throw error;
         }
         const toolHome = config.get('toolHome', '');
-        const tool = { mode: 'packaged', toolPath: state.previousPath, toolHome };
+        const tool = { mode: 'packaged', toolPath: rollbackPath, toolHome };
         refreshToolData();
         try {
           svnServices.catalogTree.refresh();
@@ -1628,6 +1661,7 @@ function activate(context) {
     bridgeOutput,
     bridge,
     processClient,
+    { dispose: () => { toolOutputChannel?.dispose(); toolOutputChannel = null; } },
     ...toolCommands
   );
 }

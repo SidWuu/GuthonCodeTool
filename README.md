@@ -360,7 +360,7 @@ cd ../GuthonNexus/gushen-vscode-completion
 npm test
 ```
 
-发布版本由根目录 `VERSION` 统一管理，每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 构建 macOS/Windows 应用、Python zipapp、依赖清单、校验文件、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill，并同步到 GitHub/Gitee Release。发行模式可在 Nexus 的折叠“运行模式”节点中选择更新源并手动检查应用更新；不会启动检查或定时联网，安装前会校验 SHA-256、运行 `self-test` 并保留上一版本用于回退。调试模式目前使用用户提供且校验通过的本地 Python；隔离运行环境的一键下载资产尚未交付。
+发布版本由根目录 `VERSION` 统一管理，每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 构建 macOS/Windows 应用、Python zipapp、依赖清单、校验文件、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill，并同步到 GitHub/Gitee Release。Gitee 附件同步可重复执行：已存在的附件跳过，缺失的补齐并逐项校验，网络中断导致失败时重新运行 `Release` 工作流的失败作业或手动运行 `Sync Gitee Release` 工作流并填入对应 tag 即可补齐镜像。发行模式可在 Nexus 的折叠“运行模式”节点中选择更新源并手动检查应用更新；不会启动检查或定时联网，安装前会校验 SHA-256、运行 `self-test` 并保留上一版本用于回退。调试模式目前使用用户提供且校验通过的本地 Python；隔离运行环境的一键下载资产尚未交付。
 构建时通过 `scripts/check_release_smoke.py` 对 zipapp 和两平台应用执行临时 toolHome 自检、初始化、MCP 握手与工具发现；实机联调遇到安装或功能问题时参阅[在线问题解决中心](https://sidwuu.github.io/GuthonCodeTool/GuthonCodeTool_QA.html)。
 
 Nexus 与 Bridge 各自维护一个常驻 ToolHost。普通工作区请求复用该进程；工作区列表在 Nexus 两棵树之间共享。普通 Nexus 刷新只重新读取工作区并重绘，不扫描全部 SVN working copy；“刷新 SVN 变更”和“检查 SVN 远程变更”仍是独立操作。SVN 日常 SCM 展示只执行必要的 `svn info --xml` 与 `svn status --xml`，写回和更新安全检查继续使用完整状态路径。

@@ -260,6 +260,20 @@ function writeUpdateState(storageRoot, state) {
   fs.renameSync(temporary, target);
 }
 
+function cacheDetectedVersion(storageRoot, resolvedPath, stats, version) {
+  try {
+    const state = readUpdateState(storageRoot);
+    writeUpdateState(storageRoot, {
+      ...state,
+      detectedVersion: {
+        path: resolvedPath, size: stats.size, mtimeMs: stats.mtimeMs, version,
+      },
+    });
+  } catch {
+    // 缓存写入失败不影响版本展示。
+  }
+}
+
 async function detectCurrentVersion(extensionPath, storageRoot, toolPath, processRunner = runProcess) {
   const state = readUpdateState(storageRoot);
   if (state.activePath && path.resolve(state.activePath) === path.resolve(toolPath || '') && state.activeVersion) {
@@ -267,15 +281,25 @@ async function detectCurrentVersion(extensionPath, storageRoot, toolPath, proces
   }
   if (!toolPath || !fs.existsSync(toolPath)) return readBundledVersion(extensionPath);
   const stats = fs.statSync(toolPath);
-  const cacheKey = `${path.resolve(toolPath)}:${stats.size}:${stats.mtimeMs}`;
+  const resolved = path.resolve(toolPath);
+  // 探测要启动一次应用；命中持久化结果时不再为每次窗口重载重复启动。
+  const detected = state.detectedVersion;
+  if (detected && detected.path === resolved && detected.version
+    && detected.size === stats.size && detected.mtimeMs === stats.mtimeMs) {
+    return normalizeVersion(detected.version);
+  }
+  const cacheKey = `${resolved}:${stats.size}:${stats.mtimeMs}`;
   if (!versionCache.has(cacheKey)) {
     versionCache.set(cacheKey, (async () => {
+      let version;
       try {
         const result = await processRunner(toolPath, ['version']);
-        return normalizeVersion(JSON.parse(result.stdout).version);
+        version = normalizeVersion(JSON.parse(result.stdout).version);
       } catch {
         return LEGACY_BASELINE_VERSION;
       }
+      cacheDetectedVersion(storageRoot, resolved, stats, version);
+      return version;
     })());
   }
   return versionCache.get(cacheKey);

@@ -369,13 +369,12 @@ function activateSvn({
   claimOperation,
 }) {
   const operationOutput = vscode.window.createOutputChannel('GuthonCodeTool');
+  // 每次日志都 reveal 会把焦点反复抢到输出面板，后台索引输出尤其明显。
   const log = (operation, message) => {
-    operationOutput.show(true);
     operationOutput.appendLine(`[Nexus SVN] ${operation}｜${message}`);
   };
   const streamBackendOutput = (value) => {
     if (!value) return;
-    operationOutput.show(true);
     operationOutput.append(String(value));
   };
   const backendOutput = { onOutput: streamBackendOutput };

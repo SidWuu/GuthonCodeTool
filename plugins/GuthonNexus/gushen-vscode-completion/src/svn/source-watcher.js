@@ -22,7 +22,9 @@ class SvnSourceWatcher {
     this.onOutput = onOutput;
     this.debounceMs = debounceMs;
     this.watchers = new Map();
+    // 每个工作区一个批量刷新定时器；pending 记录该批次待处理的源码路径。
     this.timers = new Map();
+    this.pending = new Map();
     this.suppressedUntil = new Map();
   }
 
@@ -60,9 +62,17 @@ class SvnSourceWatcher {
       if (expiresAt <= now) this.suppressedUntil.delete(candidate);
     }
     const key = `${workspaceKey}\0${sourcePath}`;
-    clearTimeout(this.timers.get(key));
-    this.timers.delete(key);
     this.suppressedUntil.set(key, now + durationMs);
+    this._dropPending(key, workspaceKey);
+  }
+
+  _dropPending(key, workspaceKey) {
+    if (!this.pending.delete(key)) return;
+    for (const candidate of this.pending.keys()) {
+      if (candidate.startsWith(`${workspaceKey}\0`)) return;
+    }
+    clearTimeout(this.timers.get(workspaceKey));
+    this.timers.delete(workspaceKey);
   }
 
   _schedule(workspace, workingCopy, uri) {
@@ -72,9 +82,25 @@ class SvnSourceWatcher {
     const suppressedUntil = this.suppressedUntil.get(key) || 0;
     if (suppressedUntil > Date.now()) return;
     this.suppressedUntil.delete(key);
-    clearTimeout(this.timers.get(key));
-    this.timers.set(key, setTimeout(async () => {
-      this.timers.delete(key);
+    this.pending.set(key, { workspace, sourcePath });
+    if (this.timers.has(workspace.workspaceKey)) return;
+    this.timers.set(workspace.workspaceKey, setTimeout(() => {
+      this.timers.delete(workspace.workspaceKey);
+      void this._flush(workspace.workspaceKey);
+    }, this.debounceMs));
+  }
+
+  async _flush(workspaceKey) {
+    const items = [];
+    for (const key of [...this.pending.keys()]) {
+      if (!key.startsWith(`${workspaceKey}\0`)) continue;
+      items.push(this.pending.get(key));
+      this.pending.delete(key);
+    }
+    if (!items.length) return;
+    const results = [];
+    const failures = [];
+    for (const { workspace, sourcePath } of items) {
       try {
         const result = this.onOutput
           ? await this.backend.reindexFile(
@@ -83,16 +109,25 @@ class SvnSourceWatcher {
             { onOutput: this.onOutput }
           )
           : await this.backend.reindexFile(workspace.workspaceKey, sourcePath);
-        await this.onChanged?.(workspace.workspaceKey, result);
+        results.push({ sourcePath, result });
       } catch (error) {
-        await this.onChanged?.(workspace.workspaceKey, { ok: false, sourcePath, error });
+        failures.push({ sourcePath, error });
       }
-    }, this.debounceMs));
+    }
+    // 同一批源码变化只触发一次级联刷新；逐个文件回调会让一次保存产生多轮目录树、虚拟文档与 SCM 刷新。
+    await this.onChanged?.(workspaceKey, {
+      ok: failures.length === 0,
+      stale: results.some(({ result }) => result?.stale),
+      paths: results.map(({ sourcePath }) => sourcePath),
+      sourcePath: failures[0]?.sourcePath || results[0]?.sourcePath || '',
+      failures,
+    });
   }
 
   dispose() {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+    this.pending.clear();
     this.suppressedUntil.clear();
     for (const record of this.watchers.values()) {
       for (const subscription of record.subscriptions) subscription.dispose();

@@ -59,6 +59,17 @@ HIDDEN_IMPORTS = (
 )
 
 
+def packaging_arguments(platform: str = sys.platform) -> list[str]:
+    """Return the PyInstaller layout for the platform.
+
+    macOS uses ``--onedir``: a onefile build unpacks the runtime into a new
+    temporary directory on every start, which costs seconds per cold start.
+    Windows keeps the single-file ``.exe`` its install steps expect.
+    """
+
+    return ["--onedir"] if platform == "darwin" else ["--onefile"]
+
+
 def main() -> int:
     if find_spec("PyInstaller") is None:
         print("PyInstaller 未安装。请在构建机执行：python -m pip install pyinstaller", file=sys.stderr)
@@ -72,7 +83,7 @@ def main() -> int:
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--onefile",
+        *packaging_arguments(),
         "--name",
         "GuthonCodeTool",
         "--specpath",

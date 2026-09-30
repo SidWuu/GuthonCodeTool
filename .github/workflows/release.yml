@@ -11,6 +11,7 @@ on:
       - "plugins/GuthonBridge/**"
       - "plugins/GuthonNexus/**"
       - "docs/releases/**"
+      - ".github/scripts/**"
       - ".github/workflows/release.yml"
   workflow_dispatch:
 
@@ -91,9 +92,9 @@ jobs:
             python scripts/check_toolhost.py ./dist/GuthonCodeTool.exe
             python scripts/check_release_smoke.py --entry dist/GuthonCodeTool.exe
           else
-            ./dist/GuthonCodeTool self-test --home "$RUNNER_TEMP/guthon-self-test"
-            python scripts/check_toolhost.py ./dist/GuthonCodeTool
-            python scripts/check_release_smoke.py --entry dist/GuthonCodeTool
+            ./dist/GuthonCodeTool/GuthonCodeTool self-test --home "$RUNNER_TEMP/guthon-self-test"
+            python scripts/check_toolhost.py ./dist/GuthonCodeTool/GuthonCodeTool
+            python scripts/check_release_smoke.py --entry dist/GuthonCodeTool/GuthonCodeTool
           fi
 
       - name: Prepare Windows application
@@ -104,8 +105,11 @@ jobs:
       - name: Prepare macOS application
         if: runner.os == 'macOS'
         run: |
+          # onedir layout: the archive root holds the launcher plus its _internal runtime.
           (cd dist && ditto --norsrc -c -k GuthonCodeTool "$GITHUB_WORKSPACE/${{ matrix.asset }}")
-          test "$(unzip -Z -1 "${{ matrix.asset }}")" = "GuthonCodeTool"
+          entries=$(unzip -Z -1 "${{ matrix.asset }}")
+          grep -qx 'GuthonCodeTool' <<< "$entries"
+          grep -q '^_internal/' <<< "$entries"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -191,7 +195,24 @@ jobs:
 
       - name: Verify release assets
         run: |
-          test "$(find release -maxdepth 1 -type f | wc -l)" -eq 7
+          expected=(
+            GuthonCodeTool-windows-x64.exe
+            GuthonCodeTool-macos-arm64.zip
+            GuthonCodeTool-python.pyz
+            GuthonCodeTool-python-requirements.txt
+            GuthonCodeTool-chrome.zip
+            guthon-nexus-vscode.vsix
+            guthon-testing.zip
+          )
+          for name in "${expected[@]}"; do
+            test -f "release/$name" || { echo "::error::缺少发行附件 $name"; exit 1; }
+          done
+          actual=$(find release -maxdepth 1 -type f | wc -l)
+          test "$actual" -eq "${#expected[@]}" || {
+            echo "::error::发行附件数量为 $actual，期望 ${#expected[@]}"
+            find release -maxdepth 1 -type f -printf '%f\n' | sort
+            exit 1
+          }
           find release -maxdepth 1 -type f -printf '%f\n' | sort
 
       - name: Generate application checksums
@@ -250,49 +271,36 @@ jobs:
             cat generated-notes.md
           } > release-notes.md
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         run: |
-          gh release create "$RELEASE_TAG" release/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "GuthonCodeTool $RELEASE_TAG" \
-            --notes-file release-notes.md \
-            --latest
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_TAG 已存在，更新说明并补齐附件"
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "GuthonCodeTool $RELEASE_TAG" \
+              --notes-file release-notes.md \
+              --latest
+            gh release upload "$RELEASE_TAG" release/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" release/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "GuthonCodeTool $RELEASE_TAG" \
+              --notes-file release-notes.md \
+              --latest
+          fi
 
-      - name: 创建 Gitee Release
-        id: gitee-release
+      - name: 同步 Gitee Release 附件
         env:
           GITEE_TOKEN: ${{ secrets.SYNCRELEASETOGITEE }}
           GITEE_OWNER: ${{ vars.GITEE_OWNER }}
           GITEE_REPO: ${{ vars.GITEE_REPO }}
+          ASSET_DIR: release
+          RELEASE_NOTES_FILE: release-notes.md
         run: |
           test -n "$GITEE_TOKEN" || { echo "::error::缺少 Secret SYNCRELEASETOGITEE"; exit 1; }
           test -n "$GITEE_OWNER" || { echo "::error::缺少变量 GITEE_OWNER"; exit 1; }
           test -n "$GITEE_REPO" || { echo "::error::缺少变量 GITEE_REPO"; exit 1; }
-
-          response=$(curl --fail-with-body --silent --show-error \
-            -X POST \
-            -F "access_token=$GITEE_TOKEN" \
-            -F "tag_name=$RELEASE_TAG" \
-            -F "target_commitish=main" \
-            -F "name=GuthonCodeTool $RELEASE_TAG" \
-            -F "body=<release-notes.md" \
-            "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/releases")
-
-          release_id=$(echo "$response" | jq -er '.id')
-          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-
-      - name: 上传 Gitee Release 附件
-        env:
-          GITEE_TOKEN: ${{ secrets.SYNCRELEASETOGITEE }}
-          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
-          GITEE_REPO: ${{ vars.GITEE_REPO }}
-          GITEE_RELEASE_ID: ${{ steps.gitee-release.outputs.release_id }}
-        run: |
-          for file in release/*; do
-            curl --fail-with-body --silent --show-error \
-              -X POST \
-              -F "access_token=$GITEE_TOKEN" \
-              -F "file=@$file" \
-              "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/releases/$GITEE_RELEASE_ID/attach_files"
-          done
+          bash .github/scripts/sync_gitee_release.sh

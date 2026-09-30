@@ -490,7 +490,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <section class="section">
 <h2 id="11-构建发布与验证">11. 构建、发布与验证</h2>
 <h3 id="11-1-发行物">11.1 发行物</h3>
-<p>Python 应用使用 PyInstaller 单文件构建，并内置公开配置模板与版本信息。构建必须在目标系统执行，以生成 Windows x64 应用和 macOS ARM64 应用。发布流程同时完成：</p>
+<p>Python 应用使用 PyInstaller 构建，并内置公开配置模板与版本信息：Windows 为单文件 EXE，macOS 为目录形态（onedir）。构建必须在目标系统执行，以生成 Windows x64 应用和 macOS ARM64 应用。发布流程同时完成：</p>
 <ul>
 <li>运行 Python、Nexus 与 Bridge 的相关测试。</li>
 <li>打包 Guthon Nexus VSIX 和 Guthon Bridge Chrome ZIP。</li>

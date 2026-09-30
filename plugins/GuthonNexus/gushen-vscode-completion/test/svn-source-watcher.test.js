@@ -70,3 +70,35 @@ test('suppression cancels watcher work already queued before an SVN update', asy
   assert.equal(watcher.timers.size, 0);
   watcher.dispose();
 });
+
+test('flushes one batch per workspace and reports a single cascade refresh', async () => {
+  const reindexed = [];
+  const changes = [];
+  const watcher = new SvnSourceWatcher({
+    vscode: {},
+    backend: {
+      reindexFile: async (workspaceKey, sourcePath) => {
+        reindexed.push(sourcePath);
+        return { ok: true, sourcePath };
+      },
+    },
+    onChanged: async (workspaceKey, result) => { changes.push({ workspaceKey, result }); },
+    debounceMs: 5,
+  });
+  const root = path.resolve('/checkout/pages/SYS-1');
+  const workspace = { workspaceKey: 'products.demo' };
+  const workingCopy = { root, localSubdir: 'pages/SYS-1' };
+  watcher._schedule(workspace, workingCopy, { fsPath: path.join(root, '0', 'PG-1.json') });
+  watcher._schedule(workspace, workingCopy, { fsPath: path.join(root, '0', 'PG-2.json') });
+
+  // 同一工作区只保留一个待处理批次。
+  assert.equal(watcher.timers.size, 1);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.deepEqual(reindexed.sort(), ['pages/SYS-1/0/PG-1.json', 'pages/SYS-1/0/PG-2.json']);
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].workspaceKey, 'products.demo');
+  assert.deepEqual(changes[0].result.paths.sort(), ['pages/SYS-1/0/PG-1.json', 'pages/SYS-1/0/PG-2.json']);
+  assert.equal(changes[0].result.ok, true);
+  watcher.dispose();
+});

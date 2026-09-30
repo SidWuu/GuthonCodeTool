@@ -8,9 +8,9 @@ It can also run the packaged `GuthonCodeTool` executable. This lets users initia
 
 ## Packaged source tool
 
-Build `dist/GuthonCodeTool` (or `GuthonCodeTool.exe` on Windows) on each target OS with `python scripts/build_guthon_tool.py`, then distribute that executable together with this VSIX. In VS Code, run these commands in order:
+Build the macOS folder layout `dist/GuthonCodeTool/GuthonCodeTool` or the Windows `dist/GuthonCodeTool.exe` on each target OS with `python scripts/build_guthon_tool.py`, then distribute that application together with this VSIX. In VS Code, run these commands in order:
 
-1. `Guthon Nexus: 设置/切换工作空间` — choose the executable and a local data directory. It creates missing configuration files without overwriting existing ones.
+1. `Guthon Nexus: 设置/切换工作空间` — choose the executable and a local data directory. The macOS release ships as a folder; select that folder or its launcher file. It creates missing configuration files without overwriting existing ones.
 2. Run `Guthon Nexus: 添加产品或项目` on first use and whenever development adds another project. Products and projects are peer workspaces: a project is an independent exported version snapshot, so the wizard creates it directly without selecting another workspace. The wizard ends immediately after SVN or DATABASE is selected and creates an initially unconfigured Nexus. For SVN, expand that Nexus and use `设置工作区 SVN 登录`, `导入/粘贴 SVN checkout 配置`, and `编辑 SVN 地址配置`. Each workspace stores one `svn.url` and checks out the complete repository visible to that account. DATABASE datasource settings are added later. Do not add a `source_mode` field. Legacy exact entries and `checkoutPaths` remain compatible; imported scripts are parsed but never executed.
 3. Expand `项目` and choose a `PRD` or `PRJ` workspace.
 4. For DATABASE, configure its datasource and run the selected workspace's full synchronization command. For SVN, use `导入/粘贴 SVN checkout 配置`, review the YAML, then run `检出/更新完整 SVN 仓库`.

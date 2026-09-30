@@ -218,10 +218,11 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h4>macOS</h4>
 <ol>
 <li>确认 Mac 为 M1 或后续型号：可在“关于本机”中查看。</li>
-<li>解压 <code>GuthonCodeTool-macos-arm64.zip</code>，将其中的 <code>GuthonCodeTool</code> 放入固定应用目录。</li>
-<li>如果文件没有执行权限，在终端执行：</li>
+<li>解压 <code>GuthonCodeTool-macos-arm64.zip</code>，得到一个 <code>GuthonCodeTool</code> 文件夹，其中包含同名启动文件与 <code>_internal</code> 运行库。把<strong>整个文件夹</strong>放入固定应用目录，不要只移动其中某个文件。</li>
+<li>在 Nexus 里选择应用时，直接选中这个 <code>GuthonCodeTool</code> 文件夹即可，也可以选中其中的同名启动文件。</li>
+<li>如果启动文件没有执行权限，在终端执行：</li>
 </ol>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>chmod +x "/你的应用目录/GuthonCodeTool"</code></pre></div>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>chmod +x "/你的应用目录/GuthonCodeTool/GuthonCodeTool"</code></pre></div>
 <p>若系统阻止运行，请先确认文件来自本项目 Release，再打开“系统设置 → 隐私与安全性”，对被阻止的 GuthonCodeTool 选择“仍要打开”。</p>
 <h4>Windows</h4>
 <ol>
@@ -461,17 +462,17 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 <li>确认当前应用或开发版包含 <code>mcp --stdio</code> 入口。旧发行包不会因更新手册而自动获得 MCP。</li>
 <li>客户端连接后，PAGE 操作先调用 <code>get_index_status</code>，过程函数操作先调用 <code>get_source_index_status</code>。目标索引为 <code>READY</code> 才继续；<code>REBUILD_REQUIRED</code> 需显式重建。若为 <code>PARTIAL</code> 且 <code>projectionGapCount&gt;0</code>，表示部分 JSON PAGE 有源码片段但缺少语义节点；可对明确目标执行 <code>svn reindex-file --path</code>，缺口较多时重建整个工作区索引。刷新会更新该工作区的 <code>context/index.db</code>，不会修改 SVN 源码或提交 SVN。过程函数对象索引就绪不要求 PAGE 语义投影同时就绪。</li>
 </ol>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>/应用目录/GuthonCodeTool reindex --home /本地数据目录 --workspace products.&lt;id&gt;</code></pre></div>
-<p>若只有明确目标缺口，也可用 <code>/应用目录/GuthonCodeTool svn --home /本地数据目录 --workspace products.&lt;id&gt; -- reindex-file --path &lt;索引返回的 sourcePath&gt;</code> 做单文件刷新；<code>sourcePath</code> 必须来自已核对的索引身份或错误提示，不猜物理路径。上行是 macOS 发行应用示意；Windows 把命令换成已安装的 <code>GuthonCodeTool-windows-x64.exe</code> 并使用本机绝对路径。只有状态提示需要刷新时才运行，不把 MCP 查询当成自动迁移入口。</p>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>/应用目录/GuthonCodeTool/GuthonCodeTool reindex --home /本地数据目录 --workspace products.&lt;id&gt;</code></pre></div>
+<p>若只有明确目标缺口，也可用 <code>/应用目录/GuthonCodeTool/GuthonCodeTool svn --home /本地数据目录 --workspace products.&lt;id&gt; -- reindex-file --path &lt;索引返回的 sourcePath&gt;</code> 做单文件刷新；<code>sourcePath</code> 必须来自已核对的索引身份或错误提示，不猜物理路径。上行是 macOS 发行应用示意；Windows 把命令换成已安装的 <code>GuthonCodeTool-windows-x64.exe</code> 并使用本机绝对路径。只有状态提示需要刷新时才运行，不把 MCP 查询当成自动迁移入口。</p>
 <h3 id="5-2-配置客户端">5.2 配置客户端</h3>
 <p>在支持 stdio MCP 的 Harness 中新增一个独立服务，命令和每个参数分别填写；使用真实的<strong>绝对路径</strong>，不要把 <code>~</code>、<code>$GUTHON_HOME</code> 或整条 Shell 命令作为可执行文件。以下示例选用发行应用；如果路径包含空格，在配置中仍把可执行文件作为一个 <code>command</code> 值，不自行拆分。</p>
 <h4>Codex（桌面应用、CLI、IDE 扩展）</h4>
 <p>编辑个人 <code>~/.codex/config.toml</code>，在已有内容后添加下列服务表，不要覆盖原有配置。Codex 的桌面应用、CLI 和 IDE 扩展共用此配置；也可放在可信任项目的 <code>.codex/config.toml</code>，但包含个人本地路径的配置通常更适合放在个人文件中。配置格式以 <a href="https://developers.openai.com/codex/mcp" target="_blank" rel="noopener noreferrer">Codex 官方 MCP 文档</a>为准。</p>
 <div class="code-wrap"><span class="code-lang">toml</span><button class="copy-btn" type="button">复制</button><pre><code>[mcp_servers."guthon-svn"]
-command = "/应用目录/GuthonCodeTool"
+command = "/应用目录/GuthonCodeTool/GuthonCodeTool"
 args = ["mcp", "--stdio", "--home", "/本地数据目录"]</code></pre></div>
 <p>也可以只用 Codex CLI 添加一次（与手工编辑 TOML 二选一，避免重复配置）：</p>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codex mcp add guthon-svn -- /应用目录/GuthonCodeTool mcp --stdio --home /本地数据目录
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codex mcp add guthon-svn -- /应用目录/GuthonCodeTool/GuthonCodeTool mcp --stdio --home /本地数据目录
 codex mcp list</code></pre></div>
 <p>命令行示例假设替换后的绝对路径不含空格；含空格时分别给可执行文件路径和数据目录路径加引号。<code>codex mcp list</code> 用于核对注册项；随后新开 Codex 任务，确认工具列表中出现 <code>guthon-svn</code>，再调用 <code>get_runtime_status</code> 和目标工作区的索引状态工具。列表中存在注册项不等于 MCP 进程已正常启动或索引已经 <code>READY</code>。原有 <code>guthon-page</code> 只是客户端别名，若仍指向同一可执行入口可继续使用；迁移时先删除或停用旧注册项，再新增 <code>guthon-svn</code>，避免同一服务重复启动，勿覆盖其他 MCP 服务。</p>
 <h4>ZCode</h4>
@@ -483,13 +484,13 @@ codex mcp list</code></pre></div>
   "mcpServers": {
     "guthon-svn": {
       "type": "stdio",
-      "command": "/应用目录/GuthonCodeTool",
+      "command": "/应用目录/GuthonCodeTool/GuthonCodeTool",
       "args": ["mcp", "--stdio", "--home", "/本地数据目录"]
     }
   }
 }</code></pre></div>
 <p>CodeBuddy Code CLI 也可只执行一次下列命令代替手工编辑 JSON；<code>codebuddy mcp list</code> 核对已注册服务，在交互任务中用 <code>/mcp</code> 查看连接诊断：</p>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codebuddy mcp add --scope user guthon-svn -- /应用目录/GuthonCodeTool mcp --stdio --home /本地数据目录
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codebuddy mcp add --scope user guthon-svn -- /应用目录/GuthonCodeTool/GuthonCodeTool mcp --stdio --home /本地数据目录
 codebuddy mcp list</code></pre></div>
 <p>以上命令行示例同样要求替换真实绝对路径；路径含空格时分别加引号。其他支持 stdio MCP 的 Harness 可按自身官方配置入口复用 <code>command</code> 与 <code>args</code>，不能假设都接受 CodeBuddy 的 <code>mcpServers</code> JSON 或 CLI 命令。</p>
 <p>Windows 把 <code>command</code> 指向应用 EXE、<code>--home</code> 后的参数指向本地数据目录；JSON 中的反斜杠要写成双反斜杠，TOML 中可使用正斜杠或正确转义的反斜杠。维护者使用源码开发版时，把 <code>command</code> 换为仓库 <code>.venv</code> 中 Python 的绝对路径，并在 <code>args</code> 最前面加上 <code>/源码仓库/scripts/guthon_tool.py</code>。需要强制只读时，在 <code>--stdio</code> 后加 <code>--read-only</code>，客户端便只发现 14 个查询工具。MCP 服务和 Nexus 可共用同一 toolHome，但客户端连接与工具调用路由须在对应客户端或 guthon-team 中另行配置；安装 GuthonCodeTool 本身不会让 AI 自动调用。</p>
@@ -618,7 +619,8 @@ codebuddy mcp list</code></pre></div>
 <h4>macOS</h4>
 <ul>
 <li>当前支持 M1 及后续型号，Intel Mac 不支持。</li>
-<li>应用没有执行权限：执行 <code>chmod +x</code> 后重新选择应用。</li>
+<li>应用没有执行权限：对解压目录内的启动文件执行 <code>chmod +x</code> 后重新选择。</li>
+<li>首次启动或刚更新后的第一次启动较慢：系统需要校验新的可执行文件，等一次即可。</li>
 <li>Gatekeeper 阻止：确认下载来源后，在“隐私与安全性”中选择“仍要打开”。</li>
 <li>终端设置的数据库环境变量未被 VS Code 读取：从同一终端启动 VS Code，或按公司方式配置用户环境后重启 VS Code。</li>
 </ul>

@@ -45,14 +45,25 @@ def mcp_tools(command: list[str], home: str, *, read_only: bool) -> list[dict]:
     return tools
 
 
+def resolve_entry(entry: Path) -> Path:
+    """Accept either the launcher file or the macOS onedir folder that holds it."""
+
+    if entry.is_dir():
+        for name in ("GuthonCodeTool", "GuthonCodeTool.exe"):
+            candidate = entry / name
+            if candidate.is_file():
+                return candidate
+    return entry
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--entry", type=Path, required=True, help="Path to EXE, macOS app, pyz, or source CLI")
     parser.add_argument("--python", type=Path, help="Python path for a .py or .pyz entry; defaults to this interpreter")
     args = parser.parse_args()
-    entry = args.entry.expanduser().resolve()
+    entry = resolve_entry(args.entry.expanduser().resolve())
     if not entry.is_file():
-        parser.error("--entry must be an existing file path")
+        parser.error("--entry must be an existing file or a folder containing GuthonCodeTool")
     if entry.suffix in {".py", ".pyz"}:
         python = (args.python or Path(sys.executable)).expanduser().resolve()
         if not python.is_file():

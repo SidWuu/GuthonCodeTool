@@ -8,13 +8,14 @@
 
 | 平台 | 应用入口 | 脚本入口 | 需安装的界面组件 |
 | --- | --- | --- | --- |
-| macOS Apple Silicon | 解压 `GuthonCodeTool-macos-arm64.zip` 后的 `GuthonCodeTool` | `GuthonCodeTool-python.pyz` 与 Python 3.12+ | `guthon-nexus-vscode.vsix`、`GuthonCodeTool-chrome.zip` |
+| macOS Apple Silicon | 解压 `GuthonCodeTool-macos-arm64.zip` 后的 `GuthonCodeTool` 文件夹入口 `GuthonCodeTool/GuthonCodeTool` | `GuthonCodeTool-python.pyz` 与 Python 3.12+ | `guthon-nexus-vscode.vsix`、`GuthonCodeTool-chrome.zip` |
 | Windows x64 | `GuthonCodeTool-windows-x64.exe` | 同一 pyz 与 Python 3.12+ | 同一 VSIX、Chrome 扩展 ZIP |
 
 先对下载件核对 `GuthonCodeTool-checksums.txt`，再在空的临时数据目录运行仓库内的冒烟脚本：
 
 ```bash
-python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool
+python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool/GuthonCodeTool
+# macOS: 也可直接传解压出的 GuthonCodeTool 文件夹
 # Windows: python scripts/check_release_smoke.py --entry D:\tools\GuthonCodeTool-windows-x64.exe
 # pyz:     python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool-python.pyz
 ```

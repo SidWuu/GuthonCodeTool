@@ -30,3 +30,9 @@ htmlcov/
 *.sqlite-*
 docs/superpowers/
 docs/private/
+# 本地构建与发布临时产物
+_site/
+release/
+*.part
+# 测试只放在本地忽略的 tests/；scripts/ 下不得新增测试文件
+scripts/**/test_*.py

@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  normalizeExecutionMode, resolveDevelopmentRuntime, resolveScriptRuntime,
+  normalizeExecutionMode, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime,
   toolArguments, writeRuntimeDescriptor,
 } = require('../src/tool-runtime');
 
@@ -114,6 +114,36 @@ test('migrates the old development setting and keeps script paths separate', () 
   });
   assert.throws(() => resolveScriptRuntime(python, path.join(root, 'other.zip')), /\.pyz/);
   fs.rmSync(root, { recursive: true });
+});
+
+test('resolves the macOS onedir application folder to its launcher', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-packaged-'));
+  const launchDir = path.join(root, 'GuthonCodeTool');
+  fs.mkdirSync(path.join(launchDir, '_internal'), { recursive: true });
+  const launcher = path.join(launchDir, 'GuthonCodeTool');
+  fs.writeFileSync(launcher, '');
+
+  assert.equal(resolvePackagedTool(launchDir), launcher);
+  assert.equal(resolvePackagedTool(launcher), launcher);
+  assert.equal(resolvePackagedTool(path.join(root, 'missing')), '');
+  assert.equal(resolvePackagedTool(path.join(launchDir, '_internal')), '');
+  fs.rmSync(root, { recursive: true });
+});
+
+test('keeps the runtime descriptor untouched when its content is unchanged', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-descriptor-'));
+  const tool = { mode: 'packaged', toolPath: '/tool/GuthonCodeTool', toolHome: home };
+  const descriptorPath = writeRuntimeDescriptor(tool);
+  fs.utimesSync(descriptorPath, new Date(0), new Date(0));
+
+  writeRuntimeDescriptor(tool);
+
+  assert.equal(fs.statSync(descriptorPath).mtimeMs, 0);
+  // 内容变化时必须重新写入。
+  writeRuntimeDescriptor({ ...tool, toolPath: '/tool/OtherGuthon' });
+  assert.notEqual(fs.statSync(descriptorPath).mtimeMs, 0);
+  assert.equal(JSON.parse(fs.readFileSync(descriptorPath, 'utf8')).command[0], '/tool/OtherGuthon');
+  fs.rmSync(home, { recursive: true });
 });
 
 test('Nexus lists every configured workspace and binds commands to workspaceKey', () => {

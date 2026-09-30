@@ -71,6 +71,32 @@ test('detects the executable version and treats pre-updater applications as 0.2.
   fs.rmSync(root, { recursive: true });
 });
 
+test('reuses the persisted version probe instead of starting the app again', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-updater-cache-'));
+  const extension = path.join(root, 'extension');
+  const toolPath = path.join(root, 'runtime', '0.2.8', 'GuthonCodeTool', 'GuthonCodeTool');
+  fs.mkdirSync(extension);
+  fs.mkdirSync(path.dirname(toolPath), { recursive: true });
+  fs.writeFileSync(path.join(extension, 'tool-version.json'), '{"version":"0.2.2"}\n');
+  fs.writeFileSync(toolPath, 'launcher');
+
+  let probes = 0;
+  const processRunner = async () => {
+    probes += 1;
+    return { stdout: '{"version":"0.2.8"}\n' };
+  };
+  assert.equal(await detectCurrentVersion(extension, root, toolPath, processRunner), '0.2.8');
+  assert.equal(readUpdateState(root).detectedVersion.version, '0.2.8');
+  assert.equal(await detectCurrentVersion(extension, root, toolPath, processRunner), '0.2.8');
+  assert.equal(probes, 1);
+
+  // 应用被替换后必须重新探测。
+  fs.writeFileSync(toolPath, 'replaced launcher');
+  assert.equal(await detectCurrentVersion(extension, root, toolPath, processRunner), '0.2.8');
+  assert.equal(probes, 2);
+  fs.rmSync(root, { recursive: true });
+});
+
 test('calculates sha256 for downloaded artifacts', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-updater-hash-'));
   const target = path.join(root, 'artifact');
@@ -167,6 +193,9 @@ for (const archiveEntry of ['GuthonCodeTool', 'dist/GuthonCodeTool']) test(`inst
           const extracted = path.join(args[3], archiveEntry);
           fs.mkdirSync(path.dirname(extracted), { recursive: true });
           fs.writeFileSync(extracted, 'packaged macOS application');
+          // onedir 发行包同时带有 _internal 运行库，安装时必须与启动文件一起保留。
+          fs.mkdirSync(path.join(args[3], '_internal'), { recursive: true });
+          fs.writeFileSync(path.join(args[3], '_internal', 'base_library.zip'), 'runtime');
           return { stdout: '' };
         }
         return args[0] === 'version' ? { stdout: '{"version":"0.2.5"}\n' } : { stdout: '' };
@@ -174,7 +203,10 @@ for (const archiveEntry of ['GuthonCodeTool', 'dist/GuthonCodeTool']) test(`inst
     });
     assert.equal(fs.readFileSync(installed.toolPath, 'utf8'), 'packaged macOS application');
     assert.equal(installed.toolPath, path.join(root, 'runtime', '0.2.5', 'GuthonCodeTool'));
-    assert.deepEqual(fs.readdirSync(path.dirname(installed.toolPath)), ['GuthonCodeTool']);
+    assert.deepEqual(
+      fs.readdirSync(path.dirname(installed.toolPath)).sort(),
+      ['GuthonCodeTool', '_internal']
+    );
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(root, { recursive: true });
