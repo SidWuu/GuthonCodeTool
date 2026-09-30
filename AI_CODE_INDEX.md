@@ -15,7 +15,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 
 - 本仓库只提供程序代码、`config/example/`、`config/schema/`、`VERSION`、发行资源；不含 `var/` 和真实 `config/*.yaml`。
 - `toolHome` 只来自显式 `--home`、runtime descriptor 或 `GUTHON_HOME` / `GUTHON_TOOL_HOME`；不得用源码仓库相对路径推断运行数据。
-- CLI 统一入口：`python scripts/guthon_tool.py <command> --home <toolHome>`。
+- CLI 统一入口：`python scripts/guthon_tool.py <command> --home <toolHome>`；命令参数自省用 `help <command>` 或 `<command> --help`。
 - runtime descriptor：`<toolHome>/var/nexus/tool-runtime.json`；linter：`<toolHome>/var/tools/guthon-lint`。
 
 ## Task to files
@@ -53,8 +53,8 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 
 | 模块 | 职责 |
 |---|---|
-| `scripts/guthon_tool.py` | 统一 CLI、`--home` 契约、命令编排与 `self-test`。 |
-| `scripts/common/gusen_hub.py` | 工作区解析、索引连接、同步、Workcopy、状态与自动暂存的共享实现。 |
+| `scripts/guthon_tool.py` | 统一 CLI、`--home` 契约、命令编排、子命令 parser 构建器与帮助自省、`self-test`。 |
+| `scripts/common/gusen_hub.py` | 工作区解析、索引连接、同步、Workcopy、状态与自动暂存的共享实现；`workspace_agent_context` 输出 `indexFirst` 可运行示例。 |
 | `scripts/common/workspace_config.py` | 工作区创建/删除与 YAML 读写。 |
 | `scripts/common/workspace_assistant.py` | 工作区摘要、就绪状态与助手输出。 |
 | `scripts/common/source_facts.py` | 源码身份、事实解析与可重建 PAGE 节点/界面字段投影。 |

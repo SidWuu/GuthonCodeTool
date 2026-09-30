@@ -10,7 +10,7 @@ def _rows(rows):
     return [dict(row) for row in rows]
 
 
-def main(args=None):
+def build_parser():
     parser = argparse.ArgumentParser(description="Query bounded Gushen Hub context without reading source bodies.")
     parser.add_argument("--workspace")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -41,7 +41,11 @@ def main(args=None):
     explain.add_argument("--caller-depth", type=int, default=2)
     explain.add_argument("--continuation", type=int, default=0)
     explain.add_argument("--include-details", action="store_true")
-    parsed = parser.parse_args(args)
+    return parser
+
+
+def main(args=None):
+    parsed = build_parser().parse_args(args)
     cfg = gusen_hub.load_config()
     if parsed.workspace:
         gusen_hub.set_workspace(parsed.workspace)

@@ -245,8 +245,10 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <div><strong>设置与路由</strong><span><code>setup</code>、<code>workspace-create/delete</code>、<code>workspaces</code>、<code>workspace-resolve</code>、<code>workspace-summary</code>、<code>source-mode</code>、<code>route</code>。</span></div>
 <div><strong>同步与索引</strong><span><code>sync-source</code>、<code>sync-source-all</code>、<code>sync-all</code>、<code>pull</code>、<code>reindex</code>、<code>search</code>、<code>context-pack</code>。</span></div>
 <div><strong>数据与源码</strong><span>元数据导出、数据库目标解析与只读查询、Workcopy 操作，以及完整的 <code>svn</code> 命令族。</span></div>
+<div><strong>命令自省</strong><span><code>help &lt;command&gt;</code>，以及任意命令的 <code>--help</code>；<code>svn &lt;action&gt; --help</code> 单独说明该 action 的专属参数。</span></div>
 </div>
 <p><code>workspace-resolve</code> 可从当前工作目录返回唯一工作区、provider、索引就绪度和下一步建议，不读取源码正文。它用于让 Agent 先确定边界，再执行小范围检索；若路径无法唯一对应工作区则明确失败。</p>
+<p>返回结果中的 <code>indexFirst.examples</code> 同时给出各场景可直接复制运行的完整 argv（含 <code>--home</code>、<code>--workspace</code> 与必填参数），使 Agent 不依赖外部文档即可发起有界查询；参数仍可随时用 <code>help</code> 或 <code>--help</code> 复核。</p>
 </section>
 
 <section class="section">
@@ -370,7 +372,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 </ul>
 <p>跨对象定义与引用依赖工作区索引，不扫描所有文件；当前虚拟文档的本地函数与字段提示读取编辑器正文。过程函数调用按索引证据定位，遇到同名身份无法确认时仍须核对目标源码。</p>
 <h3 id="7-3-工具更新">7.3 工具更新</h3>
-<p>运行模式节点默认折叠，显示当前入口路径和本地数据目录；发行应用版本、GitHub/Gitee 更新源、手动检查和回退也在此处，默认使用 Gitee。工具不会在启动时或后台定时联网，只有用户点击检查才访问所选来源。开发模式和调试模式的检查更新提示会分别说明源码/.venv 与 Release pyz/本地 Python。</p>
+<p>运行模式节点默认折叠，显示当前入口路径和本地数据目录；发行应用版本、GitHub/Gitee 更新源、手动检查和回退也在此处，默认使用 Gitee。只有发行模式读取受管应用的实际版本号；开发模式和调试模式运行仓库源码或本地 pyz，不参与发行版更新与回退，版本显示为“最新”。工具不会在启动时或后台定时联网，只有用户点击检查才访问所选来源。开发模式和调试模式的检查更新提示会分别说明源码/.venv 与 Release pyz/本地 Python。</p>
 <ol>
 <li>下载候选发行物和校验文件。</li>
 <li>验证 SHA-256，阻止损坏或被替换的文件。</li>

@@ -132,6 +132,354 @@ DATABASE_ONLY_COMMANDS = {
     "export-view": "database.viewExport",
     "diagnose": "database.diagnose",
 }
+# 每个 action 的 {说明, 专属参数用法, stdin 约定}；与 run() 分支保持一致，帮助输出与 action 列表都依赖本表。
+SVN_ACTION_SPECS = {
+    "init": {
+        "summary": "检出或初始化 SVN working copy，并重建本地索引",
+    },
+    "auth-cache": {
+        "summary": "把 SVN 密码写入系统凭据缓存（仅 manifest-working-copies）",
+        "stdin": '{"password": "<密码>"}',
+    },
+    "scope-preview": {
+        "summary": "预览当前授权范围与工作副本差异",
+    },
+    "scope-import": {
+        "summary": "从签出脚本或范围配置导入授权范围",
+        "stdin": '{"text": "<脚本或配置文本>"} 或 {"file": "<路径>", "source": "script|config"}',
+    },
+    "sync-from-script": {
+        "summary": "按签出脚本检出/更新 working copy 并重建索引",
+        "options": "[--accept-scope-change] [--merge-local]",
+    },
+    "sync-from-bat": {
+        "summary": "sync-from-script 的兼容别名",
+        "options": "[--accept-scope-change] [--merge-local]",
+    },
+    "sync-from-config": {
+        "summary": "按可编辑范围配置检出/更新 working copy 并重建索引",
+        "options": "[--accept-scope-change] [--merge-local]",
+    },
+    "refresh": {
+        "summary": "更新本地 working copy，并按变更增量刷新索引",
+        "options": "[--merge-local] [--working-copy <id>]... [--path <逻辑路径>] [--prune]",
+    },
+    "status": {
+        "summary": "报告 working copy 状态",
+        "options": "[--diff] [--remote]",
+    },
+    "catalog": {
+        "summary": "列出索引内的数据源与对象目录",
+    },
+    "fragments": {
+        "summary": "读取对象被索引的片段清单（不含源码正文）",
+        "options": "--source-type <类型> --source-id <id> [--fun-id <fun>] [--working-copy <id>]",
+    },
+    "page-query": {
+        "summary": "按 JSON stdin 调用只读 PAGE 有界查询工具",
+        "stdin": '{"name": "list_page_nodes|read_page_nodes|search_sources|...", "arguments": {...}}',
+    },
+    "read": {
+        "summary": "读取精确对象并开启编辑会话",
+        "options": (
+            "--source-type page|procedure|system-script|table|view|skill|public --source-id <id> "
+            "[--fun-id <fun>] [--json-pointer <指针>] [--working-copy <id>]"
+        ),
+    },
+    "read-batch": {
+        "summary": "一次读取多个精确对象并开启编辑会话",
+        "stdin": '{"targets": [{"sourceType": "...", "sourceId": "...", "funId": "", "jsonPointer": ""}]}',
+    },
+    "write": {
+        "summary": "把编辑会话内容写回本地 working copy",
+        "options": "--session <会话ID> --document <文档ID>",
+        "stdin": '{"content": "<完整文本>", "expectedProductHash": ""}',
+    },
+    "write-batch": {
+        "summary": "一次写回同一会话中的多处修改",
+        "options": "[--session <会话ID>]",
+        "stdin": '{"changes": [{"documentId": "...", "content": "..."}]}',
+    },
+    "scm-status": {
+        "summary": "报告 SCM 变更集（含可选远端核对）",
+        "options": "[--remote] [--working-copy <id>]...",
+    },
+    "diff": {
+        "summary": "查看指定逻辑路径的 SVN 差异",
+        "options": "--path <逻辑路径> [--remote]",
+    },
+    "conflict": {
+        "summary": "查看指定逻辑路径的冲突详情",
+        "options": "--path <逻辑路径>",
+    },
+    "resolve-conflict": {
+        "summary": "标记解决冲突并重新索引该文件",
+        "options": "--path <逻辑路径>",
+    },
+    "history": {
+        "summary": "查看指定逻辑路径的 SVN 历史",
+        "options": "--path <逻辑路径> [--limit <条数>]",
+    },
+    "revert-preview": {
+        "summary": "预览撤销某编辑会话的本地改动",
+        "options": "--session <会话ID> [--working-copy <id>]...",
+    },
+    "revert": {
+        "summary": "按选择令牌撤销某编辑会话的本地改动",
+        "options": "--session <会话ID> --selection-token <令牌> [--candidate <id>]...",
+    },
+    "platform-save-preview": {
+        "summary": "预览平台保存前的本地差异范围",
+        "options": "--session <会话ID> [--working-copy <id>]...",
+    },
+    "platform-save": {
+        "summary": "记录平台保存结果并重新索引（不提交 SVN）",
+        "options": "--session <会话ID> --selection-token <令牌> [--candidate <id>]...",
+        "stdin": '{"message": "<说明>"}',
+    },
+    "delivery-status": {
+        "summary": "报告本地保存与平台发布状态",
+    },
+    "definition": {
+        "summary": "按别名与函数名定位对象定义",
+        "options": "--alias <source_alias_id> --fun-id <fun_id>",
+    },
+    "callers": {
+        "summary": "查询跨对象调用方（共享函数影响面）",
+        "options": "--alias <source_alias_id> --fun-id <fun_id> [--limit <条数>]",
+    },
+    "find": {
+        "summary": "对象名、别名或 ID 不明时定位候选（索引首选入口）",
+        "options": "--keyword <对象名、别名或ID> [--limit <条数>]",
+    },
+    "context": {
+        "summary": "查询一跳出入边上下文",
+        "options": "--source-id <source_id> [--fun-id <fun>] [--limit <条数>]",
+    },
+    "facts": {
+        "summary": "查询局部事实：错误、条件、赋值、字段关系（索引首选入口）",
+        "options": "--keyword <词> | --table <表名> | --source-id <id>；[--limit <条数>] [--continuation <偏移>]",
+    },
+    "explain": {
+        "summary": "查询表或单据的写入原因链（索引首选入口）",
+        "options": (
+            "--table <表名> | --bill-type <单据类型>；[--data-source-id <id>] "
+            "[--operation WRITE|SELECT] [--limit <条数>] [--fact-limit <条数>] "
+            "[--caller-depth <层数>] [--continuation <偏移>] [--include-details]"
+        ),
+    },
+    "reindex-file": {
+        "summary": "只重新索引指定逻辑路径",
+        "options": "--path <逻辑路径>",
+    },
+}
+SVN_ACTIONS = tuple(SVN_ACTION_SPECS)
+# 这些命令不接受命令级选项，输入从 stdin 读取 JSON。
+STDIN_JSON_COMMANDS = {
+    "workspace-create",
+    "workspace-delete",
+    "svn-login-configure",
+    "database-target-configure",
+    "route",
+    "pull",
+}
+SVN_USAGE_PREFIX = "guthon_tool.py svn --home <toolHome> --workspace <workspaceKey> --"
+
+
+def build_import_svn_scope_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="guthon_tool.py import-svn-scope")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--script", help="path to svnCheckoutHere.sh or svnCheckoutHere.bat")
+    source.add_argument("--bat", help="legacy alias for a checkout BAT path")
+    source.add_argument("--config", help="path to an editable svn-scope.yaml/json configuration")
+    parser.add_argument("--output", required=True, help="target authorized-scope.json path")
+    parser.add_argument("--replace", action="store_true", help="replace an existing changed manifest")
+    return parser
+
+
+def build_workspace_resolve_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="guthon_tool.py workspace-resolve")
+    parser.add_argument("--path", default=str(Path.cwd()))
+    return parser
+
+
+def build_database_parser(command: str) -> argparse.ArgumentParser:
+    epilog = (
+        'stdin: {"sql": "<单条 SELECT>", "maxRows": 100}'
+        if command == "database-query-readonly"
+        else None
+    )
+    parser = argparse.ArgumentParser(prog=f"guthon_tool.py {command}", epilog=epilog)
+    parser.add_argument("--path", default=str(Path.cwd()))
+    parser.add_argument("--environment", choices=["dev", "test"], default="")
+    parser.add_argument("--target-id", default="")
+    if command == "database-describe":
+        parser.add_argument("--table", required=True)
+    return parser
+
+
+def build_source_mode_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="guthon_tool.py source-mode")
+    parser.add_argument("action", choices=["get", "set"])
+    parser.add_argument("--mode", choices=["database", "svn"])
+    return parser
+
+
+def build_search_parser(command: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=f"guthon_tool.py {command}")
+    parser.add_argument("--limit", type=int, default=20 if command == "search" else 5)
+    if command == "search":
+        parser.add_argument("--query", required=True)
+    else:
+        parser.add_argument("--source-id", required=True)
+        parser.add_argument("--fun-id", default="")
+        parser.add_argument("--detailed", action="store_true")
+    return parser
+
+
+def build_svn_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="guthon_tool.py svn")
+    parser.add_argument("action", choices=list(SVN_ACTIONS))
+    parser.add_argument("--prune", action="store_true", help="exclude paths removed from the configured sparse scope")
+    parser.add_argument(
+        "--accept-scope-change",
+        action="store_true",
+        help="accept the reviewed workspace checkout script as the new exact authorization manifest",
+    )
+    parser.add_argument("--diff", action="store_true", help="include full svn diff in status output")
+    parser.add_argument("--remote", action="store_true", help="contact the repository and report out-of-date paths")
+    parser.add_argument(
+        "--merge-local",
+        action="store_true",
+        help="explicitly allow native SVN update/merge when the selected working copy has local changes",
+    )
+    parser.add_argument(
+        "--working-copy",
+        action="append",
+        default=[],
+        help="limit a manifest operation to exact scope entry ids; repeat to select multiple entries",
+    )
+    parser.add_argument(
+        "--source-type",
+        choices=["page", "procedure", "system-script", "table", "view", "skill", "public"],
+    )
+    parser.add_argument("--source-id")
+    parser.add_argument("--fun-id", default="")
+    parser.add_argument("--json-pointer", default="")
+    parser.add_argument("--session")
+    parser.add_argument("--document")
+    parser.add_argument("--path")
+    parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--selection-token")
+    parser.add_argument("--candidate", action="append", default=[])
+    parser.add_argument("--alias")
+    parser.add_argument("--keyword", default="")
+    parser.add_argument("--table", default="")
+    parser.add_argument("--bill-type", default="")
+    parser.add_argument("--data-source-id", default="")
+    parser.add_argument("--operation", default="WRITE")
+    parser.add_argument("--fact-limit", type=int, default=4)
+    parser.add_argument("--caller-depth", type=int, default=2)
+    parser.add_argument("--continuation", type=int, default=0)
+    parser.add_argument("--include-details", action="store_true")
+    return parser
+
+
+COMMAND_PARSER_BUILDERS = {
+    "import-svn-scope": build_import_svn_scope_parser,
+    "workspace-resolve": build_workspace_resolve_parser,
+    "database-target-resolve": lambda: build_database_parser("database-target-resolve"),
+    "database-probe": lambda: build_database_parser("database-probe"),
+    "database-describe": lambda: build_database_parser("database-describe"),
+    "database-query-readonly": lambda: build_database_parser("database-query-readonly"),
+    "source-mode": build_source_mode_parser,
+    "search": lambda: build_search_parser("search"),
+    "context-pack": lambda: build_search_parser("context-pack"),
+    "svn": build_svn_parser,
+}
+# 委托模块自带 parser 的命令：帮助直接交给该模块的 argparse 输出。
+HELP_DELEGATES = {
+    **SCRIPT_COMMANDS,
+    "export-markdown": ("common.export_hub_markdown", "main"),
+}
+
+
+def _top_level_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "command",
+        choices=CLI_COMMANDS,
+    )
+    parser.add_argument("--home", help="Directory that stores local config and private source data")
+    parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")
+    return parser
+
+
+def _svn_action_from(tokens: list[str]) -> str:
+    """Return the svn action named in a help request, skipping --home/--workspace values."""
+
+    skip_value = False
+    for token in tokens:
+        if skip_value:
+            skip_value = False
+            continue
+        if token in {"--home", "--workspace"}:
+            skip_value = True
+        elif token != "--" and token in SVN_ACTION_SPECS:
+            return token
+    return ""
+
+
+def _print_command_help(topic: str, rest: list[str]) -> int:
+    if topic in HELP_DELEGATES:
+        module_name, function_name = HELP_DELEGATES[topic]
+        module = importlib.import_module(module_name)
+        with contextlib.suppress(SystemExit):
+            getattr(module, function_name)(["--help"])
+        return 0
+    builder = COMMAND_PARSER_BUILDERS.get(topic)
+    if builder is not None:
+        parser = builder()
+        if topic == "svn":
+            action = _svn_action_from(rest)
+            spec = SVN_ACTION_SPECS.get(action)
+            if spec:
+                options = spec.get("options", "")
+                print(f"usage: {SVN_USAGE_PREFIX} {action}" + (f" {options}" if options else ""))
+                print(f"  {spec['summary']}")
+                if spec.get("stdin"):
+                    print(f"  stdin：{spec['stdin']}")
+                print("\nsvn 全部 action 的共用选项：\n")
+        parser.print_help()
+        return 0
+    print(f"guthon_tool.py {topic} 没有命令级选项，仅接受 --home/--workspace。")
+    if topic in STDIN_JSON_COMMANDS:
+        print("输入从 stdin 读取 JSON。")
+    print("用 `guthon_tool.py --help` 查看全部命令，用 `guthon_tool.py help <command>` 查看具体命令。")
+    return 0
+
+
+def _dispatch_help(raw: list[str]) -> int | None:
+    """Route a trailing -h/--help to the target command parser; None means default handling."""
+
+    if not raw or raw[-1] not in {"-h", "--help"}:
+        return None
+    topic = next((token for token in raw if token in CLI_COMMANDS), None)
+    if topic is None or topic in {"version", "serve", "mcp"}:
+        return None
+    return _print_command_help(topic, raw[raw.index(topic) + 1:])
+
+
+def _command_help(argv: list[str]) -> int:
+    """Implement the explicit `guthon_tool.py help <command>` entry point."""
+
+    if not argv or argv[0] in {"-h", "--help"}:
+        _top_level_parser().print_help()
+        return 0
+    topic = argv[0]
+    if topic not in CLI_COMMANDS:
+        raise SystemExit(f"Unsupported command: {topic}")
+    return _print_command_help(topic, argv[1:])
 
 
 def resource_root() -> Path:
@@ -213,6 +561,13 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
                 "projects.self-test-db",
             )
             assert database_workspace["datasource"]["type"] == "postgresql"
+            # 子命令帮助必须可达，否则 Agent 无法自省有界查询参数而退回全库检索。
+            help_output = io.StringIO()
+            with contextlib.redirect_stdout(help_output):
+                assert _command_help(["svn", "facts"]) == 0
+                assert _command_help(["query", "explain"]) == 0
+            assert "--keyword" in help_output.getvalue()
+            assert "explain" in help_output.getvalue()
         print("guthon_tool self-test: ok")
         return 0
     if command == "setup":
@@ -223,14 +578,7 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
     if command == "import-svn-scope":
         if not selected_workspace:
             raise SystemExit("Missing --workspace. Use products.<id> or projects.<id>.")
-        import_parser = argparse.ArgumentParser(prog="guthon_tool.py import-svn-scope")
-        source = import_parser.add_mutually_exclusive_group(required=True)
-        source.add_argument("--script", help="path to svnCheckoutHere.sh or svnCheckoutHere.bat")
-        source.add_argument("--bat", help="legacy alias for a checkout BAT path")
-        source.add_argument("--config", help="path to an editable svn-scope.yaml/json configuration")
-        import_parser.add_argument("--output", required=True, help="target authorized-scope.json path")
-        import_parser.add_argument("--replace", action="store_true", help="replace an existing changed manifest")
-        parsed = import_parser.parse_args(extra_args)
+        parsed = build_import_svn_scope_parser().parse_args(extra_args)
         from providers.svn.scope_import import (
             build_manifest,
             build_manifest_from_config,
@@ -519,9 +867,7 @@ def _reindex_svn_refresh(gusen_hub, config, workspace, refresh_result: dict, on_
 
 def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
     if command == "workspace-resolve":
-        parser = argparse.ArgumentParser(prog="guthon_tool.py workspace-resolve")
-        parser.add_argument("--path", default=str(Path.cwd()))
-        parsed = parser.parse_args(extra_args)
+        parsed = build_workspace_resolve_parser().parse_args(extra_args)
         resolved = gusen_hub.resolve_workspace_for_path(config, parsed.path)
         print(json.dumps({"ok": True, **gusen_hub.workspace_agent_context(config, resolved)}, ensure_ascii=False))
         return 0
@@ -529,13 +875,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         from common import database_test_artifacts
         from common import database_readonly
 
-        parser = argparse.ArgumentParser(prog=f"guthon_tool.py {command}")
-        parser.add_argument("--path", default=str(Path.cwd()))
-        parser.add_argument("--environment", choices=["dev", "test"], default="")
-        parser.add_argument("--target-id", default="")
-        if command == "database-describe":
-            parser.add_argument("--table", required=True)
-        parsed = parser.parse_args(extra_args)
+        parsed = build_database_parser(command).parse_args(extra_args)
         resolved = gusen_hub.resolve_workspace_for_path(config, parsed.path)
         database_config_path = gusen_hub.CONFIG_DIR / "database-testing.yaml"
         try:
@@ -661,10 +1001,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         }, ensure_ascii=False, indent=2))
         return 0
     if command == "source-mode":
-        parser = argparse.ArgumentParser(prog="guthon_tool.py source-mode")
-        parser.add_argument("action", choices=["get", "set"])
-        parser.add_argument("--mode", choices=["database", "svn"])
-        parsed = parser.parse_args(extra_args)
+        parsed = build_source_mode_parser().parse_args(extra_args)
         if parsed.action == "get":
             if parsed.mode:
                 raise SystemExit("source-mode get does not accept --mode")
@@ -684,15 +1021,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
     if command in {"search", "context-pack"}:
         from common import workspace_assistant
 
-        parser = argparse.ArgumentParser(prog=f"guthon_tool.py {command}")
-        parser.add_argument("--limit", type=int, default=20 if command == "search" else 5)
-        if command == "search":
-            parser.add_argument("--query", required=True)
-        else:
-            parser.add_argument("--source-id", required=True)
-            parser.add_argument("--fun-id", default="")
-            parser.add_argument("--detailed", action="store_true")
-        parsed = parser.parse_args(extra_args)
+        parsed = build_search_parser(command).parse_args(extra_args)
         result = (
             workspace_assistant.unified_search(workspace, parsed.query, parsed.limit)
             if command == "search"
@@ -709,88 +1038,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
     if command == "svn":
         from providers.svn import checkout
 
-        svn_parser = argparse.ArgumentParser(prog="guthon_tool.py svn")
-        svn_parser.add_argument(
-            "action",
-            choices=[
-                "init",
-                "auth-cache",
-                "scope-preview",
-                "scope-import",
-                "sync-from-script",
-                "sync-from-bat",
-                "sync-from-config",
-                "refresh",
-                "status",
-                "catalog",
-                "fragments",
-                "page-query",
-                "read",
-                "read-batch",
-                "write",
-                "write-batch",
-                "scm-status",
-                "diff",
-                "conflict",
-                "resolve-conflict",
-                "history",
-                "revert-preview",
-                "revert",
-                "platform-save-preview",
-                "platform-save",
-                "delivery-status",
-                "definition",
-                "callers",
-                "find",
-                "context",
-                "facts",
-                "explain",
-                "reindex-file",
-            ],
-        )
-        svn_parser.add_argument("--prune", action="store_true", help="exclude paths removed from the configured sparse scope")
-        svn_parser.add_argument(
-            "--accept-scope-change",
-            action="store_true",
-            help="accept the reviewed workspace checkout script as the new exact authorization manifest",
-        )
-        svn_parser.add_argument("--diff", action="store_true", help="include full svn diff in status output")
-        svn_parser.add_argument("--remote", action="store_true", help="contact the repository and report out-of-date paths")
-        svn_parser.add_argument(
-            "--merge-local",
-            action="store_true",
-            help="explicitly allow native SVN update/merge when the selected working copy has local changes",
-        )
-        svn_parser.add_argument(
-            "--working-copy",
-            action="append",
-            default=[],
-            help="limit a manifest operation to exact scope entry ids; repeat to select multiple entries",
-        )
-        svn_parser.add_argument(
-            "--source-type",
-            choices=["page", "procedure", "system-script", "table", "view", "skill", "public"],
-        )
-        svn_parser.add_argument("--source-id")
-        svn_parser.add_argument("--fun-id", default="")
-        svn_parser.add_argument("--json-pointer", default="")
-        svn_parser.add_argument("--session")
-        svn_parser.add_argument("--document")
-        svn_parser.add_argument("--path")
-        svn_parser.add_argument("--limit", type=int, default=20)
-        svn_parser.add_argument("--selection-token")
-        svn_parser.add_argument("--candidate", action="append", default=[])
-        svn_parser.add_argument("--alias")
-        svn_parser.add_argument("--keyword", default="")
-        svn_parser.add_argument("--table", default="")
-        svn_parser.add_argument("--bill-type", default="")
-        svn_parser.add_argument("--data-source-id", default="")
-        svn_parser.add_argument("--operation", default="WRITE")
-        svn_parser.add_argument("--fact-limit", type=int, default=4)
-        svn_parser.add_argument("--caller-depth", type=int, default=2)
-        svn_parser.add_argument("--continuation", type=int, default=0)
-        svn_parser.add_argument("--include-details", action="store_true")
-        parsed = svn_parser.parse_args(extra_args)
+        parsed = build_svn_parser().parse_args(extra_args)
         manifest_layout = workspace["svn"].get("checkoutLayout") == "manifest-working-copies"
         if manifest_layout and parsed.prune:
             raise SystemExit("--prune is only available for the legacy sparse SVN layout")
@@ -1621,14 +1869,14 @@ def serve_stdio(home: Path) -> int:
 
 def main(argv=None) -> int:
     _configure_stdio_utf8()
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "command",
-        choices=CLI_COMMANDS,
-    )
-    parser.add_argument("--home", help="Directory that stores local config and private source data")
-    parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")
-    args, extra_args = parser.parse_known_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw[:1] == ["help"]:
+        return _command_help(raw[1:])
+    help_code = _dispatch_help(raw)
+    if help_code is not None:
+        return help_code
+    parser = _top_level_parser()
+    args, extra_args = parser.parse_known_args(raw)
     if extra_args[:1] == ["--"]:
         extra_args = extra_args[1:]
     if args.command == "version":

@@ -375,6 +375,38 @@ def workspace_index_state(workspace: dict) -> dict:
     }
 
 
+# indexFirst 的可运行示例参数按源码模式区分：svn action 用 --keyword/--fun-id，
+# 旧 query 入口的 find 用位置参数，context 与 callers 用 --fun。
+INDEX_FIRST_EXAMPLE_ARGUMENTS = {
+    "svn": (
+        ("unknownObject", ["find", "--keyword", "<对象名、别名或ID>"]),
+        ("knownLocalFact", ["facts", "--keyword", "<错误、条件、字段或业务词>"]),
+        ("tableOrBillWriteReason", ["explain", "--table", "<表名>"]),
+        ("billWriteReason", ["explain", "--bill-type", "<单据类型>", "--data-source-id", "<数据源ID>"]),
+        ("sharedCallChain", ["context", "--source-id", "<source_id>", "--fun-id", "<fun_id>"]),
+        ("callersOfSharedFunction", ["callers", "--alias", "<source_alias_id>", "--fun-id", "<fun_id>"]),
+    ),
+    "query": (
+        ("unknownObject", ["find", "<对象名、别名或ID>"]),
+        ("knownLocalFact", ["facts", "--keyword", "<错误、条件、字段或业务词>"]),
+        ("tableOrBillWriteReason", ["explain", "--table", "<表名>"]),
+        ("billWriteReason", ["explain", "--bill-type", "<单据类型>", "--data-source-id", "<数据源ID>"]),
+        ("sharedCallChain", ["context", "--source-id", "<source_id>", "--fun", "<fun_id>"]),
+        ("callersOfSharedFunction", ["callers", "--alias", "<source_alias_id>", "--fun", "<fun_id>"]),
+    ),
+}
+
+
+def index_first_examples(command: str, workspace_key: str) -> list[dict]:
+    """Return copy-ready bounded-query commands for one workspace and source mode."""
+
+    prefix = [command, "--home", str(CONFIG_DIR.parent), "--workspace", workspace_key, "--"]
+    return [
+        {"intent": intent, "argv": [*prefix, *arguments]}
+        for intent, arguments in INDEX_FIRST_EXAMPLE_ARGUMENTS.get(command, ())
+    ]
+
+
 def workspace_agent_context(config: dict, workspace: dict) -> dict:
     """Return the small, machine-readable context an agent needs before source lookup."""
 
@@ -391,7 +423,13 @@ def workspace_agent_context(config: dict, workspace: dict) -> dict:
             "unknownObject": "find",
             "knownLocalFact": "facts",
             "tableOrBillWriteReason": "explain",
-            "sharedCallChain": "context/callers",
+            "sharedCallChain": "context",
+            "callersOfSharedFunction": "callers",
+            "examples": index_first_examples(query_command, workspace["workspaceKey"]),
+            "note": (
+                "索引 ready 时首次源码定位必须执行上述有界查询；仅在索引未初始化、明确漏项或证据不足时"
+                "才改用定向文件检索，并在交付说明中写明原因。"
+            ),
         },
     }
 

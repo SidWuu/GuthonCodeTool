@@ -171,6 +171,8 @@ SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 
 .venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- find --keyword 订单保存
 .venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- facts --keyword 保存失败
 .venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- explain --table T_ORDER
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- context --source-id '<source-id>' --fun-id '<fun-id>'
+.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- callers --alias '<source-alias-id>' --fun-id '<fun-id>'
 .venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- delivery-status
 ```
 
@@ -203,10 +205,23 @@ PAGE 节点写入流程为 `open_page_node_edit → preview_page_nodes → updat
 退回全量扫描。普通浏览、虚拟编辑、SCM 和调用查询只使用本地 working copy，不查询源码数据库。
 SVN 表、视图和过程函数以根 working copy 内识别出的数据源与对象名组成索引身份，因此不同数据源允许存在同名对象；Nexus 打开对象时会携带 `workingCopyId` 和源码路径精确定位。PAGE_ID 仍在工作区内按版本去重。
 AI 从 PRD/PRJ 目录启动时，先执行 runtime descriptor 的 `workspaceResolveCommand`，由 cwd 得到唯一
-`workspaceKey`、provider 和 `index.ready`，不从目录名猜测。索引可用时第一次源码定位必须使用有界查询：对象名不明用
-`svn find`，局部事实用 `svn facts`，表或单据写入原因用 `svn explain`，跨对象影响用 `svn context/callers`；结果直接携带
+`workspaceKey`、provider 和 `index.ready`，不从目录名猜测。`workspace-resolve` 的 `indexFirst.examples` 直接给出可复制的完整
+argv；也可以随时用 `guthon_tool.py help <command>` 或 `<command> --help` 自省参数（例如 `... svn --help`、`... svn facts --help`、
+`... query explain --help`）。各命令的 `--help` 只描述自身，仍沿用「命令名后接 `--home/--workspace`，再接 `--` 与其专属参数」的写法。
+
+索引可用时第一次源码定位必须使用有界查询：
+
+| 场景 | 有界查询（SVN 源码模式） |
+|---|---|
+| 对象名、别名或 ID 不明 | `svn find --keyword <词>` |
+| 局部事实：错误、条件、赋值、字段关系 | `svn facts --keyword <词>`、`svn facts --table <表名>` |
+| 表或单据的写入原因链 | `svn explain --table <表名>`、`svn explain --bill-type <单据类型> --data-source-id <数据源ID>` |
+| 一跳出入边上下文 | `svn context --source-id <id> [--fun-id <fun>]` |
+| 跨对象调用方（共享函数影响面） | `svn callers --alias <别名> --fun-id <fun>` |
+
+DATABASE 源码模式把上表的 `svn` 换成 `query`，其中 `find` 使用位置参数、`context` 与 `callers` 使用 `--fun`。结果直接携带
 SVN 相对路径、PAGE JSON Pointer、行号、控制条件和调用者。仅在索引未初始化、明确漏项、查询证据不足或实际修改前读取对应局部源码，
-不得遍历整个 checkout 或读取完整 PAGE JSON。
+不得遍历整个 checkout 或读取完整 PAGE JSON；改用全库 `grep` 或文本检索时，须在交付说明中写明原因。
 
 数据库快速排查时，Agent 从同一 runtime descriptor 执行 `databaseTargetResolveCommand`，按 cwd 解析
 `workspaceKey`，再从私有 `config/database-testing.yaml` 选择目标：未明确环境时使用 `defaults.diagnosisTargetId`，明确开发库或测试库时使用 `defaults.byEnvironment.dev/test`。目标有 `connectionRef` 时调用内置 `databaseProbeCommand`、`databaseDescribeCommand`、`databaseQueryCommand`；只有 `connectionId` 时使用当前会话实际可用的 DBX。内置查询仅接受 stdin JSON 中的单条 `SELECT`，最大 100 行，校验 database/schema 与可见表，并始终回滚只读事务。密码仅保存在操作系统凭据库。首次配置从 Nexus 项目“配置资料 → 配置数据库排查”完成；“测试一下”不视为测试环境选择。功能验收、回归和交付仍使用 `full` 正式数据库测试目标。
