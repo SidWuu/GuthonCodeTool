@@ -4,14 +4,15 @@ import argparse
 from common import gusen_hub
 
 
-def main(args=None):
+def main(args=None, workspace=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace")
     parsed = parser.parse_args(args)
-    cfg = gusen_hub.load_config()
-    if parsed.workspace:
-        gusen_hub.set_workspace(parsed.workspace)
-    workspace = gusen_hub.resolve_workspace(cfg)
+    if workspace is None:
+        cfg = gusen_hub.load_config()
+        if parsed.workspace:
+            gusen_hub.set_workspace(parsed.workspace)
+        workspace = gusen_hub.resolve_workspace(cfg)
     with gusen_hub.index_connection(
         workspace,
         action="export-markdown-read",

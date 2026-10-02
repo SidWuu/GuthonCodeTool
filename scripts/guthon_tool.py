@@ -93,6 +93,7 @@ SVN_BROWSE_ACTIONS = {
     "explain",
     "scope-preview",
     "auth-cache",
+    "conflict",
     "delivery-status",
     "page-query",
 }
@@ -935,7 +936,8 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 )
         except Exception as error:
             code = getattr(error, "code", "DATABASE_QUERY_FAILED")
-            raise SystemExit(f"{code}: {error}") from error
+            detail = getattr(error, "detail", "")
+            raise SystemExit(f"{code}: {error}" + (f"（{detail}）" if detail else "")) from error
         print(json.dumps({**summary, "result": result}, ensure_ascii=False, indent=2))
         return 0
     if command == "database-target-configure":
@@ -970,11 +972,16 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 database_readonly.connection_for_target(updated, target), target
             )
             config_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                import yaml  # type: ignore
+            except ModuleNotFoundError as error:
+                raise database_readonly.DatabaseReadonlyError(
+                    "DRIVER_MISSING", "缺少 PyYAML，无法保存数据库测试配置"
+                ) from error
             with tempfile.NamedTemporaryFile(
                 "w", encoding="utf-8", dir=config_path.parent, prefix=".database-testing-", delete=False
             ) as handle:
-                json.dump(updated, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
+                yaml.safe_dump(updated, handle, allow_unicode=True, sort_keys=False, default_flow_style=False)
                 temporary_path = Path(handle.name)
             os.replace(temporary_path, config_path)
             configuration_saved = True
@@ -990,7 +997,8 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 except database_readonly.DatabaseReadonlyError:
                     pass
             code = getattr(error, "code", "CONFIG_INVALID")
-            raise SystemExit(f"{code}: {error}") from error
+            detail = getattr(error, "detail", "")
+            raise SystemExit(f"{code}: {error}" + (f"（{detail}）" if detail else "")) from error
         print(json.dumps({
             "ok": True,
             "workspaceKey": workspace["workspaceKey"],
@@ -1577,7 +1585,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     keyword=parsed.keyword,
                     table_name=parsed.table,
                     source_id=parsed.source_id or "",
-                    limit=parsed.limit if "--limit" in extra_args else 3,
+                    limit=parsed.limit if any(a == "--limit" or a.startswith("--limit=") for a in extra_args) else 3,
                     continuation=parsed.continuation,
                 )
             else:
@@ -1589,7 +1597,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                     bill_type_code=parsed.bill_type,
                     data_source_id=parsed.data_source_id,
                     operation=parsed.operation,
-                    limit=parsed.limit if "--limit" in extra_args else 1,
+                    limit=parsed.limit if any(a == "--limit" or a.startswith("--limit=") for a in extra_args) else 1,
                     fact_limit=parsed.fact_limit,
                     caller_depth=parsed.caller_depth,
                     continuation=parsed.continuation,
@@ -1729,7 +1737,12 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         print("本地索引重建完成")
         return 0
     if command == "pull":
-        payload = json.load(sys.stdin)
+        try:
+            payload = json.load(sys.stdin)
+        except json.JSONDecodeError as error:
+            raise SystemExit("pull requires a JSON stdin payload") from error
+        if not isinstance(payload, dict):
+            raise SystemExit("pull stdin must be a JSON object")
         if workspace:
             payload["workspaceKey"] = workspace["workspaceKey"]
         result = gusen_hub.pull_source_to_work_copy(payload)
@@ -1740,12 +1753,14 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
             raise SystemExit("export-markdown does not accept extra arguments")
         from common import export_hub_markdown
 
-        export_hub_markdown.main()
+        export_hub_markdown.main([], workspace)
         return 0
     if command in SCRIPT_COMMANDS:
         module_name, function_name = SCRIPT_COMMANDS[command]
         module = importlib.import_module(module_name)
         result = getattr(module, function_name)(extra_args)
+        if isinstance(result, dict):
+            return 0 if result.get("ok", True) else 1
         return int(result) if isinstance(result, (bool, int)) else 0
     if command == "sync-all":
         if workspace["sourceMode"] == "svn":
@@ -1828,8 +1843,9 @@ def serve_stdio(home: Path) -> int:
             capture = io.StringIO()
             old_input = sys.stdin
             protocol_output.flush()
-            saved_stdout_fd = os.dup(1)
+            saved_stdout_fd = None
             try:
+                saved_stdout_fd = os.dup(1)
                 with tempfile.TemporaryFile() as native_stdout:
                     os.dup2(native_stdout.fileno(), 1)
                     try:
@@ -1846,7 +1862,8 @@ def serve_stdio(home: Path) -> int:
                     native_text = native_stdout.read().decode("utf-8", errors="replace")
             finally:
                 sys.stdin = old_input
-                os.close(saved_stdout_fd)
+                if saved_stdout_fd is not None:
+                    os.close(saved_stdout_fd)
             if native_text:
                 print(native_text, file=sys.stderr, end="", flush=True)
             output = capture.getvalue()

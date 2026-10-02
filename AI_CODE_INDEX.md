@@ -63,7 +63,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `scripts/common/inheritance.py` | 过程函数与 PAGE 项目脚本的继承标记识别、有效内容派生与来源片段；派生结果不作为可写物理文件。 |
 | `scripts/common/source_format.py` | 源码编解码与格式元数据。 |
 | `scripts/common/export_hub_markdown.py` | 全量 Markdown 导出。 |
-| `scripts/common/run_sync_once.py` / `scripts/common/sync_workspace_all.py` | 单次同步与全工作区同步入口。 |
+| `scripts/common/run_sync_once.py` | 单次同步入口。 |
 | `scripts/common/create_work_copy.py` | Workcopy 创建入口。 |
 | `scripts/common/database_readonly.py` | 只读数据库连接、凭据引用与诊断目标解析。 |
 | `scripts/common/database_test_artifacts.py` | 测试计划/结果校验、评估与摘要。 |

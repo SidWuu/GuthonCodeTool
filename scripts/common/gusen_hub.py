@@ -37,6 +37,7 @@ LEGACY_WORK_COPY_BASELINE_DIR = ".guthon-baseline"
 WORK_COPY_META_FILE = "source-meta.json"
 WORK_COPY_DIFF_FILE = "diff.md"
 WORK_COPY_DELIVERY_FILE = "delivery.md"
+WORK_COPY_TRASH_DIR = ".guthon-trash"
 WORK_COPY_MANAGED_FILES = {WORK_COPY_META_FILE, WORK_COPY_DIFF_FILE, WORK_COPY_DELIVERY_FILE}
 WORK_COPY_COMPARE_EXCLUDED_FILES = WORK_COPY_MANAGED_FILES | {"meta.json"}
 WORKSPACE_ENV = "GUTHON_WORKSPACE"
@@ -611,10 +612,13 @@ def update_workspace_state(config, workspace, step=None, status=None, error="", 
     if full_sync:
         state["lastFullSyncAt"] = now
         state["lastFailure"] = None
-    workspace["statePath"].write_text(
-        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    state_path = workspace["statePath"]
+    temp_path = state_path.with_name(f".{state_path.name}.{os.getpid()}.tmp")
+    try:
+        temp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temp_path.replace(state_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
     return load_workspace_state(config, workspace)
 
 
@@ -859,7 +863,7 @@ def append_pull_log(pull_type, trigger, summary, payload=None, result=None, ok=T
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {
-        "time": dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
+        "time": _now(),
         "trigger": trigger,
         "pullType": pull_type,
         "ok": bool(ok),
@@ -1729,6 +1733,9 @@ def query_incoming_callers(conn, scope_id, target_alias_id, target_fun_id, limit
 
 
 def db_connect(ds: dict):
+    missing = [key for key in ("host", "port", "database", "username", "password") if not ds.get(key)]
+    if missing:
+        raise SystemExit(f"数据源配置缺少字段: {', '.join(missing)}")
     database_type = str(ds.get("type") or "mysql").strip().lower()
     database_type = {"mariadb": "mysql", "postgres": "postgresql"}.get(database_type, database_type)
     if database_type == "postgresql":
@@ -2043,7 +2050,7 @@ def run_sync_once(args=None, on_progress=None):
         set_workspace(parsed.workspace)
     workspace = resolve_workspace(cfg)
     ensure_workspace_structure(workspace)
-    sync = cfg["sync"]["sync"]
+    sync = (cfg.get("sync") or {}).get("sync") or {}
     index_path = workspace["indexPath"]
     index_name = _indexed_path(index_path)
     conn = connect_index_for_workspace(
@@ -2054,81 +2061,86 @@ def run_sync_once(args=None, on_progress=None):
             and (workspace.get("sourceMode") == "svn" or not parsed.reindex_calls)
         ),
     )
-    if workspace.get("sourceMode") == "svn":
+    try:
+        if workspace.get("sourceMode") == "svn":
+            if parsed.init_only:
+                export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
+                return
+            result = index_svn_workspace(conn, cfg, workspace, on_progress=on_progress)
+            if on_progress is not None:
+                on_progress(f"{workspace.get('displayName') or workspace['workspaceKey']}｜索引｜生成索引说明文档")
+            export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
+            if on_progress is not None:
+                on_progress(f"{workspace.get('displayName') or workspace['workspaceKey']}｜索引｜重建流程完成")
+            append_pull_log(
+                "source",
+                "local-svn-scan",
+                {"workspaceKey": workspace["workspaceKey"], "revision": result["revision"], "changed": result["changed"], "failures": result["failures"]},
+                result=result,
+                ok=not result["failures"],
+            )
+            if result["failures"]:
+                raise SystemExit(f"SVN scan completed with {result['failures']} scoped path errors")
+            return result
         if parsed.init_only:
             export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
             return
-        result = index_svn_workspace(conn, cfg, workspace, on_progress=on_progress)
-        if on_progress is not None:
-            on_progress(f"{workspace.get('displayName') or workspace['workspaceKey']}｜索引｜生成索引说明文档")
+        if parsed.reindex_calls:
+            indexed = reindex_local_calls(conn)
+            export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
+            return
+
+        full_rebuild = parsed.full_rebuild
+        if not sync:
+            raise SystemExit("配置缺少 sync.sync 段：请在 config/sync.yaml 中声明同步规则")
+        lookback = int(sync.get("lookback_minutes", 10))
+        state_key = "last_success_time"
+        sync_from = "1970-01-01 00:00:00" if full_rebuild else _sync_from(conn, lookback, state_key)
+        stats = {
+            "mode": "full-rebuild" if full_rebuild else "sync",
+            "workspaceKey": workspace["workspaceKey"],
+            "sync_from": sync_from,
+            "candidates": 0,
+            "changed": 0,
+            "deleted": 0,
+            "failures": 0,
+        }
+        stats = _sync_layer(
+            conn,
+            cfg,
+            workspace["config"],
+            workspace["layer"],
+            workspace["scopeId"],
+            workspace["projectId"],
+            sync_from,
+            stats,
+            workspace,
+            force=full_rebuild,
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
+            (state_key, _now()),
+        )
+        conn.commit()
+        if full_rebuild:
+            stats["reindexed"] = reindex_local_calls(conn)
         export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
-        if on_progress is not None:
-            on_progress(f"{workspace.get('displayName') or workspace['workspaceKey']}｜索引｜重建流程完成")
         append_pull_log(
             "source",
-            "local-svn-scan",
-            {"workspaceKey": workspace["workspaceKey"], "revision": result["revision"], "changed": result["changed"], "failures": result["failures"]},
-            result=result,
-            ok=not result["failures"],
+            "scheduled",
+            {
+                "workspaceKey": workspace["workspaceKey"],
+                "candidates": stats.get("candidates", 0),
+                "changed": stats.get("changed", 0),
+                "deleted": stats.get("deleted", 0),
+                "failures": stats.get("failures", 0),
+            },
+            payload={"sync_from": sync_from},
+            result=stats,
+            ok=not stats.get("failures"),
         )
-        if result["failures"]:
-            raise SystemExit(f"SVN scan completed with {result['failures']} scoped path errors")
-        return result
-    if parsed.init_only:
-        export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
-        return
-    if parsed.reindex_calls:
-        indexed = reindex_local_calls(conn)
-        export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
-        return
-
-    full_rebuild = parsed.full_rebuild
-    lookback = int(sync.get("lookback_minutes", 10))
-    state_key = "last_success_time"
-    sync_from = "1970-01-01 00:00:00" if full_rebuild else _sync_from(conn, lookback, state_key)
-    stats = {
-        "mode": "full-rebuild" if full_rebuild else "sync",
-        "workspaceKey": workspace["workspaceKey"],
-        "sync_from": sync_from,
-        "candidates": 0,
-        "changed": 0,
-        "deleted": 0,
-        "failures": 0,
-    }
-    stats = _sync_layer(
-        conn,
-        cfg,
-        workspace["config"],
-        workspace["layer"],
-        workspace["scopeId"],
-        workspace["projectId"],
-        sync_from,
-        stats,
-        workspace,
-        force=full_rebuild,
-    )
-    conn.execute(
-        "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
-        (state_key, _now()),
-    )
-    conn.commit()
-    if full_rebuild:
-        stats["reindexed"] = reindex_local_calls(conn)
-    export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
-    append_pull_log(
-        "source",
-        "scheduled",
-        {
-            "workspaceKey": workspace["workspaceKey"],
-            "candidates": stats.get("candidates", 0),
-            "changed": stats.get("changed", 0),
-            "deleted": stats.get("deleted", 0),
-            "failures": stats.get("failures", 0),
-        },
-        payload={"sync_from": sync_from},
-        result=stats,
-        ok=not stats.get("failures"),
-    )
+    finally:
+        conn.close()
 
 
 def _indexed_path(path: Path) -> str:
@@ -2760,11 +2772,11 @@ def _sync_layer(conn, cfg, layer_cfg, layer, scope_id, project_id, sync_from, st
                         continue
                     if row["source_table"] == PAGE_SOURCE_TYPE:
                         row["model_path"] = model_paths.get(_str(row.get("model_id")))
-                    if upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scope, force=force):
+                    if upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scope, force=force, workspace=workspace):
                         stats["changed"] += 1
             cur.execute(inventory_query, inventory_params)
             current_page_ids = {row["source_id"] for row in cur.fetchall() if _included(layer_cfg, row)}
-        stats["deleted"] = stats.get("deleted", 0) + reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids)
+        stats["deleted"] = stats.get("deleted", 0) + reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids, workspace)
     conn.commit()
     return stats
 
@@ -2795,7 +2807,7 @@ def _included(layer_cfg, row):
     return any((row["source_alias_id"] or "").startswith(prefix) for prefix in prefixes)
 
 
-def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scope, force=False):
+def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scope, force=False, workspace=None):
     change_key = _change_key(row)
     source_alias_id = _source_alias_id(row)
     existing = conn.execute(
@@ -2805,18 +2817,18 @@ def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scop
         """,
         (layer, scope_id, project_id, row["source_table"], row["source_id"], row["fun_id"] or ""),
     ).fetchone()
-    desired_path = source_base(row, layer, scope_id, project_id, layer_cfg, system_scope)
+    desired_path = source_base(row, layer, scope_id, project_id, layer_cfg, system_scope, workspace)
     if existing and existing["change_key"] == change_key and not force:
         indexed_path = ROOT / existing["local_path"] if existing["local_path"] else None
         if indexed_path == desired_path and desired_path.exists() and all(
             path.is_file() for path in _source_output_paths(row, desired_path)
         ):
             return False
-    local_path, status, scripts = write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, change_key)
+    local_path, status, scripts = write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, change_key, workspace)
     if existing and existing["local_path"]:
         old_path = ROOT / existing["local_path"]
         if old_path != local_path:
-            remove_source_path(old_path)
+            remove_source_path(old_path, workspace)
     indexed_time = _now()
     identity = (
         layer,
@@ -2891,8 +2903,8 @@ def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scop
     return True
 
 
-def remove_source_path(path: Path):
-    root = readonly_source_dir().resolve()
+def remove_source_path(path: Path, workspace=None):
+    root = (workspace or current_workspace())["readonlyDir"].resolve()
     target = path.resolve()
     if target == root or root not in target.parents:
         raise ValueError(f"Refusing to remove path outside readonly source: {path}")
@@ -2908,7 +2920,7 @@ def remove_source_path(path: Path):
         parent = parent.parent
 
 
-def reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids):
+def reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids, workspace=None):
     rows = conn.execute(
         """
         SELECT source_id, local_path FROM gusen_source_record
@@ -2919,7 +2931,7 @@ def reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids)
     stale = [row for row in rows if row["source_id"] not in current_page_ids]
     for row in stale:
         if row["local_path"]:
-            remove_source_path(ROOT / row["local_path"])
+            remove_source_path(ROOT / row["local_path"], workspace)
         identity = (layer, scope_id, project_id, PAGE_SOURCE_TYPE, row["source_id"], "")
         _delete_call_index(conn, identity)
         conn.execute(
@@ -2929,13 +2941,13 @@ def reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids)
     return len(stale)
 
 
-def readonly_layer_root(layer, scope_id, project_id, layer_cfg):
-    return readonly_source_dir()
+def readonly_layer_root(layer, scope_id, project_id, layer_cfg, workspace=None):
+    return (workspace or current_workspace())["readonlyDir"]
 
 
-def source_base(row, layer, scope_id, project_id, layer_cfg, system_scope):
+def source_base(row, layer, scope_id, project_id, layer_cfg, system_scope, workspace=None):
     system_name = _system_name(row, system_scope)
-    layer_root = readonly_layer_root(layer, scope_id, project_id, layer_cfg)
+    layer_root = readonly_layer_root(layer, scope_id, project_id, layer_cfg, workspace)
     root = layer_root / path_part(system_name)
     if row["source_table"] == PAGE_SOURCE_TYPE:
         module_name = row.get("mk_name") or row.get("mk_id") or "未归属模块"
@@ -2954,11 +2966,11 @@ def source_base(row, layer, scope_id, project_id, layer_cfg, system_scope):
         return root / "procedure" / path_part(row["source_alias_id"]) / path_part(row["fun_id"])
 
 
-def write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, change_key):
-    base = source_base(row, layer, scope_id, project_id, layer_cfg, system_scope)
+def write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, change_key, workspace=None):
+    base = source_base(row, layer, scope_id, project_id, layer_cfg, system_scope, workspace)
     if row["source_table"] != PAGE_SOURCE_TYPE:
         system_name = _system_name(row, system_scope)
-        layer_root = readonly_layer_root(layer, scope_id, project_id, layer_cfg)
+        layer_root = readonly_layer_root(layer, scope_id, project_id, layer_cfg, workspace)
         _link_shared_procedure_dirs(layer_root, system_name, row, system_scope)
     if base.exists():
         shutil.rmtree(base)
@@ -3727,11 +3739,20 @@ def _initialize_work_copy(source_path: Path, target: Path, row, change_key: str,
     return status
 
 
+def _trash_work_copy(target: Path) -> Path:
+    """Move an overwritten workcopy into a timestamped trash directory instead of deleting it."""
+    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    destination = target.parent / WORK_COPY_TRASH_DIR / stamp / target.name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(target), str(destination))
+    return destination
+
+
 def _prepare_work_copy(source_path: Path, target: Path, row, change_key: str, mode="mirror", diff_check=True):
     if not diff_check:
         action = "OVERWRITTEN" if target.exists() else "CREATED"
         if target.exists():
-            shutil.rmtree(target)
+            _trash_work_copy(target)
         shutil.copytree(source_path, target)
         return {"path": str(target), "state": "UNCHECKED", "action": action, "localChanged": False}
     if not target.exists():
@@ -3814,12 +3835,15 @@ def untracked_files(repo_root=None, pathspec=None):
     command = ["git", "-C", str(repo_root), "ls-files", "--others", "--exclude-standard", "-z"]
     if pathspec:
         command.extend(["--", *pathspec])
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return set()
     return set(result.stdout.split("\0")) - {""} if result.returncode == 0 else set()
 
 
@@ -3836,16 +3860,23 @@ def auto_add_operation_files(config, before, workspace):
     prefix = workspace_var_prefix(workspace)
     if not prefix:
         return {"gitAddStatus": "OUTSIDE_VAR_REPOSITORY", "gitAdded": 0}
-    paths = sorted(path for path in untracked_files(pathspec=[prefix]) - set(before) if path.startswith(prefix))
+    paths = sorted(
+        path
+        for path in untracked_files(pathspec=[prefix]) - set(before)
+        if path.startswith(prefix) and WORK_COPY_TRASH_DIR not in path.replace("\\", "/").split("/")
+    )
     if not paths:
         return {"gitAddStatus": "NO_NEW_FILES", "gitAdded": 0}
-    result = subprocess.run(
-        ["git", "-C", str(VAR_DIR), "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
-        input="\0".join(paths) + "\0",
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(VAR_DIR), "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+            input="\0".join(paths) + "\0",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return {"gitAddStatus": "GIT_UNAVAILABLE", "gitAdded": 0}
     if result.returncode:
         return {"gitAddStatus": "FAILED", "gitAdded": 0, "gitAddMessage": result.stderr.strip()}
     return {"gitAddStatus": "ADDED", "gitAdded": len(paths), "gitRoot": str(VAR_DIR)}
@@ -4120,11 +4151,12 @@ def pull_source_to_work_copy(payload: dict):
                     conn, None, project_id, payload["sourceType"], payload.get("alias") or payload.get("sourceId") or "", payload.get("funId") or ""
                 )
                 work_result = create_work_copy_from_row(conn, cfg, found, workspace, diff_check=pull_diff_check)
+                detail = "已覆盖" if not pull_diff_check else "已保留本地修改" if work_result["localChanged"] else "无变更"
                 return {
                     "ok": True,
                     "workspaceKey": workspace["workspaceKey"],
                     "changed": False,
-                    "message": "拉取成功, 已覆盖 workcopy" if not pull_diff_check else "拉取成功, 已保留本地修改" if work_result["localChanged"] else "拉取成功, 无变更",
+                    "message": f"远程源码未找到，已从本地缓存恢复 workcopy（{detail}）",
                     "workCopyPath": work_result["path"],
                     "workCopyStatus": work_result["state"],
                     "workCopyAction": work_result["action"],
@@ -4161,7 +4193,10 @@ def pull_source_to_work_copy(payload: dict):
         for candidate in rows:
             work_results.append(create_work_copy_from_row(conn, cfg, candidate, workspace, diff_check=pull_diff_check))
         conn.commit()
-        work_copy_path = os.path.commonpath([result["path"] for result in work_results])
+        try:
+            work_copy_path = os.path.commonpath([result["path"] for result in work_results])
+        except ValueError:
+            work_copy_path = work_results[0]["path"] if work_results else ""
         local_changed = any(result["localChanged"] for result in work_results)
         return {
             "ok": True,
