@@ -910,6 +910,7 @@ def _fact_rows(conn, scope_id: str, *, source_id: str = "", keyword: str = "", l
         SELECT 'relation', r.relation_id
         FROM gusen_page_relation r JOIN gusen_source_record s ON s.record_id=r.source_record_id
         WHERE {where} {relation_filter}
+        ORDER BY fact_type, fact_id
         LIMIT ? OFFSET ?
         """,
         (*logic_params, *data_params, *relation_params, limit, offset),
@@ -1041,7 +1042,7 @@ def query_facts(
     }
 
 
-def _incoming_chain(conn, scope_id: str, alias: str, fun_id: str, depth: int) -> list[dict]:
+def _incoming_chain(conn, scope_id: str, alias: str, fun_id: str, depth: int) -> tuple[list[dict], bool]:
     chain = []
     visited = {(alias, fun_id)}
     current = [(alias, fun_id)]
@@ -1098,11 +1099,11 @@ def _incoming_chain(conn, scope_id: str, alias: str, fun_id: str, depth: int) ->
                 chain.append(caller)
                 following.append(identity)
                 if len(chain) >= 6:
-                    return chain
+                    return chain, True
         current = following
         if not current:
             break
-    return chain
+    return chain, False
 
 
 def explain_table(
@@ -1203,6 +1204,13 @@ def explain_table(
             elif fact["detail_text"]:
                 value["detail"] = fact["detail_text"]
             fact_payload.append(value)
+        callers, callers_truncated = _incoming_chain(
+            conn,
+            scope_id,
+            row["source_alias_id"],
+            row["fun_id"],
+            caller_depth,
+        )
         chains.append(
             {
                 "source": {
@@ -1223,13 +1231,8 @@ def explain_table(
                 "totalFacts": total_facts,
                 "omittedFacts": max(0, total_facts - len(fact_payload)),
                 "factsTruncated": total_facts > len(fact_payload),
-                "callers": _incoming_chain(
-                    conn,
-                    scope_id,
-                    row["source_alias_id"],
-                    row["fun_id"],
-                    caller_depth,
-                ),
+                "callers": callers,
+                "callersTruncated": callers_truncated,
             }
         )
     return {
