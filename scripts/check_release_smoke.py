@@ -37,7 +37,7 @@ def mcp_tools(command: list[str], home: str, *, read_only: bool) -> list[dict]:
     if initialized.get("protocolVersion") != "2025-11-25":
         raise RuntimeError("MCP protocol negotiation did not return 2025-11-25")
     tools = by_id.get(2, {}).get("result", {}).get("tools")
-    expected = 16 if read_only else 29
+    expected = 18 if read_only else 29
     if not isinstance(tools, list) or len(tools) != expected:
         raise RuntimeError(f"MCP tool count: expected {expected}, received {len(tools) if isinstance(tools, list) else 'none'}")
     if read_only and any(not item.get("annotations", {}).get("readOnlyHint") for item in tools):
@@ -82,7 +82,7 @@ def main() -> int:
         run([*command, "setup", "--home", home])
         mcp_tools(command, home, read_only=False)
         mcp_tools(command, home, read_only=True)
-    print(f"PASS: {version['version']} · self-test · MCP 29/16 tools · temporary toolHome")
+    print(f"PASS: {version['version']} · self-test · MCP 29/18 tools · temporary toolHome")
     return 0
 
 

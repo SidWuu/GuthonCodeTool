@@ -29,7 +29,14 @@ except ImportError:  # pragma: no cover - exercised by Windows builds
 
 SUPPORTED_INCLUDES = {"pages", "procedures", "system-script", "tables", "views"}
 WRITABLE_INCLUDES = {"pages", "procedures", "system-script"}
-TRUSTED_CERT_FAILURES = "expired,cn-mismatch,unknown-ca,not-yet-valid,other"
+# Do not silently accept expired or hostname-mismatched certificates by default:
+# those are classic man-in-the-middle indicators. ``unknown-ca`` remains because
+# the internal SVN server uses a self-signed certificate. Operators that need the
+# previous permissive behaviour can restore it via the environment variable.
+TRUSTED_CERT_FAILURES = os.environ.get(
+    "GUTHON_SVN_TRUSTED_CERT_FAILURES",
+    "unknown-ca,not-yet-valid,other",
+)
 LEGACY_SVN_CAPABILITY_DEFAULTS = {
     "initialize": True,
     "refresh": True,

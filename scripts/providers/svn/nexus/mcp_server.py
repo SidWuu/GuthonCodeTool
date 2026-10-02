@@ -81,6 +81,12 @@ TOOLS = [
           ["workspaceKey", "sourceNamespace", "sourceId", "semanticFieldId"]),
     _tool("get_source_context", "Read separate bounded fact summaries for an exact PAGE.",
           {**PAGE, "limit": INTEGER}, ["workspaceKey", "sourceNamespace", "sourceId"]),
+    _tool("get_page_operation", "Read a PAGE operation's recorded stage and hashes without source text.",
+          {"workspaceKey": STRING, "operationId": STRING, "idempotencyKey": STRING},
+          ["workspaceKey"]),
+    _tool("get_procedure_operation", "Read the recorded procedure write stages and hashes.",
+          {"workspaceKey": STRING, "operationId": STRING, "idempotencyKey": STRING},
+          ["workspaceKey"]),
 ]
 WRITE_TOOLS = [
     _tool("open_page_node_edit", "Create a short, source-bound edit lease for one stable script or SQL node.",
@@ -111,9 +117,6 @@ WRITE_TOOLS = [
     _tool("insert_page_field", "Insert the frozen field locally with an idempotency key; never commit SVN.",
           {"workspaceKey": STRING, "editToken": STRING, "idempotencyKey": STRING},
           ["workspaceKey", "editToken", "idempotencyKey"], read_only=False),
-    _tool("get_page_operation", "Read a PAGE operation's recorded stage and hashes without source text.",
-          {"workspaceKey": STRING, "operationId": STRING, "idempotencyKey": STRING},
-          ["workspaceKey"]),
     _tool("resume_page_operation", "Resume only an already-recorded PAGE operation's verification stages.",
           {"workspaceKey": STRING, "operationId": STRING},
           ["workspaceKey", "operationId"], read_only=False),
@@ -135,9 +138,6 @@ WRITE_TOOLS = [
                "old": STRING, "new": STRING, "expectedCount": INTEGER,
            }, "required": ["old", "new"], "additionalProperties": False}}},
           ["workspaceKey", "editToken", "idempotencyKey"], read_only=False),
-    _tool("get_procedure_operation", "Read the recorded procedure write stages and hashes.",
-          {"workspaceKey": STRING, "operationId": STRING, "idempotencyKey": STRING},
-          ["workspaceKey"]),
     _tool("resume_procedure_operation", "Resume only post-write procedure index and diff verification.",
           {"workspaceKey": STRING, "operationId": STRING},
           ["workspaceKey", "operationId"], read_only=False),
@@ -168,7 +168,7 @@ def _response(request_id, *, result=None, error=None) -> dict:
 
 def _require_string(arguments: dict, key: str, *, optional: bool = False) -> str:
     value = arguments.get(key, "" if optional else None)
-    if not isinstance(value, str) or len(value) > 512 or (not optional and not value.strip()):
+    if not isinstance(value, str) or len(value) > 4096 or (not optional and not value.strip()):
         raise page_nodes.PageIndexError("INVALID_ARGUMENT", f"{key} must be a non-empty string")
     return value.strip()
 
@@ -528,10 +528,10 @@ class PageMcpServer:
             return _response(request_id, result=_result(
                 envelope, error=True, structured=self.protocol_version in STRUCTURED_RESULT_VERSIONS,
             ))
-        except (OSError, ValueError, SystemExit):
+        except (OSError, ValueError, SystemExit) as error:
             envelope = {"ok": False, "apiVersion": "v1", "error": {
                 "code": "SOURCE_UNAVAILABLE", "stage": name, "retryable": False,
-                "message": "Configured workspace or authorized source is unavailable",
+                "message": str(error) or "Configured workspace or authorized source is unavailable",
                 "nextAction": "Verify the explicit workspace and local SVN index",
             }}
             return _response(request_id, result=_result(
@@ -561,6 +561,8 @@ def serve_stdio(home: Path, version: str, *, enable_writes=True, input_stream=No
                 response = server.handle(json.loads(line))
             except json.JSONDecodeError:
                 response = _response(None, error={"code": -32700, "message": "Parse error"})
+            except Exception as error:
+                response = _response(None, error={"code": -32603, "message": f"Internal error: {error}"})
         if response is not None:
             output.write(json.dumps(response, ensure_ascii=False, separators=(",", ":")) + "\n")
             output.flush()
