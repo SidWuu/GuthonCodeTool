@@ -73,6 +73,18 @@ ALLOWED_FUNCTIONS = {
     "UPPER",
     "VERSION",
     "YEAR",
+    # Oracle / PostgreSQL 常用函数
+    "DECODE",
+    "LPAD",
+    "NVL",
+    "NVL2",
+    "RPAD",
+    "SYSDATE",
+    "SYSTIMESTAMP",
+    "TO_CHAR",
+    "TO_DATE",
+    "TO_NUMBER",
+    "TRUNC",
 }
 FORBIDDEN_SQL = re.compile(
     r"\b(?:INSERT|UPDATE|DELETE|REPLACE|MERGE|CREATE|ALTER|DROP|TRUNCATE|"
@@ -132,7 +144,7 @@ def validate_single_select(sql: str) -> str:
         candidate = candidate[:-1].rstrip()
     if not candidate:
         raise ValueError("SQL 不能为空")
-    if not re.match(r"^SELECT\b", candidate, re.IGNORECASE):
+    if not re.match(r"^SELECT\b", candidate, re.IGNORECASE) and not re.match(r"^WITH\b", candidate, re.IGNORECASE):
         raise ValueError("只允许单条 SELECT 查询")
     if ";" in candidate:
         raise ValueError("不允许多条 SQL")
@@ -232,7 +244,11 @@ def execute_database_step(case: dict, step: dict, datasource: dict, connect) -> 
 def execute_step(cursor, step: dict, parameters: dict, max_rows: int) -> dict:
     sql = validate_single_select(step["sql"])
     values = tuple(parameters[name] for name in step.get("bindings", []))
-    rendered = cursor.mogrify(sql, values)
+    mogrify = getattr(cursor, "mogrify", None)
+    if callable(mogrify):
+        rendered = mogrify(sql, values)
+    else:
+        rendered = f"{sql}  -- bindings={values!r}"
     if isinstance(rendered, bytes):
         rendered = rendered.decode("utf-8", errors="replace")
     try:
@@ -247,12 +263,13 @@ def execute_step(cursor, step: dict, parameters: dict, max_rows: int) -> dict:
             "truncated": False,
             "conclusion": f"执行异常: {error}",
         }
-    row_count = max(0, int(cursor.rowcount))
     rows = list(cursor.fetchmany(max_rows + 1))
-    truncated = len(rows) > max_rows
+    fetched = len(rows)
+    truncated = fetched > max_rows
     rows = rows[:max_rows]
+    row_count = max_rows if truncated else fetched
     condition = step.get("continue_when", "always")
-    passed = condition == "always" or (condition == "rows_found" and row_count > 0) or (condition == "no_rows" and row_count == 0)
+    passed = condition == "always" or (condition == "rows_found" and fetched > 0) or (condition == "no_rows" and fetched == 0)
     if passed:
         conclusion = step.get("pass_conclusion") or "满足继续条件"
     else:
@@ -366,7 +383,14 @@ def markdown_mapping(values: dict) -> str:
 
 
 def markdown_rows(rows: list[dict]) -> str:
-    columns = list(rows[0])
+    columns = []
+    seen_lower = set()
+    for column in rows[0]:
+        key_lower = str(column).lower()
+        if key_lower in seen_lower:
+            continue
+        seen_lower.add(key_lower)
+        columns.append(column)
     lines = [
         "| " + " | ".join(md(column) for column in columns) + " |",
         "|" + "|".join("---" for _ in columns) + "|",

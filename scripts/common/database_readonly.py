@@ -19,9 +19,16 @@ MAX_CELL_CHARS = 2_000
 
 
 class DatabaseReadonlyError(RuntimeError):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, detail: str = ""):
         super().__init__(message)
         self.code = code
+        self.detail = detail
+
+
+def _redact_secret(text: str, secret: str | None) -> str:
+    if secret:
+        return text.replace(secret, "***")
+    return text
 
 
 def _keyring():
@@ -201,7 +208,11 @@ def connect(connection: dict):
                 autocommit=False,
             )
         except Exception as error:
-            raise DatabaseReadonlyError("CONNECTION_FAILED", "MySQL 连接失败，请检查地址、只读账号、密码和网络") from error
+            raise DatabaseReadonlyError(
+                "CONNECTION_FAILED",
+                "MySQL 连接失败，请检查地址、只读账号、密码和网络",
+                _redact_secret(str(error), connection.get("password")),
+            ) from error
     if engine == "postgresql":
         try:
             import psycopg  # type: ignore
@@ -217,7 +228,11 @@ def connect(connection: dict):
                 autocommit=False,
             )
         except Exception as error:
-            raise DatabaseReadonlyError("CONNECTION_FAILED", "PostgreSQL 连接失败，请检查地址、只读账号、密码和网络") from error
+            raise DatabaseReadonlyError(
+                "CONNECTION_FAILED",
+                "PostgreSQL 连接失败，请检查地址、只读账号、密码和网络",
+                _redact_secret(str(error), connection.get("password")),
+            ) from error
     if engine == "oracle":
         try:
             import oracledb  # type: ignore
@@ -228,9 +243,14 @@ def connect(connection: dict):
                 **common,
                 service_name=connection["database"],
                 tcp_connect_timeout=timeout,
+                call_timeout=30_000,
             )
         except Exception as error:
-            raise DatabaseReadonlyError("CONNECTION_FAILED", "Oracle 连接失败，请检查地址、服务名、只读账号、密码和网络") from error
+            raise DatabaseReadonlyError(
+                "CONNECTION_FAILED",
+                "Oracle 连接失败，请检查地址、服务名、只读账号、密码和网络",
+                _redact_secret(str(error), connection.get("password")),
+            ) from error
     raise DatabaseReadonlyError("UNSUPPORTED", f"不支持的数据库引擎: {engine}")
 
 
@@ -241,7 +261,10 @@ def _set_read_only(cursor, connection: dict) -> None:
     elif engine == "postgresql":
         cursor.execute("SET TRANSACTION READ ONLY")
         cursor.execute("SET LOCAL statement_timeout = '30s'")
-        cursor.execute(f"SET LOCAL search_path TO {connection.get('schema') or 'public'}")
+        schema = str(connection.get("schema") or "public")
+        if not artifacts.IDENTIFIER.fullmatch(schema):
+            raise DatabaseReadonlyError("CONFIG_INVALID", "schema 必须是普通标识符")
+        cursor.execute(f"SET LOCAL search_path TO {schema}")
     else:
         cursor.execute("SET TRANSACTION READ ONLY")
 
@@ -322,11 +345,18 @@ def verify_query_scope(cursor, connection: dict, target: dict, sql: str) -> str:
     if not references:
         raise DatabaseReadonlyError("QUERY_UNSUPPORTED", "无法识别查询中的数据表")
     expected = str(target.get("schema") or target["database"]).lower()
+    database_name = str(target["database"]).lower()
     for reference in references:
         parts = reference.split(".")
-        if connection["engine"] == "oracle" and len(parts) != 2:
-            raise DatabaseReadonlyError("QUERY_UNSUPPORTED", "Oracle 查询必须使用业务 schema 限定表名")
-        if len(parts) == 2 and parts[0].lower() != expected:
+        if connection["engine"] == "oracle":
+            if len(parts) != 2:
+                raise DatabaseReadonlyError("QUERY_UNSUPPORTED", "Oracle 查询必须使用业务 schema 限定表名")
+        elif len(parts) == 3:
+            if parts[0].lower() != database_name:
+                raise DatabaseReadonlyError("CROSS_DATABASE_DENIED", f"引用了未授权数据库: {parts[0]}")
+            if parts[1].lower() != expected:
+                raise DatabaseReadonlyError("CROSS_DATABASE_DENIED", f"引用了未授权 schema: {parts[1]}")
+        elif len(parts) == 2 and parts[0].lower() != expected:
             raise DatabaseReadonlyError("CROSS_DATABASE_DENIED", f"引用了未授权数据库或 schema: {parts[0]}")
     allowed = {str(name).upper() for name in target.get("allowedTables") or []}
     required = {reference.split(".")[-1].upper() for reference in references}
@@ -339,22 +369,37 @@ def verify_query_scope(cursor, connection: dict, target: dict, sql: str) -> str:
     return candidate
 
 
+def _database_name_matches(engine: str, actual: str, expected: str) -> bool:
+    if engine == "oracle":
+        # Oracle 的 SERVICE_NAME 可能带域名后缀（pdb.example.com），按 service name 前缀匹配
+        return actual.lower().split(".")[0] == expected.lower().split(".")[0]
+    return actual.lower() == expected.lower()
+
+
 def probe(connection: dict, target: dict) -> dict:
     db = connect(connection)
     try:
         cursor = db.cursor()
         _set_read_only(cursor, connection)
         if connection["engine"] == "mysql":
-            columns, rows = _execute_dicts(cursor, "SELECT DATABASE() AS database_name")
+            columns, rows = _execute_dicts(cursor, "SELECT DATABASE() AS database_name, VERSION() AS server_version")
         elif connection["engine"] == "postgresql":
-            columns, rows = _execute_dicts(cursor, "SELECT CURRENT_DATABASE() AS database_name, CURRENT_SCHEMA() AS schema_name")
+            columns, rows = _execute_dicts(cursor, "SELECT CURRENT_DATABASE() AS database_name, CURRENT_SCHEMA() AS schema_name, version() AS server_version")
         else:
             columns, rows = _execute_dicts(cursor, "SELECT SYS_CONTEXT('USERENV', 'SERVICE_NAME') AS database_name, SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AS schema_name FROM DUAL")
         actual = rows[0] if rows else {}
         actual_database = str(actual.get("database_name") or actual.get("DATABASE_NAME") or "")
-        if actual_database and actual_database.lower() != str(target["database"]).lower():
+        if actual_database and not _database_name_matches(connection["engine"], actual_database, str(target["database"])):
             raise DatabaseReadonlyError("ENVIRONMENT_MISMATCH", "连接返回的 database 与目标配置不一致")
-        return {"ok": True, "columns": columns, "identity": _normalize_rows(rows, 1)[0][0] if rows else {}}
+        return {
+            "ok": True,
+            "columns": columns,
+            "identity": _normalize_rows(rows, 1)[0][0] if rows else {},
+            "database": actual_database,
+            "schema": str(actual.get("schema_name") or actual.get("SCHEMA_NAME") or ""),
+            "serverVersion": str(actual.get("server_version") or actual.get("SERVER_VERSION") or ""),
+            "readOnly": True,
+        }
     finally:
         try:
             db.rollback()
