@@ -89,6 +89,70 @@ test("saveRemoteFile writes directly into the requested absolute output director
   }
 });
 
+test("saveRemoteFile rejects a path-traversal extension", async () => {
+  const port = 17471;
+  const toolHome = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-bridge-home-"));
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-bridge-output-"));
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_TOOL_HOME: toolHome
+    },
+    stdio: "ignore"
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/saveRemoteFile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        objectKey: "demo.pkg#escape",
+        outputDir,
+        content: "function body",
+        metadata: { extension: "txt/../../../.zshrc", funId: "escape" }
+      })
+    });
+    const data = await response.json();
+    assert.equal(response.status, 500, data.message);
+    assert.equal(data.ok, false);
+  } finally {
+    server.kill();
+    fs.rmSync(toolHome, { recursive: true, force: true });
+  }
+});
+
+test("saveRemoteFile rejects an oversized request body", async () => {
+  const port = 17472;
+  const toolHome = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-bridge-home-"));
+  const server = spawn(process.execPath, ["bridge/server.js"], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GUTHON_BRIDGE_PORT: String(port),
+      GUTHON_TOOL_HOME: toolHome
+    },
+    stdio: "ignore"
+  });
+
+  try {
+    await waitForHealth(port);
+    const response = await fetch(`http://127.0.0.1:${port}/saveRemoteFile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ objectKey: "big", content: "x".repeat(2 * 1024 * 1024) })
+    });
+    const data = await response.json();
+    assert.equal(response.status, 500, data.message);
+    assert.equal(data.ok, false);
+  } finally {
+    server.kill();
+    fs.rmSync(toolHome, { recursive: true, force: true });
+  }
+});
+
 test("logPullFailure records the page pull failure reason", async () => {
   const port = 17465;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-page-pull-failure-"));

@@ -92,12 +92,16 @@ async function persistCurrentOutputDir() {
   }
 }
 
+function isAbsolutePath(value) {
+  return /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(value);
+}
+
 async function getOutputDir() {
   const outputDir = outputDirEl.value.trim();
   if (!outputDir) {
     throw new Error("请先填写保存目录");
   }
-  if (!outputDir.startsWith("/")) {
+  if (!isAbsolutePath(outputDir)) {
     throw new Error("保存目录必须是本机绝对路径");
   }
   await persistOutputDir(outputDir);
