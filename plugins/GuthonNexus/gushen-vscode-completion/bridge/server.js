@@ -1,8 +1,14 @@
+// GENERATED FILE - do not edit. Regenerate with: npm run build:bridge
+// Source: plugins/GuthonBridge/bridge/server.js
 const http = require("http");
 const { spawn } = require("child_process");
 const { ToolProcessClient } = require("../src/tool-process-client");
 const fs = require("fs");
 const path = require("path");
+
+const MAX_BODY_BYTES = 1024 * 1024;
+const BODY_TIMEOUT_MS = 10_000;
+const EXTENSION_WHITELIST = /^[A-Za-z0-9]+$/;
 
 const PORT = Number(process.env.GUTHON_BRIDGE_PORT || 17361);
 const ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -63,7 +69,10 @@ function buildFilePath(payload) {
   }
 
   const funId = payload.metadata?.funId || "unknownFun";
-  const ext = payload.metadata?.extension || "java";
+  const ext = String(payload.metadata?.extension || "java");
+  if (!EXTENSION_WHITELIST.test(ext)) {
+    throw new Error("扩展名不合法，仅允许字母或数字");
+  }
   fs.mkdirSync(outputDir, { recursive: true });
   return path.join(outputDir, `${sanitizeSegment(funId)}.${ext}`);
 }
@@ -81,17 +90,42 @@ function sendJson(res, status, body) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
+    let size = 0;
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("请求体读取超时"));
+      req.destroy();
+    }, BODY_TIMEOUT_MS);
     req.on("data", (chunk) => {
+      if (settled) return;
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error("请求体过大"));
+        return;
+      }
       raw += chunk;
     });
     req.on("end", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
       try {
         resolve(raw ? JSON.parse(raw) : {});
       } catch (error) {
         reject(error);
       }
     });
-    req.on("error", reject);
+    req.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(error);
+      }
+    });
   });
 }
 
@@ -201,14 +235,29 @@ function runJsonProcess(executable, args, errorLabel, input) {
     });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      reject(new Error(`${errorLabel}超时`));
+    }, 30 * 60 * 1000);
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
       if (code !== 0) {
         reject(new Error(commandErrorMessage(errorLabel, stderr || stdout, code)));
         return;
@@ -605,10 +654,34 @@ const server = http.createServer(async (req, res) => {
   return sendJson(res, 404, { ok: false, message: "接口不存在" });
 });
 
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`谷神桥接服务启动失败：端口 ${PORT} 已被占用`);
+  } else {
+    console.error(`谷神桥接服务启动失败：${error.message}`);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`谷神桥接服务已启动：http://127.0.0.1:${PORT}`);
 });
 
-process.on("SIGTERM", () => {
-  void toolProcessClient.stop().finally(() => server.close());
-});
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`收到 ${signal}，正在停止谷神桥接服务`);
+  const finish = () => {
+    server.close(() => process.exit(0));
+    if (typeof server.closeAllConnections === "function") {
+      server.closeAllConnections();
+    }
+    // Fallback exit if in-flight ToolHost or keep-alive connections never settle.
+    setTimeout(() => process.exit(0), 5000).unref();
+  };
+  void toolProcessClient.stop().finally(finish);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

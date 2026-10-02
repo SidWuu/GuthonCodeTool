@@ -9,13 +9,16 @@ const READ_COMMANDS = new Set([
 const SVN_READ_ACTIONS = new Set([
   'catalog', 'fragments', 'read', 'read-batch', 'status', 'scm-status', 'diff',
   'history', 'definition', 'callers', 'find', 'context', 'facts', 'explain',
-  'scope-preview', 'delivery-status', 'page-query',
+  'scope-preview', 'conflict', 'delivery-status', 'page-query',
 ]);
 const DEFAULT_TIMEOUT_MS = 120000;
 const SVN_INDEX_TIMEOUT_MS = 30 * 60 * 1000;
 
 function requestTimeoutMs(command, args = []) {
   return command === 'reindex'
+    || command === 'sync-all'
+    || command === 'sync-source-all'
+    || command === 'sync-source'
     || (command === 'svn' && ['sync-from-config', 'init', 'refresh'].includes(args[0]))
     ? SVN_INDEX_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
 }

@@ -317,7 +317,7 @@
     "build:data": "node scripts/build-data.mjs",
     "build:bridge": "node scripts/build-bridge.mjs",
     "package": "npm run build:bridge && vsce package --allow-missing-repository --skip-license --out guthon-nexus-vscode.vsix",
-    "check": "node --check src/extension.js && node --check src/tool-updater.js && node --check src/tool-workspace.js && node --check scripts/build-bridge.mjs && node --check scripts/build-data.mjs",
+    "check": "npm run build:bridge && node --check src/extension.js && node --check src/tool-updater.js && node --check src/tool-workspace.js && node --check scripts/build-bridge.mjs && node --check scripts/build-data.mjs",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {}
