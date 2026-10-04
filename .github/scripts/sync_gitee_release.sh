@@ -60,7 +60,17 @@ fetch_release() {
     -o "$RELEASE_JSON" -w '%{http_code}' \
     "$API/releases/tags/$RELEASE_TAG") || return 1
   case "$http_code" in
-    200) return 0 ;;
+    200)
+      # Gitee also returns HTTP 200 with JSON null for an absent tag.
+      if jq -e '. == null' "$RELEASE_JSON" > /dev/null; then
+        return 4
+      fi
+      if jq -e 'type == "object" and (.id | type == "number")' "$RELEASE_JSON" > /dev/null; then
+        return 0
+      fi
+      echo "错误：Gitee Release 响应缺少有效发行 ID（HTTP 200）" >&2
+      return 1
+      ;;
     404) return 4 ;;
     *)
       echo "错误：读取 Gitee Release 失败（HTTP ${http_code}）" >&2
