@@ -31,7 +31,13 @@ GENERIC_TEXT_SUFFIXES = {*TEXT_SUFFIXES, ".json", ".md", ".txt", ".yaml", ".yml"
 
 
 def header_fields(text: str) -> dict[str, str]:
-    return {match.group("key"): match.group("value").strip() for match in HEADER_FIELD.finditer(text[:8192])}
+    start = 1 if text.startswith("\ufeff") else 0
+    if text[start:].startswith("/**"):
+        end = text.find("*/", start + 3)
+        header = text[start:] if end < 0 else text[start:end]
+    else:
+        header = text[:8192]
+    return {match.group("key"): match.group("value").strip() for match in HEADER_FIELD.finditer(header)}
 
 
 def _decode_json(text: str):
@@ -306,6 +312,8 @@ def scan(
 ) -> dict:
     """Read authorized files; optionally stream each parsed object to an index writer."""
 
+    from common.operation_control import checkpoint
+
     scope = load_authorized_scope(workspace)
     # Authorization remains the full configured upper bound. Initialization
     # records paths that the current SVN account cannot read so indexing can
@@ -342,7 +350,7 @@ def scan(
         before_count = sum(counts.values())
         before_errors = len(errors)
         if not (entry.root / ".svn").is_dir():
-            errors.append({"scopeEntryId": entry.id, "path": entry.local_subdir, "error": "missing working copy"})
+            errors.append({"scopeEntryId": entry.id, "path": entry.local_subdir, "code": "SOURCE_UNAVAILABLE", "error": "missing working copy"})
             if on_progress is not None:
                 on_progress(f"[{index}/{total}] {label}｜索引｜失败 · working copy 不存在")
             continue
@@ -362,7 +370,12 @@ def scan(
         if on_progress is not None:
             on_progress(f"[{index}/{total}] {label}｜索引｜解析授权文件")
         scanned_files = 0
-        for path in sorted(entry.root.rglob("*")):
+        paths = []
+        for path in entry.root.rglob("*"):
+            checkpoint()
+            paths.append(path)
+        for path in sorted(paths):
+            checkpoint()
             if not path.is_file() or ".svn" in path.parts:
                 continue
             scanned_files += 1
@@ -385,6 +398,9 @@ def scan(
             try:
                 item = _object_for_file(entry, path, revision_map, change_map)
                 if item:
+                    if item["status"] == "IDENTITY_MISMATCH":
+                        errors.append({"scopeEntryId": entry.id, "path": item["source_path"],
+                                       "code": "IDENTITY_MISMATCH", "error": "Source header identity does not match its authorized path"})
                     if collect_objects:
                         objects.append(item)
                     elif item["source_table"] == "page":
@@ -407,6 +423,7 @@ def scan(
                                 {
                                     "scopeEntryId": item["scope_entry_id"],
                                     "path": item["source_path"],
+                                    "code": "IDENTITY_AMBIGUOUS",
                                     "error": f"duplicate object identity also used by {previous}",
                                 }
                             )
@@ -414,9 +431,9 @@ def scan(
                             identities[identity] = item["source_path"]
                         if on_object is not None:
                             on_object(item)
-            except Exception as error:
+            except (Exception, SystemExit) as error:
                 errors.append(
-                    {"scopeEntryId": entry.id, "path": _logical_path(entry, path), "error": str(error)}
+                    {"scopeEntryId": entry.id, "path": _logical_path(entry, path), "code": "PARSE_ERROR", "error": str(error)}
                 )
         if on_progress is not None:
             on_progress(
@@ -441,6 +458,7 @@ def scan(
                     {
                         "scopeEntryId": item["scope_entry_id"],
                         "path": item["source_path"],
+                        "code": "IDENTITY_AMBIGUOUS",
                         "error": f"duplicate object identity also used by {previous}",
                     }
                 )
@@ -448,7 +466,12 @@ def scan(
                 identities[identity] = item["source_path"]
         if on_object is not None:
             for item in objects:
-                on_object(item)
+                checkpoint()
+                try:
+                    on_object(item)
+                except (Exception, SystemExit) as error:
+                    errors.append({"scopeEntryId": item["scope_entry_id"], "path": item["source_path"],
+                                   "code": "PARSE_ERROR", "error": str(error)})
     else:
         page_objects, ignored = resolve_page_duplicates(page_objects)
         counts["page"] = len(page_objects)
@@ -456,7 +479,12 @@ def scan(
             if on_progress is not None:
                 on_progress(f"索引｜开始写入 {len(page_objects)} 个 PAGE 对象")
             for page_index, item in enumerate(page_objects, 1):
-                on_object(item)
+                checkpoint()
+                try:
+                    on_object(item)
+                except (Exception, SystemExit) as error:
+                    errors.append({"scopeEntryId": item["scope_entry_id"], "path": item["source_path"],
+                                   "code": "PARSE_ERROR", "error": str(error)})
                 if on_progress is not None and page_index % 250 == 0:
                     on_progress(f"索引｜已写入 PAGE 对象 {page_index}/{len(page_objects)}")
 

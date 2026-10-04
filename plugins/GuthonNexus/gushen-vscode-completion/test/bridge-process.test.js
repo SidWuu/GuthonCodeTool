@@ -77,3 +77,31 @@ test('restarts Bridge with a switched workspace', async () => {
   assert.equal(children.length, 2);
   assert.equal(bridge.isRunning(), true);
 });
+
+test('forces termination when Bridge ignores graceful shutdown', async () => {
+  const child = fakeChild();
+  const signals = [];
+  child.kill = (signal) => { signals.push(signal || 'SIGTERM'); child.killed = true; };
+  const bridge = createBridgeProcess({ scriptPath: '/bridge/server.js', spawnProcess: () => child, stopTimeoutMs: 10 });
+  bridge.start({ toolPath: '/tool', toolHome: '/home' });
+  await assert.rejects(bridge.stop(), /停止超时/);
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+});
+
+test('bundled Bridge stays identical to its source after import relocation', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '../../../GuthonBridge/bridge/server.js'), 'utf8');
+  const generated = fs.readFileSync(path.resolve(__dirname, '../bridge/server.js'), 'utf8');
+  assert.equal(generated, '// GENERATED FILE - do not edit. Regenerate with: npm run build:bridge\n// Source: plugins/GuthonBridge/bridge/server.js\n' + source.replace('../../GuthonNexus/gushen-vscode-completion/src/tool-process-client', '../src/tool-process-client'));
+});
+
+test('Bridge locators round-trip through the Nexus URI contract', () => {
+  const bridge = require('../../../GuthonBridge/extension/nexus-locator');
+  const { sourceLocatorFromUri } = require('../src/svn/page-locator');
+  for (const target of [ {mode:'page-source',pageId:'PG-Demo-01'}, {mode:'procedure',procedureKeyword:'demo.pkg_$',funId:'save_$'} ]) {
+    const uri = new URL(bridge.build(target).uri);
+    const resolved = sourceLocatorFromUri({ authority: uri.host, path: uri.pathname, query: uri.search.slice(1) });
+    assert.deepEqual(resolved, target.mode === 'page-source' ? {type:'page',pageId:target.pageId} : {type:'procedure',alias:target.procedureKeyword,funId:target.funId});
+  }
+});

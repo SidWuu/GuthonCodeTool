@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 
 from common import gusen_hub
+from providers.database._export_common import normalize_values as normalize_view_ids
+from providers.database._export_common import write_source
 from providers.database.export_table_schema_sql import (
     normalize_data_source_ids,
     resolve_data_source_ids,
@@ -17,16 +19,7 @@ from providers.database.export_table_schema_sql import (
 )
 
 
-ROOT = gusen_hub.ROOT
-DEFAULT_OUTPUT_DIR = ROOT / "var" / "workspace"
 
-
-def normalize_view_ids(value):
-    if not value:
-        return []
-    if isinstance(value, str):
-        value = value.split(",")
-    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def fetch_rows(conn, table_name, data_source_ids, view_ids=None):
@@ -42,9 +35,9 @@ def fetch_rows(conn, table_name, data_source_ids, view_ids=None):
         return list(cur.fetchall())
 
 
-def export_views(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, view_ids=None, config=None):
-    output_dir = Path(output_dir)
+def export_views(conn, output_dir=None, data_source_ids=None, view_ids=None, config=None):
     config = config or gusen_hub.load_config()
+    output_dir = Path(output_dir) if output_dir is not None else gusen_hub.resolve_workspace(config)["databaseDir"] / "views"
     data_source_ids = normalize_data_source_ids(data_source_ids)
     if not data_source_ids:
         raise ValueError("data_source_ids is required")
@@ -76,8 +69,9 @@ def export_views(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, view
         folder = output_dir / system_folder_name(data_source_id, system.get("SYSTEM_NAME"))
         folder.mkdir(parents=True, exist_ok=True)
         source_path = folder / f"{sanitize_name(view_id)}.sql"
-        source_path.write_text(f"{source}\n", encoding="utf-8")
-        git_added += gusen_hub._auto_add_work_copy(config, source_path)["gitAdded"]
+        newly_created = not source_path.exists()
+        write_source(source_path, f"{source}\n")
+        git_added += gusen_hub._auto_add_work_copy(config, source_path, generated_paths=[source_path] if newly_created else [])["gitAdded"]
         exported += 1
 
     return {

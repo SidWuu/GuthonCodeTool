@@ -12,10 +12,9 @@ from pathlib import Path
 
 from common import gusen_hub
 from providers.database.export_table_schema_sql import normalize_data_source_ids
+from providers.database._export_common import normalize_values, write_json, write_source
 
 
-ROOT = gusen_hub.ROOT
-DEFAULT_OUTPUT_DIR = ROOT / "var" / "workspace"
 STANDARD_TYPES = {
     10: ("系统启动初始化脚本", "js"),
     11: ("用户登录初始化脚本", "js"),
@@ -44,7 +43,7 @@ SYSTEM_SCRIPT_MAPPING_KEYS = (
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def resolve_output_dir(base_dir=DEFAULT_OUTPUT_DIR, requested=None, config=None):
+def resolve_output_dir(base_dir=None, requested=None, config=None):
     if requested:
         return Path(requested)
     config = config or gusen_hub.load_config()
@@ -54,14 +53,6 @@ def resolve_output_dir(base_dir=DEFAULT_OUTPUT_DIR, requested=None, config=None)
 def resolve_workcopy_dir(config=None):
     config = config or gusen_hub.load_config()
     return gusen_hub.resolve_workspace(config)["workcopyDir"]
-
-
-def normalize_values(value):
-    if not value:
-        return []
-    if isinstance(value, str):
-        value = value.split(",")
-    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def normalize_script_types(value):
@@ -183,9 +174,6 @@ def resolve_script(row, extension):
     return source, "CURRENT"
 
 
-def write_json(path, value):
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-
 
 def script_dir_name(script_type, script_type_name, script_description):
     parts = [str(script_type), script_type_name, str(script_description or "").strip()]
@@ -222,15 +210,15 @@ def change_key(source, row):
 
 def export_system_scripts(
     conn,
-    output_dir=DEFAULT_OUTPUT_DIR,
+    output_dir=None,
     data_source_ids=None,
     system_ids=None,
     script_types=None,
     workcopy_dir=None,
     config=None,
 ):
-    output_dir = Path(output_dir)
     config = config or gusen_hub.load_config()
+    output_dir = Path(output_dir) if output_dir is not None else resolve_output_dir(config=config)
     data_source_ids = normalize_data_source_ids(data_source_ids)
     if not data_source_ids:
         raise ValueError("data_source_ids is required")
@@ -272,7 +260,8 @@ def export_system_scripts(
         source, source_origin = resolve_script(row, extension)
         source_change_key = change_key(source, row)
         source_file = f"source.{extension}"
-        (script_dir / source_file).write_text(source, encoding="utf-8")
+        new_paths = [path for path in (script_dir / source_file, script_dir / "meta.json") if not path.exists()]
+        write_source(script_dir / source_file, source)
         metadata = {
             "sourceTable": mapping["source_table_name"],
             "systemId": system_id,
@@ -293,7 +282,7 @@ def export_system_scripts(
             "status": "OK" if source else "EMPTY_CONTENT",
         }
         write_json(script_dir / "meta.json", metadata)
-        git_added += gusen_hub._auto_add_work_copy(config, script_dir)["gitAdded"]
+        git_added += gusen_hub._auto_add_work_copy(config, script_dir, generated_paths=new_paths)["gitAdded"]
         if workcopy_dir:
             target = Path(workcopy_dir) / relative_dir
             migrate_script_dir(target.parent, script_type, target)

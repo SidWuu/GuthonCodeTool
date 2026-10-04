@@ -108,31 +108,13 @@ test('registers native Quick Diff for physical and virtual SVN documents', () =>
   manager.dispose();
 });
 
-test('applies a managed save to the cached SCM state without a backend scan', () => {
-  const vscode = fakeVscode();
-  const manager = new SvnScmManager({ vscode, backend: {} });
+test('reconciles saves with backend status, including saves that restore clean SVN BASE', async () => {
+  const vscode = fakeVscode();let scans=0;
+  const manager = new SvnScmManager({ vscode, backend: {scmStatus:async()=>{scans+=1;return {ok:true,workspaceKey:'projects.demo',clean:true,workingCopies:[{id:'systems-domestic',clean:true}],changes:[],groups:{}};}} });
   const record = manager.ensure(workspace());
-  manager._applyStatus(record, {
-    ok: true,
-    workspaceKey: 'projects.demo',
-    clean: true,
-    workingCopies: [{ id: 'systems-domestic', clean: true }],
-    changes: [],
-    groups: {},
-  });
-
-  assert.equal(manager.applySaved({
-    changed: true,
-    workspaceKey: 'projects.demo',
-    workingCopyId: 'systems-domestic',
-    sourcePath: 'pages/SYS-1/0/PG-1.json',
-    sourceHash: 'after-hash',
-  }), true);
-
-  assert.equal(record.status.clean, false);
-  assert.equal(record.status.workingCopies[0].clean, false);
-  assert.equal(record.status.groups.LOCAL_MODIFIED[0].path, 'pages/SYS-1/0/PG-1.json');
-  assert.equal(record.groups.get('subsystem-flat-0008').resourceStates.length, 1);
+  manager._applyStatus(record,{ok:true,workspaceKey:'projects.demo',clean:false,workingCopies:[{id:'systems-domestic',clean:false}],changes:[{path:'pages/SYS-1/0/PG-1.json',workingCopyId:'systems-domestic'}],groups:{}});
+  assert.equal(await manager.applySaved({changed:true,workspaceKey:'projects.demo',workingCopyId:'systems-domestic',sourcePath:'pages/SYS-1/0/PG-1.json'}),true);
+  assert.equal(scans,1);assert.equal(record.status.clean,true);assert.equal(record.status.changes.length,0);
   manager.dispose();
 });
 
@@ -316,6 +298,9 @@ test('scoped remote refresh keeps other local changes but only displays selected
   const backend = {
     scmStatus: async (workspaceKey, remote, options) => {
       calls.push({ workspaceKey, remote, options });
+      if(!remote)return {ok:true,workspaceKey,clean:false,workingCopies:[{id:'systems-domestic',clean:false},{id:'datasources-0008',clean:false}],
+        changes:[{path:'pages/SYS-1/local-page.json',item:'modified',workingCopyId:'systems-domestic'},{path:'procedures/DS-1/local.gss',item:'modified',workingCopyId:'datasources-0008'}],
+        groups:{LOCAL_MODIFIED:[{path:'pages/SYS-1/local-page.json',item:'modified',workingCopyId:'systems-domestic'},{path:'procedures/DS-1/local.gss',item:'modified',workingCopyId:'datasources-0008'}]},remoteChecked:false};
       return {
         ok: true,
         workspaceKey,
@@ -390,4 +375,22 @@ test('scoped remote refresh keeps other local changes but only displays selected
   ]);
   assert.equal(record.groups.get('subsystem-flat-0008').resourceStates.length, 3);
   manager.dispose();
+});
+
+test('deduplicates concurrent SCM reads and ignores an older response after a newer scope', async () => {
+  const manager=new SvnScmManager({vscode:fakeVscode(),backend:{}});
+  const pending=[];manager.backend.scmStatus=async()=>new Promise(resolve=>pending.push(resolve));
+  const first=manager.refresh(workspace());const same=manager.refresh(workspace());
+  assert.equal(pending.length,1);
+  const latest=manager.refreshRemote(workspace());assert.equal(pending.length,2);
+  pending[1]({ok:true,workspaceKey:'projects.demo',clean:true,changes:[],workingCopies:[],groups:{},remoteChecked:true,remoteChanges:[]});
+  await latest;
+  pending[0]({ok:true,workspaceKey:'projects.demo',clean:false,changes:[{path:'stale.gss'}],workingCopies:[],groups:{}});
+  await Promise.all([first,same]);assert.equal(manager.record('projects.demo').status.clean,true);manager.dispose();
+});
+
+test('scoped refresh rereads all local working copies instead of retaining removed changes', async () => {
+  let scans=0;const manager=new SvnScmManager({vscode:fakeVscode(),backend:{scmStatus:async()=>{scans+=1;return {ok:true,workspaceKey:'projects.demo',clean:true,workingCopies:[],changes:[],groups:{}};}}});
+  const record=manager.ensure(workspace());manager._applyStatus(record,{ok:true,workspaceKey:'projects.demo',clean:false,workingCopies:[],changes:[{path:'old.gss',workingCopyId:'other'}],groups:{}});
+  await manager.refresh(workspace(),{workingCopyIds:['selected']});assert.equal(scans,2);assert.deepEqual(record.status.changes,[]);manager.dispose();
 });

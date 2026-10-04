@@ -187,33 +187,7 @@ class SvnScmManager {
     return this._create(workspace);
   }
 
-  _mergeScopedStatus(record, value, options = {}) {
-    const selected = new Set((options.workingCopyIds || []).filter(Boolean));
-    if (!selected.size || !record.status) return value;
-    const outside = (items = [], getId = (item) => item.workingCopyId) => (
-      items.filter((item) => !selected.has(getId(item)))
-    );
-    const groups = Object.fromEntries(
-      LOCAL_STATES.map((state) => [
-        state,
-        [...outside(record.status.groups?.[state]), ...(value.groups?.[state] || [])],
-      ])
-    );
-    const changes = [...outside(record.status.changes), ...(value.changes || [])];
-    return {
-      ...value,
-      clean: !changes.length,
-      changes,
-      workingCopies: [
-        ...outside(record.status.workingCopies, (item) => item.id),
-        ...(value.workingCopies || []),
-      ],
-      groups,
-    };
-  }
-
   _applyStatus(record, value, options = {}) {
-    value = this._mergeScopedStatus(record, value, options);
     const previousRemote = record.status?.remoteChanges || [];
     const remoteChanges = value.remoteChecked ? (value.remoteChanges || []) : previousRemote;
     record.status = { ...value, remoteChanges };
@@ -288,17 +262,27 @@ class SvnScmManager {
     return record.status;
   }
 
-  async refresh(workspace, options = {}) {
-    const record = this.ensure(workspace);
-    const value = await this.backend.scmStatus(workspace.workspaceKey, false, options);
-    return this._applyStatus(record, value, options);
+  async _refresh(workspace, remote, options) {
+    const record=this.ensure(workspace);
+    const key=JSON.stringify([workspace.workspaceKey,remote,options]);
+    record.inFlight ||= new Map();
+    if(record.inFlight.has(key))return record.inFlight.get(key);
+    const generation=(record.statusRequest||0)+1;record.statusRequest=generation;
+    const pending=(async()=>{
+      let value=await this.backend.scmStatus(workspace.workspaceKey,remote,options);
+      if((options.workingCopyIds||[]).length){
+        // Scope controls remote IO, not the freshness of the local SCM snapshot.
+        const local=await this.backend.scmStatus(workspace.workspaceKey,false,{});
+        value={...local,remoteChecked:value.remoteChecked,remoteChanges:value.remoteChanges};
+      }
+      if(this.providers.get(workspace.workspaceKey)!==record || record.statusRequest!==generation)return record.status;
+      return this._applyStatus(record,value);
+    })().finally(()=>record.inFlight.delete(key));
+    record.inFlight.set(key,pending);return pending;
   }
 
-  async refreshRemote(workspace, options = {}) {
-    const record = this.ensure(workspace);
-    const value = await this.backend.scmStatus(workspace.workspaceKey, true, options);
-    return this._applyStatus(record, value, options);
-  }
+  refresh(workspace, options = {}) { return this._refresh(workspace,false,options); }
+  refreshRemote(workspace, options = {}) { return this._refresh(workspace,true,options); }
 
   async refreshAll(workspaces, options = {}) {
     const expected = new Set(workspaces.map((workspace) => workspace.workspaceKey));
@@ -324,41 +308,12 @@ class SvnScmManager {
     }
   }
 
-  applySaved(result) {
-    const record = this.record(result?.workspaceKey);
-    const current = record?.status;
-    if (!record || !current || !result?.changed || !result.sourcePath || !result.workingCopyId) return false;
-    const previousChange = (current.changes || []).find((item) => item.path === result.sourcePath);
-    const change = {
-      workingCopyId: result.workingCopyId,
-      scopeEntryId: result.workingCopyId,
-      category: result.sourcePath.split('/')[0] || '',
-      path: result.sourcePath,
-      item: 'modified',
-      properties: 'none',
-      state: 'LOCAL_MODIFIED',
-      sessionManaged: true,
-      sourceHash: result.sourceHash || '',
-      sourceType: result.sourceType || previousChange?.sourceType || '',
-      sourceId: result.sourceId || previousChange?.sourceId || '',
-      funId: result.funId || previousChange?.funId || '',
-      jsonPointer: result.jsonPointer || previousChange?.jsonPointer || '',
-    };
-    const withoutSavedPath = (items = []) => items.filter((item) => item.path !== result.sourcePath);
-    const groups = Object.fromEntries(
-      LOCAL_STATES.map((state) => [state, withoutSavedPath(current.groups?.[state])])
-    );
-    groups.LOCAL_MODIFIED.push(change);
-    const workingCopies = (current.workingCopies || []).map((workingCopy) => (
-      workingCopy.id === result.workingCopyId ? { ...workingCopy, clean: false } : workingCopy
-    ));
-    this._applyStatus(record, {
-      ...current,
-      clean: false,
-      workingCopies,
-      changes: [...withoutSavedPath(current.changes), change],
-      groups,
-    });
+  async applySaved(result) {
+    const record=this.record(result?.workspaceKey);
+    if(!record || !result?.sourcePath)return false;
+    // Saving content can also restore SVN BASE. Only a fresh status response can
+    // decide whether this file remains modified; do not invent a local change.
+    await this.refresh(record.workspace);
     return true;
   }
 

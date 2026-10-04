@@ -2,7 +2,7 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn: spawnChild } = require("child_process");
 const test = require("node:test");
 const vm = require("node:vm");
 
@@ -17,6 +17,44 @@ const POPUP_SCRIPT_PATH = path.join(ROOT, "extension", "popup.js");
 const HOST_CONFIG_PATH = path.join(ROOT, "extension", "host-config.js");
 const WORKSPACE_SELECTION_PATH = path.join(ROOT, "extension", "workspace-selection.js");
 const BRIDGE_CSS_PATH = path.join(ROOT, "extension", "bridge.css");
+
+const serverHomes = new Map();
+function spawn(executable, args, options) {
+  if (args[0] === "bridge/server.js") {
+    const env = options.env;
+    serverHomes.set(Number(env.GUTHON_BRIDGE_PORT), env.GUTHON_TOOL_HOME);
+    const legacy = Object.entries({ pull: "TEST_PULL_SCRIPT", "export-schema": "TEST_SCHEMA_SCRIPT", "export-bill-type": "TEST_BILL_TYPE_SCRIPT", "export-view": "TEST_VIEW_SCRIPT", "export-system-script": "TEST_SYSTEM_SCRIPT", query: "TEST_QUERY_SCRIPT" }).find(([, key]) => env[key]);
+    if (legacy) {
+      const fixture = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "bridge-fixture-")), "host.js");
+      fs.writeFileSync(fixture, `
+const readline = require('node:readline');
+const { spawnSync } = require('node:child_process');
+process.stdout.write(JSON.stringify({type:'ready',protocolVersion:1})+'\\n');
+readline.createInterface({input:process.stdin}).on('line', line => {
+  const request = JSON.parse(line);
+  let result;
+  if (request.command === 'route') result = {ok:true,workspaceKey:request.input.workspaceKey};
+  else {
+    const argv = ${JSON.stringify(legacy[0])} === 'pull' ? ['--json-stdin'] : ['--workspace',request.workspaceKey,...request.args];
+    const out = spawnSync(${JSON.stringify(env.TEST_EXECUTABLE)},[${JSON.stringify(env[legacy[1]])},...argv],{input:JSON.stringify(request.input)});
+    if (out.status !== 0) { process.stdout.write(JSON.stringify({type:'result',id:request.id,ok:false,error:{message:out.stderr.toString()}})+'\\n'); return; }
+    result = JSON.parse(out.stdout.toString());
+  }
+  process.stdout.write(JSON.stringify({type:'result',id:request.id,ok:true,result})+'\\n');
+});`);
+      options.env = { ...env, GUTHON_TOOL_PATH: process.execPath, GUTHON_TOOL_ENTRY: fixture };
+    }
+  }
+  return spawnChild(executable, args, options);
+}
+async function bridgeFetch(url, options) {
+  if (options?.method === "POST") {
+    const home = serverHomes.get(Number(new URL(url).port));
+    const token = fs.readFileSync(path.join(home, "var", "nexus", "bridge", "token"), "utf8");
+    options.headers = { ...options.headers, Authorization: `Bearer ${token}` };
+  }
+  return fetch(url, options);
+}
 
 function waitForHealth(port) {
   const url = `http://127.0.0.1:${port}/health`;
@@ -43,7 +81,7 @@ function waitForHealth(port) {
   });
 }
 
-test("saveRemoteFile writes directly into the requested absolute output directory", async () => {
+test("saveRemoteFile writes only into the configured export root", async () => {
   const port = 17461;
   const toolHome = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-bridge-home-"));
   const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-bridge-output-"));
@@ -52,14 +90,15 @@ test("saveRemoteFile writes directly into the requested absolute output director
     env: {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_TOOL_HOME: toolHome
+      GUTHON_TOOL_HOME: toolHome,
+      GUTHON_BRIDGE_EXPORT_ROOT: outputDir
     },
     stdio: "ignore"
   });
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/saveRemoteFile`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/saveRemoteFile`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -80,7 +119,7 @@ test("saveRemoteFile writes directly into the requested absolute output director
 
     assert.equal(response.status, 200, data.message);
     assert.equal(data.ok, true);
-    assert.equal(data.filePath, path.join(outputDir, "doPreRequestScript.java"));
+    assert.equal(data.filePath, path.join(fs.realpathSync(outputDir), "doPreRequestScript.java"));
     assert.equal(fs.readFileSync(data.filePath, "utf8"), "function body");
     assert.equal(fs.existsSync(path.join(outputDir, "demo.pkg")), false);
   } finally {
@@ -98,14 +137,15 @@ test("saveRemoteFile rejects a path-traversal extension", async () => {
     env: {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_TOOL_HOME: toolHome
+      GUTHON_TOOL_HOME: toolHome,
+      GUTHON_BRIDGE_EXPORT_ROOT: outputDir
     },
     stdio: "ignore"
   });
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/saveRemoteFile`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/saveRemoteFile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -139,7 +179,7 @@ test("saveRemoteFile rejects an oversized request body", async () => {
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/saveRemoteFile`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/saveRemoteFile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ objectKey: "big", content: "x".repeat(2 * 1024 * 1024) })
@@ -169,7 +209,7 @@ test("logPullFailure records the page pull failure reason", async () => {
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/logPullFailure`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/logPullFailure`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -228,8 +268,8 @@ process.stdin.on("end", () => {
     env: {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_HUB_PYTHON: process.execPath,
-      GUTHON_HUB_PULL_SCRIPT: hubScript,
+      TEST_EXECUTABLE: process.execPath,
+      TEST_PULL_SCRIPT: hubScript,
       GUTHON_PULL_LOG_PATH: logPath
     },
     stdio: "ignore"
@@ -237,7 +277,7 @@ process.stdin.on("end", () => {
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/pullHubSource`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/pullHubSource`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -299,6 +339,7 @@ const readline = require('node:readline');
 process.stdout.write(JSON.stringify({ type: 'ready', protocolVersion: 1 }) + '\\n');
 readline.createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line);
+  if (request.command === 'route') { process.stdout.write(JSON.stringify({ id: request.id, type: 'result', ok: true, result: {ok:true,workspaceKey:request.input.workspaceKey} }) + '\\n'); return; }
   if (request.command !== 'pull' || request.workspaceKey !== 'projects.demo-project') process.exit(3);
   process.stdout.write(JSON.stringify({ id: request.id, type: 'result', ok: true, result: { ok: true, mode: 'development' } }) + '\\n');
 });
@@ -320,7 +361,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/pullHubSource`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/pullHubSource`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workspaceKey: "projects.demo-project", sourceType: "procedure", alias: "demo.pkg", funId: "save" }),
@@ -330,7 +371,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     assert.equal(response.status, 200, data.message);
     assert.equal(data.ok, true);
     assert.equal(data.mode, "development");
-    const second = await fetch(`http://127.0.0.1:${port}/pullHubSource`, {
+    const second = await bridgeFetch(`http://127.0.0.1:${port}/pullHubSource`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workspaceKey: "projects.demo-project", sourceType: "procedure", alias: "demo.pkg", funId: "save" }),
@@ -385,7 +426,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/routeWorkspace`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/routeWorkspace`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workspaceKey: "products.demo", checkoutPath: "/must/not/be/forwarded" }),
@@ -422,8 +463,8 @@ process.stdout.write(JSON.stringify({ ok: true, exported_table_count: 1, outputD
     env: {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_HUB_PYTHON: process.execPath,
-      GUTHON_TABLE_SCHEMA_SCRIPT: schemaScript,
+      TEST_EXECUTABLE: process.execPath,
+      TEST_SCHEMA_SCRIPT: schemaScript,
       GUTHON_PULL_LOG_PATH: logPath
     },
     stdio: "ignore"
@@ -431,7 +472,7 @@ process.stdout.write(JSON.stringify({ ok: true, exported_table_count: 1, outputD
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/exportTableSchema`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportTableSchema`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -476,15 +517,15 @@ test("database connection failures return a friendly message", async () => {
     env: {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_HUB_PYTHON: process.execPath,
-      GUTHON_TABLE_SCHEMA_SCRIPT: schemaScript,
+      TEST_EXECUTABLE: process.execPath,
+      TEST_SCHEMA_SCRIPT: schemaScript,
     },
     stdio: "ignore",
   });
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/exportTableSchema`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportTableSchema`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workspaceKey: "products.demo-product", dataSourceId: "0015" }),
@@ -513,15 +554,15 @@ test("PostgreSQL connection failures return the same friendly message", async ()
     env: {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_HUB_PYTHON: process.execPath,
-      GUTHON_TABLE_SCHEMA_SCRIPT: schemaScript,
+      TEST_EXECUTABLE: process.execPath,
+      TEST_SCHEMA_SCRIPT: schemaScript,
     },
     stdio: "ignore",
   });
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/exportTableSchema`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportTableSchema`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workspaceKey: "products.demo-product", dataSourceId: "0015" }),
@@ -561,8 +602,8 @@ process.stdout.write(JSON.stringify({ ok: true, exported_bill_type_count: 3, out
     env: {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_HUB_PYTHON: process.execPath,
-      GUTHON_BILL_TYPE_SCRIPT: billTypeScript,
+      TEST_EXECUTABLE: process.execPath,
+      TEST_BILL_TYPE_SCRIPT: billTypeScript,
       GUTHON_PULL_LOG_PATH: logPath
     },
     stdio: "ignore"
@@ -570,7 +611,7 @@ process.stdout.write(JSON.stringify({ ok: true, exported_bill_type_count: 3, out
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/exportBillType`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportBillType`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -627,8 +668,8 @@ process.stdout.write(JSON.stringify({ ok: true, exported_view_count: 1, outputDi
     env: {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_HUB_PYTHON: process.execPath,
-      GUTHON_VIEW_SQL_SCRIPT: viewScript,
+      TEST_EXECUTABLE: process.execPath,
+      TEST_VIEW_SCRIPT: viewScript,
       GUTHON_PULL_LOG_PATH: logPath
     },
     stdio: "ignore"
@@ -636,7 +677,7 @@ process.stdout.write(JSON.stringify({ ok: true, exported_view_count: 1, outputDi
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/exportViewSql`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportViewSql`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -688,8 +729,8 @@ process.stdout.write(JSON.stringify({ ok: true, exported_system_script_count: 1,
     env: {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_HUB_PYTHON: process.execPath,
-      GUTHON_SYSTEM_SCRIPT_EXPORT_SCRIPT: exportScript,
+      TEST_EXECUTABLE: process.execPath,
+      TEST_SYSTEM_SCRIPT: exportScript,
       GUTHON_PULL_LOG_PATH: logPath
     },
     stdio: "ignore"
@@ -697,7 +738,7 @@ process.stdout.write(JSON.stringify({ ok: true, exported_system_script_count: 1,
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/exportSystemScripts`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportSystemScripts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -748,15 +789,15 @@ process.stdout.write(JSON.stringify({
     env: {
       ...process.env,
       GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_HUB_PYTHON: process.execPath,
-      GUTHON_HUB_QUERY_SCRIPT: queryScript
+      TEST_EXECUTABLE: process.execPath,
+      TEST_QUERY_SCRIPT: queryScript
     },
     stdio: "ignore"
   });
 
   try {
     await waitForHealth(port);
-    const response = await fetch(`http://127.0.0.1:${port}/queryProcedureCallers`, {
+    const response = await bridgeFetch(`http://127.0.0.1:${port}/queryProcedureCallers`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workspaceKey: "products.demo-product", alias: "demo.target", funId: "run" })
@@ -824,7 +865,7 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes("inspect-hub-source"), true);
   assert.equal(script.includes('type: "run-page-command"'), true);
   assert.equal(content.includes('message?.type === "run-page-command"'), true);
-  assert.equal(background.includes('message.type === "query-procedure-callers"'), true);
+  assert.equal(background.includes('"query-procedure-callers": "/queryProcedureCallers"'), true);
   assert.equal(content.includes('"procedure-callers-request"'), true);
   assert.equal(content.includes('"open-procedure-caller"'), true);
   assert.equal(content.includes('"open-module-caller"'), true);
@@ -842,11 +883,11 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(script.includes('"export-bill-type"'), true);
   assert.equal(script.includes('"export-view-sql"'), true);
   assert.equal(script.includes('type: "log-pull-failure"'), true);
-  assert.equal(background.includes('postJson("/logPullFailure"'), true);
+  assert.equal(background.includes('"log-pull-failure": "/logPullFailure"'), true);
   assert.equal(background.includes('chrome.runtime.onInstalled.addListener'), true);
   assert.equal(background.includes('files: ["bridge.css"]'), true);
-  assert.equal(background.includes('files: ["fields-mover-core.js", "page-bridge.js"]'), true);
-  assert.equal(background.includes('files: ["host-config.js", "nexus-locator.js", "workspace-selection.js", "content.js"]'), true);
+  assert.equal(background.includes('files: ["host-config.js", "fields-mover-core.js", "page-bridge.js"]'), true);
+  assert.equal(background.includes('files: ["host-config.js", "nexus-locator.js", "workspace-selection.js", "task-client.js", "content.js"]'), true);
   assert.equal(background.includes('world: "MAIN"'), true);
   assert.equal(script.includes("拉取单据类型"), true);
   assert.equal(script.includes("workspaceSelectionRequired"), true);
@@ -1055,22 +1096,10 @@ test("extension manifest injects the floating pull button on Guthon pages", () =
   const manifest = JSON.parse(fs.readFileSync(EXTENSION_MANIFEST_PATH, "utf8"));
 
   assert.deepEqual(manifest.permissions.includes("storage"), true);
-  assert.deepEqual(manifest.host_permissions.includes("http://*/*"), true);
-  assert.deepEqual(manifest.host_permissions.includes("https://*/*"), true);
-  assert.deepEqual(manifest.content_scripts, [
-    {
-      matches: ["http://*/*", "https://*/*"],
-      css: ["bridge.css"],
-      js: ["host-config.js", "nexus-locator.js", "workspace-selection.js", "content.js"],
-      run_at: "document_end"
-    }
-  ]);
-  assert.deepEqual(manifest.web_accessible_resources, [
-    {
-      resources: ["fields-mover-core.js", "page-bridge.js"],
-      matches: ["http://*/*", "https://*/*"]
-    }
-  ]);
+  assert.deepEqual(manifest.host_permissions, ["http://*/guthon/*", "https://*/guthon/*", "http://127.0.0.1/*"]);
+  assert.deepEqual(manifest.content_scripts[0].matches, ["http://*/guthon/*", "https://*/guthon/*"]);
+  assert.deepEqual(manifest.web_accessible_resources[0].matches, ["http://*/guthon/*", "https://*/guthon/*"]);
+  assert.ok(manifest.web_accessible_resources[0].resources.includes("host-config.js"));
 });
 
 test("configured IP ranges and domain suffixes control Guthon URLs", () => {
@@ -1149,7 +1178,7 @@ test("view management page exposes view source export action", () => {
   const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
   const refreshScript = contentScript.slice(
     contentScript.indexOf("async function refreshToolbarButtons"),
-    contentScript.indexOf("getRuntime()?.onMessage")
+    contentScript.indexOf("function onExtensionMessage")
   );
 
   assert.equal(contentScript.includes("拉取视图源码"), true);
@@ -1245,8 +1274,8 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes('location.pathname}${location.hash}#${root.dataset.mode'), true);
   assert.equal(contentScript.includes('window.addEventListener("hashchange", refreshToolbarButtonsSafely)'), true);
   assert.equal(contentScript.includes('window.addEventListener("popstate", refreshToolbarButtonsSafely)'), true);
-  assert.equal(contentScript.includes('const TOOLBAR_REFRESH_INTERVAL_MS = 30000'), true);
-  assert.equal(contentScript.includes('setInterval(refreshToolbarButtonsSafely, TOOLBAR_REFRESH_INTERVAL_MS)'), true);
+  assert.equal(contentScript.includes('const PAGE_CONTEXT_HEARTBEAT_MS = 60000'), true);
+  assert.equal(contentScript.includes('setInterval(() => {void publishPageContext().catch(() => {});}, PAGE_CONTEXT_HEARTBEAT_MS)'), true);
   assert.equal(contentScript.includes('if (!pageSource && !target.procedureId)'), true);
   assert.equal(contentScript.includes('sourceType: pageSource ? "page" : "procedure"'), true);
   assert.equal(css.includes('.guthon-bridge-inline [hidden]'), true);
@@ -1339,7 +1368,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("getPageCodeFromVue() || getPageCodeFromUrl()"), true);
   assert.equal(pageBridge.includes('resolvedBy: "module-page-code"'), true);
   assert.equal(pageBridge.includes('location.hash.includes("?")'), true);
-  assert.equal(contentScript.includes('?v=20260723d'), true);
+  assert.equal(contentScript.includes('?v=20261003'), true);
   assert.equal(pageBridge.includes("/(Form|Table)$/"), true);
   assert.equal(pageBridge.includes("getControlTitle"), true);
   assert.equal(pageBridge.includes('return controlName ? `${prefix}.${controlName}` : prefix;'), true);
@@ -1389,38 +1418,11 @@ test("floating controls mount before workspace checks while commands inject the 
   assert.equal(refresh.includes("await ensurePageBridge();"), false);
 });
 
-test("popup waits for storage.local output directory persistence", () => {
-  const popupScript = fs.readFileSync(path.join(ROOT, "extension", "popup.js"), "utf8");
-  const popupHtml = fs.readFileSync(path.join(ROOT, "extension", "popup.html"), "utf8");
-  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
-  const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
-
-  assert.equal(popupScript.includes('target.mode === "page-source" ? "module"'), true);
-  assert.equal(popupScript.includes("打开复制模式"), true);
-  assert.equal(popupScript.includes('chrome.tabs.sendMessage(tab.id, { type: "show-copy-overlay" })'), true);
-  assert.equal(popupScript.includes("async function persistOutputDir"), true);
-  assert.equal(popupScript.includes("await persistOutputDir(outputDir);"), true);
-  assert.equal(popupScript.includes('outputDirEl.addEventListener("change", persistCurrentOutputDir);'), true);
-  assert.equal(popupScript.includes('outputDirEl.addEventListener("blur", persistCurrentOutputDir);'), true);
-  assert.equal(popupHtml.includes('id="copyFieldsBtn"'), true);
-  assert.equal(popupHtml.includes('id="pasteFieldsBtn"'), true);
-  assert.equal(popupHtml.includes('id="forceRefreshBtn"'), true);
-  assert.equal(css.includes("background: #409eff"), true);
-  assert.equal(css.includes(".action-force"), true);
-  assert.equal(css.includes("grid-template-columns: 3fr 1fr"), true);
-  assert.equal(css.includes(".source-actions.full-width"), true);
-  assert.equal(css.includes("border: 0;"), true);
-  assert.equal(popupScript.includes('runFieldsMover("show-fields-mover")'), true);
-  assert.equal(popupScript.includes('runFieldsMover("paste-fields-mover")'), true);
-  assert.equal(popupScript.includes("runHubPull(true)"), true);
-  assert.equal(popupScript.includes("forceRefreshBtn.hidden = !canPullSource && !isSystemScripts"), true);
-  assert.equal(popupScript.includes('pullHubBtn.parentElement.classList.toggle("full-width", !canPullSource)'), true);
-  assert.equal(popupScript.includes('"已识别当前模块源码片段"'), true);
-  assert.equal(popupScript.includes("copyFieldsBtn.hidden = !isModule"), true);
-  assert.equal(popupScript.includes("pasteFieldsBtn.hidden = !isModule"), true);
-  assert.equal(contentScript.includes('message?.type === "show-fields-mover"'), true);
-  assert.equal(contentScript.includes('message?.type === "paste-fields-mover"'), true);
-  assert.equal(contentScript.includes('makeNativeButton("强制刷新"'), false);
+test("popup stores pairing settings and obtains the authorized export directory", () => {
+  const popup = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
+  assert.ok(popup.includes('chrome.storage.local.set({ guthonBridgeToken: token, guthonBridgePort: port })'));
+  assert.ok(popup.includes('outputDirEl.value = status.exportRoot'));
+  assert.ok(fs.readFileSync(POPUP_HTML_PATH, "utf8").includes('readonly placeholder="连接 Bridge 后显示导出目录"'));
 });
 
 test("page bridge uses popup-compatible procedure search strategy", () => {
@@ -1440,6 +1442,8 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   };
   const context = {
     window,
+    location: { href: "https://gusen.steel56.com.cn/guthon/" },
+    GuthonBridgeHost: require(HOST_CONFIG_PATH),
     CSS: { highlights: new Map() },
     Highlight: class Highlight {
       constructor(range) { this.range = range; }
@@ -1473,6 +1477,15 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   const resolveDefinitionText = window.GuthonProcedureNavigation.resolveProcedureDefinitionText;
   const resolveLocal = window.GuthonProcedureNavigation.resolveLocalFunctionTarget;
   const isModifier = window.GuthonProcedureNavigation.isProcedureNavigationModifier;
+  const exactProcedure = window.GuthonProcedureNavigation.resolveProcedure;
+  const procedures = [{procedureId: 'PR-1', procedureAliasId: 'demo.pkg', procedureName: '中文包', funId: 'save', dataSourceId: 'DS-1'},
+    {procedureId: 'PR-2', procedureAliasId: 'demo.pkg.extra', funId: 'save', dataSourceId: 'DS-1'}];
+  assert.equal(exactProcedure(procedures, 'demo.pkg', 'save', true).procedureId, 'PR-1');
+  assert.equal(exactProcedure(procedures, 'demo.pkg', 'save', true).procedureName, 'demo.pkg');
+  procedures.push({...procedures[0], procedureId: 'PR-3', dataSourceId: 'DS-2'});
+  assert.throws(() => exactProcedure(procedures, 'demo.pkg', 'save', true), /多个精确候选/);
+  assert.equal(exactProcedure(procedures, 'demo.pkg', 'save', true, 'DS-2').procedureId, 'PR-3');
+  assert.throws(() => exactProcedure(procedures, 'demo.pkg', 'save', true, 'DS-3'), /未找到/);
   const invoke = '$vs.proc.invoke("com.golden.demo.common", "saveForecast", $params);';
   const binding = "#set($proc=$vs.proc.find('com.golden.demo.back'))\n$proc.updateBacknum($map);";
 
@@ -1538,6 +1551,11 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   ];
   await window.GuthonProcedureNavigation.openModuleCaller({ source_id: "PG-1" });
   assert.equal(openedPage, page);
+  const otherTree = {modules: [{pageId: 'PG-1'}], $parent: moduleVm};
+  context.document.querySelectorAll = () => [
+    {__vue__: {$router: {push: async () => {}}}}, {__vue__: treeVm}, {__vue__: otherTree},
+  ];
+  await assert.rejects(() => window.GuthonProcedureNavigation.openModuleCaller({source_id: 'PG-1', exact: true}), /多个精确 PAGE 候选/);
   let treeNode = null;
   let located = null;
   const openedNodes = [];
@@ -1773,4 +1791,194 @@ test("floating pull shows a visible diagnostic message", () => {
   assert.equal(contentScript.includes("setMessage(root,"), true);
   assert.equal(contentScript.includes("}, 10000);"), true);
   assert.equal(contentScript.includes("console.error(\"谷神桥接：源码拉取失败\""), true);
+});
+
+test("Bridge pairing blocks web origins and unpaired writes and confines file mappings", async () => {
+  const port = 17473;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-security-"));
+  const server = spawn(process.execPath, ["bridge/server.js"], { cwd: ROOT, env: { ...process.env, GUTHON_TOOL_HOME: home, GUTHON_BRIDGE_PORT: String(port) }, stdio: "ignore" });
+  const url = `http://127.0.0.1:${port}`;
+  try {
+    await waitForHealth(port);
+    const tokenPath = path.join(home, "var", "nexus", "bridge", "token");
+    const token = fs.readFileSync(tokenPath, "utf8");
+    assert.equal(token.length, 64);
+    if (process.platform !== "win32") assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o600);
+    const payload = { objectKey: "demo#run", content: "body", metadata: { funId: "run", extension: "js" } };
+    const post = (headers, body = payload) => fetch(`${url}/saveRemoteFile`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+    const denied = await post({});
+    assert.equal(denied.status, 401);
+    assert.equal(denied.headers.get("access-control-allow-origin"), null);
+    assert.equal((await post({ Authorization: `Bearer ${token}`, Origin: "https://malicious.example" })).status, 403);
+    assert.equal((await post({ Authorization: `Bearer ${token}`, "Content-Type": "text/plain" })).status, 415);
+    assert.equal((await post({ Authorization: `Bearer ${token}` }, { ...payload, outputDir: os.tmpdir() })).status, 500);
+    const saved = await (await post({ Authorization: `Bearer ${token}`, Origin: `chrome-extension://${"a".repeat(32)}` })).json();
+    assert.equal(saved.ok, true);
+    assert.equal(fs.readFileSync(saved.filePath, "utf8"), "body");
+    const outside = path.join(home, "outside.txt");
+    fs.writeFileSync(outside, "unchanged");
+    fs.unlinkSync(saved.filePath);
+    fs.symlinkSync(outside, saved.filePath);
+    assert.equal((await post({ Authorization: `Bearer ${token}` })).status, 500);
+    const read = await fetch(`${url}/readRemoteFile`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({objectKey:payload.objectKey}) });
+    assert.equal(read.status, 403);
+    assert.equal(fs.readFileSync(outside, "utf8"), "unchanged");
+  } finally {
+    await new Promise((resolve) => { server.once("exit", resolve); server.kill(); });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("force refresh dispatches only after typing the routed workspace key", async () => {
+  const source = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
+  const body = source.slice(source.indexOf("async function runHubPull("), source.indexOf('pullPageBtn.addEventListener("click"'));
+  const calls = [];
+  const context = {
+    resolveHubSourceTarget: async () => ({mode:"procedure",procedureId:"PR-1",procedureKeyword:"demo.pkg",funId:"save",dataSourceId:"DS1"}),
+    getActiveTab: async () => ({id:1}),
+    resolveWorkspaceSummary: async () => ({workspaceKey:"products.demo"}),
+    sendWorkspaceRequest: async (type, payload) => { calls.push({type,payload}); return {ok:true}; },
+    window: {prompt:()=>null}
+  };
+  vm.runInNewContext(`${body}\nglobalThis.pull = runHubPull;`,context);
+  await assert.rejects(context.pull(true), /已取消强制刷新/);
+  assert.equal(calls.length,0);
+  context.window.prompt = () => "products.demo";
+  await context.pull(true);
+  assert.equal(calls[0].payload.confirmation,"products.demo");
+  assert.equal(calls[0].payload.workspaceKey,"products.demo");
+  context.window.prompt = () => { throw new Error("ordinary pull must not prompt"); };
+  await context.pull(false);
+  assert.equal(calls[1].payload.force,false);
+});
+
+test("source Bridge and packaged Nexus use the same generated ToolHost command metadata", () => {
+  const source = fs.readFileSync(path.join(ROOT, "bridge/server.js"), "utf8");
+  assert.ok(source.includes('const TOOL_CLIENT_MODULE = "../../GuthonNexus/gushen-vscode-completion/src/tool-process-client";'));
+  assert.ok(source.includes('require(TOOL_CLIENT_MODULE)'));
+  const authority = fs.readFileSync(path.resolve(ROOT, '../../scripts/common/command_metadata.json'));
+  const bundled = fs.readFileSync(path.resolve(ROOT, '../GuthonNexus/gushen-vscode-completion/data/tool-command-metadata.json'));
+  assert.ok(authority.equals(bundled), "Run Nexus npm run build:bridge to refresh metadata");
+  const client = require('../../GuthonNexus/gushen-vscode-completion/src/tool-process-client');
+  assert.equal(client.requestTimeoutMs('svn',['sync-from-script']),1800000);
+  assert.equal(client.requestKind('svn',['auth-cache']),'write');
+});
+
+
+test("HTTP JSON preserves split UTF-8 code points and rejects invalid bytes", async () => {
+  const { EventEmitter } = require("node:events");
+  const { TextDecoder } = require("node:util");
+  const source = fs.readFileSync(path.join(ROOT, "bridge/server.js"), "utf8");
+  const body = source.slice(source.indexOf("function readBody("), source.indexOf("function pullLogRecord("));
+  const context = { Buffer, TextDecoder, MAX_BODY_BYTES: 1024 * 1024, BODY_TIMEOUT_MS: 1000, setTimeout, clearTimeout };
+  vm.runInNewContext(`${body}\nglobalThis.read = readBody;`, context);
+  const request = new EventEmitter();
+  request.destroy = () => {};
+  const pending = context.read(request);
+  const input = Buffer.from(JSON.stringify({ content: "谷神测试🌙" }));
+  for (const byte of input) request.emit("data", Buffer.from([byte]));
+  request.emit("end");
+  assert.equal((await pending).content, "谷神测试🌙");
+  const invalid = new EventEmitter();
+  invalid.destroy = () => {};
+  const failed = context.read(invalid);
+  invalid.emit("data", Buffer.from([0x7b, 0x22, 0xff, 0x22, 0x3a, 0x31, 0x7d]));
+  invalid.emit("end");
+  await assert.rejects(failed, /encoded data was not valid/);
+});
+
+
+test("platform page feedback never exposes local paths or raw exception details", () => {
+  const script = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  const helper = script.slice(script.indexOf("function pageActionError("), script.indexOf("function isVisible("));
+  const context = {};
+  vm.runInNewContext(`${helper}\nglobalThis.feedback = pageActionError;`, context);
+  assert.equal(context.feedback({ message: "permission denied /Users/private/path password=secret" }).includes("private"), false);
+  assert.match(context.feedback({ message: "配对令牌无效 /Users/private" }), /扩展弹窗/);
+  assert.equal(script.includes("pullResult.workCopyPath"), false);
+  assert.equal(script.includes("result.outputDir"), false);
+  assert.equal(/console\.error\([^\n]*, error\)/.test(script), false);
+});
+
+test('durable Bridge jobs acknowledge promptly, enforce identity, deduplicate and never replay after restart', async()=>{
+  const port=17476;const home=fs.mkdtempSync(path.join(os.tmpdir(),'bridge-jobs-'));const tool=path.join(home,'tool.js');const count=path.join(home,'executions');const pidPath=path.join(home,'host-pid');
+  fs.writeFileSync(tool,`const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(pidPath)},String(process.pid));process.stdout.write(JSON.stringify({type:'ready',protocolVersion:1})+'\\n');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.command==='route'){process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.input.workspaceKey}})+'\\n');return;}fs.appendFileSync(${JSON.stringify(count)},'execute\\n');setTimeout(()=>process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.workspaceKey,message:'finished'}})+'\\n'),r.input.alias==='slow'?10000:200);});`);
+  const start=()=>spawn(process.execPath,['bridge/server.js'],{cwd:ROOT,env:{...process.env,GUTHON_TOOL_HOME:home,GUTHON_BRIDGE_PORT:String(port),GUTHON_TOOL_PATH:process.execPath,GUTHON_TOOL_ENTRY:tool},stdio:'ignore'});
+  let server=start();
+  const stop=async(signal)=>{if(server.exitCode===null)await new Promise(resolve=>{server.once('exit',resolve);server.kill(signal);});};
+  try{
+    await waitForHealth(port);
+    const token=fs.readFileSync(path.join(home,'var/nexus/bridge/token'),'utf8');
+    const post=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});return {status:response.status,...await response.json()};};
+    const body={requestId:`${Date.now()}_${require('node:crypto').randomUUID()}`,workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',operation:'pull-hub-source',payload:{sourceType:'procedure',alias:'demo',funId:'save'}};
+    const first=await post('/submitJob',body);assert.equal(first.status,202);assert.equal(first.state,'QUEUED');
+    const duplicate=await post('/submitJob',body);assert.equal(duplicate.jobId,first.jobId);
+    assert.equal((await post('/submitJob',{...body,payload:{...body.payload,funId:'other'}})).status,400);
+    assert.equal((await post('/jobStatus',{...body,workspaceKey:'projects.other'})).status,404);
+    let done;for(let attempt=0;attempt<30;attempt++){done=await post('/jobStatus',body);if(done.state==='COMPLETED')break;await new Promise(resolve=>setTimeout(resolve,20));}
+    assert.equal(done.state,'COMPLETED');assert.equal(fs.readFileSync(count,'utf8').trim().split('\n').length,1);
+    const slow={...body,requestId:`${Date.now()}_${require('node:crypto').randomUUID()}`,payload:{...body.payload,alias:'slow'}};
+    await post('/submitJob',slow);for(let attempt=0;attempt<30;attempt++){if((await post('/jobStatus',slow)).state==='RUNNING')break;await new Promise(resolve=>setTimeout(resolve,20));}
+    // RUNNING marks queue dispatch; wait for host execution evidence before the
+    // crash so the replay assertion has a deterministic execution boundary.
+    const executionDeadline = Date.now() + 3000;
+    while (fs.readFileSync(count, 'utf8').trim().split('\n').length < 2 && Date.now() < executionDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.equal(fs.readFileSync(count, 'utf8').trim().split('\n').length, 2);
+    await stop('SIGKILL');try{process.kill(Number(fs.readFileSync(pidPath,'utf8')),'SIGKILL');}catch{}
+    server=start();await waitForHealth(port);
+    assert.equal((await post('/jobStatus',slow)).state,'UNKNOWN');assert.equal((await post('/submitJob',slow)).state,'UNKNOWN');
+    assert.equal(fs.readFileSync(count,'utf8').trim().split('\n').length,2);
+  }finally{await stop();fs.rmSync(home,{recursive:true,force:true});}
+});
+
+test('explicit workspaces execute concurrently in separate hosts while each workspace stays serial',async()=>{
+ const port=17479;const home=fs.mkdtempSync(path.join(os.tmpdir(),'bridge-parallel-'));
+ const tool=path.join(home,'tool.js');const events=path.join(home,'events.ndjson');
+ fs.writeFileSync(tool,`const fs=require('node:fs');process.stdout.write(JSON.stringify({type:'ready',protocolVersion:1})+'\\n');
+ require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);
+ if(r.command==='route'){process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.input.workspaceKey}})+'\\n');return;}
+ fs.appendFileSync(${JSON.stringify(events)},JSON.stringify({phase:'start',key:r.workspaceKey,alias:r.input.alias,pid:process.pid})+'\\n');
+ setTimeout(()=>{fs.appendFileSync(${JSON.stringify(events)},JSON.stringify({phase:'end',key:r.workspaceKey,alias:r.input.alias,pid:process.pid})+'\\n');
+ process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.workspaceKey}})+'\\n');},r.input.alias==='first'?300:20);});`);
+ const server=spawn(process.execPath,['bridge/server.js'],{cwd:ROOT,env:{...process.env,GUTHON_TOOL_HOME:home,GUTHON_BRIDGE_PORT:String(port),GUTHON_TOOL_PATH:process.execPath,GUTHON_TOOL_ENTRY:tool},stdio:'ignore'});
+ try {
+  await waitForHealth(port);const token=fs.readFileSync(path.join(home,'var/nexus/bridge/token'),'utf8');
+  const post=async(route,body)=>await(await fetch(`http://127.0.0.1:${port}${route}`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  const job=(key,alias)=>({requestId:`${Date.now()}_${require('node:crypto').randomUUID()}`,workspaceKey:key,pageOrigin:'https://gusen.steel56.com.cn',operation:'pull-hub-source',payload:{sourceType:'procedure',alias,funId:'save'}});
+  const requests=[job('products.first','first'),job('products.first','second'),job('projects.other','other')];
+  await Promise.all(requests.map(request=>post('/submitJob',request)));
+  for(let attempt=0;attempt<60;attempt++) {
+   const status=await Promise.all(requests.map(request=>post('/jobStatus',request)));
+   if(status.every(value=>value.state==='COMPLETED'))break;
+   if(attempt===59)throw new Error('Parallel jobs did not finish');
+   await new Promise(resolve=>setTimeout(resolve,20));
+  }
+  const rows=fs.readFileSync(events,'utf8').trim().split('\n').map(JSON.parse);
+  const index=(phase,alias)=>rows.findIndex(row=>row.phase===phase && row.alias===alias);
+  assert.ok(index('end','other')<index('end','first'));
+  assert.ok(index('start','second')>index('end','first'));
+  assert.notEqual(rows.find(row=>row.alias==='first').pid,rows.find(row=>row.alias==='other').pid);
+ } finally {
+  if(server.exitCode===null)await new Promise(resolve=>{server.once('exit',resolve);server.kill('SIGTERM');});
+  fs.rmSync(home,{recursive:true,force:true});
+ }
+});
+
+
+test('one data home has one live Bridge owner and malformed job receipts stay unknown',async()=>{
+ const crypto=require('node:crypto');const http=require('node:http');
+ const socket=http.createServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));
+ const home=fs.mkdtempSync(path.join(os.tmpdir(),'bridge-instance-'));const requestId=`${Date.now()}_${crypto.randomUUID()}`;const workspaceKey='products.demo';const pageOrigin='https://gusen.steel56.com.cn';
+ const id=crypto.createHash('sha256').update(JSON.stringify([requestId,workspaceKey,pageOrigin])).digest('hex');const jobs=path.join(home,'var/nexus/bridge/jobs');fs.mkdirSync(jobs,{recursive:true});fs.writeFileSync(path.join(jobs,id+'.json'),'{broken');
+ const options={cwd:ROOT,env:{...process.env,GUTHON_TOOL_HOME:home,GUTHON_BRIDGE_PORT:String(port)},stdio:['ignore','pipe','pipe']};
+ const owner=spawnChild(process.execPath,['bridge/server.js'],options);let ownerErrors='';owner.stderr.on('data',data=>ownerErrors+=data.toString());
+ try{
+  await waitForHealth(port);const reused=spawnChild(process.execPath,['bridge/server.js'],options);let output='';reused.stdout.on('data',data=>output+=data.toString());
+  const reusedExit=await new Promise(resolve=>reused.once('exit',resolve));assert.equal(reusedExit,0,ownerErrors);assert.match(output,/BRIDGE_REUSE/);
+  const token=fs.readFileSync(path.join(home,'var/nexus/bridge/token'),'utf8');const status=await (await fetch(`http://127.0.0.1:${port}/status`,{headers:{Authorization:`Bearer ${token}`}})).json();assert.equal(status.invalidJobRecords.length,1);
+  const state=await (await fetch(`http://127.0.0.1:${port}/jobStatus`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({requestId,workspaceKey,pageOrigin})})).json();assert.equal(state.state,'UNKNOWN');
+  assert.equal((await (await fetch(`http://127.0.0.1:${port}/health`)).json()).ok,true);
+ }finally{owner.kill('SIGTERM');await new Promise(resolve=>owner.once('exit',resolve));fs.rmSync(home,{recursive:true,force:true});}
 });

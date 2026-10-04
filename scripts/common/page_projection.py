@@ -43,6 +43,8 @@ class ScriptField:
     original_value: str
     effective_value: str
     origin_segments: tuple[dict, ...] = ()
+    display_path: tuple[str, ...] = ()
+    event_type: str | None = None
 
     def to_dict(self):
         result = asdict(self)
@@ -193,22 +195,27 @@ def _node_display_label(value: dict, node_kind: str | None = None) -> str:
     return str(fallback).strip() if isinstance(fallback, (str, int, float)) else ""
 
 
-def extract_page_scripts(value) -> list[ScriptField]:
+def extract_page_scripts(value, *, missing_product_as_empty=False) -> list[ScriptField]:
     """Return every explicit script string with a stable pointer and readable unique filename."""
 
     fields = []
 
-    def walk(current, parts, display_path, inherited_scripts=None, event_type=None, node_kind=None):
+    def walk(current, parts, display_path, inherited_scripts=None, event_type=None, node_kind=None, source_display=None):
+        source_display = source_display or []
         if isinstance(current, dict):
             label = _node_display_label(current, node_kind)
             next_display = display_path + ([label] if label else [])
+            source_label = str(current.get("fieldId") or "").strip()
+            if not source_label:
+                source_label = str(current.get("name") or current.get("id") or "") if node_kind == "button" else str(current.get("name") or current.get("aliasName") or current.get("id") or "")
+            next_source_display = source_display + ([source_label] if source_label else [])
             for key, child in current.items():
                 child_parts = parts + [key]
                 if is_script_key(key, event_type) and isinstance(child, str):
                     inherited = (inherited_scripts or {}).get(key)
                     if key == "script":
                         inherited = current.get("superScript")
-                    inherited = inherited if isinstance(inherited, str) else None
+                    inherited = inherited if isinstance(inherited, str) else "" if missing_product_as_empty else None
                     projection = project_inheritance(child, inherited)
                     effective = projection["effective"] if projection["status"] == "ACTIVE" else child
                     pointer = json_pointer(child_parts)
@@ -233,6 +240,8 @@ def extract_page_scripts(value) -> list[ScriptField]:
                             original_value=child,
                             effective_value=effective,
                             origin_segments=origins,
+                            display_path=tuple(next_source_display),
+                            event_type=event_type,
                         )
                     )
                 elif key not in EVENT_SUPERS.values():
@@ -244,10 +253,11 @@ def extract_page_scripts(value) -> list[ScriptField]:
                         inherited if isinstance(inherited, dict) else None,
                         key if key in EVENT_SUPERS else event_type,
                         "button" if key in {"button", "buttons"} else None,
+                        next_source_display,
                     )
         elif isinstance(current, list):
             for index, child in enumerate(current):
-                walk(child, parts + [index], display_path, inherited_scripts, event_type, node_kind)
+                walk(child, parts + [index], display_path, inherited_scripts, event_type, node_kind, source_display)
 
     walk(value, [], [])
     return fields

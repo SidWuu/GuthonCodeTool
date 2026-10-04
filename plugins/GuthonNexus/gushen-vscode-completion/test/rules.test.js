@@ -426,3 +426,9 @@ test('finds API overloads for hover documentation in the current language', () =
   );
   assert.deepEqual(findHoverItems(data, 'sql', '$vs.proc.callMainPageFind'), []);
 });
+
+test('escapes backslashes, dollars and closing braces in generated snippet text', () => {
+  assert.equal(templateToSnippet(String.raw`C:\temp\$name}`), String.raw`C:\\temp\\\$name\}`);
+  assert.equal(templateToSnippet(String.raw`invoke(C:\temp,$name})`), 'invoke(${1:C:\\\\temp},${2:\\$name\\}})');
+  assert.equal(itemBodyToSnippet(['${1:explicit}\\$value']), '${1:explicit}\\$value');
+});

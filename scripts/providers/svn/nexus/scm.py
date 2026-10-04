@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import difflib
 import json
 import os
@@ -176,9 +177,13 @@ def _platform_state(workspace: dict) -> dict:
     path = workspace["contextDir"] / PLATFORM_STATE_FILE
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:
         return {}
-    return value if value.get("workspaceKey") == workspace["workspaceKey"] else {}
+    except (OSError, json.JSONDecodeError) as error:
+        raise SystemExit(f"SVN delivery receipt is unreadable; preserve it for recovery: {path}") from error
+    if not isinstance(value, dict) or value.get("workspaceKey") != workspace["workspaceKey"]:
+        raise SystemExit(f"SVN delivery receipt does not match this workspace: {path}")
+    return value
 
 
 def _deliveries(state: dict) -> list[dict]:
@@ -193,6 +198,16 @@ def _deliveries(state: dict) -> list[dict]:
         "groups": state.get("groups") or [],
         "committedAt": state.get("committedAt") or "",
     }]
+
+
+def _record_delivery(workspace: dict, delivery: dict) -> None:
+    """Durably record confirmed revisions before clearing the local edit ledger."""
+    previous = _platform_state(workspace)
+    deliveries = [item for item in _deliveries(previous) if item.get("deliveryId") != delivery["deliveryId"]]
+    deliveries.append(delivery)
+    atomic_json(workspace["contextDir"] / PLATFORM_STATE_FILE,
+                {**previous, "workspaceKey": workspace["workspaceKey"], "version": 4,
+                 **delivery, "deliveries": deliveries[-50:]})
 
 
 def _delivery_markdown(workspace: dict, deliveries: list[dict]) -> str:
@@ -214,12 +229,17 @@ def _delivery_markdown(workspace: dict, deliveries: list[dict]) -> str:
             f"- SVN 提交时间：`{item.get('committedAt') or ''}`",
             f"- 文件数：{len(item.get('files') or [])}",
         ])
-        lines.extend(f"- `{source_path}`" for source_path in item.get("files") or [])
+        lines.extend(f"- 已提交 `{source_path}`" for source_path in item.get("files") or [])
+        lines.extend(f"- 未确认 `{source_path}`" for source_path in item.get("remainingFiles") or [])
+        if item.get("status") in {"PARTIAL", "IN_PROGRESS"}:
+            lines.append("重新预览并选择当前仍有修改的文件；新的选择令牌会重新核对文件哈希、授权和远程版本。已提交的干净文件不会再次成为候选。")
+            if item.get("outcomeUncertain"):
+                lines.append("失败组的提交结果尚未确认；先检查 SVN 状态与历史。不得按旧选择令牌重试。")
     lines.extend([
         "",
         "## 证据边界",
         "",
-        "列出的文件已完成 SVN commit 并取得 revision，即视为本次源码交付成功；编译、发布和业务运行结果不在 Nexus 跟踪范围内。",
+        "仅“已提交”文件已核对 SVN 状态并取得 revision；“未确认”文件可能未提交或提交结果未知，须先核验。编译、发布和业务运行结果不在 Nexus 跟踪范围内。",
     ])
     return "\n".join(lines).rstrip() + "\n"
 
@@ -227,6 +247,11 @@ def _delivery_markdown(workspace: dict, deliveries: list[dict]) -> str:
 def _delivery_view(item: dict) -> dict:
     return {
         "deliveryId": item.get("deliveryId") or "",
+        "status": item.get("status") or "COMPLETE",
+        "remainingFiles": item.get("remainingFiles") or [],
+        "remainingCandidates": item.get("remainingCandidates") or [],
+        "outcomeUncertain": bool(item.get("outcomeUncertain")),
+        "nextAction": item.get("nextAction") or "",
         "workingCopyId": item.get("workingCopyId") or "",
         "lastCommittedRevision": item.get("lastCommittedRevision") or "",
         "files": item.get("files") or [],
@@ -496,7 +521,7 @@ def _conflict_artifact(entry: ScopeEntry, target: Path, value: str, label: str) 
 def conflict_details(workspace: dict, *, logical_path: str) -> dict:
     """Return the four physical files required by VS Code's merge editor."""
 
-    require_capability(workspace, "edit")
+    require_capability(workspace, "status")
     entry, path, relative = _entry_and_path(workspace, logical_path)
     if not source_path_writable(entry, relative) or not path.is_file():
         raise SystemExit(f"SVN conflict target is not an editable file: {logical_path}")
@@ -587,6 +612,58 @@ def history(workspace: dict, *, logical_path: str, limit=20) -> dict:
     }
 
 
+def blame(workspace: dict, *, logical_path: str, start_line: int = 1, end_line: int = 100) -> dict:
+    """Read at most 200 physical SVN lines, with an exact authorized path and byte ceiling."""
+    require_capability(workspace, "history")
+    if (isinstance(start_line, bool) or isinstance(end_line, bool)
+            or not isinstance(start_line, int) or not isinstance(end_line, int)
+            or not 1 <= start_line <= end_line or end_line - start_line >= 200):
+        raise ValueError("blame requires a positive line range of at most 200 lines")
+    entry, path, _relative = _entry_and_path(workspace, logical_path)
+    if not path.is_file():
+        raise SystemExit("SVN blame source is missing")
+    with operation_lock(workspace, "manifest-blame", shared=True):
+        raw = path.read_bytes()
+        if len(raw) > 8 * 1024 * 1024:
+            raise SystemExit("SVN blame source exceeds the 8 MiB inspection limit")
+        baseline = run_svn_binary(["cat", "-r", "BASE", "--", str(path)]).stdout
+        if len(baseline) > 8 * 1024 * 1024:
+            raise SystemExit("SVN blame baseline exceeds the 8 MiB inspection limit")
+        lines = decode_source(baseline)[0].splitlines()
+        if start_line > len(lines):
+            raise ValueError("startLine exceeds source length")
+        end_line = min(end_line, len(lines))
+        # SVN blame has no line-range option: fetch metadata, then return only
+        # the requested window. Never include unbounded source bodies in MCP.
+        result = run_remote_svn(["blame", "--xml", "-r", "BASE", "--", str(path)], workspace["svn"])
+        if len(result.stdout) > 16 * 1024 * 1024:
+            raise SystemExit("SVN blame metadata exceeds the inspection limit")
+        tree = ET.fromstring(result.stdout)
+        entries = []
+        remaining = 24_000
+        for node in tree.findall(".//entry"):
+            number = int(node.get("line-number", "0"))
+            if not start_line <= number <= end_line:
+                continue
+            commit = node.find("commit")
+            content = lines[number - 1]
+            kept = content[:remaining]
+            remaining -= len(kept)
+            entries.append({"line": number, "revision": commit.get("revision", "") if commit is not None else "",
+                            "author": commit.findtext("author", "") if commit is not None else "",
+                            "date": commit.findtext("date", "") if commit is not None else "",
+                            "content": kept, "truncated": len(kept) < len(content)})
+        if file_hash(path) != hashlib.sha256(raw).hexdigest():
+            raise SystemExit("SVN blame source changed during inspection")
+    truncated = any(item["truncated"] for item in entries)
+    return {"workspaceKey": workspace["workspaceKey"], "workingCopyId": entry.id,
+            "sourcePath": logical_path, "startLine": start_line, "endLine": end_line,
+            "lines": entries, "complete": not truncated, "truncated": truncated,
+            "coordinateKind": "svn-base-line", "sourceHash": hashlib.sha256(baseline).hexdigest(),
+            "localSourceHash": hashlib.sha256(raw).hexdigest(),
+            "warnings": ["Content and authors refer to SVN BASE; local uncommitted modifications are excluded"]}
+
+
 def _candidate_records(
     workspace: dict,
     session: dict,
@@ -637,7 +714,9 @@ def preview(
 ) -> dict:
     if action == "revert":
         require_capability(workspace, "revert")
-    elif action != "platform-save":
+    elif action == "platform-save":
+        require_capability(workspace, "platform_save")
+    else:
         raise SystemExit(f"Unsupported SVN selection action: {action}")
     session = load_session(workspace)
     if not session_id or session_id != session.get("sessionId"):
@@ -673,6 +752,8 @@ def preview(
         "expiresAt": record["expiresAt"],
         "candidates": candidates,
         "blockers": blockers,
+        "pendingDeliveries": [_delivery_view(item) for item in _deliveries(_platform_state(workspace))[-20:]
+                              if item.get("status") in {"PARTIAL", "IN_PROGRESS"}] if action == "platform-save" else [],
     }
 
 
@@ -849,6 +930,7 @@ def platform_save(
     message: str,
     on_progress: ProgressCallback = None,
 ) -> dict:
+    require_capability(workspace, "platform_save")
     commit_message = str(message or "").strip()
     with operation_lock(workspace, "manifest-platform-save"):
         token_path, selected = _load_selection(
@@ -879,6 +961,13 @@ def platform_save(
             for group in selected_groups
         ]
         saved_groups = []
+        delivery = {"deliveryId": uuid.uuid4().hex[:12], "status": "IN_PROGRESS",
+                    "files": [], "groups": [], "remainingFiles": [item["path"] for item in selected],
+                    "remainingCandidates": [{key: item[key] for key in ("workingCopyId", "path", "sourceHash")} for item in selected],
+                    "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(), "committedAt": "",
+                    "nextAction": "Inspect SVN status and create a fresh platform-save preview before retrying"}
+        _record_delivery(workspace, delivery)
+        attempted = False
         try:
             total = len(prepared)
             for index, (group, entry, targets) in enumerate(prepared, 1):
@@ -895,6 +984,7 @@ def platform_save(
                     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                         handle.write(commit_message)
                         handle.write("\n")
+                    attempted = True
                     result = run_remote_svn(
                         ["commit", "--file", message_path, *map(str, targets)],
                         workspace["svn"],
@@ -911,6 +1001,8 @@ def platform_save(
                     if relative in remaining:
                         raise SystemExit(f"SVN commit did not clean the selected file: {relative}")
                 revision = run_svn(["info", "--show-item", "revision", str(targets[0])]).stdout.strip()
+                if not revision.isdecimal():
+                    raise SystemExit("SVN commit result has no confirmed numeric revision; inspect SVN history before retrying")
                 saved_groups.append(
                     {
                         "workingCopyId": entry.id,
@@ -920,45 +1012,34 @@ def platform_save(
                     }
                 )
                 _progress(on_progress, f"[{index}/{total}] {label}｜提交完成 · r{revision}")
+                completed_paths = {path for saved in saved_groups for path in saved["files"]}
+                delivery.update(status="IN_PROGRESS", groups=[{key: saved[key] for key in ("workingCopyId", "revision", "files")} for saved in saved_groups],
+                                files=[item["path"] for item in selected if item["path"] in completed_paths],
+                                remainingFiles=[item["path"] for item in selected if item["path"] not in completed_paths],
+                                remainingCandidates=[{key: item[key] for key in ("workingCopyId", "path", "sourceHash")} for item in selected if item["path"] not in completed_paths],
+                                workingCopyId=entry.id, lastCommittedRevision=revision,
+                                committedAt=dt.datetime.now(dt.timezone.utc).isoformat(), outcomeUncertain=False)
+                _record_delivery(workspace, delivery)
+                attempted = False
                 _clear_selected_session(workspace, session, group)
         except (Exception, SystemExit) as error:
             completed = "、".join(
                 f"{group['workingCopyId']}@r{group['revision']}" for group in saved_groups
             ) or "无"
+            delivery.update(status="PARTIAL", outcomeUncertain=attempted,
+                            nextAction="Inspect SVN status/history, create a fresh platform-save preview and select only still-modified files")
+            _record_delivery(workspace, delivery)
             raise SystemExit(
-                f"提交中断（已完成：{completed}）\n{_format_commit_error(error)}"
+                f"提交中断（已完成：{completed}；回执：{delivery['deliveryId']}）\n{_format_commit_error(error)}\n"
+                "已确认组已记录；请重新预览，仅选择仍有修改的文件，勿重用旧选择令牌。"
             ) from error
         finally:
             token_path.unlink(missing_ok=True)
         revisions = [group["revision"] for group in saved_groups]
-        committed_at = dt.datetime.now(dt.timezone.utc).isoformat()
-        delivery = {
-            "deliveryId": uuid.uuid4().hex[:12],
-            "workingCopyId": saved_groups[-1]["workingCopyId"],
-            "lastCommittedRevision": revisions[-1],
-            "files": [item["path"] for item in selected],
-            "groups": [{
-                "workingCopyId": group["workingCopyId"],
-                "revision": group["revision"],
-                "files": group["files"],
-            } for group in saved_groups],
-            "committedAt": committed_at,
-        }
-        previous = _platform_state(workspace)
-        deliveries = _deliveries(previous)
-        deliveries.append(delivery)
-        platform_state = {
-            "workspaceKey": workspace["workspaceKey"],
-            "version": 3,
-            "workingCopyId": saved_groups[-1]["workingCopyId"],
-            "lastCommittedRevision": revisions[-1],
-            "deliveryId": delivery["deliveryId"],
-            "files": delivery["files"],
-            "groups": saved_groups,
-            "committedAt": committed_at,
-            "deliveries": deliveries[-50:],
-        }
-        atomic_json(workspace["contextDir"] / PLATFORM_STATE_FILE, platform_state)
+        delivery.update(status="COMPLETE", remainingFiles=[], remainingCandidates=[], outcomeUncertain=False,
+                        nextAction="", committedAt=dt.datetime.now(dt.timezone.utc).isoformat())
+        _record_delivery(workspace, delivery)
+        platform_state = _platform_state(workspace)
         _progress(
             on_progress,
             f"提交 Nexus 修改｜完成 · {len(saved_groups)} 个分组 / {len(selected)} 个文件 · "

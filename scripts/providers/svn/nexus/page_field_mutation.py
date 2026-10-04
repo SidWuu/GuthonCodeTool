@@ -174,6 +174,7 @@ def open_field_insert(
             "sourceType": "page", "sourceId": source_id, "funId": fun_id,
             "collectionPointer": collection_pointer, "regionType": region,
             "action": action, "field": candidate, "insertIndex": insertion_index,
+            "sessionId": opened["sessionId"], "documentId": opened["documentId"],
             "editToken": token, "expiresAt": session["pageEditTokens"][token]["expiresAt"],
             "indexedSourceHash": record["source_hash"], "indexGeneration": generation,
         }
@@ -190,6 +191,8 @@ def insert_field(workspace: dict, *, edit_token: str, idempotency_key: str = "",
         token = session["pageEditTokens"].get(edit_token)
         if not token or token.get("kind") != "FIELD_INSERT":
             raise page_nodes.PageIndexError("EDIT_TOKEN_INVALID", "PAGE field edit token is missing or invalid")
+        if token["expiresAt"] < time.time() or token["scopeDigest"] != load_authorized_scope(workspace).digest:
+            raise page_nodes.PageIndexError("EDIT_TOKEN_EXPIRED", "PAGE field edit token or scope expired; inspect or resume by operationId")
         documents._validate_session(session, token["sessionId"])
         document = session["documents"].get(token["documentId"])
         operation_path = (documents._page_operation_path(workspace, idempotency_key)
@@ -232,3 +235,70 @@ def insert_field(workspace: dict, *, edit_token: str, idempotency_key: str = "",
         )
         return {**result, "action": token["action"], "collectionPointer": token["collectionPointer"],
                 "fieldId": token["field"]["fieldId"], "insertIndex": token["index"]}
+
+
+def open_field_update(workspace: dict, *, source_namespace: str, source_id: str, semantic_field_id: str,
+                      indexed_source_hash: str, patch: dict, fun_id: str = "") -> dict:
+    """Freeze presentation label edits; identity, bindings and scripts are immutable."""
+    require_capability(workspace, "edit")
+    if (not isinstance(patch, dict) or not patch or set(patch) - {"label", "disName"}
+            or any(not isinstance(value, str) or len(value) > 512 for value in patch.values())):
+        raise page_nodes.PageIndexError("INVALID_FIELD", "Only existing label/disName strings may be updated")
+    with operation_lock(workspace, "field-update-open", blocking=True, timeout_seconds=documents.DOCUMENT_LOCK_TIMEOUT_SECONDS):
+        generation, record, parsed = _source_snapshot(workspace, source_namespace, source_id, fun_id)
+        if indexed_source_hash != record["source_hash"]:
+            raise page_nodes.PageIndexError("SOURCE_STALE", "PAGE changed since field listing")
+        entities = [field for field in extract_page_field_entities(parsed) if field.semantic_field_id == semantic_field_id]
+        if len(entities) != 1 or entities[0].identity_stability != "STABLE":
+            raise page_nodes.PageIndexError("FIELD_AMBIGUOUS", "Select one stable indexed UI field")
+        entity = entities[0]
+        field = pointer_value(parsed, entity.json_pointer)
+        if any(key not in field or not isinstance(field[key], str) for key in patch):
+            raise page_nodes.PageIndexError("FIELD_PROPERTY_UNAVAILABLE", "The requested text label property is not present")
+        fields = pointer_value(parsed, entity.collection_pointer)
+        opened = documents.read(workspace, source_type="page", source_id=source_id, fun_id=fun_id,
+                    json_pointer=entity.collection_pointer, working_copy_id=record["working_copy_id"])
+        if not opened["editable"] or opened["sourceHash"] != record["source_hash"] or json.loads(opened["content"]) != fields:
+            raise page_nodes.PageIndexError("SOURCE_STALE", "Field collection could not bind its source snapshot")
+        token = "page-field-update:v1:" + uuid.uuid4().hex
+        session = documents.load_session(workspace)
+        session["pageEditTokens"][token] = {"kind": "FIELD_UPDATE", "documentId": opened["documentId"],
+            "sessionId": opened["sessionId"], "sourceNamespace": source_namespace, "sourceId": source_id,
+            "funId": fun_id, "sourcePath": record["source_path"], "sourceHash": record["source_hash"],
+            "documentHash": opened["documentHash"], "scopeDigest": load_authorized_scope(workspace).digest,
+            "collectionPointer": entity.collection_pointer, "index": entity.ordinal, "patch": dict(patch),
+            "expiresAt": int(time.time()) + 30 * 60}
+        documents._prune_document_leases(session)
+        atomic_json(documents.session_path(workspace), session)
+        return {"workspaceKey": workspace["workspaceKey"], "editToken": token, "expiresAt": session["pageEditTokens"][token]["expiresAt"],
+                "sessionId": opened["sessionId"], "documentId": opened["documentId"], "sourceHash": record["source_hash"],
+                "semanticFieldId": semantic_field_id, "patch": patch, "indexGeneration": generation}
+
+
+def update_field(workspace: dict, *, edit_token: str, idempotency_key: str = "", dry_run: bool = False) -> dict:
+    require_capability(workspace, "edit")
+    with operation_lock(workspace, "field-update-write", blocking=True, timeout_seconds=documents.DOCUMENT_LOCK_TIMEOUT_SECONDS):
+        session = documents.load_session(workspace)
+        token = session["pageEditTokens"].get(edit_token)
+        if not token or token.get("kind") != "FIELD_UPDATE":
+            raise page_nodes.PageIndexError("EDIT_TOKEN_INVALID", "Field update token is missing")
+        if token["expiresAt"] < time.time() or token["scopeDigest"] != load_authorized_scope(workspace).digest:
+            raise page_nodes.PageIndexError("EDIT_TOKEN_EXPIRED", "Field update token or scope expired")
+        documents._validate_session(session, token["sessionId"])
+        operation = documents._load_page_operation(documents._page_operation_path(workspace, idempotency_key)) if not dry_run else None
+        if operation is not None and operation.get("state") in {"LOCAL_WRITE_DONE", "INDEX_SYNCED", "DIFF_VERIFIED"}:
+            if (operation.get("workspaceKey") != workspace["workspaceKey"] or operation.get("sessionId") != token["sessionId"]
+                    or operation.get("sourcePath") != token["sourcePath"]
+                    or not any(document.get("documentId") == token["documentId"] for document in operation["documents"])):
+                raise page_nodes.PageIndexError("IDEMPOTENCY_CONFLICT", "Idempotency key belongs to a different leased update")
+            return operation["result"]
+        generation, record, parsed = _source_snapshot(workspace, token["sourceNamespace"], token["sourceId"], token["funId"])
+        if operation is None and (record["source_path"] != token["sourcePath"] or record["source_hash"] != token["sourceHash"]):
+            raise page_nodes.PageIndexError("SOURCE_STALE", "PAGE changed since the label update was opened")
+        fields = pointer_value(parsed, token["collectionPointer"])
+        candidate = [dict(field) for field in fields]
+        candidate[token["index"]].update(token["patch"])
+        changes = [{"documentId": token["documentId"], "content": json.dumps(candidate, ensure_ascii=False, indent=2)}]
+        return documents.write_page_nodes_batch(workspace, session_id=token["sessionId"], changes=changes,
+                    idempotency_key=None if dry_run else idempotency_key, dry_run=dry_run,
+                    field_update={"index": token["index"], "patch": token["patch"]})

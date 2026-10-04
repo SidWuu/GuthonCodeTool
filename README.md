@@ -127,7 +127,7 @@ products:
 
 ## CLI
 
-以下命令在工具源码仓库根执行，`$GUTHON_HOME` 是**本地数据目录（toolHome）**而非本仓库：先 `export GUTHON_HOME=/path/to/toolHome`。工具只通过显式 `--home` 读取 `config/` 和 `var/`，不会在源码仓库里创建运行数据。
+以下命令在工具源码仓库根执行，`$GUTHON_HOME` 是**本地数据目录（toolHome）**而非本仓库：先 `export GUTHON_HOME=/path/to/toolHome`。工具通过显式 `--home` 或 `GUTHON_HOME` / `GUTHON_TOOL_HOME` 读取 `config/` 和 `var/`，不会在源码仓库里创建运行数据。
 
 准备配置并查看全部工作区：
 
@@ -182,7 +182,7 @@ SVN MCP 是与 Nexus、Bridge 并列的 AI 查询和受控源码修改入口，�
 .venv/bin/python scripts/guthon_tool.py mcp --stdio --home "$GUTHON_HOME"
 ```
 
-默认提供 29 个工具：16 个只读工具（含独立的 SVN 对象索引状态、过程函数有界读取与调用方证据）和 13 个受控编辑/恢复工具；`--read-only` 仅暴露 16 个只读工具。PAGE 写入限于授权 SVN working copy 中稳定的脚本/SQL 字符串节点及同一已识别 UI 字段集合内的单字段新增/拷贝，不支持任意 PAGE JSON、跨集合复制或反射组修改。过程函数按 `workspaceKey + sourceNamespace + sourceId + funId + workingCopyId` 精确定位，先读取、取得编辑租约、预览，再以幂等键写入本地物理文件并核对索引和 SVN diff；不提交 SVN。字段目录仅索引有组件宿主的界面字段；无原生身份的数据源列仍从字段集合按需读取。关系查询保留显式 `selectCodefieldId` 指向及未解析的 `otherSetFields` 证据；引用检查始终不批准自动删除，不能作为完整引用证明。stdio 握手支持 MCP `2025-03-26`、`2025-06-18` 和 `2025-11-25`；不回显未支持版本，客户端须确认协商结果。工具要求显式 `workspaceKey`。PAGE 语义索引和 SVN 对象索引分别用 `get_index_status`、`get_source_index_status` 检查；`REBUILD_REQUIRED` 需显式重建，`PARTIAL` 且 `projectionGapCount>0` 表示某些 JSON PAGE 有片段但缺少语义节点，可先按精确 `sourcePath` 执行 `svn reindex-file --path`，范围较多时重建工作区索引。缺口目标会返回 `INDEX_STALE`，不会误作空 PAGE。MCP 不会自行迁移真实索引。索引 generation 改变时旧分页游标会被拒绝。Nexus 的现有编辑入口不受影响。
+默认提供 56 个工具；`--read-only` 暴露 43 个只读工具（含操作回查与候选预览），隐藏 13 个会写入源码、租约或恢复状态的工具。PAGE 写入限于授权 SVN working copy 中稳定的脚本/SQL 字符串节点及同一已识别 UI 字段集合内的单字段新增/拷贝，不支持任意 PAGE JSON、跨集合复制或反射组修改。过程函数按 `workspaceKey + sourceNamespace + sourceId + funId` 定位；唯一命中可省略 `workingCopyId`，多候选时必须补全，先读取、取得编辑租约、预览，再以幂等键写入本地物理文件并核对索引和 SVN diff；不提交 SVN。字段目录仅索引有组件宿主的界面字段；无原生身份的数据源列仍从字段集合按需读取。关系查询保留显式 `selectCodefieldId` 指向及未解析的 `otherSetFields` 证据；引用检查始终不批准自动删除，不能作为完整引用证明。stdio 握手支持 MCP `2025-03-26`、`2025-06-18` 和 `2025-11-25`；不回显未支持版本，客户端须确认协商结果。工具要求显式 `workspaceKey`。PAGE 语义索引和 SVN 对象索引分别用 `get_index_status`、`get_source_index_status` 检查；`REBUILD_REQUIRED` 需显式重建，`PARTIAL` 且 `projectionGapCount>0` 表示某些 JSON PAGE 有片段但缺少语义节点，可先按精确 `sourcePath` 执行 `svn reindex-file --path`，范围较多时重建工作区索引。缺口目标会返回 `INDEX_STALE`，不会误作空 PAGE。MCP 不会自行迁移真实索引。索引 generation 改变时旧分页游标会被拒绝。Nexus 的现有编辑入口不受影响。
 
 同一只读 PAGE 服务也可由 `svn page-query` 使用 JSON stdin 调用，并供 Nexus 后端按相同结果结构查询。Nexus 源码版的 SVN 源码树可对 PAGE JSON 使用“浏览 PAGE 语义节点”命令按页选择，再经过源码复核打开现有虚拟文档；尚无独立新面板，已安装 VSIX 需重新打包安装后才包含此命令。示例：
 
@@ -194,7 +194,7 @@ echo '{"name":"list_page_nodes","arguments":{"sourceNamespace":"pages-SYS-1","so
 
 SVN 项目过程函数的 `.gss` 与 `.inherit.gss` 会按同目录同名归为一个逻辑函数；产品文件只读。Nexus 打开项目过程函数或 PAGE 项目脚本时，直接在可编辑标签页显示展开后的完整源码，以低饱和度整行蓝灰背景标识产品继承段。编辑器的差异基线使用相同展开结果，产品继承内容本身不会显示为修改；物理 SVN 差异仍反映真实写入。仅修改项目段并保存时，物理项目源码保留 `@inherit`；修改产品段时，保存会把完整候选写入项目源码，并复核产品哈希。`return @inherit();` 的控制流不能自动证明等价，修改产品段后保存需显式核对。MCP `read_inherited_source` 仍按精确身份有界返回两层原文、展开片段、来源位置和哈希；读取前需完成一次完整索引重建。原有“查看展开后的继承源码”仍可用于只读来源核对。写入后须审阅 SVN diff。
 
-PAGE 节点写入流程为 `open_page_node_edit → preview_page_nodes → update_page_nodes → get_page_operation / resume_page_operation`；字段新增/拷贝为 `open_page_field_insert → preview_page_field_insert → insert_page_field → get_page_operation / resume_page_operation`；过程函数为 `open_procedure_edit → preview_procedure → update_procedure → get_procedure_operation / resume_procedure_operation`。新增字段始终生成新 `id`；仅当候选原有 `guid` 键时才生成新 `guid`，省略时保持省略。正式写入要求工作区 `edit` 能力、授权文件、未过期的编辑令牌、当前源码与索引一致及调用方提供 `idempotencyKey`；响应丢失后先用该 key 查询原 operation，避免盲目重写。写入仅保存到本地 SVN working copy，**不会提交 SVN**。需要强制只读的客户端可在 `--stdio` 后加 `--read-only`，此时只发现 16 个查询工具。字段删除、移动和反射组写入仍不开放；此前版本的真实工作区曾完成 28 个工具的本地调用验证及受控撤销测试。本轮已完成 VSIX 安装、真实项目本地索引重建和两层源码只读抽样；Windows、AI 自主路由、真实项目的 Nexus 展开交互与故障矩阵仍需验收。使用写入后必须人工核对 SVN diff，不把工具响应当作平台运行结果。
+PAGE 节点写入流程为 `open_page_node_edit → preview_page_nodes → update_page_nodes → get_page_operation / resume_page_operation`；字段新增/拷贝为 `open_page_field_insert → preview_page_field_insert → insert_page_field → get_page_operation / resume_page_operation`；过程函数为 `open_procedure_edit → preview_procedure → update_procedure → get_procedure_operation / resume_procedure_operation`。新增字段始终生成新 `id`；仅当候选原有 `guid` 键时才生成新 `guid`，省略时保持省略。正式写入要求工作区 `edit` 能力、授权文件、未过期的编辑令牌、当前源码与索引一致及调用方提供 `idempotencyKey`；响应丢失后先用该 key 查询原 operation，避免盲目重写。写入仅保存到本地 SVN working copy，**不会提交 SVN**。需要强制只读的客户端可在 `--stdio` 后加 `--read-only`，此时发现 43 个只读工具。字段删除、移动和反射组写入仍不开放；此前版本的真实工作区曾完成 28 个工具的本地调用验证及受控撤销测试。过往版本曾完成 VSIX 安装及真实索引抽样；本轮新增能力仍以当前源码与测试为准，需重新构建安装后验收；Windows、AI 自主路由、真实项目的 Nexus 展开交互与故障矩阵仍需验收。使用写入后必须人工核对 SVN diff，不把工具响应当作平台运行结果。
 
 配置变更会在执行前显示新增、移除和变更数量，确认后将唯一根地址写入工作区 `context/authorized-scope.json` 并检出/更新；该 JSON 仅供程序使用。
 旧的逐条 `svn.scope`/`checkoutPaths` 写法仍兼容。用户名只在本地 <code>sync.yaml</code> 配置，密码只由 SVN 系统凭据存储；二者都不会进入配置清单、日志或参数。旧的 `sync-from-script`、`sync-from-bat` 命令仍兼容，另提供 `sync-from-config` 别名。移出配置的旧 working copy 不会自动删除。
@@ -335,6 +335,7 @@ Bridge 默认监听 `127.0.0.1:17361`，支持：
 - 模块页面字段复制。
 - 在模块开发页从当前激活的 PAGE 页签取页面编码，交给 Nexus 按精确索引定位；Nexus 仍要求选择 SVN 工作区和多候选源码。
 - 请求级工作区自动匹配和歧义选择。
+- Nexus 的 PAGE/过程函数源码可反向定位到已打开的平台页签；多页签当次选择并重新核验来源与工作区。pageContext 只保留有界元数据，Bearer SSE 传定位指令/回执及工作区上下文变化，不默认推送正文或选中文本。
 
 Bridge 请求携带 `workspaceKey` 时会验证页面身份；未携带时按 `pageOrigin + dataSourceId + systemId` 匹配配置。多个候选只影响当前请求，不保存默认绑定。详细说明见 [plugins/GuthonBridge/README.md](plugins/GuthonBridge/README.md)。
 
@@ -364,6 +365,79 @@ npm test
 构建时通过 `scripts/check_release_smoke.py` 对 zipapp 和两平台应用执行临时 toolHome 自检、初始化、MCP 握手与工具发现；实机联调遇到安装或功能问题时参阅[在线问题解决中心](https://sidwuu.github.io/GuthonCodeTool/GuthonCodeTool_QA.html)。
 
 Nexus 与 Bridge 各自维护一个常驻 ToolHost。普通工作区请求复用该进程；工作区列表在 Nexus 两棵树之间共享。普通 Nexus 刷新只重新读取工作区并重绘，不扫描全部 SVN working copy；“刷新 SVN 变更”和“检查 SVN 远程变更”仍是独立操作。SVN 日常 SCM 展示只执行必要的 `svn info --xml` 与 `svn status --xml`，写回和更新安全检查继续使用完整状态路径。
+
+## 审查修复后的本地使用变化
+
+首次从 Nexus 启动 Bridge 后，使用“复制 Bridge 配对令牌”，在 Chrome 扩展弹窗的配对设置中粘贴；端口须与 Nexus 的 `bridgePort` 一致（默认 17361）。令牌只存本地运行目录与 Chrome 扩展存储，不输入平台页面。Bridge 拒绝网页 Origin，业务请求携带 Bearer 令牌，导出根固定为 `<toolHome>/var/nexus/bridge/exports`；维护者可显式配置 `GUTHON_BRIDGE_EXPORT_ROOT`。平台页面提示不展示本机路径或原始异常详情；详情保留在扩展弹窗和本地工具侧。网页与 MAIN world 仍共享脚本环境，配对不证明平台自身没有 XSS。端口占用会明确报错，不会自动接管另一实例。
+
+DATABASE `pull_diff_check=true` 继续保留本地 Workcopy；设置 false 或显式强制覆盖时，先备份到相邻 `.guthon-trash/<时间戳>/`。`force=true` 还须在 JSON 中给出 `confirmation`，值为完整工作区键。`workcopy trash-list` 列备份，`workcopy restore <backup> --check` 预览，正式恢复附 `--confirmation products.<id>`，当前副本也会先备份。远程未找到源码时返回失败及缓存可用提示，不修改 Workcopy；需要缓存时使用 `create-workcopy`。自动暂存仅在独立 var Git 仓库中处理本次明确生成且原本未跟踪的文件，排除回收站、日志和同时手工新增的文件。
+
+工作区列表返回 `configErrors`，单个坏配置不阻断无关工作区；冲突身份及重叠的 SVN 范围仍拒绝使用。源码镜像写入与 SQLite 行更新保存恢复记录，失败回滚，下一次同步先恢复未完成事务。SVN 重建可发布 `PARTIAL` 的合法对象索引并保留坏文件错误；身份或授权错误保留旧索引。PARTIAL 不算完全同步成功。内容与状态未变时 generation 不再空转；继承解析版本变化后执行一次完整 `reindex`。
+
+```bash
+# --home 可由显式设置的环境变量提供；--workspace 优先于 --path。
+python scripts/guthon_tool.py database-target-list --workspace products.demo
+python scripts/guthon_tool.py database-connect-test --workspace products.demo -- --environment test
+python scripts/guthon_tool.py database-diagnose --workspace products.demo -- --table DEMO_ORDER --sql 'SELECT COUNT(*) FROM DEMO_ORDER'
+python scripts/guthon_tool.py database-query-readonly --workspace products.demo -- --sql @query.sql --max-rows 100 --format csv --output result.csv
+python scripts/guthon_tool.py database-target-remove --workspace products.demo -- --target-id test --check
+# 正式删除配置需 --confirmation test；只清理不再被引用的连接及凭据。
+python scripts/guthon_tool.py database-test-artifacts -- validate-config /path/to/config/database-testing.yaml
+python scripts/guthon_tool.py database-test-artifacts -- init-plan /path/to/config/database-testing.yaml --workspace products.demo --system-id SYS --data-source-id DS --out plan.json
+python scripts/guthon_tool.py index-doctor --workspace products.demo
+python scripts/guthon_tool.py context-pack --workspace products.demo -- --source-id '<id>' --fun-id '<fun>' --source-namespace '<namespace>' --include-source --max-chars 8000 --write-context
+python scripts/guthon_tool.py command-metadata
+```
+
+`database-diagnose` 默认只做身份探测；`--sql` / `--sql-file` 或 `--stdin` 启用查询，保持单连接只读事务。`database-target-configure` 允许已有目标仅更新密码或少量字段；正式 full 目标必须提供身份证据与范围。凭据以 keyring 为主，也可明确配置 `passwordEnv` 或绝对路径 `passwordFile`；切换来源不会自动删除旧 keyring 记录，需本地核查清理。DBX-only 目标在 resolve 时给出适配器提示；可导入公开连接元数据并生成身份优先的 MCP 交接，不读取 DBX 密码。快速排查用 `database-*`，legacy `diagnose` 用于 source-diagnosis 案例；其报告默认隐藏绑定参数，`--include-params` 才输出原文。
+
+SQL 校验允许普通字符串中的邮箱、分号及井号、SELECT CTE 和对应引擎的白名单函数/类型；拒绝跨库、未知副作用函数、注释、引用标识符及不支持的转义形式。Oracle 替代引号、PG dollar-quote、嵌套 WITH 和反斜线字面量仍不支持，复杂值使用绑定参数。正式验证的 `allowedTables` 为边界；diagnosis-only 不将该列表当作库内排查禁区。MySQL/PostgreSQL 查询可附 `--explain` 获取有界估计计划（不执行 ANALYZE，queryExecuted=false）；Oracle 因需要计划表写入而明确拒绝。导出对象内容相同则保留文件不覆写，变化内容原子替换；不声称数据库元数据读取已使用远端增量水位。查询截断返回行/列位置，CSV/表格输出同时在 stderr 提示截断。导出摘要仅保留最近 100 条。
+
+`database-query-readonly` 和带实际查询的 `database-diagnose` 可用 `--format xlsx --output <私有结果.xlsx>` 导出“结果”和“证据”两页；字符串按文本保存，长整数保留精度，证据页标注身份与截断。连接探测或 DBX 交接不生成伪空结果；重复或空列名会明确拒绝，避免结果被覆盖。导出文件包含查询结果，应保留在私有目录。
+
+Nexus 工作区节点的“查看最近诊断历史”可查看最近最多 100 条记录的摘要或精确记录详情；复用 `diagnosis-list` / `diagnosis-show`，按明确工作区只读元数据，不加载 SQL、参数或结果行，也不重新执行查询。
+
+MCP 新增 `find_sources/get_definition/list_callers/get_indexed_context/query_facts/explain_table/read_source_document/read_objects_batch/get_index_health/list_sources/svn_history/svn_diff`，查询继续受范围和大小限制。`list_sources` 提供分页对象计数摘要。可选 FTS5 加速 ASCII 三字符以上的身份子串预筛，中文、短词、LIKE 通配和旧库保留原检索结果；正文检索另由私有片段索引提供，完整 reindex 后启用，并明确标注截断或部分覆盖。`context-pack --write-context` 仅将有界 Markdown 保存到目标工作区 `context/ai/`，不写公开源码仓库。
+
+跨组平台保存失败后保留已确认提交的 revision、剩余文件及结果不确定标记；再次预览取得新令牌，只选仍 dirty 的剩余候选，提交前重做哈希与远程状态校验。历史 PARTIAL 回执继续保留，不自动宣称已恢复。
+
+CLI 与 Node 的动作读写分类、超时及帮助来自 `scripts/common/command_metadata.json`；构建生成 Nexus 元数据并进行字节一致性检查。平台保存确实执行 SVN commit，受独立 `svn.platform_save` 能力与原有选择/哈希校验约束；MCP 的 update/insert 仍只修改本地源码。
+
+发行自更新只允许 HTTPS 和受校验的重定向，下载与哈希流式处理，核对 API digest、checksum 与文件。更新/回退共用跨窗口锁，半安装目录在新候选自检通过后保留为 recovery 备份；版本探测失败明确报错并允许重试，缓存不会覆盖回退状态。独立 Ed25519 验证由本机固定公钥提供；未配置公钥时仅执行资产一致性校验，并明确提示签名未验证。
+
+Nexus 的 SVN「重建索引」进度窗口支持协作式取消，ToolHost ready 声明 `cancel-index-v1`。取消在对象扫描检查点回滚当前索引事务；发布屏障后不再接受取消，以真实完成结果为准。初始化索引元数据可能已经完成。DATABASE 重建、SVN 更新/提交及源码写回不支持相同的扫描取消语义；旧 ToolHost 不接收新控制帧，客户端等待原任务结果。切换运行环境在启动/写入期间报忙，工作区身份始终固定在原请求中。
+
+长任务与编辑：Bridge 长操作通过 <code>/submitJob</code>/<code>/jobStatus</code> 提交持久请求并短轮询，Chrome worker 中止后可从弹窗恢复；Bridge 重启将未完成任务标 UNKNOWN，不自动重放。长写入期间 Node 延迟启动独立只读 ToolHost；MCP 工具仍 FIFO，但协议线程可立即回应 ping。编辑租约支持续期/释放，操作日志支持有界巡检与确认后归档，pending/损坏/活动记录不可归档。字段更新只允许稳定 UI 字段现有 `label/disName` 文本，不改身份、脚本和绑定。
+
+`svn changed-sources --since-generation <id>` 查询最近 500 个保留代次的新增修改删除；未知或过旧代次要求重新取得快照。`svn text-search --keyword <text>` 搜索私有片段正文，返回哈希、Pointer 与有界摘录；每片段最多索引 200 万字符，超限明确标部分覆盖。完整 reindex 才能启用正文覆盖，不会把新增空表误当完整索引。Nexus 的“复制源码对象分享链接”生成含显式工作区/精确对象身份的链接；接收端需先配置同一工作区，不包含本机路径、源码或租约。`source-map` 和 `search-all` 提供有界地图和显式跨工作区检索，`parser-feedback` 从 stdin 保存已声明脱敏的最小草稿；`doctor --bundle <dir>` 仅导出运行/索引元数据，排除源码、凭据和原始日志。全局 `--json` 输出结构化结果；`version`/MCP runtime status 返回 `buildId`，区分同版本号的不同后端构建。
+
+数据库新增 `database-dbx-import`（公开元数据及明确来源、不会读取密码）、`database-dbx-handoff`（身份优先的精确工具调用交接，不伪装已执行）、`--profile`、`database-history-list/show`、`database-compare` 和 `diagnosis-template`。DBX 原始 Markdown 结果可按明确类型规范化，截断或 NULL 类型不明保留不完整状态。Oracle 登录 schema 与业务 schema 分开核验；正式计划可 `export-dbx-plan/import-dbx-results` 后本地 evaluate。描述缓存绑定完整目标摘要、TTL 与 probe 失效 epoch，历史不保存 SQL 原文或结果行。业务计数不同不等于功能错误。
+
+发行签名公钥随 Nexus 的 `data/release-trust.json` 分发，员工无需配置；固定 key ID 为 `guthon-release-20261004`。更新会自动验证版本与完整 checksum 签名，签名缺失/伪造或资产哈希不一致时阻止新版本执行，保留已有安装。维护者的本机 `globalStorage/release-trust.json` 仅可增加明确公钥，不可放宽包内的强制策略或替换已有 key ID。
+
+CI 从 Secret `GUTHON_RELEASE_SIGNING_PRIVATE_KEY` 和 Variable `GUTHON_RELEASE_SIGNING_KEY_ID` 读取；私钥与包内公钥不匹配、或严格策略下缺少 Secret，会阻止发行。签名覆盖应用、pyz、VSIX、Chrome 扩展与 Skill 发行附件。`scripts/verify_release.mjs` 可配合通过可信渠道取得的公钥离线验证下载目录。首次 Nexus 安装仍需从可信渠道分发；签名不是 macOS/Windows 的系统代码签名证书，也不能证明没有程序漏洞。具有签名密钥或控制签名 CI 的攻击者仍可能签出恶意包。
+
+本项目仅支持 macOS Apple Silicon 与 Windows x64，不计划 Intel Mac 发行包。
+
+正式计划可用 `database-test-artifacts run-readonly plan.json --config <私有配置> --out-dir <新私有运行目录>` 执行内置连接的只读检查并生成结果和报告：先验明身份，前置条件失败或截断即停止该用例；平台用例必须有与源码和目标绑定的版本及触发证据。DBX-only 计划使用交接和结果导入。执行器不发布、触发平台或清理数据，也不覆盖旧运行。legacy `diagnose case.json --dry-run` 仅输出未绑定 SQL 的静态校验，不连接、不写报告。
+
+Chrome 弹窗记录最近 20 次成功拉取的对象与上次导出目录；只在同一平台来源显示。再次拉取创建新请求，丢弃旧 force/confirmation，仍需服务端路由校验；UNKNOWN 不进入成功历史。实际页面导出始终使用当前受约束导出根，不以历史目录绕过路径策略。
+
+`pull-log tail --limit 100` 和 `pull-log summary` 仅观察当前工作区与 Bridge 保留日志的有界窗口，返回损坏行/缺口提示；Nexus 的“查看源码拉取历史”展示同一结果。日志在 5 MiB 轮转一份。虚拟文档过程函数补全为 `proc.invoke` 提供包名/函数候选，为 `proc.find` 提供包名候选；各命名空间分别显示，动态调用未推断。已有 API 与 PAGE 字段补全继续可用，索引不可用时保留本地建议。
+
+源码数据源创建时，新密码写入 keyring；可显式配置环境变量或密码文件。受保护迁移用 `database-credentials-export/import`，要求明确的工作区、已注册凭据引用和确认；AES-GCM 加密文件不进入工具仓库，解密不落明文文件。
+
+Bridge 对明确 workspaceKey 的任务按工作区串行，最多 4 个工作区并行；32 个队列项与 8 个工作区客户端上限，闲置客户端按近期使用回收。未解析工作区的旧请求仍单队列；每条命令重新验证固定归属。`/status` 返回 activeWorkspaces，不把并行任务伪装成一个当前工作区。共享 var Git 暂存加锁，仍仅暂存本次生成的新未跟踪文件。
+
+编辑账本由 `edit_sessions` 验证，仅文件不存在时新建会话；损坏 JSON、空对象/数组/null、错误身份或记录类型会报错并保留原文件。`operation_records` 共享日志 schema/持久化与 phase 时间，实体写回和不同语义仍分别校验。`query`、`svn` 和 `context-pack` 均接受 `--fun`/`--fun-id` 的同义输入，参数含义和默认值保持一致。
+
+Nexus 状态栏和工具输出显示当前插件版本及代码/资源哈希，后端 runtime 的 buildId 独立记录，可区分相同版本号的不同安装构建。
+
+已退役仅转发的 workcopy/create_work_copy/run_sync_once/pull_source_to_work_copy 独立脚本；统一使用 `guthon_tool.py workcopy/create-workcopy/sync-source/pull`，无 Bridge 脚本旁路。
+
+0.3.0 补充：Nexus 提供排查/正式验证目标选择与明确范围采集、私有 AI 上下文文件导出；拉取历史支持固定快照分页、JSON/Markdown导出及本地精确归属记录的可恢复归档。模板 `--case-out` 生成不可直接执行的案例草稿，保留 `--max-rows`；旧诊断报告写入身份/案例摘要并登记脱敏历史。`--json` 或全局 `--format json` 返回 apiVersion=1并保留现有字段；文本/表格/CSV按显式格式输出，协议服务保持独立帧。
+
+同步推荐名为 `source-sync/source-sync-full/workspace-sync/index-rebuild/index-init`，既有命令仍可用。表与区域摘要有明确截断和索引证据边界；不构成运行或删除安全证明。具体平台交互见 [0.3.0 人工验收清单](docs/releases/v0.3.0-platform-acceptance.md)。
 
 ## 文档
 

@@ -10,7 +10,6 @@ import stat
 import tempfile
 import time
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from common.inheritance import project as project_inheritance
@@ -41,6 +40,15 @@ from providers.svn.checkout import (
 
 from .catalog import header_fields, scan
 from . import index_queries
+from .operation_records import (
+    operation_time as _page_operation_time,
+    load_recorded_operation as _load_recorded_operation,
+    save_recorded_operation as _save_recorded_operation,
+)
+from .edit_sessions import (
+    SESSION_VERSION, SESSION_FILE, MAX_DOCUMENT_LEASES, MAX_PAGE_EDIT_TOKENS,
+    MAX_PROCEDURE_EDIT_TOKENS, session_path, load_session, _prune_document_leases,
+)
 from .manifest import (
     load_authorized_scope,
     logical_path_for_entry,
@@ -50,13 +58,8 @@ from .manifest import (
 )
 
 
-SESSION_VERSION = 1
-SESSION_FILE = "svn-edit-session.json"
 DOCUMENT_LOCK_TIMEOUT_SECONDS = 30
 MAX_BATCH_CHANGES = 100
-MAX_DOCUMENT_LEASES = 1000
-MAX_PAGE_EDIT_TOKENS = 1000
-MAX_PROCEDURE_EDIT_TOKENS = 1000
 PAGE_FRAGMENT_TYPES = {
     "page-string",
     "page-js",
@@ -71,66 +74,14 @@ def _text_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def session_path(workspace: dict) -> Path:
-    return workspace["contextDir"] / SESSION_FILE
-
-
-def _prune_document_leases(session: dict) -> None:
-    documents = session["documents"]
-    overflow = len(documents) - MAX_DOCUMENT_LEASES
-    if overflow > 0:
-        for document_id in list(documents)[:overflow]:
-            documents.pop(document_id, None)
-    now = time.time()
-    tokens = {
-        token: value for token, value in session["pageEditTokens"].items()
-        if value.get("documentId") in documents
-        and isinstance(value.get("expiresAt"), (int, float))
-        and value["expiresAt"] >= now
-    }
-    session["pageEditTokens"] = dict(list(tokens.items())[-MAX_PAGE_EDIT_TOKENS:])
-    procedure_tokens = {
-        token: value for token, value in session["procedureEditTokens"].items()
-        if value.get("documentId") in documents
-        and isinstance(value.get("expiresAt"), (int, float))
-        and value["expiresAt"] >= now
-    }
-    session["procedureEditTokens"] = dict(list(procedure_tokens.items())[-MAX_PROCEDURE_EDIT_TOKENS:])
-
-
-def load_session(workspace: dict) -> dict:
-    path = session_path(workspace)
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        value = {}
-    except (OSError, json.JSONDecodeError) as error:
-        raise SystemExit(f"Invalid SVN edit session: {path}") from error
-    if not value:
-        return {
-            "version": SESSION_VERSION,
-            "workspaceKey": workspace["workspaceKey"],
-            "sessionId": str(uuid.uuid4()),
-            "files": {},
-            "documents": {},
-            "pageEditTokens": {},
-            "procedureEditTokens": {},
-        }
-    if value.get("version") != SESSION_VERSION or value.get("workspaceKey") != workspace["workspaceKey"]:
-        raise SystemExit(f"SVN edit session does not match {workspace['workspaceKey']}")
-    if not isinstance(value.get("files"), dict) or not isinstance(value.get("documents"), dict):
-        raise SystemExit(f"Invalid SVN edit session records: {path}")
-    if (not isinstance(value.setdefault("pageEditTokens", {}), dict)
-            or any(not isinstance(token, dict) for token in value["pageEditTokens"].values())):
-        raise SystemExit(f"Invalid PAGE edit token records: {path}")
-    if (not isinstance(value.setdefault("procedureEditTokens", {}), dict)
-            or any(not isinstance(token, dict) for token in value["procedureEditTokens"].values())):
-        raise SystemExit(f"Invalid procedure edit token records: {path}")
-    return value
-
-
 def accept_refreshed_files(workspace: dict, refreshed: list[dict]) -> None:
     """Advance the edit ledger after an explicit, successful SVN update."""
+    with operation_lock(workspace, "document-refresh-ledger", blocking=True,
+                        timeout_seconds=DOCUMENT_LOCK_TIMEOUT_SECONDS):
+        _accept_refreshed_files(workspace, refreshed)
+
+
+def _accept_refreshed_files(workspace: dict, refreshed: list[dict]) -> None:
     session = load_session(workspace)
     scope = load_authorized_scope(workspace)
     entries = {entry.id: entry for entry in scope.entries}
@@ -183,19 +134,9 @@ def accept_refreshed_files(workspace: dict, refreshed: list[dict]) -> None:
         if path.is_file():
             record["expectedCurrentHash"] = file_hash(path)
             record["refreshAccepted"] = True
-    session["documents"] = {
-        key: value
-        for key, value in session["documents"].items()
-        if value.get("sourcePath") not in affected_paths
-    }
-    session["pageEditTokens"] = {
-        key: value for key, value in session["pageEditTokens"].items()
-        if value.get("documentId") in session["documents"]
-    }
-    session["procedureEditTokens"] = {
-        key: value for key, value in session["procedureEditTokens"].items()
-        if value.get("documentId") in session["documents"]
-    }
+    for document in session["documents"].values():
+        if document.get("sourcePath") in affected_paths:
+            document["invalidatedReason"] = "Source was refreshed; reopen the editor against the current source"
     atomic_json(session_path(workspace), session)
 
 
@@ -579,19 +520,9 @@ def read(
                 # advanced by update/switch, not by an untracked local edit.
                 # Drop stale fragment hashes and establish a fresh edit record.
                 session["files"].pop(item["source_path"], None)
-                session["documents"] = {
-                    key: value
-                    for key, value in session["documents"].items()
-                    if value.get("sourcePath") != item["source_path"]
-                }
-                session["pageEditTokens"] = {
-                    key: value for key, value in session["pageEditTokens"].items()
-                    if value.get("documentId") in session["documents"]
-                }
-                session["procedureEditTokens"] = {
-                    key: value for key, value in session["procedureEditTokens"].items()
-                    if value.get("documentId") in session["documents"]
-                }
+                for document in session["documents"].values():
+                    if document.get("sourcePath") == item["source_path"]:
+                        document["invalidatedReason"] = "Source changed after SVN update; reopen the editor"
                 known_file = None
         relative_path = relative_path_for_entry(entry, item["source_path"])
         editable = bool(
@@ -640,6 +571,7 @@ def read(
                 "fragmentType": fragment_type,
                 "expectedSourceHash": current_hash,
                 "expectedDocumentHash": _text_hash(content),
+                "lastUsedAt": time.time(),
             }
             _prune_document_leases(session)
             atomic_json(session_path(workspace), session)
@@ -696,6 +628,9 @@ def _session_document(workspace: dict, session: dict, document_id: str) -> dict:
     document = session["documents"].get(document_id)
     if not document:
         raise SystemExit("SVN virtual document is missing or expired")
+    if document.get("invalidatedReason"):
+        raise SystemExit(document["invalidatedReason"])
+    document["lastUsedAt"] = time.time()
     file_record = session["files"].get(document["sourcePath"])
     if not file_record:
         raise SystemExit("SVN edit session file record is missing")
@@ -1170,64 +1105,17 @@ def resume_page_node_operation(workspace: dict, config: dict, *, operation_id: s
         }
 
 
-def _page_operation_request_hash(session_id: str, changes: list[dict], field_insert=None) -> str:
+def _page_operation_request_hash(session_id: str, changes: list[dict], field_insert=None, field_update=None) -> str:
     request = {"sessionId": session_id, "changes": changes}
     if field_insert is not None:
         request["fieldInsert"] = field_insert
+    if field_update is not None:
+        request["fieldUpdate"] = field_update
     return _text_hash(json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-
-
-def _page_operation_time() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def _load_recorded_operation(path: Path, kind: str) -> dict | None:
-    try:
-        record = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
-    except (OSError, json.JSONDecodeError) as error:
-        raise SystemExit(f"{kind} operation record is unreadable; manual recovery required") from error
-    if not isinstance(record, dict) or record.get("version") != 1:
-        raise SystemExit(f"{kind} operation record is invalid; manual recovery required")
-    required_strings = (
-        "operationId", "workspaceKey", "sessionId", "requestHash", "state",
-        "sourcePath", "scopeEntryId", "beforeHash", "afterHash",
-    )
-    if (any(not isinstance(record.get(key), str) or not record[key] for key in required_strings)
-            or record["state"] not in {"PREFLIGHT_PASSED", "LOCAL_WRITE_DONE", "INDEX_SYNCED", "DIFF_VERIFIED"}
-            or not isinstance(record.get("documents"), list)
-            or not isinstance(record.get("result"), dict)
-            or not isinstance(record.get("phaseTimes", {}), dict)):
-        raise SystemExit(f"{kind} operation record is incomplete; manual recovery required")
-    return record
 
 
 def _load_page_operation(path: Path) -> dict | None:
     return _load_recorded_operation(path, "PAGE")
-
-
-def _save_recorded_operation(path: Path, record: dict) -> None:
-    record["updatedAt"] = _page_operation_time()
-    record.setdefault("phaseTimes", {}).setdefault(record["state"], record["updatedAt"])
-    new_directory = not path.parent.exists()
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if new_directory and os.name != "nt":
-        descriptor = os.open(path.parent.parent, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-    atomic_json(path, record)
-    # The preflight journal must survive a rename before the source file may be
-    # replaced. Windows directory fsync is not supported by this runtime and
-    # remains an explicit D6 platform gate.
-    if os.name != "nt":
-        descriptor = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
 
 
 def _save_page_operation(path: Path, record: dict) -> None:
@@ -1396,6 +1284,7 @@ def write_page_nodes_batch(
     workspace: dict, *, session_id: str, changes: list[dict],
     idempotency_key: str | None = None, dry_run: bool = False,
     field_insert: dict | None = None,
+    field_update: dict | None = None,
 ) -> dict:
     """Apply several leased PAGE string fragments to one source snapshot and physical file.
 
@@ -1412,9 +1301,12 @@ def write_page_nodes_batch(
                                      or set(field_insert) != {"index", "field"}
                                      or len(changes) != 1):
         raise SystemExit("PAGE field insertion requires one exact field candidate")
+    if field_update is not None and (field_insert is not None or not isinstance(field_update, dict)
+            or set(field_update) != {"index", "patch"} or len(changes) != 1):
+        raise SystemExit("PAGE field update requires one exact label candidate")
     operation_path = _page_operation_path(workspace, idempotency_key) if idempotency_key is not None else None
     try:
-        request_hash = (_page_operation_request_hash(session_id, changes, field_insert)
+        request_hash = (_page_operation_request_hash(session_id, changes, field_insert, field_update)
                         if operation_path else "")
     except (TypeError, ValueError) as error:
         raise SystemExit("PAGE node batch request must contain JSON-compatible values") from error
@@ -1453,7 +1345,7 @@ def write_page_nodes_batch(
             if (item["item"]["source_table"] != "page"
                     or item["path"].suffix.lower() != ".json"
                     or item["document"].get("fragmentType") not in
-                    ({"page-fields"} if field_insert is not None else PAGE_FRAGMENT_TYPES - {"page-fields"})
+                    ({"page-fields"} if field_insert is not None or field_update is not None else PAGE_FRAGMENT_TYPES - {"page-fields"})
                     or not pointer):
                 raise SystemExit("PAGE batch target is not an allowed leased fragment")
             if pointer in pointers:
@@ -1482,6 +1374,24 @@ def write_page_nodes_batch(
                     or candidate_fields != [*original_fields[:index], field, *original_fields[index:]]):
                 raise SystemExit("PAGE field candidate is not one insertion into the leased collection")
             after_text = insert_json_array_item(source_text, pointer, index, field, original_fields)
+        elif field_update is not None:
+            pointer = first["document"]["jsonPointer"]
+            original_fields = pointer_value(data, pointer)
+            candidate_fields = json.loads(first["content"])
+            index, patch = field_update["index"], field_update["patch"]
+            if (not isinstance(original_fields, list) or isinstance(index, bool) or not isinstance(index, int)
+                    or not 0 <= index < len(original_fields) or not isinstance(patch, dict) or not patch
+                    or set(patch) - {"label", "disName"}
+                    or any(key not in original_fields[index] or not isinstance(original_fields[index][key], str)
+                           or not isinstance(value, str) or len(value) > 512 for key, value in patch.items())):
+                raise SystemExit("PAGE field update permits existing label/disName strings only")
+            expected_fields = [dict(field) for field in original_fields]
+            expected_fields[index].update(patch)
+            if candidate_fields != expected_fields:
+                raise SystemExit("PAGE field update cannot change identity, scripts, bindings or other fields")
+            replacements = {pointer + "/" + str(index) + "/" + key: value for key, value in patch.items()}
+            expected = {pointer + "/" + str(index) + "/" + key: original_fields[index][key] for key in patch}
+            after_text = replace_json_strings(source_text, replacements, expected)
         else:
             expected = {item["document"]["jsonPointer"]: pointer_value(data, item["document"]["jsonPointer"])
                         for item in prepared}

@@ -46,19 +46,37 @@ function parseDiagnosisDatabaseUrl(value) {
   };
 }
 
-async function promptDatabaseDiagnosis(window, workspaceKey) {
+async function promptDatabaseDiagnosis(window, workspaceKey, { listTargets } = {}) {
   const environment = await window.showQuickPick([
-    { label: '开发库', value: 'dev', description: '未明确环境时可作为工作区默认排查库' },
-    { label: '测试库', value: 'test', description: '仅在明确要求测试环境时自动选择' },
-  ], { title: `配置数据库排查 · ${workspaceKey}` });
+    { label: '开发库', value: 'dev', description: '明确配置开发环境目标' },
+    { label: '测试库', value: 'test', description: '明确配置测试环境目标' },
+  ], { title: `配置数据库只读目标 · ${workspaceKey}` });
   if (!environment) return undefined;
   const targetId = await window.showInputBox({
     title: '目标标识',
     prompt: '同一工作区内唯一，例如 trade-dev',
-    value: environment.value,
     validateInput: (text) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(text) ? undefined : '仅允许字母、数字、点、下划线和连字符',
   });
   if (!targetId) return undefined;
+  const targets = listTargets ? await listTargets(targetId) : [];
+  const existing = targets.find((target) => target.id === targetId);
+  if (existing && existing.environment !== environment.value) {
+    throw new Error(`目标 ${targetId} 已属于 ${existing.environment} 环境，请使用其准确环境或新标识`);
+  }
+  const scope = await window.showQuickPick([
+    { label: '快速只读排查', value: 'diagnosis-only', description: '用于有界排查，不可运行正式验证计划' },
+    { label: '正式只读验证', value: 'full', description: '需明确系统、数据源、表范围、租户字段及身份核验证据' },
+  ], { title: `选择验证范围 · ${targetId}` });
+  if (!scope) return undefined;
+  if (existing) {
+    const confirmation = await window.showWarningMessage(
+      `将更新准确目标 ${targetId}（${existing.environment} · ${existing.endpoint} · ${existing.database}）。验证范围：${existing.validationScope || 'full'} → ${scope.value}。`,
+      { modal: true }, '更新此目标'
+    );
+    if (confirmation !== '更新此目标') return undefined;
+  }
+  const formal = scope.value === 'full' ? await promptFormalScope(window) : {};
+  if (!formal) return undefined;
   const url = await window.showInputBox({
     title: '数据库连接地址',
     prompt: '支持 mysql://、postgresql://、oracle://；可包含用户名，不建议包含密码',
@@ -91,6 +109,11 @@ async function promptDatabaseDiagnosis(window, workspaceKey) {
     });
     if (!schema) return undefined;
   }
+  const defaultChoice = await window.showQuickPick([
+    { label: '仅保存此目标', value: false },
+    { label: '设为工作区排查默认目标', value: true, description: '同时更新该环境的默认排查目标' },
+  ], { title: `默认排查目标 · ${targetId}` });
+  if (!defaultChoice) return undefined;
   return {
     targetId,
     environment: environment.value,
@@ -101,8 +124,55 @@ async function promptDatabaseDiagnosis(window, workspaceKey) {
     ...(schema ? { schema } : {}),
     username,
     password,
-    makeDefault: true,
+    validationScope: scope.value,
+    ...formal,
+    makeDefault: defaultChoice.value,
   };
 }
 
-module.exports = { parseDiagnosisDatabaseUrl, promptDatabaseDiagnosis };
+const identifier = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+const actualEvidence = (value) => !!String(value || '').trim()
+  && !/[<>]/.test(value) && !/^replace-/i.test(value.trim()) && !/\.example/i.test(value);
+
+function parseAllowedTables(value) {
+  const tables = String(value || '').split(',').map((table) => table.trim());
+  if (!tables.length || tables.some((table) => !identifier.test(table))) {
+    throw new Error('请输入明确表名，以英文逗号分隔；不允许通配符或 schema 前缀');
+  }
+  if (new Set(tables.map((table) => table.toUpperCase())).size !== tables.length) throw new Error('表名不能重复');
+  return tables;
+}
+
+async function promptFormalScope(window) {
+  const fields = [
+    ['systemId', '准确业务系统 ID', '使用已核验的业务系统 ID'],
+    ['dataSourceId', '准确数据源 ID', '使用已核验的数据源 ID'],
+    ['allowedTables', '允许查询的表', '明确表名，以英文逗号分隔'],
+    ['tenantField', '租户/组织范围字段', '填写已核验的普通字段名'],
+    ['tenantEvidence', '租户字段核验证据引用', '填写实际证据引用，例如核验记录文件路径或记录 ID'],
+    ['evidenceRef', '数据库身份核验证据引用', '已核验 engine、endpoint、database、schema 的实际证据引用'],
+  ];
+  const values = {};
+  for (const [field, title, prompt] of fields) {
+    const validateInput = (text) => {
+      if (field === 'allowedTables') {
+        try { parseAllowedTables(text); return undefined; } catch (error) { return error.message; }
+      }
+      if (field === 'tenantField') return identifier.test(text) ? undefined : '请输入有效字段名';
+      return actualEvidence(text) ? undefined : '必须填写实际值，不允许占位内容';
+    };
+    const value = await window.showInputBox({ title, prompt, validateInput, ignoreFocusOut: true });
+    if (value === undefined) return undefined;
+    const error = validateInput(value);
+    if (error) throw new Error(error);
+    values[field] = value.trim();
+  }
+  return {
+    systemId: values.systemId, dataSourceId: values.dataSourceId,
+    allowedTables: parseAllowedTables(values.allowedTables),
+    tenantScope: { field: values.tenantField, evidenceRef: values.tenantEvidence },
+    evidenceRef: values.evidenceRef,
+  };
+}
+
+module.exports = { parseDiagnosisDatabaseUrl, parseAllowedTables, promptDatabaseDiagnosis };

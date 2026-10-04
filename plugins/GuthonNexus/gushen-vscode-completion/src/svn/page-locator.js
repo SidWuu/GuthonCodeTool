@@ -51,11 +51,24 @@ function procedureFromFullName(fullName) {
 }
 
 function sourceLocatorFromUri(uri) {
-  if (uri?.path !== '/locate-page' && uri?.path !== '/locate-procedure') return null;
+  if (!['/locate-page', '/locate-procedure', '/open-source'].includes(uri?.path)) return null;
   if (uri.authority !== 'gushen-local.guthon-nexus-vscode') {
     throw new Error('源码定位链接的扩展身份不正确');
   }
   const params = new URLSearchParams(uri.query || '');
+  if (uri.path === '/open-source') {
+    const allowed = ['workspaceKey', 'sourceType', 'sourceId', 'workingCopyId', 'sourceNamespace', 'funId', 'jsonPointer'];
+    if ([...params.keys()].some(key => !allowed.includes(key) || params.getAll(key).length !== 1)) throw new Error('对象分享链接含未知或重复身份字段');
+    const identity = Object.fromEntries(params);
+    const {isWorkspaceKey} = require('../workspace-identity');
+    if (!isWorkspaceKey(identity.workspaceKey)
+        || !['page', 'procedure', 'system-script', 'table', 'view', 'skill', 'public'].includes(identity.sourceType)
+        || !identity.sourceId || !identity.workingCopyId
+        || Object.values(identity).some(value => !value || value.length > 2048 || /[\u0000-\u001f\u007f]/.test(value))
+        || (identity.funId && !FUNCTION_ID.test(identity.funId))
+        || (identity.jsonPointer && !identity.jsonPointer.startsWith('/'))) throw new Error('对象分享链接缺少有效精确身份');
+    return {type: 'source', identity};
+  }
   if (uri.path === '/locate-page') {
     const ids = params.getAll('pageId');
     if (ids.length !== 1 || [...params.keys()].some((key) => key !== 'pageId')
@@ -74,9 +87,19 @@ function sourceLocatorFromUri(uri) {
   return { type: 'procedure', alias: aliases[0], funId: funIds[0] };
 }
 
+function buildSourceLocatorLink(identity) {
+  const params = new URLSearchParams();
+  for (const key of ['workspaceKey', 'sourceType', 'sourceId', 'workingCopyId', 'sourceNamespace', 'funId', 'jsonPointer']) {
+    if (identity?.[key]) params.set(key, String(identity[key]));
+  }
+  sourceLocatorFromUri({path: '/open-source', authority: 'gushen-local.guthon-nexus-vscode', query: params.toString()});
+  return `vscode://gushen-local.guthon-nexus-vscode/open-source?${params}`;
+}
+
 module.exports = {
   findExactPageCandidates,
   findExactProcedureCandidates,
   procedureFromFullName,
   sourceLocatorFromUri,
+  buildSourceLocatorLink,
 };

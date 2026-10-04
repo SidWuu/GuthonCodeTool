@@ -199,7 +199,7 @@ function mergeCompletionData(...sources) {
 }
 
 function escapeSnippetText(value) {
-  return String(value).replace(/\$/g, '\\$');
+  return String(value).replace(/[\\$}]/g, '\\$&');
 }
 
 function templateToSnippet(template) {
@@ -224,7 +224,7 @@ function templateToSnippet(template) {
   }
 
   const body = args
-    .map((arg, index) => `\${${index + 1}:${arg}}`)
+    .map((arg, index) => `\${${index + 1}:${escapeSnippetText(arg)}}`)
     .join(',');
 
   return `${head}${body}${tail}`;

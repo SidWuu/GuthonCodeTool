@@ -34,6 +34,8 @@ description: Diagnose GuShen development or test database issues through GuthonC
 
 内置适配器用 `databaseProbeCommand`、`databaseDescribeCommand`、`databaseQueryCommand`，均追加与目标解析相同的 `--path` 和可选环境。SQL 只通过 `databaseQueryCommand` 的 JSON 标准输入传递：`{"sql":"...","maxRows":100}`，不得放入命令参数。DBX 首次查询前仍按精确 `connectionId` 核验引擎、端点、database；Oracle 还要核验业务 schema。与 `expectedIdentity` 不一致时返回 `ENVIRONMENT_MISMATCH` 并停止。
 
+legacy `diagnose <case.json>` 只用于已有 source-diagnosis 案例，其数据源须为明确启用的 test/query_only；`--dry-run` 不连接并隐藏绑定参数。临时排查使用 `database-*`。
+
 ## 快速数据库排查
 
 读取 [数据库执行流程](references/database-workflow.md) 的快速排查部分。先简短告知本次选择的工作区、开发/测试环境和实际适配器，再从本地索引定位相关源码、表、租户字段和业务主键。陌生表或字段先读取结构，再执行有业务主键或租户范围的只读查询。
@@ -49,9 +51,11 @@ description: Diagnose GuShen development or test database issues through GuthonC
 读取 [数据库执行流程](references/database-workflow.md)。创建私有 `database-test-plan.json`，契约见仓库 `config/schema/database-test-plan.schema.json`，参考 [演示计划](assets/database-test-plan.example.json)。先运行：
 
 ```bash
-PYTHONPATH=scripts .venv/bin/python scripts/common/database_test_artifacts.py validate-plan \
+<descriptor command> database-test-artifacts -- validate-plan \
   <database-test-plan.json> --config <descriptor.home>/config/database-testing.yaml
 ```
+
+计划校验通过后，内置连接可用统一 CLI 的 `database-test-artifacts run-readonly <plan> --config <private-config> --out-dir <new-private-run>` 自动核验身份并执行只读检查；平台用例另提供版本/触发证据，不由执行器触发。仅 DBX connectionId 的目标使用 `export-dbx-plan/import-dbx-results`，由当前会话执行实际 MCP 调用；交接文件本身没有执行查询。
 
 真实连接由 DBX 或 GuthonCodeTool 内置只读适配器管理。映射只保存在 `<descriptor.home>/config/database-testing.yaml`；内置密码只保存在操作系统凭据库。不要询问用户在对话中粘贴密码，也不要读取、复制或输出密码。
 

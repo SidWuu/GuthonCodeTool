@@ -23,6 +23,7 @@ Guthon Nexus 是 GuthonCodeTool 的 VS Code 开发入口。它把工作空间设
 
 - 同时列出全部 `PRD <产品名称>`、`PRJ <项目名称>` 及其同步状态。
 - 每个节点绑定自己的 `workspaceKey`。DATABASE 节点可独立同步全部资料、执行只读源码排查和维护 Workcopy；SVN 节点按授权清单管理 checkout、索引和本地源码变更。
+- 工作区节点的“查看最近诊断历史”或同名命令可查看最近最多 100 条记录的摘要，或选择一条读取详情。复用只读 `diagnosis-list` / `diagnosis-show`，只显示工作区、目标、环境、时间、状态、计数、截断和 SQL 哈希等元数据；不加载 SQL/结果行或重跑数据库查询。详情重新核对工作区和记录 ID，已轮转记录会明确报错。
 - 节点显示“数据库”或“SVN”，操作由 workspace summary 的有效 capabilities 生成，不在扩展内猜测配置。
 - 在已创建的 SVN Nexus 中使用“导入/粘贴 SVN checkout 配置”：可选择它自己的 `svnCheckoutHere.sh`（macOS/Linux）/`svnCheckoutHere.bat`（Windows），或在多行编辑器逐行粘贴 SVN URL、`<url> <localSubdir>` 或完整 checkout 命令（支持 Markdown 列表前缀）。同一产品的多个 checkout 地址解析为一个公共 `svn.url`，每条地址去掉公共前缀后的唯一相对路径逐条写入 `svn.scope`。没有系统映射时检出全部精确地址；配置映射后按子系统筛选。Nexus 不会从 `context/` 或其他工作区自动发现脚本。检出/更新前展示脱敏范围统计，确认后生成授权清单并使用同一次认证处理全部 working copy，不执行脚本或持久化凭据。单个 scope 无权限或远端不存在时记录并跳过，其他 working copy 继续检出；网络和整体认证错误仍会中断。
 - SVN 节点按授权清单初始化或更新多个精确 URL working copy；物理目录按 `systems/<SYSTEM_ID>` 和 `datasources/<DATA_SOURCE_ID>` 聚合，在“谷神源码”中按业务分类展示 PAGE、过程函数、
@@ -47,12 +48,16 @@ checkout；“管理本地源码变更”统一提供类 Git 差异、多选/全
 
 ### Guthon Bridge
 
-- 在左侧面板单击“启动 Guthon Bridge”或“停止 Guthon Bridge”。
+- 在左侧面板单击“启动 Guthon Bridge”或“停止 Guthon Bridge”。启动经过带令牌的健康检查；通知的“复制配对令牌”按钮可将令牌粘贴到 Chrome 扩展弹窗的 Bridge 配对设置。
+- 本机端口可通过 `gushenCompletion.bridgePort` 设置，停止后重启生效；Chrome 配对设置使用同一端口。
+- 页面源码导出默认写入 `<toolHome>/var/nexus/bridge/exports`，不能通过页面消息选择任意路径。SVN 命令错误会显示独立的 `Guthon Nexus SVN` 输出通道。
 - Nexus 自动复用当前运行模式和本地数据目录：发行模式调用应用，调试模式调用源码仓库 Python；无需设置 Bridge 环境变量或打开终端。
 - Bridge 根据请求的 `workspaceKey` 或页面身份路由到对应产品、项目；多个候选由 Chrome 选择。
+- PAGE/过程函数源码树右键“在谷神平台定位源码”可反向定位到已打开且配对的平台页签；当前 SVN 虚拟文档也可从命令面板调用。多页签当次选择，平台来源和工作区重新校验；过程函数限制为当前平台数据源的精确候选，不自动保存、发布或重放导航。尚未打开平台或上下文过期时给出明确提示。
+- Bridge pageContext 只提供有界身份与页签元数据；Bearer SSE 传定位指令/回执及工作区快照变化，不推送正文或选中文本。平台 DOM 事件负责页签刷新，60 秒元数据心跳恢复 worker 和重启后的快照。
 - Bridge 运行时切换运行模式，也会自动重启；调试模式下每次拉取都会读取最新 Python 脚本。
 
-所有会运行 GuthonCodeTool 的操作都要求用户确认；打开配置文件和本地目录保持单击。
+最近诊断历史和平台定位按明确用户命令直接执行；其它工具操作按其现有提示确认，打开配置文件和本地目录保持单击。
 
 ## 代码补全
 
@@ -234,3 +239,22 @@ npm test
 node --check src/extension.js
 node --check src/rules.js
 ```
+
+
+### ToolHost 命令协议元数据
+
+读写分类、SVN 动作清单和等待时限统一由仓库 `scripts/common/command_metadata.json` 定义。Nexus 的 `npm run build:bridge` 同时将其原字节复制到 `data/tool-command-metadata.json`，供源码 Bridge 和已打包 Nexus 的共享 ToolHost 客户端读取。修改权威文件后须重新运行该构建；测试会核验两份 JSON 的字节一致性与全部命令的分类/时限。生成文件只含公开命令协议，不含本机运行配置。
+
+### 发行应用更新与回退
+
+更新请求及所有重定向都要求 HTTPS，并拒绝 URL 中的用户名/密码。应用通过流式下载写入唯一临时文件，再流式计算 SHA-256；Release API 提供 `asset.digest` 时，必须与校验文件、实际下载内容一致。通过版本核对和 `self-test` 后才切换应用。版本探测失败显示“无法探测”，检查更新报错且允许重试，不猜测旧版本号。
+
+更新和回退共用跨窗口锁，覆盖下载、应用状态写入、设置切换及回退自检；窗口异常退出留下的 `.application-update.lock` 不会被自动抢占，请先确认更新进程已退出再移除。版本目录不完整或验证失败时，新版本验证通过后将旧目录保留为 `.recovery`，供人工恢复，不直接删除旧文件。版本探测缓存独立存放，避免覆盖更新/回退状态。
+
+发行包内 `data/release-trust.json` 固定 Ed25519 公钥，员工无需逐机配置。严格验签在下载/执行前完成；签名缺失、未知 key ID、版本/校验内容不匹配均阻止更新并保留已有安装。globalStorage 中的同名配置只能补充公钥，不能放宽内置策略或覆盖已有 key ID。维护者的私钥留在仓库外或 CI Secret；不从待更新 Release 下载信任公钥。CI 在发布前验证全部附件哈希和签名，首次 Nexus 安装需可信分发。
+
+快速打开 SVN 源码支持按索引名称、身份或路径定位；单工作区和唯一候选减少选择步骤。“复制源码对象分享链接”生成含显式工作区及精确对象身份的 vscode 链接，不含本机路径、正文或编辑令牌。接收端须先配置相同稳定工作区键和相应授权范围；链接不授予访问权限。
+
+ToolHost 的 ready 可声明 `cancel-index-v1`。SVN 重建索引在对象检查点响应协作式取消，回滚当前扫描事务；发布屏障后返回真实结果，初始化元数据可能已完成。窗口请求取消不等于进程已停止，旧 ToolHost 继续原任务并明确提示；没有新增自动 kill/写入重放。运行模式/数据目录切换在启动或写入期间拒绝，中断后的未知结果仍需核验。
+
+状态栏和 GuthonCodeTool 输出显示实际加载的 Nexus version/buildId；哈希只取插件公开代码与资源，后端 runtime buildId 是另一份证据。

@@ -161,8 +161,7 @@ Nexus 的“导入/粘贴 SVN checkout 配置”可选择 `.sh/.bat` 或粘贴 c
 或无法识别的业务分类会阻止旧范围格式生成。凭据不会进入地址配置、清单、日志或公开配置。
 
 仅在需要覆盖默认 checkout 根或调整非核心高级能力时，才在产品/项目配置中增加 `svn:` 块。公共用户名只在 `sync.yaml` 的
-`svn.username` 配置一次；密码由 Nexus 临时交给 SVN 系统凭据存储。内部 SVN 使用 HTTPS 自签证书，所有远程命令固定
-以非交互方式信任证书异常。Nexus 的多 working-copy SVN 模式固定支持“保存到谷神”，不再使用 `platform_save` capability 开关；
+`svn.username` 配置一次；密码由 Nexus 临时交给 SVN 系统凭据存储。内部 SVN 可使用 HTTPS 自签证书；默认只信任 `unknown-ca`，不放行过期、域名不匹配等异常，维护者可通过 `GUTHON_SVN_TRUSTED_CERT_FAILURES` 显式配置允许集合。Nexus 多 working-copy 模式默认启用 `platform_save`；设置 `svn.capabilities.platform_save: false` 可禁用该提交入口；
 保存仍需经过文件选择、内容哈希复核和远程最新状态检查；SVN 提交说明可选，留空可直接保存。
 
 Nexus 的“设置工作区 SVN 登录”读取 `sync.yaml` 中的公共用户名，只弹出一次密码输入框；密码不会进入 VS Code SecretStorage、
@@ -257,3 +256,23 @@ cp config/example/source-diagnosis.example.json "$GUTHON_HOME/var/diagnosis/case
 排查定义中的 `database` 指定默认数据库；某一步需要查询另一个数据库时，在该步骤增加同名 `database` 覆盖。数据库必须存在于数据源的 `databases` 白名单中，脚本不会执行 `USE`。
 
 执行器只接受单条 `SELECT`，使用绑定参数，每一步在对应数据库的新只读事务中执行。首个不满足 `continue_when` 的步骤停止，报告写入 `<toolHome>/var/docs/业务排查文档/<日期>/`。完整参数、数据库、原生 SQL 和查询结果保存在报告中；终端只输出状态、停止步骤、结论和报告路径。
+
+## 目标维护与凭据来源
+
+`setup` 同时创建空 `database-testing.yaml`，不绑定任何真实数据库。`database-target-list` 不读取密码，列出全部目标及选中依据；支持全局 `--workspace` 显式选择，未传时按 `--path` 解析。`database-target-configure` 的 JSON 可仅给已有 `targetId` 和新 `password`，其余连接字段沿用；目标顺序、引用及默认选择保持稳定。新增正式目标使用 `validationScope: full`，必须给出 `systemId/dataSourceId/allowedTables/tenantScope/evidenceRef`；已有正式目标更换连接身份也要提供新证据，不能复用旧探测结果。
+
+连接可声明 `credentialRef`、`passwordEnv`、`passwordFile`，后两项为显式本机来源，文件路径须为绝对路径。keyring 引用存在时优先使用；仅在配置了 fallback 时才允许回退。`datasource.yaml` 的源码同步链路复用相同解析器，已有 password 字段继续兼容。不要把密码输入 shell 参数；configure JSON 从 stdin 输入。配置保存串行加锁且原子替换；无 PyYAML 的依赖最小运行模式保存 JSON（合法 YAML 子集），加载器明确支持该格式，不会误送迷你 YAML 解析器。
+
+目标删除先用 `database-target-remove --target-id <id> --check` 预览，正式删除要求 `--confirmation <id>`。只移除失去引用的连接、身份和凭据；如果凭据清理失败，错误明确区分“配置已删除”和“密码未清理”。切换密码来源后旧 keyring 项不会自动清理，需本地核查。DBX connectionId 不等于内置 connectionRef；resolve 会预告后续内置 probe/query 不可用，不能把 UUID 当作端点配置。
+
+快速单连接排查使用 `database-diagnose`，无 SQL 时只探测，`--stdin`、`--sql`、`--sql @file.sql` 和 `--sql-file` 按互斥入口使用。查询只允许单条 SELECT/保守 CTE，跨库与未知函数/类型被拒绝；不支持 dollar-quote、Oracle 替代引号、引用标识符、嵌套 WITH 和反斜线字面量。legacy `diagnose` 专用于案例文件，报告默认参数脱敏。测试工件的 `validate-config/resolve-target/validate-plan/evaluate/init-plan` 已注册为 `database-test-artifacts` 子命令；init-plan 输出是必须补全源码摘要与验收值的草稿，不能视为验证已通过。
+
+正式查询计划经 validate-plan 后可用统一 CLI 的 `database-test-artifacts run-readonly <plan> --config <private-config> --out-dir <new-private-run>` 执行内置只读目标；结果只写新私有目录，前置条件失败或截断不继续检查。DBX-only 计划使用交接与 capture 导入。平台版本和触发证据须由原流程提供；需要清理的用例不能交由只读执行器关闭。
+
+查询可用 `--format xlsx --output <private-path>.xlsx` 导出不含公式的结果页和证据页。XLSX 要求实际查询结果、明确完整性和工具仓库外的文件，不将 DBX handoff/probe 伪装为空结果。长整数以文本保留；截断提示与详情留在证据页。格式不支持的 XML 字符明确拒绝，不覆盖已有文件；查询列名重复时需先使用不同 SQL 别名，避免字典转换丢失值。
+
+Nexus 已内置发行公钥 `data/release-trust.json`，普通使用者无配置步骤。维护者可在 globalStorage 增加受信公钥，不能降低内置强制验签或覆盖同 ID 密钥；私钥不进入本仓库。CI 私钥 Secret/key ID Variable 须与内置公钥匹配；发行失败不会自动放宽签名策略。
+
+MySQL/PostgreSQL 的 `database-query-readonly/database-diagnose --explain` 只取校验后 SELECT 的有界估计计划，不执行 ANALYZE 或业务查询，返回 queryExecuted=false。Oracle因EXPLAIN写计划表明确拒绝。导出器比较规范化内容，只覆写有变化的table/view对象，导出摘要仍按本次读取对象计数，不等于改变文件数。
+
+0.3.0 Nexus向导可明确选择排查或正式验证；full目标须提供系统/数据源、表范围、租户字段与证据、真实身份证据。重复target ID在向导中预检并明确确认更新；后端仍进行最终校验。模板 `--case-out <private-case.json> --datasource <name> --source-evidence <ref>` 只生成草稿不连接，必须审阅业务条件后显式draft=false再执行。

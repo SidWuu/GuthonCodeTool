@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shlex
 import textwrap
@@ -12,6 +11,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.parse import urlsplit
+
+from common.persistence import atomic_text
 
 from .nexus.manifest import (
     SAFE_ENTRY_ID,
@@ -319,16 +320,17 @@ def _read_scope_config_payload(text: str) -> object:
             return json.loads(stripped)
         except json.JSONDecodeError as error:
             raise SystemExit(f"Invalid SVN scope configuration JSON: {error}") from error
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    if lines and all(_simple_scope_entry(line) for line in lines):
+        return {"entries": [_simple_scope_entry(line) for line in lines]}
     try:
         import yaml  # type: ignore
 
         return yaml.safe_load(text) or {}
     except ModuleNotFoundError:
         pass
-    except Exception:
-        # A plain text file with one ``<url> <localSubdir>`` entry per line is
-        # intentionally accepted when it is not valid YAML.
-        pass
+    except Exception as error:
+        raise SystemExit(f"Invalid SVN scope configuration YAML: {error}") from error
 
     return _parse_scope_config_lines(text)
 
@@ -650,13 +652,7 @@ def write_scope_config(path: Path, result: ImportResult, replace: bool = False) 
                 f"Review and rerun with --replace: {path}"
             )
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        temporary.write_text(rendered, encoding="utf-8")
-        temporary.replace(path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+    atomic_text(path, rendered)
     return {"ok": True, "written": True, "output": str(path)}
 
 
@@ -1244,13 +1240,7 @@ def _merge_compact_scope_config(path: Path, workspace_key: str, result: ImportRe
             "url": root,
             "scope": scopes,
         }
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        temporary.write_text(rendered, encoding="utf-8")
-        temporary.replace(path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+    atomic_text(path, rendered)
     return {
         "ok": True,
         "written": True,
@@ -1353,13 +1343,7 @@ def merge_scope_config(
             lines[scope_end:scope_end] = _render_scope_entries(additions, scope_indent + 2)
 
     rendered = "\n".join(lines) + "\n"
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        temporary.write_text(rendered, encoding="utf-8")
-        temporary.replace(path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+    atomic_text(path, rendered)
     return {
         "ok": True,
         "written": True,
@@ -1410,13 +1394,7 @@ def write_manifest(path: Path, result: ImportResult, replace: bool = False) -> d
                 f"Review the checkout script and rerun with --replace: {path}"
             )
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        temporary.write_text(rendered, encoding="utf-8")
-        temporary.replace(path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+    atomic_text(path, rendered)
     return _summary(path, result, previous, written=True)
 
 

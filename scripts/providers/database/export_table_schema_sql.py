@@ -6,28 +6,16 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import re
 import sys
 from pathlib import Path
 
 from common import gusen_hub
+from providers.database._export_common import normalize_values as normalize_table_ids
 
 
-ROOT = gusen_hub.ROOT
-DEFAULT_OUTPUT_DIR = ROOT / "var" / "workspace"
 
 
-def sanitize_name(value):
-    if value is None or str(value).strip() == "":
-        return "空"
-    text = re.sub(r"[\\/:*?\"<>|]+", "_", str(value)).strip()
-    text = re.sub(r"\s+", "_", text)
-    return text[:120] or "空"
-
-
-def write_json(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+from providers.database._export_common import sanitize_name, write_json, drop_empty, append_summary
 
 
 def read_json(path):
@@ -54,14 +42,6 @@ def camelize_keys(value):
         return [camelize_keys(item) for item in value]
     if isinstance(value, dict):
         return {to_camel_key(key): camelize_keys(item) for key, item in value.items()}
-    return value
-
-
-def drop_empty(value):
-    if isinstance(value, list):
-        return [drop_empty(item) for item in value]
-    if isinstance(value, dict):
-        return {key: drop_empty(item) for key, item in value.items() if item not in (None, "")}
     return value
 
 
@@ -115,15 +95,6 @@ def normalize_data_source_ids(value):
     return [str(item).strip() for item in items if str(item).strip()]
 
 
-def normalize_table_ids(value):
-    if not value:
-        return []
-    if isinstance(value, str):
-        items = value.split(",")
-    else:
-        items = value
-    return [str(item).strip() for item in items if str(item).strip()]
-
 
 def fetch_rows(conn, table_name, data_source_ids, table_ids=None):
     ids = normalize_data_source_ids(data_source_ids)
@@ -140,8 +111,8 @@ def fetch_rows(conn, table_name, data_source_ids, table_ids=None):
         return list(cur.fetchall())
 
 
-def export_table_schema(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, table_ids=None, exported_at=None):
-    output_dir = Path(output_dir)
+def export_table_schema(conn, output_dir=None, data_source_ids=None, table_ids=None, exported_at=None):
+    output_dir = Path(output_dir) if output_dir is not None else resolve_output_dir(None)
     data_source_ids = normalize_data_source_ids(data_source_ids)
     if not data_source_ids:
         raise ValueError("data_source_ids is required")
@@ -208,9 +179,7 @@ def export_table_schema(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=Non
         "exported_table_name": ",".join(name for name in exported_names if name),
     }
     summary_file = output_dir / "export_summary.json"
-    summaries = read_json(summary_file) if summary_file.exists() else []
-    summaries.append(summary)
-    write_json(summary_file, summaries)
+    append_summary(summary_file, summary)
     return summary
 
 
@@ -238,7 +207,7 @@ def main(argv=None):
     config = gusen_hub.load_config()
     if args.workspace:
         gusen_hub.set_workspace(args.workspace)
-    output_dir = resolve_output_dir(DEFAULT_OUTPUT_DIR, args.output_dir, config)
+    output_dir = resolve_output_dir(None, args.output_dir, config)
     datasource_name, datasource = gusen_hub.resolve_datasource(config, args.datasource)
     try:
         with gusen_hub.db_connect(datasource) as conn:

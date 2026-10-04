@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import Path
 from collections import Counter
 
+from common.inheritance import mask_noncode
 from common.page_projection import (
     PAGE_FIELD_PARSER_VERSION, PAGE_FIELD_RELATION_PARSER_VERSION, PAGE_NODE_PARSER_VERSION,
     extract_page_field_entities, extract_page_field_relations, extract_page_nodes,
@@ -41,8 +43,8 @@ STRING_BINDING = re.compile(
 )
 CONDITION = re.compile(r"(?i)(?:^|\s)(?:#?if)\s*\((?P<value>.+)")
 ASSIGNMENT = re.compile(
-    r"^(?:#set\s*\(\s*)?\$?(?P<subject>[A-Za-z_][A-Za-z0-9_.$\[\]'-]*)"
-    r"\s*(?<![=!<>])=(?!=)\s*(?P<value>.+?)(?:\)\s*)?;?$"
+    r"^\$?(?P<subject>[A-Za-z_][A-Za-z0-9_.$\[\]'-]*)"
+    r"\s*(?<![=!<>])=(?!=)\s*(?P<value>.+?);?$"
 )
 ERROR_MARKER = re.compile(r"(?i)\b(?:throw|error|exception|fail(?:ed|ure)?)\b|失败|异常|错误")
 RETURN_MARKER = re.compile(r"(?i)^\s*(?:#return|return)\b")
@@ -225,8 +227,15 @@ def setup_schema(conn) -> None:
         "ON gusen_page_relation(target_key, relation_type, source_record_id)"
     )
 
+    from common import source_text_search
+    source_text_search.setup(conn)
+    from common import page_field_search
+    page_field_search.setup(conn)
+
 
 def clear_source_details(conn, source_record_id: int) -> None:
+    from common import source_text_search
+    source_text_search.clear(conn, source_record_id)
     conn.execute("DELETE FROM gusen_page_field_relation WHERE source_record_id=?", (source_record_id,))
     conn.execute("DELETE FROM gusen_page_field WHERE source_record_id=?", (source_record_id,))
     conn.execute("DELETE FROM gusen_page_node WHERE source_record_id=?", (source_record_id,))
@@ -238,6 +247,8 @@ def clear_source_details(conn, source_record_id: int) -> None:
 
 
 def clear_all_details(conn, *, preserve_external_bill_routes: bool = False) -> None:
+    from common import source_text_search
+    source_text_search.clear(conn)
     for table in (
         "gusen_page_field_relation",
         "gusen_page_field",
@@ -343,19 +354,36 @@ def _insert_fragment(conn, source_record_id: int, script: dict) -> int:
     return int(row["fragment_id"])
 
 
+def _condition_expression(raw: str, code: str, match) -> str:
+    start = match.start("value")
+    depth = 1
+    for index in range(start, len(code)):
+        if code[index] == "(":
+            depth += 1
+        elif code[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return raw[start:index].strip()
+    return raw[start:].rstrip("{ ").strip()
+
+
 def _logic_facts(content: str, label: str) -> list[dict]:
     lines = content.splitlines()
     facts = []
-    stack: list[int] = []
-    for line_no, raw in enumerate(lines, 1):
+    stack: list[int | None] = []
+    for line_no, (raw, masked) in enumerate(zip(lines, mask_noncode(content).splitlines()), 1):
         line = raw.strip()
+        code = masked.strip()
         if not line:
             continue
-        if line.startswith("#end") or line.startswith("}"):
+        leading_closers = len(code) - len(code.lstrip("}"))
+        for _ in range(leading_closers + int(code.startswith("#end"))):
             if stack:
-                facts[stack.pop()]["line_end"] = line_no
-        scope = "/".join(str(facts[index]["line_start"]) for index in stack)
-        match = CONDITION.search(line)
+                closed = stack.pop()
+                if closed is not None:
+                    facts[closed]["line_end"] = line_no
+        scope = "/".join(str(facts[index]["line_start"]) for index in stack if index is not None)
+        match = CONDITION.search(code)
         if match and len(facts) < MAX_FACTS_PER_FRAGMENT:
             index = len(facts)
             facts.append(
@@ -363,19 +391,25 @@ def _logic_facts(content: str, label: str) -> list[dict]:
                     "fact_kind": "CONDITION",
                     "subject": "if",
                     "operator": "EVALUATE",
-                    "value_text": match.group("value").rstrip("{ ").strip(),
+                    "value_text": _condition_expression(line, code, match),
                     "scope_path": scope,
-                    "parent_index": stack[-1] if stack else None,
+                    "parent_index": next((item for item in reversed(stack) if item is not None), None),
                     "line_start": line_no,
                     "line_end": line_no,
                     "confidence": "MEDIUM",
                     "detail": line,
                 }
             )
-            if "{" in line or line.startswith("#if"):
+            if "{" in code or code.startswith("#if"):
                 stack.append(index)
-                scope = "/".join(str(facts[item]["line_start"]) for item in stack)
-        assignment = ASSIGNMENT.match(line)
+                scope = "/".join(str(facts[item]["line_start"]) for item in stack if item is not None)
+        condition_open = bool(match and ("{" in code or code.startswith("#if")))
+        for _ in range(max(0, code.count("{") - int(condition_open))):
+            stack.append(None)
+        assignment_line = line
+        if code.startswith("#set") and line.endswith(")"):
+            assignment_line = line[line.find("(") + 1:-1].strip()
+        assignment = ASSIGNMENT.match(assignment_line) if code else None
         if assignment and len(facts) < MAX_FACTS_PER_FRAGMENT:
             facts.append(
                 {
@@ -384,14 +418,14 @@ def _logic_facts(content: str, label: str) -> list[dict]:
                     "operator": "SET",
                     "value_text": assignment.group("value").strip(),
                     "scope_path": scope,
-                    "parent_index": stack[-1] if stack else None,
+                    "parent_index": next((item for item in reversed(stack) if item is not None), None),
                     "line_start": line_no,
                     "line_end": line_no,
                     "confidence": "MEDIUM",
                     "detail": line,
                 }
             )
-        if ERROR_MARKER.search(line) and len(facts) < MAX_FACTS_PER_FRAGMENT:
+        if ERROR_MARKER.search(line) and code and len(facts) < MAX_FACTS_PER_FRAGMENT:
             facts.append(
                 {
                     "fact_kind": "ERROR",
@@ -399,14 +433,14 @@ def _logic_facts(content: str, label: str) -> list[dict]:
                     "operator": "RAISE",
                     "value_text": line,
                     "scope_path": scope,
-                    "parent_index": stack[-1] if stack else None,
+                    "parent_index": next((item for item in reversed(stack) if item is not None), None),
                     "line_start": line_no,
                     "line_end": line_no,
                     "confidence": "HIGH",
                     "detail": line,
                 }
             )
-        if RETURN_MARKER.search(line) and len(facts) < MAX_FACTS_PER_FRAGMENT:
+        if RETURN_MARKER.search(code) and len(facts) < MAX_FACTS_PER_FRAGMENT:
             facts.append(
                 {
                     "fact_kind": "RETURN",
@@ -414,20 +448,23 @@ def _logic_facts(content: str, label: str) -> list[dict]:
                     "operator": "RETURN",
                     "value_text": line,
                     "scope_path": scope,
-                    "parent_index": stack[-1] if stack else None,
+                    "parent_index": next((item for item in reversed(stack) if item is not None), None),
                     "line_start": line_no,
                     "line_end": line_no,
                     "confidence": "HIGH",
                     "detail": line,
                 }
             )
-        closing = line.count("}") - int(line.startswith("}"))
+        closing = code.count("}") - leading_closers
         for _ in range(max(0, closing)):
             if stack:
-                facts[stack.pop()]["line_end"] = line_no
+                closed = stack.pop()
+                if closed is not None:
+                    facts[closed]["line_end"] = line_no
     final_line = max(1, len(lines))
     for index in stack:
-        facts[index]["line_end"] = final_line
+        if index is not None:
+            facts[index]["line_end"] = final_line
     return facts
 
 
@@ -863,6 +900,8 @@ def index_source_details(
         fragments[pointer] = fragment_id
         label = str(script.get("label") or pointer or source.get("source_name") or source.get("source_id") or "")
         content = str(script.get("content") or "")
+        from common import source_text_search
+        source_text_search.index_body(conn, source_record_id, pointer, content, source.get("source_hash") or "")
         if str(script.get("script_type") or "").lower() == "fields":
             continue
         facts = _insert_logic_facts(conn, source_record_id, fragment_id, content, label)
@@ -878,12 +917,15 @@ def index_source_details(
     return {"fragments": fragments}
 
 
-def _fact_rows(conn, scope_id: str, *, source_id: str = "", keyword: str = "", limit: int, offset: int):
+def _fact_rows(conn, scope_id: str, *, source_id: str = "", keyword: str = "", limit: int, offset: int, source_record_id=None):
     clauses = ["s.scope_id=?"]
     params: list[object] = [scope_id]
     if source_id:
         clauses.append("s.source_id=?")
         params.append(source_id)
+    if source_record_id is not None:
+        clauses.append("s.record_id=?")
+        params.append(source_record_id)
     where = " AND ".join(clauses)
     keyword_filter = ""
     if keyword:
@@ -941,11 +983,11 @@ def _compact_logic_fact(value) -> dict:
     }
 
 
-def _source_locator(conn, source_record_id: int, source_fragment_id: int | None = None) -> dict:
+def _source_locator(conn, source_record_id: int, source_fragment_id: int | None = None, source_root=None) -> dict:
     row = conn.execute(
         """
-        SELECT source_table, source_id, source_alias_id, fun_id, source_name,
-               source_path, provider, system_id, data_source_id, status
+        SELECT record_id AS source_record_id, working_copy_id, source_namespace, source_table, source_id, source_alias_id, fun_id, source_name,
+               source_path, local_path, provider, system_id, data_source_id, status
         FROM gusen_source_record WHERE record_id=?
         """,
         (source_record_id,),
@@ -954,11 +996,20 @@ def _source_locator(conn, source_record_id: int, source_fragment_id: int | None 
         key: row[key]
         for key in (
             "source_table", "source_id", "source_alias_id", "fun_id", "source_name",
-            "source_path", "system_id", "data_source_id",
+            "source_path", "system_id", "data_source_id", "source_namespace", "source_record_id", "working_copy_id",
         )
         if row and row[key] not in (None, "")
     }
+    if row and row["local_path"]:
+        path = Path(row["local_path"])
+        locator["localPath"] = str(path)
+        if path.is_absolute():
+            locator["absolutePath"] = str(path)
+        elif source_root is not None:
+            locator["absolutePath"] = str((Path(source_root) / path).resolve())
     if source_fragment_id:
+        count = conn.execute("SELECT COUNT(*) FROM gusen_logic_fact WHERE source_fragment_id=?", (source_fragment_id,)).fetchone()[0]
+        locator["factLimitReached"] = count >= MAX_FACTS_PER_FRAGMENT
         fragment = conn.execute(
             """
             SELECT fragment_type, json_pointer, label, language, coordinate_kind, line_count
@@ -984,6 +1035,8 @@ def query_facts(
     source_id: str = "",
     limit: int = 3,
     offset: int = 0,
+    source_record_id=None,
+    source_root=None,
 ) -> dict:
     limit = max(1, min(int(limit), 50))
     offset = max(0, int(offset))
@@ -996,15 +1049,16 @@ def query_facts(
             FROM gusen_data_access d
             JOIN gusen_source_record s ON s.record_id=d.source_record_id
             WHERE s.scope_id=? AND UPPER(d.table_name)=UPPER(?)
+            AND (? IS NULL OR s.record_id=?)
             ORDER BY d.operation, s.source_alias_id, s.fun_id, d.line_no
             LIMIT ? OFFSET ?
             """,
-            (scope_id, table_name, limit + 1, offset),
+            (scope_id, table_name, source_record_id, source_record_id, limit + 1, offset),
         ).fetchall()
     elif source_id:
-        rows = _fact_rows(conn, scope_id, source_id=source_id, limit=limit + 1, offset=offset)
+        rows = _fact_rows(conn, scope_id, source_id=source_id, limit=limit + 1, offset=offset, source_record_id=source_record_id)
     elif normalized_keyword:
-        rows = _fact_rows(conn, scope_id, keyword=normalized_keyword, limit=limit + 1, offset=offset)
+        rows = _fact_rows(conn, scope_id, keyword=normalized_keyword, limit=limit + 1, offset=offset, source_record_id=source_record_id)
     else:
         raise ValueError("facts query requires keyword, table_name, or source_id")
     truncated = len(rows) > limit
@@ -1015,7 +1069,7 @@ def query_facts(
             source = _source_locator(
                 conn,
                 int(value["source_record_id"]),
-                value.get("source_fragment_id"),
+                value.get("source_fragment_id"), source_root=source_root,
             )
             if row["fact_type"] == "logic":
                 compact = _compact_logic_fact(value)
@@ -1044,6 +1098,7 @@ def query_facts(
 
 def _incoming_chain(conn, scope_id: str, alias: str, fun_id: str, depth: int) -> tuple[list[dict], bool]:
     chain = []
+    truncated = False
     visited = {(alias, fun_id)}
     current = [(alias, fun_id)]
     for level in range(1, max(0, min(depth, 5)) + 1):
@@ -1057,11 +1112,12 @@ def _incoming_chain(conn, scope_id: str, alias: str, fun_id: str, depth: int) ->
                 FROM gusen_invoke_call_detail
                 WHERE scope_id=? AND target_alias_id=? AND target_fun_id=?
                 ORDER BY source_table, source_alias_id, fun_id, line_no
-                LIMIT 3
+                LIMIT 4
                 """,
                 (scope_id, target_alias, target_fun),
             ).fetchall()
-            for row in rows:
+            truncated = truncated or len(rows) > 3
+            for row in rows[:3]:
                 identity = (row["source_alias_id"], row["fun_id"])
                 if identity in visited:
                     continue
@@ -1096,14 +1152,14 @@ def _incoming_chain(conn, scope_id: str, alias: str, fun_id: str, depth: int) ->
                     )
                     caller["source_path"] = locator.get("source_path") or ""
                     caller["fragment"] = locator.get("fragment") or {}
-                chain.append(caller)
-                following.append(identity)
                 if len(chain) >= 6:
                     return chain, True
+                chain.append(caller)
+                following.append(identity)
         current = following
         if not current:
             break
-    return chain, False
+    return chain, truncated
 
 
 def explain_table(
@@ -1231,6 +1287,7 @@ def explain_table(
                 "totalFacts": total_facts,
                 "omittedFacts": max(0, total_facts - len(fact_payload)),
                 "factsTruncated": total_facts > len(fact_payload),
+                "factLimitReached": total_facts >= MAX_FACTS_PER_FRAGMENT,
                 "callers": callers,
                 "callersTruncated": callers_truncated,
             }

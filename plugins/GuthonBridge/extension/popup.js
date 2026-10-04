@@ -11,7 +11,6 @@ const pasteFieldsBtn = document.getElementById("pasteFieldsBtn");
 const locateNexusBtn = document.getElementById("locateNexusBtn");
 const forceRefreshBtn = document.getElementById("forceRefreshBtn");
 const closeBtn = document.getElementById("closeBtn");
-const OUTPUT_DIR_STORAGE_KEY = "guthonBridgeOutputDir";
 
 function setStatus(message) {
   statusEl.textContent = message;
@@ -58,6 +57,8 @@ function isProcedureUrl(url) {
 }
 
 function setPopupMode(mode) {
+  pullHubBtn.dataset.mode = mode;
+  forceRefreshBtn.dataset.mode = mode;
   const isModule = mode === "module";
   const isTableSchema = mode === "table-schema";
   const isBillType = mode === "billtype";
@@ -80,23 +81,14 @@ function setPopupMode(mode) {
   pullHubBtn.parentElement.classList.toggle("full-width", !canPullSource);
 }
 
-async function persistOutputDir(outputDir) {
-  localStorage.setItem(OUTPUT_DIR_STORAGE_KEY, outputDir);
-  await chrome.storage?.local?.set?.({ [OUTPUT_DIR_STORAGE_KEY]: outputDir });
-}
-
-async function persistCurrentOutputDir() {
-  const outputDir = outputDirEl.value.trim();
-  if (outputDir) {
-    await persistOutputDir(outputDir);
-  }
-}
-
 function isAbsolutePath(value) {
   return /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(value);
 }
 
 async function getOutputDir() {
+  const status = await chrome.runtime.sendMessage({ type: "bridge-health" });
+  if (!status?.ok) throw new Error(status?.message || "Bridge 尚未配对");
+  outputDirEl.value = status.exportRoot;
   const outputDir = outputDirEl.value.trim();
   if (!outputDir) {
     throw new Error("请先填写保存目录");
@@ -104,7 +96,6 @@ async function getOutputDir() {
   if (!isAbsolutePath(outputDir)) {
     throw new Error("保存目录必须是本机绝对路径");
   }
-  await persistOutputDir(outputDir);
   return outputDir;
 }
 
@@ -120,12 +111,13 @@ async function getActiveTab() {
 }
 
 async function sendWorkspaceRequest(type, payload) {
+  const dispatch = (message) => GuthonBridgeTasks.run(message.type,message.payload);
   const tab = await getActiveTab();
   const pageOrigin = tab.url ? new URL(tab.url).origin : "";
   const request = { pageOrigin, ...payload };
   const cachedWorkspaceKey = await GuthonBridgeWorkspace.storedWorkspaceKey(tab.url || pageOrigin);
   if (cachedWorkspaceKey) {
-    const cachedResult = await chrome.runtime.sendMessage({
+    const cachedResult = await dispatch({
       type,
       payload: { ...request, workspaceKey: cachedWorkspaceKey }
     });
@@ -133,7 +125,7 @@ async function sendWorkspaceRequest(type, payload) {
       return cachedResult;
     }
   }
-  const result = await chrome.runtime.sendMessage({ type, payload: request });
+  const result = await dispatch({ type, payload: request });
   if (!result?.workspaceSelectionRequired) {
     return result;
   }
@@ -141,7 +133,7 @@ async function sendWorkspaceRequest(type, payload) {
     throw new Error(result.message || "页面身份未匹配到工作区");
   }
   const workspaceKey = await GuthonBridgeWorkspace.select(result.candidates, tab.url || pageOrigin);
-  return chrome.runtime.sendMessage({
+  return dispatch({
     type,
     payload: { ...request, workspaceKey }
   });
@@ -303,7 +295,10 @@ async function runCommand(command) {
   }
 
   if (command === "pull") {
-    const objectKey = buildObjectKey(target);
+    const savedTarget = { ...target, ...result.data,
+      procedureKeyword: result.data.procedureName || target.procedureKeyword,
+      funId: result.data.funId || target.funId };
+    const objectKey = buildObjectKey(savedTarget);
     const saveResult = await chrome.runtime.sendMessage({
       type: "save-pull-result",
       payload: {
@@ -317,12 +312,13 @@ async function runCommand(command) {
           pageId: result.data.pageId || "",
           pageVersion: result.data.pageVersion || "",
           procedureName: result.data.procedureName || procedureEl.value.trim(),
-          funId: funIdEl.value.trim(),
+          funId: savedTarget.funId,
           versionMac: result.data.versionMac || "",
           flag: result.data.flag ?? 0
         }
       }
     });
+    if (!saveResult?.ok) throw new Error(saveResult?.message || "保存页面源码失败");
     return { ok: true, remote: result.data, local: saveResult };
   }
 
@@ -412,6 +408,15 @@ async function runHubPull(force = false, pullAllSystemScripts = false) {
   if (payload.sourceType === "procedure" && ((!payload.sourceId && !payload.alias) || !payload.funId)) {
     throw new Error("当前页面没有识别到过程函数源码表查询条件");
   }
+  if (force) {
+    const workspace = await resolveWorkspaceSummary(await getActiveTab(), target);
+    if (!workspace?.workspaceKey) throw new Error("强制刷新前必须明确选择工作区");
+    const key = workspace.workspaceKey;
+    const typed = window.prompt(`强制刷新将备份并覆盖工作副本。请输入工作区 ${key} 确认：`, "");
+    if (typed !== key) throw new Error("已取消强制刷新");
+    payload.workspaceKey = key;
+    payload.confirmation = key;
+  }
   return sendWorkspaceRequest("pull-hub-source", payload);
 }
 
@@ -460,10 +465,10 @@ pullHubBtn.addEventListener("click", async () => {
     if (!tab.url || !isSupportedGuthonUrl(tab.url)) {
       throw new Error("请先打开谷神开发平台页面");
     }
-    const isTableSchema = pullHubBtn.textContent.includes("表结构");
-    const isBillType = pullHubBtn.textContent.includes("单据类型");
-    const isViews = pullHubBtn.textContent.includes("视图源码");
-    const isSystemScripts = pullHubBtn.textContent.includes("选中脚本");
+    const isTableSchema = pullHubBtn.dataset.mode === "table-schema";
+    const isBillType = pullHubBtn.dataset.mode === "billtype";
+    const isViews = pullHubBtn.dataset.mode === "views";
+    const isSystemScripts = pullHubBtn.dataset.mode === "system-scripts";
     setStatus(`${isSystemScripts ? "正在拉取选中系统脚本" : isViews ? "正在拉取视图源码" : isBillType ? "正在拉取单据类型" : isTableSchema ? "正在拉取表结构" : "正在从源码表拉取"}...\n${tab.url}`);
     const result = await runHubPull();
     if (!result?.ok) {
@@ -487,10 +492,10 @@ pullHubBtn.addEventListener("click", async () => {
     }
     setStatus([result.message || "源码表拉取成功", `工作副本：${result.workCopyPath}`].join("\n"));
   } catch (error) {
-    const isTableSchema = pullHubBtn.textContent.includes("表结构");
-    const isBillType = pullHubBtn.textContent.includes("单据类型");
-    const isViews = pullHubBtn.textContent.includes("视图源码");
-    const isSystemScripts = pullHubBtn.textContent.includes("选中脚本");
+    const isTableSchema = pullHubBtn.dataset.mode === "table-schema";
+    const isBillType = pullHubBtn.dataset.mode === "billtype";
+    const isViews = pullHubBtn.dataset.mode === "views";
+    const isSystemScripts = pullHubBtn.dataset.mode === "system-scripts";
     setStatus(`${isSystemScripts ? "系统脚本拉取失败" : isViews ? "视图源码拉取失败" : isBillType ? "单据类型拉取失败" : isTableSchema ? "表结构拉取失败" : "源码表拉取失败"}\n${error.message}`);
   }
 });
@@ -526,7 +531,7 @@ locateNexusBtn.addEventListener("click", async () => {
 
 forceRefreshBtn.addEventListener("click", async () => {
   try {
-    if (forceRefreshBtn.textContent.includes("全部脚本")) {
+    if (forceRefreshBtn.dataset.mode === "system-scripts") {
       setStatus("正在拉取当前应用系统全部脚本...");
       const result = await runHubPull(false, true);
       if (!result?.ok) {
@@ -542,13 +547,66 @@ forceRefreshBtn.addEventListener("click", async () => {
     }
     setStatus([result.message || "强制刷新成功", `工作副本：${result.workCopyPath}`].join("\n"));
   } catch (error) {
-    const action = forceRefreshBtn.textContent.includes("全部脚本") ? "系统脚本拉取失败" : "强制刷新失败";
+    const action = forceRefreshBtn.dataset.mode === "system-scripts" ? "系统脚本拉取失败" : "强制刷新失败";
     setStatus(`${action}\n${error.message}`);
   }
 });
 
-outputDirEl.addEventListener("change", persistCurrentOutputDir);
-outputDirEl.addEventListener("blur", persistCurrentOutputDir);
+document.getElementById("resumeBridgeJobsBtn").addEventListener("click", async () => {
+  setStatus("正在查询原任务；不会重新执行写入...");
+  const results = await GuthonBridgeTasks.resume(undefined,(job)=>setStatus(`任务 ${job.workspaceKey}：${job.state}`));
+  setStatus(results.length ? results.map((result)=>result?.ok===false ? result.message : "原任务已完成").join("\n") : "当前页面没有待恢复任务");
+});
+
+async function refreshRecentPulls() {
+  const response = await chrome.runtime.sendMessage({type:'bridge-history-list'});
+  if (!response?.ok) throw new Error(response?.message || '历史读取失败');
+  const list = document.getElementById('recentPulls');
+  list.replaceChildren();
+  for (const entry of response.records || []) {
+    const item = document.createElement('div');
+    const identity = entry.payload?.sourceId || entry.payload?.alias || entry.payload?.systemId || entry.payload?.dataSourceId
+      || entry.payload?.dataSourceIds?.join(', ') || '导出对象';
+    const description = `${entry.workspaceKey} · ${identity}${entry.payload?.funId ? '.'+entry.payload.funId : ''}`;
+    const button = document.createElement('button');
+    button.type = 'button'; button.textContent = `再次拉取：${description}`;
+    button.addEventListener('click', async () => {
+      try {
+        const tab = await getActiveTab();
+        const request = GuthonBridgeTaskHistory.replay(entry,new URL(tab.url).origin);
+        if (!window.confirm(`再次拉取 ${description}？\n按当前工作区规则保护本地修改，不沿用旧的强制覆盖确认。`)) return;
+        button.disabled = true;
+        setStatus('正在再次拉取历史对象...');
+        const result = await GuthonBridgeTasks.run(request.type,request.payload);
+        setStatus(result?.ok ? '历史对象再次拉取完成' : result?.message || '再次拉取失败，请先核验状态');
+      } catch (error) {setStatus(error.message);}
+      finally {button.disabled=false;}
+    });
+    item.appendChild(button);
+    if (entry.outputDir) {
+      const folder=document.createElement('p');folder.textContent=`上次导出目录：${entry.outputDir}`;item.appendChild(folder);
+    }
+    list.appendChild(item);
+  }
+  if (!(response.records || []).length) list.textContent='此平台暂无最近成功拉取记录';
+}
+document.getElementById('refreshRecentPullsBtn').addEventListener('click', () => {
+  refreshRecentPulls().catch(error=>setStatus(error.message));
+});
+
+document.getElementById("pairBridgeBtn").addEventListener("click", async () => {
+  try {
+    const token = document.getElementById("bridgeToken").value.trim();
+    const port = Number(document.getElementById("bridgePort").value);
+    if (!/^[a-f0-9]{64}$/.test(token)) throw new Error("请粘贴 Nexus 复制的完整配对令牌");
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("端口必须在 1 到 65535 之间");
+    await chrome.storage.local.set({ guthonBridgeToken: token, guthonBridgePort: port });
+    const result = await chrome.runtime.sendMessage({ type: "bridge-health" });
+    if (!result?.ok) throw new Error(result?.message || "连接失败");
+    outputDirEl.value = result.exportRoot;
+    setStatus("Bridge 配对成功");
+  } catch (error) { setStatus(error.message); }
+});
 closeBtn.addEventListener("click", () => window.close());
 
 async function initializePopup() {
@@ -558,9 +616,11 @@ async function initializePopup() {
   pasteFieldsBtn.disabled = true;
   forceRefreshBtn.disabled = true;
   locateNexusBtn.hidden = true;
-  const stored = await chrome.storage?.local?.get?.(OUTPUT_DIR_STORAGE_KEY);
-  outputDirEl.value =
-    stored?.[OUTPUT_DIR_STORAGE_KEY] || localStorage.getItem(OUTPUT_DIR_STORAGE_KEY) || "";
+  const settings = await chrome.storage.local.get(["guthonBridgeToken", "guthonBridgePort"]);
+  document.getElementById("bridgeToken").value = settings.guthonBridgeToken || "";
+  document.getElementById("bridgePort").value = settings.guthonBridgePort || 17361;
+  const bridgeStatus = await chrome.runtime.sendMessage({ type: "bridge-health" });
+  if (bridgeStatus?.ok) outputDirEl.value = bridgeStatus.exportRoot;
   const tab = await getActiveTab();
   setPopupMode("procedure");
   setStatus(isProcedureUrl(tab.url) ? "正在识别当前过程函数..." : "正在识别当前谷神对象...");

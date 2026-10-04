@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Guthon Bridge",
-  "version": "0.2.8",
+  "version": "0.3.0",
   "description": "谷神低代码平台开发增强辅助工具",
   "permissions": [
     "activeTab",
@@ -10,9 +10,9 @@
     "tabs"
   ],
   "host_permissions": [
-    "http://*/*",
-    "https://*/*",
-    "http://127.0.0.1:17361/*"
+    "http://*/guthon/*",
+    "https://*/guthon/*",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -36,8 +36,8 @@
   "content_scripts": [
     {
       "matches": [
-        "http://*/*",
-        "https://*/*"
+        "http://*/guthon/*",
+        "https://*/guthon/*"
       ],
       "css": [
         "bridge.css"
@@ -46,6 +46,7 @@
         "host-config.js",
         "nexus-locator.js",
         "workspace-selection.js",
+        "task-client.js",
         "content.js"
       ],
       "run_at": "document_end"
@@ -53,10 +54,14 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["fields-mover-core.js", "page-bridge.js"],
+      "resources": [
+        "host-config.js",
+        "fields-mover-core.js",
+        "page-bridge.js"
+      ],
       "matches": [
-        "http://*/*",
-        "https://*/*"
+        "http://*/guthon/*",
+        "https://*/guthon/*"
       ]
     }
   ]

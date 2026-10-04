@@ -1,31 +1,25 @@
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 
-const READ_COMMANDS = new Set([
-  'version', 'workspaces', 'workspace-resolve', 'workspace-summary', 'route',
-  'database-target-resolve', 'database-probe', 'database-describe',
-  'database-query-readonly', 'search', 'context-pack', 'query', 'doctor',
-]);
-const SVN_READ_ACTIONS = new Set([
-  'catalog', 'fragments', 'read', 'read-batch', 'status', 'scm-status', 'diff',
-  'history', 'definition', 'callers', 'find', 'context', 'facts', 'explain',
-  'scope-preview', 'conflict', 'delivery-status', 'page-query',
-]);
-const DEFAULT_TIMEOUT_MS = 120000;
-const SVN_INDEX_TIMEOUT_MS = 30 * 60 * 1000;
+// Generated from the Python ToolHost authority by npm run build:bridge.
+const COMMAND_METADATA = require('../data/tool-command-metadata.json');
+
+function commandMetadata(command, args) {
+  const registry = command === 'svn' ? COMMAND_METADATA.svnActions : COMMAND_METADATA.commands;
+  const key = command === 'svn' ? args[0] : command;
+  return Object.hasOwn(registry, key) ? registry[key] : undefined;
+}
 
 function requestTimeoutMs(command, args = []) {
-  return command === 'reindex'
-    || command === 'sync-all'
-    || command === 'sync-source-all'
-    || command === 'sync-source'
-    || (command === 'svn' && ['sync-from-config', 'init', 'refresh'].includes(args[0]))
-    ? SVN_INDEX_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  return commandMetadata(command, args)?.timeoutMs ?? COMMAND_METADATA.defaultTimeoutMs;
 }
 
 function requestKind(command, args = []) {
-  return READ_COMMANDS.has(command) || (command === 'svn' && SVN_READ_ACTIONS.has(args[0]))
-    ? 'read' : 'write';
+  // Unknown actions must remain non-replayable.
+  const metadata = commandMetadata(command, args);
+  if (metadata?.writeFlags?.some((flag) => args.some((arg) => arg === flag || arg.startsWith(`${flag}=`)))) return 'write';
+  if(metadata?.writeArguments?.some(argument=>args.includes(argument)))return 'write';
+  return metadata?.kind ?? 'write';
 }
 
 function runtimeKey(tool) {
@@ -33,7 +27,11 @@ function runtimeKey(tool) {
 }
 
 class ToolProcessClient {
-  constructor({ spawnProcess = spawn, env = process.env, onError = () => {}, onProgress = () => {} } = {}) {
+  constructor({ spawnProcess = spawn, env = process.env, onError = () => {}, onProgress = () => {}, allowReadLane = true } = {}) {
+    this.allowReadLane = allowReadLane;
+    this.capabilities = new Set();
+    this.readClient = null;
+    this.readClientOptions = {spawnProcess,env,onError,onProgress,allowReadLane:false};
     this.spawnProcess = spawnProcess;
     this.env = env;
     this.onError = onError;
@@ -53,6 +51,11 @@ class ToolProcessClient {
     const key = runtimeKey(tool);
     if (this.child && this.key === key && !this.starting) return;
     if (this.starting && this.key === key) return this.starting;
+    if (this.child && this.key !== key && (this.starting || this.active?.kind === 'write' || this.jobs.some(job => job.kind === 'write'))) {
+      const error = new Error('旧运行环境仍有请求正在启动或写入；请等待完成后重试切换，原写入未被中断。');
+      error.code = 'TOOLHOST_BUSY';
+      throw error;
+    }
     if (this.child) await this.stop();
     if (tool.mode === 'script') {
       require('./script-runtime').verifyScriptChecksum(tool.toolEntry);
@@ -75,29 +78,53 @@ class ToolProcessClient {
     this.startReject = readyReject;
     this.startTimer = setTimeout(() => {
       readyReject(new Error('ToolHost 启动超时'));
-      child.kill();
+      child.kill('SIGKILL');
     }, 30000);
+    let protocolBytes = 0;
+    child.stdout.on('data', (chunk) => {
+      for (const part of chunk.toString().split(/(?<=\n)/)) {
+        protocolBytes += Buffer.byteLength(part);
+        if (protocolBytes > 8 * 1024 * 1024) {
+          child.protocolFailure = new Error('ToolHost 协议输出超过限制');
+          this.onError(child.protocolFailure);
+          child.kill('SIGKILL');
+          return;
+        }
+        if (part.endsWith('\n')) protocolBytes = 0;
+      }
+    });
     const lineReader = readline.createInterface({ input: child.stdout });
     lineReader.on('line', (line) => {
+      if (child.protocolFailure) return;
       let message;
       try {
         message = JSON.parse(line);
       } catch {
-        this.onError(new Error(`ToolHost 协议输出无效：${line.slice(0, 200)}`));
-        child.kill();
+        child.protocolFailure = new Error(`ToolHost 协议输出无效：${line.slice(0, 200)}`);
+        this.onError(child.protocolFailure);
+        child.kill('SIGKILL');
         return;
       }
       if (message.type === 'ready') {
         if (message.protocolVersion !== 1) {
           readyReject(new Error(`ToolHost 协议版本不匹配：${message.protocolVersion}`));
-          child.kill();
+          child.kill('SIGKILL');
         } else {
+          this.capabilities = new Set(Array.isArray(message.capabilities) ? message.capabilities : []);
           clearTimeout(this.startTimer);
           this.startTimer = null;
           this.startReject = null;
           readyResolve();
           this.starting = null;
           this._next();
+        }
+        return;
+      }
+      if (message.type === 'control') {
+        if (message.operation === 'cancel' && this.active?.id === message.id) {
+          this.active.onOutput?.(message.accepted
+            ? '已请求协作式取消，等待安全检查点结果。\n'
+            : '当前阶段未接受取消，任务继续；请以最终结果为准。\n');
         }
         return;
       }
@@ -108,16 +135,21 @@ class ToolProcessClient {
       }
       if (message.type !== 'result' || !this.active || message.id !== this.active.id) {
         this.onError(new Error('ToolHost 返回了未匹配的请求结果'));
-        child.kill();
+        child.kill('SIGKILL');
         return;
       }
       const job = this.active;
       this.active = null;
       clearTimeout(job.timer);
+      job.cancelSubscription?.dispose();
       if (!job.settled) {
         job.settled = true;
         if (message.ok) job.resolve(message.result);
-        else job.reject(new Error(message.error?.message || 'ToolHost 命令失败'));
+        else {
+          const error = new Error(message.error?.message || 'ToolHost 命令失败');
+          error.code = message.error?.code;
+          job.reject(error);
+        }
       }
       this._next();
     });
@@ -127,12 +159,13 @@ class ToolProcessClient {
     });
     const failed = (error) => {
       if (this.child !== child) return;
+      if (child.protocolFailure) error = child.protocolFailure;
       this.child = null;
       this.key = '';
       clearTimeout(this.startTimer);
       this.startTimer = null;
       if (this.starting) {
-        error.code = 'TOOLHOST_EXIT';
+        error.code = child.protocolFailure ? 'TOOLHOST_PROTOCOL' : 'TOOLHOST_EXIT';
         readyReject(error);
         this.starting = null;
         this.startReject = null;
@@ -142,12 +175,13 @@ class ToolProcessClient {
       this.jobs = [];
       for (const job of jobs) {
         clearTimeout(job.timer);
+        job.cancelSubscription?.dispose();
         if (!job.settled) {
           job.settled = true;
           const failure = job.timeoutError || new Error(job.kind === 'write'
             ? `ToolHost 已退出，写入结果未知；请先重新读取状态。${error.message}`
             : `ToolHost 已退出：${error.message}`);
-          failure.code = 'TOOLHOST_EXIT';
+          failure.code = child.protocolFailure ? 'TOOLHOST_PROTOCOL' : 'TOOLHOST_EXIT';
           job.reject(failure);
         }
       }
@@ -167,7 +201,7 @@ class ToolProcessClient {
         job.timeoutError = new Error(job.kind === 'write'
           ? 'ToolHost 写入等待超时，结果未知；请先重新读取状态。'
           : 'ToolHost 读取等待超时');
-        this.child?.kill();
+        this.child?.kill('SIGKILL');
       }
     }, job.timeoutMs);
     this.child.stdin.write(`${JSON.stringify(job.request)}\n`);
@@ -176,17 +210,45 @@ class ToolProcessClient {
   async request(tool, command, args = [], workspaceKey = '', input = undefined, options = {}) {
     if (this.disposed) throw new Error('ToolHost 客户端已关闭');
     const kind = requestKind(command, args);
+    if (kind === 'read' && this.allowReadLane && this.active?.kind === 'write'
+        && this.active.timeoutMs > 120000) {
+      this.readClient ||= new ToolProcessClient(this.readClientOptions);
+      return this.readClient.request(tool, command, args, workspaceKey, input, options);
+    }
     for (let attempt = 0; attempt <= (kind === 'read' ? 1 : 0); attempt += 1) {
       try {
         await this._start(tool);
         const id = `req-${++this.sequence}`;
         return await new Promise((resolve, reject) => {
-          this.jobs.push({
+          const job = {
             id, kind, resolve, reject, settled: false,
             timeoutMs: options.timeoutMs || requestTimeoutMs(command, args),
             onOutput: options.onOutput,
             request: { id, command, args, workspaceKey, input, requestKind: kind },
-          });
+          };
+          const cancel = () => {
+            if (job.settled) return;
+            if (this.active !== job) {
+              this.jobs = this.jobs.filter(item => item !== job);
+              job.settled = true;
+              job.cancelSubscription?.dispose();
+              const error = new Error('已取消尚未执行的请求'); error.code = 'OPERATION_CANCELLED';
+              reject(error);
+            } else if (this.capabilities.has('cancel-index-v1')) {
+              if (!job.cancelSent) {
+                job.cancelSent = true;
+                try {this.child.stdin.write(`${JSON.stringify({type:'cancel',id:job.id})}\n`);} catch {
+                  job.onOutput?.('取消控制消息未发送成功，等待原任务最终结果。\n');
+                }
+              }
+            } else job.onOutput?.('当前 ToolHost 版本不支持协作式取消，原任务继续。\n');
+          };
+          this.jobs.push(job);
+          if (commandMetadata(command, args)?.cancellable && options.token) {
+            job.cancelSubscription = options.token.onCancellationRequested(cancel);
+            if (options.token.isCancellationRequested) cancel();
+            if (job.settled) job.cancelSubscription?.dispose();
+          }
           this._next();
         });
       } catch (error) {
@@ -196,8 +258,12 @@ class ToolProcessClient {
   }
 
   async stop() {
+    const readClient = this.readClient;
+    this.readClient = null;
+    let readStopError;
+    const readStop = readClient ? readClient.stop().catch((error) => { readStopError=error; }) : Promise.resolve();
     const child = this.child;
-    if (!child) return;
+    if (!child) { await readStop; if(readStopError)throw readStopError; return; }
     this.child = null;
     this.key = '';
     clearTimeout(this.startTimer);
@@ -210,6 +276,7 @@ class ToolProcessClient {
     this.jobs = [];
     for (const job of jobs) {
       clearTimeout(job.timer);
+      job.cancelSubscription?.dispose();
       if (!job.settled) {
         job.settled = true;
         job.reject(new Error(job.kind === 'write'
@@ -217,16 +284,21 @@ class ToolProcessClient {
           : 'ToolHost 已停止'));
       }
     }
-    await new Promise((resolve, reject) => {
-      const terminate = setTimeout(() => child.kill(), 2000);
+    let stopError;
+    try {
+      await new Promise((resolve, reject) => {
+      const terminate = setTimeout(() => child.kill('SIGKILL'), 2000);
       const deadline = setTimeout(() => reject(new Error('ToolHost 停止超时')), 5000);
       child.once('close', () => {
         clearTimeout(terminate);
         clearTimeout(deadline);
         resolve();
       });
-      try { child.stdin.end(); } catch { child.kill(); }
-    });
+      try { child.stdin.end(); } catch { child.kill('SIGKILL'); }
+      });
+    } catch(error) { stopError=error; }
+    await readStop;
+    if(stopError || readStopError)throw stopError || readStopError;
   }
 
   dispose() {
@@ -235,4 +307,4 @@ class ToolProcessClient {
   }
 }
 
-module.exports = { ToolProcessClient, requestKind, requestTimeoutMs, runtimeKey };
+module.exports = { ToolProcessClient, requestKind, requestTimeoutMs, runtimeKey, ...require('./workspace-scheduler') };

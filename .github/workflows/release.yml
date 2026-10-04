@@ -137,6 +137,8 @@ jobs:
           npm test
           npm run check
           npm run build:bridge
+          node ../../../scripts/check_nexus_commands.mjs
+          git diff --exit-code -- bridge/server.js bridge/page-context.js data/tool-command-metadata.json
           npx --yes @vscode/vsce@3.9.2 package \
             --allow-missing-repository \
             --skip-license \
@@ -223,7 +225,23 @@ jobs:
             GuthonCodeTool-macos-arm64.zip \
             GuthonCodeTool-python.pyz \
             GuthonCodeTool-python-requirements.txt \
+            GuthonCodeTool-chrome.zip \
+            guthon-nexus-vscode.vsix \
+            guthon-testing.zip \
             > GuthonCodeTool-checksums.txt
+
+      - name: Sign release checksum metadata when an external key is configured
+        env:
+          GUTHON_RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.GUTHON_RELEASE_SIGNING_PRIVATE_KEY }}
+          GUTHON_RELEASE_SIGNING_KEY_ID: ${{ vars.GUTHON_RELEASE_SIGNING_KEY_ID }}
+        run: |
+          if [ -n "$GUTHON_RELEASE_SIGNING_PRIVATE_KEY" ]; then
+            node scripts/sign_release.mjs --checksums release/GuthonCodeTool-checksums.txt --version "$RELEASE_VERSION" --out release/GuthonCodeTool-checksums.signature.json
+            node scripts/verify_release.mjs --release-dir release --trust-file plugins/GuthonNexus/gushen-vscode-completion/data/release-trust.json --version "$RELEASE_VERSION"
+          else
+            node -e 'const fs=require("fs"); const p="plugins/GuthonNexus/gushen-vscode-completion/data/release-trust.json"; if(fs.existsSync(p) && JSON.parse(fs.readFileSync(p,"utf8")).requireSignature) { console.error("Pinned signature policy requires the CI signing Secret");process.exit(1); }'
+            echo "::notice::Independent release signing is not configured; no signature claim will be made."
+          fi
 
       - name: Generate Chinese release notes
         run: |

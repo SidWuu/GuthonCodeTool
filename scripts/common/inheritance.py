@@ -7,7 +7,7 @@ import re
 
 MARKER = re.compile(r"^[ \t]*(?P<return>return[ \t]+)?@?inherit\(\);[ \t]*$")
 POSSIBLE_MARKER = re.compile(r"(?<![A-Za-z0-9_])@?inherit\s*\(")
-SOURCE_CATALOG_VERSION = "svn-inheritance-v1"
+SOURCE_CATALOG_VERSION = "svn-inheritance-v2"
 
 
 def procedure_body(text: str) -> tuple[str, int]:
@@ -25,44 +25,86 @@ def procedure_body(text: str) -> tuple[str, int]:
     return text[end:], end
 
 
-def _marker_spans(text: str) -> tuple[list[tuple[int, int, bool]], bool]:
-    """Find whole-line calls outside comments and quoted strings."""
+def mask_noncode(content: str) -> str:
+    """Preserve coordinates while masking comments, literals and template interpolation.
 
+    Template expressions are deliberately opaque to the whole-line inheritance
+    grammar. Nested templates must remain opaque too, never becoming edit targets.
+    """
+    masked = list(content)
+    frames = [{"kind": "code"}]
+    index = 0
+    while index < len(content):
+        frame = frames[-1]
+        kind = frame["kind"]
+        char = content[index]
+        pair = content[index:index + 2]
+        if kind != "code" and char not in "\r\n":
+            masked[index] = " "
+        if kind == "line":
+            if char in "\r\n":
+                frames.pop()
+        elif kind == "block":
+            if pair == "*/":
+                masked[index:index + 2] = "  "
+                index += 1
+                frames.pop()
+        elif kind in {"'", '\"', "`", "regex"}:
+            if frame.get("escaped"):
+                frame["escaped"] = False
+            elif char == "\\":
+                frame["escaped"] = True
+            elif kind == "regex":
+                if char == "[":
+                    frame["characterClass"] = True
+                elif char == "]":
+                    frame["characterClass"] = False
+                elif char == "/" and not frame.get("characterClass"):
+                    frames.pop()
+            elif kind == "`" and pair == "${":
+                masked[index:index + 2] = "  "
+                index += 1
+                frames.append({"kind": "template-expression", "depth": 1})
+            elif char == kind:
+                frames.pop()
+        elif pair in {"//", "##", "/*"}:
+            frames.append({"kind": "block" if pair == "/*" else "line"})
+            masked[index:index + 2] = "  "
+            index += 1
+        elif char in {"'", '\"', "`"}:
+            frames.append({"kind": char})
+            masked[index] = " "
+        elif char == "/":
+            prefix = content[max(0, index-80):index].rstrip()
+            if (not prefix or prefix[-1] in "=([{,:;!&|?}"
+                    or re.search(r"\b(?:return|case|throw)$", prefix)):
+                frames.append({"kind": "regex"})
+                masked[index] = " "
+        elif kind == "template-expression":
+            if char == "{":
+                frame["depth"] += 1
+            elif char == "}":
+                frame["depth"] -= 1
+                if frame["depth"] == 0:
+                    frames.pop()
+        index += 1
+    return "".join(masked)
+
+
+def _marker_spans(text: str) -> tuple[list[tuple[int, int, bool]], bool]:
+    """Recognize only whole-line markers in code, excluding quoted/commented text."""
     spans = []
     uncertain = False
-    state = "code"
     position = 0
-    for line in text.splitlines(keepends=True):
+    for line, masked in zip(text.splitlines(keepends=True), mask_noncode(text).splitlines(keepends=True)):
         body = line.rstrip("\r\n")
-        match = MARKER.fullmatch(body) if state == "code" else None
+        code = masked.rstrip("\r\n")
+        match = MARKER.fullmatch(body) if MARKER.fullmatch(code) else None
         if match:
+            # Include exactly the marker line, never adjacent comments.
             spans.append((position, position + len(body), bool(match.group("return"))))
-        elif POSSIBLE_MARKER.search(body) and state == "code" and not body.lstrip().startswith(("//", "*")):
+        elif POSSIBLE_MARKER.search(code):
             uncertain = True
-        index = 0
-        while index < len(line):
-            char = line[index]
-            pair = line[index:index + 2]
-            if state == "code":
-                if pair == "//":
-                    break
-                if pair == "/*":
-                    state = "block"
-                    index += 2
-                    continue
-                if char in "'\"`":
-                    state = char
-            elif state == "block":
-                if pair == "*/":
-                    state = "code"
-                    index += 2
-                    continue
-            elif char == "\\":
-                index += 2
-                continue
-            elif char == state:
-                state = "code"
-            index += 1
         position += len(line)
     return spans, uncertain
 

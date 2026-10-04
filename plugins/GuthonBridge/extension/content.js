@@ -1,9 +1,21 @@
+(function () {
+if (!globalThis.GuthonBridgeHost?.isAllowed(location.href)) return;
+globalThis.__guthonContentCleanup?.();
+const documentListeners = [];
+function listenDocument(type, listener, options) {
+  document.addEventListener(type, listener, options);
+  documentListeners.push([type, listener, options]);
+}
+function blockSyntheticClick(event) {
+  if (!event.isTrusted && event.target?.closest?.('[id^="guthon-bridge-"]')) event.stopImmediatePropagation();
+}
+listenDocument("click", blockSyntheticClick, true);
 const OUTPUT_DIR_STORAGE_KEY = "guthonBridgeOutputDir";
 const FLOATING_ROOT_ID = "guthon-bridge-floating-root";
 const COPY_OVERLAY_ID = "guthon-bridge-copy-overlay";
 const FIELDS_MOVER_OVERLAY_ID = "guthon-bridge-fields-mover-overlay";
 const CALLERS_OVERLAY_ID = "guthon-bridge-callers-overlay";
-const TOOLBAR_REFRESH_INTERVAL_MS = 30000;
+const PAGE_CONTEXT_HEARTBEAT_MS = 60000;
 
 let gIntervalId = null;
 let gRefreshInFlight = null;
@@ -46,7 +58,15 @@ function stopExtensionLoops() {
   }
   gToolbarObserver?.disconnect();
   gToolbarObserver = null;
+  window.removeEventListener("hashchange", refreshToolbarButtonsSafely);
+  window.removeEventListener("popstate", refreshToolbarButtonsSafely);
+  window.removeEventListener("message", onPageCallersMessage);
+  getRuntime()?.onMessage?.removeListener(onExtensionMessage);
+  for (const [type, listener, options] of documentListeners) document.removeEventListener(type, listener, options);
+  documentListeners.length = 0;
+  for (const id of [FLOATING_ROOT_ID, COPY_OVERLAY_ID, FIELDS_MOVER_OVERLAY_ID, CALLERS_OVERLAY_ID]) document.getElementById(id)?.remove();
 }
+globalThis.__guthonContentCleanup = stopExtensionLoops;
 
 function isSupportedGuthonPage() {
   return Boolean(globalThis.GuthonBridgeHost?.isAllowed(location.href));
@@ -65,7 +85,7 @@ async function ensurePageBridge() {
     }, 300);
 
     function onMessage(event) {
-      if (event.source !== window) {
+      if (event.source !== window || event.origin !== location.origin) {
         return;
       }
       const data = event.data;
@@ -74,11 +94,11 @@ async function ensurePageBridge() {
       }
       clearTimeout(timer);
       window.removeEventListener("message", onMessage);
-      resolve({ ready: Boolean(data.ok), fieldsMover: Boolean(data.data?.fieldsMover) });
+      resolve({ ready: Boolean(data.ok), fieldsMover: Boolean(data.data?.fieldsMover) && data.data?.ready === "20261003" });
     }
 
     window.addEventListener("message", onMessage);
-    window.postMessage({ source: "guthon-extension", requestId, command: "pingPageBridge", payload: {} }, "*");
+    window.postMessage({ source: "guthon-extension", requestId, command: "pingPageBridge", payload: {} }, location.origin);
   });
   if (ready.ready && ready.fieldsMover) {
     return;
@@ -86,13 +106,14 @@ async function ensurePageBridge() {
   async function injectPageScript(name) {
     await new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `${runtime.getURL(name)}?v=20260723d`;
+      script.src = `${runtime.getURL(name)}?v=20261003`;
       script.dataset.source = "guthon-bridge";
       script.onload = () => { script.remove(); resolve(); };
       script.onerror = () => { script.remove(); reject(new Error("页面桥接脚本加载失败")); };
       (document.head || document.documentElement).appendChild(script);
     });
   }
+  await injectPageScript("host-config.js");
   await injectPageScript("fields-mover-core.js");
   await injectPageScript("page-bridge.js");
 }
@@ -116,10 +137,10 @@ async function runPageCommand(command, payload = {}) {
         ok: false,
         message: "页面桥接超时，当前编辑器上下文没有及时返回"
       });
-    }, 8000);
+    }, 20000);
 
     function onMessage(event) {
-      if (event.source !== window) {
+      if (event.source !== window || event.origin !== location.origin) {
         return;
       }
       const data = event.data;
@@ -139,7 +160,7 @@ async function runPageCommand(command, payload = {}) {
         command,
         payload
       },
-      "*"
+      location.origin
     );
   });
 }
@@ -162,10 +183,11 @@ function sendRuntimeMessage(message) {
 }
 
 async function sendWorkspaceRequest(type, payload, { allowWorkspaceSelection = true } = {}) {
+  const dispatch = (message) => GuthonBridgeTasks.run(message.type,message.payload,sendRuntimeMessage);
   const request = { pageOrigin: location.origin, ...payload };
   const cachedWorkspaceKey = await GuthonBridgeWorkspace.storedWorkspaceKey(location.href);
   if (cachedWorkspaceKey) {
-    const cachedResult = await sendRuntimeMessage({
+    const cachedResult = await dispatch({
       type,
       payload: { ...request, workspaceKey: cachedWorkspaceKey }
     });
@@ -173,7 +195,7 @@ async function sendWorkspaceRequest(type, payload, { allowWorkspaceSelection = t
       return cachedResult;
     }
   }
-  const result = await sendRuntimeMessage({ type, payload: request });
+  const result = await dispatch({ type, payload: request });
   if (!result?.workspaceSelectionRequired || !allowWorkspaceSelection) {
     return result;
   }
@@ -181,7 +203,7 @@ async function sendWorkspaceRequest(type, payload, { allowWorkspaceSelection = t
     throw new Error(result.message || "页面身份未匹配到工作区");
   }
   const workspaceKey = await GuthonBridgeWorkspace.select(result.candidates, location.href);
-  return sendRuntimeMessage({
+  return dispatch({
     type,
     payload: { ...request, workspaceKey }
   });
@@ -216,6 +238,14 @@ function setMessage(root, message, tone = "idle") {
 
 function toErrorMessage(stage, error) {
   return `${stage}: ${error?.message || String(error)}`;
+}
+
+function pageActionError(error) {
+  const message = String(error?.message || "");
+  if (/配对令牌/.test(message)) return "请在 Guthon Bridge 扩展弹窗配置配对令牌。";
+  if (/端口|无法连接|fetch/i.test(message)) return "Bridge 连接失败，请检查 Nexus 服务与配对端口。";
+  if (/工作区|workspace/i.test(message)) return "请在 Guthon Bridge 扩展弹窗核对工作区与页面身份。";
+  return "操作失败，请在 Guthon Bridge 扩展弹窗核对状态，或查看 Nexus 输出。";
 }
 
 function isVisible(element) {
@@ -348,14 +378,14 @@ async function pullCurrentProcedure(root, button = root.querySelector("button"),
     }
 
     button.textContent = "成功";
-    const successMessage = pullResult.message || "源码拉取成功";
-    button.title = `${successMessage}: ${pullResult.workCopyPath}`;
-    setMessage(root, `${successMessage}: ${pullResult.workCopyPath}`, "success");
+    const successMessage = "源码拉取完成，请在 Nexus 查看工作副本。";
+    button.title = successMessage;
+    setMessage(root, successMessage, "success");
     setTimeout(() => setButtonTextNode(button, "源码拉取"), 1600);
   } catch (error) {
-    console.error("谷神桥接：源码拉取失败", error);
+    console.error("谷神桥接：源码拉取失败");
     button.textContent = "失败";
-    const message = error?.message || String(error);
+    const message = pageActionError(error);
     button.title = message;
     setMessage(root, message, "error");
     setTimeout(() => setButtonTextNode(button, "源码拉取"), 2200);
@@ -389,13 +419,13 @@ async function exportCurrentTableSchema(root, button = root.querySelector("butto
     button.textContent = "成功";
     const selected = Array.isArray(inspected.data.tableIds) && inspected.data.tableIds.length > 0;
     const detail = selected ? `已拉取选中表: ${inspected.data.tableIds.join(", ")}` : `已拉取数据源 ${inspected.data.dataSourceId} 全部表`;
-    setButtonTitle(root, `${detail}: ${result.outputDir}`);
+    setButtonTitle(root, detail);
     setMessage(root, `${detail}: ${result.exported_table_count}`, "success");
     setTimeout(() => setButtonText(root, "源码拉取"), 1600);
   } catch (error) {
-    console.error("谷神桥接：表结构拉取失败", error);
+    console.error("谷神桥接：表结构拉取失败");
     button.textContent = "失败";
-    const message = error?.message || String(error);
+    const message = pageActionError(error);
     setButtonTitle(root, message);
     setMessage(root, message, "error");
     setTimeout(() => setButtonText(root, "源码拉取"), 2200);
@@ -436,13 +466,13 @@ async function exportCurrentBillType(root, button = root.querySelector("button")
     const selected = Array.isArray(inspected.data.billTypeCodes) && inspected.data.billTypeCodes.length > 0;
     const source = [inspected.data.dataSourceId, inspected.data.dataSourceName].filter(Boolean).join(" ");
     const detail = selected ? `已拉取选中单据类型: ${inspected.data.billTypeCodes.join(", ")}` : `已拉取数据源 ${source} 全部单据类型`;
-    setButtonTitle(root, `${detail}: ${result.outputDir}`);
+    setButtonTitle(root, detail);
     setMessage(root, `${detail}: ${result.exported_bill_type_count}`, "success");
     setTimeout(() => setButtonText(root, "源码拉取"), 1600);
   } catch (error) {
-    console.error("谷神桥接：单据类型拉取失败", error);
+    console.error("谷神桥接：单据类型拉取失败");
     button.textContent = "失败";
-    const message = error?.message || String(error);
+    const message = pageActionError(error);
     setButtonTitle(root, message);
     setMessage(root, message, "error");
     setTimeout(() => setButtonText(root, "源码拉取"), 2200);
@@ -483,13 +513,13 @@ async function exportCurrentViewSql(root, button = root.querySelector("button"))
     const selected = Array.isArray(inspected.data.viewIds) && inspected.data.viewIds.length > 0;
     const source = [inspected.data.dataSourceId, inspected.data.dataSourceName].filter(Boolean).join(" ");
     const detail = selected ? `已拉取选中视图: ${inspected.data.viewIds.join(", ")}` : `已拉取数据源 ${source} 全部视图`;
-    setButtonTitle(root, `${detail}: ${result.outputDir}`);
+    setButtonTitle(root, detail);
     setMessage(root, `${detail}: ${result.exported_view_count}`, "success");
     setTimeout(() => setButtonText(root, "源码拉取"), 1600);
   } catch (error) {
-    console.error("谷神桥接：视图源码拉取失败", error);
+    console.error("谷神桥接：视图源码拉取失败");
     button.textContent = "失败";
-    const message = error?.message || String(error);
+    const message = pageActionError(error);
     setButtonTitle(root, message);
     setMessage(root, message, "error");
     setTimeout(() => setButtonText(root, "源码拉取"), 2200);
@@ -535,14 +565,13 @@ async function exportCurrentSystemScripts(root, button, pullAll = false) {
     button.textContent = "成功";
     const target = [inspected.data.systemName, inspected.data.systemId].filter(Boolean).join(" ");
     const detail = pullAll ? `已拉取 ${target} 全部系统脚本` : `已拉取脚本类型 ${scriptTypes.join(", ")}`;
-    const outputPath = pullAll ? result.outputDir : result.work_copy_paths?.[0] || result.outputDir;
-    button.title = `${detail}: ${outputPath}`;
-    setMessage(root, `${detail}: ${outputPath}`, "success");
+    button.title = detail;
+    setMessage(root, detail, "success");
     setTimeout(() => setButtonTextNode(button, idleText), 1600);
   } catch (error) {
-    console.error("谷神桥接：系统脚本拉取失败", error);
+    console.error("谷神桥接：系统脚本拉取失败");
     button.textContent = "失败";
-    const message = error?.message || String(error);
+    const message = pageActionError(error);
     button.title = message;
     setMessage(root, message, "error");
     setTimeout(() => setButtonTextNode(button, idleText), 2200);
@@ -663,7 +692,7 @@ async function applyInlineWorkspaceMode() {
   root.dataset.workspaceModeChecking = "true";
   try {
     const inspected = await runPageCommand("inspect-hub-source");
-    if (!inspected?.ok) return;
+    if (!inspected?.ok) { setMessage(root, inspected?.message || "页面识别失败，请刷新页面", "error"); return; }
     const route = await sendWorkspaceRequest(
       "route-workspace",
       inspected.data || {},
@@ -675,11 +704,12 @@ async function applyInlineWorkspaceMode() {
         .filter(Boolean)
     );
     const sourceMode = route?.workspace?.sourceMode || (candidateModes.size === 1 ? [...candidateModes][0] : "");
-    if (!sourceMode) return;
+    if (!sourceMode) { setMessage(root, route?.message || "尚未匹配工作区，请打开扩展弹窗选择", "idle"); return; }
     const previousMode = root.dataset.workspaceMode;
     root.dataset.workspaceModeKey = cacheKey;
     root.dataset.workspaceModeCheckedAt = String(Date.now());
     root.dataset.workspaceMode = sourceMode;
+    if (route.ok && route.workspaceKey) await publishPageContext(route.workspaceKey).catch(() => {});
     const svnMode = sourceMode === "svn";
     root.querySelector(".guthon-bridge-source-button").hidden = svnMode;
     root.querySelector(".guthon-bridge-system-script-all").hidden = svnMode;
@@ -693,11 +723,23 @@ async function applyInlineWorkspaceMode() {
   }
 }
 
+async function publishPageContext(workspaceKey) {
+  const inspected = await runPageCommand('inspect-page-context');
+  if (!inspected?.ok) return;
+  let key = workspaceKey;
+  if (!key) {
+    const route = await sendWorkspaceRequest('route-workspace', inspected.data || {}, {allowWorkspaceSelection: false});
+    if (!route?.ok || !route.workspaceKey) return;
+    key = route.workspaceKey;
+  }
+  return sendRuntimeMessage({type: 'publish-page-context', payload: {workspaceKey: key, metadata: inspected.data}});
+}
+
 function installSystemScriptSelection() {
   if (gSystemScriptSelectionInstalled) {
     return;
   }
-  document.addEventListener("click", (event) => {
+  listenDocument("click", (event) => {
     if (!isSupportedGuthonPage() || !isSystemScriptRoute()) {
       return;
     }
@@ -741,7 +783,7 @@ function installTreeAutoScroll() {
   if (gTreeScrollListenerInstalled) {
     return;
   }
-  document.addEventListener("click", (event) => {
+  listenDocument("click", (event) => {
     if (!isSupportedGuthonPage() || (!isProcedureRoute() && !isModuleRoute())) {
       return;
     }
@@ -865,7 +907,7 @@ function installCellSelection(overlay) {
     paintCellSelection(overlay, drag.table, drag.columnIndex, drag.startRowIndex, rowIndex);
     window.getSelection()?.removeAllRanges();
     overlay.focus({ preventScroll: true });
-    document.addEventListener("mouseup", stopDrag, { once: true });
+    listenDocument("mouseup", stopDrag, { once: true });
     event.preventDefault();
   });
 
@@ -929,6 +971,12 @@ async function showProcedureCallers(target) {
   overlay.querySelector(".guthon-bridge-callers-head button").addEventListener("click", () => removeNode(CALLERS_OVERLAY_ID));
   document.body.appendChild(overlay);
 
+  const list = overlay.querySelector(".guthon-bridge-callers-list");
+  list.innerHTML = '<button type="button">查询调用方</button>';
+  await new Promise((resolve) => list.querySelector("button").addEventListener("click", (event) => {
+    if (event.isTrusted) resolve();
+  }));
+  list.textContent = "正在查询调用方...";
   const result = await sendWorkspaceRequest(
     "query-procedure-callers",
     { alias: target.procedureKeyword, funId: target.funId }
@@ -937,7 +985,6 @@ async function showProcedureCallers(target) {
     throw new Error(result?.message || "调用方查询失败");
   }
   const callers = Array.isArray(result.callers) ? result.callers : [];
-  const list = overlay.querySelector(".guthon-bridge-callers-list");
   if (!callers.length) {
     list.innerHTML = '<div class="guthon-bridge-callers-state">未找到静态调用方</div>';
     return;
@@ -1078,8 +1125,8 @@ function installCopyOverlayInteractions(overlay) {
       document.removeEventListener("mousemove", move);
       document.removeEventListener("mouseup", stop);
     };
-    document.addEventListener("mousemove", move);
-    document.addEventListener("mouseup", stop);
+    listenDocument("mousemove", move);
+    listenDocument("mouseup", stop);
     event.preventDefault();
   });
 
@@ -1104,8 +1151,8 @@ function installCopyOverlayInteractions(overlay) {
       document.removeEventListener("mousemove", move);
       document.removeEventListener("mouseup", stop);
     };
-    document.addEventListener("mousemove", move);
-    document.addEventListener("mouseup", stop);
+    listenDocument("mousemove", move);
+    listenDocument("mouseup", stop);
     event.preventDefault();
   });
 }
@@ -1266,10 +1313,13 @@ function observeToolbarContext() {
 window.addEventListener("hashchange", refreshToolbarButtonsSafely);
 window.addEventListener("popstate", refreshToolbarButtonsSafely);
 
-getRuntime()?.onMessage?.addListener((message, sender, sendResponse) => {
+function onExtensionMessage(message, sender, sendResponse) {
+  if (sender.id !== getRuntime()?.id || !isSupportedGuthonPage()) return false;
   const root = document.getElementById(FLOATING_ROOT_ID) || document.body;
   const action = message?.type === "run-page-command"
     ? () => runPageCommand(message.command, message.payload)
+    : message?.type === 'refresh-page-context'
+    ? async () => {await refreshToolbarButtonsSafely(); await publishPageContext(); return {ok: true};}
     : message?.type === "show-copy-overlay"
     ? async () => ({ ok: true, data: await showCopyOverlay() })
     : message?.type === "show-fields-mover"
@@ -1284,25 +1334,32 @@ getRuntime()?.onMessage?.addListener((message, sender, sendResponse) => {
     .then(sendResponse)
     .catch((error) => sendResponse({ ok: false, message: error?.message || String(error) }));
   return true;
-});
+}
+getRuntime()?.onMessage?.addListener(onExtensionMessage);
 
-window.addEventListener("message", (event) => {
+function onPageCallersMessage(event) {
   const message = event.data;
   if (
     event.source === window
+    && event.origin === location.origin
     && message?.source === "guthon-page-bridge"
     && message?.event === "procedure-callers-request"
   ) {
     showProcedureCallers(message.data).catch((error) => {
       const state = document.querySelector(`#${CALLERS_OVERLAY_ID} .guthon-bridge-callers-state`);
       if (state) {
-        state.textContent = error?.message || "调用方查询失败";
+        state.textContent = pageActionError(error);
       }
-      console.error("谷神桥接：调用方查询失败", error);
+      console.error("谷神桥接：调用方查询失败");
     });
   }
-});
+}
+window.addEventListener("message", onPageCallersMessage);
 
 observeToolbarContext();
 refreshToolbarButtonsSafely();
-gIntervalId = setInterval(refreshToolbarButtonsSafely, TOOLBAR_REFRESH_INTERVAL_MS);
+// A bounded metadata lease heartbeat restores a suspended MV3 worker or restarted
+// Bridge. Route/tab UI changes are observed above instead of repeatedly rescanning.
+gIntervalId = setInterval(() => {void publishPageContext().catch(() => {});}, PAGE_CONTEXT_HEARTBEAT_MS);
+
+})();

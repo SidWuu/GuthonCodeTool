@@ -1,4 +1,5 @@
 (function () {
+  if (!globalThis.GuthonBridgeHost?.isAllowed(location.href)) return;
   if (window.__guthonPageBridgeCleanup) {
     try {
       window.__guthonPageBridgeCleanup();
@@ -351,7 +352,7 @@
     if (searchResult.code && searchResult.code !== 0) {
       throw new Error(searchResult.message || "搜索过程函数失败");
     }
-    const procedure = resolveProcedure(searchResult, target.procedureKeyword, target.funId, true);
+    const procedure = resolveProcedure(searchResult, target.procedureKeyword, target.funId, true, target.dataSourceId);
     if (!procedure.dataSourceId) {
       throw new Error(`未解析到过程函数数据源: ${target.procedureKeyword}.${target.funId}`);
     }
@@ -376,7 +377,7 @@
         event: "procedure-callers-request",
         data: target
       },
-      "*"
+      location.origin
     );
   }
 
@@ -384,7 +385,8 @@
     await navigateToProcedure(
       {
         procedureKeyword: payload.source_alias_id,
-        funId: payload.fun_id
+        funId: payload.fun_id,
+        dataSourceId: payload.dataSourceId
       },
       null
     );
@@ -407,18 +409,32 @@
       .filter(Boolean);
     const deadline = Date.now() + 8000;
     while (Date.now() < deadline) {
-      const pageTab = document.getElementById(`tab-${payload.source_id}`);
+      const pageTabs = payload.exact ? Array.from(document.querySelectorAll('[role="tab"]'))
+        .filter(tab => tab.id === `tab-${payload.source_id}`) : [];
+      if (pageTabs.length > 1) throw new Error('平台存在多个精确 PAGE 页签，请先选择应用系统');
+      const pageTab = payload.exact ? pageTabs[0] : document.getElementById(`tab-${payload.source_id}`);
       if (pageTab) {
         pageTab.click();
         return;
       }
-      const instances = Array.from(document.querySelectorAll("*")).map(getVueInstance).filter(Boolean);
-      const treeVm = instances.find((vm) => Array.isArray(vm.modules));
+      const instances = [...new Set(Array.from(document.querySelectorAll("*")).map(getVueInstance).filter(Boolean))];
+      let treeVm = instances.find((vm) => Array.isArray(vm.modules));
+      let exactPage;
+      if (payload.exact) {
+        const matches = new Map();
+        for (const candidate of instances.filter(vm => Array.isArray(vm.modules))) {
+          walk(candidate.modules, item => {
+            if (String(item.pageId || '') === payload.source_id) matches.set(item, candidate);
+          });
+        }
+        if (matches.size > 1) throw new Error('平台对象树存在多个精确 PAGE 候选，请先选择应用系统');
+        [exactPage, treeVm] = [...matches.entries()][0] || [];
+      }
       const developVm = instances.find(
         (vm) => vm?.$options?.name === "gdpaas_dev_modules" && typeof vm.onOpenPage === "function"
       ) || (typeof treeVm?.$parent?.onOpenPage === "function" ? treeVm.$parent : null);
-      let page;
-      walk(treeVm?.modules, (item) => {
+      let page = exactPage;
+      if (!payload.exact) walk(treeVm?.modules, (item) => {
         if (String(item.pageId || "") === String(payload.source_id || "")) {
           page = item;
           return false;
@@ -429,7 +445,7 @@
         await Promise.resolve(developVm.onOpenPage(page));
         return;
       }
-      const treeItem = Array.from(
+    const treeItem = !payload.exact && Array.from(
         document.querySelectorAll(".el-tree-node__content, [role='treeitem']")
       ).find((element) => {
         const text = String(element.innerText || element.textContent || "").trim();
@@ -1236,6 +1252,41 @@
     return { dataSourceId: getDataSourceId(), ...inspectCurrentProcedure() };
   }
 
+  function inspectPageContext() {
+    const current = inspectCurrentHubSource();
+    const result = {mode: current.mode || 'procedure', hash: location.hash.split('?')[0].slice(0, 512)};
+    for (const key of ['pageId', 'procedureKeyword', 'funId', 'dataSourceId', 'systemId']) {
+      result[key] = typeof current[key] === 'string' ? current[key].slice(0, 256) : '';
+    }
+    for (const key of ['dataSourceIds', 'systemIds']) result[key] = Array.isArray(current[key])
+      ? current[key].slice(0, 32).map(value => String(value).slice(0, 128)) : [];
+    const selected = getSelectedTabInfo();
+    result.selectedTab = {id: String(selected?.id || '').slice(0, 128), label: String(selected?.label || '').slice(0, 128)};
+    result.openTabs = Array.from(document.querySelectorAll('[role="tab"]')).slice(0, 32)
+      .map(tab => ({id: String(tab.id || '').slice(0, 128), label: String(tab.textContent || '').trim().slice(0, 128)}));
+    const editors = Array.from(document.querySelectorAll('.script-editor')).filter(isVisible)
+      .map(getVueInstance).map(vm => vm?.editor || vm?.$refs?.editor?.editor).filter(editor => editor?.getPosition);
+    if (editors.length === 1) {
+      const position = editors[0].getPosition();
+      if (position && Number.isInteger(position.lineNumber) && Number.isInteger(position.column)) {
+        result.editorCursor = {line: position.lineNumber, column: position.column};
+      }
+    }
+    return result;
+  }
+
+  async function openSourceTarget(payload) {
+    if (payload?.type === 'page' && /^PG-[A-Za-z0-9-]{1,96}$/.test(payload.pageId)) {
+      return openModuleCaller({source_id: payload.pageId, exact: true});
+    }
+    if (payload?.type === 'procedure' && /^[A-Za-z_$][A-Za-z0-9_.$]{0,255}$/.test(payload.alias)
+        && /^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(payload.funId)) {
+      if (!payload.dataSourceId || typeof payload.dataSourceId !== 'string') throw new Error('反向定位缺少当前平台数据源');
+      return openProcedureCaller({source_alias_id: payload.alias, fun_id: payload.funId, dataSourceId: payload.dataSourceId});
+    }
+    throw new Error('不支持的精确平台定位身份');
+  }
+
   function putMapValue(map, key, value) {
     if (key !== undefined && key !== null && key !== "" && value !== undefined && value !== null && value !== "") {
       map.set(String(key), String(value));
@@ -1254,13 +1305,16 @@
     return display;
   }
 
-  let displayMapsPromise;
+  let displayMapsCache;
   async function getDisplayMaps() {
-    if (displayMapsPromise) {
-      return displayMapsPromise;
-    }
-    displayMapsPromise = (async () => {
-      const dataSourceId = getDataSourceId();
+    const dataSourceId = getDataSourceId();
+    const now = Date.now();
+    if (displayMapsCache?.key === dataSourceId && now < displayMapsCache.expiresAt) return displayMapsCache.promise;
+    // Coalesce in-flight loads. Once loaded, refresh within one minute even if
+    // an administrator changes labels without switching datasource.
+    const entry = { key: dataSourceId, expiresAt: Infinity, promise: undefined };
+    displayMapsCache = entry;
+    entry.promise = (async () => {
       const [templateResponse, codeTitleResponse, compResponse] = await Promise.all([
         postForm("/develop/basesetup/fieldTemplate/admin/getAllList.htm", {}),
         dataSourceId ? postForm("/develop/basesetup/codes/getCodesTitles.htm", { dataSourceId }) : Promise.resolve({}),
@@ -1279,9 +1333,13 @@
         putMapValue(selectMap, item.compId || item.id, item.compName || item.name);
       });
 
+      entry.expiresAt = Date.now() + 60_000;
       return { templateMap, selectMap };
-    })();
-    return displayMapsPromise;
+    })().catch((error) => {
+      if (displayMapsCache === entry) displayMapsCache = undefined;
+      throw error;
+    });
+    return entry.promise;
   }
 
   function readMappedFirst(obj, paths, map) {
@@ -1856,7 +1914,7 @@
     return null;
   }
 
-  function resolveProcedure(searchResult, procedureKeyword, funId, strict = false) {
+  function resolveProcedure(searchResult, procedureKeyword, funId, strict = false, dataSourceId = '') {
     const matches = collectMatches(searchResult, funId);
     const packageLower = String(procedureKeyword || "").toLowerCase();
     const exactFun = matches.find((item) => {
@@ -1872,7 +1930,19 @@
       .join(" ")
       .toLowerCase()
       .includes(packageLower));
-    const chosen = exact || (!strict && matches[0]);
+    let chosen = exact || (!strict && matches[0]);
+    if (strict) {
+      const candidates = matches.filter(item => {
+        if (String(item.funId || '') !== String(funId)) return false;
+        if (dataSourceId && String(pickFirst(item, ['dataSourceId', 'datasourceId', 'data_source_id'])) !== dataSourceId) return false;
+        return ['procedureName', 'procedureAliasId', 'className', 'procName', 'fullName', 'id']
+          .some(key => String(item[key] || '') === procedureKeyword || String(item[key] || '') === `${procedureKeyword}.${funId}`);
+      });
+      const identities = new Map(candidates.map(item => [JSON.stringify([pickFirst(item, ['procedureId', 'procId', 'id', 'value']),
+        pickFirst(item, ['dataSourceId', 'datasourceId', 'data_source_id'])]), item]));
+      if (identities.size > 1) throw new Error(`过程函数存在多个精确候选，请在平台选择数据源: ${procedureKeyword}.${funId}`);
+      chosen = [...identities.values()][0];
+    }
     if (!chosen) {
       throw new Error(`未找到过程函数: ${procedureKeyword}.${funId}`);
     }
@@ -1885,7 +1955,7 @@
       dataSourceId: pickFirst(chosen, ["dataSourceId", "datasourceId", "data_source_id"]),
       fun: chosen,
       procedureName:
-        pickFirst(chosen, [
+        (strict ? procedureKeyword : pickFirst(chosen, [
           "procedureName",
           "procedureAliasId",
           "fullName",
@@ -1893,7 +1963,7 @@
           "procName",
           "name",
           "label"
-        ]) || procedureKeyword
+        ])) || procedureKeyword
     };
   }
 
@@ -2005,6 +2075,8 @@
     inspectSystemScriptTarget,
     "inspect-current": inspectCurrent,
     "inspect-hub-source": inspectCurrentHubSource,
+    "inspect-page-context": inspectPageContext,
+    "open-source-target": openSourceTarget,
     "pull": pullCurrentProcedure,
     "pull-page-source": pullPageSource,
     "open-procedure-caller": openProcedureCaller,
@@ -2014,7 +2086,7 @@
   };
 
   const onMessage = async (event) => {
-    if (event.source !== window) {
+    if (event.source !== window || event.origin !== location.origin) {
       return;
     }
     const message = event.data;
@@ -2032,7 +2104,7 @@
           ok: false,
           message: `未知命令: ${command}`
         },
-        "*"
+        location.origin
       );
       return;
     }
@@ -2046,7 +2118,7 @@
           ok: true,
           data
         },
-        "*"
+        location.origin
       );
     } catch (error) {
       window.postMessage(
@@ -2056,7 +2128,7 @@
           ok: false,
           message: error.message
         },
-        "*"
+        location.origin
       );
     }
   };
@@ -2076,18 +2148,39 @@
     minimizeScriptEditor,
     openProcedureInVm,
     openModuleCaller,
+    resolveProcedure,
+    inspectPageContext,
     highlightProcedureTitle
   };
   window.GuthonProcedureNavigation = navigationApi;
   installProcedureNavigation();
-  const navigationInterval = setInterval(installProcedureNavigation, 1000);
+  let navigationTimer;
+  const scheduleNavigation = () => {
+    if (navigationTimer) return;
+    navigationTimer = setTimeout(() => {navigationTimer = undefined; installProcedureNavigation();}, 100);
+  };
+  // DOM mounts and tab changes are browser events; SSE observes Bridge events.
+  const navigationObserver = typeof MutationObserver === 'function' ? new MutationObserver(mutations => {
+    if (mutations.some(mutation => mutation.type === 'childList'
+        && [...mutation.addedNodes, ...mutation.removedNodes].some(node => node.nodeType === 1))) scheduleNavigation();
+  }) : null;
+  if (document.body) navigationObserver?.observe(document.body, {childList: true, subtree: true});
+  window.addEventListener('hashchange', scheduleNavigation);
+  window.addEventListener('popstate', scheduleNavigation);
+  document.addEventListener('pointerdown', installProcedureNavigation, true);
+  document.addEventListener('focusin', scheduleNavigation, true);
   window.__guthonPageBridgeCleanup = function () {
     window.removeEventListener("message", onMessage);
     document.removeEventListener("contextmenu", onContextMenu, true);
     document.removeEventListener("click", onProcedureTitleClick, true);
     document.removeEventListener("mousemove", onProcedureTitleMove, true);
     document.removeEventListener("keyup", onNavigationKeyUp);
-    clearInterval(navigationInterval);
+    clearTimeout(navigationTimer);
+    navigationObserver?.disconnect();
+    window.removeEventListener('hashchange', scheduleNavigation);
+    window.removeEventListener('popstate', scheduleNavigation);
+    document.removeEventListener('pointerdown', installProcedureNavigation, true);
+    document.removeEventListener('focusin', scheduleNavigation, true);
     clearProcedureLinks();
     highlightProcedureTitle(null);
     navigationDisposables.forEach((disposable) => disposable?.dispose?.());
@@ -2095,5 +2188,5 @@
       delete window.GuthonProcedureNavigation;
     }
   };
-  window.__guthonPageBridgeReady = "20260717i";
+  window.__guthonPageBridgeReady = "20261003";
 })();

@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "name": "count-by-value",
+  "description": "统计单一业务字段等于明确字符串值的行数；值按 SQL 字符串转义。",
+  "parameters": {"schema": "identifier", "table": "identifier", "field": "identifier", "value": "string"},
+  "sql": "SELECT COUNT(*) AS row_count FROM {{schema}}.{{table}} WHERE {{field}} = {{value}}"
+}

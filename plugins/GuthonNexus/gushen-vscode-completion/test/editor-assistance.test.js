@@ -1,6 +1,45 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { completions, diagnostics, documentKind, fieldReferencePrefix, registerEditorAssistance } = require('../src/svn/editor-assistance');
+const {procedureCompletionTarget} = require('../src/svn/editor-assistance');
+
+test('procedure suggestions only query bounded literal invoke/find argument prefixes', () => {
+  for (const [source,argument,prefix] of [["$vs.proc.invoke('demo",'alias','demo'],["$vs.proc.invoke('demo.pkg', 'sa",'function','sa'],['$vs.proc.find("de','alias','de']]) {
+    const target=procedureCompletionTarget(source, source.length);
+    assert.equal(target.argument,argument); assert.equal(target.prefix,prefix);
+    assert.equal(source.slice(target.start),prefix);
+  }
+  for (const source of ['ordinary("demo','$vs.proc.invoke("a','$vs.proc.invoke(variable', '$vs.proc.invoke("demo\\', '$vs.proc.find("demo.pkg", "sa']) {
+    assert.equal(procedureCompletionTarget(source,source.length),null);
+  }
+});
+
+test('indexed procedures retain namespace provenance and reject results after document changes', async () => {
+  let provider;
+  const dispose={dispose(){}};
+  const vscode={languages:{createDiagnosticCollection:()=>({set(){},delete(){},dispose(){}}),registerCompletionItemProvider:(_selectors,value)=>{provider=value;return dispose;}},
+    workspace:{textDocuments:[],onDidOpenTextDocument:()=>dispose,onDidChangeTextDocument:()=>dispose,onDidCloseTextDocument:()=>dispose},
+    CompletionItem:class{constructor(label){this.label=label;}},CompletionItemKind:{Function:1},
+    Range:class{constructor(start,end){this.start=start;this.end=end;}}};
+  const source='$vs.proc.invoke("demo.pkg", "sa';
+  const current={...document('procedure','','guthon-gss'),getText:()=>source,offsetAt:()=>source.length,positionAt:offset=>offset,version:1};
+  let change=false,calls=0;
+  const registered=registerEditorAssistance(vscode,{procedureCandidates:async(_doc,target)=>{
+    calls++;assert.equal(target.alias,'demo.pkg');
+    if(change)current.version++;
+    return {sources:[...['one','two'].map(sourceNamespace=>({status:'OK',sourceType:'procedure',sourceAliasId:'demo.pkg',funId:'save',sourceNamespace})),
+      {status:'STALE',sourceType:'procedure',sourceAliasId:'demo.pkg',funId:'saveOld',sourceNamespace:'old'}]};
+  }});
+  const items=await provider.provideCompletionItems(current,source.length);
+  assert.deepEqual(items.map(item=>item.label),['save','save']);
+  assert.match(items[0].detail,/one/);assert.match(items[1].detail,/two/);
+  change=true;
+  assert.deepEqual(await provider.provideCompletionItems(current,source.length),[]);
+  const before=calls;
+  assert.deepEqual(await provider.provideCompletionItems(current,source.length,{isCancellationRequested:true}),[]);
+  assert.equal(calls,before);
+  registered.dispose();
+});
 
 function document(sourceType, jsonPointer, languageId = 'json') {
   const params = new URLSearchParams({ sourceType, sourceId: 'PG-1', jsonPointer });

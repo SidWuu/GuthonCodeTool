@@ -338,9 +338,9 @@ def refresh(
         for entry in scope.entries:
             if entry.id in skipped_ids:
                 continue
-            _validate_existing(entry)
             if selected and entry.id not in selected:
                 continue
+            _validate_existing(entry)
             progress_index += 1
             label = scope_entry_label(workspace, entry)
             _progress(on_progress, f"[{progress_index}/{total}] {label}｜更新｜检查远程状态")

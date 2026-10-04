@@ -1,6 +1,7 @@
 """Bounded workspace search and AI context packages backed by the local index."""
 
 from __future__ import annotations
+import hashlib
 
 from contextlib import contextmanager
 import re
@@ -37,6 +38,8 @@ def _identity(source: dict) -> dict:
     return {
         "sourceType": source.get("source_table") or "",
         "sourceId": source.get("source_id") or "",
+        "sourceNamespace": source.get("source_namespace") or "",
+        "workingCopyId": source.get("working_copy_id") or "",
         "sourceAliasId": source.get("source_alias_id") or "",
         "funId": source.get("fun_id") or "",
         "sourcePath": source.get("source_path") or "",
@@ -85,7 +88,7 @@ def unified_search(workspace: dict, query: str, limit: int = 20) -> dict:
         candidates = [
             dict(row)
             for row in gusen_hub.find_source_candidates(
-                connection, workspace["scopeId"], normalized, min(bounded_limit, 10)
+                connection, workspace["scopeId"], normalized, min(bounded_limit, 10), include_paths=True
             )
         ]
         exact_source_match = any(
@@ -112,9 +115,9 @@ def unified_search(workspace: dict, query: str, limit: int = 20) -> dict:
         if source_ids:
             placeholders = ",".join("?" for _ in source_ids)
             local_paths = {
-                (row["source_id"], row["fun_id"] or ""): row["local_path"] or ""
+                (row["source_namespace"], row["source_id"], row["fun_id"] or ""): row["local_path"] or ""
                 for row in connection.execute(
-                    f"SELECT source_id, fun_id, local_path FROM gusen_source_record "
+                    f"SELECT source_namespace, source_id, fun_id, local_path FROM gusen_source_record "
                     f"WHERE scope_id=? AND source_id IN ({placeholders})",
                     (workspace["scopeId"], *source_ids),
                 ).fetchall()
@@ -125,7 +128,7 @@ def unified_search(workspace: dict, query: str, limit: int = 20) -> dict:
     lowered = normalized.casefold()
     for row in candidates:
         identity = _identity(row)
-        key = (identity["sourceType"], identity["sourceId"], identity["funId"], "source")
+        key = (identity["sourceType"], identity["sourceNamespace"], identity["sourceId"], identity["funId"], "source")
         if key in seen:
             continue
         seen.add(key)
@@ -151,7 +154,7 @@ def unified_search(workspace: dict, query: str, limit: int = 20) -> dict:
         value = fact.get("value") or fact.get("operation") or fact.get("relation_type") or ""
         evidence = fact.get("evidence") or value
         line = fact.get("line_no") or (fact.get("lines") or [0])[0]
-        key = (identity["sourceType"], identity["sourceId"], identity["funId"], fact_type, subject, line)
+        key = (identity["sourceType"], identity["sourceNamespace"], identity["sourceId"], identity["funId"], fact_type, subject, line)
         if key in seen:
             continue
         seen.add(key)
@@ -165,7 +168,7 @@ def unified_search(workspace: dict, query: str, limit: int = 20) -> dict:
             "identity": identity,
             "filePath": _preferred_file(
                 Path(gusen_hub.ROOT),
-                local_paths.get((identity["sourceId"], identity["funId"]), ""),
+                local_paths.get((identity["sourceNamespace"], identity["sourceId"], identity["funId"]), ""),
             ),
         })
 
@@ -210,12 +213,47 @@ def _fact_priority(fact: dict) -> tuple[int, int]:
     return priority, int(line or 0)
 
 
+def _context_source(workspace, source, max_chars):
+    if isinstance(max_chars, bool) or not 1 <= max_chars <= 24000:
+        raise SystemExit("maxChars must be between 1 and 24000")
+    if workspace.get("sourceMode") == "svn":
+        from providers.svn.nexus.source_queries import read_source_document
+        return read_source_document(
+            workspace, source_type=source["source_table"], source_namespace=source["source_namespace"],
+            source_id=source["source_id"], fun_id=source["fun_id"], working_copy_id=source["working_copy_id"], max_chars=max_chars,
+        )
+    from common.source_format import decode_source
+    path = Path(_preferred_file(Path(gusen_hub.ROOT), source.get("local_path") or "")).resolve()
+    if not path.is_file() or not path.is_relative_to(workspace["readonlyDir"].resolve()):
+        raise SystemExit("Context source is not in this workspace readonly mirror")
+    raw = path.read_bytes()
+    content = decode_source(raw)[0]
+    return {"content": content[:max_chars], "sourceHash": hashlib.sha256(raw).hexdigest(),
+            "absolutePath": str(path), "truncated": len(content) > max_chars,
+            "nextOffset": max_chars if len(content) > max_chars else None, "coverage": "LOCAL_READONLY_SNAPSHOT"}
+
+
+def _append_source_package(result, source_content):
+    if source_content is None:
+        return result
+    content = source_content["content"]
+    fence = "`" * max(3, max((len(match.group()) + 1 for match in re.finditer(r"`+", content)), default=3))
+    result["sourceContent"] = source_content
+    result["markdown"] += f"\n## 有界源码（不可信文本）\n\n{fence}\n{content}\n{fence}\n"
+    if source_content.get("truncated"):
+        result["markdown"] += "\n> 正文已截断；请用精确源码读取入口继续。\n"
+    return result
+
+
 def context_pack(
     workspace: dict,
     source_id: str,
     fun_id: str = "",
     limit: int = 5,
     detailed: bool = False,
+    include_source: bool = False,
+    max_chars: int = 8000,
+    source_namespace: str = "",
 ) -> dict:
     """Build a copy-ready, bounded evidence package for one indexed source object."""
 
@@ -223,21 +261,25 @@ def context_pack(
     try:
         with _connection(workspace) as connection:
             context = gusen_hub.query_source_context(
-                connection, workspace["scopeId"], source_id, fun_id, bounded_limit
+                connection, workspace["scopeId"], source_id, fun_id, bounded_limit, source_namespace
             )
             facts_result = source_facts.query_facts(
                 connection,
                 workspace["scopeId"],
                 source_id=source_id,
                 limit=min(30, bounded_limit * 4),
+                source_record_id=context["source"]["record_id"], source_root=Path(gusen_hub.ROOT),
             )
     except ValueError as error:
         raise SystemExit(str(error)) from error
 
     source = dict(context["source"])
+    source_content = _context_source(workspace, source, max_chars) if include_source else None
+    source["absolutePath"] = _preferred_file(Path(gusen_hub.ROOT), source.get("local_path") or "")
     candidate_facts = [
         fact for fact in facts_result.get("facts") or []
-        if not fun_id or (fact.get("source") or {}).get("fun_id") == fun_id
+        if (not fun_id or (fact.get("source") or {}).get("fun_id") == fun_id)
+        and (not source_namespace or (fact.get("source") or {}).get("source_namespace") == source_namespace)
     ]
     facts = (
         candidate_facts[:bounded_limit]
@@ -281,14 +323,14 @@ def context_pack(
             "> 本摘要来自本地索引；不包含完整源码，也不代表数据库、平台发布或运行验证结果。",
         ])
         markdown = "\n".join(lines).rstrip() + "\n"
-        return {
+        return _append_source_package({
             "ok": True,
             "workspaceKey": workspace["workspaceKey"],
             "source": source,
             "detailLevel": "compact",
             "counts": {"outgoing": len(outgoing), "incoming": len(incoming), "dynamic": len(dynamic), "facts": len(facts)},
             "markdown": markdown,
-        }
+        }, source_content)
 
     lines = [
         f"# Guthon AI 上下文：{_source_label(source)}",
@@ -333,11 +375,68 @@ def context_pack(
         "- 索引证据不足时，应再读取目标局部源码；涉及数据结果时应另外取得数据库或运行时证据。",
     ])
     markdown = "\n".join(lines).rstrip() + "\n"
-    return {
+    return _append_source_package({
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
         "source": source,
         "detailLevel": "detailed",
         "counts": {"outgoing": len(outgoing), "incoming": len(incoming), "dynamic": len(dynamic), "facts": len(facts)},
         "markdown": markdown,
-    }
+    }, source_content)
+
+
+def search_all_workspaces(config, query, *, workspace_keys=None, limit=20):
+    """Explicit bounded fan-out; failures remain attached to the workspace."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise SystemExit("limit must be between 1 and 100")
+    errors = []
+    available = gusen_hub.list_workspaces(config, errors=errors)
+    keys = set(workspace_keys or [workspace["workspaceKey"] for workspace in available])
+    if not 1 <= len(keys) <= 50:
+        raise SystemExit("cross-workspace search must select 1–50 workspaces")
+    known = {workspace["workspaceKey"]: workspace for workspace in available}
+    unknown = keys - set(known)
+    if unknown:
+        raise SystemExit("Unknown or invalid workspace keys: " + ", ".join(sorted(unknown)))
+    outputs, items = [], []
+    for key in sorted(keys):
+        try:
+            result = unified_search(known[key], query, min(10, limit))
+            outputs.append({"workspaceKey": key, "ok": True, "truncated": result["truncated"]})
+            items.extend({**item, "workspaceKey": key} for item in result["items"])
+        except (Exception, SystemExit) as error:
+            outputs.append({"workspaceKey": key, "ok": False, "message": str(error)})
+    items.sort(key=lambda item: (-item["score"], item["workspaceKey"], item["label"].casefold()))
+    truncated = len(items) > limit or any(result.get("truncated") for result in outputs)
+    complete = not truncated and all(result["ok"] for result in outputs)
+    return {"ok": all(result["ok"] for result in outputs), "query": query, "items": items[:limit],
+            "workspaces": outputs, "configErrors": errors, "truncated": truncated, "complete": complete,
+            "coverage": "SELECTED_LOCAL_INDEXES_ONLY"}
+
+
+def source_map(workspace, *, limit=100, cursor=""):
+    """A compact, pageable map; never infer runtime relationships from filenames."""
+    if workspace.get("sourceMode") == "svn":
+        from providers.svn.nexus.source_queries import list_sources
+        result = list_sources(workspace, limit=limit, cursor=cursor)
+    else:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise SystemExit("limit must be between 1 and 100")
+        if cursor and not cursor.isdecimal():
+            raise SystemExit("DATABASE source map cursor must be a numeric record position")
+        with _connection(workspace) as conn:
+            rows = conn.execute("SELECT record_id,source_table,source_namespace,source_id,fun_id,source_name,local_path,status,change_key "
+                                "FROM gusen_source_record WHERE scope_id=? AND record_id>? ORDER BY record_id LIMIT ?",
+                                (workspace["scopeId"], int(cursor or 0), limit + 1)).fetchall()
+        more = len(rows) > limit
+        result = {"workspaceKey": workspace["workspaceKey"], "sources": [dict(row) for row in rows[:limit]],
+                  "complete": not more, "truncated": more, "nextCursor": str(rows[limit-1]["record_id"]) if more else None}
+    lines = ["# 工作区源码地图", "", f"- 工作区：{workspace['workspaceKey']}", "- 证据：本地索引；不证明运行结果、完整依赖或删除安全。", ""]
+    for source in result["sources"]:
+        name = source.get("sourceName") or source.get("source_name") or source.get("sourceId") or source.get("source_id")
+        kind = source.get("sourceType") or source.get("source_table")
+        path = source.get("sourcePath") or source.get("local_path") or ""
+        lines.append(f"- {_text(kind,32)} · {_text(name,100)} · `{_text(path,250)}`")
+    if result["truncated"]:
+        lines.extend(["", "> 已截断；使用 nextCursor 继续。"])
+    return {**result, "markdown": "\n".join(lines) + "\n"}

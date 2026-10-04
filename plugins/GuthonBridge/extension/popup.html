@@ -12,10 +12,24 @@
         <button id="closeBtn" title="关闭" type="button">×</button>
       </div>
 
+      <details>
+        <summary>Bridge 配对设置</summary>
+        <p>先在 Nexus 启动 Bridge，点击“复制配对令牌”，在此粘贴。</p>
+        <label>配对令牌<input id="bridgeToken" type="password" autocomplete="off" /></label>
+        <label>本机端口<input id="bridgePort" type="number" value="17361" min="1" max="65535" /></label>
+        <button id="pairBridgeBtn" type="button">保存并连接</button>
+        <button id="resumeBridgeJobsBtn" type="button">查询待恢复任务</button>
+      </details>
       <label>
         <span id="procedureLabel">包名</span>
         <input id="procedureKeyword" value="" readonly />
       </label>
+
+      <details>
+        <summary>最近拉取对象</summary>
+        <button id="refreshRecentPullsBtn" type="button">刷新历史</button>
+        <div id="recentPulls"></div>
+      </details>
 
       <label>
         <span id="funIdLabel">函数名</span>
@@ -23,8 +37,8 @@
       </label>
 
       <label>
-        页面保存目录
-        <input id="outputDir" value="" placeholder="请输入本机绝对路径" />
+        页面导出目录
+        <input id="outputDir" value="" readonly placeholder="连接 Bridge 后显示导出目录" />
       </label>
 
       <div class="actions">
@@ -44,6 +58,8 @@
     <script src="host-config.js"></script>
     <script src="nexus-locator.js"></script>
     <script src="workspace-selection.js"></script>
+    <script src="task-client.js"></script>
+    <script src="task-history.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

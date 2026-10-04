@@ -1,0 +1,557 @@
+{
+  "schemaVersion": 1,
+  "defaultTimeoutMs": 120000,
+  "commands": {
+    "workspace-summary": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "sync-all": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "doctor": {
+      "kind": "read",
+      "timeoutMs": 120000,
+      "writeFlags": [
+        "--bundle"
+      ]
+    },
+    "database-diagnose": {
+      "kind": "read",
+      "timeoutMs": 120000,
+      "writeFlags": [
+        "--output"
+      ]
+    },
+    "reindex": {
+      "kind": "write",
+      "timeoutMs": 1800000,
+      "cancellable": true
+    },
+    "route": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "workspaces": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "query": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "sync-source-all": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "database-target-resolve": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "context-pack": {
+      "kind": "read",
+      "timeoutMs": 120000,
+      "writeFlags": [
+        "--write-context"
+      ]
+    },
+    "database-target-list": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "workspace-resolve": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "database-query-readonly": {
+      "kind": "read",
+      "timeoutMs": 120000,
+      "writeFlags": [
+        "--output"
+      ]
+    },
+    "database-probe": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "search": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "version": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "sync-source": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "database-connect-test": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "database-describe": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "index-doctor": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "command-metadata": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "database-dbx-import": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "database-dbx-handoff": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "database-history-list": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "database-history-show": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "diagnosis-list": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "diagnosis-show": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "database-compare": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "diagnosis-template": {
+      "kind": "read",
+      "timeoutMs": 120000,
+      "writeFlags": [
+        "--case-out",
+        "--output"
+      ]
+    },
+    "search-all": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "parser-feedback": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "source-map": {
+      "kind": "read",
+      "timeoutMs": 120000,
+      "writeFlags": [
+        "--write"
+      ]
+    },
+    "database-credentials-export": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "database-credentials-import": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "database-test-artifacts": {
+      "kind": "read",
+      "timeoutMs": 1800000,
+      "writeFlags": [
+        "--out",
+        "--out-dir",
+        "--report"
+      ]
+    },
+    "pull-log": {
+      "summary": "有界读取当前工作区及 Bridge 保留的拉取元数据，或汇总观察窗口",
+      "kind": "read",
+      "timeoutMs": 120000,
+      "writeArguments": [
+        "export",
+        "archive",
+        "restore"
+      ]
+    },
+    "serve": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "mcp": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "setup": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "workspace-create": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "workspace-delete": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "svn-login-configure": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "import-svn-scope": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "database-target-configure": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "source-mode": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "init": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "svn": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "pull": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "export-markdown": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "export-schema": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "export-bill-type": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "export-view": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "export-system-script": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "diagnose": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "create-workcopy": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "workcopy": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "self-test": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "database-target-remove": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "source-sync": {
+      "kind": "write",
+      "timeoutMs": 1800000,
+      "canonicalCommand": "sync-source"
+    },
+    "source-sync-full": {
+      "kind": "write",
+      "timeoutMs": 1800000,
+      "canonicalCommand": "sync-source-all"
+    },
+    "workspace-sync": {
+      "kind": "write",
+      "timeoutMs": 1800000,
+      "canonicalCommand": "sync-all"
+    },
+    "index-rebuild": {
+      "kind": "write",
+      "timeoutMs": 1800000,
+      "cancellable": true,
+      "canonicalCommand": "reindex"
+    },
+    "index-init": {
+      "kind": "write",
+      "timeoutMs": 120000,
+      "canonicalCommand": "init"
+    }
+  },
+  "svnActions": {
+    "init": {
+      "summary": "检出或初始化 SVN working copy，并重建本地索引",
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "auth-cache": {
+      "summary": "把 SVN 密码写入系统凭据缓存（仅 manifest-working-copies）",
+      "stdin": "{\"password\": \"<密码>\"}",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "scope-preview": {
+      "summary": "预览当前授权范围与工作副本差异",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "scope-import": {
+      "summary": "从签出脚本或范围配置导入授权范围",
+      "stdin": "{\"text\": \"<脚本或配置文本>\"} 或 {\"file\": \"<路径>\", \"source\": \"script|config\"}",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "sync-from-script": {
+      "summary": "按签出脚本检出/更新 working copy 并重建索引",
+      "options": "[--accept-scope-change] [--merge-local]",
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "sync-from-bat": {
+      "summary": "sync-from-script 的兼容别名",
+      "options": "[--accept-scope-change] [--merge-local]",
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "sync-from-config": {
+      "summary": "按可编辑范围配置检出/更新 working copy 并重建索引",
+      "options": "[--accept-scope-change] [--merge-local]",
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "refresh": {
+      "summary": "更新本地 working copy，并按变更增量刷新索引",
+      "options": "[--merge-local] [--working-copy <id>]... [--path <逻辑路径>] [--prune]",
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "status": {
+      "summary": "报告 working copy 状态",
+      "options": "[--diff] [--remote]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "catalog": {
+      "summary": "列出索引内的数据源与对象目录",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "fragments": {
+      "summary": "读取对象被索引的片段清单（不含源码正文）",
+      "options": "--source-type <类型> --source-id <id> [--fun-id <fun>] [--working-copy <id>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "page-query": {
+      "summary": "按 JSON stdin 调用只读 PAGE 有界查询工具",
+      "stdin": "{\"name\": \"list_page_nodes|read_page_nodes|search_sources|...\", \"arguments\": {...}}",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "read": {
+      "summary": "读取精确对象并开启编辑会话",
+      "options": "--source-type page|procedure|system-script|table|view|skill|public --source-id <id> [--fun-id <fun>] [--json-pointer <指针>] [--working-copy <id>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "read-batch": {
+      "summary": "一次读取多个精确对象并开启编辑会话",
+      "stdin": "{\"targets\": [{\"sourceType\": \"...\", \"sourceId\": \"...\", \"funId\": \"\", \"jsonPointer\": \"\"}]}",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "write": {
+      "summary": "把编辑会话内容写回本地 working copy",
+      "options": "--session <会话ID> --document <文档ID>",
+      "stdin": "{\"content\": \"<完整文本>\", \"expectedProductHash\": \"\"}",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "write-batch": {
+      "summary": "一次写回同一会话中的多处修改",
+      "options": "[--session <会话ID>]",
+      "stdin": "{\"changes\": [{\"documentId\": \"...\", \"content\": \"...\"}]}",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "scm-status": {
+      "summary": "报告 SCM 变更集（含可选远端核对）",
+      "options": "[--remote] [--working-copy <id>]...",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "diff": {
+      "summary": "查看指定逻辑路径的 SVN 差异",
+      "options": "--path <逻辑路径> [--remote]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "conflict": {
+      "summary": "查看指定逻辑路径的冲突详情",
+      "options": "--path <逻辑路径>",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "resolve-conflict": {
+      "summary": "标记解决冲突并重新索引该文件",
+      "options": "--path <逻辑路径>",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "history": {
+      "summary": "查看指定逻辑路径的 SVN 历史",
+      "options": "--path <逻辑路径> [--limit <条数>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "revert-preview": {
+      "summary": "预览撤销某编辑会话的本地改动",
+      "options": "--session <会话ID> [--working-copy <id>]...",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "revert": {
+      "summary": "按选择令牌撤销某编辑会话的本地改动",
+      "options": "--session <会话ID> --selection-token <令牌> [--candidate <id>]...",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "platform-save-preview": {
+      "summary": "预览平台保存前的本地差异范围",
+      "options": "--session <会话ID> [--working-copy <id>]...",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "platform-save": {
+      "summary": "将选定文件提交到 SVN 并记录平台保存结果（需要 svn.platform_save 能力）",
+      "options": "--session <会话ID> --selection-token <令牌> [--candidate <id>]...",
+      "stdin": "{\"message\": \"<说明>\"}",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "delivery-status": {
+      "summary": "报告本地保存与平台发布状态",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "definition": {
+      "summary": "按别名与函数名定位对象定义",
+      "options": "--alias <source_alias_id> --fun-id <fun_id>",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "callers": {
+      "summary": "查询跨对象调用方（共享函数影响面）",
+      "options": "--alias <source_alias_id> --fun-id <fun_id> [--limit <条数>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "find": {
+      "summary": "对象名、别名或 ID 不明时定位候选（索引首选入口）",
+      "options": "--keyword <对象名、别名或ID> [--limit <条数>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "context": {
+      "summary": "查询一跳出入边上下文",
+      "options": "--source-id <source_id> [--fun-id <fun>] [--limit <条数>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "facts": {
+      "summary": "查询局部事实：错误、条件、赋值、字段关系（索引首选入口）",
+      "options": "--keyword <词> | --table <表名> | --source-id <id>；[--limit <条数>] [--continuation <偏移>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "explain": {
+      "summary": "查询表或单据的写入原因链（索引首选入口）",
+      "options": "--table <表名> | --bill-type <单据类型>；[--data-source-id <id>] [--operation WRITE|SELECT] [--limit <条数>] [--fact-limit <条数>] [--caller-depth <层数>] [--continuation <偏移>] [--include-details]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "reindex-file": {
+      "summary": "只重新索引指定逻辑路径",
+      "options": "--path <逻辑路径>",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "lease-renew": {
+      "summary": "延长仍有效且源码未变更的编辑租约",
+      "options": "--edit-token <token>",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "lease-release": {
+      "summary": "释放精确文档租约，保留源码和其他编辑者",
+      "options": "--session <id> --document <id>",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "operations": {
+      "summary": "有界巡检编辑操作记录",
+      "options": "[--limit <n>] [--cursor <token>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "operation-gc": {
+      "summary": "预览或确认后归档完成且无活动租约的操作记录",
+      "options": "--before <ISO日期> [--apply --confirmation <planHash>]",
+      "kind": "read",
+      "timeoutMs": 120000,
+      "writeFlags": [
+        "--apply"
+      ]
+    },
+    "blame": {
+      "summary": "读取授权源码的有界SVN逐行归属",
+      "options": "--path <path> [--start-line <n>] [--end-line <n>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "changed-sources": {
+      "summary": "列出保留代次之后已提交索引的新增修改删除",
+      "options": "--since-generation <id> [--limit <n>] [--cursor <token>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "table-references": {
+      "summary": "查询已识别表访问或明确界面列映射，不判断删除安全",
+      "options": "--table <name> [--column <name>] [--graph] [--limit <n>] [--cursor <token>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "text-search": {
+      "summary": "检索私有片段正文索引，返回有界摘录与哈希/Pointer，不证明当前源码或运行行为",
+      "options": "--keyword <text> [--limit <n>] [--cursor <token>]",
+      "kind": "read",
+      "timeoutMs": 120000
+    }
+  },
+  "configIdPattern": "[A-Za-z0-9][A-Za-z0-9._-]*",
+  "commandAliases": {
+    "source-sync": "sync-source",
+    "source-sync-full": "sync-source-all",
+    "workspace-sync": "sync-all",
+    "index-rebuild": "reindex",
+    "index-init": "init"
+  }
+}

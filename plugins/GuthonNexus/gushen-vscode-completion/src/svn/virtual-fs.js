@@ -1,3 +1,4 @@
+const { BoundedCache } = require('./bounded-cache');
 const SCHEME = 'guthon-svn-edit';
 const GENERIC_SOURCE_EXTENSIONS = new Set(['json', 'md', 'txt', 'yaml', 'yml', 'gss', 'js', 'vm', 'sql']);
 
@@ -54,6 +55,7 @@ function encodeIdentity(identity) {
   params.set('sourceId', identity.sourceId);
   if (identity.funId) params.set('funId', identity.funId);
   if (identity.workingCopyId) params.set('workingCopyId', identity.workingCopyId);
+  if (identity.sourceNamespace) params.set('sourceNamespace', identity.sourceNamespace);
   if (identity.jsonPointer) params.set('jsonPointer', identity.jsonPointer);
   return params.toString();
 }
@@ -69,6 +71,8 @@ function decodeIdentity(uri) {
   };
   const workingCopyId = params.get('workingCopyId') || '';
   if (workingCopyId) identity.workingCopyId = workingCopyId;
+  const namespace = params.get('sourceNamespace') || '';
+  if (namespace) identity.sourceNamespace = namespace;
   return identity;
 }
 
@@ -83,7 +87,20 @@ class SvnVirtualFileSystem {
     this.onOutput = onOutput;
     this.changed = new vscode.EventEmitter();
     this.onDidChangeFile = this.changed.event;
-    this.cache = new Map();
+    this.cache = new BoundedCache({maxEntries:128,maxBytes:32*1024*1024,ttlMs:60_000,
+      sizeOf:(record)=>Buffer.byteLength(JSON.stringify(record),'utf8'),
+      isPinned:(key)=>this.vscode.workspace?.textDocuments?.some((document)=>document.uri.toString()===key)});
+    this.inFlight = new Map();
+    this.generations = new BoundedCache({maxEntries:512,isPinned:(key)=>this.inFlight.has(key)});
+    this.closeRegistration = vscode.workspace?.onDidCloseTextDocument?.((document)=>{
+      const key=document.uri.toString();
+      const record=this.cache.get(key);
+      this.generations.set(key,(this.generations.get(key)||0)+1);this.cache.delete(key);
+      if(record?.value?.editable && record.value.sessionId && record.value.documentId && typeof this.backend.releaseLease==='function') {
+        void Promise.resolve().then(()=>this.backend.releaseLease(record.identity.workspaceKey,record.value.sessionId,record.value.documentId))
+          .catch((error)=>this.onOutput?.(`关闭文档后的租约释放未完成：${error.message}\n`));
+      }
+    });
   }
 
   uriFor(identity) {
@@ -97,7 +114,16 @@ class SvnVirtualFileSystem {
 
   async _load(uri, force = false) {
     const key = uri.toString();
-    if (!force && this.cache.has(key)) return this.cache.get(key);
+    const cached = this.cache.get(key);
+    if (!force && cached) return cached;
+    if (this.inFlight.has(key)) return this.inFlight.get(key);
+    const generation=this.generations.get(key)||0;
+    const pending=this._fetch(uri,key,generation).finally(()=>{if(this.inFlight.get(key)===pending)this.inFlight.delete(key);});
+    this.inFlight.set(key,pending);
+    return pending;
+  }
+
+  async _fetch(uri,key,generation) {
     const identity = decodeIdentity(uri);
     if (!identity.workspaceKey || !identity.sourceType || !identity.sourceId) {
       throw this.vscode.FileSystemError.FileNotFound(uri);
@@ -131,10 +157,11 @@ class SvnVirtualFileSystem {
         }
         for (const name of Object.keys(chunks)) chunks[name].push(result[name]?.content || '');
         if (result.complete) break;
-        offset = result.nextOffset;
-        if (!Number.isInteger(offset) || offset > 1_000_000) {
-          throw new Error('继承源码超过编辑器展开上限，请使用分段读取接口');
+        const nextOffset = result.nextOffset;
+        if (!Number.isInteger(nextOffset) || nextOffset <= offset || nextOffset > 1_000_000) {
+          throw new Error('继承源码分页未前进或超过展开上限，请使用分段读取接口');
         }
+        offset = nextOffset;
       }
       if (first.inheritanceStatus === 'ACTIVE') {
         const projectOriginal = chunks.projectOriginal.join('');
@@ -166,6 +193,7 @@ class SvnVirtualFileSystem {
         value.inheritanceDiagnostic = `继承状态 ${first.inheritanceStatus}：${first.diagnostic || '请核对两层源码和本地索引'}`;
       }
     }
+    if ((this.generations.get(key)||0)!==generation) throw new Error('源码读取期间缓存已失效，请重新打开');
     const record = { identity, value, inheritance, updatedAt: Date.now() };
     this.cache.set(key, record);
     this.onLoaded?.(uri, value);
@@ -174,7 +202,7 @@ class SvnVirtualFileSystem {
 
   async open(identity, options = {}) {
     const uri = this.uriFor(identity);
-    const alreadyDirty = this.vscode.workspace.textDocuments?.some((document) =>
+    const alreadyDirty = this.vscode.workspace?.textDocuments?.some((document) =>
       document.uri.toString() === uri.toString() && document.isDirty);
     const record = await this._load(uri, !alreadyDirty);
     const document = await this.vscode.workspace.openTextDocument(uri);
@@ -334,12 +362,20 @@ class SvnVirtualFileSystem {
   delete() { throw this.vscode.FileSystemError.NoPermissions(); }
   rename() { throw this.vscode.FileSystemError.NoPermissions(); }
 
-  invalidate(workspaceKey, notify = false, preserveUri) {
+  invalidate(workspaceKey, notify = false, preserveUri, sourcePaths) {
     const preserveKey = preserveUri?.toString();
     const changedUris = [];
+    const paths=sourcePaths?.length?new Set(sourcePaths):null;
+    for(const key of this.inFlight.keys()) {
+      if(key===preserveKey)continue;
+      const identity=decodeIdentity(this.vscode.Uri.parse(key));
+      if(identity.workspaceKey===workspaceKey)this.generations.set(key,(this.generations.get(key)||0)+1);
+    }
     for (const [key, record] of this.cache.entries()) {
       if (record.identity.workspaceKey !== workspaceKey) continue;
       if (key === preserveKey) continue;
+      if(paths && !paths.has(record.value.sourcePath))continue;
+      this.generations.set(key,(this.generations.get(key)||0)+1);
       if (notify) changedUris.push(this.vscode.Uri.parse(key));
       this.cache.delete(key);
     }
@@ -353,6 +389,8 @@ class SvnVirtualFileSystem {
   }
 
   dispose() {
+    this.closeRegistration?.dispose?.();
+    for(const key of this.inFlight.keys())this.generations.set(key,(this.generations.get(key)||0)+1);
     this.cache.clear();
     this.changed.dispose();
   }

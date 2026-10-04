@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "name": "table-count",
+  "description": "只读统计显式业务表的行数；COUNT 结果不代表业务验收通过。",
+  "parameters": {"schema": "identifier", "table": "identifier"},
+  "sql": "SELECT COUNT(*) AS row_count FROM {{schema}}.{{table}}"
+}

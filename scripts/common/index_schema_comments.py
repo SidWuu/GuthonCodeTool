@@ -5,6 +5,53 @@ describes the table; other rows describe columns returned by PRAGMA table_info.
 """
 
 SCHEMA_COMMENTS = {
+    "gusen_index_generation": (
+        "有保留期限的已提交 SVN 索引代次边界；不表示运行时事件。",
+        """sequence|索引发布次序
+generation|发布代次标识
+published_at|发布 UTC 时间
+source_count|该代次源码对象数量""",
+    ),
+    "gusen_source_snapshot": (
+        "上一已发布 SVN 索引的元数据快照，供精确比较新增修改删除；不保存源码正文。",
+        """scope_id|工作区业务身份
+source_namespace|源码命名空间
+source_type|源码类型
+source_id|源码原生编号
+fun_id|函数编号
+source_path|授权源码路径
+working_copy_id|工作副本编号
+source_hash|物理源码哈希
+status|索引对象状态
+change_key|索引变更键
+source_alias_id|源码别名
+source_name|源码名称""",
+    ),
+    "gusen_source_change_event": (
+        "已提交索引代次的新增修改删除元数据；只覆盖保留的历史。",
+        """event_id|变更事件次序
+generation_sequence|所属发布代次序号
+scope_id|工作区业务身份
+source_namespace|源码命名空间
+source_type|源码类型
+source_id|源码原生编号
+fun_id|函数编号
+source_path|变更时授权源码路径
+working_copy_id|工作副本编号
+change_type|新增修改或删除
+source_hash|变更时物理源码哈希
+status|变更时索引对象状态""",
+    ),
+    "source_body_content": (
+        "私有派生片段正文缓存；只用于有界检索，不作为当前源码或运行证据。",
+        """body_id|正文缓存编号
+source_record_id|对应源码对象编号
+json_pointer|片段 JSON Pointer
+content|已索引的私有片段正文
+source_hash|物理源码哈希证据
+indexed_chars|实际索引字符数
+total_chars|原始片段字符数""",
+    ),
     "gusen_source_record": (
         "源码对象主表；其他事实表通过 record_id 关联此表。",
         """record_id|索引内的源码对象编号

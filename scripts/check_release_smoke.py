@@ -37,7 +37,9 @@ def mcp_tools(command: list[str], home: str, *, read_only: bool) -> list[dict]:
     if initialized.get("protocolVersion") != "2025-11-25":
         raise RuntimeError("MCP protocol negotiation did not return 2025-11-25")
     tools = by_id.get(2, {}).get("result", {}).get("tools")
-    expected = 18 if read_only else 29
+    from providers.svn.nexus.mcp_server import TOOLS, WRITE_TOOLS
+    registered = TOOLS + WRITE_TOOLS
+    expected = sum(bool(tool["annotations"]["readOnlyHint"]) for tool in registered) if read_only else len(registered)
     if not isinstance(tools, list) or len(tools) != expected:
         raise RuntimeError(f"MCP tool count: expected {expected}, received {len(tools) if isinstance(tools, list) else 'none'}")
     if read_only and any(not item.get("annotations", {}).get("readOnlyHint") for item in tools):
@@ -80,9 +82,9 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="guthon-release-smoke-") as home:
         run([*command, "self-test", "--home", home])
         run([*command, "setup", "--home", home])
-        mcp_tools(command, home, read_only=False)
-        mcp_tools(command, home, read_only=True)
-    print(f"PASS: {version['version']} · self-test · MCP 29/18 tools · temporary toolHome")
+        all_tools = mcp_tools(command, home, read_only=False)
+        readonly_tools = mcp_tools(command, home, read_only=True)
+    print(f"PASS: {version['version']} · self-test · MCP {len(all_tools)}/{len(readonly_tools)} tools · temporary toolHome")
     return 0
 
 

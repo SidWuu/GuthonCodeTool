@@ -310,3 +310,15 @@ test('reverts one native Quick Diff block while preserving the rest of the file'
   }), true);
   assert.equal(appliedEdit.text, 'one\ntwo\nthree\n');
 });
+
+test('diff snapshots use bounded digest keys without retaining duplicated source text',()=>{
+  const Uri={from:value=>({...value,toString:()=>JSON.stringify(value)})};
+  const provider=new SvnDiffContentProvider({vscode:{Uri,workspace:{textDocuments:[]}}});provider.contents.maxEntries=2;
+  const first=provider.storeOriginal('products.demo','a.gss','old');
+  provider.storeOriginal('products.demo','b.gss','b');
+  provider.storeOriginal('products.demo','c.gss','c');
+  assert.equal(provider.contents.size,2);assert.equal(provider.snapshotKeys.size,2);assert.equal(provider.snapshotUris.size,2);
+  assert.equal(provider.provideTextDocumentContent(first),'');
+  for(const key of provider.snapshotUris.keys())assert.match(key,/^[a-f0-9]{64}$/);
+  provider.dispose();
+});

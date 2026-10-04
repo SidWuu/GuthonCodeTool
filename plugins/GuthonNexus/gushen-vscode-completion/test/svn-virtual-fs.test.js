@@ -24,6 +24,8 @@ test('encodes only stable object identity in SVN virtual URIs', () => {
   const query = encodeIdentity(identity);
   assert.equal(query.includes('/checkout/'), false);
   assert.deepEqual(decodeIdentity({ authority: identity.workspaceKey, query }), identity);
+  const namespaced = {...identity, sourceNamespace:'ds-one:pages/SYS-1',workingCopyId:'copy-one'};
+  assert.deepEqual(decodeIdentity({authority:identity.workspaceKey,query:encodeIdentity(namespaced)}), namespaced);
 });
 
 test('selects a readable virtual filename extension', () => {
@@ -309,4 +311,38 @@ test('materializes edited product source with its checked hash', async () => {
   assert.equal(writes[0][3], 'changed();');
   assert.deepEqual(writes[0][4], { expectedProductHash: 'page-hash' });
   provider.dispose();
+});
+
+test('deduplicates loads, rejects invalidated in-flight reads and pins live document leases', async () => {
+  class EventEmitter{constructor(){this.event=()=>{};}fire(){}dispose(){}}
+  const documents=[];
+  const Uri={from:value=>({...value,toString(){return JSON.stringify(value);}}),parse:text=>Uri.from(JSON.parse(text))};
+  let reads=0;let release;
+  const backend={read:async()=>{reads+=1;return new Promise(resolve=>{release=resolve;});}};
+  const provider=new SvnVirtualFileSystem({vscode:{EventEmitter,Uri,workspace:{textDocuments:documents},FileSystemError:{FileNotFound:()=>new Error('missing')}},backend});
+  const identity={workspaceKey:'products.demo',sourceType:'procedure',sourceId:'demo#save',funId:'save'};const uri=provider.uriFor(identity);
+  const first=provider.readFile(uri);const second=provider.stat(uri);assert.equal(reads,1);
+  provider.invalidate('products.demo');release({content:'stale',sourcePath:'stale.gss'});
+  await assert.rejects(first,/已失效/);await assert.rejects(second,/已失效/);assert.equal(provider.cache.size,0);
+  backend.read=async(key,item)=>({content:item.sourceId,sourcePath:item.sourceId,sessionId:item.sourceId,editable:true});
+  documents.push({uri,isDirty:true});provider.cache.maxEntries=1;
+  await provider.readFile(uri);
+  await provider.readFile(provider.uriFor({...identity,sourceId:'other'}));
+  assert.equal(provider.cache.get(uri.toString()).value.sessionId,'demo#save');
+  provider.invalidate('products.demo',false,undefined,['unrelated']);assert.equal(provider.cache.has(uri.toString()),true);
+  provider.dispose();
+});
+
+
+test('closing an editable virtual document releases exactly its backend lease',async()=>{
+ let closed;const released=[];
+ class EventEmitter{constructor(){this.event=()=>{};}fire(){}dispose(){}}
+ const vscode={EventEmitter,workspace:{textDocuments:[],onDidCloseTextDocument:fn=>{closed=fn;return {dispose(){}};}}};
+ const backend={releaseLease:async(...args)=>released.push(args)};
+ const provider=new SvnVirtualFileSystem({vscode,backend});
+ const uri={toString:()=> 'guthon-svn://products.demo/procedure'};
+ provider.cache.set(uri.toString(),{identity:{workspaceKey:'products.demo'},value:{editable:true,sessionId:'session',documentId:'document',content:'source'}});
+ closed({uri});await new Promise(resolve=>setImmediate(resolve));
+ assert.deepEqual(released,[['products.demo','session','document']]);
+ assert.equal(provider.cache.has(uri.toString()),false);provider.dispose();
 });

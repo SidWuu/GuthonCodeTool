@@ -95,7 +95,20 @@ function completions(kind, source, offset) {
   return [];
 }
 
-function registerEditorAssistance(vscode, { pageFieldCandidates } = {}) {
+function procedureCompletionTarget(source, offset) {
+  const before = source.slice(Math.max(0, offset - 1024), offset);
+  const match = before.match(/\$vs\.proc\.(invoke|find)\(\s*(["'])([A-Za-z0-9_.$]*)(?:\2\s*,\s*(["'])([A-Za-z0-9_$]*))?$/);
+  if (!match) return null;
+  // The second proc.find argument is timeout, not a function name (API data).
+  if (match[4] && match[1] !== 'invoke') return null;
+  const argument = match[4] ? 'function' : 'alias';
+  const prefix = argument === 'alias' ? match[3] : match[5];
+  if (match[3].length < 2) return null;
+  return {argument, alias: argument === 'function' ? match[3] : '', keyword: match[3], prefix,
+    start: offset - prefix.length, end: offset};
+}
+
+function registerEditorAssistance(vscode, { pageFieldCandidates, procedureCandidates } = {}) {
   const collection = vscode.languages.createDiagnosticCollection('Guthon Nexus');
   const pending = new Map();
   const update = (document) => {
@@ -131,16 +144,24 @@ function registerEditorAssistance(vscode, { pageFieldCandidates } = {}) {
     collection.delete(document.uri);
   });
   const completion = vscode.languages.registerCompletionItemProvider(
-    [{ scheme: SCHEME, language: 'guthon-gss' }, { scheme: SCHEME, language: 'json' }],
+    ['guthon-gss', 'json', 'javascript', 'java'].map(language => ({scheme:SCHEME, language})),
     {
       async provideCompletionItems(document, position, token) {
         const kind = documentKind(document);
-        if (!kind) return [];
+        if (!kind && (document.uri?.scheme !== SCHEME || !['javascript', 'java'].includes(document.languageId))) return [];
+        const version = document.version;
         const source = document.getText();
         const offset = document.offsetAt(position);
         const local = completions(kind, source, offset);
         const prefix = kind === 'fields' ? fieldReferencePrefix(source, offset) : null;
         let indexed = { fields: [], truncated: false };
+        const target = ['guthon-gss', 'javascript', 'java'].includes(document.languageId) ? procedureCompletionTarget(source, offset) : null;
+        let procedures = {sources:[], truncated:false};
+        if (target && procedureCandidates && !token?.isCancellationRequested) {
+          try {procedures = await procedureCandidates(document, target, token);} catch {
+            // API and current-document completions still work without a ready index.
+          }
+        }
         if (prefix !== null && prefix.length >= 2 && pageFieldCandidates) {
           try {
             indexed = await pageFieldCandidates(document, prefix, token);
@@ -148,7 +169,7 @@ function registerEditorAssistance(vscode, { pageFieldCandidates } = {}) {
             // Keep current-document suggestions available when the index is stale or unavailable.
           }
         }
-        if (token?.isCancellationRequested) return [];
+        if (token?.isCancellationRequested || document.version !== version) return [];
         const items = local.map((item) => {
           const result = new vscode.CompletionItem(
             item.name,
@@ -171,10 +192,28 @@ function registerEditorAssistance(vscode, { pageFieldCandidates } = {}) {
             items.push(result);
           }
         }
-        return indexed?.truncated ? new vscode.CompletionList(items, true) : items;
+        if (target) {
+          const seen = new Set();
+          for (const candidate of procedures?.sources || []) {
+            if (candidate.status !== 'OK' || candidate.sourceType !== 'procedure') continue;
+            if (target.argument === 'function' && candidate.sourceAliasId !== target.alias) continue;
+            const name = target.argument === 'alias' ? candidate.sourceAliasId : candidate.funId;
+            if (typeof name !== 'string') continue;
+            if (!/^[A-Za-z_$][A-Za-z0-9_.$]*$/.test(name) || !name.startsWith(target.prefix)) continue;
+            const key = `${name}\0${candidate.sourceNamespace}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const result = new vscode.CompletionItem(name, vscode.CompletionItemKind.Function);
+            result.range = new vscode.Range(document.positionAt(target.start), position);
+            result.insertText = name;
+            result.detail = `${candidate.sourceName || candidate.sourceId} · ${candidate.sourceNamespace}（索引候选）`;
+            items.push(result);
+          }
+        }
+        return indexed?.truncated || procedures?.truncated ? new vscode.CompletionList(items, true) : items;
       },
     },
-    '@', '"'
+    '@', '"', "'"
   );
   return { dispose() {
     for (const timer of pending.values()) clearTimeout(timer);
@@ -185,4 +224,5 @@ function registerEditorAssistance(vscode, { pageFieldCandidates } = {}) {
 module.exports = {
   completions, diagnostics, documentKind, fieldReferencePrefix,
   localFunctions, pageFieldIds, registerEditorAssistance,
+  procedureCompletionTarget,
 };

@@ -2,8 +2,23 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   findExactPageCandidates, findExactProcedureCandidates,
-  procedureFromFullName, sourceLocatorFromUri,
+  procedureFromFullName, sourceLocatorFromUri, buildSourceLocatorLink,
 } = require('../src/svn/page-locator');
+
+test('object share links roundtrip exact identity and reject ambiguity or local paths', () => {
+  const identity = {workspaceKey:'products.demo',sourceType:'procedure',sourceId:'example.pkg#save',
+    workingCopyId:'source:one',sourceNamespace:'source:one',funId:'save'};
+  const link = buildSourceLocatorLink({...identity, localPath:'/private/source',editToken:'secret'});
+  assert.ok(!link.includes('/private/source'));
+  assert.ok(!link.includes('secret'));
+  const url = new URL(link);
+  const uri = {authority:url.hostname,path:url.pathname,query:url.search.slice(1)};
+  assert.deepEqual(sourceLocatorFromUri(uri), {type:'source',identity});
+  assert.throws(()=>sourceLocatorFromUri({...uri,query:uri.query+'&workspaceKey=products.other'}),/重复/);
+  assert.throws(()=>sourceLocatorFromUri({...uri,query:uri.query+'&localPath=/tmp/source'}),/未知/);
+  assert.throws(()=>buildSourceLocatorLink({...identity,workspaceKey:''}),/精确身份/);
+  assert.throws(()=>buildSourceLocatorLink({...identity,workingCopyId:''}),/精确身份/);
+});
 
 test('external PAGE locator accepts one PAGE ID and rejects extra routing state', () => {
   const uri = { authority: 'gushen-local.guthon-nexus-vscode', path: '/locate-page', query: 'pageId=PG-1234-5678' };

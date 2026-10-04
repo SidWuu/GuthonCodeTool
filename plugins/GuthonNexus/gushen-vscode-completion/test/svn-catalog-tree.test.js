@@ -439,3 +439,17 @@ test('keeps file decorations available while the catalog tree is refreshing', ()
   assert.equal(provider.provideFileDecoration(directoryUri).badge, 'M');
   provider.dispose();
 });
+
+test('rebuilding a workspace releases its old decoration tree and preserves other workspaces', async () => {
+  class EventEmitter { constructor() {this.event=()=>{};} fire() {} dispose() {} }
+  const provider = new SvnCatalogTreeProvider({vscode:{EventEmitter}, backend:{catalog:async()=>({objects:[]})}, listSvnWorkspaces:async()=>[]});
+  const old = {workspaceKey:'products.a'};
+  provider.decorationElements.set('old-source', old);
+  provider.decorationElements.set('old-root', {workspace:{workspaceKey:'products.a'}});
+  provider.decorationElements.set('other', {workspaceKey:'products.b'});
+  provider.refresh('products.a');
+  assert.equal(provider.decorationElements.get('old-source'), old);
+  await provider.getChildren({kind:'workspace',workspace:{workspaceKey:'products.a'}});
+  assert.deepEqual([...provider.decorationElements.keys()], ['other']);
+  provider.dispose();
+});

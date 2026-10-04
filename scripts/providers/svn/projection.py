@@ -37,6 +37,8 @@ def _atomic_bytes(path: Path, value: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(temp_name, path)
     except Exception:
         try:
@@ -152,6 +154,12 @@ def _open_workcopy(workspace: dict, row, scope: dict) -> dict:
         raise SystemExit(f"Refusing to overwrite unmanaged Workcopy directory: {target}")
     if (target / META_FILE).is_file():
         _old_target, old, local_changes = inspect_projection(target)
+        if any(old.get(key) != expected for key, expected in {
+            "sourceTable": row["source_table"], "sourceId": row["source_id"],
+            "funId": row.get("fun_id") or "", "svnPath": relative.as_posix(),
+            "workspaceKey": workspace["workspaceKey"],
+        }.items()):
+            raise SystemExit(f"SVN Workcopy identity collision: {target}")
         if local_changes:
             return {
                 "ok": True,

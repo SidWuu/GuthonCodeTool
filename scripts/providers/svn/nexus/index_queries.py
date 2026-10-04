@@ -16,10 +16,10 @@ from .manifest import load_authorized_scope, source_relative_path
 
 
 SUMMARY = re.compile(r"<summary>\s*(?P<label>.*?)\s*</summary>", re.IGNORECASE)
-PAGE_MENU = re.compile(r"^\s*-\s*📄\s*(?P<label>.*?)\s*$")
-PAGE_LINK = re.compile(r"^\s*-\s*\[(?P<label>.+)]\((?P<path>[^)]+)\)\s*$")
+PAGE_MENU = re.compile(r"^\s*[-*]\s*(?:📄\s*)?(?P<label>[^\s\[<].*?)\s*$")
+PAGE_LINK = re.compile(r"^\s*[-*]\s*\[(?P<label>.+)]\((?P<path>[^)]+)\)\s*$")
 PROCEDURE_PACKAGE = re.compile(
-    r"^\s*-\s*📦\s*(?P<alias>.*?)\s*-\s*\[(?P<source_id>[^]]+)]\s*\[(?P<label>[^]]*)]"
+    r"^\s*[-*]\s*(?:📦\s*)?(?P<alias>.*?)\s*-\s*\[(?P<source_id>[^]]+)]\s*\[(?P<label>[^]]*)]"
 )
 SOURCE_ICONS = ("📂", "⭐", "📄", "🏠", "📦", "🧊", "🔰", "⚡", "📊", "🐳", "🌏")
 
@@ -36,7 +36,12 @@ def _connection(workspace: dict):
         ) as connection:
             yield connection
     except sqlite3.Error as error:
-        raise SystemExit(f"SVN 本地索引不可用，请先重建：{error}") from error
+        from .page_nodes import PageIndexError
+
+        busy = "locked" in str(error).lower() or "busy" in str(error).lower()
+        raise PageIndexError("INDEX_BUSY" if busy else "INDEX_REBUILD_REQUIRED",
+                             f"SVN local index is unavailable: {error}", retryable=busy,
+                             next_action="Retry after the active operation" if busy else "Rebuild this workspace index") from error
 
 
 def _display_label(value: str) -> str:
@@ -81,8 +86,10 @@ def _procedure_index_path(entry) -> Path:
 def _page_index_locations(entry) -> dict[str, dict]:
     try:
         lines = _page_index_path(entry).read_text(encoding="utf-8").splitlines()
-    except (FileNotFoundError, OSError, UnicodeDecodeError):
+    except FileNotFoundError:
         return {}
+    except (OSError, UnicodeDecodeError) as error:
+        raise SystemExit(f"Cannot read SVN PAGE navigation index {_page_index_path(entry)}: {error}") from error
     directories = []
     current_menu = ""
     locations = {}
@@ -124,8 +131,10 @@ def _page_index_locations(entry) -> dict[str, dict]:
 def _procedure_index_locations(entry) -> dict[str, dict]:
     try:
         lines = _procedure_index_path(entry).read_text(encoding="utf-8").splitlines()
-    except (FileNotFoundError, OSError, UnicodeDecodeError):
+    except FileNotFoundError:
         return {}
+    except (OSError, UnicodeDecodeError) as error:
+        raise SystemExit(f"Cannot read SVN procedure navigation index {_procedure_index_path(entry)}: {error}") from error
     package_alias = ""
     package_label = ""
     locations = {}
@@ -494,10 +503,10 @@ def definition(workspace: dict, *, alias: str, fun_id: str) -> dict:
             SELECT source_table, source_id, source_alias_id, fun_id, source_name, source_path,
                    working_copy_id, scope_entry_id, status
             FROM gusen_source_record
-            WHERE provider='svn' AND source_table<>'procedure-inherit' AND source_alias_id=? AND fun_id=?
+            WHERE provider='svn' AND scope_id=? AND source_table<>'procedure-inherit' AND source_alias_id=? AND fun_id=?
             ORDER BY source_table, source_id
             """,
-            (normalized_alias, normalized_fun),
+            (workspace["scopeId"], normalized_alias, normalized_fun),
         ).fetchall()
     if not rows:
         return {
@@ -528,25 +537,28 @@ def definition(workspace: dict, *, alias: str, fun_id: str) -> dict:
     }
 
 
-def callers(workspace: dict, *, alias: str, fun_id: str, limit=100) -> dict:
+def callers(workspace: dict, *, alias: str, fun_id: str, limit=100, continuation=0) -> dict:
     bounded_limit = max(1, min(int(limit), 500))
+    if isinstance(continuation, bool) or not isinstance(continuation, int) or continuation < 0:
+        raise ValueError("continuation must be a nonnegative offset")
     with _connection(workspace) as connection:
         rows = connection.execute(
             """
             SELECT source_table, source_id, source_alias_id, fun_id, source_name, script_type,
                    json_path, line_no, invoke_type, confidence
             FROM gusen_invoke_call_detail
-            WHERE target_alias_id=? AND target_fun_id=?
-            ORDER BY source_alias_id, fun_id, line_no
-            LIMIT ?
+            WHERE scope_id=? AND target_alias_id=? AND target_fun_id=?
+            ORDER BY source_alias_id, fun_id, line_no, source_record_id, json_path
+            LIMIT ? OFFSET ?
             """,
-            (str(alias or "").strip(), str(fun_id or "").strip(), bounded_limit),
+            (workspace["scopeId"], str(alias or "").strip(), str(fun_id or "").strip(), bounded_limit + 1, continuation),
         ).fetchall()
     return {
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
         "target": {"alias": alias, "funId": fun_id},
-        "callers": [dict(row) for row in rows],
+        "callers": [dict(row) for row in rows[:bounded_limit]],
+        "complete": len(rows) <= bounded_limit, "truncated": len(rows) > bounded_limit,
     }
 
 
@@ -558,9 +570,15 @@ def find(workspace: dict, *, keyword: str, limit: int = 10) -> dict:
             keyword,
             limit,
         )
+        total = connection.execute(
+            "SELECT COUNT(*) FROM gusen_source_record WHERE scope_id=? "
+            "AND (source_id LIKE ? OR source_alias_id LIKE ? OR fun_id LIKE ? OR source_name LIKE ?)",
+            (workspace["scopeId"], *([f"%{keyword.strip()}%"] * 4)),
+        ).fetchone()[0]
     return {
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
+        "complete": total <= len(rows), "truncated": total > len(rows), "totalCandidates": total,
         "scopeId": workspace["scopeId"],
         "candidates": [dict(row) for row in rows],
     }
@@ -568,20 +586,31 @@ def find(workspace: dict, *, keyword: str, limit: int = 10) -> dict:
 
 def context(workspace: dict, *, source_id: str, fun_id: str = "", limit: int = 20) -> dict:
     with _connection(workspace) as connection:
-        result = gusen_hub.query_source_context(
-            connection,
-            workspace["scopeId"],
-            source_id,
-            fun_id,
-            limit,
-        )
+        matches = connection.execute(
+            "SELECT source_namespace, source_table, source_id, fun_id, source_path FROM gusen_source_record "
+            "WHERE scope_id=? AND source_id=? " + ("AND fun_id=? " if fun_id else "") + "LIMIT 2",
+            (workspace["scopeId"], source_id, *([fun_id] if fun_id else [])),
+        ).fetchall()
+        if len(matches) > 1:
+            from .page_nodes import PageIndexError
+
+            error = PageIndexError("SOURCE_AMBIGUOUS", "Indexed context cannot select one source identity",
+                                   next_action="Use list_sources and select an exact sourceNamespace before source reads")
+            error.candidates = [dict(row) for row in matches]
+            raise error
+        result = gusen_hub.query_source_context(connection, workspace["scopeId"], source_id, fun_id, limit)
+        source = dict(result["source"])
+        counts = {"outgoing": connection.execute("SELECT COUNT(*) FROM gusen_invoke_call WHERE source_record_id=?", (source["record_id"],)).fetchone()[0],
+                  "dynamic": connection.execute("SELECT COUNT(*) FROM gusen_dynamic_call WHERE source_record_id=?", (source["record_id"],)).fetchone()[0],
+                  "incoming": connection.execute("SELECT COUNT(*) FROM gusen_invoke_call_detail WHERE scope_id=? AND target_alias_id=? AND target_fun_id=?", (workspace["scopeId"], source["source_alias_id"], source["fun_id"])).fetchone()[0]}
+    truncated = any(counts[key] > len(result[key]) for key in counts)
     return {
-        "ok": True,
-        "workspaceKey": workspace["workspaceKey"],
-        "source": dict(result["source"]),
+        "ok": True, "workspaceKey": workspace["workspaceKey"],
+        "source": {**source, "absolutePath": source.get("local_path") or ""},
         "outgoing": [dict(row) for row in result["outgoing"]],
         "incoming": [dict(row) for row in result["incoming"]],
         "dynamic": [dict(row) for row in result["dynamic"]],
+        "counts": counts, "complete": not truncated, "truncated": truncated,
     }
 
 

@@ -14,86 +14,8 @@ from zoneinfo import ZoneInfo
 from common import gusen_hub
 
 
-ROOT = gusen_hub.ROOT
-REPORT_ROOT = ROOT / "var" / "docs" / "业务排查文档"
 CONTINUE_CONDITIONS = {"always", "rows_found", "no_rows"}
-ALLOWED_FUNCTIONS = {
-    "ABS",
-    "AVG",
-    "CAST",
-    "CEIL",
-    "CEILING",
-    "CHAR_LENGTH",
-    "COALESCE",
-    "CONCAT",
-    "CONCAT_WS",
-    "CONVERT",
-    "COUNT",
-    "DATE",
-    "DATABASE",
-    "DATEDIFF",
-    "DATE_FORMAT",
-    "DAY",
-    "DENSE_RANK",
-    "EXISTS",
-    "FIND_IN_SET",
-    "FLOOR",
-    "FORMAT",
-    "GREATEST",
-    "GROUP_CONCAT",
-    "IF",
-    "IFNULL",
-    "IN",
-    "JSON_EXTRACT",
-    "JSON_UNQUOTE",
-    "LEAST",
-    "LEFT",
-    "LENGTH",
-    "LOWER",
-    "LTRIM",
-    "MAX",
-    "MIN",
-    "MOD",
-    "MONTH",
-    "NOW",
-    "NULLIF",
-    "OVER",
-    "RANK",
-    "REPLACE",
-    "RIGHT",
-    "ROUND",
-    "ROW_NUMBER",
-    "RTRIM",
-    "STR_TO_DATE",
-    "SUBSTR",
-    "SUBSTRING",
-    "SUM",
-    "TIMESTAMPDIFF",
-    "TRIM",
-    "UPPER",
-    "VERSION",
-    "YEAR",
-    # Oracle / PostgreSQL 常用函数
-    "DECODE",
-    "LPAD",
-    "NVL",
-    "NVL2",
-    "RPAD",
-    "SYSDATE",
-    "SYSTIMESTAMP",
-    "TO_CHAR",
-    "TO_DATE",
-    "TO_NUMBER",
-    "TRUNC",
-}
-FORBIDDEN_SQL = re.compile(
-    r"\b(?:INSERT|UPDATE|DELETE|REPLACE|MERGE|CREATE|ALTER|DROP|TRUNCATE|"
-    r"GRANT|REVOKE|CALL|DO|SET|USE|LOAD|LOCK|UNLOCK|HANDLER|PROCEDURE|INTO|"
-    r"OUTFILE|DUMPFILE|GET_LOCK|RELEASE_LOCK|SLEEP|BENCHMARK|LOAD_FILE)\b"
-    r"|FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|:=",
-    re.IGNORECASE,
-)
-FUNCTION_CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_$]*)\s*\(", re.IGNORECASE)
+from common.database_sql import validate_single_select
 
 
 def load_case(path: Path) -> dict:
@@ -104,6 +26,8 @@ def load_case(path: Path) -> dict:
 
 
 def validate_case(case: dict) -> dict:
+    if 'draft' in case and not isinstance(case['draft'],bool):raise ValueError('draft 必须是布尔值')
+    if case.get('draft') is True:raise ValueError('诊断案例仍是草稿；请核验源码和业务继续/停止条件后显式将 draft 改为 false')
     for field in ("name", "source_scope", "datasource", "database"):
         if not str(case.get(field) or "").strip():
             raise ValueError(f"排查定义缺少字段: {field}")
@@ -138,33 +62,6 @@ def validate_case(case: dict) -> dict:
     return case
 
 
-def validate_single_select(sql: str) -> str:
-    candidate = str(sql or "").strip()
-    if candidate.endswith(";"):
-        candidate = candidate[:-1].rstrip()
-    if not candidate:
-        raise ValueError("SQL 不能为空")
-    if not re.match(r"^SELECT\b", candidate, re.IGNORECASE) and not re.match(r"^WITH\b", candidate, re.IGNORECASE):
-        raise ValueError("只允许单条 SELECT 查询")
-    if ";" in candidate:
-        raise ValueError("不允许多条 SQL")
-    if "--" in candidate or "/*" in candidate or "#" in candidate:
-        raise ValueError("SQL 中不允许注释")
-    if "`" in candidate or '"' in candidate:
-        raise ValueError("SQL 中不允许引用标识符")
-    if "@" in candidate:
-        raise ValueError("SQL 中不允许用户变量")
-    if re.search(r"\.\s*[A-Za-z_][A-Za-z0-9_$]*\s*\(", candidate):
-        raise ValueError("SQL 中不允许调用数据库自定义函数")
-    match = FORBIDDEN_SQL.search(candidate)
-    if match:
-        raise ValueError(f"SQL 包含禁止操作: {match.group(0)}")
-    functions = {match.group(1).upper() for match in FUNCTION_CALL.finditer(candidate)}
-    unknown = sorted(functions - ALLOWED_FUNCTIONS)
-    if unknown:
-        raise ValueError(f"SQL 包含未允许的函数: {', '.join(unknown)}")
-    return candidate
-
 
 def validate_datasource(name: str, datasource: dict) -> None:
     diagnosis = datasource.get("diagnosis") or {}
@@ -184,13 +81,13 @@ def validate_datasource(name: str, datasource: dict) -> None:
         raise ValueError(f"数据源 {name} 的 databases 存在重复项")
 
 
-def execute_case(case: dict, datasource: dict, connect=gusen_hub.db_connect) -> dict:
+def execute_case(case: dict, datasource: dict, connect=gusen_hub.db_connect, *, redact_params: bool = True) -> dict:
     started = now()
     results = []
     stopped_at = ""
     conclusion = case.get("success_conclusion") or "全部数据库检查点均满足源码继续执行条件"
     for step in case["steps"]:
-        result = execute_database_step(case, step, datasource, connect)
+        result = execute_database_step(case, step, datasource, connect, redact_params=redact_params)
         results.append(result)
         if result["status"] != "PASS":
             stopped_at = str(step["id"])
@@ -202,10 +99,11 @@ def execute_case(case: dict, datasource: dict, connect=gusen_hub.db_connect) -> 
         "results": results,
         "stopped_at": stopped_at,
         "conclusion": conclusion,
+        "redact_params": redact_params,
     }
 
 
-def execute_database_step(case: dict, step: dict, datasource: dict, connect) -> dict:
+def execute_database_step(case: dict, step: dict, datasource: dict, connect, *, redact_params: bool = True) -> dict:
     database = str(step.get("database") or case["database"])
     connection = None
     try:
@@ -219,8 +117,10 @@ def execute_database_step(case: dict, step: dict, datasource: dict, connect) -> 
         else:
             connection.autocommit = False
         with connection.cursor() as cursor:
-            cursor.execute("START TRANSACTION READ ONLY")
-            result = execute_step(cursor, step, case.get("parameters") or {}, case["max_rows"])
+            engine = str(datasource.get("type") or "mysql").lower()
+            validate_single_select(step["sql"], {"postgres": "postgresql", "mariadb": "mysql"}.get(engine, engine))
+            cursor.execute("SET TRANSACTION READ ONLY" if engine in {"postgres", "postgresql", "oracle"} else "START TRANSACTION READ ONLY")
+            result = execute_step(cursor, step, case.get("parameters") or {}, case["max_rows"], redact_params=redact_params)
     except Exception as error:
         result = {
             "step": step,
@@ -229,7 +129,7 @@ def execute_database_step(case: dict, step: dict, datasource: dict, connect) -> 
             "rows": [],
             "row_count": 0,
             "truncated": False,
-            "conclusion": f"执行异常: {error}",
+            "conclusion": "执行异常: " + _redact_values(str(error), [datasource.get("password"), *(case.get("parameters") or {}).values()]) if redact_params else f"执行异常: {error}",
         }
     finally:
         if connection is not None:
@@ -241,11 +141,13 @@ def execute_database_step(case: dict, step: dict, datasource: dict, connect) -> 
     return result
 
 
-def execute_step(cursor, step: dict, parameters: dict, max_rows: int) -> dict:
+def execute_step(cursor, step: dict, parameters: dict, max_rows: int, *, redact_params: bool = True) -> dict:
     sql = validate_single_select(step["sql"])
     values = tuple(parameters[name] for name in step.get("bindings", []))
     mogrify = getattr(cursor, "mogrify", None)
-    if callable(mogrify):
+    if redact_params:
+        rendered = f"{sql}  -- bindings={len(values)} values redacted"
+    elif callable(mogrify):
         rendered = mogrify(sql, values)
     else:
         rendered = f"{sql}  -- bindings={values!r}"
@@ -261,7 +163,7 @@ def execute_step(cursor, step: dict, parameters: dict, max_rows: int) -> dict:
             "rows": [],
             "row_count": 0,
             "truncated": False,
-            "conclusion": f"执行异常: {error}",
+            "conclusion": "执行异常: " + _redact_values(str(error), values) if redact_params else f"执行异常: {error}",
         }
     rows = list(cursor.fetchmany(max_rows + 1))
     fetched = len(rows)
@@ -285,6 +187,13 @@ def execute_step(cursor, step: dict, parameters: dict, max_rows: int) -> dict:
     }
 
 
+def _redact_values(text: str, values) -> str:
+    for value in sorted((str(value) for value in values if value is not None), key=len, reverse=True):
+        if value:
+            text = text.replace(value, "***")
+    return text
+
+
 def render_report(case: dict, run: dict, datasource_name: str) -> str:
     lines = [
         f"# {case['name']}排查报告",
@@ -306,7 +215,10 @@ def render_report(case: dict, run: dict, datasource_name: str) -> str:
         lines.extend(source_evidence(source_files))
     else:
         lines.append("- 未登记源码文件；各步骤仍保留源码位置。")
-    lines.extend(["", "## 二、排查参数", "", markdown_mapping(case.get("parameters") or {}), "", "## 三、源码逻辑链", ""])
+    parameters = case.get("parameters") or {}
+    if run.get("redact_params", True):
+        parameters = {key: "***" for key in parameters}
+    lines.extend(["", "## 二、排查参数", "", markdown_mapping(parameters), "", "## 三、源码逻辑链", ""])
     lines.extend(
         [
             "| 步骤 | 数据库 | 源码位置 | 逻辑 | 继续条件 |",
@@ -335,7 +247,8 @@ def render_report(case: dict, run: dict, datasource_name: str) -> str:
             ]
         )
         if result["sql"]:
-            lines.extend(["#### 原生可直接执行 SQL", "", "```sql", result["sql"].rstrip(";") + ";", "```", ""])
+            title = "#### 参数化 SQL（绑定值已脱敏）" if run.get("redact_params", True) else "#### 原生可直接执行 SQL"
+            lines.extend([title, "", "```sql", result["sql"].rstrip(";") + ";", "```", ""])
         lines.extend(["#### 查询结果", ""])
         if result["rows"]:
             lines.append(markdown_rows(result["rows"]))
@@ -362,16 +275,24 @@ def render_report(case: dict, run: dict, datasource_name: str) -> str:
             "",
         ]
     )
+    provenance=run.get('provenance')
+    if provenance:
+        front=['---', 'schemaVersion: 1']
+        for key in ('workspaceKey','datasource','database','caseDigest','identityBoundary'):
+            front.append(f'{key}: '+json.dumps(provenance[key],ensure_ascii=False))
+        front.extend(['---',''])
+        lines=[*front,*lines]
     return "\n".join(lines)
 
 
 def source_evidence(source_files: list) -> list[str]:
+    root = gusen_hub.tool_home()
     lines = ["| 文件 | 函数 | SHA-256 |", "|---|---|---|"]
     for item in source_files:
         raw_path = str(item.get("path") or "")
-        path = (ROOT / raw_path).resolve()
+        path = (root / raw_path).resolve()
         digest = "文件不存在或不在工作区"
-        if path.is_relative_to(ROOT) and path.is_file():
+        if path.is_relative_to(root) and path.is_file():
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
         lines.append(f"| {md(raw_path)} | {md(item.get('function', ''))} | `{md(digest)}` |")
     return lines
@@ -415,23 +336,53 @@ def report_path(case: dict, requested: str = "") -> Path:
         return Path(requested).expanduser().resolve()
     current = dt.datetime.now(ZoneInfo("Asia/Shanghai"))
     safe_name = re.sub(r'[\\/:*?"<>|\s]+', "_", case["name"]).strip("_") or "source_diagnosis"
-    return REPORT_ROOT / current.strftime("%Y%m%d") / f"{safe_name}_{current.strftime('%Y%m%d_%H%M%S')}.md"
+    return (Path(gusen_hub.VAR_DIR) / "docs" / "业务排查文档") / current.strftime("%Y%m%d") / f"{safe_name}_{current.strftime('%Y%m%d_%H%M%S')}.md"
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("case", help="排查定义 JSON 文件")
     parser.add_argument("--output", help="报告输出路径；默认写入 var/docs/业务排查文档/<日期>/")
+    parser.add_argument("--include-params", action="store_true", help="明确允许报告包含绑定参数原文；默认脱敏")
+    parser.add_argument("--dry-run", action="store_true", help="校验排查定义、引擎和数据库范围，输出未绑定 SQL；不连接或写报告")
     args = parser.parse_args(argv)
 
     case = load_case(Path(args.case))
     config = gusen_hub.load_config()
     datasource_name, datasource = gusen_hub.resolve_datasource(config, case["datasource"])
     validate_datasource(datasource_name, datasource)
-    run = execute_case(case, datasource)
+    if args.dry_run:
+        engine = str(datasource.get('type') or 'mysql').lower()
+        engine = {'postgres': 'postgresql', 'mariadb': 'mysql'}.get(engine, engine)
+        steps = []
+        for step in case['steps']:
+            database = str(step.get('database') or case['database'])
+            if database not in datasource['databases']:
+                raise ValueError(f'数据库 {database} 不在数据源允许列表中')
+            validate_single_select(step['sql'], engine)
+            steps.append({'id': step['id'], 'database': database, 'sql': step['sql'],
+                          'bindingCount': len(step.get('bindings', [])), 'parametersRedacted': True})
+        print(json.dumps({'ok': True, 'executed': False, 'sqlBound': False, 'engine': engine,
+                          'steps': steps, 'evidenceBoundary': '仅静态验证；未探测连接、绑定参数或运行 EXPLAIN'}, ensure_ascii=False))
+        return 0
+    workspace=gusen_hub.resolve_workspace(config)
+    if datasource.get('object') and datasource['object']!=workspace['workspaceKey']:
+        raise ValueError('排查数据源不属于当前显式工作区')
+    run = execute_case(case, datasource, redact_params=not args.include_params)
     target = report_path(case, args.output)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render_report(case, run, datasource_name), encoding="utf-8")
+    if target.is_relative_to(Path(__file__).resolve().parents[3]):
+        raise ValueError('私有诊断报告不得写入公开工具源码仓库')
+    from common.database_test_artifacts import digest
+    from common.persistence import atomic_text
+    run['provenance']={'workspaceKey':workspace['workspaceKey'],'datasource':datasource_name,'database':case['database'],
+                       'caseDigest':digest(case),'identityBoundary':'legacy configured test datasource; not a formal target identity probe'}
+    atomic_text(target,render_report(case,run,datasource_name))
+    from common import database_operations
+    database_operations.record_history(workspace['root'],workspace_key=workspace['workspaceKey'],
+        target={'id':datasource_name,'environment':'test','database':case['database']},command='diagnose',
+        error_code='PRECONDITION_UNMET' if run['stopped_at'] else '', stage='legacy-case',
+        metadata={'caseDigest':run['provenance']['caseDigest'],'reportPath':str(target),
+                  'stepCount':len(run['results']),'stoppedAt':str(run['stopped_at'])})
 
     status = "STOP" if run["stopped_at"] else "PASS"
     print(f"status={status}")

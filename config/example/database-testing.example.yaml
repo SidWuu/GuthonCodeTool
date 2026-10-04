@@ -22,6 +22,9 @@ connections:
     database: demo_trade
     username: readonly_user
     credentialRef: projects.demo.trade-dev
+    # 无 keyring 时可明确选择以下来源（不要把密码写入本文件）：
+    # passwordEnv: GUTHON_DEMO_DB_PASSWORD
+    # passwordFile: /absolute/private/password.txt
     connectTimeoutSeconds: 10
 
 databaseTests:
@@ -56,3 +59,9 @@ databaseTests:
       #   environment: test
       #   access: read-only
       #   expectedIdentityRef: projects.demo.trade-test.identity
+
+# 命名目标可通过 --profile demo-dev 选择；显式工作区/target/environment仍必须一致。
+profiles:
+  demo-dev:
+    workspaceKey: projects.demo
+    targetId: trade-dev

@@ -66,6 +66,7 @@ def open_node_for_edit(
             "sourceType": "page", "sourceId": source_id, "funId": fun_id,
             "semanticNodeId": semantic_node_id, "jsonPointer": node["jsonPointer"],
             "nodeType": node["nodeType"], "editToken": token, "expiresAt": expires_at,
+            "sessionId": opened["sessionId"], "documentId": opened["documentId"],
             "indexedSourceHash": record["source_hash"], "documentHash": opened["documentHash"],
             "indexGeneration": selected["indexGeneration"], "content": opened["content"],
         }
@@ -111,6 +112,8 @@ def write_nodes(
         if any(token["scopeDigest"] != scope.digest for token in tokens):
             raise page_nodes.PageIndexError("EDIT_TOKEN_EXPIRED", "PAGE authorization changed after edit open")
         operation_path = documents._page_operation_path(workspace, idempotency_key) if not dry_run else None
+        if any(token["expiresAt"] < time.time() for token in tokens):
+            raise page_nodes.PageIndexError("EDIT_TOKEN_EXPIRED", "PAGE edit token expired; inspect or resume the recorded operation by operationId")
         if operation_path and documents._load_page_operation(operation_path) is not None:
             return documents.write_page_nodes_batch(
                 workspace, session_id=session_id, changes=document_changes,

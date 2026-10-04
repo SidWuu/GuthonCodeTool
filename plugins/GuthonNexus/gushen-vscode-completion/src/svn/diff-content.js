@@ -1,3 +1,5 @@
+const crypto = require('node:crypto');
+const { BoundedCache } = require('./bounded-cache');
 const path = require('node:path');
 const { SCHEME, decodeIdentity } = require('./virtual-fs');
 
@@ -10,7 +12,9 @@ function safeDiffName(value) {
 class SvnDiffContentProvider {
   constructor({ vscode }) {
     this.vscode = vscode;
-    this.contents = new Map();
+    this.contents = new BoundedCache({maxEntries:128,maxBytes:32*1024*1024,sizeOf:Buffer.byteLength,
+      isPinned:(key)=>this.vscode.workspace?.textDocuments?.some((document)=>document.uri.toString()===key),
+      onEvict:(key)=>this._forgetSnapshot(key)});
     this.snapshotKeys = new Map();
     this.snapshotUris = new Map();
     this.sequence = 0;
@@ -31,6 +35,10 @@ class SvnDiffContentProvider {
     if (!uri) return;
     const uriKey = uri.toString();
     this.contents.delete(uriKey);
+    this._forgetSnapshot(uriKey);
+  }
+
+  _forgetSnapshot(uriKey) {
     const snapshotKey = this.snapshotKeys.get(uriKey);
     this.snapshotKeys.delete(uriKey);
     if (snapshotKey && this.snapshotUris.get(snapshotKey)?.toString() === uriKey) {
@@ -40,7 +48,7 @@ class SvnDiffContentProvider {
 
   _store(workspaceKey, sourcePath, side, content, extension = '') {
     const text = String(content || '');
-    const snapshotKey = [workspaceKey, sourcePath, side, extension, text].join('\0');
+    const snapshotKey = crypto.createHash('sha256').update(JSON.stringify([workspaceKey,sourcePath,side,extension])).update('\0').update(text).digest('hex');
     const existingUri = this.snapshotUris.get(snapshotKey);
     if (existingUri && this.contents.has(existingUri.toString())) return existingUri;
     this.sequence += 1;
@@ -51,9 +59,11 @@ class SvnDiffContentProvider {
       query: new URLSearchParams({ path: sourcePath, version: String(this.sequence) }).toString(),
     });
     const uriKey = uri.toString();
-    this.contents.set(uriKey, text);
+    if(Buffer.byteLength(text)>this.contents.maxBytes)throw new Error('差异快照超过编辑器缓存上限，请按单文件查看');
     this.snapshotKeys.set(uriKey, snapshotKey);
     this.snapshotUris.set(snapshotKey, uri);
+    this.contents.set(uriKey, text);
+    if(!this.contents.has(uriKey))throw new Error('差异缓存已满，请关闭部分差异视图后重试');
     return uri;
   }
 
@@ -109,6 +119,8 @@ class SvnQuickDiffProvider {
     this.projectBase = projectBase;
     this.workspaces = new Map();
     this.statuses = new Map();
+    this.inFlight = new Map();
+    this.generations = new Map();
     this.label = 'SVN 本地更改（工作副本）';
   }
 
@@ -120,10 +132,11 @@ class SvnQuickDiffProvider {
   removeWorkspace(workspaceKey) {
     this.workspaces.delete(workspaceKey);
     this.statuses.delete(workspaceKey);
+    this.generations.set(workspaceKey,(this.generations.get(workspaceKey)||0)+1);
   }
 
   setStatus(workspaceKey, status) {
-    if (workspaceKey) this.statuses.set(workspaceKey, status);
+    if (workspaceKey) {this.statuses.set(workspaceKey, status);this.generations.set(workspaceKey,(this.generations.get(workspaceKey)||0)+1);}
   }
 
   _sourceFor(uri) {
@@ -155,9 +168,16 @@ class SvnQuickDiffProvider {
     if (!source || (!source.identity && this._isUntracked(source.workspaceKey, source.sourcePath))) {
       return undefined;
     }
-    const result = source.identity
-      ? await this.backend.read(source.workspaceKey, source.identity)
-      : await this.backend.diff(source.workspaceKey, source.sourcePath);
+    const generation=this.generations.get(source.workspaceKey)||0;
+    const key=JSON.stringify([source.workspaceKey,generation,source.identity||source.sourcePath]);
+    if(!this.inFlight.has(key)){
+      const pending=(source.identity
+        ? this.backend.read(source.workspaceKey,source.identity)
+        : this.backend.diff(source.workspaceKey,source.sourcePath)).finally(()=>this.inFlight.delete(key));
+      this.inFlight.set(key,pending);
+    }
+    const result=await this.inFlight.get(key);
+    if((this.generations.get(source.workspaceKey)||0)!==generation)return undefined;
     if (token?.isCancellationRequested) return undefined;
     const sourcePath = result.sourcePath || source.sourcePath || source.identity.sourceId;
     const baseContent = source.identity && this.projectBase
@@ -172,8 +192,9 @@ class SvnQuickDiffProvider {
   }
 
   dispose() {
-    this.workspaces.clear();
-    this.statuses.clear();
+    for(const key of this.workspaces.keys())this.generations.set(key,(this.generations.get(key)||0)+1);
+    this.workspaces.clear();this.statuses.clear();
+    this.inFlight.clear();
   }
 }
 

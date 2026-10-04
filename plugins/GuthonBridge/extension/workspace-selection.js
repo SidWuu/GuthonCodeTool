@@ -1,4 +1,5 @@
 (function initWorkspaceSelection(root) {
+  const pendingSelections = new Map();
   const STORAGE_KEY = "guthonBridgeWorkspaceSelection";
 
   function guthonAddress(pageUrl) {
@@ -68,7 +69,11 @@
       actions.append(cancel, confirm);
       form.append(title, select, actions);
       dialog.appendChild(form);
+      const removed = new MutationObserver(() => {
+        if (!dialog.isConnected) { removed.disconnect(); reject(new Error("工作区选择窗口已被页面移除，请重试")); }
+      });
       dialog.addEventListener("close", () => {
+        removed.disconnect();
         const workspaceKey = dialog.returnValue === "confirm" ? select.value : "";
         dialog.remove();
         if (workspaceKey) {
@@ -78,6 +83,7 @@
         }
       }, { once: true });
       document.body.appendChild(dialog);
+      removed.observe(document.body, { childList: true, subtree: true });
       dialog.showModal();
       select.focus();
     });
@@ -90,9 +96,15 @@
     if (cached) {
       return cached;
     }
-    const workspaceKey = await showWorkspaceDialog(candidates);
-    await storage?.set({ [STORAGE_KEY]: { address: guthonAddress(pageUrl), workspaceKey } });
-    return workspaceKey;
+    const key = JSON.stringify([guthonAddress(pageUrl), candidates.map((item) => item.workspaceKey).sort()]);
+    if (!pendingSelections.has(key)) {
+      const pending = showWorkspaceDialog(candidates).then(async (workspaceKey) => {
+        await storage?.set({ [STORAGE_KEY]: { address: guthonAddress(pageUrl), workspaceKey } });
+        return workspaceKey;
+      }).finally(() => pendingSelections.delete(key));
+      pendingSelections.set(key, pending);
+    }
+    return pendingSelections.get(key);
   }
 
   const api = { cachedWorkspaceKey, guthonAddress, isWorkspaceCacheError, select, storedWorkspaceKey };

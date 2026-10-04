@@ -7,10 +7,11 @@ const { SCHEME: INHERIT_SCHEME, SvnInheritanceView } = require('./inheritance-vi
 const { localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt } = require('../definition');
 const { SvnSourceWatcher } = require('./source-watcher');
 const { registerEditorAssistance } = require('./editor-assistance');
+const {navigateInBrowser} = require('./browser-navigation');
 const { impactEvidenceChoices, impactMarkdown, loadImpact } = require('./impact-preview');
 const {
   findExactPageCandidates, findExactProcedureCandidates,
-  procedureFromFullName, sourceLocatorFromUri,
+  procedureFromFullName, sourceLocatorFromUri, buildSourceLocatorLink,
 } = require('./page-locator');
 const {
   DIFF_SCHEME,
@@ -367,8 +368,9 @@ function activateSvn({
   processClient,
   onToolTreeChanged,
   claimOperation,
+  bridge,
 }) {
-  const operationOutput = vscode.window.createOutputChannel('GuthonCodeTool');
+  const operationOutput = vscode.window.createOutputChannel('Guthon Nexus SVN');
   // 每次日志都 reveal 会把焦点反复抢到输出面板，后台索引输出尤其明显。
   const log = (operation, message) => {
     operationOutput.appendLine(`[Nexus SVN] ${operation}｜${message}`);
@@ -442,10 +444,10 @@ function activateSvn({
       }
       inheritanceView.invalidate(workspaceKey);
       const savedIdentity = decodeIdentity(uri);
-      if (!scm.applySaved({ ...result, ...savedIdentity })) {
-        refreshWorkspaceScm(workspaceKey).catch((error) => {
-          vscode.window.showWarningMessage(`SVN 源码已保存，但 SCM 刷新失败：${error.message}`);
-        });
+      try {
+        if (!await scm.applySaved({ ...result, ...savedIdentity })) await refreshWorkspaceScm(workspaceKey);
+      } catch (error) {
+        vscode.window.showWarningMessage(`SVN 源码已保存，但 SCM 刷新失败：${error.message}`);
       }
       onToolTreeChanged?.();
     },
@@ -455,7 +457,7 @@ function activateSvn({
     backend,
     onChanged: async (workspaceKey, result) => {
       catalogTree.refresh(workspaceKey);
-      virtualFs.invalidate(workspaceKey, true);
+      virtualFs.invalidate(workspaceKey, true, undefined, [...(result?.paths || []), ...(result?.failures || []).map((item)=>item.sourcePath), ...(result?.sourcePath ? [result.sourcePath] : [])]);
       inheritanceView.invalidate(workspaceKey);
       try {
         await refreshWorkspaceScm(workspaceKey);
@@ -544,6 +546,11 @@ function activateSvn({
     }
   );
   const editorAssistance = registerEditorAssistance(vscode, {
+    procedureCandidates: (document, target, token) => token?.isCancellationRequested
+      ? {sources:[], truncated:false}
+      : backend.pageQuery(document.uri.authority, 'search_sources', {
+        keyword:target.keyword, sourceType:'procedure', limit:30,
+      }),
     pageFieldCandidates: (document, prefix, token) => indexedPageFieldCandidates(
       vscode, backend, catalogTree, virtualFs, document, prefix, token
     ),
@@ -576,6 +583,8 @@ function activateSvn({
     try {
       return await action(...args);
     } catch (error) {
+      operationOutput.appendLine(`[错误] ${error.stack || error.message}`);
+      operationOutput.show(true);
       void vscode.window.showErrorMessage(`Guthon Nexus SVN：${error.message}`);
       return undefined;
     }
@@ -984,11 +993,45 @@ function activateSvn({
   const uriHandler = vscode.window.registerUriHandler({
     handleUri: withError(async (uri) => {
       const target = sourceLocatorFromUri(uri);
+      if (target?.type === 'source') {
+        const workspaces = await listSvnWorkspaces();
+        if (!workspaces.some(workspace => workspace.workspaceKey === target.identity.workspaceKey)) {
+          throw new Error('分享链接的工作区未在本机配置；请先配置相同稳定工作区键');
+        }
+        return virtualFs.open(target.identity);
+      }
       if (target) await locateSourceByTarget(target);
     }),
   });
 
   const commands = [
+    vscode.commands.registerCommand('gushenCompletion.openSvnSourceInBrowser', withError(async (element) => {
+      let source = sourceModuleElement(element || treeView.selection[0]);
+      if (!source) {
+        const uri = vscode.window.activeTextEditor?.document.uri;
+        if (uri?.scheme === SCHEME) source = sourceModuleElement(await catalogTree.locate(decodeIdentity(uri)));
+      }
+      if (!source?.object || !bridge) throw new Error('请先选择或打开 PAGE/过程函数源码');
+      const result = await navigateInBrowser({vscode, bridge, tool: await getTool(),
+        identity: {...source.object, workspaceKey: source.workspaceKey}});
+      if (result) await vscode.window.showInformationMessage('已在谷神平台定位所选源码');
+      return result;
+    })),
+    vscode.commands.registerCommand('gushenCompletion.copySvnLocatorLink', withError(async (element) => {
+      const selected = element || treeView.selection[0];
+      const source = sourceModuleElement(selected);
+      let identity;
+      if (source?.object) {
+        identity = {...source.object, workspaceKey: source.workspaceKey,
+          workingCopyId: source.object.workingCopyId || source.object.scopeEntryId || '',
+          ...(selected?.fragment?.jsonPointer ? {jsonPointer: selected.fragment.jsonPointer} : {})};
+      } else {
+        const uri = vscode.window.activeTextEditor?.document?.uri;
+        if (uri?.scheme === SCHEME) identity = decodeIdentity(uri);
+      }
+      if (!identity) throw new Error('请先选择或打开一个 SVN 源码对象');
+      await vscode.env.clipboard.writeText(buildSourceLocatorLink(identity));
+    })),
     vscode.commands.registerCommand('gushenCompletion.showSvnInheritedSource', withError(async (element) => {
       const selected = element || treeView.selection[0];
       const source = sourceModuleElement(selected);

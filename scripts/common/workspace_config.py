@@ -10,6 +10,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from providers.svn import checkout as svn_checkout
+from common.persistence import file_lock, atomic_text
+from common.workspace_identity import validate_workspace_key
 
 
 ROOT_KEYS = {"product": "products", "project": "projects"}
@@ -43,28 +45,28 @@ def _svn_url(value) -> str:
     return url
 
 
-def _atomic_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_name, path)
-    except BaseException:
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
-        raise
+_atomic_text = atomic_text
 
 
-def _append_root_entry(path: Path, root_key: str, entry_id: str, body: list[str]) -> None:
+def _canonical_yaml(text):
+    """The dependency-free runtime edits only the documented block YAML subset."""
+    from common.gusen_hub import _parse_tiny_yaml
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if "\t" in line[:len(line)-len(line.lstrip())]:
+            raise SystemExit("PyYAML is required for noncanonical YAML configuration")
+        value = line.partition(":")[2].strip()
+        if value and value[0] in "&*|>" or value.startswith("{") and value != "{}":
+            raise SystemExit("PyYAML is required for flow mappings, anchors or multiline YAML")
+    return _parse_tiny_yaml(text)
+
+
+def _append_canonical_entry(path: Path, root_key: str, entry_id: str, body: list[str]) -> None:
     text = path.read_text(encoding="utf-8")
     empty_root = re.compile(rf"(?m)^(?P<indent>[ ]*){re.escape(root_key)}:[ ]*\{{\}}[ ]*$")
     match = empty_root.search(text)
-    entry = "\n".join([f"  {entry_id}:", *[f"    {line}" for line in body]]) + "\n"
+    entry = "\n".join([f"  {_yaml_string(entry_id) if entry_id[0].isdigit() or entry_id.lower() in {'true','false','null','yes','no','on','off'} else entry_id}:", *[f"    {line}" for line in body]]) + "\n"
     if match:
         replacement = f"{match.group('indent')}{root_key}:\n{entry.rstrip()}"
         updated = text[: match.start()] + replacement + text[match.end() :]
@@ -78,7 +80,7 @@ def _append_root_entry(path: Path, root_key: str, entry_id: str, body: list[str]
     _atomic_text(path, updated)
 
 
-def _remove_root_entry_text(text: str, root_key: str, entry_id: str) -> tuple[str, bool]:
+def _remove_canonical_entry_text(text: str, root_key: str, entry_id: str) -> tuple[str, bool]:
     lines = text.splitlines(keepends=True)
     root_pattern = re.compile(rf"^(?P<indent>[ ]*){re.escape(root_key)}:[ ]*(?:#.*)?(?:\r?\n)?$")
     root_index = next((index for index, line in enumerate(lines) if root_pattern.match(line)), None)
@@ -120,6 +122,87 @@ def _remove_root_entry_text(text: str, root_key: str, entry_id: str) -> tuple[st
         end += 1
     del lines[entry_index:end]
     return "".join(lines), True
+
+
+def _yaml_mapping_node(text, root_key):
+    try:
+        import yaml
+    except ImportError as error:
+        raise SystemExit("PyYAML is required to edit configuration safely") from error
+    node = yaml.compose(text)
+    if not isinstance(node, yaml.MappingNode):
+        raise SystemExit("Configuration root must be a YAML mapping")
+    matches = [value for key, value in node.value if key.value == root_key]
+    if len(matches) != 1 or not isinstance(matches[0], yaml.MappingNode):
+        raise SystemExit(f"Expected exactly one YAML mapping: {root_key}")
+    return yaml, matches[0]
+
+
+def _append_root_entry(path: Path, root_key: str, entry_id: str, body: list[str]) -> None:
+    text = path.read_text(encoding="utf-8")
+    try:
+        import yaml
+    except ImportError:
+        data = _canonical_yaml(text)
+        if entry_id in (data.get(root_key) or {}):
+            raise SystemExit(f"Duplicate config entry: {entry_id}")
+        _append_canonical_entry(path, root_key, entry_id, body)
+        return
+    yaml, mapping = _yaml_mapping_node(text, root_key)
+    data = yaml.safe_load(text)
+    if entry_id in data[root_key]:
+        raise SystemExit(f"Duplicate config entry: {entry_id}")
+    entry = "\n".join([f"  {_yaml_string(entry_id) if entry_id[0].isdigit() or entry_id.lower() in {'true','false','null','yes','no','on','off'} else entry_id}:", *[f"    {line}" for line in body]]) + "\n"
+    if mapping.flow_style:
+        combined = {**data[root_key], **yaml.safe_load(entry)}
+        replacement = yaml.safe_dump(combined, allow_unicode=True, sort_keys=False, default_flow_style=True).strip()
+        updated = text[:mapping.start_mark.index] + replacement + text[mapping.end_mark.index:]
+        if not data[root_key]:
+            updated = text[:mapping.start_mark.index] + "\n" + entry.rstrip("\n") + text[mapping.end_mark.index:]
+    else:
+        offset = mapping.end_mark.index - mapping.end_mark.column
+        updated = text[:offset].rstrip("\n") + "\n" + entry + text[offset:]
+    expected = {**data, root_key: {**data[root_key], **yaml.safe_load(entry)}}
+    if yaml.safe_load(updated) != expected:
+        raise SystemExit("Configuration edit did not preserve existing YAML values")
+    _atomic_text(path, updated if updated.endswith("\n") else updated + "\n")
+
+
+def _remove_root_entry_text(text: str, root_key: str, entry_id: str) -> tuple[str, bool]:
+    try:
+        import yaml
+    except ImportError:
+        data = _canonical_yaml(text)
+        updated, found = _remove_canonical_entry_text(text, root_key, entry_id)
+        expected = {**data, root_key: {key: value for key, value in (data.get(root_key) or {}).items() if key != entry_id}}
+        if found and _canonical_yaml(updated) != expected:
+            raise SystemExit("Configuration removal did not preserve existing YAML values")
+        return updated, found
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict) or root_key not in data:
+        return text, False
+    matches = [key for key in (data[root_key] or {}) if str(key) == entry_id]
+    if len(matches) > 1:
+        raise SystemExit('Ambiguous YAML entry identity; quote and repair duplicate keys before removal')
+    if not matches:
+        return text, False
+    actual_key = matches[0]
+    yaml, mapping = _yaml_mapping_node(text, root_key)
+    expected = {**data, root_key: {key: value for key, value in data[root_key].items() if key != actual_key}}
+    if mapping.flow_style or len(mapping.value) == 1:
+        replacement = yaml.safe_dump(expected[root_key], allow_unicode=True, sort_keys=False, default_flow_style=True).strip()
+        updated = text[:mapping.start_mark.index] + replacement + text[mapping.end_mark.index:]
+    else:
+        offsets = [0]
+        for line in text.splitlines(keepends=True):
+            offsets.append(offsets[-1] + len(line))
+        index = next(index for index, (key, _value) in enumerate(mapping.value) if key.value == entry_id)
+        start = offsets[mapping.value[index][0].start_mark.line]
+        end = offsets[mapping.value[index + 1][0].start_mark.line] if index + 1 < len(mapping.value) else mapping.end_mark.index - mapping.end_mark.column
+        updated = text[:start] + text[end:]
+    if yaml.safe_load(updated) != expected:
+        raise SystemExit("Configuration removal did not preserve existing YAML values")
+    return updated, True
 
 
 def _remove_root_entries(path: Path, root_key: str, entry_ids: list[str]) -> list[str]:
@@ -177,6 +260,8 @@ def _datasource_body(payload: dict, workspace_key: str) -> tuple[str, list[str]]
         raise SystemExit("datasource.type must be mysql or postgresql")
     raw_port = datasource.get("port", 5432 if database_type == "postgresql" else 3306)
     try:
+        if isinstance(raw_port,bool):
+            raise ValueError('boolean is not a port')
         port = int(raw_port)
     except (TypeError, ValueError) as error:
         raise SystemExit("datasource.port must be an integer") from error
@@ -191,8 +276,22 @@ def _datasource_body(payload: dict, workspace_key: str) -> tuple[str, list[str]]
         f"port: {port}",
         f"database: {_yaml_string(_required_text(datasource.get('database'), 'datasource.database'))}",
         f"username: {_yaml_string(_required_text(datasource.get('username'), 'datasource.username'))}",
-        f"password: {_yaml_string(str(datasource.get('password') or ''))}",
     ]
+    if datasource.get('password') is not None and not isinstance(datasource.get('password'),str):
+        raise SystemExit('datasource.password must be a string')
+    if datasource.get('credentialRef') or datasource.get('password') or not (datasource.get('passwordEnv') or datasource.get('passwordFile')):
+        body.append(f"credentialRef: {_yaml_string(str(datasource.get('credentialRef') or workspace_key + '.source.' + datasource_id))}")
+    if datasource.get('passwordEnv'):
+        if not isinstance(datasource['passwordEnv'],str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',datasource['passwordEnv']):
+            raise SystemExit('datasource.passwordEnv must be an environment variable name')
+        body.append(f"passwordEnv: {_yaml_string(datasource['passwordEnv'])}")
+    if datasource.get('passwordFile'):
+        if not isinstance(datasource['passwordFile'],str) or not Path(datasource['passwordFile']).expanduser().is_absolute():
+            raise SystemExit('datasource.passwordFile must be an absolute path')
+        body.append(f"passwordFile: {_yaml_string(datasource['passwordFile'])}")
+    reference = str(datasource.get('credentialRef') or workspace_key + '.source.' + datasource_id)
+    if not reference.startswith(workspace_key + '.') or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*',reference):
+        raise SystemExit('datasource.credentialRef must belong to this explicit workspace')
     return datasource_id, body
 
 
@@ -220,6 +319,11 @@ def _ensure_svn_username(path: Path, configured: dict, requested) -> bool:
 
 
 def configure_svn_username(home: Path, payload: dict) -> dict:
+    with file_lock(home / "config" / ".configuration.lock"):
+        return _configure_svn_username(home, payload)
+
+
+def _configure_svn_username(home: Path, payload: dict) -> dict:
     if not isinstance(payload, dict):
         raise SystemExit("svn-login-configure input must be a JSON object")
     username = _required_text(payload.get("username"), "username")
@@ -246,6 +350,11 @@ def configure_svn_username(home: Path, payload: dict) -> dict:
 
 
 def create_workspace(home: Path, payload: dict, gusen_hub) -> dict:
+    with file_lock(home / "config" / ".configuration.lock"):
+        return _create_workspace(home, payload, gusen_hub)
+
+
+def _create_workspace(home: Path, payload: dict, gusen_hub) -> dict:
     """Append one workspace and optional datasource, with rollback on any failure."""
 
     if not isinstance(payload, dict):
@@ -266,7 +375,7 @@ def create_workspace(home: Path, payload: dict, gusen_hub) -> dict:
         raise SystemExit("Missing configuration files; run setup first: " + ", ".join(missing))
 
     config = gusen_hub.load_config()
-    workspaces = gusen_hub.list_workspaces(config)
+    workspaces = gusen_hub.list_workspaces(config, strict=True)
     if any(item["id"] == workspace_id for item in workspaces):
         raise SystemExit(f"Duplicate workspace config id: {workspace_id}")
     root_key = ROOT_KEYS[kind]
@@ -294,8 +403,17 @@ def create_workspace(home: Path, payload: dict, gusen_hub) -> dict:
     workspace_root = gusen_hub.resolve_workspace_storage_root(root_key, workspace_id, item)
     mode_path = gusen_hub.workspace_source_mode_path(workspace_root)
     previous_mode = mode_path.read_bytes() if mode_path.is_file() else None
+    credential_changed = False
+    credential_ref = ''
+    previous_password = None
     try:
         svn_username_added = False
+        if datasource_body is not None and normalized['datasource'].get('password'):
+            from common import database_readonly
+            credential_ref = str(normalized['datasource'].get('credentialRef') or workspace_key + '.source.' + datasource_id)
+            previous_password = database_readonly._keyring().get_password(database_readonly.CREDENTIAL_SERVICE, credential_ref)
+            credential_changed = True
+            database_readonly.set_password(credential_ref, str(normalized['datasource']['password']))
         if source_mode == "svn" and str(payload.get("svnUsername") or "").strip():
             svn_username_added = _ensure_svn_username(
                 sync_path,
@@ -319,6 +437,13 @@ def create_workspace(home: Path, payload: dict, gusen_hub) -> dict:
         else:
             mode_path.parent.mkdir(parents=True, exist_ok=True)
             _atomic_text(mode_path, previous_mode.decode("utf-8"))
+        if credential_changed:
+            from common import database_readonly
+            try:
+                database_readonly.delete_password(credential_ref) if previous_password is None else database_readonly.set_password(credential_ref, previous_password)
+            except database_readonly.DatabaseReadonlyError as error:
+                from common.command_errors import CommandError
+                raise CommandError('CREDENTIAL_ROLLBACK_FAILED','Workspace configuration rolled back, but credential state is uncertain; reconfigure the source credential') from error
         raise
 
     return {
@@ -334,12 +459,17 @@ def create_workspace(home: Path, payload: dict, gusen_hub) -> dict:
 def workspace_deletion_plan(home: Path, workspace_key: str, gusen_hub) -> dict:
     key = _required_text(workspace_key, "workspaceKey")
     config = gusen_hub.load_config()
-    match = re.fullmatch(r"(products|projects)\.([A-Za-z0-9][A-Za-z0-9._-]*)", key)
-    if not match:
-        raise SystemExit("workspaceKey must be products.<id> or projects.<id>")
-    kind, workspace_id = match.groups()
+    try:
+        validate_workspace_key(key)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
+    kind, workspace_id = key.split(".", 1)
     workspace_items = (config.get(kind, {}).get(kind) or {})
     workspace_item = workspace_items.get(workspace_id)
+    if workspace_item is None:
+        matches = [item for item_id,item in workspace_items.items() if str(item_id) == workspace_id]
+        if len(matches)>1:raise SystemExit('Ambiguous workspace config identity; repair duplicate keys')
+        workspace_item = matches[0] if matches else None
     if not isinstance(workspace_item, dict):
         raise SystemExit(f"Unknown workspace: {key}")
     workspace_name = _required_text(workspace_item.get("name"), f"name for {key}")
@@ -384,6 +514,11 @@ def workspace_deletion_plan(home: Path, workspace_key: str, gusen_hub) -> dict:
 
 
 def delete_workspace_config(home: Path, payload: dict, gusen_hub) -> dict:
+    with file_lock(home / "config" / ".configuration.lock"):
+        return _delete_workspace_config(home, payload, gusen_hub)
+
+
+def _delete_workspace_config(home: Path, payload: dict, gusen_hub) -> dict:
     if not isinstance(payload, dict):
         raise SystemExit("workspace-delete input must be a JSON object")
     key = _required_text(payload.get("workspaceKey"), "workspaceKey")

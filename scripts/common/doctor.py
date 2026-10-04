@@ -7,6 +7,10 @@ import argparse
 import importlib
 import json
 import sys
+import hashlib
+import uuid
+import zipfile
+from pathlib import Path
 import urllib.error
 import urllib.request
 
@@ -91,11 +95,44 @@ def run_checks(bridge_port=17361):
     return checks
 
 
+def diagnostic_bundle(checks, directory, *, workspace_key=""):
+    """Save bounded metadata, excluding raw config, source, SQL, paths and logs."""
+    from guthon_tool import application_version, application_build_info
+    config = gusen_hub.load_config()
+    errors = []
+    workspaces = [gusen_hub.resolve_workspace(config, workspace_key)] if workspace_key else gusen_hub.list_workspaces(config, errors=errors)
+    if len(workspaces) > 50:
+        raise SystemExit("Select --workspace-key to keep the diagnostic bundle bounded")
+    summaries = []
+    for workspace in workspaces:
+        state = gusen_hub.load_workspace_state(config, workspace)
+        index = gusen_hub.workspace_index_state(workspace)
+        summaries.append({"workspaceKey": workspace["workspaceKey"], "sourceMode": workspace["sourceMode"],
+                          "status": state["status"],
+                          "indexReady": index["ready"], "indexSizeBytes": index["sizeBytes"],
+                          "stepStatuses": {key: value.get("status") for key, value in state["steps"].items()}})
+    payload = {"schemaVersion": 1, "version": application_version(), **application_build_info(), "pythonVersion": sys.version.split()[0],
+               "checks": [{"name": check["name"], "status": check["status"]} for check in checks],
+               "workspaces": summaries, "configErrors": [{"workspaceKey": error["workspaceKey"], "code": error["code"]} for error in errors],
+               "coverage": "LOCAL_RUNTIME_AND_INDEX_METADATA", "sourceIncluded": False, "credentialsIncluded": False,
+               "logsIncluded": False}
+    directory = Path(directory).expanduser().resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / ("guthon-diagnostics-" + uuid.uuid4().hex + ".zip")
+    with zipfile.ZipFile(path, "x", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("diagnostics.json", json.dumps(payload, ensure_ascii=False, indent=2))
+        archive.writestr("README.txt", "Metadata only. No source, credentials, raw configuration or query results are included.\n")
+    return {"ok": True, "bundlePath": str(path), "sizeBytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "coverage": payload["coverage"]}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bridge-port", type=int, default=17361)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--workspace-key", default="")
+    parser.add_argument("--bundle", type=Path, help="create a metadata-only diagnostic archive; excludes source, credentials and raw logs")
     args = parser.parse_args(argv)
     if args.self_test:
         assert result("x", "PASS", "ok") == {"name": "x", "status": "PASS", "message": "ok"}
@@ -103,7 +140,10 @@ def main(argv=None):
         return 0
 
     checks = run_checks(args.bridge_port)
-    if args.json:
+    if args.bundle:
+        bundle = diagnostic_bundle(checks, args.bundle, workspace_key=args.workspace_key)
+        print(json.dumps(bundle, ensure_ascii=False, indent=2))
+    elif args.json:
         print(json.dumps(checks, ensure_ascii=False, indent=2))
     else:
         for check in checks:

@@ -11,7 +11,6 @@ import json
 import os
 import re
 import subprocess
-import tempfile
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -27,6 +26,9 @@ except ImportError:  # pragma: no cover - exercised by Windows builds
     import msvcrt
 
 
+from common.persistence import atomic_text
+from common.workspace_identity import CONFIG_ID as SAFE_ID, validate_config_id as validate_identity_id
+
 SUPPORTED_INCLUDES = {"pages", "procedures", "system-script", "tables", "views"}
 WRITABLE_INCLUDES = {"pages", "procedures", "system-script"}
 # Do not silently accept expired or hostname-mismatched certificates by default:
@@ -35,7 +37,7 @@ WRITABLE_INCLUDES = {"pages", "procedures", "system-script"}
 # previous permissive behaviour can restore it via the environment variable.
 TRUSTED_CERT_FAILURES = os.environ.get(
     "GUTHON_SVN_TRUSTED_CERT_FAILURES",
-    "unknown-ca,not-yet-valid,other",
+    "unknown-ca",
 )
 LEGACY_SVN_CAPABILITY_DEFAULTS = {
     "initialize": True,
@@ -49,6 +51,7 @@ LEGACY_SVN_CAPABILITY_DEFAULTS = {
     "edit": False,
     "history": False,
     "revert": False,
+    "platform_save": False,
 }
 MANIFEST_SVN_CAPABILITY_DEFAULTS = {
     "initialize": True,
@@ -62,12 +65,12 @@ MANIFEST_SVN_CAPABILITY_DEFAULTS = {
     "edit": True,
     "history": True,
     "revert": True,
+    "platform_save": True,
 }
 
 
 _OPERATION_LOCK_STATE = threading.local()
 SVN_CAPABILITY_DEFAULTS = LEGACY_SVN_CAPABILITY_DEFAULTS
-SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ENV_REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 SCOPE_FILE = "checkout-scope.json"
 SCOPE_VERSION = 2
@@ -93,26 +96,14 @@ def json_hash(value) -> str:
 
 
 def atomic_json(path: Path, value) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_name, path)
-    except Exception:
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
-        raise
+    atomic_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
 def validate_config_id(config_id: str) -> None:
-    if not SAFE_ID.fullmatch(str(config_id or "")) or config_id in {".", ".."}:
-        raise SystemExit(f"Unsafe workspace config id: {config_id}")
+    try:
+        validate_identity_id(config_id)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
 
 
 def expand_config_value(value, label: str, *, allow_missing_env=False) -> str:
@@ -164,9 +155,6 @@ def svn_settings(
         else LEGACY_SVN_CAPABILITY_DEFAULTS
     )
     configured = dict(svn.get("capabilities") or {})
-    # Older configs may still contain this flag. It is intentionally ignored:
-    # manifest-based SVN workspaces always support saving to Guthon.
-    configured.pop("platform_save", None)
     non_boolean = [name for name, value in configured.items() if not isinstance(value, bool)]
     if non_boolean:
         raise SystemExit(f"SVN capabilities must be boolean for {config_id}: {', '.join(sorted(non_boolean))}")
@@ -182,6 +170,8 @@ def svn_settings(
         raise SystemExit(f"svn.edit requires browse, status and reindex for {config_id}")
     if capabilities["revert"] and not all(capabilities[name] for name in ("edit", "status")):
         raise SystemExit(f"svn.revert requires edit and status for {config_id}")
+    if capabilities["platform_save"] and not all(capabilities[name] for name in ("edit", "status")):
+        raise SystemExit(f"svn.platform_save requires edit and status for {config_id}")
     includes = svn.get("include") or ["pages", "procedures", "system-script"]
     if isinstance(includes, str):
         includes = [value.strip() for value in includes.strip("[]").split(",") if value.strip()]

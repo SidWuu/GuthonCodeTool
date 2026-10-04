@@ -1,6 +1,4 @@
-const { spawn } = require('node:child_process');
-const { StringDecoder } = require('node:string_decoder');
-const { toolArguments } = require('../tool-runtime');
+const { ToolJsonClient } = require('../tool-json-client');
 
 function backendErrorMessage(stderr, stdout, code) {
   const stderrLines = String(stderr || '')
@@ -11,58 +9,17 @@ function backendErrorMessage(stderr, stdout, code) {
 }
 
 class SvnBackendClient {
-  constructor({ getTool, spawnProcess = spawn, processClient }) {
-    this.getTool = getTool;
-    this.spawnProcess = spawnProcess;
-    this.processClient = processClient;
+  constructor({ getTool, spawnProcess, processClient }) {
+    this.client = new ToolJsonClient({getTool, spawnProcess, processClient,
+      errorMessage: backendErrorMessage, outputLabel: 'SVN 后端'});
   }
 
-  async run(workspaceKey, args, input, { onOutput } = {}) {
-    const tool = await this.getTool();
-    if (!tool) throw new Error('请先配置 GuthonCodeTool 运行模式和本地数据目录');
-    if (this.processClient) {
-      const payload = await this.processClient.request(tool, 'svn', args, workspaceKey, input, { onOutput });
-      if (payload?.ok !== true) {
-        throw new Error(payload?.errors?.map((item) => item.error).join('; ') || '后端返回 ok=false');
-      }
-      return payload;
-    }
-    return new Promise((resolve, reject) => {
-      const child = this.spawnProcess(
-        tool.toolPath,
-        toolArguments(tool, 'svn', args, workspaceKey),
-        { shell: false, env: process.env }
-      );
-      const stdoutChunks = [];
-      const stderrChunks = [];
-      const stderrDecoder = new StringDecoder('utf8');
-      child.stdout.on('data', (data) => {
-        stdoutChunks.push(Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8'));
-      });
-      child.stderr.on('data', (data) => {
-        const chunk = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
-        stderrChunks.push(chunk);
-        onOutput?.(stderrDecoder.write(chunk));
-      });
-      child.on('error', reject);
-      child.on('close', (code) => {
-        onOutput?.(stderrDecoder.end());
-        const stdout = Buffer.concat(stdoutChunks).toString('utf8');
-        const stderr = Buffer.concat(stderrChunks).toString('utf8');
-        if (code) return reject(new Error(backendErrorMessage(stderr, stdout, code)));
-        try {
-          const payload = JSON.parse(stdout);
-          if (payload?.ok !== true) {
-            throw new Error(payload?.errors?.map((item) => item.error).join('; ') || '后端返回 ok=false');
-          }
-          resolve(payload);
-        } catch (error) {
-          reject(new Error(`SVN 后端输出无效：${error.message}`));
-        }
-      });
-      if (input !== undefined) child.stdin.end(JSON.stringify(input));
-      else child.stdin.end();
-    });
+  run(workspaceKey, args, input, options = {}) {
+    return this.client.run(workspaceKey, 'svn', args, input, options);
+  }
+
+  releaseLease(workspaceKey, sessionId, documentId) {
+    return this.run(workspaceKey, ['lease-release', '--session', sessionId, '--document', documentId]);
   }
 
   catalog(workspaceKey) {

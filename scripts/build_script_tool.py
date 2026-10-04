@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+from common.build_info import source_build_info
 import shutil
 import tempfile
 import zipapp
@@ -25,6 +27,10 @@ def build(destination: Path) -> Path:
             target = stage / source.relative_to(ROOT / "scripts")
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
+        (stage / "scripts").mkdir(exist_ok=True)
+        shutil.copy2(ROOT / "scripts" / "vault_crypto.mjs", stage / "scripts" / "vault_crypto.mjs")
+        shutil.copy2(ROOT / "scripts" / "common" / "command_metadata.json", stage / "common" / "command_metadata.json")
+        (stage / "BUILD_INFO.json").write_text(json.dumps(source_build_info(ROOT)),encoding="utf-8")
         shutil.copy2(ROOT / "VERSION", stage / "VERSION")
         shutil.copytree(ROOT / "config" / "example", stage / "config" / "example")
         data = ROOT / "plugins" / "GuthonNexus" / "gushen-vscode-completion" / "data"

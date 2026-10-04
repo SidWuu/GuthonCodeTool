@@ -161,7 +161,7 @@ test('SVN workspace actions come only from effective capabilities', () => {
   ]);
   assert.deepEqual(actions.workcopy, []);
   assert.deepEqual(actions.metadata, [
-    ['配置数据库排查', 'gushenCompletion.configureDatabaseDiagnosis', 'database'],
+    ['配置数据库只读目标', 'gushenCompletion.configureDatabaseDiagnosis', 'database'],
   ]);
   assert.equal(actions.diagnose, false);
   assert.equal(actions.syncAll, undefined);
@@ -180,7 +180,7 @@ test('database workspace keeps pull, metadata and diagnosis actions', () => {
     ],
     workcopy: [['检查或打包 Workcopy', 'gushenCompletion.inspectWorkcopy', 'package']],
     metadata: [
-      ['配置数据库排查', 'gushenCompletion.configureDatabaseDiagnosis', 'database'],
+      ['配置数据库只读目标', 'gushenCompletion.configureDatabaseDiagnosis', 'database'],
       ['导出表结构', 'gushenCompletion.exportSchema', 'table'],
       ['导出单据类型', 'gushenCompletion.exportBillTypes', 'list-tree'],
       ['导出系统脚本', 'gushenCompletion.exportSystemScripts', 'file-code'],

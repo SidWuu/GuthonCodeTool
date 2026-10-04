@@ -18,6 +18,7 @@ const { createDocumentSelector } = require('./selector');
 const { procedureTargetAt, selectDefinitionPaths } = require('./definition');
 const { prepareWorkspaceSetup, promptWorkspaceCreation, workspaceActions } = require('./tool-workspace');
 const { promptDatabaseDiagnosis } = require('./database-config');
+const { exportAiContext, validateContextResult } = require('./ai-context-export');
 const { ToolJsonClient } = require('./tool-json-client');
 const { searchPickItems, workspaceCockpit } = require('./workspace-assistant');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
@@ -38,6 +39,7 @@ const {
   readUpdateState,
   releaseAsset,
   writeUpdateState,
+  withUpdateLock,
 } = require('./tool-updater');
 const {
   filterWorkspacesBySourceMode,
@@ -47,6 +49,7 @@ const {
 const { WorkspaceRegistry } = require('./workspace-registry');
 const { activateSvn, selectEditableIdentity, sourceModuleElement } = require('./svn/activate');
 const { clearLegacyCredentials, promptForPassword } = require('./svn/credentials');
+const {isWorkspaceKey} = require('./workspace-identity');
 const { workspaceKeyFromSourceControlId } = require('./svn/scm-manager');
 const {
   createSvnScopeInputFile,
@@ -78,6 +81,7 @@ const TOOL_COMMANDS = {
   sourceMode: 'source-mode',
   search: 'search',
   contextPack: 'context-pack',
+  pullLog: 'pull-log',
   databaseTargetConfigure: 'database-target-configure',
 };
 const CONFIG_FILES = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'source-tables.yaml', 'sync.yaml', 'database-testing.yaml'];
@@ -133,7 +137,13 @@ function claimToolRun(command, workspaceKey, labelOverride = '') {
     return null;
   }
   const runKey = toolRunKey(command, workspaceKey);
-  if (activeToolRuns.has(runKey)) {
+  const sourceCommands = new Set(['svn','init','reindex','sync-all','sync-source','sync-source-all','pull','source-mode','workspace-delete','export-schema','export-view','export-bill-type','export-system-script']);
+  const selectedScope = workspaceKey || '__all__';
+  const scopeBusy = sourceCommands.has(command) && [...activeToolRuns].some((key) => {
+    const [otherCommand, otherScope] = key.split('::');
+    return sourceCommands.has(otherCommand) && (selectedScope==='__all__' || !otherScope || otherScope==='__all__' || otherScope===selectedScope);
+  });
+  if (activeToolRuns.has(runKey) || scopeBusy) {
     reportToolAlreadyRunning(command, workspaceKey, labelOverride);
     return null;
   }
@@ -426,11 +436,12 @@ async function runToolCommand(
   const modeLabel = {
     'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
   }[tool.mode] || tool.mode;
-  const execute = async () => {
+  const execute = async (token) => {
     output.appendLine(`运行：${command}${workspaceKey ? ` · ${workspaceKey}` : ''}（${modeLabel}）`);
     try {
       const result = await processClient.request(tool, command, extraArgs, workspaceKey, stdinPayload, {
         onOutput: (value) => output.append(value),
+        token,
       });
       if (result?.stdout) output.append(result.stdout);
       else output.appendLine(JSON.stringify(result, null, 2));
@@ -440,12 +451,16 @@ async function runToolCommand(
     } catch (error) {
       const target = workspaceKey ? ` · ${workspaceKey}` : '';
       output.show(true);
-      output.appendLine(`${label}失败${target}（${modeLabel}）：${error.message}`);
-      vscode.window.showErrorMessage(`${label}失败${target}（${modeLabel}）：${error.message}。详情见“输出 → GuthonCodeTool”`);
+      output.appendLine(`${label}${error.code === 'OPERATION_CANCELLED' ? '已取消' : '失败'}${target}（${modeLabel}）：${error.message}`);
+      if (error.code === 'OPERATION_CANCELLED') vscode.window.showInformationMessage(`${label}已取消${target}。详情见“输出 → GuthonCodeTool”`);
+      else vscode.window.showErrorMessage(`${label}失败${target}（${modeLabel}）：${error.message}。详情见“输出 → GuthonCodeTool”`);
       return false;
     }
   };
-  const pending = toolQueue.then(execute, execute);
+  const progressExecute = () => command === 'reindex'
+    ? vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:`${label}${workspaceKey ? ' · '+workspaceKey : ''}`,cancellable:true}, (_progress, token) => execute(token))
+    : execute();
+  const pending = toolQueue.then(progressExecute, progressExecute);
   toolQueue = pending.catch(() => false);
   return pending.finally(release);
 }
@@ -512,7 +527,7 @@ class ToolTreeDataProvider {
     const configuredToolPath = resolvePackagedTool(config.get('toolPath', ''));
     // 开发/调试模式运行仓库源码或本地 pyz，不参与发行版更新与回退，版本统一显示为最新。
     const applicationVersion = executionMode === 'packaged'
-      ? await detectCurrentVersion(this.context.extensionPath, storageRoot, configuredToolPath)
+      ? await detectCurrentVersion(this.context.extensionPath, storageRoot, configuredToolPath).catch(() => '无法探测')
       : '最新';
     const updateState = readUpdateState(storageRoot);
     const ready = toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'));
@@ -652,6 +667,7 @@ class ToolTreeDataProvider {
           source,
           actions.metadata.length && metadata,
           actions.diagnose && toolItem('执行源码逻辑排查', 'gushenCompletion.runDiagnosis', 'search', undefined, [item.workspaceKey]),
+          toolItem('查看最近诊断历史', 'gushenCompletion.showDiagnosisHistory', 'history', '只读元数据', [item.workspaceKey]),
           ...actions.workcopy.map(([label, command, icon]) =>
             toolItem(label, command, icon, undefined, [item.workspaceKey])),
         ].filter(Boolean);
@@ -681,6 +697,7 @@ class ToolTreeDataProvider {
 }
 
 function activate(context) {
+  const nexusBuild = require('./extension-build').registerExtensionBuild(vscode,context);
   const processClient = new ToolProcessClient();
   const runTool = (...args) => runToolCommand(processClient, ...args);
   const initialConfig = vscode.workspace.getConfiguration('gushenCompletion');
@@ -703,6 +720,7 @@ function activate(context) {
     createHoverProvider(context)
   );
   const bridgeOutput = vscode.window.createOutputChannel('Guthon Bridge');
+  toolOutput().appendLine(`已加载 Nexus ${nexusBuild.version} · ${nexusBuild.buildId}`);
   const workspaceRegistry = new WorkspaceRegistry(async (tool) => {
     const result = await processClient.request(tool, 'workspaces');
     if (result?.ok !== true || !Array.isArray(result.workspaces)) {
@@ -713,6 +731,7 @@ function activate(context) {
   let toolView;
   const bridge = createBridgeProcess({
     scriptPath: resolveBridgeScript(context.extensionPath),
+    getPort: () => vscode.workspace.getConfiguration('gushenCompletion').get('bridgePort', 17361),
     onOutput: (text) => bridgeOutput.append(text),
     onError: (error) => vscode.window.showErrorMessage(`Guthon Bridge 启动失败：${error.message}`),
     onExit: (code) => {
@@ -736,6 +755,7 @@ function activate(context) {
     listSvnWorkspaces,
     invalidateWorkspaces: () => workspaceRegistry.invalidate(),
     processClient,
+    bridge,
     onToolTreeChanged: () => toolView.refresh(),
     claimOperation: (workspaceKey, label) => claimToolRun(TOOL_COMMANDS.svn, workspaceKey, label),
   });
@@ -757,8 +777,10 @@ function activate(context) {
     if (!workspaceKey || !identity?.sourceId) throw new Error('所选结果没有可定位的源码对象');
     const args = ['--source-id', identity.sourceId];
     if (identity.funId) args.push('--fun-id', identity.funId);
+    if (identity.sourceNamespace) args.push('--source-namespace', identity.sourceNamespace);
     if (detailed) args.push('--detailed', '--limit', '12');
     const result = await assistantClient.run(workspaceKey, TOOL_COMMANDS.contextPack, args);
+    validateContextResult(result, workspaceKey, identity);
     await vscode.env.clipboard.writeText(result.markdown);
     vscode.window.showInformationMessage(`${detailed ? '详细' : '精简'} AI 上下文已复制：${identity.sourceId}`);
     return result;
@@ -776,6 +798,7 @@ function activate(context) {
       if (!selected) throw new Error(`找不到工作区：${workspaceKey}`);
       return selected;
     }
+    if (workspaces.length===1) return workspaces[0];
     return vscode.window.showQuickPick(workspaces.map((item) => ({
       label: item.displayName,
       description: `${item.workspaceKey} · ${sourceModeLabel(item.sourceMode)}`,
@@ -783,13 +806,41 @@ function activate(context) {
     })), { title: '选择统一搜索的工作区' }).then((item) => item?.workspace);
   };
 
-  const searchWorkspace = async (workspaceValue, sourceMode = '') => {
+  const saveAiContext = async (workspace, identity) => {
+    const choices = [
+      { label: '索引摘要', value: 'metadata', description: '保留精确源码身份与有界调用/事实，不读取正文' },
+    ];
+    if (workspace.sourceMode === 'svn' && ['page', 'procedure'].includes(identity.sourceType)) {
+      choices.push({ label: '摘要与影响预览', value: 'impact', description: '加入当前索引中的有界表访问、字段关系或调用证据' });
+      if (identity.sourceNamespace && (identity.sourceType === 'procedure' || (identity.jsonPointer && ['gss', 'vm', 'js', 'sql'].includes(identity.fragmentType)))) {
+        choices.push({ label: '摘要、影响与继承上下文', value: 'inheritance', description: '显式读取当前片段最多 8000 字继承正文；不复制整 PAGE' });
+      }
+    }
+    const selected = await vscode.window.showQuickPick(choices, { title: '选择 AI 上下文文件内容' });
+    if (!selected) return undefined;
+    const tool = configuredToolFromSettings();
+    if (!tool) throw new Error('请先配置明确的本地数据目录');
+    const result = await exportAiContext({
+      client: assistantClient, backend: svnServices.backend, toolHome: tool.toolHome, workspace, identity,
+      includeImpact: ['impact', 'inheritance'].includes(selected.value),
+      includeInheritance: selected.value === 'inheritance',
+    });
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(result.artifactPath));
+    await vscode.window.showTextDocument(document, { preview: true });
+    const action = await vscode.window.showInformationMessage(`AI 上下文已导出：${result.artifactPath}`, '复制文件路径');
+    if (action === '复制文件路径') await vscode.env.clipboard.writeText(result.artifactPath);
+    return result;
+  };
+
+  const searchWorkspace = async (workspaceValue, sourceMode = '', exportOnly = false) => {
     const requestedKey = typeof workspaceValue === 'string' ? workspaceValue : '';
     const workspace = await selectWorkspace(requestedKey, sourceMode);
     if (!workspace) return undefined;
     const query = await vscode.window.showInputBox({
       title: `统一搜索 · ${workspace.displayName}`,
       prompt: '搜索源码名称、ID、函数、条件、赋值、异常、表读写或调用关系',
+      value: vscode.window.activeTextEditor?.selection && !vscode.window.activeTextEditor.selection.isEmpty
+        ? vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection).trim().slice(0,100) : '',
       validateInput: (value) => String(value || '').trim() ? undefined : '请输入搜索关键词',
     });
     if (!query) return undefined;
@@ -807,12 +858,15 @@ function activate(context) {
       matchOnDetail: true,
     });
     if (!selected) return undefined;
+    if (exportOnly) return saveAiContext(workspace, selected.item.identity);
     const action = await vscode.window.showQuickPick([
       { label: '打开源码', value: 'open', description: selected.item.filePath || selected.item.identity?.sourcePath || '' },
       { label: '复制精简 AI 上下文', value: 'context', description: '定位、关键关系和最多 5 条高价值事实' },
       { label: '复制详细 AI 上下文', value: 'context-detailed', description: '用于需要更多调用关系和事实的深入分析' },
+      { label: '导出 AI 上下文文件', value: 'context-file', description: '保存到当前私有工作区 context/ai，提供绝对路径' },
     ], { title: selected.label });
     if (!action) return undefined;
+    if (action.value === 'context-file') return saveAiContext(workspace, selected.item.identity);
     if (action.value === 'context') {
       return copyAiContext(workspace.workspaceKey, selected.item.identity);
     }
@@ -840,6 +894,34 @@ function activate(context) {
     return editor;
   };
   const toolCommands = [
+    vscode.commands.registerCommand('gushenCompletion.showDiagnosisHistory', async (workspaceValue = '') => {
+      try {
+        const key = typeof workspaceValue === 'string' ? workspaceValue : workspaceValue?.guthonWorkspaceKey || workspaceValue?.workspaceKey || '';
+        const selected = await selectWorkspace(key);
+        if (!selected) return;
+        const {showDiagnosisHistory} = require('./diagnosis-history-view');
+        return await showDiagnosisHistory({vscode, client: assistantClient, workspaceKey: selected.workspaceKey});
+      } catch (error) {return vscode.window.showErrorMessage(`诊断历史读取失败：${error.message}`);}
+    }),
+    vscode.commands.registerCommand('gushenCompletion.showPullHistory', async (workspaceKey = '') => {
+      try {
+        const selected = await selectWorkspace(typeof workspaceKey === 'string' ? workspaceKey : workspaceKey?.guthonWorkspaceKey || workspaceKey?.workspaceKey || '');
+        if (!selected) return;
+        const {showPullHistory} = require('./pull-history-view');
+        return await showPullHistory({vscode,client:assistantClient,workspaceKey:selected.workspaceKey,workspaceRoot:selected.root});
+      } catch (error) {return vscode.window.showErrorMessage(`拉取历史读取失败：${error.message}`);}
+    }),
+    ...['archive', 'restore'].map((action) => vscode.commands.registerCommand(
+      `gushenCompletion.${action}PullHistory`, async (workspaceValue = '') => {
+        try {
+          const key = typeof workspaceValue === 'string' ? workspaceValue : workspaceValue?.guthonWorkspaceKey || workspaceValue?.workspaceKey || '';
+          const selected = await selectWorkspace(key);
+          if (!selected) return;
+          const {maintainPullHistory} = require('./pull-history-view');
+          return await maintainPullHistory({vscode,client:assistantClient,workspaceKey:selected.workspaceKey,action});
+        } catch (error) {return vscode.window.showErrorMessage(`拉取历史维护失败：${error.message}`);}
+      }
+    )),
     vscode.commands.registerCommand('gushenCompletion.searchWorkspace', async (workspaceKey) => {
       try {
         return await searchWorkspace(workspaceKey);
@@ -853,6 +935,22 @@ function activate(context) {
       } catch (error) {
         return vscode.window.showErrorMessage(`统一搜索失败：${error.message}`);
       }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.exportAiContext', async (element) => {
+      try {
+        const source = sourceModuleElement(element);
+        if (!source?.object) {
+          return await searchWorkspace(typeof element === 'string' ? element : element?.guthonWorkspaceKey || element?.workspaceKey || '', '', true);
+        }
+        const workspace = await selectWorkspace(source.workspaceKey);
+        if (!workspace) return;
+        const identity = {
+          ...source.object,
+          workingCopyId: source.object.workingCopyId || source.object.scopeEntryId || '',
+          ...(element?.fragment ? { jsonPointer: element.fragment.jsonPointer || '', fragmentType: element.fragment.scriptType || '' } : {}),
+        };
+        return await saveAiContext(workspace, identity);
+      } catch (error) { return vscode.window.showErrorMessage(`AI 上下文导出失败：${error.message}`); }
     }),
     vscode.commands.registerCommand('gushenCompletion.copySvnAiContext', async (element) => {
       try {
@@ -914,10 +1012,19 @@ function activate(context) {
         '公共 SVN 用户名已更新，密码已由 SVN 系统保存。'
       );
     }),
+    vscode.commands.registerCommand('gushenCompletion.quickOpenSvnSource', async (workspaceKey='') => {
+      const {quickOpenSource}=require('./svn/quick-open');
+      try {
+        return await quickOpenSource({vscode,listWorkspaces:listSvnWorkspaces,workspaceKey,
+          search:(key,keyword)=>assistantClient.run(key,TOOL_COMMANDS.search,['--query',keyword,'--limit','30']),
+          open:async(identity)=>svnServices.virtualFs.open(await selectEditableIdentity(vscode,svnServices.backend,identity))});
+      } catch(error){return vscode.window.showErrorMessage(error.message);}
+    }),
     vscode.commands.registerCommand('gushenCompletion.selectWorkspaceSourceMode', async (
       workspaceKey,
       currentMode
     ) => {
+      if (!isWorkspaceKey(workspaceKey)) return vscode.window.showErrorMessage('请在具有明确工作区键的产品或项目节点上切换源码模式');
       const selected = await selectWorkspaceSourceMode(vscode.window, currentMode, async (current, next) => {
         if (current !== 'svn' || next !== 'database') return true;
         const dirtyDocuments = vscode.workspace.textDocuments.filter(
@@ -1052,44 +1159,46 @@ function activate(context) {
       applicationUpdateRunning = true;
       let bridgeWasRunning = false;
       try {
-        const release = await vscode.window.withProgress({
-          location: vscode.ProgressLocation.Notification,
-          title: `正在从 ${UPDATE_SOURCES[source]?.label || source} 检查更新`,
-          cancellable: false,
-        }, () => fetchLatestRelease(source));
-        const installedVersion = await detectCurrentVersion(context.extensionPath, storageRoot, toolPath);
-        if (compareVersions(release.version, installedVersion) <= 0) {
-          return vscode.window.showInformationMessage(`当前已是最新版本：${installedVersion}（${release.sourceLabel}）`);
-        }
-        const asset = releaseAsset(release, assetNameFor());
-        const size = asset.size ? `，${(asset.size / 1024 / 1024).toFixed(1)} MB` : '';
-        const confirmed = await vscode.window.showInformationMessage(
-          `发现 GuthonCodeTool ${release.version}（当前 ${installedVersion}${size}）`,
-          { modal: true, detail: `更新源：${release.sourceLabel}\n下载后将校验 SHA-256、运行 self-test，并保留当前版本用于回退。` },
-          '下载并更新'
-        );
-        if (confirmed !== '下载并更新') return false;
-        bridgeWasRunning = bridge.isRunning();
-        if (bridgeWasRunning) await bridge.stop();
-        await processClient.stop();
-        const installed = await vscode.window.withProgress({
-          location: vscode.ProgressLocation.Notification,
-          title: `更新 GuthonCodeTool 至 ${release.version}`,
-          cancellable: false,
-        }, (progress) => installRelease({
-          release,
-          storageRoot,
-          onProgress: (message) => progress.report({ message }),
-        }));
-        const previousState = readUpdateState(storageRoot);
-        writeUpdateState(storageRoot, {
-          activeVersion: installed.version,
-          activePath: installed.toolPath,
-          previousVersion: installedVersion,
-          previousPath: toolPath,
-          source,
-          sha256: installed.sha256,
-          updatedAt: new Date().toISOString(),
+        return await withUpdateLock(storageRoot, async () => {
+          const release = await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `正在从 ${UPDATE_SOURCES[source]?.label || source} 检查更新`,
+            cancellable: false,
+          }, () => fetchLatestRelease(source));
+          const installedVersion = await detectCurrentVersion(context.extensionPath, storageRoot, toolPath);
+          if (compareVersions(release.version, installedVersion) <= 0) {
+            return vscode.window.showInformationMessage(`当前已是最新版本：${installedVersion}（${release.sourceLabel}）`);
+          }
+          const asset = releaseAsset(release, assetNameFor());
+          const size = asset.size ? `，${(asset.size / 1024 / 1024).toFixed(1)} MB` : '';
+          const confirmed = await vscode.window.showInformationMessage(
+            `发现 GuthonCodeTool ${release.version}（当前 ${installedVersion}${size}）`,
+            { modal: true, detail: `更新源：${release.sourceLabel}\n下载后将校验 SHA-256、运行 self-test，并保留当前版本用于回退。` },
+            '下载并更新'
+          );
+          if (confirmed !== '下载并更新') return false;
+          bridgeWasRunning = bridge.isRunning();
+          if (bridgeWasRunning) await bridge.stop();
+          await processClient.stop();
+          const installed = await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `更新 GuthonCodeTool 至 ${release.version}`,
+            cancellable: false,
+          }, (progress) => installRelease({
+            release,
+            storageRoot,
+            alreadyLocked: true,
+            onProgress: (message) => progress.report({ message }),
+          }));
+          const previousState = readUpdateState(storageRoot);
+          writeUpdateState(storageRoot, {
+            activeVersion: installed.version,
+            activePath: installed.toolPath,
+            previousVersion: installedVersion,
+            previousPath: toolPath,
+            source,
+            sha256: installed.sha256,
+            updatedAt: new Date().toISOString(),
         });
         try {
           await config.update('toolPath', installed.toolPath, vscode.ConfigurationTarget.Global);
@@ -1109,6 +1218,7 @@ function activate(context) {
           await vscode.window.showWarningMessage(`应用已更新，但运行状态刷新失败：${error.message}`);
         }
         return vscode.window.showInformationMessage(`GuthonCodeTool 已更新至 ${installed.version}`);
+        });
       } catch (error) {
         if (bridgeWasRunning && !bridge.isRunning()) {
           const currentTool = configuredToolFromSettings();
@@ -1142,18 +1252,22 @@ function activate(context) {
       applicationUpdateRunning = true;
       const bridgeWasRunning = bridge.isRunning();
       try {
-        if (bridgeWasRunning) await bridge.stop();
-        await processClient.stop();
-        const currentPath = resolvePackagedTool(config.get('toolPath', '')) || config.get('toolPath', '');
-        const currentApplicationVersion = await detectCurrentVersion(context.extensionPath, storageRoot, currentPath);
-        const previousState = state;
-        writeUpdateState(storageRoot, {
-          activeVersion: state.previousVersion,
-          activePath: rollbackPath,
-          previousVersion: currentApplicationVersion,
-          previousPath: currentPath,
-          source: state.source,
-          updatedAt: new Date().toISOString(),
+        return await withUpdateLock(storageRoot, async () => {
+          const currentState = readUpdateState(storageRoot);
+          if (JSON.stringify(currentState) !== JSON.stringify(state)) throw new Error('确认期间更新状态已变化，请重新发起回退');
+          await verifyExecutable(rollbackPath, state.previousVersion);
+          if (bridgeWasRunning) await bridge.stop();
+          await processClient.stop();
+          const currentPath = resolvePackagedTool(config.get('toolPath', '')) || config.get('toolPath', '');
+          const currentApplicationVersion = await detectCurrentVersion(context.extensionPath, storageRoot, currentPath);
+          const previousState = state;
+          writeUpdateState(storageRoot, {
+            activeVersion: state.previousVersion,
+            activePath: rollbackPath,
+            previousVersion: currentApplicationVersion,
+            previousPath: currentPath,
+            source: state.source,
+            updatedAt: new Date().toISOString(),
         });
         try {
           await config.update('toolPath', rollbackPath, vscode.ConfigurationTarget.Global);
@@ -1173,6 +1287,7 @@ function activate(context) {
           await vscode.window.showWarningMessage(`应用已回退，但运行状态刷新失败：${error.message}`);
         }
         return vscode.window.showInformationMessage(`GuthonCodeTool 已回退到 ${state.previousVersion}`);
+        });
       } catch (error) {
         if (bridgeWasRunning && !bridge.isRunning()) {
           const currentTool = configuredToolFromSettings();
@@ -1271,7 +1386,7 @@ function activate(context) {
       const workspaceKey = typeof workspaceValue === 'string'
         ? workspaceValue
         : workspaceValue?.guthonWorkspaceKey;
-      if (!workspaceKey) return vscode.window.showErrorMessage('请在具体产品或项目节点上执行删除');
+      if (!isWorkspaceKey(workspaceKey)) return vscode.window.showErrorMessage('请在具体产品或项目节点上执行删除');
       let plan;
       try {
         plan = await assistantClient.run('', TOOL_COMMANDS.workspaceDelete, [], {
@@ -1328,7 +1443,16 @@ function activate(context) {
       if (typeof workspaceKey !== 'string' || !workspaceKey) {
         return vscode.window.showErrorMessage('请从具体产品或项目下配置数据库排查');
       }
-      const definition = await promptDatabaseDiagnosis(vscode.window, workspaceKey);
+      let definition;
+      try {
+        definition = await promptDatabaseDiagnosis(vscode.window, workspaceKey, {
+          listTargets: async (targetId) => {
+            const result = await assistantClient.run(workspaceKey, 'database-target-list', ['--target-id', targetId]);
+            if (result.workspaceKey !== workspaceKey || !Array.isArray(result.targets)) throw new Error('目标预检返回的工作区或目标列表无效');
+            return result.targets;
+          },
+        });
+      } catch (error) { return vscode.window.showErrorMessage(`数据库目标配置预检失败：${error.message}`); }
       if (!definition) return false;
       const completed = await runTool(
         TOOL_COMMANDS.databaseTargetConfigure,
@@ -1345,9 +1469,11 @@ function activate(context) {
       const tool = await configuredTool();
       if (!tool) return;
       try {
-        if (!bridge.start(tool)) return vscode.window.showInformationMessage('Guthon Bridge 已在运行');
+        bridge.start(tool);
         bridgeOutput.show(true);
-        return vscode.window.showInformationMessage('Guthon Bridge 已启动：http://127.0.0.1:17361');
+        const status = await bridge.waitForReady(tool.toolHome);
+        const action = await vscode.window.showInformationMessage(`Guthon Bridge 已启动：http://127.0.0.1:${status.port}`, '复制配对令牌');
+        if (action === '复制配对令牌') await vscode.env.clipboard.writeText(bridge.pairingToken(tool.toolHome));
       } catch (error) {
         return vscode.window.showErrorMessage(`Guthon Bridge 启动失败：${error.message}`);
       }

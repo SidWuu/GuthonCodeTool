@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import difflib
 import hashlib
 import json
 import os
@@ -16,9 +15,13 @@ import subprocess
 import sys
 import uuid
 from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from pathlib import Path
 
-from common import index_schema_comments, source_facts
+from common import index_schema_comments, source_facts, identity_search, source_changes
+from common.persistence import file_lock
+from common.operation_control import OperationCancelled, checkpoint, publication_barrier
+from common.source_store import source_transaction, prepare_path
 from common.inheritance import SOURCE_CATALOG_VERSION
 from common.source_format import decode_source
 from providers.svn import checkout as svn_checkout
@@ -26,11 +29,14 @@ from providers.svn import group_inference
 from providers.svn.dedup import is_newer_page
 
 
-# Packaged launches set GUTHON_HOME so config and private source data stay outside
-# the application install directory. Source checkouts keep their current root.
-ROOT = Path(os.environ.get("GUTHON_HOME") or Path(__file__).resolve().parents[2]).expanduser().resolve()
-CONFIG_DIR = ROOT / "config"
-VAR_DIR = ROOT / "var"
+from common.runtime_paths import RuntimePath, tool_home
+from common.workspace_identity import validate_workspace_key
+
+ROOT = RuntimePath()
+CONFIG_DIR = RuntimePath("config")
+VAR_DIR = RuntimePath("var")
+
+
 PAGE_SOURCE_TYPE = "page"
 PROCEDURE_SOURCE_TYPE = "procedure"
 LEGACY_WORK_COPY_BASELINE_DIR = ".guthon-baseline"
@@ -50,330 +56,32 @@ INDEX_BUSY_TIMEOUT_MS = 30000
 INDEX_LOCK_TIMEOUT_SECONDS = INDEX_BUSY_TIMEOUT_MS / 1000
 
 
+_GENERATED_FILES = ContextVar("guthon_generated_files", default=None)
+
+
+@contextmanager
+def operation_generated_files():
+    paths = set()
+    token = _GENERATED_FILES.set(paths)
+    try:
+        yield paths
+    finally:
+        _GENERATED_FILES.reset(token)
+
+
+def record_generated_files(paths):
+    generated = _GENERATED_FILES.get()
+    if generated is not None:
+        generated.update(Path(path).resolve() for path in paths)
+
+
+class IndexPartialError(SystemExit):
+    error_code = "INDEX_PARTIAL"
+
+
 class IndexRebuildRequired(SystemExit):
     """Raised when a derived index cannot be upgraded in place."""
-
-
-def workspace_steps(workspace):
-    return ("source",) if workspace.get("sourceMode") == "svn" else WORKSPACE_STEPS
-
-
-def _database_capabilities():
-    return {
-        "database.sourceSync": True,
-        "database.schemaExport": True,
-        "database.billTypeExport": True,
-        "database.systemScriptExport": True,
-        "database.viewExport": True,
-        "database.diagnose": True,
-        "source.reindex": True,
-        "workcopy.open": True,
-    }
-
-
-def _svn_capabilities(settings):
-    return {f"svn.{name}": bool(value) for name, value in settings["capabilities"].items()}
-
-
-def workspace_key(value=None):
-    key = str(value or os.environ.get(WORKSPACE_ENV) or "").strip()
-    if not key:
-        raise SystemExit("Missing --workspace. Use products.<id> or projects.<id>.")
-    return key
-
-
-def set_workspace(value):
-    os.environ[WORKSPACE_ENV] = workspace_key(value)
-
-
-def workspace_source_mode_path(workspace_root: Path) -> Path:
-    return workspace_root / "context" / SOURCE_MODE_FILE
-
-
-def read_workspace_source_mode(workspace_root: Path, key: str, item: dict) -> tuple[str, str]:
-    """Read the workspace-local provider choice without coupling it to project YAML."""
-
-    path = workspace_source_mode_path(workspace_root)
-    if path.is_file():
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise SystemExit(f"Invalid source mode file for {key}: {path}: {error}") from error
-        if not isinstance(payload, dict) or payload.get("version") != SOURCE_MODE_VERSION:
-            raise SystemExit(f"Invalid source mode version for {key}: {path}")
-        if payload.get("workspaceKey") != key:
-            raise SystemExit(f"source mode workspaceKey mismatch for {key}: {path}")
-        mode = str(payload.get("sourceMode") or "").strip().lower()
-        if mode not in SOURCE_MODES:
-            raise SystemExit(f"sourceMode must be database or svn for {key}: {path}")
-        return mode, "workspace-context"
-
-    # Temporary read compatibility for existing installations. Nexus writes the
-    # project-local context file and all distributed YAML templates omit this key.
-    legacy_mode = str(item.get("source_mode") or "").strip().lower()
-    if legacy_mode:
-        if legacy_mode not in SOURCE_MODES:
-            raise SystemExit(f"source_mode must be database or svn for {key}")
-        return legacy_mode, "legacy-config"
-    return "database", "default"
-
-
-def write_workspace_source_mode(workspace: dict, source_mode: str) -> dict:
-    mode = str(source_mode or "").strip().lower()
-    if mode not in SOURCE_MODES:
-        raise SystemExit("source mode must be database or svn")
-    path = workspace_source_mode_path(workspace["root"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "version": SOURCE_MODE_VERSION,
-        "workspaceKey": workspace["workspaceKey"],
-        "sourceMode": mode,
-    }
-    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temp_path.replace(path)
-    finally:
-        try:
-            temp_path.unlink()
-        except FileNotFoundError:
-            pass
-    return {
-        "ok": True,
-        "workspaceKey": workspace["workspaceKey"],
-        "sourceMode": mode,
-        "sourceModeSource": "workspace-context",
-        "sourceModePath": str(path),
-    }
-
-
-def change_workspace_source_mode(config: dict, workspace: dict, source_mode: str) -> tuple[dict, dict]:
-    """Persist a provider choice and roll it back if the target provider is invalid."""
-
-    path = workspace_source_mode_path(workspace["root"])
-    previous = path.read_bytes() if path.is_file() else None
-    result = write_workspace_source_mode(workspace, source_mode)
-    try:
-        updated = resolve_workspace(config, workspace["workspaceKey"])
-    except BaseException:
-        if previous is None:
-            path.unlink(missing_ok=True)
-        else:
-            temp_path = path.with_name(f".{path.name}.{os.getpid()}.rollback.tmp")
-            try:
-                temp_path.write_bytes(previous)
-                temp_path.replace(path)
-            finally:
-                temp_path.unlink(missing_ok=True)
-        raise
-    return result, updated
-
-
-def resolve_workspace_storage_root(kind: str, config_id: str, item: dict) -> Path:
-    """Resolve one product/project's private root from its persisted identity."""
-
-    prefixes = {"products": "PRD", "projects": "PRJ"}
-    if kind not in prefixes:
-        raise SystemExit(f"Unknown workspace kind: {kind}")
-    configured_workspace_root = item.get("workspace_root")
-    workspace_root_value = (
-        svn_checkout.expand_config_value(configured_workspace_root, f"workspace_root for {kind}.{config_id}")
-        if configured_workspace_root not in (None, "")
-        else ""
-    )
-    workspace_root = Path(workspace_root_value or VAR_DIR / "workspace").expanduser().absolute()
-    resolved_workspace_root = workspace_root.resolve()
-    if resolved_workspace_root in {Path("/").resolve(), Path.home().resolve()}:
-        raise SystemExit(f"Unsafe workspace_root for {kind}.{config_id}: {workspace_root}")
-    name = str(item.get("name") or "").strip()
-    return workspace_root / path_part(f"{prefixes[kind]} {name}")
-
-
-def list_workspaces(config):
-    workspaces = []
-    seen_names = {"products": set(), "projects": set()}
-    seen_ids = set()
-    for kind, config_key, prefix, layer in (
-        ("products", "products", "PRD", "PRODUCT"),
-        ("projects", "projects", "PRJ", "PROJECT"),
-    ):
-        for item_id, item in (config.get(config_key, {}).get(config_key) or {}).items():
-            svn_checkout.validate_config_id(item_id)
-            if item_id in seen_ids:
-                raise SystemExit(f"Duplicate workspace config id across products/projects: {item_id}")
-            seen_ids.add(item_id)
-            name = str(item.get("name") or "").strip()
-            if not name:
-                raise SystemExit(f"Missing name for {kind}.{item_id}")
-            if name in seen_names[kind]:
-                raise SystemExit(f"Duplicate {kind} display name: {name}")
-            seen_names[kind].add(name)
-            key = f"{kind}.{item_id}"
-            root = resolve_workspace_storage_root(kind, item_id, item)
-            resolved_workspace_root = root.parent.resolve()
-            source_mode, source_mode_source = read_workspace_source_mode(root, key, item)
-            svn = svn_checkout.svn_settings(
-                item_id,
-                item,
-                VAR_DIR,
-                root,
-                (config.get("sync", {}).get("svn") or {}),
-            ) if source_mode == "svn" else None
-            if svn and svn.get("scopeConfigPath") is None:
-                svn["scopeConfigPath"] = (
-                    CONFIG_DIR / ("products.yaml" if kind == "products" else "projects.yaml")
-                ).resolve()
-            datasource_name = str(item.get("datasource") or "").strip()
-            datasource = (config.get("datasource", {}).get("datasource") or {}).get(datasource_name)
-            manifest_layout = bool(svn and svn.get("checkoutLayout") == "manifest-working-copies")
-            if datasource_name and not datasource:
-                raise SystemExit(f"Unknown datasource for {key}: {datasource_name}")
-            datasource = datasource or {}
-            resolved_checkout_root = svn["checkoutRoot"].resolve() if svn else None
-            if svn and (
-                resolved_checkout_root == resolved_workspace_root
-                or resolved_checkout_root in resolved_workspace_root.parents
-                or resolved_workspace_root in resolved_checkout_root.parents
-            ):
-                raise SystemExit(f"checkout_root and workspace_root must be separate for {key}")
-            capabilities = _svn_capabilities(svn) if svn else _database_capabilities()
-            system_mappings = ((item.get("systems") or {}).get("include") or {}).get("mappings") or {}
-            if not isinstance(system_mappings, dict):
-                raise SystemExit(f"systems.include.mappings must be a mapping: {key}")
-            aliases = [str(alias).strip() for alias in system_mappings if str(alias).strip()]
-            if source_mode == "svn" and not aliases and not manifest_layout:
-                raise SystemExit(f"SVN workspace requires systems.include.mappings: {key}")
-            workspaces.append(
-                {
-                    "workspaceKey": key,
-                    "kind": kind,
-                    "type": "product" if kind == "products" else "project",
-                    "id": item_id,
-                    "name": name,
-                    "displayName": f"{prefix} {name}",
-                    "layer": layer,
-                    "scopeId": item_id,
-                    "projectId": "" if kind == "products" else item_id,
-                    "datasourceName": datasource_name,
-                    "datasource": datasource,
-                    "sourceMode": source_mode,
-                    "sourceModeSource": source_mode_source,
-                    "sourceModePath": workspace_source_mode_path(root),
-                    "capabilities": capabilities,
-                    "svn": svn,
-                    "checkoutPath": svn["checkoutPath"] if svn else None,
-                    "providerSourceRoot": svn["checkoutPath"] if svn else root / "source" / "readonly",
-                    "systemAliases": aliases,
-                    "systemMappings": system_mappings,
-                    "systems": item.get("systems") or {},
-                    "sourceScope": {
-                        "include": item.get("include") or {},
-                        "exclude": item.get("exclude") or {},
-                        "extraWhere": item.get("extra_where") or {},
-                    },
-                    "pageOrigins": [str(value).rstrip("/") for value in item.get("page_origins") or [] if str(value).strip()],
-                    "config": item,
-                    "configDir": CONFIG_DIR,
-                    "root": root,
-                    "docsDir": root / "docs",
-                    "sourceDir": root / "source",
-                    "readonlyDir": root / "source" / "readonly",
-                    "workcopyDir": root / "source" / "workcopy",
-                    "databaseDir": root / "database",
-                    "contextDir": root / "context",
-                    "indexPath": root / "context" / "index.db",
-                    "statePath": root / "context" / "state.json",
-                    "logsDir": root / "context" / "logs",
-                }
-            )
-    _validate_svn_workspace_boundaries(workspaces)
-    return workspaces
-
-
-def _validate_svn_workspace_boundaries(workspaces):
-    managed_paths = []
-    for workspace in workspaces:
-        if workspace.get("sourceMode") != "svn":
-            continue
-        if workspace["svn"].get("checkoutLayout") == "manifest-working-copies":
-            from providers.svn.nexus.manifest import load_authorized_scope
-
-            manifest_path = workspace["svn"].get("scopeManifestPath")
-            if not manifest_path or not manifest_path.is_file():
-                continue
-            paths = [(entry.root.resolve(), entry.id) for entry in load_authorized_scope(workspace).entries]
-        else:
-            paths = [(workspace["checkoutPath"].resolve(), "legacy-sparse")]
-        for path, entry_id in paths:
-            for other_path, other_workspace_key, other_entry_id in managed_paths:
-                if path == other_path or path in other_path.parents or other_path in path.parents:
-                    raise SystemExit(
-                        "SVN working-copy paths overlap across workspaces: "
-                        f"{workspace['workspaceKey']}/{entry_id} and {other_workspace_key}/{other_entry_id}"
-                    )
-            managed_paths.append((path, workspace["workspaceKey"], entry_id))
-
-
-def resolve_workspace(config, value=None):
-    key = workspace_key(value)
-    for workspace in list_workspaces(config):
-        if workspace["workspaceKey"] == key:
-            return workspace
-    raise SystemExit(f"Unknown workspace: {key}")
-
-
-def resolve_workspace_for_path(config: dict, value: str | Path | None = None) -> dict:
-    """Resolve exactly one configured workspace containing a cwd or child path."""
-
-    candidate = Path(value or Path.cwd()).expanduser().resolve()
-    matches = []
-    for workspace in list_workspaces(config):
-        root = workspace["root"].expanduser().resolve()
-        if candidate == root or root in candidate.parents:
-            matches.append((len(root.parts), workspace))
-    if not matches:
-        raise SystemExit(f"Path is not inside a configured workspace: {candidate}")
-    matches.sort(key=lambda item: item[0], reverse=True)
-    if len(matches) > 1 and matches[0][0] == matches[1][0]:
-        keys = ", ".join(item[1]["workspaceKey"] for item in matches if item[0] == matches[0][0])
-        raise SystemExit(f"Path matches multiple configured workspaces: {candidate}: {keys}")
-    return matches[0][1]
-
-
-def workspace_index_state(workspace: dict) -> dict:
-    """Return local index readiness without triggering synchronization or remote access."""
-
-    index_path = workspace["indexPath"]
-    index_size = index_path.stat().st_size if index_path.is_file() else 0
-    index_ready = False
-    if index_size:
-        try:
-            connection = sqlite3.connect(f"file:{index_path}?mode=ro", uri=True)
-            try:
-                columns = {
-                    row[1]
-                    for row in connection.execute("PRAGMA table_info(gusen_source_record)")
-                }
-                if {"scope_id", "source_namespace"}.issubset(columns):
-                    index_ready = connection.execute(
-                        "SELECT 1 FROM gusen_source_record WHERE scope_id=? LIMIT 1",
-                        (workspace["scopeId"],),
-                    ).fetchone() is not None
-                elif {"product_id", "project_id"}.issubset(columns):
-                    index_ready = connection.execute(
-                        "SELECT 1 FROM gusen_source_record WHERE product_id=? OR project_id=? LIMIT 1",
-                        (workspace["scopeId"], workspace["scopeId"]),
-                    ).fetchone() is not None
-            finally:
-                connection.close()
-        except sqlite3.Error:
-            index_ready = False
-    return {
-        "path": str(index_path),
-        "ready": index_ready,
-        "sizeBytes": index_size,
-        "requiredAction": "" if index_ready else "init-or-reindex",
-    }
+    error_code = "INDEX_REBUILD_REQUIRED"
 
 
 # indexFirst 的可运行示例参数按源码模式区分：svn action 用 --keyword/--fun-id，
@@ -396,43 +104,6 @@ INDEX_FIRST_EXAMPLE_ARGUMENTS = {
         ("callersOfSharedFunction", ["callers", "--alias", "<source_alias_id>", "--fun", "<fun_id>"]),
     ),
 }
-
-
-def index_first_examples(command: str, workspace_key: str) -> list[dict]:
-    """Return copy-ready bounded-query commands for one workspace and source mode."""
-
-    prefix = [command, "--home", str(CONFIG_DIR.parent), "--workspace", workspace_key, "--"]
-    return [
-        {"intent": intent, "argv": [*prefix, *arguments]}
-        for intent, arguments in INDEX_FIRST_EXAMPLE_ARGUMENTS.get(command, ())
-    ]
-
-
-def workspace_agent_context(config: dict, workspace: dict) -> dict:
-    """Return the small, machine-readable context an agent needs before source lookup."""
-
-    query_command = "svn" if workspace["sourceMode"] == "svn" else "query"
-    return {
-        "workspaceKey": workspace["workspaceKey"],
-        "root": str(workspace["root"]),
-        "sourceMode": workspace["sourceMode"],
-        "sourceModeSource": workspace["sourceModeSource"],
-        "sourceModePath": str(workspace["sourceModePath"]),
-        "index": workspace_index_state(workspace),
-        "indexFirst": {
-            "command": query_command,
-            "unknownObject": "find",
-            "knownLocalFact": "facts",
-            "tableOrBillWriteReason": "explain",
-            "sharedCallChain": "context",
-            "callersOfSharedFunction": "callers",
-            "examples": index_first_examples(query_command, workspace["workspaceKey"]),
-            "note": (
-                "索引 ready 时首次源码定位必须执行上述有界查询；仅在索引未初始化、明确漏项或证据不足时"
-                "才改用定向文件检索，并在交付说明中写明原因。"
-            ),
-        },
-    }
 
 
 def _svn_delivery_state(workspace: dict) -> dict:
@@ -473,40 +144,6 @@ def _svn_delivery_state(workspace: dict) -> dict:
     }
 
 
-def _workspace_cockpit(summary: dict) -> dict:
-    index_ready = bool(summary["index"]["ready"])
-    status_failed = summary.get("status") == "FAILED"
-    working_copies = summary.get("workingCopies") or []
-    skipped_working_copies = summary.get("skippedWorkingCopies") or []
-    dirty_count = sum(not item.get("clean") for item in working_copies)
-    messages = []
-    if status_failed:
-        failure = summary.get("lastFailure") or {}
-        message = failure.get("message") if isinstance(failure, dict) else str(failure)
-        messages.append(message or "最近一次工作区操作失败")
-    if not index_ready:
-        messages.append("本地事实索引尚未就绪")
-    if summary.get("sourceMode") == "database" and not summary.get("datasourceReady"):
-        messages.append("DATABASE 数据源尚未配置")
-    if summary.get("status") == "PARTIAL":
-        messages.append("工作区资料尚未达到完整一致状态")
-    elif summary.get("status") == "UNINITIALIZED" and index_ready:
-        messages.append("工作区尚未完成初始化")
-    if dirty_count:
-        messages.append(f"{dirty_count} 个 SVN working copy 存在本地变更")
-    if skipped_working_copies:
-        messages.append(f"{len(skipped_working_copies)} 个 SVN scope 无权限或不存在，已跳过")
-    return {
-        "health": "FAILED" if status_failed else "ACTION_REQUIRED" if messages else "READY",
-        "issueCount": len(messages),
-        "indexReady": index_ready,
-        "workingCopyCount": len(working_copies),
-        "skippedWorkingCopyCount": len(skipped_working_copies),
-        "dirtyWorkingCopies": dirty_count,
-        "messages": messages,
-    }
-
-
 def current_workspace(config=None):
     return resolve_workspace(config or load_config())
 
@@ -531,312 +168,6 @@ def ensure_workspace_structure(workspace):
         paths.append(workspace["workcopyDir"])
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)
-
-
-def workspace_config_digest(config, workspace):
-    workspace_config = dict(workspace["config"])
-    workspace_config.pop("source_mode", None)
-    payload = {
-        "workspace": workspace_config,
-        "sourceMode": workspace["sourceMode"],
-        "datasource": workspace["datasource"],
-        "rules": config.get("sync", {}).get("rules") or {},
-        "sourceTables": config.get("source_tables") or {},
-    }
-    return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
-
-
-def legacy_workspace_config_digest(config, workspace):
-    """Recognize state written before provider selection moved out of YAML."""
-
-    workspace_config = dict(workspace["config"])
-    workspace_config["source_mode"] = workspace["sourceMode"]
-    payload = {
-        "workspace": workspace_config,
-        "datasource": workspace["datasource"],
-        "rules": config.get("sync", {}).get("rules") or {},
-        "sourceTables": config.get("source_tables") or {},
-    }
-    return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
-
-
-def load_workspace_state(config, workspace):
-    path = workspace["statePath"]
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        state = {}
-    digest = workspace_config_digest(config, workspace)
-    digest_matches = state.get("configDigest") in {
-        digest,
-        legacy_workspace_config_digest(config, workspace),
-    }
-    steps = state.get("steps") if isinstance(state.get("steps"), dict) else {}
-    all_synced = digest_matches and all(
-        (steps.get(step) or {}).get("status") == "SUCCESS" for step in workspace_steps(workspace)
-    )
-    if not state:
-        status = "UNINITIALIZED"
-    elif all_synced:
-        status = "SYNCED"
-    elif digest_matches and state.get("lastFailure"):
-        status = "FAILED"
-    else:
-        status = "PARTIAL"
-    return {
-        "workspaceKey": workspace["workspaceKey"],
-        "configDigest": digest,
-        "status": status,
-        "lastFullSyncAt": state.get("lastFullSyncAt") or "",
-        "steps": steps,
-        "lastFailure": state.get("lastFailure"),
-    }
-
-
-def update_workspace_state(config, workspace, step=None, status=None, error="", full_sync=False):
-    ensure_workspace_structure(workspace)
-    state = load_workspace_state(config, workspace)
-    state["configDigest"] = workspace_config_digest(config, workspace)
-    state.pop("status", None)
-    now = _now()
-    if step:
-        state.setdefault("steps", {})[step] = {"status": status, "updatedAt": now}
-    if error:
-        state["lastFailure"] = {"step": step or "", "message": str(error)[:1000], "time": now}
-    elif status == "SUCCESS" and (state.get("lastFailure") or {}).get("step") == step:
-        state["lastFailure"] = None
-    if full_sync:
-        state["lastFullSyncAt"] = now
-        state["lastFailure"] = None
-    state_path = workspace["statePath"]
-    temp_path = state_path.with_name(f".{state_path.name}.{os.getpid()}.tmp")
-    try:
-        temp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temp_path.replace(state_path)
-    finally:
-        temp_path.unlink(missing_ok=True)
-    return load_workspace_state(config, workspace)
-
-
-def _svn_source_control_groups(workspace, working_copies):
-    mappings = workspace.get("systemMappings") or {}
-    root_copy = next(
-        (item for item in working_copies if isinstance(item, dict) and item.get("category") == "root"),
-        None,
-    )
-    if root_copy:
-        system_ids = sorted({
-            str(mapping.get("system_id") or "").strip()
-            for mapping in mappings.values()
-            if isinstance(mapping, dict) and str(mapping.get("system_id") or "").strip()
-        })
-        return [{
-            "id": "repository-root",
-            "label": workspace.get("name") or workspace.get("workspaceKey") or "SVN 仓库",
-            "dataSourceId": "",
-            "systemIds": system_ids,
-            "systemNames": [],
-            "workingCopyIds": [str(root_copy.get("id") or "repository-root")],
-            "inferred": False,
-        }]
-
-    def checkout_name(local_subdir):
-        return group_inference.checkout_name(workspace["checkoutPath"] / local_subdir)
-
-    inferred = None
-    effective_mappings = mappings
-    if not mappings:
-        inferred = group_inference.infer_groups(workspace["checkoutPath"], working_copies)
-        effective_mappings = {
-            f"inferred.{system_id}": {
-                "system_id": system_id,
-                "data_source_id": match["dataSourceId"],
-                "inference": match,
-            }
-            for system_id, match in inferred["matches"].items()
-        }
-
-    systems_by_data_source = {}
-    for mapping in effective_mappings.values():
-        if not isinstance(mapping, dict):
-            continue
-        data_source_id = str(mapping.get("data_source_id") or "").strip()
-        system_id = str(mapping.get("system_id") or "").strip()
-        if not data_source_id or not system_id:
-            continue
-        group = systems_by_data_source.setdefault(data_source_id, {"systemIds": [], "systemNames": []})
-        if system_id not in group["systemIds"]:
-            group["systemIds"].append(system_id)
-        system_name = checkout_name(f"systems/{system_id}")
-        if system_name and system_name not in group["systemNames"]:
-            group["systemNames"].append(system_name)
-
-    copy_ids_by_subdir = {
-        str(item.get("localSubdir") or "").strip().replace("\\", "/"): str(item.get("id") or "").strip()
-        for item in working_copies
-        if isinstance(item, dict) and str(item.get("id") or "").strip()
-    }
-    assigned = set()
-    groups = []
-    for data_source_id, system_group in systems_by_data_source.items():
-        subdirs = [f"datasources/{data_source_id}"] + [
-            f"systems/{system_id}" for system_id in system_group["systemIds"]
-        ]
-        working_copy_ids = [copy_ids_by_subdir[subdir] for subdir in subdirs if subdir in copy_ids_by_subdir]
-        assigned.update(working_copy_ids)
-        system_names = system_group["systemNames"]
-        datasource_name = checkout_name(f"datasources/{data_source_id}")
-        display_name = (
-            datasource_name
-            if datasource_name
-            else system_names[0]
-            if len(system_names) == 1
-            else " / ".join(system_names)
-            if system_names
-            else f"{data_source_id} 子系统"
-        )
-        groups.append({
-            "id": f"{'subsystem' if mappings else 'inferred-subsystem'}-flat-{data_source_id}",
-            "label": display_name,
-            "dataSourceId": data_source_id,
-            "systemIds": system_group["systemIds"],
-            "systemNames": system_group["systemNames"],
-            "workingCopyIds": working_copy_ids,
-            "inferred": not bool(mappings),
-        })
-
-    remaining = {
-        str(item.get("localSubdir") or "").strip().replace("\\", "/"):
-            str(item.get("id") or "").strip()
-        for item in working_copies
-        if isinstance(item, dict)
-        and str(item.get("id") or "").strip()
-        and str(item.get("id") or "").strip() not in assigned
-    }
-    if inferred:
-        for item in inferred["unmatchedSystems"]:
-            system_id = item["systemId"]
-            working_copy_id = remaining.pop(f"systems/{system_id}", "")
-            if working_copy_id:
-                groups.append({
-                    "id": f"unmatched-system-flat-{system_id}",
-                    "label": item["systemName"] or f"{system_id} 业务系统",
-                    "dataSourceId": "",
-                    "systemIds": [system_id],
-                    "systemNames": [item["systemName"]] if item["systemName"] else [],
-                    "workingCopyIds": [working_copy_id],
-                    "inferred": True,
-                    "unmatched": True,
-                })
-        for item in inferred["unmatchedDatasources"]:
-            data_source_id = item["dataSourceId"]
-            working_copy_id = remaining.pop(f"datasources/{data_source_id}", "")
-            if working_copy_id:
-                groups.append({
-                    "id": f"unmatched-datasource-flat-{data_source_id}",
-                    "label": item["dataSourceName"] or f"{data_source_id} 数据源",
-                    "dataSourceId": data_source_id,
-                    "systemIds": [],
-                    "systemNames": [],
-                    "workingCopyIds": [working_copy_id],
-                    "inferred": True,
-                    "unmatched": True,
-                })
-    remaining_ids = [working_copy_id for working_copy_id in remaining.values() if working_copy_id]
-    if remaining_ids:
-        groups.append({
-            "id": "shared-flat",
-            "label": "公共源码",
-            "dataSourceId": "",
-            "systemIds": [],
-            "systemNames": [],
-            "workingCopyIds": remaining_ids,
-        })
-    return groups
-
-
-def workspace_summary(config, workspace):
-    state = load_workspace_state(config, workspace)
-    summary = {
-        "workspaceKey": workspace["workspaceKey"],
-        "type": workspace["type"],
-        "id": workspace["id"],
-        "name": workspace["name"],
-        "displayName": workspace["displayName"],
-        "root": str(workspace["root"]),
-        "sourceMode": workspace["sourceMode"],
-        "sourceModeSource": workspace["sourceModeSource"],
-        "sourceModePath": str(workspace["sourceModePath"]),
-        "providerSourceRoot": str(workspace["providerSourceRoot"]),
-        "checkoutPath": str(workspace["checkoutPath"]) if workspace.get("checkoutPath") else "",
-        "datasourceName": workspace.get("datasourceName") or "",
-        "datasourceReady": bool(workspace.get("datasourceName") and workspace.get("datasource")),
-        "capabilities": workspace["capabilities"],
-        "status": state["status"],
-        "lastFullSyncAt": state["lastFullSyncAt"],
-        "steps": state["steps"],
-        "lastFailure": state["lastFailure"],
-    }
-    if workspace.get("sourceMode") == "svn" and workspace["svn"].get("checkoutLayout") == "manifest-working-copies":
-        from providers.svn.nexus.workspace import load_state
-
-        checkout_state = load_state(workspace, required=False)
-        summary["checkoutLayout"] = "manifest-working-copies"
-        manifest_path = workspace["svn"].get("scopeManifestPath")
-        checkout_script_path = workspace["svn"].get("checkoutScriptPath")
-        scope_config_path = workspace["svn"].get("scopeConfigPath")
-        scope_entries = workspace["svn"].get("scopeEntries")
-        summary["scopeManifestPath"] = str(manifest_path) if manifest_path else ""
-        summary["scopeManifestReady"] = bool(manifest_path and manifest_path.is_file())
-        summary["scopeConfigPath"] = str(scope_config_path) if scope_config_path else ""
-        summary["scopeConfigReady"] = bool(
-            workspace["svn"].get("scopeRootUrl")
-            or scope_entries is not None
-            or (workspace["svn"].get("scopeConfigExplicit") and scope_config_path and scope_config_path.is_file())
-        )
-        summary["scopeRootUrl"] = workspace["svn"].get("scopeRootUrl") or ""
-        summary["checkoutScriptPath"] = str(checkout_script_path) if checkout_script_path else ""
-        summary["checkoutScriptReady"] = bool(checkout_script_path and checkout_script_path.is_file())
-        # Compatibility for clients released before checkout scripts became platform-neutral.
-        summary["checkoutBatPath"] = summary["checkoutScriptPath"]
-        summary["checkoutBatReady"] = summary["checkoutScriptReady"]
-        summary["svnLoginRequired"] = True
-        summary["svnUsernameSource"] = "sync.yaml"
-        summary["svnUsername"] = workspace["svn"].get("username") or ""
-        summary["workingCopies"] = [
-            {
-                "id": item.get("id") or "",
-                "root": item.get("root") or "",
-                "localSubdir": item.get("localSubdir") or "",
-                "category": item.get("category") or "",
-                "scopeEntryId": item.get("id") or "",
-                "revision": item.get("revision") or "",
-                "clean": bool(item.get("clean")),
-            }
-            for item in checkout_state.get("workingCopies") or []
-        ]
-        summary["skippedWorkingCopies"] = [
-            {
-                "id": item.get("id") or "",
-                "localSubdir": item.get("localSubdir") or "",
-                "category": item.get("category") or "",
-                "reason": item.get("reason") or "",
-            }
-            for item in checkout_state.get("skipped") or []
-            if isinstance(item, dict)
-        ]
-        summary["sourceControlGroups"] = _svn_source_control_groups(
-            workspace,
-            summary["workingCopies"],
-        )
-        summary["delivery"] = _svn_delivery_state(workspace)
-    summary["index"] = workspace_index_state(workspace)
-    summary["cockpit"] = _workspace_cockpit(summary)
-    return summary
 
 
 def source_dir(workspace=None) -> Path:
@@ -872,19 +203,43 @@ def append_pull_log(pull_type, trigger, summary, payload=None, result=None, ok=T
         "result": result or {},
         "message": message or "",
     }
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    def redact(value):
+        if isinstance(value, dict):
+            return {key: redact(item) for key, item in value.items()
+                    if not re.search(r'password|secret|token|credential|content|sql|stack', str(key), re.I)}
+        if isinstance(value, list):
+            return [redact(item) for item in value]
+        return value[:2000] if isinstance(value, str) else value
+    # Match Bridge retention and serialize append/rotation across CLI workers.
+    with file_lock(path.with_name('.pull-log.lock')):
+        if path.exists() and path.stat().st_size >= 5 * 1024 * 1024:
+            os.replace(path, path.with_name(path.name + '.1'))
+        with open(path, "a", encoding="utf-8", opener=lambda name, flags: os.open(name, flags, 0o600)) as handle:
+            handle.write(json.dumps(redact(record), ensure_ascii=False) + "\n")
     return path
 
 
 def load_yaml(path: Path):
-    text = _expand_env(path.read_text(encoding="utf-8"))
-    try:
-        import yaml  # type: ignore
-
-        return yaml.safe_load(text) or {}
-    except ModuleNotFoundError:
-        return _parse_tiny_yaml(text)
+    text = path.read_text(encoding="utf-8")
+    if text.lstrip().startswith(("{", "[")):
+        data = json.loads(text)
+    else:
+        try:
+            import yaml  # type: ignore
+            data = yaml.safe_load(text) or {}
+        except ModuleNotFoundError:
+            data = _parse_tiny_yaml(text)
+    def expand(value):
+        if isinstance(value, str):
+            return _expand_env(value)
+        if isinstance(value, list):
+            return [expand(item) for item in value]
+        if isinstance(value, dict):
+            return {key: expand(item) for key, item in value.items()}
+        return value
+    # Expand scalar values after parsing: passwords/paths cannot inject YAML
+    # syntax or change type when they contain quotes, backslashes or newlines.
+    return expand(data)
 
 
 def _expand_env(text: str) -> str:
@@ -916,6 +271,8 @@ def _parse_tiny_yaml(text: str):
             continue
         key, _, raw_value = item.partition(":")
         key = key.strip()
+        if key.startswith(("'", '"')):
+            key = _scalar(key)
         raw_value = raw_value.strip()
         if raw_value:
             parent[key] = _scalar(raw_value)
@@ -959,6 +316,8 @@ def _scalar(value: str):
     try:
         return int(value)
     except ValueError:
+        if re.fullmatch(r"[+-]?\d+\.\d+", value):
+            return float(value)
         return value
 
 
@@ -1029,7 +388,7 @@ def _build_system_scope(records, selected):
     }
 
 
-def resolve_system_scope(conn, config: dict, datasource_name: str, workspace=None):
+def resolve_system_scope(conn, config: dict, datasource_name: str, workspace=None, *, allow_remote=True):
     workspace = workspace or resolve_workspace(config)
     selected = system_aliases(config, workspace)
     if not selected:
@@ -1050,6 +409,10 @@ def resolve_system_scope(conn, config: dict, datasource_name: str, workspace=Non
     }
     records = records if set(selected).issubset(covered_aliases) else None
     if not records:
+        if not allow_remote:
+            return None
+        if conn is None:
+            raise SystemExit("System identity cache is missing; run init for this DATABASE workspace")
         placeholders = ", ".join(["%s"] * len(selected))
         with conn.cursor() as cur:
             cur.execute(
@@ -1065,13 +428,24 @@ def resolve_system_scope(conn, config: dict, datasource_name: str, workspace=Non
         cache["datasources"][datasource_name] = {"system_aliases": selected, "systems": records}
         cache["generated_at"] = _now()
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.tmp")
-        temp_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temp_path.replace(cache_path)
+        _merge_system_cache(cache_path, datasource_name, cache["datasources"][datasource_name])
     scope = _build_system_scope(records, selected)
     if not scope.get("system_ids") or not scope.get("data_source_ids"):
         raise SystemExit(f"Invalid system cache for datasource: {datasource_name}")
     return scope
+
+
+def _merge_system_cache(path, datasource_name, entry):
+    with file_lock(path.with_suffix(".lock")):
+        try:
+            cache = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            cache = {}
+        if not isinstance(cache, dict) or not isinstance(cache.get("datasources"), dict):
+            cache = {"datasources": {}}
+        cache["datasources"][datasource_name] = entry
+        cache["generated_at"] = _now()
+        svn_checkout.atomic_json(path, cache)
 
 
 def bootstrap_system_data(config: dict, workspace) -> dict:
@@ -1102,7 +476,7 @@ def bootstrap_system_data(config: dict, workspace) -> dict:
         "systems": records,
     }
     cache["generated_at"] = _now()
-    svn_checkout.atomic_json(cache_path, cache)
+    _merge_system_cache(cache_path, datasource_name, cache["datasources"][datasource_name])
     return {"datasource": datasource_name, "systems": len(records)}
 
 
@@ -1180,21 +554,21 @@ def workspace_matches_request(config, workspace, payload, match_origin=True):
         if requested_alias and requested_alias not in authorized_aliases:
             return False
         if not data_source_ids and not system_ids:
-            return bool(origin or requested_alias)
+            return bool(requested_alias in authorized_aliases or origin and origin in workspace["pageOrigins"])
         return data_source_ids.issubset(authorized_data_source_ids) and system_ids.issubset(authorized_system_ids)
     if not data_source_ids and not system_ids:
-        return bool(origin or requested_alias)
-    try:
-        scope = resolve_system_scope(None, config, workspace["datasourceName"], workspace)
-    except AttributeError:
-        with db_connect(workspace["datasource"]) as conn:
-            scope = resolve_system_scope(conn, config, workspace["datasourceName"], workspace)
+        return bool(requested_alias in workspace.get("systemAliases", []) or origin and origin in workspace["pageOrigins"])
+    scope = resolve_system_scope(None, config, workspace["datasourceName"], workspace, allow_remote=False)
+    if scope is None:
+        return False
     return data_source_ids.issubset(set(scope.get("data_source_ids") or [])) and system_ids.issubset(
         set(scope.get("system_ids") or [])
     )
 
 
 def route_workspace_request(config, payload):
+    if not isinstance(payload, dict):
+        raise SystemExit("route input must be a JSON object")
     requested = str(payload.get("workspaceKey") or "").strip()
     if requested:
         workspace = resolve_workspace(config, requested)
@@ -1203,8 +577,7 @@ def route_workspace_request(config, payload):
         if not has_identity:
             return {"ok": True, "workspaceKey": requested, "workspace": workspace_summary(config, workspace)}
         if not workspace_matches_request(config, workspace, payload):
-            if not any(identity[1:]) or not workspace_matches_request(config, workspace, payload, match_origin=False):
-                raise SystemExit(f"Page identity does not match workspace: {requested}")
+            raise SystemExit(f"Page identity does not match workspace: {requested}")
         return {"ok": True, "workspaceKey": requested, "workspace": workspace_summary(config, workspace)}
     candidates = [
         workspace
@@ -1218,12 +591,6 @@ def route_workspace_request(config, payload):
             "workspaceKey": workspace["workspaceKey"],
             "workspace": workspace_summary(config, workspace),
         }
-    if not candidates and any(request_identity(payload)[1:]):
-        candidates = [
-            workspace
-            for workspace in list_workspaces(config)
-            if workspace_matches_request(config, workspace, payload, match_origin=False)
-        ]
     return {
         "ok": False,
         "workspaceSelectionRequired": True,
@@ -1429,8 +796,11 @@ def connect_index(
     source_facts.setup_schema(conn)
     conn.commit()
     call_schema_migrated = _migrate_call_index_schema(conn)
+    identity_search.setup(conn)
+    source_changes.setup(conn)
     index_schema_comments.setup_schema_comments(conn)
-    conn.execute("DROP TABLE IF EXISTS gusen_effective_source")
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='gusen_effective_source'").fetchone():
+        conn.execute("DROP TABLE gusen_effective_source")
     conn.commit()
     if call_schema_migrated:
         conn.execute("VACUUM")
@@ -1629,47 +999,49 @@ def _migrate_call_index_schema(conn):
         raise
 
 
-def find_source_candidates(conn, scope_id, keyword, limit=10):
+def find_source_candidates(conn, scope_id, keyword, limit=10, include_paths=False):
     limit = max(1, min(int(limit), 10))
     query = f"%{keyword.strip()}%"
+    if include_paths and ("/" in keyword or "\\" in keyword or re.search(r"\.(?:gss|json|vm|js|java|sql)$", keyword, re.I)):
+        normalized = keyword.replace("\\", "/").strip()
+        return conn.execute("SELECT source_layer,project_id,source_namespace,working_copy_id,source_table,source_id,source_alias_id,fun_id,source_name,local_path,status,provider,source_path,source_hash,svn_revision,system_id,data_source_id FROM gusen_source_record WHERE scope_id=? AND (source_path LIKE ? OR replace(local_path, char(92), '/') LIKE ?) ORDER BY source_path,source_namespace,record_id LIMIT ?",
+                            (scope_id,"%"+normalized+"%","%"+normalized+"%",limit)).fetchall()
+    fts_clause, fts_params = identity_search.candidate_clause(conn, keyword.strip(), allow_like_wildcards=True)
     return conn.execute(
-        """
-        SELECT source_layer, project_id, source_table, source_id, source_alias_id, fun_id, source_name,
+        f"""
+        SELECT source_layer, project_id, source_namespace, working_copy_id, source_table, source_id, source_alias_id, fun_id, source_name,
                local_path, status, provider, source_path, source_hash, svn_revision, system_id, data_source_id
         FROM gusen_source_record
         WHERE scope_id=?
           AND (source_id LIKE ? OR source_alias_id LIKE ? OR fun_id LIKE ? OR source_name LIKE ?)
-        ORDER BY source_name, source_alias_id, fun_id
+          {"AND " + fts_clause if fts_clause else ""}
+        ORDER BY source_name, source_alias_id, fun_id, source_namespace, record_id
         LIMIT ?
         """,
-        (scope_id, query, query, query, query, limit),
+        (scope_id, query, query, query, query, *fts_params, limit),
     ).fetchall()
 
 
-def query_source_context(conn, scope_id, source_id, fun_id="", limit=20):
+def query_source_context(conn, scope_id, source_id, fun_id="", limit=20, source_namespace=""):
     limit = max(1, min(int(limit), 20))
+    filters = ["scope_id=?", "source_id=?"]
+    params = [scope_id, source_id]
     if fun_id:
-        source = conn.execute(
-            """
-            SELECT record_id AS source_record_id, * FROM gusen_source_record
-            WHERE scope_id=? AND source_id=? AND fun_id=?
-            ORDER BY source_layer, project_id
-            LIMIT 1
-            """,
-            (scope_id, source_id, fun_id),
-        ).fetchone()
-    else:
-        source = conn.execute(
-            """
-            SELECT record_id AS source_record_id, * FROM gusen_source_record
-            WHERE scope_id=? AND source_id=?
-            ORDER BY source_layer, project_id
-            LIMIT 1
-            """,
-            (scope_id, source_id),
-        ).fetchone()
-    if not source:
+        filters.append("fun_id=?")
+        params.append(fun_id)
+    if source_namespace:
+        filters.append("source_namespace=?")
+        params.append(source_namespace)
+    sources = conn.execute(
+        "SELECT record_id AS source_record_id,* FROM gusen_source_record WHERE " + " AND ".join(filters)
+        + " ORDER BY source_namespace,source_layer,project_id,fun_id LIMIT 2", params,
+    ).fetchall()
+    if not sources:
         raise ValueError(f"Source not found: scope={scope_id}, sourceId={source_id}, funId={fun_id}")
+    if len(sources) > 1:
+        raise ValueError("SOURCE_AMBIGUOUS: supply exact funId/sourceNamespace; candidates=" + json.dumps(
+            [{"sourceNamespace": row["source_namespace"], "funId": row["fun_id"]} for row in sources], ensure_ascii=False))
+    source = sources[0]
     outgoing = conn.execute(
         """
         SELECT ? AS source_table, ? AS source_id, ? AS source_alias_id, ? AS fun_id,
@@ -1733,6 +1105,9 @@ def query_incoming_callers(conn, scope_id, target_alias_id, target_fun_id, limit
 
 
 def db_connect(ds: dict):
+    from common.database_readonly import resolve_password
+    ds = dict(ds)
+    ds["password"] = resolve_password(ds)
     missing = [key for key in ("host", "port", "database", "username", "password") if not ds.get(key)]
     if missing:
         raise SystemExit(f"数据源配置缺少字段: {', '.join(missing)}")
@@ -2080,7 +1455,9 @@ def run_sync_once(args=None, on_progress=None):
                 ok=not result["failures"],
             )
             if result["failures"]:
-                raise SystemExit(f"SVN scan completed with {result['failures']} scoped path errors")
+                if not result.get("indexPreserved", True):
+                    raise IndexPartialError(f"SVN index PARTIAL; {result['failures']} scoped path errors")
+                raise SystemExit(f"SVN scan completed with {result['failures']} scoped path errors; old index preserved")
             return result
         if parsed.init_only:
             export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
@@ -2145,7 +1522,7 @@ def run_sync_once(args=None, on_progress=None):
 
 def _indexed_path(path: Path) -> str:
     try:
-        return str(path.resolve().relative_to(ROOT))
+        return str(path.resolve().relative_to(Path(ROOT).resolve()))
     except ValueError:
         return str(path.resolve())
 
@@ -2203,6 +1580,11 @@ def _delete_svn_index_item(conn, workspace, row):
 
 def _insert_svn_index_item(conn, workspace, item, indexed_time):
     local_path = Path(item.get("local_path") or workspace["checkoutPath"] / item["source_path"])
+    before = local_path.stat()
+    raw_source = local_path.read_bytes()
+    after = local_path.stat()
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or hashlib.sha256(raw_source).hexdigest() != item["source_hash"]:
+        raise ValueError(f"Source changed during scan: {item['source_path']}")
     conn.execute(
         """
         INSERT OR REPLACE INTO gusen_source_record(
@@ -2242,8 +1624,8 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
             item.get("data_source_id") or "",
             item.get("working_copy_id") or "",
             item.get("scope_entry_id") or "",
-            local_path.stat().st_size,
-            local_path.stat().st_mtime_ns,
+            after.st_size,
+            after.st_mtime_ns,
             "" if item["status"] == "OK" else item["status"],
             "",
             "source-facts-v1",
@@ -2265,7 +1647,7 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
     public_data = None
     if local_path.suffix.lower() == ".json":
         try:
-            raw_json = local_path.read_bytes()
+            raw_json = raw_source
             if (item["source_table"] == "page"
                     and hashlib.sha256(raw_json).hexdigest() != item["source_hash"]):
                 raise ValueError(f"PAGE projection source changed during scan: {item['source_path']}")
@@ -2311,6 +1693,8 @@ def _advance_page_semantic_generation(conn, *, full_rebuild=False):
     """Publish one visible PAGE projection snapshot in the surrounding SVN transaction."""
 
     if full_rebuild:
+        from common import source_text_search
+        conn.execute("INSERT OR REPLACE INTO gusen_sync_state(state_key,state_value) VALUES(?,?)", ("source_body_index_version",source_text_search.VERSION))
         conn.execute(
             "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
             ("source_catalog_parser_version", SOURCE_CATALOG_VERSION),
@@ -2339,7 +1723,25 @@ def _advance_page_semantic_generation(conn, *, full_rebuild=False):
             "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
             ("page_field_relation_projection_version", source_facts.PAGE_FIELD_RELATION_PARSER_VERSION),
         )
+    digest = hashlib.sha256()
+    digest.update(json.dumps([SOURCE_CATALOG_VERSION, source_facts.PAGE_NODE_PARSER_VERSION,
+                             source_facts.PAGE_FIELD_PARSER_VERSION, source_facts.PAGE_FIELD_RELATION_PARSER_VERSION]).encode("utf-8"))
+    for row in conn.execute(
+        "SELECT source_namespace,source_table,source_id,fun_id,source_path,source_hash,change_key,status "
+        "FROM gusen_source_record WHERE provider='svn' "
+        "ORDER BY source_namespace,source_table,source_id,fun_id,source_path"
+    ):
+        digest.update(json.dumps(tuple(row), ensure_ascii=False).encode("utf-8"))
+    fingerprint = digest.hexdigest()
+    previous = conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='source_catalog_fingerprint'").fetchone()
+    if previous and previous[0] == fingerprint:
+        existing_generation = conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='source_catalog_generation'").fetchone()
+        if existing_generation:
+            source_changes.publish(conn, existing_generation[0])
+        return
+    conn.execute("INSERT OR REPLACE INTO gusen_sync_state(state_key,state_value) VALUES(?,?)", ("source_catalog_fingerprint", fingerprint))
     generation = uuid.uuid4().hex
+    source_changes.publish(conn, generation)
     for state_key in ("source_catalog_generation", "page_semantic_generation"):
         conn.execute(
             "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
@@ -2367,7 +1769,27 @@ def _cleanup_database_source_after_svn_index(workspace):
     return {"status": "REMOVED" if removed else "NOT_NEEDED", "paths": removed}
 
 
+def _insert_svn_scan_item(conn, workspace, item, indexed_time):
+    conn.execute("SAVEPOINT scan_item")
+    try:
+        _insert_svn_index_item(conn, workspace, item, indexed_time)
+        conn.execute("RELEASE scan_item")
+    except Exception:
+        conn.execute("ROLLBACK TO scan_item")
+        conn.execute("RELEASE scan_item")
+        raise
+
+
+def _store_svn_scan_diagnostics(conn, scan):
+    for key, value in (
+        ("svn_catalog_build_status", "PARTIAL" if scan["errors"] else "READY"),
+        ("svn_catalog_errors", json.dumps(scan["errors"], ensure_ascii=False)),
+    ):
+        conn.execute("INSERT OR REPLACE INTO gusen_sync_state(state_key,state_value) VALUES(?,?)", (key, value))
+
+
 def index_svn_workspace(conn, cfg, workspace, on_progress=None):
+    checkpoint()
     svn_checkout.require_capability(workspace, "reindex")
     progress_label = workspace.get("displayName") or workspace["workspaceKey"]
 
@@ -2394,26 +1816,30 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
                 progress("清理旧索引完成，开始扫描授权 working copy")
                 scan = catalog.scan(
                     workspace,
-                    on_object=lambda item: _insert_svn_index_item(conn, workspace, item, indexed_time),
+                    on_object=lambda item: _insert_svn_scan_item(conn, workspace, item, indexed_time),
                     collect_objects=False,
                     collect_modules=False,
                     on_progress=on_progress,
                 )
-                if scan["errors"]:
-                    progress(f"扫描发现 {len(scan['errors'])} 个错误，回滚并保留旧索引")
+                if any(error.get("code") not in {"PARSE_ERROR"} for error in scan["errors"]):
+                    progress(f"扫描发现身份或范围错误，回滚并保留旧索引")
                     conn.rollback()
+                    scan["indexPreserved"] = True
                 else:
                     progress("扫描完成，写入 SVN 版本状态")
                     conn.execute(
                         "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
                         ("svn_revision", scan["revision"]),
                     )
+                    _store_svn_scan_diagnostics(conn, scan)
                     _advance_page_semantic_generation(conn, full_rebuild=True)
+                    publication_barrier()
                     conn.commit()
-                    progress("索引事务已提交")
-            except Exception:
+                    scan["indexPreserved"] = False
+                    progress("索引事务已提交" + ("（PARTIAL，坏文件见 errors）" if scan["errors"] else ""))
+            except (Exception, OperationCancelled) as error:
                 conn.rollback()
-                progress("索引事务异常，已回滚并保留旧索引")
+                progress("索引扫描已取消，事务已回滚" if isinstance(error, OperationCancelled) else "索引事务异常，已回滚并保留旧索引")
                 raise
     else:
         from providers.svn import scanner
@@ -2436,32 +1862,37 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
                     conn.execute("DELETE FROM gusen_source_record")
                     indexed_time = _now()
                     for item in scan["objects"]:
+                        checkpoint()
                         _insert_svn_index_item(conn, workspace, item, indexed_time)
                     conn.execute(
                         "INSERT OR REPLACE INTO gusen_sync_state(state_key, state_value) VALUES(?, ?)",
                         ("svn_revision", scan["revision"]),
                     )
+                    _store_svn_scan_diagnostics(conn, scan)
                     _advance_page_semantic_generation(conn, full_rebuild=True)
+                    publication_barrier()
                     conn.commit()
                     progress("扫描结果事务已提交")
-                except Exception:
+                except (Exception, OperationCancelled) as error:
                     conn.rollback()
-                    progress("扫描结果事务异常，已回滚并保留旧索引")
+                    progress("索引扫描已取消，事务已回滚" if isinstance(error, OperationCancelled) else "扫描结果事务异常，已回滚并保留旧索引")
                     raise
     if scan["errors"]:
-        progress(f"重建失败 · {len(scan['errors'])} 个错误 · 旧索引已保留")
+        preserved = scan.get("indexPreserved", True)
+        progress(f"扫描错误 · {len(scan['errors'])} 个 · " + ("旧索引已保留" if preserved else "已发布部分可用索引"))
         return {
             "mode": "svn-scan",
             "provider": "svn",
             "workspaceKey": workspace["workspaceKey"],
             "revision": scan["revision"],
-            "changed": 0,
+            "changed": 0 if preserved else conn.execute("SELECT COUNT(*) FROM gusen_source_record WHERE provider='svn'").fetchone()[0],
             "candidates": sum(scan["counts"].values()),
             "counts": scan["counts"],
             "failures": len(scan["errors"]),
             "errors": scan["errors"],
             "ignored": scan.get("ignored") or [],
-            "indexPreserved": True,
+            "indexPreserved": preserved,
+            "buildStatus": "FAILED" if preserved else "PARTIAL",
             "checkoutClean": scan["status"]["clean"],
             "checkoutChanges": scan["status"]["changes"],
         }
@@ -2757,7 +2188,10 @@ def _sync_layer(conn, cfg, layer_cfg, layer, scope_id, project_id, sync_from, st
     ds = cfg["datasource"]["datasource"][ds_name]
     table_cfg = cfg["source_tables"]
     rules = cfg["sync"].get("rules") or {}
-    with db_connect(ds) as remote:
+    include = layer_cfg.get("include") or {}
+    if not include.get("all") and not include.get("procedure_alias_prefix"):
+        print("警告：include 未声明 all 或 procedure_alias_prefix，本次不会同步过程函数。", file=sys.stderr)
+    with source_transaction(conn, workspace), db_connect(ds) as remote:
         system_scope = resolve_system_scope(remote, cfg, ds_name, workspace)
         page_query, page_params = _scoped_sql(page_sql(table_cfg, rules), system_scope, "system", table_cfg)
         inventory_query, inventory_params = _scoped_sql(page_inventory_sql(table_cfg), system_scope, "system", table_cfg)
@@ -2777,7 +2211,6 @@ def _sync_layer(conn, cfg, layer_cfg, layer, scope_id, project_id, sync_from, st
             cur.execute(inventory_query, inventory_params)
             current_page_ids = {row["source_id"] for row in cur.fetchall() if _included(layer_cfg, row)}
         stats["deleted"] = stats.get("deleted", 0) + reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids, workspace)
-    conn.commit()
     return stats
 
 
@@ -2820,14 +2253,14 @@ def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scop
     desired_path = source_base(row, layer, scope_id, project_id, layer_cfg, system_scope, workspace)
     if existing and existing["change_key"] == change_key and not force:
         indexed_path = ROOT / existing["local_path"] if existing["local_path"] else None
-        if indexed_path == desired_path and desired_path.exists() and all(
+        if indexed_path.resolve() == desired_path.resolve() and desired_path.exists() and all(
             path.is_file() for path in _source_output_paths(row, desired_path)
         ):
             return False
     local_path, status, scripts = write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, change_key, workspace)
     if existing and existing["local_path"]:
         old_path = ROOT / existing["local_path"]
-        if old_path != local_path:
+        if old_path.resolve() != local_path.resolve():
             remove_source_path(old_path, workspace)
     indexed_time = _now()
     identity = (
@@ -2862,7 +2295,7 @@ def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scop
             _str(row.get("check_out_date")),
             _str(row.get("check_in_date")),
             change_key,
-            str(local_path.relative_to(ROOT)),
+            _indexed_path(local_path),
             status,
             indexed_time,
         ),
@@ -2908,6 +2341,7 @@ def remove_source_path(path: Path, workspace=None):
     target = path.resolve()
     if target == root or root not in target.parents:
         raise ValueError(f"Refusing to remove path outside readonly source: {path}")
+    prepare_path(target)
     if target.exists():
         shutil.rmtree(target)
     page_root = next((parent for parent in target.parents if parent.name == "page"), None)
@@ -2972,6 +2406,7 @@ def write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, chan
         system_name = _system_name(row, system_scope)
         layer_root = readonly_layer_root(layer, scope_id, project_id, layer_cfg, workspace)
         _link_shared_procedure_dirs(layer_root, system_name, row, system_scope)
+    prepare_path(base)
     if base.exists():
         shutil.rmtree(base)
     base.mkdir(parents=True, exist_ok=True)
@@ -2990,6 +2425,7 @@ def write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, chan
             script_path = base / "scripts" / "compScript.vm"
             script_path.parent.mkdir(exist_ok=True)
             script_path.write_text("", encoding="utf-8")
+            record_generated_files([base / "meta.json", script_path])
             return base, status, [("compScript", script_path, "")]
         (base / "raw.json").write_text(content, encoding="utf-8")
         scripts = parse_page_scripts(base, content)
@@ -2997,6 +2433,7 @@ def write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, chan
         script_path = base / "source.vm"
         script_path.write_text(content, encoding="utf-8")
         scripts = [("procedure_script", script_path, content)]
+    record_generated_files([base / "meta.json", *_source_output_paths(row, base)])
     return base, status, scripts
 
 
@@ -3052,35 +2489,18 @@ def _database_index_payload(row, local_path, scripts):
         return [], None
 
 
-SCRIPT_KEYS = {
-    "script",
-    "beforeSaveScript",
-    "afterSaveScript",
-    "onClickScript",
-    "onOpenScript",
-    "onCreateScript",
-    "onAfterLoadScript",
-    "onChangeScript",
-    "onBeforeWinCloseScript",
-    "doMethodScript",
-    "compScript",
-    "sql",
-}
-
-
-def _is_script_key(key):
-    return key != "superScript" and (key in SCRIPT_KEYS or str(key).endswith("Script"))
-
-
 INHERIT_MARKER = re.compile(r"(?m)^[ \t]*(?:return[ \t]+)?@?inherit\(\);[ \t]*\r?$")
-EVENT_SUPERS = {"serviceEvents": "superServiceEvents", "pageEvents": "superPageEvents"}
 
 
 def _resolve_inherited_script(script, inherited):
-    if not INHERIT_MARKER.search(script):
+    from common.inheritance import mask_noncode
+    markers = list(INHERIT_MARKER.finditer(mask_noncode(script)))
+    if not markers:
         return script
     resolved = inherited.rstrip("\r\n")
-    return INHERIT_MARKER.sub(lambda _match: resolved, script)
+    for marker in reversed(markers):
+        script = script[:marker.start()] + resolved + script[marker.end():]
+    return script
 
 
 def parse_page_scripts(base: Path, raw: str):
@@ -3093,10 +2513,13 @@ def parse_page_scripts(base: Path, raw: str):
     out_dir = base / "scripts"
     out_dir.mkdir(exist_ok=True)
     scripts = []
-    for path, key, value, event_type in _walk_scripts(data):
-        script_path = out_dir / _page_script_filename(path, key, event_type)
-        script_path.write_text(value, encoding="utf-8")
-        scripts.append((key, script_path, value))
+    from common.page_projection import extract_page_scripts
+    for field in extract_page_scripts(data, missing_product_as_empty=True):
+        if not field.effective_value.strip() and field.key != "compScript":
+            continue
+        script_path = out_dir / _page_script_filename(list(field.display_path), field.key, field.event_type)
+        script_path.write_text(field.effective_value, encoding="utf-8")
+        scripts.append((field.key, script_path, field.effective_value))
     return scripts
 
 
@@ -3129,53 +2552,12 @@ def _source_output_paths(row, base):
             data = json.loads(data)
     except Exception:
         return [base / "raw.json"]
+    from common.page_projection import extract_page_scripts
     return [
         base / "raw.json",
-        *(
-            base / "scripts" / _page_script_filename(path, key, event_type)
-            for path, key, _value, event_type in _walk_scripts(data)
-        ),
+        *(base / "scripts" / _page_script_filename(list(field.display_path), field.key, field.event_type)
+          for field in extract_page_scripts(data, missing_product_as_empty=True) if field.effective_value.strip() or field.key == "compScript"),
     ]
-
-
-def _page_script_node_label(value, node_kind=None):
-    """Use field IDs and visible button names for DATABASE page script files."""
-
-    field_id = value.get("fieldId")
-    if field_id is not None and str(field_id).strip():
-        return str(field_id)
-    if node_kind == "button":
-        return str(value.get("name") or value.get("id") or "")
-    return str(value.get("name") or value.get("aliasName") or value.get("id") or "")
-
-
-def _walk_scripts(value, path=None, inherited_scripts=None, event_type=None, node_kind=None):
-    path = path or []
-    if isinstance(value, dict):
-        label = _page_script_node_label(value, node_kind)
-        next_path = path + ([label] if label else [])
-        for key, child in value.items():
-            if _is_script_key(key) and isinstance(child, str) and (child.strip() or key == "compScript"):
-                inherited = (inherited_scripts or {}).get(key, "")
-                if key == "script":
-                    inherited = value.get("superScript", "")
-                resolved = _resolve_inherited_script(child, inherited if isinstance(inherited, str) else "")
-                if resolved.strip() or (key == "compScript" and not child.strip()):
-                    yield next_path, key, resolved, event_type
-            elif key in EVENT_SUPERS.values():
-                continue
-            else:
-                inherited = value.get(EVENT_SUPERS.get(key, ""), {})
-                yield from _walk_scripts(
-                    child,
-                    next_path,
-                    inherited if isinstance(inherited, dict) else None,
-                    key if key in EVENT_SUPERS else event_type,
-                    "button" if key in {"button", "buttons"} else None,
-                )
-    elif isinstance(value, list):
-        for child in value:
-            yield from _walk_scripts(child, path, inherited_scripts, event_type, node_kind)
 
 
 CALL_PATTERNS = [
@@ -3225,8 +2607,10 @@ def index_calls(
         source_record_id = source_record["source_record_id"]
     bindings = {}
     for line_no, line in enumerate(content.splitlines(), 1):
-        find = PROC_FIND.search(line)
-        if find:
+        assignments = list(re.finditer(r"#set\s*\(\s*\$(\w+)\s*=", line))
+        for assignment in assignments:
+            bindings.pop(assignment.group(1), None)
+        for find in PROC_FIND.finditer(line):
             bindings[find.group(1)] = find.group(2)
         for var, alias in bindings.items():
             match = re.search(rf"\${re.escape(var)}\.([A-Za-z_][A-Za-z0-9_]*)\(", line)
@@ -3482,351 +2866,45 @@ def _row_value(row, key, default=""):
     return row[key] if key in row.keys() else default
 
 
-def _work_copy_change_key(row):
-    return _str(_row_value(row, "change_key"))
-
-
-def _tree_files(root: Path, exclude_work_copy_files=False):
-    if not root or not root.exists():
-        return {}
-    files = {}
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(root)
-        if exclude_work_copy_files and (
-            rel.parts[0] == LEGACY_WORK_COPY_BASELINE_DIR or rel.as_posix() in WORK_COPY_COMPARE_EXCLUDED_FILES
-        ):
-            continue
-        files[rel.as_posix()] = path
-    return files
-
-
-def _tree_changes(before: Path, after: Path, after_is_work_copy=False):
-    before_files = _tree_files(before, after_is_work_copy)
-    after_files = _tree_files(after, after_is_work_copy)
-    changes = []
-    for rel in sorted(set(before_files) | set(after_files)):
-        if rel not in before_files:
-            status = "A"
-        elif rel not in after_files:
-            status = "D"
-        elif before_files[rel].read_bytes() != after_files[rel].read_bytes():
-            status = "M"
-        else:
-            continue
-        changes.append({"status": status, "path": rel})
-    return changes
-
-
-def _work_copy_metadata(target: Path):
-    path = target / WORK_COPY_META_FILE
-    if not path.exists():
-        raise SystemExit(f"工作副本缺少 {WORK_COPY_META_FILE}: {target}")
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise SystemExit(f"工作副本元数据无效: {path}: {exc}") from exc
-
-
-def _display_path(path: Path):
-    try:
-        return str(path.resolve().relative_to(ROOT))
-    except ValueError:
-        return str(path.resolve())
-
-
-def _write_work_copy_metadata(target: Path, row, source_path: Path, mode: str):
-    old = {}
-    meta_path = target / WORK_COPY_META_FILE
-    if meta_path.exists():
-        try:
-            old = json.loads(meta_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            old = {}
-    old_work_copy = old.get("_workcopy") or {}
-    metadata = dict(row)
-    metadata["_workcopy"] = {
-        "format": 2,
-        "mode": mode,
-        "createdAt": old_work_copy.get("createdAt") or _now(),
-        "updatedAt": _now(),
-        "sourcePath": _display_path(source_path),
-    }
-    meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _replace_work_copy_source(source_path: Path, target: Path):
-    for child in target.iterdir():
-        if child.name in WORK_COPY_MANAGED_FILES:
-            continue
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
-    shutil.copytree(source_path, target, dirs_exist_ok=True)
-
-
-def _manual_diff_notes(target: Path):
-    path = target / WORK_COPY_DIFF_FILE
-    if not path.exists():
-        return ""
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if not lines or lines[0].strip() != "# 修改说明":
-        return ""
-    notes = []
-    for line in lines[1:]:
-        if line.startswith("# "):
-            break
-        notes.append(line)
-    return "\n".join(notes).strip()
-
-
-def _json_path_changes(before, after, path="$", output=None, limit=200):
-    output = [] if output is None else output
-    if len(output) >= limit:
-        return output
-    if isinstance(before, dict) and isinstance(after, dict):
-        for key in sorted(set(before) | set(after)):
-            child = f"{path}.{key}"
-            if key not in before:
-                output.append(f"A {child}")
-            elif key not in after:
-                output.append(f"D {child}")
-            else:
-                _json_path_changes(before[key], after[key], child, output, limit)
-            if len(output) >= limit:
-                break
-    elif isinstance(before, list) and isinstance(after, list):
-        if len(before) != len(after):
-            output.append(f"M {path}.length ({len(before)} -> {len(after)})")
-        for index, (left, right) in enumerate(zip(before, after)):
-            _json_path_changes(left, right, f"{path}[{index}]", output, limit)
-            if len(output) >= limit:
-                break
-    elif before != after:
-        output.append(f"M {path}")
-    return output
-
-
-def _render_file_diff(before: Path, after: Path, rel: str):
-    if rel == "raw.json" and (not before.exists() or not after.exists()):
-        return ["JSON 文件新增。" if after.exists() else "JSON 文件删除。"]
-    if rel == "raw.json" and before.exists() and after.exists():
-        try:
-            changes = _json_path_changes(
-                json.loads(before.read_text(encoding="utf-8")),
-                json.loads(after.read_text(encoding="utf-8")),
-            )
-            lines = ["JSON 路径变化：", ""] + [f"    {line}" for line in changes]
-            if len(changes) == 200:
-                lines.append("    ... 仅展示前 200 个路径")
-            return lines
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            pass
-    try:
-        before_lines = before.read_text(encoding="utf-8").splitlines() if before.exists() else []
-        after_lines = after.read_text(encoding="utf-8").splitlines() if after.exists() else []
-    except UnicodeDecodeError:
-        return ["二进制文件发生变化。"]
-    diff = list(
-        difflib.unified_diff(
-            before_lines,
-            after_lines,
-            fromfile=f"readonly/{rel}",
-            tofile=f"workcopy/{rel}",
-            lineterm="",
-        )
-    )
-    # ponytail: reports cap each file at 400 lines; inspect the source file directly when a larger diff matters.
-    rendered = [f"    {line}" for line in diff[:400]]
-    if len(diff) > 400:
-        rendered.append(f"    ... 已省略 {len(diff) - 400} 行")
-    return rendered or ["文件内容发生变化。"]
-
-
-def _work_copy_state(target: Path, upstream_path: Path | None, upstream_change_key=""):
-    upstream_missing = not upstream_path or not upstream_path.exists()
-    local_changes = [] if upstream_missing else _tree_changes(upstream_path, target, after_is_work_copy=True)
-    if upstream_missing:
-        state = "UPSTREAM_MISSING"
-    elif local_changes:
-        state = "LOCAL_CHANGED"
-    else:
-        state = "CLEAN"
-    return {
-        "path": str(target),
-        "state": state,
-        "localChanged": bool(local_changes),
-        "upstreamMissing": upstream_missing,
-        "upstreamChangeKey": upstream_change_key,
-        "localChanges": local_changes,
-        "upstreamPath": str(upstream_path) if upstream_path else "",
-    }
-
-
-def _write_work_copy_diff(target: Path, status: dict, notes=""):
-    labels = {
-        "CLEAN": "无变化",
-        "LOCAL_CHANGED": "与 readonly 不一致",
-        "UPSTREAM_MISSING": "上游源码不存在",
-    }
-    lines = [
-        "# 修改说明",
-        "",
-        notes,
-        "",
-        "# Workcopy 状态",
-        "",
-        f"- 状态：`{status['state']}`（{labels[status['state']]}）",
-        f"- Readonly 版本：`{status['upstreamChangeKey'] or '-'}`",
-        f"- 差异文件：{len(status['localChanges'])}",
-        "",
-        "# 差异文件汇总",
-        "",
-    ]
-    if status["localChanges"]:
-        lines.extend(f"- `{change['status']}` `{change['path']}`" for change in status["localChanges"])
-    else:
-        lines.append("- 无")
-    lines.extend(["", "# Diff", ""])
-    readonly = Path(status["upstreamPath"]) if status["upstreamPath"] else None
-    for change in status["localChanges"]:
-        rel = change["path"]
-        lines.extend([f"## {change['status']} `{rel}`", ""])
-        lines.extend(_render_file_diff(readonly / rel, target / rel, rel))
-        lines.append("")
-    if not status["localChanges"]:
-        lines.append("无本地源码差异。")
-    (target / WORK_COPY_DIFF_FILE).write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-
-
-def _write_work_copy_delivery(target: Path, status: dict):
-    lines = [
-        "# Workcopy 交付清单",
-        "",
-        f"- 状态：`{status['state']}`",
-        f"- Readonly 版本：`{status['upstreamChangeKey'] or '-'}`",
-        "",
-    ]
-    if status["state"] == "UPSTREAM_MISSING":
-        lines.extend(["> 当前状态不可直接交付，请先处理上游变化。", ""])
-    lines.extend(["## 需要回写或复核的文件", ""])
-    if status["localChanges"]:
-        lines.extend(f"- [ ] `{change['status']}` `{change['path']}`" for change in status["localChanges"])
-    else:
-        lines.append("- 无本地修改")
-    lines.extend(
-        [
-            "",
-            "## 交付检查",
-            "",
-            "- [ ] 已查看 `diff.md`",
-            "- [ ] 已在谷神开发平台完成手工回写",
-            "- [ ] 已重新拉取并确认上游版本",
-        ]
-    )
-    path = target / WORK_COPY_DELIVERY_FILE
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return path
-
-
-def _initialize_work_copy(source_path: Path, target: Path, row, change_key: str, mode: str):
-    shutil.copytree(source_path, target)
-    _write_work_copy_metadata(target, row, source_path, mode)
-    status = _work_copy_state(target, source_path, change_key)
-    status["action"] = "CREATED"
-    return status
-
-
-def _trash_work_copy(target: Path) -> Path:
-    """Move an overwritten workcopy into a timestamped trash directory instead of deleting it."""
-    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    destination = target.parent / WORK_COPY_TRASH_DIR / stamp / target.name
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(target), str(destination))
-    return destination
-
-
-def _prepare_work_copy(source_path: Path, target: Path, row, change_key: str, mode="mirror", diff_check=True):
-    if not diff_check:
-        action = "OVERWRITTEN" if target.exists() else "CREATED"
-        if target.exists():
-            _trash_work_copy(target)
-        shutil.copytree(source_path, target)
-        return {"path": str(target), "state": "UNCHECKED", "action": action, "localChanged": False}
-    if not target.exists():
-        return _initialize_work_copy(source_path, target, row, change_key, mode)
-    legacy_baseline = target / LEGACY_WORK_COPY_BASELINE_DIR
-    if legacy_baseline.exists():
-        shutil.rmtree(legacy_baseline)
-    notes = _manual_diff_notes(target)
-    status = _work_copy_state(target, source_path, change_key)
-    if status["localChanged"]:
-        readonly_meta = source_path / "meta.json"
-        work_copy_meta = target / "meta.json"
-        if readonly_meta.exists():
-            shutil.copy2(readonly_meta, work_copy_meta)
-        elif work_copy_meta.exists():
-            work_copy_meta.unlink()
-        _write_work_copy_metadata(target, row, source_path, mode)
-        status["action"] = "PRESERVED"
-        _write_work_copy_diff(target, status, notes)
-        return status
-    _replace_work_copy_source(source_path, target)
-    _write_work_copy_metadata(target, row, source_path, mode)
-    status = _work_copy_state(target, source_path, change_key)
-    status["action"] = "UNCHANGED"
-    if (target / WORK_COPY_DIFF_FILE).exists():
-        _write_work_copy_diff(target, status, notes)
-    return status
-
-
-def _auto_add_work_copy(cfg: dict, target: Path):
-    rules = cfg["sync"].get("rules") or {}
-    if not rules.get("pull_auto_add_git"):
+def _auto_add_work_copy(cfg: dict, target: Path, generated_paths=()):
+    if not (cfg.get("sync", {}).get("rules") or {}).get("pull_auto_add_git"):
         return {"gitAddStatus": "DISABLED", "gitAdded": 0}
     if os.environ.get("GUTHON_DEFER_GIT_ADD") == "1":
         return {"gitAddStatus": "DEFERRED", "gitAdded": 0}
-    git_cwd = target if target.is_dir() else target.parent
+    return _add_generated_paths(generated_paths)
+
+
+def _add_generated_paths(generated_paths, before=()):
+    repo_root = Path(VAR_DIR).resolve()
     try:
-        root_result = subprocess.run(
-            ["git", "-C", str(git_cwd), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        root = subprocess.run(["git", "-C", str(repo_root), "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True, check=False)
     except FileNotFoundError:
         return {"gitAddStatus": "GIT_UNAVAILABLE", "gitAdded": 0}
-    if root_result.returncode:
-        return {"gitAddStatus": "NO_REPOSITORY", "gitAdded": 0}
-    repo_root = Path(root_result.stdout.strip()).resolve()
-    try:
-        relative_target = target.resolve().relative_to(repo_root).as_posix()
-    except ValueError:
-        return {"gitAddStatus": "OUTSIDE_REPOSITORY", "gitAdded": 0}
-    untracked = subprocess.run(
-        ["git", "-C", str(repo_root), "ls-files", "--others", "--exclude-standard", "-z", "--", relative_target],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    paths = [path for path in untracked.stdout.split("\0") if path]
-    if not paths:
-        ignored = subprocess.run(
-            ["git", "-C", str(repo_root), "check-ignore", "-q", "--", relative_target],
-            check=False,
-        )
-        return {"gitAddStatus": "IGNORED" if ignored.returncode == 0 else "NO_NEW_FILES", "gitAdded": 0}
-    added = subprocess.run(
-        ["git", "-C", str(repo_root), "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
-        input="\0".join(paths) + "\0",
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if added.returncode:
-        return {"gitAddStatus": "FAILED", "gitAdded": 0, "gitAddMessage": added.stderr.strip()}
+    if root.returncode or Path(root.stdout.strip()).resolve() != repo_root:
+        return {"gitAddStatus": "OUTSIDE_VAR_REPOSITORY", "gitAdded": 0}
+    allowed = set()
+    for path in generated_paths:
+        path = Path(path).resolve()
+        try:
+            relative = path.relative_to(repo_root)
+        except ValueError:
+            continue
+        if path.is_file() and WORK_COPY_TRASH_DIR not in relative.parts:
+            allowed.add(relative.as_posix())
+    with file_lock(repo_root / '.guthon' / 'git-add.lock'):
+        paths = sorted(allowed & (untracked_files(repo_root) - set(before)))
+        if not paths:
+            return {"gitAddStatus": "NO_NEW_FILES", "gitAdded": 0}
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(repo_root), "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                input="\0".join(paths) + "\0", capture_output=True, text=True, check=False,
+            )
+        except FileNotFoundError:
+            return {"gitAddStatus": "GIT_UNAVAILABLE", "gitAdded": 0}
+    if result.returncode:
+        return {"gitAddStatus": "FAILED", "gitAdded": 0, "gitAddMessage": result.stderr.strip()}
     return {"gitAddStatus": "ADDED", "gitAdded": len(paths), "gitRoot": str(repo_root)}
 
 
@@ -3854,230 +2932,12 @@ def workspace_var_prefix(workspace):
         return ""
 
 
-def auto_add_operation_files(config, before, workspace):
+def auto_add_operation_files(config, before, workspace, generated_paths=()):
     if not (config.get("sync", {}).get("rules") or {}).get("pull_auto_add_git"):
         return {"gitAddStatus": "DISABLED", "gitAdded": 0}
-    prefix = workspace_var_prefix(workspace)
-    if not prefix:
-        return {"gitAddStatus": "OUTSIDE_VAR_REPOSITORY", "gitAdded": 0}
-    paths = sorted(
-        path
-        for path in untracked_files(pathspec=[prefix]) - set(before)
-        if path.startswith(prefix) and WORK_COPY_TRASH_DIR not in path.replace("\\", "/").split("/")
-    )
-    if not paths:
-        return {"gitAddStatus": "NO_NEW_FILES", "gitAdded": 0}
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(VAR_DIR), "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
-            input="\0".join(paths) + "\0",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except FileNotFoundError:
-        return {"gitAddStatus": "GIT_UNAVAILABLE", "gitAdded": 0}
-    if result.returncode:
-        return {"gitAddStatus": "FAILED", "gitAdded": 0, "gitAddMessage": result.stderr.strip()}
-    return {"gitAddStatus": "ADDED", "gitAdded": len(paths), "gitRoot": str(VAR_DIR)}
-
-
-def _current_work_copy_source(metadata: dict):
-    if metadata.get("source_table") == "system-script":
-        source_path = Path((metadata.get("_workcopy") or {}).get("sourcePath") or "")
-        source_path = source_path if source_path.is_absolute() else ROOT / source_path
-        if not source_path.exists():
-            return None, None, ""
-        try:
-            source_meta = json.loads((source_path / "meta.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None, source_path, ""
-        return metadata, source_path, _str(source_meta.get("changeKey"))
-    cfg = load_config()
-    workspace = resolve_workspace(cfg, metadata.get("workspaceKey"))
-    source_type = metadata.get("source_table") or ""
-    alias = metadata.get("source_alias_id") or ""
-    fun = metadata.get("fun_id") or ""
-    project_id = metadata.get("project_id") or ""
-
-    def lookup(conn):
-        if project_id:
-            row = conn.execute(
-                """
-                SELECT * FROM gusen_source_record
-                WHERE source_layer='PROJECT' AND project_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
-                """,
-                (project_id, source_type, alias, fun),
-            ).fetchone()
-        else:
-            row = conn.execute(
-                """
-                SELECT * FROM gusen_source_record
-                WHERE source_layer='PRODUCT' AND scope_id=? AND source_table=? AND source_alias_id=? AND fun_id=?
-                """,
-                (metadata.get("scope_id") or "", source_type, alias, fun),
-            ).fetchone()
-        if not row:
-            return None, None, ""
-        path = ROOT / row["local_path"]
-        return row, path, _work_copy_change_key(row)
-
-    if workspace.get("sourceMode") == "svn":
-        with index_connection(workspace, action="workcopy-status-read", readonly=True) as conn:
-            return lookup(conn)
-    conn = connect_index(workspace["indexPath"])
-    try:
-        return lookup(conn)
-    finally:
-        conn.close()
-
-
-def inspect_work_copy(path):
-    target = Path(path).expanduser()
-    target = target if target.is_absolute() else ROOT / target
-    target = target.resolve()
-    root = work_copy_dir().resolve()
-    if target != root and root not in target.parents:
-        raise SystemExit(f"路径不在 workcopy 目录下: {target}")
-    while target != root and not (target / WORK_COPY_META_FILE).exists():
-        target = target.parent
-    if not (target / WORK_COPY_META_FILE).exists():
-        raise SystemExit(f"未找到工作副本元数据: {path}")
-    metadata = _work_copy_metadata(target)
-    _row, source_path, change_key = _current_work_copy_source(metadata)
-    return target, _work_copy_state(target, source_path, change_key)
-
-
-def work_copy_cli(args=None):
-    parser = argparse.ArgumentParser(description="检查和打包 Guthon workcopy")
-    parser.add_argument("command", choices=["status", "diff", "package", "save-svn"])
-    parser.add_argument("path")
-    parser.add_argument("--check", action="store_true", help="validate and preview SVN writeback without writing")
-    parser.add_argument("--json", action="store_true")
-    parsed = parser.parse_args(args)
-    cfg = load_config()
-    workspace = resolve_workspace(cfg)
-    if workspace.get("sourceMode") == "svn":
-        from providers.svn import writeback
-
-        if parsed.command == "package":
-            raise SystemExit("SVN Workcopy uses save-svn --check and svn diff instead of database delivery packaging")
-        if parsed.command == "save-svn" or parsed.command == "diff":
-            result = writeback.save(workspace, Path(parsed.path), check_only=parsed.check or parsed.command == "diff")
-            if parsed.command == "save-svn" and not parsed.check and result.get("changed"):
-                conn = connect_index_for_workspace(
-                    workspace,
-                    action="index-init",
-                    rebuild_incompatible=True,
-                )
-                try:
-                    result["reindex"] = index_svn_workspace(conn, cfg, workspace)
-                finally:
-                    conn.close()
-                if result["reindex"].get("failures"):
-                    result.update({
-                        "ok": False,
-                        "status": "SVN_DIRTY_REINDEX_FAILED",
-                        "message": "SVN 写回成功，但本地索引重建失败；旧索引已保留",
-                    })
-        else:
-            result = writeback.inspect_status(workspace, Path(parsed.path))
-        if parsed.json:
-            print(json.dumps(result, ensure_ascii=False, indent=2))
-        else:
-            print(f"状态: {result.get('state') or result.get('status') or ('可写回' if result.get('changed') else '无变化')}")
-            if result.get("diff"):
-                print(result["diff"])
-            if result.get("svnDiff"):
-                print(result["svnDiff"])
-            if parsed.command == "save-svn" and not parsed.check:
-                print("已写回本地 SVN working copy；请执行 svn diff 审阅后人工 commit")
-                if result.get("reindex", {}).get("failures"):
-                    print("警告: 本地索引重建失败，旧索引已保留；修复扫描错误后重新执行 reindex")
-        return result
-    target, status = inspect_work_copy(parsed.path)
-    output = None
-    if parsed.command in {"diff", "package"}:
-        _write_work_copy_diff(target, status, _manual_diff_notes(target))
-        output = target / WORK_COPY_DIFF_FILE
-    if parsed.command == "package":
-        output = _write_work_copy_delivery(target, status)
-    result = {**status, "output": str(output) if output else ""}
-    if parsed.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-    print(f"状态: {status['state']}")
-    print(f"与 readonly 差异: {len(status['localChanges'])}")
-    print(f"Readonly 版本: {status['upstreamChangeKey'] or '-'}")
-    if output:
-        print(f"输出: {output}")
-
-
-def create_work_copy(args=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--type", required=True, choices=sorted(SVN_SOURCE_TYPES))
-    parser.add_argument("--source-id", default="")
-    parser.add_argument("--alias", default="")
-    parser.add_argument("--fun", default="")
-    parsed = parser.parse_args(args)
-    cfg = load_config()
-    workspace = resolve_workspace(cfg)
-    layer, scope_id, project_id, _layer_cfg = resolve_pull_scope(cfg, {"workspaceKey": workspace["workspaceKey"]})
-    if workspace.get("sourceMode") == "svn":
-        with index_connection(workspace, action="workcopy-read", readonly=True) as conn:
-            row = find_svn_source(conn, workspace, parsed.type, parsed.source_id, parsed.alias, parsed.fun)
-            result = create_work_copy_from_row(conn, cfg, row, workspace)
-    else:
-        conn = connect_index(workspace["indexPath"])
-        try:
-            if not parsed.alias:
-                raise SystemExit("--alias is required in database source mode")
-            row = find_work_copy_source(
-                conn,
-                scope_id if layer == "PRODUCT" else None,
-                project_id or None,
-                parsed.type,
-                parsed.alias,
-                parsed.fun,
-            )
-            result = create_work_copy_from_row(conn, cfg, row, workspace)
-        finally:
-            conn.close()
-    print(result["path"])
-
-
-def create_work_copy_from_row(conn, cfg, row, workspace, diff_check=True):
-    row_dict = dict(row) if not isinstance(row, dict) else row
-    if row_dict.get("provider") == "svn" or workspace.get("sourceMode") == "svn":
-        from providers.svn import projection
-
-        svn_checkout.require_capability(workspace, "workcopy")
-        return projection.open_workcopy(workspace, row_dict, svn_checkout.load_scope(workspace))
-    scope_id = workspace["scopeId"]
-    project_id = workspace["projectId"]
-    found = find_work_copy_source(
-        conn,
-        scope_id=scope_id if not project_id else None,
-        project_id=project_id,
-        source_type=row["source_table"],
-        alias=_source_alias_id(row),
-        fun=row["fun_id"] or "",
-    )
-    source_rel = found["local_path"]
-    source_path = ROOT / source_rel
-    target = workspace["workcopyDir"] / _work_copy_source_relative_path(source_path, workspace)
-    work_row = dict(found)
-    work_row["workspaceKey"] = workspace["workspaceKey"]
-    result = _prepare_work_copy(source_path, target, work_row, _work_copy_change_key(found), diff_check=diff_check)
-    result.update(_auto_add_work_copy(cfg, target))
-    return result
-
-
-def _work_copy_source_relative_path(source_path, workspace):
-    try:
-        return Path(source_path).resolve().relative_to(workspace["readonlyDir"].resolve())
-    except ValueError as error:
-        raise ValueError(f"Source path is outside workspace readonly: {source_path}") from error
+    root = workspace["root"].resolve()
+    paths = [Path(path) for path in generated_paths if Path(path).resolve().is_relative_to(root)]
+    return _add_generated_paths(paths, before)
 
 
 def pull_source_to_work_copy(payload: dict):
@@ -4126,7 +2986,12 @@ def pull_source_to_work_copy(payload: dict):
         }
     layer, scope_id, project_id, layer_cfg = resolve_pull_scope(cfg, payload)
     rules = cfg["sync"].get("rules") or {}
-    pull_diff_check = rules.get("pull_diff_check", True)
+    force = payload.get("force", False)
+    if not isinstance(force, bool):
+        raise SystemExit("pull force must be a boolean")
+    if force and payload.get("confirmation") != workspace["workspaceKey"]:
+        raise SystemExit("pull force requires confirmation equal to the exact workspaceKey")
+    pull_diff_check = rules.get("pull_diff_check", True) and not force
     with index_connection(workspace, action="workcopy-pull", readonly=False) as conn:
         sql, params = single_source_sql(cfg["source_tables"], payload["sourceType"], payload, rules)
         ds_name = layer_cfg["datasource"]
@@ -4150,20 +3015,10 @@ def pull_source_to_work_copy(payload: dict):
                 found = find_work_copy_source(
                     conn, None, project_id, payload["sourceType"], payload.get("alias") or payload.get("sourceId") or "", payload.get("funId") or ""
                 )
-                work_result = create_work_copy_from_row(conn, cfg, found, workspace, diff_check=pull_diff_check)
-                detail = "已覆盖" if not pull_diff_check else "已保留本地修改" if work_result["localChanged"] else "无变更"
                 return {
-                    "ok": True,
-                    "workspaceKey": workspace["workspaceKey"],
-                    "changed": False,
-                    "message": f"远程源码未找到，已从本地缓存恢复 workcopy（{detail}）",
-                    "workCopyPath": work_result["path"],
-                    "workCopyStatus": work_result["state"],
-                    "workCopyAction": work_result["action"],
-                    "localChanged": work_result["localChanged"],
-                    "gitAddStatus": work_result.get("gitAddStatus", "DISABLED"),
-                    "gitAdded": work_result.get("gitAdded", 0),
-                    "pulled": 1,
+                    "ok": False, "errorCode": "SOURCE_NOT_FOUND", "workspaceKey": workspace["workspaceKey"],
+                    "changed": False, "pulled": 0, "cacheAvailable": True,
+                    "message": "远程源码未找到；本地缓存存在，未修改 Workcopy。需要缓存时显式执行 create-workcopy。",
                     "source": {key: _str(found[key]) if key in found.keys() else "" for key in ("source_table", "source_id", "source_alias_id", "fun_id", "source_name")},
                 }
             allowed = ", ".join(rules.get("allow_unchecked_check_out_user_ids") or []) or "none"
@@ -4178,18 +3033,19 @@ def pull_source_to_work_copy(payload: dict):
             raise SystemExit("Source is outside configured include scope")
         work_results = []
         changed = False
-        for candidate in rows:
-            changed = upsert_source(
-                conn,
-                candidate,
-                layer,
-                scope_id,
-                project_id,
-                layer_cfg,
-                system_scope,
-                force=not pull_diff_check or bool(payload.get("force")),
-            ) or changed
-        conn.commit()
+        with source_transaction(conn, workspace):
+            for candidate in rows:
+                changed = upsert_source(
+                    conn,
+                    candidate,
+                    layer,
+                    scope_id,
+                    project_id,
+                    layer_cfg,
+                    system_scope,
+                    force=not pull_diff_check or force,
+                    workspace=workspace,
+                ) or changed
         for candidate in rows:
             work_results.append(create_work_copy_from_row(conn, cfg, candidate, workspace, diff_check=pull_diff_check))
         conn.commit()
@@ -4338,25 +3194,6 @@ def _sync_from(conn, lookback, state_key):
     return (parsed - dt.timedelta(minutes=lookback)).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _flatten_records(value):
-    if isinstance(value, list):
-        records = []
-        for item in value:
-            records.extend(_flatten_records(item))
-        return records
-    if isinstance(value, dict):
-        children = []
-        for key in ("data", "rows", "records", "items", "children", "list"):
-            if key in value:
-                children.extend(_flatten_records(value[key]))
-        return [value] + children if any(_looks_like_system_key(k) for k in value) else children
-    return []
-
-
-def _looks_like_system_key(key):
-    return str(key).upper() in {"SYSTEM_ID", "SYSTEM_CODE", "SYSTEM_ALIAS_ID", "SYS_CODE", "DATA_SOURCE_ID", "DATA_SOURCE_IDS"}
-
-
 def _values(record, *keys):
     out = set()
     for key in keys:
@@ -4444,4 +3281,62 @@ def _str(value):
 
 
 if __name__ == "__main__":
-    run_sync_once()
+    raise SystemExit("Use scripts/guthon_tool.py with an explicit --home and command")
+
+
+# Public workspace APIs are aliases to the owning implementation.
+from common.workspace_registry import (
+    workspace_steps,
+    _database_capabilities,
+    _svn_capabilities,
+    workspace_key,
+    set_workspace,
+    workspace_source_mode_path,
+    read_workspace_source_mode,
+    write_workspace_source_mode,
+    change_workspace_source_mode,
+    resolve_workspace_storage_root,
+    _list_workspaces_strict,
+    list_workspaces,
+    _validate_svn_workspace_boundaries,
+    resolve_workspace,
+    resolve_workspace_for_path,
+    workspace_index_state,
+    index_first_examples,
+    workspace_agent_context,
+    _workspace_cockpit,
+    workspace_config_digest,
+    legacy_workspace_config_digest,
+    load_workspace_state,
+    update_workspace_state,
+    _svn_source_control_groups,
+    workspace_summary,
+)
+
+
+# Workcopy lifecycle APIs have a single implementation; keep facade aliases.
+from common.workcopy_store import (
+    _work_copy_change_key,
+    _tree_files,
+    _tree_changes,
+    _work_copy_metadata,
+    _display_path,
+    _write_work_copy_metadata,
+    _replace_work_copy_source,
+    _manual_diff_notes,
+    _json_path_changes,
+    _render_file_diff,
+    _work_copy_state,
+    _write_work_copy_diff,
+    _write_work_copy_delivery,
+    _initialize_work_copy,
+    _trash_work_copy,
+    _prepare_work_copy,
+    _current_work_copy_source,
+    inspect_work_copy,
+    restore_work_copy,
+    work_copy_cli,
+    create_work_copy,
+    create_work_copy_from_row,
+    _work_copy_source_relative_path,
+)

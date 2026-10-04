@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Validate database targets and evaluate database-test workflow artifacts.
 
-This module never connects to a database. DBX and the built-in read-only adapter
-share its deterministic target resolution, scope validation, assertions, and
-report rendering.
+Validation and evaluation never connect to a database. The explicit run-readonly
+subcommand delegates execution to the built-in adapter; DBX uses MCP handoff.
 """
 
 from __future__ import annotations
@@ -17,16 +16,12 @@ from pathlib import Path
 from typing import Any
 
 from common import gusen_hub
-from providers.database.run_source_diagnosis import validate_single_select
+from common.workspace_identity import WORKSPACE_KEY
+from common.database_sql import validate_single_select, table_references
 
 
 SCHEMA_VERSION = 1
-WORKSPACE_KEY = re.compile(r"^(?:products|projects)\.[A-Za-z0-9._-]+$")
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
-TABLE_REFERENCE = re.compile(
-    r"\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)?)",
-    re.IGNORECASE,
-)
 ASSERTION_TYPES = {
     "scalar_equals",
     "decimal_equals",
@@ -39,6 +34,14 @@ CASE_LEVELS = {"query", "platform-result"}
 ENVIRONMENTS = {"dev", "test"}
 ENGINES = {"mysql", "postgresql", "oracle"}
 VALIDATION_SCOPES = {"diagnosis-only", "full"}
+CONFIG_FIELDS = {"schemaVersion", "connections", "expectedIdentities", "databaseTests", "profiles"}
+IDENTITY_FIELDS = {"engine", "endpoint", "database", "schema", "evidenceRef"}
+CONNECTION_FIELDS = {"engine", "host", "port", "database", "schema", "username", "credentialRef", "passwordEnv", "passwordFile", "connectTimeoutSeconds"}
+TARGET_FIELDS = {"id", "systemId", "dataSourceId", "connectionId", "connectionRef", "validationScope", "database", "schema", "environment", "access", "expectedIdentityRef", "allowedTables", "tenantScope"}
+IDENTITY_REQUIRED = {"engine", "endpoint", "database", "evidenceRef"}
+CONNECTION_REQUIRED = {"engine", "host", "port", "database", "username"}
+TARGET_REQUIRED = {"id", "database", "environment", "access", "expectedIdentityRef"}
+FULL_TARGET_REQUIRED = {"systemId", "dataSourceId", "allowedTables", "tenantScope"}
 
 
 class ArtifactError(ValueError):
@@ -92,7 +95,7 @@ def _is_placeholder(value: str) -> bool:
 
 
 def validate_config(config: dict) -> dict:
-    _reject_unknown(config, {"schemaVersion", "connections", "expectedIdentities", "databaseTests"}, "配置")
+    _reject_unknown(config, CONFIG_FIELDS, "配置")
     if config.get("schemaVersion") != SCHEMA_VERSION:
         raise ArtifactError("CONFIG_VERSION_UNSUPPORTED", "仅支持 schemaVersion=1")
     identities = config.get("expectedIdentities")
@@ -100,16 +103,20 @@ def validate_config(config: dict) -> dict:
     workspaces = config.get("databaseTests")
     if not isinstance(connections, dict):
         raise ArtifactError("CONFIG_INVALID", "connections 必须是对象")
-    if not isinstance(identities, dict) or not identities:
-        raise ArtifactError("CONFIG_INVALID", "expectedIdentities 必须是非空对象")
-    if not isinstance(workspaces, dict) or not workspaces:
-        raise ArtifactError("CONFIG_INVALID", "databaseTests 必须是非空对象")
+    if not isinstance(identities, dict):
+        raise ArtifactError("CONFIG_INVALID", "expectedIdentities 必须是对象")
+    if not isinstance(workspaces, dict):
+        raise ArtifactError("CONFIG_INVALID", "databaseTests 必须是对象")
 
     for identity_id, identity in identities.items():
         if not isinstance(identity, dict):
             raise ArtifactError("CONFIG_INVALID", f"环境身份 {identity_id} 必须是对象")
-        _reject_unknown(identity, {"engine", "endpoint", "database", "schema", "evidenceRef"}, f"环境身份 {identity_id}")
-        _require_keys(identity, {"engine", "endpoint", "database", "evidenceRef"}, f"环境身份 {identity_id}")
+        _reject_unknown(identity, IDENTITY_FIELDS, f"环境身份 {identity_id}")
+        _require_keys(identity, IDENTITY_REQUIRED, f"环境身份 {identity_id}")
+        if any(not isinstance(item, str) or not item for item in identity.values()):
+            raise ArtifactError("CONFIG_INVALID", f"环境身份 {identity_id} 必须使用非空字符串字段")
+        if not IDENTIFIER.fullmatch(identity["database"]):
+            raise ArtifactError("CONFIG_INVALID", f"环境身份 {identity_id} 的 database 无效")
         if identity["engine"] not in ENGINES:
             raise ArtifactError("UNSUPPORTED", f"仅支持 MySQL/PostgreSQL/Oracle: {identity_id}")
         if identity["engine"] == "oracle" and not identity.get("schema"):
@@ -169,25 +176,40 @@ def validate_config(config: dict) -> dict:
                     "ENVIRONMENT_MISMATCH",
                     f"工作区 {workspace_key} 的 {environment} 默认 target 环境不一致: {target_id}",
                 )
+    profiles = config.get("profiles", {})
+    if not isinstance(profiles, dict):
+        raise ArtifactError("CONFIG_INVALID", "profiles 必须是对象")
+    for name, profile in profiles.items():
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", str(name)) or not isinstance(profile, dict):
+            raise ArtifactError("CONFIG_INVALID", "profile 名称或对象无效")
+        _reject_unknown(profile, {"workspaceKey", "targetId"}, f"profile {name}")
+        _require_keys(profile, {"workspaceKey", "targetId"}, f"profile {name}")
+        workspace = workspaces.get(profile["workspaceKey"])
+        if not workspace or not any(item["id"] == profile["targetId"] for item in workspace["targets"]):
+            raise ArtifactError("BINDING_MISSING", f"profile {name} 的工作区或 target 不存在")
     return config
 
 
 def validate_connection(connection: Any, connection_id: str, identities: dict) -> None:
     if not isinstance(connection, dict):
         raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 必须是对象")
-    allowed = {
-        "engine", "host", "port", "database", "schema", "username",
-        "credentialRef", "connectTimeoutSeconds",
-    }
-    _reject_unknown(connection, allowed, f"连接 {connection_id}")
-    _require_keys(
-        connection,
-        {"engine", "host", "port", "database", "username", "credentialRef"},
-        f"连接 {connection_id}",
-    )
+    _reject_unknown(connection, CONNECTION_FIELDS, f"连接 {connection_id}")
+    _require_keys(connection, CONNECTION_REQUIRED, f"连接 {connection_id}")
+    for field in CONNECTION_FIELDS - {"port", "connectTimeoutSeconds"}:
+        if field in connection and (not isinstance(connection[field], str) or not connection[field]):
+            raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 的 {field} 必须是非空字符串")
+    for field in ("port", "connectTimeoutSeconds"):
+        if field in connection and (not isinstance(connection[field], int) or isinstance(connection[field], bool)):
+            raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 的 {field} 必须是整数")
     if connection["engine"] not in ENGINES:
         raise ArtifactError("UNSUPPORTED", f"连接 {connection_id} 的引擎不受支持")
-    if _is_placeholder(str(connection["host"])) or _is_placeholder(str(connection["credentialRef"])):
+    if not any(connection.get(key) for key in ("credentialRef", "passwordEnv", "passwordFile")):
+        raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 必须配置凭据引用、环境变量或密码文件")
+    if connection.get("passwordEnv") and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(connection["passwordEnv"])):
+        raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 的 passwordEnv 无效")
+    if connection.get("passwordFile") and not Path(str(connection["passwordFile"])).expanduser().is_absolute():
+        raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 的 passwordFile 必须使用绝对路径")
+    if _is_placeholder(str(connection["host"])) or (connection.get("credentialRef") and _is_placeholder(str(connection["credentialRef"]))):
         raise ArtifactError("CONFIG_INVALID", f"连接 {connection_id} 仍包含占位值")
     try:
         port = int(connection["port"])
@@ -207,28 +229,16 @@ def validate_connection(connection: Any, connection_id: str, identities: dict) -
 def validate_target(target: Any, workspace_key: str, identities: dict, connections: dict | None = None) -> None:
     if not isinstance(target, dict):
         raise ArtifactError("CONFIG_INVALID", f"工作区 {workspace_key} 的 target 必须是对象")
-    allowed = {
-        "id",
-        "systemId",
-        "dataSourceId",
-        "connectionId",
-        "connectionRef",
-        "validationScope",
-        "database",
-        "schema",
-        "environment",
-        "access",
-        "expectedIdentityRef",
-        "allowedTables",
-        "tenantScope",
-    }
-    _reject_unknown(target, allowed, f"target {target.get('id', '?')}")
+    _reject_unknown(target, TARGET_FIELDS, f"target {target.get('id', '?')}")
+    for field in TARGET_FIELDS - {"allowedTables", "tenantScope"}:
+        if field in target and (not isinstance(target[field], str) or not target[field]):
+            raise ArtifactError("CONFIG_INVALID", f"target {target.get('id', '?')} 的 {field} 必须是非空字符串")
     validation_scope = str(target.get("validationScope") or "full")
     if validation_scope not in VALIDATION_SCOPES:
         raise ArtifactError("CONFIG_INVALID", f"target {target.get('id', '?')} 的 validationScope 无效")
-    required = {"id", "database", "environment", "access", "expectedIdentityRef"}
+    required = set(TARGET_REQUIRED)
     if validation_scope == "full":
-        required |= {"systemId", "dataSourceId", "allowedTables", "tenantScope"}
+        required |= FULL_TARGET_REQUIRED
     _require_keys(target, required, f"工作区 {workspace_key} 的 target")
     connection_id = str(target.get("connectionId") or "")
     connection_ref = str(target.get("connectionRef") or "")
@@ -246,11 +256,13 @@ def validate_target(target: Any, workspace_key: str, identities: dict, connectio
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的 database 无效")
     if target.get("schema") and not IDENTIFIER.fullmatch(str(target["schema"])):
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的 schema 无效")
-    tables = target.get("allowedTables") or []
+    tables = target.get("allowedTables", [])
     if validation_scope == "full" and (not isinstance(tables, list) or not tables or "*" in tables):
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 必须配置非通配 allowedTables")
-    if not isinstance(tables, list) or any(not IDENTIFIER.fullmatch(str(table)) for table in tables):
+    if not isinstance(tables, list) or any(not isinstance(table, str) or not IDENTIFIER.fullmatch(table) for table in tables):
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 包含无效表名")
+    if len(set(tables)) != len(tables):
+        raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的 allowedTables 重复")
     identity_ref = str(target["expectedIdentityRef"])
     if identity_ref not in identities:
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的 expectedIdentityRef 不存在")
@@ -323,10 +335,18 @@ def resolve_diagnosis_target(
     *,
     environment: str = "",
     target_id: str = "",
+    profile: str = "",
 ) -> tuple[dict, str]:
     """Resolve one database target for ad-hoc diagnosis without guessing names."""
 
     validate_config(config)
+    if profile:
+        binding = config.get("profiles", {}).get(profile)
+        if not binding:
+            raise ArtifactError("BINDING_MISSING", f"profile 不存在: {profile}")
+        if binding["workspaceKey"] != workspace_key or (target_id and target_id != binding["targetId"]):
+            raise ArtifactError("ENVIRONMENT_MISMATCH", "profile 与显式工作区/target 不一致")
+        target_id = binding["targetId"]
     workspace = config["databaseTests"].get(workspace_key)
     if not workspace:
         raise ArtifactError("BINDING_MISSING", f"工作区未配置数据库排查目标: {workspace_key}")
@@ -334,7 +354,7 @@ def resolve_diagnosis_target(
     defaults = workspace.get("defaults") or {}
     if target_id:
         matches = [target for target in targets if target["id"] == target_id]
-        selection_source = "explicit-target"
+        selection_source = "profile" if profile else "explicit-target"
     elif environment:
         if environment not in ENVIRONMENTS:
             raise ArtifactError("CONFIG_INVALID", f"数据库环境仅允许 dev/test: {environment}")
@@ -475,40 +495,20 @@ def validate_step(step: Any, case_id: str, target: dict | None) -> None:
 
 
 def validate_sql_scope(sql: str, target: dict, case_id: str, step_id: str) -> None:
-    if _has_top_level_comma_join(sql):
-        raise ArtifactError("QUERY_UNSUPPORTED", f"用例 {case_id} 步骤 {step_id} 不支持逗号连接，请使用显式 JOIN")
-    allowed = {str(table).lower() for table in target["allowedTables"]}
-    found = TABLE_REFERENCE.findall(sql)
+    try:
+        found = table_references(sql)
+    except ValueError as error:
+        raise ArtifactError("QUERY_UNSUPPORTED", f"用例 {case_id} 步骤 {step_id}: {error}") from error
     if not found:
         raise ArtifactError("QUERY_UNSUPPORTED", f"用例 {case_id} 步骤 {step_id} 无法识别数据表")
-    expected_qualifier = str(target.get("schema") or target["database"]).lower()
+    allowed = {str(table).lower() for table in target["allowedTables"]}
+    expected = str(target.get("schema") or target["database"]).lower()
     for reference in found:
         parts = reference.split(".")
-        if len(parts) == 2 and parts[0].lower() != expected_qualifier:
+        if len(parts) > 2 or (len(parts) == 2 and parts[0].lower() != expected):
             raise ArtifactError("CROSS_DATABASE_DENIED", f"用例 {case_id} 步骤 {step_id} 引用了未授权数据库或 schema")
-        table = parts[-1].lower()
-        if table not in allowed:
+        if parts[-1].lower() not in allowed:
             raise ArtifactError("TABLE_DENIED", f"用例 {case_id} 步骤 {step_id} 引用了未授权表: {parts[-1]}")
-
-
-def _has_top_level_comma_join(sql: str) -> bool:
-    tokens = list(re.finditer(r"[A-Za-z_][A-Za-z0-9_$]*|[(),]", sql))
-    depth = 0
-    in_from = False
-    terminators = {"WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "UNION", "FOR"}
-    for match in tokens:
-        token = match.group(0).upper()
-        if token == "(":
-            depth += 1
-        elif token == ")":
-            depth = max(0, depth - 1)
-        elif depth == 0 and token == "FROM":
-            in_from = True
-        elif depth == 0 and in_from and token in terminators:
-            in_from = False
-        elif depth == 0 and in_from and token == ",":
-            return True
-    return False
 
 
 def validate_assertion(assertion: dict) -> None:
@@ -952,6 +952,26 @@ def _emit(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
 
 
+def build_plan_template(config: dict, workspace_key: str, *, system_id: str, data_source_id: str, target_id: str = "", source_mode: str = "svn") -> dict:
+    """Build a draft; source and acceptance placeholders deliberately block validation."""
+    target = resolve_target(config, workspace_key, system_id=system_id, data_source_id=data_source_id, target_id=target_id)
+    if source_mode not in {"svn", "database"}:
+        raise ArtifactError("ARTIFACT_INVALID", "sourceMode 仅允许 svn/database")
+    qualifier = str(target.get("schema") or target["database"])
+    checks = [
+        {"id": f"check-{index}", "sql": f"SELECT COUNT(*) AS row_count FROM {qualifier}.{table}", "assert": {"type": "scalar_equals", "column": "row_count", "valueType": "integer", "expected": "<expected-row-count>"}}
+        for index, table in enumerate(target["allowedTables"], 1)
+    ]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "taskId": "<task-id>",
+        "workspaceKey": workspace_key,
+        "sourceMode": source_mode,
+        "sourceDigest": "<source-digest>",
+        "cases": [{"caseId": "case-1", "requirementIds": ["<requirement-id>"], "targetId": target["id"], "level": "query", "sourceEvidence": ["<source-evidence>"], "checks": checks, "expectedBasis": "<acceptance-evidence>", "cleanup": {"required": False, "reason": "只读查询，无数据库写入"}}],
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -976,9 +996,41 @@ def main(argv: list[str] | None = None) -> int:
     evaluate_parser.add_argument("--config", type=Path)
     evaluate_parser.add_argument("--report", type=Path)
 
+    init_parser = commands.add_parser("init-plan", help="从 full 目标生成待补充源码证据和断言的计划模板")
+    init_parser.add_argument("config", type=Path)
+    init_parser.add_argument("--workspace", required=True)
+    init_parser.add_argument("--system-id", required=True)
+    init_parser.add_argument("--data-source-id", required=True)
+    init_parser.add_argument("--target-id", default="")
+    init_parser.add_argument("--source-mode", choices=("svn", "database"), default="svn")
+    init_parser.add_argument("--out", required=True, type=Path)
+
+    export_dbx = commands.add_parser("export-dbx-plan", help="生成身份优先的 DBX MCP 调用交接文件，不执行查询")
+    export_dbx.add_argument("plan", type=Path)
+    export_dbx.add_argument("--config", required=True, type=Path)
+    export_dbx.add_argument("--out", required=True, type=Path)
+    import_dbx = commands.add_parser("import-dbx-results", help="导入调用方记录的规范化 DBX capture，保留失败和截断状态")
+    import_dbx.add_argument("plan", type=Path)
+    import_dbx.add_argument("capture", type=Path)
+    import_dbx.add_argument("--config", required=True, type=Path)
+    import_dbx.add_argument("--out", required=True, type=Path)
+
+    run_parser = commands.add_parser("run-readonly", help="执行已校验计划的只读查询并保存新运行证据；不执行平台动作或清理")
+    run_parser.add_argument("plan", type=Path)
+    run_parser.add_argument("--config", required=True, type=Path)
+    run_parser.add_argument("--out-dir", required=True, type=Path)
+    run_parser.add_argument("--max-rows", type=int, default=100)
+    run_parser.add_argument("--platform-evidence", type=Path)
+
     args = parser.parse_args(argv)
     try:
-        if args.command == "validate-config":
+        if args.command == "run-readonly":
+            from common.database_plan_runner import run_plan
+            result = run_plan(load_json(args.plan), load_yaml(args.config), args.out_dir, max_rows=args.max_rows,
+                              platform_evidence=load_json(args.platform_evidence) if args.platform_evidence else None)
+            _emit(result)
+            return 0 if result['ok'] else 2
+        elif args.command == "validate-config":
             validate_config(load_yaml(args.config))
             _emit({"ok": True, "schemaVersion": SCHEMA_VERSION})
         elif args.command == "resolve-target":
@@ -995,6 +1047,21 @@ def main(argv: list[str] | None = None) -> int:
             config = load_yaml(args.config) if args.config else None
             validate_plan(plan, config)
             _emit({"ok": True, "planDigest": digest(plan)})
+        elif args.command in {"export-dbx-plan", "import-dbx-results"}:
+            from common import database_dbx
+            config = load_yaml(args.config)
+            plan = load_json(args.plan)
+            result = database_dbx.export_plan(config, plan) if args.command == "export-dbx-plan" else database_dbx.import_results(config, plan, load_json(args.capture))
+            with args.out.open("x", encoding="utf-8") as handle:
+                json.dump(result, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+            _emit({"ok": True, "path": str(args.out.resolve()), "executed": False})
+        elif args.command == "init-plan":
+            plan = build_plan_template(load_yaml(args.config), args.workspace, system_id=args.system_id, data_source_id=args.data_source_id, target_id=args.target_id, source_mode=args.source_mode)
+            with args.out.open("x", encoding="utf-8") as handle:
+                json.dump(plan, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+            _emit({"ok": True, "draft": True, "path": str(args.out.resolve()), "nextAction": "补充源码摘要、证据及预期值后执行 validate-plan"})
         else:
             plan = load_json(args.plan)
             results = load_json(args.results)

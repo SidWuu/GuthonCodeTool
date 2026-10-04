@@ -33,6 +33,7 @@ products:
     #     workcopy: false
     #     writeback: false
     #     commit: false
+    #     platform_save: true  # manifest 模式保存到平台的 SVN 提交入口；可显式禁用
     #     browse: true
     #     edit: true
     #     history: true

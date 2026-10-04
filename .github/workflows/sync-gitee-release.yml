@@ -21,6 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
       - name: Resolve release tag
         env:
           INPUT_TAG: ${{ inputs.tag }}
@@ -54,6 +58,12 @@ jobs:
           for name in "${expected[@]}"; do
             test -f "release/$name" || { echo "::error::GitHub Release 缺少附件 $name"; exit 1; }
           done
+          # Preserve historical unsigned tags, while signed tags must verify
+          # against the locally pinned public key before mirroring.
+          if [ -f release/GuthonCodeTool-checksums.signature.json ]; then
+            expected+=(GuthonCodeTool-checksums.signature.json)
+            node scripts/verify_release.mjs --release-dir release --trust-file plugins/GuthonNexus/gushen-vscode-completion/data/release-trust.json --version "${RELEASE_TAG#v}"
+          fi
           actual=$(find release -maxdepth 1 -type f | wc -l)
           test "$actual" -eq "${#expected[@]}" || {
             echo "::error::GitHub Release 附件数量为 $actual，期望 ${#expected[@]}"

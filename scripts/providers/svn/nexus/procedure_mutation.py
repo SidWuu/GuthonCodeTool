@@ -158,6 +158,7 @@ def open_procedure_edit(
             "workingCopyId": working_copy_id, "sourcePath": record["source_path"],
             "sourceHash": digest, "indexGeneration": generation,
             "editToken": token, "expiresAt": expires_at,
+            "sessionId": opened["sessionId"], "documentId": opened["documentId"],
         }
 
 

@@ -269,6 +269,11 @@ def search_sources(
                    "instr(lower(source_alias_id), ?) > 0 OR "
                    "instr(lower(COALESCE(source_name, '')), ?) > 0)"]
         params: list[object] = [keyword.lower(), keyword.lower(), keyword.lower()]
+        from common.identity_search import candidate_clause
+        fts_clause, fts_params = candidate_clause(conn, keyword.lower())
+        if fts_clause:
+            clauses.append(fts_clause)
+            params.extend(fts_params)
         if source_type:
             clauses.append("source_table=?")
             params.append(source_type)
@@ -301,7 +306,7 @@ def search_sources(
 
 
 def search_page_fields(
-    workspace: dict, *, source_namespace: str, field_id_prefix: str,
+    workspace: dict, *, source_namespace: str, field_id_prefix: str = "", label_keyword: str = "",
     limit: int = 50, cursor: str = "",
 ) -> dict:
     """Find source-backed UI field names across PAGEs in one namespace, without inferring relations."""
@@ -309,20 +314,32 @@ def search_page_fields(
     require_capability(workspace, "browse")
     if not isinstance(source_namespace, str) or not source_namespace.strip() or len(source_namespace) > 512:
         raise PageIndexError("INVALID_FILTER", "sourceNamespace is required")
-    if not isinstance(field_id_prefix, str) or not 1 <= len(field_id_prefix) <= 128:
-        raise PageIndexError("INVALID_FILTER", "fieldIdPrefix must contain 1–128 characters")
+    if (not isinstance(field_id_prefix, str) or len(field_id_prefix) > 128
+            or not isinstance(label_keyword, str) or len(label_keyword) > 128
+            or not field_id_prefix and not label_keyword.strip()):
+        raise PageIndexError("INVALID_FILTER", "Provide fieldIdPrefix or labelKeyword (1–128 characters)")
+    label_keyword = label_keyword.strip()
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_PAGE_SIZE:
         raise PageIndexError("INVALID_LIMIT", f"limit must be between 1 and {MAX_PAGE_SIZE}")
     _require_index_file(workspace)
     with _connection(workspace) as conn:
         generation = _require_ready(conn)
-        query = [workspace["workspaceKey"], source_namespace, field_id_prefix]
+        query = [workspace["workspaceKey"], source_namespace, field_id_prefix, label_keyword]
         after = _decode_cursor(cursor, generation, query, key_length=3) if cursor else None
         if after and not after[2].isdecimal():
             raise PageIndexError("INVALID_CURSOR", "PAGE field search cursor has no valid position")
-        clauses = ["s.provider='svn'", "s.source_table='page'", "s.source_namespace=?",
-                   "substr(f.field_id, 1, ?) = ?"]
-        params: list[object] = [source_namespace, len(field_id_prefix), field_id_prefix]
+        clauses = ["s.provider='svn'", "s.source_table='page'", "s.source_namespace=?"]
+        params: list[object] = [source_namespace]
+        if field_id_prefix:
+            clauses.append("substr(f.field_id, 1, ?) = ?")
+            params.extend([len(field_id_prefix), field_id_prefix])
+        if label_keyword:
+            clauses.append("instr(lower(f.label), ?) > 0")
+            params.append(label_keyword.lower())
+            from common.page_field_search import candidates
+            clause, values = candidates(conn, label_keyword.lower())
+            if clause:
+                clauses.append(clause);params.extend(values)
         if after:
             clauses.append("(s.source_id, f.json_pointer, f.rowid) > (?, ?, ?)")
             params.extend([after[0], after[1], int(after[2])])
@@ -343,6 +360,7 @@ def search_page_fields(
     return {
         "workspaceKey": workspace["workspaceKey"], "sourceNamespace": source_namespace,
         "fieldIdPrefix": field_id_prefix, "indexGeneration": generation,
+        "labelKeyword": label_keyword,
         "coverage": "INDEXED_UI_FIELDS_ONLY", "relationResolution": "UNVERIFIED",
         "fields": [{
             "sourceType": "page", "sourceNamespace": row["source_namespace"],
@@ -617,7 +635,7 @@ def list_field_relations(
 
 def field_reference_diagnostics(
     workspace: dict, *, source_namespace: str, source_id: str,
-    semantic_field_id: str, fun_id: str = "", limit: int = 20,
+    semantic_field_id: str, fun_id: str = "", limit: int = 20, cursor: str = "",
 ) -> dict:
     """Report bounded reference evidence; never certify that a field is safe to delete."""
 
@@ -638,6 +656,11 @@ def field_reference_diagnostics(
             raise PageIndexError("FIELD_AMBIGUOUS" if rows else "FIELD_NOT_FOUND",
                                  "PAGE UI field is not uniquely indexed")
         field = rows[0]
+        query = [workspace["workspaceKey"], source_namespace, source_id, fun_id, semantic_field_id, "references-v1"]
+        after = _decode_cursor(cursor, generation, query, key_length=2) if cursor else ["0", "0"]
+        if any(not value.isdecimal() for value in after):
+            raise PageIndexError("INVALID_CURSOR", "Invalid relation evidence position")
+        incoming_offset, unresolved_offset = map(int, after)
         record_id = record["record_id"]
         native_id = field["field_id"]
         duplicates = conn.execute(
@@ -647,8 +670,8 @@ def field_reference_diagnostics(
         incoming = conn.execute(
             "SELECT source_pointer, evidence_pointer, resolution, target_pointer "
             "FROM gusen_page_field_relation WHERE source_record_id=? AND relation_type='SELECT_CODE_FIELD' "
-            "AND target_field_id=? ORDER BY relation_id LIMIT ?",
-            (record_id, native_id, limit + 1),
+            "AND target_field_id=? ORDER BY relation_id LIMIT ? OFFSET ?",
+            (record_id, native_id, limit + 1, incoming_offset),
         ).fetchall() if native_id else []
         incoming_count = conn.execute(
             "SELECT COUNT(*) FROM gusen_page_field_relation WHERE source_record_id=? "
@@ -657,8 +680,8 @@ def field_reference_diagnostics(
         ).fetchone()[0] if native_id else 0
         unresolved = conn.execute(
             "SELECT evidence_pointer FROM gusen_page_field_relation WHERE source_record_id=? "
-            "AND relation_type='OTHER_SET_FIELDS_UNPARSED' ORDER BY relation_id LIMIT ?",
-            (record_id, limit + 1),
+            "AND relation_type='OTHER_SET_FIELDS_UNPARSED' ORDER BY relation_id LIMIT ? OFFSET ?",
+            (record_id, limit + 1, unresolved_offset),
         ).fetchall()
         unresolved_count = conn.execute(
             "SELECT COUNT(*) FROM gusen_page_field_relation WHERE source_record_id=? "
@@ -689,6 +712,9 @@ def field_reference_diagnostics(
         "blockingReasons": reasons,
         "complete": len(incoming) <= limit and len(unresolved) <= limit,
         "truncated": len(incoming) > limit or len(unresolved) > limit,
+        "nextCursor": _encode_cursor(generation, query, [str(incoming_offset + min(limit, len(incoming))),
+                                                       str(unresolved_offset + min(limit, len(unresolved)))])
+                      if len(incoming) > limit or len(unresolved) > limit else None,
     }
 
 
@@ -771,7 +797,7 @@ def read_nodes(
 
 
 def source_context(
-    workspace: dict, *, source_namespace: str, source_id: str, fun_id: str = "", limit: int = 10,
+    workspace: dict, *, source_namespace: str, source_id: str, fun_id: str = "", limit: int = 10, cursor: str = "",
 ) -> dict:
     """Return separate bounded evidence classes for one exact PAGE, never a mixed fact stream."""
 
@@ -784,26 +810,31 @@ def source_context(
         record = _page_record(conn, source_namespace, source_id, fun_id)
         _checked_raw(workspace, record)
         record_id = record["record_id"]
+        query = [workspace["workspaceKey"], source_namespace, source_id, fun_id, "context-v1"]
+        after = _decode_cursor(cursor, generation, query, key_length=3) if cursor else ["0", "0", "0"]
+        if any(not value.isdecimal() for value in after):
+            raise PageIndexError("INVALID_CURSOR", "Invalid context evidence position")
+        fragment_offset, access_offset, fact_offset = map(int, after)
         fragments = conn.execute(
             "SELECT fragment_type, json_pointer, label, content_hash, origin_map_json FROM gusen_source_fragment "
-            "WHERE source_record_id=? ORDER BY fragment_type, json_pointer LIMIT ?",
-            (record_id, limit + 1),
+            "WHERE source_record_id=? ORDER BY fragment_type, json_pointer, fragment_id LIMIT ? OFFSET ?",
+            (record_id, limit + 1, fragment_offset),
         ).fetchall()
         accesses = conn.execute(
             "SELECT a.table_name, a.operation, a.confidence, a.evidence, a.line_no, "
             "f.json_pointer, f.fragment_type, f.origin_map_json FROM gusen_data_access a "
             "LEFT JOIN gusen_source_fragment f ON f.fragment_id=a.source_fragment_id "
             "AND f.source_record_id=a.source_record_id "
-            "WHERE a.source_record_id=? ORDER BY a.table_name, a.operation, a.access_id LIMIT ?",
-            (record_id, limit + 1),
+            "WHERE a.source_record_id=? ORDER BY a.table_name, a.operation, a.access_id LIMIT ? OFFSET ?",
+            (record_id, limit + 1, access_offset),
         ).fetchall()
         facts = conn.execute(
             "SELECT l.fact_kind, l.subject, l.value_text, l.confidence, l.line_start, "
             "f.json_pointer, f.fragment_type, f.origin_map_json FROM gusen_logic_fact l "
             "LEFT JOIN gusen_source_fragment f ON f.fragment_id=l.source_fragment_id "
             "AND f.source_record_id=l.source_record_id "
-            "WHERE l.source_record_id=? ORDER BY l.fact_kind, l.line_start, l.fact_id LIMIT ?",
-            (record_id, limit + 1),
+            "WHERE l.source_record_id=? ORDER BY l.fact_kind, l.line_start, l.fact_id LIMIT ? OFFSET ?",
+            (record_id, limit + 1, fact_offset),
         ).fetchall()
         node_count = conn.execute(
             "SELECT COUNT(*) FROM gusen_page_node WHERE source_record_id=?", (record_id,)
@@ -834,6 +865,8 @@ def source_context(
         "tableAccesses": [with_origin(row) for row in accesses[:limit]],
         "logicFacts": [with_origin(row) for row in facts[:limit]],
         "complete": not truncated, "truncated": truncated,
+        "nextCursor": _encode_cursor(generation, query, [str(offset + min(limit, len(rows)))
+                                                       for offset, rows in zip((fragment_offset, access_offset, fact_offset), (fragments, accesses, facts))]) if truncated else None,
         "truncation": {"fragments": len(fragments) > limit,
                        "tableAccesses": len(accesses) > limit,
                        "logicFacts": len(facts) > limit},

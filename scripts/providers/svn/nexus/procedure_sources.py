@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 from common.inheritance import SOURCE_CATALOG_VERSION
 from common.source_format import decode_source
@@ -41,31 +42,44 @@ def source_index_status(workspace: dict) -> dict:
                     "indexGeneration": generation, "procedureCount": procedure_count,
                     "staleSourceCount": 0, "requiredAction": "svn-reindex"}
         stale_count = conn.execute(
-            "SELECT COUNT(*) FROM gusen_source_record WHERE provider='svn' AND status='STALE'"
+            "SELECT COUNT(*) FROM gusen_source_record WHERE provider='svn' AND scope_id=? AND status NOT IN ('OK','SVN_DIRTY')",
+            (workspace["scopeId"],),
         ).fetchone()[0]
+        errors = conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='svn_catalog_errors'").fetchone()
+        try:
+            scan_errors = json.loads(errors[0]) if errors else []
+        except (ValueError, TypeError):
+            scan_errors = ["invalid stored scan diagnostics"]
+        if not isinstance(scan_errors, list):
+            scan_errors = ["invalid stored scan diagnostics"]
     return {"workspaceKey": workspace["workspaceKey"],
-            "buildStatus": "PARTIAL" if stale_count else "READY",
+            "buildStatus": "PARTIAL" if stale_count or scan_errors else "READY",
             "indexGeneration": generation, "procedureCount": procedure_count,
-            "staleSourceCount": stale_count, "requiredAction": ""}
+            "staleSourceCount": stale_count, "scanErrorCount": len(scan_errors), "requiredAction": ""}
 
 
 def _record(workspace: dict, *, source_namespace: str, source_id: str,
             fun_id: str, working_copy_id: str) -> tuple[dict, str]:
     require_capability(workspace, "browse")
-    if not all((source_namespace, source_id, fun_id, working_copy_id)):
+    if not all((source_namespace, source_id, fun_id)):
         raise page_nodes.PageIndexError("INVALID_LOCATOR", "Complete procedure identity is required")
     with index_queries._connection(workspace) as conn:
         generation = page_nodes._require_source_ready(conn)
         rows = conn.execute(
             "SELECT * FROM gusen_source_record WHERE provider='svn' AND source_table='procedure' "
-            "AND source_namespace=? AND source_id=? AND fun_id=? AND working_copy_id=? LIMIT 2",
-            (source_namespace, source_id, fun_id, working_copy_id),
+            "AND scope_id=? AND source_namespace=? AND source_id=? AND fun_id=? "
+            + ("AND working_copy_id=? " if working_copy_id else "")
+            + "ORDER BY working_copy_id, record_id LIMIT 11",
+            (workspace["scopeId"], source_namespace, source_id, fun_id, *([working_copy_id] if working_copy_id else [])),
         ).fetchall()
     if len(rows) != 1:
-        raise page_nodes.PageIndexError(
+        error = page_nodes.PageIndexError(
             "SOURCE_AMBIGUOUS" if rows else "SOURCE_NOT_FOUND",
             "Procedure identity is not uniquely indexed",
+            next_action="Select an exact workingCopyId from the bounded candidates" if rows else "Search the authorized source catalog",
         )
+        error.candidates = [{"workingCopyId": row["working_copy_id"], "sourcePath": row["source_path"]} for row in rows[:10]]
+        raise error
     record = dict(rows[0])
     if record["status"] not in {"OK", "SVN_DIRTY"}:
         raise page_nodes.PageIndexError("SOURCE_STALE", "Procedure source is stale",
@@ -88,39 +102,20 @@ def _current_source(workspace: dict, record: dict) -> tuple[str, str]:
 
 def read_procedure(
     workspace: dict, *, source_namespace: str, source_id: str, fun_id: str,
-    working_copy_id: str, offset: int = 0, max_chars: int = 12_000,
+    working_copy_id: str = "", offset: int = 0, max_chars: int = 12_000,
 ) -> dict:
     """Return a bounded text window without creating a document edit lease."""
 
-    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
-        raise page_nodes.PageIndexError("INVALID_LIMIT", "offset must be a nonnegative integer")
-    if (isinstance(max_chars, bool) or not isinstance(max_chars, int)
-            or not 1 <= max_chars <= MAX_PROCEDURE_READ_CHARS):
-        raise page_nodes.PageIndexError(
-            "INVALID_LIMIT", f"maxChars must be between 1 and {MAX_PROCEDURE_READ_CHARS}",
-        )
-    record, generation = _record(
-        workspace, source_namespace=source_namespace, source_id=source_id,
-        fun_id=fun_id, working_copy_id=working_copy_id,
-    )
-    content, digest = _current_source(workspace, record)
-    if offset > len(content):
-        raise page_nodes.PageIndexError("INVALID_LIMIT", "offset exceeds procedure length")
-    end = min(len(content), offset + max_chars)
-    return {
-        "workspaceKey": workspace["workspaceKey"], "sourceType": "procedure",
-        "sourceNamespace": source_namespace, "sourceId": source_id, "funId": fun_id,
-        "workingCopyId": working_copy_id, "sourcePath": record["source_path"],
-        "sourceHash": digest, "svnBaseRevision": record["svn_revision"],
-        "indexGeneration": generation, "offset": offset, "totalChars": len(content),
-        "content": content[offset:end], "complete": end == len(content),
-        "truncated": end < len(content), "nextOffset": end if end < len(content) else None,
-    }
+    from .source_queries import read_source_document
+
+    return read_source_document(workspace, source_type="procedure", source_namespace=source_namespace,
+                                source_id=source_id, fun_id=fun_id, working_copy_id=working_copy_id,
+                                offset=offset, max_chars=max_chars)
 
 
 def procedure_callers(
     workspace: dict, *, source_namespace: str, source_id: str, fun_id: str,
-    working_copy_id: str, limit: int = 20,
+    working_copy_id: str = "", limit: int = 20, cursor: str = "",
 ) -> dict:
     """Return bounded index evidence for an exactly identified procedure."""
 
@@ -131,6 +126,11 @@ def procedure_callers(
         fun_id=fun_id, working_copy_id=working_copy_id,
     )
     _current_source(workspace, record)
+    query = [workspace["workspaceKey"], source_namespace, source_id, fun_id, record["working_copy_id"], "procedure-callers-v1"]
+    after = page_nodes._decode_cursor(cursor, generation, query, key_length=1) if cursor else ["0"]
+    if not after[0].isdecimal():
+        raise page_nodes.PageIndexError("INVALID_CURSOR", "Invalid caller evidence position")
+    offset = int(after[0])
     with index_queries._connection(workspace) as conn:
         target_count = conn.execute(
             "SELECT COUNT(*) FROM gusen_source_record WHERE provider='svn' "
@@ -144,14 +144,16 @@ def procedure_callers(
             next_action="Inspect each exact working copy; do not attribute callers to one target",
         )
     result = index_queries.callers(
-        workspace, alias=record["source_alias_id"], fun_id=fun_id, limit=limit + 1,
+        workspace, alias=record["source_alias_id"], fun_id=fun_id, limit=limit + 1, continuation=offset,
     )
     callers = result["callers"][:limit]
     return {
         "workspaceKey": workspace["workspaceKey"], "sourceType": "procedure",
         "sourceNamespace": source_namespace, "sourceId": source_id, "funId": fun_id,
-        "workingCopyId": working_copy_id, "sourceHash": record["source_hash"],
+        "workingCopyId": record["working_copy_id"], "sourceHash": record["source_hash"],
         "indexGeneration": generation, "callers": callers,
         "complete": len(result["callers"]) <= limit,
         "truncated": len(result["callers"]) > limit,
+        "nextCursor": page_nodes._encode_cursor(generation, query, [str(offset + len(callers))])
+                      if len(result["callers"]) > limit else None,
     }

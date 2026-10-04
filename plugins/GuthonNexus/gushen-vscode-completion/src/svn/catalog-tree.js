@@ -351,6 +351,12 @@ class SvnCatalogTreeProvider {
       catalog = await this.backend.catalog(element.workspace.workspaceKey);
       this.catalogs.set(element.workspace.workspaceKey, catalog);
     }
+    // Keep old decorations during refresh, then release the old tree once its
+    // replacement catalog is ready. Removed objects must not stay rooted forever.
+    const workspaceKey = element.workspace.workspaceKey;
+    for (const [key, cached] of this.decorationElements) {
+      if ((cached.workspaceKey || cached.workspace?.workspaceKey) === workspaceKey) this.decorationElements.delete(key);
+    }
     element.children = groupCatalog(catalog.objects).map((category) => {
       const categoryElement = {
         ...category,

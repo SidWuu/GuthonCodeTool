@@ -5,36 +5,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
 
 from common import gusen_hub
+from providers.database._export_common import normalize_values as normalize_bill_type_codes
 from providers.database.export_table_schema_sql import normalize_data_source_ids, resolve_data_source_ids
 
 
-ROOT = gusen_hub.ROOT
-DEFAULT_OUTPUT_DIR = ROOT / "var" / "workspace"
 
 
-def sanitize_name(value):
-    if value is None or str(value).strip() == "":
-        return "空"
-    text = re.sub(r"[\\/:*?\"<>|]+", "_", str(value)).strip()
-    text = re.sub(r"\s+", "_", text)
-    return text[:120] or "空"
-
-
-def write_json(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def drop_empty(value):
-    if isinstance(value, list):
-        return [drop_empty(item) for item in value]
-    if isinstance(value, dict):
-        return {key: drop_empty(item) for key, item in value.items() if item not in (None, "")}
-    return value
+from providers.database._export_common import sanitize_name, write_json, drop_empty
 
 
 def system_display_name(data_source_id, system_name):
@@ -44,13 +24,6 @@ def system_display_name(data_source_id, system_name):
 def output_file_name(data_source_id, system_name):
     return f"{sanitize_name(data_source_id)} {sanitize_name(system_name)}.json"
 
-
-def normalize_bill_type_codes(value):
-    if not value:
-        return []
-    if isinstance(value, str):
-        value = value.split(",")
-    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def fetch_rows(conn, table_name, data_source_ids, bill_type_codes=None):
@@ -93,8 +66,8 @@ def bill_type_json(row):
     )
 
 
-def export_bill_types(conn, output_dir=DEFAULT_OUTPUT_DIR, data_source_ids=None, bill_type_codes=None):
-    output_dir = Path(output_dir)
+def export_bill_types(conn, output_dir=None, data_source_ids=None, bill_type_codes=None):
+    output_dir = Path(output_dir) if output_dir is not None else gusen_hub.resolve_workspace(gusen_hub.load_config())["databaseDir"] / "billtype"
     data_source_ids = normalize_data_source_ids(data_source_ids)
     if not data_source_ids:
         raise ValueError("data_source_ids is required")

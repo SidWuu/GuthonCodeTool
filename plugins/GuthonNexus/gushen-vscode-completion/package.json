@@ -2,7 +2,7 @@
   "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon workspace, source sync, metadata export, workcopy tools, API completions, hover documentation, and source navigation.",
-  "version": "2.3.4",
+  "version": "2.4.0",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,
@@ -45,8 +45,13 @@
     "onCommand:gushenCompletion.locateSvnProcedureByName",
     "onCommand:gushenCompletion.searchCrossPageFields",
     "onCommand:gushenCompletion.copySvnAiContext",
+    "onCommand:gushenCompletion.exportAiContext",
     "onCommand:gushenCompletion.showSvnDeliveryReceipt",
     "onCommand:gushenCompletion.searchWorkspace",
+    "onCommand:gushenCompletion.showPullHistory",
+    "onCommand:gushenCompletion.archivePullHistory",
+    "onCommand:gushenCompletion.restorePullHistory",
+    "onCommand:gushenCompletion.showDiagnosisHistory",
     "onCommand:gushenCompletion.searchCurrentSvnWorkspace",
     "onCommand:gushenCompletion.jumpSelectedSvnSource",
     "onCommand:gushenCompletion.locateActiveSvnSource",
@@ -94,7 +99,9 @@
     "onCommand:gushenCompletion.showSvnStatus",
     "onCommand:gushenCompletion.refreshToolView",
     "onView:gushenCompletion.toolView",
-    "onView:gushenCompletion.svnSourceView"
+    "onView:gushenCompletion.svnSourceView",
+    "onCommand:gushenCompletion.copySvnLocatorLink",
+    "onCommand:gushenCompletion.openSvnSourceInBrowser"
   ],
   "main": "./src/extension.js",
   "contributes": {
@@ -130,6 +137,13 @@
     "configuration": {
       "title": "Guthon Nexus",
       "properties": {
+        "gushenCompletion.bridgePort": {
+          "type": "integer",
+          "default": 17361,
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Bridge 本机端口。修改后停止并重新启动 Bridge，并在 Chrome 配对设置中填写同一端口。"
+        },
         "gushenCompletion.rulesPath": {
           "type": "string",
           "default": "",
@@ -176,10 +190,15 @@
       }
     },
     "commands": [
+      {"command":"gushenCompletion.archivePullHistory","title":"Guthon Nexus: 归档本地拉取历史"},
+      {"command":"gushenCompletion.restorePullHistory","title":"Guthon Nexus: 恢复拉取历史归档"},
+      {"command":"gushenCompletion.showPullHistory","title":"Guthon Nexus: 查看源码拉取历史"},
+      {"command":"gushenCompletion.showDiagnosisHistory","title":"Guthon Nexus: 查看最近诊断历史"},
+      {"command": "gushenCompletion.quickOpenSvnSource", "title": "Guthon Nexus: 快速打开 SVN 源码"},
       { "command": "gushenCompletion.setupTool", "title": "Guthon Nexus: 设置/切换工作空间" },
       { "command": "gushenCompletion.addWorkspace", "title": "Guthon Nexus: 添加产品或项目", "icon": "$(add)" },
       { "command": "gushenCompletion.deleteWorkspace", "title": "Guthon Nexus: 删除产品或项目", "icon": "$(trash)" },
-      { "command": "gushenCompletion.configureDatabaseDiagnosis", "title": "Guthon Nexus: 配置数据库排查", "icon": "$(database)" },
+      { "command": "gushenCompletion.configureDatabaseDiagnosis", "title": "Guthon Nexus: 配置数据库只读目标", "icon": "$(database)" },
       { "command": "gushenCompletion.selectExecutionMode", "title": "Guthon Nexus: 切换运行模式" },
       { "command": "gushenCompletion.restartDevelopmentToolHost", "title": "Guthon Nexus: 重启开发 ToolHost" },
       { "command": "gushenCompletion.selectUpdateSource", "title": "Guthon Nexus: 选择 GuthonCodeTool 更新源" },
@@ -201,6 +220,7 @@
       { "command": "gushenCompletion.locateSvnPageById", "title": "Guthon Nexus: 按页面编码定位本地 PAGE", "icon": "$(target)" },
       { "command": "gushenCompletion.locateSvnProcedureByName", "title": "Guthon Nexus: 按包名和函数名定位本地过程函数", "icon": "$(target)" },
       { "command": "gushenCompletion.searchCrossPageFields", "title": "Guthon Nexus: 查找其他 PAGE 的字段", "icon": "$(search)" },
+      { "command": "gushenCompletion.exportAiContext", "title": "Guthon Nexus: 导出 AI 上下文文件", "icon": "$(export)" },
       { "command": "gushenCompletion.copySvnAiContext", "title": "Guthon Nexus: 复制精简 AI 上下文", "icon": "$(copy)" },
       { "command": "gushenCompletion.showSvnDeliveryReceipt", "title": "Guthon Nexus: 查看 SVN 交付回执", "icon": "$(output)" },
       { "command": "gushenCompletion.searchWorkspace", "title": "Guthon Nexus: 搜索工作区完整索引", "icon": "$(search)" },
@@ -248,7 +268,9 @@
       { "command": "gushenCompletion.editSvnScope", "title": "Guthon Nexus: 编辑 SVN 地址配置" },
       { "command": "gushenCompletion.refreshSvn", "title": "Guthon Nexus: 更新指定 SVN working copy", "icon": "$(sync)" },
       { "command": "gushenCompletion.showSvnStatus", "title": "Guthon Nexus: 查看 SVN 状态与差异" },
-      { "command": "gushenCompletion.refreshToolView", "title": "Guthon Nexus: 刷新已有工作空间状态", "icon": "$(refresh)" }
+      { "command": "gushenCompletion.refreshToolView", "title": "Guthon Nexus: 刷新已有工作空间状态", "icon": "$(refresh)" },
+      {"command": "gushenCompletion.copySvnLocatorLink", "title": "Guthon Nexus: 复制源码对象分享链接", "icon": "$(link)"},
+      {"command": "gushenCompletion.openSvnSourceInBrowser", "title": "Guthon Nexus: 在谷神平台定位源码", "icon": "$(browser)"}
     ],
     "viewsContainers": {
       "activitybar": [
@@ -274,6 +296,11 @@
         { "command": "gushenCompletion.refreshSvnSourceView", "when": "view == gushenCompletion.svnSourceView", "group": "navigation@6" }
       ],
       "view/item/context": [
+        {"command":"gushenCompletion.exportAiContext","when":"view == gushenCompletion.toolView && viewItem == guthonWorkspace","group":"navigation@8"},
+        {"command":"gushenCompletion.archivePullHistory","when":"view == gushenCompletion.toolView && viewItem == guthonWorkspace","group":"maintenance@1"},
+        {"command":"gushenCompletion.restorePullHistory","when":"view == gushenCompletion.toolView && viewItem == guthonWorkspace","group":"maintenance@2"},
+        {"command":"gushenCompletion.showPullHistory","when":"view == gushenCompletion.toolView && viewItem == guthonWorkspace","group":"navigation@7"},
+        {"command":"gushenCompletion.showDiagnosisHistory","when":"view == gushenCompletion.toolView && viewItem == guthonWorkspace","group":"navigation@8"},
         { "command": "gushenCompletion.deleteWorkspace", "when": "view == gushenCompletion.toolView && viewItem == guthonWorkspace", "group": "danger@1" },
         { "command": "gushenCompletion.copySvnProcedureName", "when": "view == gushenCompletion.svnSourceView && viewItem == guthonSvnProcedure", "group": "navigation@1" },
         { "command": "gushenCompletion.copyQualifiedSvnProcedureName", "when": "view == gushenCompletion.svnSourceView && viewItem == guthonSvnProcedure", "group": "navigation@2" },
@@ -283,8 +310,11 @@
         { "command": "gushenCompletion.showSvnImpactPreview", "when": "view == gushenCompletion.svnSourceView && viewItem =~ /^guthonSvn(Procedure|Page)$/", "group": "navigation@3" },
         { "command": "gushenCompletion.browseSvnImpactEvidence", "when": "view == gushenCompletion.svnSourceView && viewItem =~ /^guthonSvn(Procedure|Page)$/", "group": "navigation@4" },
         { "command": "gushenCompletion.searchCrossPageFields", "when": "view == gushenCompletion.svnSourceView && viewItem == guthonSvnPage", "group": "navigation@5" },
+        { "command": "gushenCompletion.exportAiContext", "when": "view == gushenCompletion.svnSourceView && viewItem =~ /^guthonSvn(Source|Procedure|Page|Fragment)$/", "group": "navigation@6" },
         { "command": "gushenCompletion.copySvnAiContext", "when": "view == gushenCompletion.svnSourceView && viewItem =~ /^guthonSvn(Source|Procedure|Page)$/", "group": "navigation@5" },
-        { "command": "gushenCompletion.revealSvnSourceFile", "when": "view == gushenCompletion.svnSourceView && viewItem =~ /^guthonSvn(Source|Procedure|Page)$/", "group": "navigation@6" }
+        { "command": "gushenCompletion.revealSvnSourceFile", "when": "view == gushenCompletion.svnSourceView && viewItem =~ /^guthonSvn(Source|Procedure|Page)$/", "group": "navigation@6" },
+        {"command": "gushenCompletion.copySvnLocatorLink", "when": "view == gushenCompletion.svnSourceView && viewItem =~ /^guthonSvn(Source|Procedure|Page)$/", "group": "navigation@3"},
+        {"command": "gushenCompletion.openSvnSourceInBrowser", "when": "view == gushenCompletion.svnSourceView && viewItem =~ /^guthonSvn(Procedure|Page)$/", "group": "navigation@4"}
       ],
       "scm/title": [
         { "command": "gushenCompletion.refreshSvnScm", "when": "scmProvider =~ /^guthon-svn-/", "group": "navigation@1" },
