@@ -149,6 +149,9 @@ if [ -s "$NOTES_FILE" ]; then
   curl --fail-with-body --silent --show-error "${CURL_RETRY[@]}" \
     -X PATCH \
     --data-urlencode "access_token=$GITEE_TOKEN" \
+    --data-urlencode "tag_name=$RELEASE_TAG" \
+    --data-urlencode "name=$(jq -er '.name' "$RELEASE_JSON")" \
+    --data-urlencode "prerelease=$(jq -r '.prerelease == true' "$RELEASE_JSON")" \
     --data-urlencode "body@$NOTES_FILE" \
     "$API/releases/$RELEASE_ID" > "$WORK_DIR/update.json"
   jq -e --argjson expected "$RELEASE_ID" '.id == $expected' "$WORK_DIR/update.json" > /dev/null
