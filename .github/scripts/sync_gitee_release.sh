@@ -31,6 +31,7 @@ API="https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO"
 
 # Gitee 上传偶发 SSL 连接超时（curl 退出码 28）：连接阶段快速失败并整体重试。
 CURL_RETRY=(
+  --http1.1
   --retry 4
   --retry-delay 15
   --retry-all-errors
@@ -112,7 +113,9 @@ upload_asset() {
   local path="$1" name size
   name=$(basename "$path")
   size=$(wc -c < "$path" | tr -d '[:space:]')
+  echo "开始上传 ${name}（${size} 字节）"
   if curl --fail-with-body --silent --show-error "${CURL_RETRY[@]}" \
+    --speed-limit 1024 --speed-time 60 \
     -X POST \
     -F "access_token=$GITEE_TOKEN" \
     -F "file=@$path" \
@@ -140,6 +143,16 @@ else
   jq -er '.id' "$WORK_DIR/create.json" > /dev/null
   refresh_present
   echo "已创建 Gitee Release（id=${RELEASE_ID}）"
+fi
+
+if [ -s "$NOTES_FILE" ]; then
+  curl --fail-with-body --silent --show-error "${CURL_RETRY[@]}" \
+    -X PATCH \
+    --data-urlencode "access_token=$GITEE_TOKEN" \
+    --data-urlencode "body@$NOTES_FILE" \
+    "$API/releases/$RELEASE_ID" > "$WORK_DIR/update.json"
+  jq -e --argjson expected "$RELEASE_ID" '.id == $expected' "$WORK_DIR/update.json" > /dev/null
+  echo "已同步 Gitee 发行说明"
 fi
 
 for round in $(seq 1 "$MAX_ROUNDS"); do
