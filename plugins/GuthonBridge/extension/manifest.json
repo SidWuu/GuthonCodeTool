@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Guthon Bridge",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "谷神低代码平台开发增强辅助工具",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
-    "tabs"
+    "tabs",
+    "alarms"
   ],
   "host_permissions": [
     "http://*/guthon/*",
@@ -43,6 +44,7 @@
         "bridge.css"
       ],
       "js": [
+        "host-settings.js",
         "host-config.js",
         "nexus-locator.js",
         "workspace-selection.js",
@@ -55,6 +57,7 @@
   "web_accessible_resources": [
     {
       "resources": [
+        "host-settings.js",
         "host-config.js",
         "fields-mover-core.js",
         "page-bridge.js"

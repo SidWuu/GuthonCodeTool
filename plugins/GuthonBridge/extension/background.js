@@ -1,4 +1,4 @@
-importScripts("host-config.js", "nexus-locator.js", "task-history.js", "event-client.js");
+importScripts("host-settings.js", "host-config.js", "nexus-locator.js", "task-history.js", "event-client.js", "component-client.js");
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.tabs.query({}, (tabs) => {
@@ -9,12 +9,12 @@ chrome.runtime.onInstalled.addListener(() => {
       }).catch(() => {});
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ["host-config.js", "fields-mover-core.js", "page-bridge.js"],
+        files: ["host-settings.js", "host-config.js", "fields-mover-core.js", "page-bridge.js"],
         world: "MAIN"
       }).catch(() => {});
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ["host-config.js", "nexus-locator.js", "workspace-selection.js", "task-client.js", "content.js"]
+        files: ["host-settings.js", "host-config.js", "nexus-locator.js", "workspace-selection.js", "task-client.js", "content.js"]
       }).catch(() => {});
     });
   });
@@ -73,6 +73,14 @@ async function clientId() {
   })();
   return clientIdentity;
 }
+function reportComponent() {
+  if (!globalThis.GuthonBridgeComponents || !chrome.runtime.getManifest) return Promise.resolve();
+  return GuthonBridgeComponents.heartbeat({ chrome, request: bridgeRequest, clientId }).catch(() => {});
+}
+chrome.alarms?.create('guthon-component-version', { periodInMinutes: 1 });
+chrome.alarms?.onAlarm.addListener(alarm => { if (alarm.name === 'guthon-component-version') void reportComponent(); });
+chrome.runtime.onStartup?.addListener(() => { void reportComponent(); });
+void reportComponent();
 async function handleBridgeEvent(event, command) {
   if (event !== 'navigate') return;
   const identity = await clientId();
@@ -189,7 +197,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       pendingQueue=pending.catch(()=>{});
       return pending;
     }
-    if (message?.type === "bridge-health") return bridgeRequest("/status");
+    if (message?.type === "bridge-health") { await reportComponent(); return bridgeRequest("/status"); }
     if (message?.type === "open-nexus") {
       const locator = GuthonBridgeNexusLocator.build(message.target);
       await chrome.tabs.create({ url: locator.uri });

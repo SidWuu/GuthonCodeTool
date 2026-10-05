@@ -168,9 +168,13 @@ test('Nexus lists every configured workspace and binds commands to workspaceKey'
   assert.equal(extension.includes('`切换模式：${modeLabel'), true);
   assert.equal(extension.includes('`当前版本：${applicationVersion}`'), true);
   assert.equal(extension.includes("executionMode === 'packaged'\n      ? await detectCurrentVersion"), true);
-  assert.equal(extension.includes(": '最新';"), true);
+  assert.equal(extension.includes(": '最新';"), false);
+  assert.equal(extension.includes("this.updates?.snapshot.current?.toolVersion"), true);
   assert.equal(extension.includes('`更新源：${UPDATE_SOURCES[updateSource]'), true);
   assert.equal(extension.includes("toolItem('检查更新'"), true);
+  assert.equal(extension.includes("new vscode.TreeItem('更新中心'"), false);
+  assert.equal(extension.includes("checkUpdate.children ="), true);
+  assert.equal(extension.includes("return [workspace, projects, bridge, maintenance]"), true);
   assert.equal(extension.includes("'回退到上一版本'"), true);
   assert.equal(manifest.contributes.configuration.properties['gushenCompletion.updateSource'].default, 'gitee');
   assert.equal(manifest.contributes.commands.some(({ command }) => command === 'gushenCompletion.checkToolUpdate'), true);

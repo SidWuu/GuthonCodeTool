@@ -64,6 +64,9 @@ jobs:
             expected+=(GuthonCodeTool-checksums.signature.json)
             node scripts/verify_release.mjs --release-dir release --trust-file plugins/GuthonNexus/gushen-vscode-completion/data/release-trust.json --version "${RELEASE_TAG#v}"
           fi
+          if [ -f release/GuthonCodeTool-release.json ]; then
+            expected+=(GuthonCodeTool-release.json)
+          fi
           actual=$(find release -maxdepth 1 -type f | wc -l)
           test "$actual" -eq "${#expected[@]}" || {
             echo "::error::GitHub Release 附件数量为 $actual，期望 ${#expected[@]}"

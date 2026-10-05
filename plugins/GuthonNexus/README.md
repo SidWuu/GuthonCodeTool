@@ -245,7 +245,7 @@ node --check src/rules.js
 
 读写分类、SVN 动作清单和等待时限统一由仓库 `scripts/common/command_metadata.json` 定义。Nexus 的 `npm run build:bridge` 同时将其原字节复制到 `data/tool-command-metadata.json`，供源码 Bridge 和已打包 Nexus 的共享 ToolHost 客户端读取。修改权威文件后须重新运行该构建；测试会核验两份 JSON 的字节一致性与全部命令的分类/时限。生成文件只含公开命令协议，不含本机运行配置。
 
-### 发行应用更新与回退
+### 运行模式下的检查更新与后端回退
 
 更新请求及所有重定向都要求 HTTPS，并拒绝 URL 中的用户名/密码。应用通过流式下载写入唯一临时文件，再流式计算 SHA-256；Release API 提供 `asset.digest` 时，必须与校验文件、实际下载内容一致。通过版本核对和 `self-test` 后才切换应用。版本探测失败显示“无法探测”，检查更新报错且允许重试，不猜测旧版本号。
 
@@ -258,3 +258,15 @@ node --check src/rules.js
 ToolHost 的 ready 可声明 `cancel-index-v1`。SVN 重建索引在对象检查点响应协作式取消，回滚当前扫描事务；发布屏障后返回真实结果，初始化元数据可能已完成。窗口请求取消不等于进程已停止，旧 ToolHost 继续原任务并明确提示；没有新增自动 kill/写入重放。运行模式/数据目录切换在启动或写入期间拒绝，中断后的未知结果仍需核验。
 
 状态栏和 GuthonCodeTool 输出显示实际加载的 Nexus version/buildId；哈希只取插件公开代码与资源，后端 runtime buildId 是另一份证据。
+
+### 三组件统一更新（工具/Bridge 0.3.1，Nexus 2.5.0）
+
+Nexus“运行模式 → 检查更新”统一检查后端、Nexus VSIX 与 Chrome Bridge，默认每天首次激活后后台检查；角标显示可更新数量。发行和调试模式点击确认后从所选发行源下载并验签，分别更新应用或pyz与依赖清单；开发模式从明确developmentRoot本地源码构建Nexus和Bridge，不访问发行源，后端继续使用工具源码。Nexus 自安装最后执行，安装后可立即重新加载窗口或稍后；Chrome 首次需要加载固定托管目录并配对，之后空闲时自动重载。
+
+每日检查使用本地日历日期和所选更新源，失败间隔重试；手动检查不受每日缓存限制。可通过 gushenCompletion.autoCheckUpdates 关闭后台检查。元数据缓存按签名复验，版本依据当前IDE和所选后端重新计算。发行清单 GuthonCodeTool-release.json 纳入签名校验文件，声明组件各自版本和附件身份。
+
+更新在 var/nexus/updates 下缓存附件和保留操作记录；Chrome目录为 var/nexus/updates/chrome/extension。损坏附件、ZIP越界或符号链接阻止安装。下载完成后检查本机任务和Bridge维护锁，先切换后端及Chrome文件，释放磁盘锁后安装Nexus，避免重启扩展宿主遗留锁。IDE自己的Nexus安装记录存于其globalStorage，VS Code与CodeBuddy分别确认。
+
+安装后可选择立即重新加载或稍后，首次Chrome加载和未连接状态有管理指引。普通异常保留已完成组件，再次点击可继续；异常退出留下的安装锁须确认进程已停止后核查。此流程保留应用回退与Chrome目录备份；不自动覆盖开发源码、不自动修改Python环境。
+
+开发模式的“检查更新”不依赖线上发行清单，读取developmentRoot下的Nexus/Bridge源码，并比较版本与构建标识；点击确认后从独立快照构建，只使用已安装@vscode/vsce和所选.venv Python，不修改后端源码或源码目录内的安装包。发行/调试模式继续使用所选GitHub/Gitee与独立签名。Nexus安装后需重新加载IDE，Chrome固定托管目录保留主机规则。

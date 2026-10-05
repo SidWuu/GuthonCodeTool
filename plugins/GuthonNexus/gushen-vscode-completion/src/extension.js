@@ -28,16 +28,12 @@ const {
 } = require('./tool-runtime');
 const { ToolProcessClient } = require('./tool-process-client');
 const { probeScriptRuntime } = require('./script-runtime');
+const { createUpdateCenter } = require('./update-center');
 const {
   UPDATE_SOURCES,
-  assetNameFor,
-  compareVersions,
   detectCurrentVersion,
-  fetchLatestRelease,
-  installRelease,
   verifyExecutable,
   readUpdateState,
-  releaseAsset,
   writeUpdateState,
   withUpdateLock,
 } = require('./tool-updater');
@@ -525,10 +521,10 @@ class ToolTreeDataProvider {
     const updateSource = config.get('updateSource', 'gitee');
     const storageRoot = this.context.globalStorageUri.fsPath;
     const configuredToolPath = resolvePackagedTool(config.get('toolPath', ''));
-    // 开发/调试模式运行仓库源码或本地 pyz，不参与发行版更新与回退，版本统一显示为最新。
+    // Show the selected backend's actual version; source mode never overwrites the checkout.
     const applicationVersion = executionMode === 'packaged'
       ? await detectCurrentVersion(this.context.extensionPath, storageRoot, configuredToolPath).catch(() => '无法探测')
-      : '最新';
+      : this.updates?.snapshot.current?.toolVersion || '待探测';
     const updateState = readUpdateState(storageRoot);
     const ready = toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'));
     const workspace = new vscode.TreeItem('工作区', vscode.TreeItemCollapsibleState.Expanded);
@@ -554,6 +550,17 @@ class ToolTreeDataProvider {
     homeItem.command = { command: 'gushenCompletion.setupTool', title: '切换工作空间' };
     runtime.iconPath = new vscode.ThemeIcon(executionMode === 'packaged' ? 'package' : 'beaker');
     runtime.description = modeLabel;
+    const update = this.updates?.snapshot;
+    const checkUpdate = toolItem('检查更新', 'gushenCompletion.checkToolUpdate', 'sync',
+      update?.count ? update.count + '项可更新' : update?.pending ? '待生效' : update?.unavailable ? '更新源待新版发行' : '');
+    checkUpdate.tooltip = update?.error || update?.info || '检查后端、Nexus 与 Chrome Bridge 的版本';
+    checkUpdate.children = [
+      ...(update?.rows || []).map(item => staticItem(item.label, item.update ? 'cloud-download' : 'versions',
+        (item.current || '未确认/未托管') + (item.target ? ' → ' + item.target : '') + (item.status ? ' · ' + item.status : ''))),
+      ...(update?.error ? [staticItem('检查未完成', 'warning', update.error)] : []),
+      ...(update?.info ? [staticItem('发行信息', 'info', update.info)] : []),
+    ];
+    checkUpdate.collapsibleState = checkUpdate.children.length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None;
     runtime.children = [
       toolItem(
         `切换模式：${modeLabel}`,
@@ -568,12 +575,12 @@ class ToolTreeDataProvider {
       staticItem(`当前版本：${applicationVersion}`, 'tag'),
       entryItem,
       homeItem,
-      toolItem(
+      executionMode === 'source-development' ? staticItem('更新源：本地源码', 'repo', path.basename(developmentRoot) || '未配置') : toolItem(
         `更新源：${UPDATE_SOURCES[updateSource]?.label || 'Gitee'}`,
         'gushenCompletion.selectUpdateSource',
         'cloud'
       ),
-      toolItem('检查更新', 'gushenCompletion.checkToolUpdate', 'sync'),
+      checkUpdate,
       toolItem(
         '回退到上一版本',
         'gushenCompletion.rollbackToolUpdate',
@@ -740,7 +747,7 @@ function activate(context) {
     onStateChange: () => toolView?.refresh(),
   });
   toolView = new ToolTreeDataProvider(bridge, context, workspaceRegistry);
-  const toolViewDisposable = vscode.window.registerTreeDataProvider('gushenCompletion.toolView', toolView);
+  const toolViewDisposable = vscode.window.createTreeView('gushenCompletion.toolView', { treeDataProvider: toolView });
   const listSvnWorkspaces = async () => {
     const tool = configuredToolFromSettings();
     if (!tool) return [];
@@ -763,6 +770,13 @@ function activate(context) {
     workspaceRegistry.invalidate();
     toolView.refresh();
   };
+  const updateCenter = createUpdateCenter({ vscode, context, bridge, processClient,
+    getTool: configuredToolFromSettings, loadedVersion: nexusBuild.version, loadedBuildId: nexusBuild.buildId,
+    isBusy: () => activeToolRuns.size > 0,
+    setBusy: value => { applicationUpdateRunning = value; },
+    refresh: () => toolView.refresh(), treeView: toolViewDisposable,
+    log: message => toolOutput().appendLine(message) });
+  toolView.updates = updateCenter;
   const refreshLocalWorkspaceViews = async () => {
     refreshToolData();
     svnServices.catalogTree.refresh();
@@ -1122,6 +1136,9 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('gushenCompletion.selectUpdateSource', async () => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
+      if (normalizeExecutionMode(config.get('executionMode', 'packaged')) === 'source-development') {
+        return vscode.window.showInformationMessage('开发模式从当前 developmentRoot 本地源码构建插件；发行和调试模式可选择 GitHub/Gitee。');
+      }
       const current = config.get('updateSource', 'gitee');
       const selected = await vscode.window.showQuickPick(
         Object.entries(UPDATE_SOURCES).map(([value, provider]) => ({
@@ -1136,99 +1153,7 @@ function activate(context) {
       refreshToolData();
       return vscode.window.showInformationMessage(`GuthonCodeTool 更新源已切换为 ${selected.label}`);
     }),
-    vscode.commands.registerCommand('gushenCompletion.checkToolUpdate', async () => {
-      const config = vscode.workspace.getConfiguration('gushenCompletion');
-      const executionMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
-      if (executionMode !== 'packaged') {
-        const source = executionMode === 'script' ? 'Release pyz 和本地 Python' : '仓库源码和 .venv';
-        const label = executionMode === 'script' ? '调试模式' : '开发模式';
-        return vscode.window.showInformationMessage(`${label}使用${source}，不检查 GuthonCodeTool 发行版更新`);
-      }
-      if (activeToolRuns.size) {
-        return vscode.window.showWarningMessage('当前有 GuthonCodeTool 或 SVN 操作正在执行，请完成后再检查更新');
-      }
-      if (applicationUpdateRunning) {
-        return vscode.window.showInformationMessage('GuthonCodeTool 更新或回退正在执行，本次点击已忽略');
-      }
-      const toolPath = resolvePackagedTool(config.get('toolPath', ''));
-      if (!toolPath) {
-        return vscode.window.showErrorMessage('当前发行模式未配置有效的 GuthonCodeTool 可执行程序');
-      }
-      const storageRoot = context.globalStorageUri.fsPath;
-      const source = config.get('updateSource', 'gitee');
-      applicationUpdateRunning = true;
-      let bridgeWasRunning = false;
-      try {
-        return await withUpdateLock(storageRoot, async () => {
-          const release = await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: `正在从 ${UPDATE_SOURCES[source]?.label || source} 检查更新`,
-            cancellable: false,
-          }, () => fetchLatestRelease(source));
-          const installedVersion = await detectCurrentVersion(context.extensionPath, storageRoot, toolPath);
-          if (compareVersions(release.version, installedVersion) <= 0) {
-            return vscode.window.showInformationMessage(`当前已是最新版本：${installedVersion}（${release.sourceLabel}）`);
-          }
-          const asset = releaseAsset(release, assetNameFor());
-          const size = asset.size ? `，${(asset.size / 1024 / 1024).toFixed(1)} MB` : '';
-          const confirmed = await vscode.window.showInformationMessage(
-            `发现 GuthonCodeTool ${release.version}（当前 ${installedVersion}${size}）`,
-            { modal: true, detail: `更新源：${release.sourceLabel}\n下载后将校验 SHA-256、运行 self-test，并保留当前版本用于回退。` },
-            '下载并更新'
-          );
-          if (confirmed !== '下载并更新') return false;
-          bridgeWasRunning = bridge.isRunning();
-          if (bridgeWasRunning) await bridge.stop();
-          await processClient.stop();
-          const installed = await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: `更新 GuthonCodeTool 至 ${release.version}`,
-            cancellable: false,
-          }, (progress) => installRelease({
-            release,
-            storageRoot,
-            alreadyLocked: true,
-            onProgress: (message) => progress.report({ message }),
-          }));
-          const previousState = readUpdateState(storageRoot);
-          writeUpdateState(storageRoot, {
-            activeVersion: installed.version,
-            activePath: installed.toolPath,
-            previousVersion: installedVersion,
-            previousPath: toolPath,
-            source,
-            sha256: installed.sha256,
-            updatedAt: new Date().toISOString(),
-        });
-        try {
-          await config.update('toolPath', installed.toolPath, vscode.ConfigurationTarget.Global);
-        } catch (error) {
-          writeUpdateState(storageRoot, previousState);
-          throw error;
-        }
-        const toolHome = config.get('toolHome', '');
-        const tool = { mode: 'packaged', toolPath: installed.toolPath, toolHome };
-        refreshToolData();
-        try {
-          svnServices.catalogTree.refresh();
-          if (toolHome) writeRuntimeDescriptor(tool);
-          if (bridgeWasRunning) bridge.start(tool);
-          await svnServices.refreshWorkspaceList();
-        } catch (error) {
-          await vscode.window.showWarningMessage(`应用已更新，但运行状态刷新失败：${error.message}`);
-        }
-        return vscode.window.showInformationMessage(`GuthonCodeTool 已更新至 ${installed.version}`);
-        });
-      } catch (error) {
-        if (bridgeWasRunning && !bridge.isRunning()) {
-          const currentTool = configuredToolFromSettings();
-          if (currentTool) bridge.start(currentTool);
-        }
-        return vscode.window.showErrorMessage(`GuthonCodeTool 更新失败：${error.message}`);
-      } finally {
-        applicationUpdateRunning = false;
-      }
-    }),
+    vscode.commands.registerCommand('gushenCompletion.checkToolUpdate', () => updateCenter.open()),
     vscode.commands.registerCommand('gushenCompletion.rollbackToolUpdate', async () => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
       if (activeToolRuns.size) {
@@ -1783,6 +1708,7 @@ function activate(context) {
     definitionDisposable,
     hoverDisposable,
     toolViewDisposable,
+    updateCenter,
     toolView.changed,
     bridgeOutput,
     bridge,

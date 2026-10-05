@@ -51,7 +51,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | Chrome Bridge 扩展与 PAGE/过程函数定位入口 | `plugins/GuthonBridge/extension/content.js`、`plugins/GuthonBridge/extension/popup.js` | `plugins/GuthonBridge/extension/page-bridge.js`、`plugins/GuthonBridge/extension/nexus-locator.js`、`plugins/GuthonBridge/extension/background.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/page-locator.js` | `plugins/GuthonBridge/bridge/server.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/page-locator.test.js` |
 | 发行构建 | `scripts/build_guthon_tool.py` | `GuthonCodeTool.spec` | `tests/test_build_guthon_tool.py` |
 | 谷神 API 补全数据 | `scripts/sync_guthon_api.mjs` | `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs` | 两个脚本的 `--self-test` |
-| 工具自更新 | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-updater.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/tool-updater.test.js` |
+| 三组件更新 | `plugins/GuthonNexus/gushen-vscode-completion/src/update-center.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/component-update.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/release-catalog.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/update-archive.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/tool-updater.js`、`scripts/build_release_catalog.mjs` | `plugins/GuthonNexus/gushen-vscode-completion/test/component-update.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/update-center.test.js` |
 | 环境自检 | `scripts/common/doctor.py` | `scripts/guthon_tool.py` | `scripts/guthon_tool.py self-test --home <临时目录>` |
 
 ## Python
@@ -174,3 +174,7 @@ cd plugins/GuthonBridge && npm test
 ```
 
 `var/` 和真实 `config/` 不在本仓库，涉及真实运行数据的验证必须显式传入 `--home` 并保持只读。
+
+Chrome 托管版本回执与更新维护锁由 `plugins/GuthonBridge/bridge/browser-updates.js` 提供；浏览器 `plugins/GuthonBridge/extension/component-client.js` 只重载自己的托管安装，主机规则独立保存在 `plugins/GuthonBridge/extension/host-settings.js`。构建脚本同步本地服务副本。
+
+开发模式本地插件更新由 `plugins/GuthonNexus/gushen-vscode-completion/src/local-update.js` 提供；`plugins/GuthonNexus/gushen-vscode-completion/src/extension-package.js` 定义打包文件、构建标识和规范Bridge副本，供本地快照与 `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-bridge.mjs` 共用。

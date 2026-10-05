@@ -138,7 +138,7 @@ jobs:
           npm run check
           npm run build:bridge
           node ../../../scripts/check_nexus_commands.mjs
-          git diff --exit-code -- bridge/server.js bridge/page-context.js data/tool-command-metadata.json
+          git diff --exit-code -- bridge/server.js bridge/page-context.js bridge/browser-updates.js data/tool-command-metadata.json
           npx --yes @vscode/vsce@3.9.2 package \
             --allow-missing-repository \
             --skip-license \
@@ -217,6 +217,9 @@ jobs:
           }
           find release -maxdepth 1 -type f -printf '%f\n' | sort
 
+      - name: Generate component release catalog
+        run: node scripts/build_release_catalog.mjs --release-dir release --version "$RELEASE_VERSION"
+
       - name: Generate application checksums
         working-directory: release
         run: |
@@ -228,6 +231,7 @@ jobs:
             GuthonCodeTool-chrome.zip \
             guthon-nexus-vscode.vsix \
             guthon-testing.zip \
+            GuthonCodeTool-release.json \
             > GuthonCodeTool-checksums.txt
 
       - name: Sign release checksum metadata when an external key is configured

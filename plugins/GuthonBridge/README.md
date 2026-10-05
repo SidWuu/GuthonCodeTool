@@ -95,10 +95,10 @@ Chrome 扩展默认访问 `127.0.0.1:17361`。可在 Nexus 设置 `gushenComplet
 
 ## 允许的开发平台地址
 
-编辑 `extension/host-config.js` 顶部配置后重新加载扩展：
+编辑独立 `extension/host-settings.js` 配置后重新加载扩展；托管更新保留该文件，程序校验逻辑由新版本提供：
 
 ```js
-const config = {
+globalThis.GuthonBridgeHostSettings = {
   protocols: ["http:", "https:"],
   ipRanges: ["192.168.0.0/16", "192.0.2.0/24"],
   domainSuffixes: ["dev.example.com"],
@@ -232,3 +232,9 @@ node --check extension/background.js
 Chrome 弹窗的最近拉取保存最多 20 条成功任务元数据及上次导出目录，按浏览器当前平台来源筛选；重拉以新请求进行，剥离旧 force/confirmation、正文、凭据及输出目录覆盖。UNKNOWN/失败任务只按原请求恢复核验，不成为成功重拉记录。页面导出仍使用当前固定导出根，历史目录不能扩大服务端写入范围。
 
 明确工作区的导出/拉取任务在同一工作区内串行，跨工作区最多 4 个并行。队列最多 32 项，独立工作区客户端最多 8 个，回收闲置客户端；未解析的旧请求串行。status 提供 activeWorkspaces，所有任务仍重新验证来源和固定 workspaceKey。
+
+## Nexus 托管更新
+
+首次安装支持三组件更新的 Nexus 2.5.0 后，按其管理指引从固定目录加载 Chrome 扩展并完成配对。可导入旧版主机规则；不要覆盖源码仓库中的扩展目录。新端核验正常后再移除旧端，后续保持固定路径。主机规则保存在独立 host-settings.js，令牌、端口和历史继续使用当前扩展的 Chrome storage。
+
+扩展通过配对服务报告实际 manifest 版本和托管安装身份，空闲心跳时按已安装目标重载；未知或未恢复拉取任务会延后重载。安装文件与运行版本分别显示，未连接不视为已生效。更新不会自动刷新平台页面；保存编辑后可手动重载扩展及刷新页面。

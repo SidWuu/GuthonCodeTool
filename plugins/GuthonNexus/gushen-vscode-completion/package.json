@@ -2,7 +2,7 @@
   "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon workspace, source sync, metadata export, workcopy tools, API completions, hover documentation, and source navigation.",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,
@@ -165,12 +165,17 @@
           "default": "packaged",
           "description": "Use the packaged app, local source checkout, or Release Python zipapp."
         },
+        "gushenCompletion.autoCheckUpdates": {
+          "type": "boolean",
+          "default": true,
+          "description": "每天首次激活 Nexus 后后台检查三组件更新；只检查，不自动安装。"
+        },
         "gushenCompletion.updateSource": {
           "type": "string",
           "enum": ["github", "gitee"],
           "enumDescriptions": ["GitHub Release", "Gitee Release"],
           "default": "gitee",
-          "description": "Release source used only when manually checking for GuthonCodeTool application updates."
+          "description": "Guthon 三组件统一更新源；发行和调试模式均可检查更新。"
         },
         "gushenCompletion.developmentRoot": {
           "type": "string",
@@ -202,7 +207,7 @@
       { "command": "gushenCompletion.selectExecutionMode", "title": "Guthon Nexus: 切换运行模式" },
       { "command": "gushenCompletion.restartDevelopmentToolHost", "title": "Guthon Nexus: 重启开发 ToolHost" },
       { "command": "gushenCompletion.selectUpdateSource", "title": "Guthon Nexus: 选择 GuthonCodeTool 更新源" },
-      { "command": "gushenCompletion.checkToolUpdate", "title": "Guthon Nexus: 检查 GuthonCodeTool 更新" },
+      { "command": "gushenCompletion.checkToolUpdate", "title": "Guthon Nexus: 检查更新" },
       { "command": "gushenCompletion.rollbackToolUpdate", "title": "Guthon Nexus: 回退 GuthonCodeTool 版本" },
       { "command": "gushenCompletion.selectWorkspaceSourceMode", "title": "Guthon Nexus: 设置项目源码来源" },
       { "command": "gushenCompletion.setSvnCredentials", "title": "Guthon Nexus: 设置工作区 SVN 登录" },

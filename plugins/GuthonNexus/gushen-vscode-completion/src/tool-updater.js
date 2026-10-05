@@ -20,6 +20,7 @@ const STATE_FILE = 'tool-update-state.json';
 const versionCache = new Map();
 const { SIGNATURE_ASSET, readTrust, verifySignature } = require('./release-signature');
 const { pipeline } = require('node:stream/promises');
+const { Transform } = require('node:stream');
 const MAX_METADATA_BYTES = 4 * 1024 * 1024;
 
 function normalizeVersion(value) {
@@ -93,7 +94,8 @@ async function fetchLatestRelease(source) {
     source,
     sourceLabel: provider.label,
     version,
-    notes: String(payload.body || '').trim(),
+    prerelease: Boolean(payload.prerelease),
+    notes: String(payload.body || '').trim().slice(0, 16384),
     assets: assets.map((asset) => ({
       name: asset.name,
       size: Number(asset.size || 0),
@@ -141,10 +143,15 @@ async function sha256Stream(filePath) {
   return digest.digest('hex');
 }
 
-async function downloadAsset(url, destination) {
+async function downloadAsset(url, destination, { maxBytes = 256 * 1024 * 1024 } = {}) {
   const response = await openResponse(url);
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  await pipeline(response, fs.createWriteStream(destination, { flags: 'wx' }));
+  let count = 0;
+  const limit = new Transform({ transform(chunk, encoding, callback) {
+    count += chunk.length;
+    callback(count > maxBytes ? new Error('更新附件超过声明大小限制') : null, chunk);
+  } });
+  await pipeline(response, limit, fs.createWriteStream(destination, { flags: 'wx', mode: 0o600 }));
   return fs.statSync(destination).size;
 }
 
@@ -222,10 +229,11 @@ async function installRelease({
   downloader = downloadAsset,
   requester = request,
   bundledTrustFile,
+  trustStorageRoot = storageRoot,
   alreadyLocked = false,
 }) {
   if (!alreadyLocked) return withUpdateLock(storageRoot, () => installRelease({
-    release, storageRoot, platform, arch, onProgress, processRunner, downloader, requester, bundledTrustFile, alreadyLocked: true,
+    release, storageRoot, platform, arch, onProgress, processRunner, downloader, requester, bundledTrustFile, trustStorageRoot, alreadyLocked: true,
   }));
   normalizeVersion(release.version);
   const assetName = assetNameFor(platform, arch);
@@ -237,7 +245,7 @@ async function installRelease({
   const checksumBytes = await requester(checksumAsset.url);
   const checksumDigest = assetDigest(checksumAsset);
   if (checksumDigest && crypto.createHash('sha256').update(checksumBytes).digest('hex') !== checksumDigest) throw new Error('校验文件与 Release 资产摘要不一致');
-  const trust = readTrust(storageRoot, bundledTrustFile);
+  const trust = readTrust(trustStorageRoot, bundledTrustFile);
   let signatureEvidence = {verified:false,reason:'NO_PINNED_TRUST_KEY'};
   const signedAsset = release.assets.find(item=>item.name===SIGNATURE_ASSET);
   if(Object.keys(trust.keys).length && signedAsset) {
@@ -264,7 +272,7 @@ async function installRelease({
     finalDir,
     platform === 'darwin' ? 'GuthonCodeTool' : 'GuthonCodeTool.exe'
   );
-  if (fs.existsSync(installedExecutable)) {
+  if (platform === 'win32' && fs.existsSync(installedExecutable)) {
     onProgress('验证已下载版本');
     try {
       if (platform === 'win32' && await sha256Stream(installedExecutable) !== expectedHash) throw new Error('已安装文件 SHA-256 不匹配');
@@ -425,4 +433,7 @@ module.exports = {
   updateUrl,
   withUpdateLock,
   downloadAsset,
+  request,
+  runProcess,
+  sha256Stream,
 };

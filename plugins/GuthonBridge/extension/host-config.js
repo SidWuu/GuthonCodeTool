@@ -1,6 +1,6 @@
 (function configureGuthonHosts(global) {
   // 显式允许的协议、IPv4/IPv6 CIDR、域名后缀和 Guthon 路径前缀。
-  const config = {
+  const config = global.GuthonBridgeHostSettings || {
     protocols: ["http:", "https:"],
     ipRanges: ["192.168.0.0/16"],
     domainSuffixes: ["gusen.steel56.com.cn"],

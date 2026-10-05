@@ -321,7 +321,7 @@ Nexus 是随 VSIX 发布的 VS Code 扩展：
 ```
 
 该描述符除基础 `command`/`home` 外，还写入模式、代码来源、ToolHost 协议版本，以及 cwd 无关的 `workspaceResolveCommand`、`databaseTargetResolveCommand`、`databaseProbeCommand`、`databaseDescribeCommand`、`databaseQueryCommand` 与 `linterCommand` 数组。
-Nexus 的“运行模式”节点可核对当前入口路径、版本和本地数据目录；只有发行模式显示受管应用的实际版本号，开发模式和调试模式运行仓库源码或本地 pyz，版本显示为“最新”。点击“切换模式”选择发行、开发或调试模式；点击“当前入口”只重新选择并验证当前模式的发行应用、开发源码仓库或调试环境；点击“本地数据目录”可切换工作空间。命令失败时提示目标 `workspaceKey`，首条失败阶段和完整输出保留在“输出 → GuthonCodeTool”。PAGE 语义节点遇到 `INDEX_STALE`、`PARTIAL` 或 `REBUILD_REQUIRED` 时，可按提示刷新当前 PAGE 或重建工作区索引，再重新浏览。
+Nexus 的“运行模式”节点可核对当前入口路径、版本和本地数据目录；三种模式分别探测所选应用、pyz或明确源码目录的版本；无法确认时明确标注，不显示“最新”。点击“切换模式”选择发行、开发或调试模式；点击“当前入口”只重新选择并验证当前模式的发行应用、开发源码仓库或调试环境；点击“本地数据目录”可切换工作空间。命令失败时提示目标 `workspaceKey`，首条失败阶段和完整输出保留在“输出 → GuthonCodeTool”。PAGE 语义节点遇到 `INDEX_STALE`、`PARTIAL` 或 `REBUILD_REQUIRED` 时，可按提示刷新当前 PAGE 或重建工作区索引，再重新浏览。
 Agent 不再拼装 `../../scripts` 或 `../../tools/guthon-lint`；从具体 PRD/PRJ cwd 运行 `--changed` 时，Linter 只检查当前
 workspace，Git pre-commit 的 `--staged` 仍检查整个暂存集合。
 
@@ -361,7 +361,7 @@ cd ../GuthonNexus/gushen-vscode-completion
 npm test
 ```
 
-发布版本由根目录 `VERSION` 统一管理，每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 构建 macOS/Windows 应用、Python zipapp、依赖清单、校验文件、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill，并同步到 GitHub/Gitee Release。Gitee 附件同步可重复执行：已存在的附件跳过，缺失的补齐并逐项校验，网络中断导致失败时重新运行 `Release` 工作流的失败作业或手动运行 `Sync Gitee Release` 工作流并填入对应 tag 即可补齐镜像。发行模式可在 Nexus 的折叠“运行模式”节点中选择更新源并手动检查应用更新；不会启动检查或定时联网，安装前会校验 SHA-256、运行 `self-test` 并保留上一版本用于回退。调试模式目前使用用户提供且校验通过的本地 Python；隔离运行环境的一键下载资产尚未交付。
+发布版本由根目录 `VERSION` 统一管理，每次发布同步新增 `docs/releases/v<版本>.md`。GitHub Actions 构建 macOS/Windows 应用、Python zipapp、依赖清单、校验文件、Guthon Nexus VSIX、Chrome 扩展和 Guthon Testing Skill，并同步到 GitHub/Gitee Release。Gitee 附件同步可重复执行：已存在的附件跳过，缺失的补齐并逐项校验，网络中断导致失败时重新运行 `Release` 工作流的失败作业或手动运行 `Sync Gitee Release` 工作流并填入对应 tag 即可补齐镜像。Nexus“运行模式 → 检查更新”统一检查后端、Nexus VSIX 与 Chrome Bridge，默认每天首次激活后后台检查；角标显示可更新数量。发行和调试模式点击确认后从所选发行源下载并验签，分别更新应用或pyz与依赖清单；开发模式从明确developmentRoot本地源码构建Nexus和Bridge，不访问发行源，后端继续使用工具源码。Nexus 自安装最后执行，安装后可立即重新加载窗口或稍后；Chrome 首次需要加载固定托管目录并配对，之后空闲时自动重载。 后端安装前运行 `self-test`，保留原有应用回退；依赖和操作记录使用显式本地数据目录。调试模式目前使用用户提供且校验通过的本地 Python；隔离运行环境的一键下载资产尚未交付。
 构建时通过 `scripts/check_release_smoke.py` 对 zipapp 和两平台应用执行临时 toolHome 自检、初始化、MCP 握手与工具发现；实机联调遇到安装或功能问题时参阅[在线问题解决中心](https://sidwuu.github.io/GuthonCodeTool/GuthonCodeTool_QA.html)。
 
 Nexus 与 Bridge 各自维护一个常驻 ToolHost。普通工作区请求复用该进程；工作区列表在 Nexus 两棵树之间共享。普通 Nexus 刷新只重新读取工作区并重绘，不扫描全部 SVN working copy；“刷新 SVN 变更”和“检查 SVN 远程变更”仍是独立操作。SVN 日常 SCM 展示只执行必要的 `svn info --xml` 与 `svn status --xml`，写回和更新安全检查继续使用完整状态路径。

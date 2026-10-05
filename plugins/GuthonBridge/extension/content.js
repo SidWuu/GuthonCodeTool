@@ -1,6 +1,7 @@
 (function () {
 if (!globalThis.GuthonBridgeHost?.isAllowed(location.href)) return;
 globalThis.__guthonContentCleanup?.();
+for (const id of ['guthon-bridge-floating-root', 'guthon-bridge-copy-overlay', 'guthon-bridge-fields-mover-overlay', 'guthon-bridge-callers-overlay']) document.getElementById(id)?.remove();
 const documentListeners = [];
 function listenDocument(type, listener, options) {
   document.addEventListener(type, listener, options);
@@ -113,6 +114,7 @@ async function ensurePageBridge() {
       (document.head || document.documentElement).appendChild(script);
     });
   }
+  await injectPageScript("host-settings.js");
   await injectPageScript("host-config.js");
   await injectPageScript("fields-mover-core.js");
   await injectPageScript("page-bridge.js");

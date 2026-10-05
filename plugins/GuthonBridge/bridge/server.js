@@ -6,6 +6,7 @@ const path = require("path");
 const crypto = require("node:crypto");
 const {createPageContexts, snapshot} = require('./page-context');
 const pageContexts = createPageContexts();
+const { createBrowserUpdates } = require('./browser-updates');
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const BODY_TIMEOUT_MS = 10_000;
@@ -41,7 +42,7 @@ const bridgeCode = fs.readFileSync(__filename,"utf8")
   .replace(/^\/\/ GENERATED FILE[^\n]*\n\/\/ Source:[^\n]*\n/,"")
   .replace(/^const TOOL_CLIENT_MODULE = .*;$/m, 'const TOOL_CLIENT_MODULE = "tool-process-client";');
 const toolClientFile = require.resolve(TOOL_CLIENT_MODULE);
-const libraryHashes = [require.resolve('./page-context'), toolClientFile, path.join(path.dirname(toolClientFile), 'workspace-scheduler.js'),
+const libraryHashes = [require.resolve('./page-context'), require.resolve('./browser-updates'), toolClientFile, path.join(path.dirname(toolClientFile), 'workspace-scheduler.js'),
   path.join(path.dirname(toolClientFile), '../data/tool-command-metadata.json')]
   .map(file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'));
 const runtimeFingerprint = crypto.createHash("sha256").update(JSON.stringify([
@@ -87,6 +88,8 @@ const HUB_TOOL_MODE = process.env.GUTHON_TOOL_MODE || "packaged";
 const DEFAULT_TOOL_ENTRY = path.join(ROOT, "scripts", "guthon_tool.py");
 const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(BRIDGE_STATE_DIR, "pull-log.ndjson");
 const workspaceQueue = new WorkspaceQueue({limit:32,concurrency:4});
+let activeBusinessRequests = 0;
+const browserUpdates = createBrowserUpdates(HUB_TOOL_HOME, { busy: () => activeBusinessRequests > 0 || workspaceQueue.size > 0 });
 const toolProcessClient = new WorkspaceToolPool({limit:8,createClient:()=>new ToolProcessClient({
   env: { ...process.env, GUTHON_SUPPRESS_PULL_LOG: "1" },
 })});
@@ -529,6 +532,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && req.url === "/status") {
     return sendJson(res, 200, { ok: true, port: PORT, instanceId: INSTANCE_ID, invalidJobRecords: jobLoadErrors.slice(0,20), exportRoot: EXPORT_ROOT, queueLength: workspaceQueue.size, activeWorkspaces: [...workspaceQueue.activeKeys].filter(key=>key!=="__unresolved__"), workspaceKey: workspaceQueue.activeKeys.size===1 ? ([...workspaceQueue.activeKeys][0]==="__unresolved__" ? "" : [...workspaceQueue.activeKeys][0]) : "" });
   }
+  if (req.method === 'GET' && req.url === '/components') return sendJson(res, 200, { ok: true, clients: browserUpdates.list(), protocolVersion: 2 });
   if (req.method === "OPTIONS") return sendJson(res, 403, { ok: false, message: "不支持网页跨域调用" });
 
   const requestUrl = new URL(req.url, `http://127.0.0.1:${PORT}`);
@@ -544,6 +548,23 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "POST" && !/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) {
     return sendJson(res, 415, { ok: false, message: "仅支持 JSON 请求" });
+  }
+  if (req.method === 'POST' && ['/componentHeartbeat', '/updateGuard'].includes(req.url)) {
+    try {
+      const payload = await readBody(req);
+      if (req.url === '/componentHeartbeat') return sendJson(res, 200, browserUpdates.heartbeat(payload, origin));
+      if (origin) throw new Error('更新维护锁只接受本机 Nexus 请求');
+      if (payload.action === 'acquire') return sendJson(res, 200, browserUpdates.acquire());
+      if (payload.action === 'release') return sendJson(res, 200, browserUpdates.release(payload.id));
+      throw new Error('无效的更新维护锁操作');
+    } catch (error) { return sendJson(res, 409, { ok: false, message: error.message }); }
+  }
+  if (req.method === 'POST' && !['/pageContext', '/removePageContext', '/navigationResult'].includes(req.url)) {
+    if (browserUpdates.maintenance()) return sendJson(res, 409, { ok: false, message: '组件更新维护中，请稍后重试' });
+    activeBusinessRequests++;
+    let finished = false;
+    const complete = () => { if (!finished) { finished = true; activeBusinessRequests--; } };
+    res.once('finish', complete); res.once('close', complete);
   }
 
   if (req.method === 'POST' && ['/pageContext', '/removePageContext', '/navigate', '/navigationResult'].includes(req.url)) {

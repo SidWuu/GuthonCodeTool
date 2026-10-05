@@ -112,7 +112,7 @@ function createBridgeProcess(options) {
 
   async function request(toolHome, route, payload) {
     if (!isRunning()) throw new Error('Bridge 未运行，请先启动 Guthon Bridge');
-    if (!/^\/(pageContext|navigate|navigationResult)(\?|$)/.test(route)) throw new Error('不支持的浏览器定位接口');
+    if (!/^\/(pageContext|navigate|navigationResult|components|updateGuard)(\?|$)/.test(route)) throw new Error('不支持的 Bridge 接口');
     const response = await fetch(`http://127.0.0.1:${currentPort}${route}`, {
       method: payload === undefined ? 'GET' : 'POST',
       headers: {Authorization: `Bearer ${pairingToken(toolHome)}`, 'Content-Type': 'application/json'},
@@ -123,7 +123,7 @@ function createBridgeProcess(options) {
     return result;
   }
 
-  return { dispose, isRunning, pairingToken, request, restart, start, stop, waitForReady };
+  return { dispose, isRunning, isShared: () => Boolean(sharedInstance), pairingToken, request, restart, start, stop, waitForReady };
 }
 
 module.exports = { createBridgeProcess, resolveBridgeScript };

@@ -886,8 +886,8 @@ test("popup exposes separate page and hub pull actions without hub target input"
   assert.equal(background.includes('"log-pull-failure": "/logPullFailure"'), true);
   assert.equal(background.includes('chrome.runtime.onInstalled.addListener'), true);
   assert.equal(background.includes('files: ["bridge.css"]'), true);
-  assert.equal(background.includes('files: ["host-config.js", "fields-mover-core.js", "page-bridge.js"]'), true);
-  assert.equal(background.includes('files: ["host-config.js", "nexus-locator.js", "workspace-selection.js", "task-client.js", "content.js"]'), true);
+  assert.equal(background.includes('files: ["host-settings.js", "host-config.js", "fields-mover-core.js", "page-bridge.js"]'), true);
+  assert.equal(background.includes('files: ["host-settings.js", "host-config.js", "nexus-locator.js", "workspace-selection.js", "task-client.js", "content.js"]'), true);
   assert.equal(background.includes('world: "MAIN"'), true);
   assert.equal(script.includes("拉取单据类型"), true);
   assert.equal(script.includes("workspaceSelectionRequired"), true);

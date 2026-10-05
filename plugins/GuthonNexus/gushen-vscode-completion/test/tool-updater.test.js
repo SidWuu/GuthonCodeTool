@@ -322,8 +322,11 @@ test('update lock spans application-state changes and rejects concurrent windows
     const extension = fs.readFileSync(path.join(__dirname,'../src/extension.js'),'utf8');
     const start = extension.indexOf("registerCommand('gushenCompletion.checkToolUpdate'");
     const end = extension.indexOf("registerCommand('gushenCompletion.rollbackToolUpdate'");
-    assert.ok(extension.slice(start,end).includes('withUpdateLock(storageRoot, async () =>'));
-    assert.ok(extension.slice(start,end).includes('alreadyLocked: true'));
+    assert.ok(extension.slice(start,end).includes('updateCenter.open()'));
+    const center = fs.readFileSync(path.join(__dirname,'../src/update-center.js'),'utf8');
+    const components = fs.readFileSync(path.join(__dirname,'../src/component-update.js'),'utf8');
+    assert.ok(center.includes('withUpdateLock(directory, () => withUpdateLock(context.globalStorageUri.fsPath'));
+    assert.ok(components.includes('alreadyLocked: true'));
     assert.ok(extension.slice(end).includes('withUpdateLock(storageRoot, async () =>'));
     assert.ok(extension.slice(end).includes('verifyExecutable(rollbackPath, state.previousVersion)'));
   } finally {release();await first;fs.rmSync(root,{recursive:true,force:true});}
