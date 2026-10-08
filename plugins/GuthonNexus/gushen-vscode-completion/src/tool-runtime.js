@@ -16,6 +16,32 @@ function normalizeExecutionMode(mode) {
   return mode === 'development' ? 'source-development' : mode;
 }
 
+function runtimeConfigurationTarget(config, key, targets) {
+  const scope = config.inspect?.(key);
+  if (scope?.workspaceFolderValue !== undefined) return targets.WorkspaceFolder;
+  if (scope?.workspaceValue !== undefined) return targets.Workspace;
+  return targets.Global;
+}
+
+function installedToolEnvironment(home, base = process.env) {
+  const file = path.join(home, 'var', 'nexus', 'setup-result.json');
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 65536) return {};
+    const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (report.state !== 'environment-ready') return {};
+    const directories = [];
+    for (const name of ['git', 'svn']) {
+      const executable = report.programs?.[name];
+      if (!path.isAbsolute(executable || '') || path.basename(executable).toLowerCase() !== name + '.exe' || !isFile(executable)) continue;
+      directories.push(path.dirname(executable));
+      const ssh = path.join(path.dirname(executable), '..', 'usr', 'bin');
+      if (name === 'git' && isDirectory(ssh)) directories.push(ssh);
+    }
+    return directories.length ? { PATH: [...directories, base.PATH || base.Path || ''].join(path.delimiter) } : {};
+  } catch { return {}; }
+}
+
 function isFile(filePath) {
   try { return fs.statSync(filePath).isFile(); } catch { return false; }
 }
@@ -88,6 +114,8 @@ function writeRuntimeDescriptor(tool) {
 }
 
 module.exports = {
+  installedToolEnvironment,
+  runtimeConfigurationTarget,
   normalizeExecutionMode, resolveDevelopmentRuntime, resolveScriptRuntime,
   resolvePackagedTool, toolArguments, writeRuntimeDescriptor,
 };

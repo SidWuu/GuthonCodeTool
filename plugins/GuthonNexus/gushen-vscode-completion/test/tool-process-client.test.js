@@ -12,6 +12,19 @@ readline.createInterface({input:process.stdin}).on('line', line => {
 });
 `;
 
+test('ToolHost receives the installed dependency environment explicitly', async () => {
+  let environment;
+  const client = new ToolProcessClient({ env: { PATH: '/old-parent', KEEP: 'preserved' }, spawnProcess: (_exe, _args, options) => {
+    environment = options.env;
+    return spawn(process.execPath, ['-e', fakeHost], { stdio: ['pipe', 'pipe', 'pipe'] });
+  } });
+  try {
+    await client.request({ toolPath: '/fixture', toolHome: '/fixture-home', env: { PATH: '/installed-git' } }, 'workspaces');
+    assert.equal(environment.PATH, '/installed-git');
+    assert.equal(environment.KEEP, 'preserved');
+  } finally { await client.stop(); }
+});
+
 test('reuses one ToolHost for consecutive requests and stops it on dispose', async () => {
   let starts = 0;
   const client = new ToolProcessClient({

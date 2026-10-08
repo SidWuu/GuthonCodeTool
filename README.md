@@ -14,6 +14,14 @@ GuthonCodeTool 是独立工具源码仓库，只保存公开的工具代码、�
 
 工具代码只通过显式 `--home`、runtime descriptor 或 `GUTHON_HOME` / `GUTHON_TOOL_HOME` 获取 `toolHome`，不从源码仓库相对路径推断运行数据。
 
+## Windows 安装入口
+
+GuthonCodeSetup 的下载清单和配置步骤集中在 [Windows 安装步骤第一章：一键安装配置](docs/GuthonCodeTool_Windows安装步骤.html#one-click)。
+v0.3.2 提供统一安装器；单独安装或修复仍可按同页手动章节操作。
+维护者构建、组件职责与验收边界见 [统一安装器构建说明](docs/UNIFIED_INSTALLER.md)。
+
+GuthonCodeSetup 仅负责从零安装工具、插件和基础环境。一次性安装确认完成后，后续在 CodeBuddy 使用 GuthonNexus；产品／项目接入与索引属于后续业务操作。套件工作区自动启动 Bridge，日常不再显示安装助手。
+
 ## AI 开发入口
 
 工具开发读取 [AGENTS.md](AGENTS.md)，先经 [AI_CODE_INDEX.md](AI_CODE_INDEX.md) 定位模块；谷神业务开发从独立私有工作区的 `<toolHome>/var/AGENTS.md` 进入。排查开发库/测试库，或在功能开发后执行数据库验证时，使用 [Guthon Testing Skill](skills/guthon-testing/SKILL.md)。Skill 可调用工具内置只读连接器；已有 DBX 时也可继续使用。专项规范按任务加载，README 不维护第二套 Agent 流程。

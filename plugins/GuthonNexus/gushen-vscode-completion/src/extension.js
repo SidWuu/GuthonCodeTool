@@ -24,11 +24,12 @@ const { searchPickItems, workspaceCockpit } = require('./workspace-assistant');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 const {
   normalizeExecutionMode, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime,
-  writeRuntimeDescriptor,
+  writeRuntimeDescriptor, runtimeConfigurationTarget, installedToolEnvironment,
 } = require('./tool-runtime');
 const { ToolProcessClient } = require('./tool-process-client');
 const { probeScriptRuntime } = require('./script-runtime');
 const { createUpdateCenter } = require('./update-center');
+const { createOnboarding } = require('./onboarding');
 const {
   UPDATE_SOURCES,
   detectCurrentVersion,
@@ -283,7 +284,7 @@ async function configuredRuntime(config, mode, options = {}) {
       }
     }
     if (config.get('developmentRoot', '') !== developmentRoot) {
-      await config.update('developmentRoot', developmentRoot, vscode.ConfigurationTarget.Global);
+      await config.update('developmentRoot', developmentRoot, runtimeConfigurationTarget(config, 'developmentRoot', vscode.ConfigurationTarget));
     }
     return runtime;
   } else if (mode === 'script') {
@@ -343,10 +344,10 @@ async function configuredRuntime(config, mode, options = {}) {
       }
     }
     if (config.get('scriptPythonPath', '') !== pythonPath) {
-      await config.update('scriptPythonPath', pythonPath, vscode.ConfigurationTarget.Global);
+      await config.update('scriptPythonPath', pythonPath, runtimeConfigurationTarget(config, 'scriptPythonPath', vscode.ConfigurationTarget));
     }
     if (config.get('scriptToolPath', '') !== scriptPath) {
-      await config.update('scriptToolPath', scriptPath, vscode.ConfigurationTarget.Global);
+      await config.update('scriptToolPath', scriptPath, runtimeConfigurationTarget(config, 'scriptToolPath', vscode.ConfigurationTarget));
     }
     return runtime;
   } else {
@@ -378,7 +379,7 @@ async function configuredRuntime(config, mode, options = {}) {
         vscode.window.showErrorMessage(`所选发行应用不可用：${error.message}`);
         return undefined;
       }
-      await config.update('toolPath', toolPath, vscode.ConfigurationTarget.Global);
+      await config.update('toolPath', toolPath, runtimeConfigurationTarget(config, 'toolPath', vscode.ConfigurationTarget));
     }
     return { mode: 'packaged', toolPath };
   }
@@ -395,10 +396,10 @@ async function configuredTool(options = {}) {
     if (!selected) return undefined;
     toolHome = selected[0].fsPath;
     if (options.persistToolHome !== false) {
-      await config.update('toolHome', toolHome, vscode.ConfigurationTarget.Global);
+      await config.update('toolHome', toolHome, runtimeConfigurationTarget(config, 'toolHome', vscode.ConfigurationTarget));
     }
   }
-  const tool = { ...runtime, toolHome };
+  const tool = { ...runtime, toolHome, env: installedToolEnvironment(toolHome) };
   if (options.writeDescriptor !== false) writeRuntimeDescriptor(tool);
   return tool;
 }
@@ -473,7 +474,7 @@ function configuredToolFromSettings() {
         ? resolveScriptRuntime(config.get('scriptPythonPath', ''), config.get('scriptToolPath', ''))
         : { mode: 'packaged', toolPath: resolvePackagedTool(config.get('toolPath', '')) };
     if (!runtime.toolPath || !fs.existsSync(runtime.toolPath)) return undefined;
-    return { ...runtime, toolHome };
+    return { ...runtime, toolHome, env: installedToolEnvironment(toolHome) };
   } catch {
     return undefined;
   }
@@ -908,6 +909,7 @@ function activate(context) {
     return editor;
   };
   const toolCommands = [
+    vscode.commands.registerCommand('gushenCompletion.openOnboarding', () => onboarding.open()),
     vscode.commands.registerCommand('gushenCompletion.showDiagnosisHistory', async (workspaceValue = '') => {
       try {
         const key = typeof workspaceValue === 'string' ? workspaceValue : workspaceValue?.guthonWorkspaceKey || workspaceValue?.workspaceKey || '';
@@ -1110,7 +1112,7 @@ function activate(context) {
       if (!runtime) return;
       await processClient.stop();
       if (!selectEntry) {
-        await config.update('executionMode', selected.value, vscode.ConfigurationTarget.Global);
+        await config.update('executionMode', selected.value, runtimeConfigurationTarget(config, 'executionMode', vscode.ConfigurationTarget));
       }
       const toolHome = config.get('toolHome', '');
       if (toolHome) writeRuntimeDescriptor({ ...runtime, toolHome });
@@ -1195,7 +1197,7 @@ function activate(context) {
             updatedAt: new Date().toISOString(),
         });
         try {
-          await config.update('toolPath', rollbackPath, vscode.ConfigurationTarget.Global);
+          await config.update('toolPath', rollbackPath, runtimeConfigurationTarget(config, 'toolPath', vscode.ConfigurationTarget));
         } catch (error) {
           writeUpdateState(storageRoot, previousState);
           throw error;
@@ -1258,7 +1260,7 @@ function activate(context) {
       try {
         if (previousToolHome !== tool.toolHome) await processClient.stop();
         writeRuntimeDescriptor(tool);
-        await config.update('toolHome', tool.toolHome, vscode.ConfigurationTarget.Global);
+        await config.update('toolHome', tool.toolHome, runtimeConfigurationTarget(config, 'toolHome', vscode.ConfigurationTarget));
       } catch (error) {
         return vscode.window.showErrorMessage(`Nexus 保存工作空间配置失败：${error.message}`);
       }
@@ -1703,12 +1705,32 @@ function activate(context) {
     }),
   ];
 
+  const onboarding = createOnboarding({ vscode, context, getTool: configuredToolFromSettings,
+    client: assistantClient, bridge });
+  const startEnvironmentBridge = async () => {
+    if (!vscode.workspace.isTrusted || !vscode.workspace.getConfiguration('gushenCompletion').get('autoStartBridge', false)) return;
+    const tool = configuredToolFromSettings();
+    if (!tool) return;
+    writeRuntimeDescriptor(tool);
+    bridge.start(tool);
+    await bridge.waitForReady(tool.toolHome);
+  };
+  const initializeInstalledEnvironment = async () => {
+    try { await startEnvironmentBridge(); }
+    catch (error) { void vscode.window.showErrorMessage(`Guthon Bridge 自动启动失败：${error.message}`); }
+    await onboarding.openIfNeeded();
+  };
+  const onboardingTrust = vscode.workspace.onDidGrantWorkspaceTrust?.(() => {
+    void initializeInstalledEnvironment().catch(error => vscode.window.showErrorMessage(error.message));
+  });
   context.subscriptions.push(
     disposable,
     definitionDisposable,
     hoverDisposable,
     toolViewDisposable,
     updateCenter,
+    onboarding,
+    ...(onboardingTrust ? [onboardingTrust] : []),
     toolView.changed,
     bridgeOutput,
     bridge,
@@ -1716,6 +1738,7 @@ function activate(context) {
     { dispose: () => { toolOutputChannel?.dispose(); toolOutputChannel = null; } },
     ...toolCommands
   );
+  void initializeInstalledEnvironment().catch(error => vscode.window.showErrorMessage(error.message));
 }
 
 function deactivate() {}

@@ -105,13 +105,10 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 
 ## Configuration
 
-The default route table is stored in:
-
-```text
-rules.json
-```
-
-Example:
+The Windows suite download list and first-run instructions are maintained in the
+[Windows installation guide, chapter one](../../../docs/GuthonCodeTool_Windows安装步骤.html#one-click).
+Runtime switches and updates persist in the effective setting scope. Installation confirmation is one-time; project connections and indexes belong to later Nexus use. The installer remains a candidate;
+standalone extension settings are listed below.
 
 ```json
 {

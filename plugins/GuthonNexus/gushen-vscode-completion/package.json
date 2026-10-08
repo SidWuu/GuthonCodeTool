@@ -2,7 +2,7 @@
   "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon workspace, source sync, metadata export, workcopy tools, API completions, hover documentation, and source navigation.",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,
@@ -137,6 +137,8 @@
     "configuration": {
       "title": "Guthon Nexus",
       "properties": {
+        "gushenCompletion.onboarding": { "type": "boolean", "default": false, "description": "从零安装后显示尚未完成的一次性工具与插件安装确认，完成后日常不再显示。" },
+        "gushenCompletion.autoStartBridge": { "type": "boolean", "default": false, "description": "在已信任的 Guthon 工作区自动启动本机 Bridge；统一安装器配置的工作区默认启用。" },
         "gushenCompletion.bridgePort": {
           "type": "integer",
           "default": 17361,
@@ -195,6 +197,7 @@
       }
     },
     "commands": [
+      { "command": "gushenCompletion.openOnboarding", "title": "Guthon Nexus: 一次性安装配置助手" },
       {"command":"gushenCompletion.archivePullHistory","title":"Guthon Nexus: 归档本地拉取历史"},
       {"command":"gushenCompletion.restorePullHistory","title":"Guthon Nexus: 恢复拉取历史归档"},
       {"command":"gushenCompletion.showPullHistory","title":"Guthon Nexus: 查看源码拉取历史"},

@@ -40,3 +40,12 @@ python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool/GuthonCode
 ## 本次执行记录
 
 此文件是验收模板。实际安装、真实页面、数据库和 SVN 的结果需在每次发行时另行填写，不能由源码测试推断。
+
+## 统一安装器额外验收
+
+候选 GuthonCodeSetup 额外核验：Inno 编译、干净电脑依赖安装、无系统 Python、中文用户目录、
+内网市场提示与实际 SessionStart、MCP 握手、已有配置保护、中途失败后重试、桌面入口和卸载保留数据。
+员工步骤见 [Windows 安装步骤第一章](GuthonCodeTool_Windows安装步骤.html#one-click)，
+维护者构建见 [统一安装器构建说明](UNIFIED_INSTALLER.md)。这些 Windows 实机检查尚未执行。
+
+安装器专项验收须使用没有业务工作区的新目录：确认未创建产品／项目、未收集 SVN 业务密码、未检出源码或建立业务索引，仍可完成工具与插件环境安装；完成后再次启动不得重新弹出安装助手。

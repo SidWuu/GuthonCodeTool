@@ -8,6 +8,30 @@ const {
   toolArguments, writeRuntimeDescriptor,
 } = require('../src/tool-runtime');
 
+test('installer workspace runtime changes remain in the effective setting scope', () => {
+  const { runtimeConfigurationTarget } = require('../src/tool-runtime');
+  const targets = { Global: 1, Workspace: 2, WorkspaceFolder: 3 };
+  assert.equal(runtimeConfigurationTarget({ inspect: () => ({ workspaceValue: '/suite/tool.exe' }) }, 'toolPath', targets), 2);
+  assert.equal(runtimeConfigurationTarget({ inspect: () => ({ workspaceFolderValue: 'script', workspaceValue: 'packaged' }) }, 'executionMode', targets), 3);
+  assert.equal(runtimeConfigurationTarget({ inspect: () => ({ globalValue: '/old/tool.exe' }) }, 'toolPath', targets), 1);
+});
+
+test('suite dependencies remain available to a pre-existing IDE without changing process PATH', () => {
+  const { installedToolEnvironment } = require('../src/tool-runtime');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-environment-'));
+  try {
+    const git = path.join(home, 'Git', 'cmd', 'git.exe'), svn = path.join(home, 'SVN', 'bin', 'svn.exe');
+    for (const file of [git, svn]) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'fixture'); }
+    fs.mkdirSync(path.join(home, 'Git', 'usr', 'bin'), { recursive: true });
+    fs.mkdirSync(path.join(home, 'var', 'nexus'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'var', 'nexus', 'setup-result.json'), JSON.stringify({ state: 'environment-ready', programs: { git, svn } }));
+    const environment = installedToolEnvironment(home, { PATH: '/old/parent' });
+    assert.ok(environment.PATH.includes(path.dirname(git)));
+    assert.ok(environment.PATH.includes(path.dirname(svn)));
+    assert.ok(environment.PATH.endsWith('/old/parent'));
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
 test('resolves the repository virtualenv and Python entry point', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-runtime-'));
   fs.mkdirSync(path.join(root, '.venv', 'bin'), { recursive: true });

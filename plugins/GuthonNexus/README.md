@@ -103,6 +103,14 @@ $proc.函数名($参数)
 
 ## 安装方式
 
+Windows 的统一安装器下载与首次配置见 [Windows 安装步骤第一章](../../docs/GuthonCodeTool_Windows安装步骤.html#one-click)。
+安装器会生成 `Guthon.code-workspace` 并打开一次性工具安装助手；v0.3.2 起提供统一安装包。
+运行模式、工作空间切换和后端更新会写回当前生效的设置作用域。
+
+GuthonCodeSetup 仅负责从零安装工具、插件和基础环境。一次性安装确认完成后，后续在 CodeBuddy 使用 GuthonNexus；产品／项目接入与索引属于后续业务操作。套件工作区自动启动 Bridge，日常不再显示安装助手。
+
+以下为独立 VSIX 的手动安装方法：
+
 从 [GuthonCodeTool Releases](https://github.com/SidWuu/GuthonCodeTool/releases) 下载 Guthon Nexus 扩展 `guthon-nexus-vscode.vsix` 后安装：
 
 ```bash

@@ -31,6 +31,7 @@ function createBridgeProcess(options) {
     const started = spawnProcess(options.executable || process.execPath, [options.scriptPath], {
       env: {
         ...process.env,
+        ...(tool.env || {}),
         ELECTRON_RUN_AS_NODE: '1',
         GUTHON_TOOL_PATH: tool.toolPath,
         GUTHON_TOOL_ENTRY: tool.toolEntry || '',

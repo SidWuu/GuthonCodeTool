@@ -6,6 +6,8 @@ YAML 配置文件首行说明各自用途；`system-data.json` 只是在 DATABAS
 `datasource.yaml`、`products.yaml`、`projects.yaml`，向导在选择 SVN 或 DATABASE 后只生成对应 Nexus，不继续询问登录、checkout 或数据库连接；已有配置不会覆盖。SVN 登录、导入/粘贴 checkout 和范围编辑在新建 Nexus 节点内完成，DATABASE 的 datasource 后续补充。
 生成后 Nexus 会询问是否立即调整对应 YAML，因为系统 alias、`system_id`、`data_source_id` 仍须以实际谷神环境为准。
 
+统一安装器只创建基础运行配置，不创建业务工作区。安装完成后，在 CodeBuddy 使用 GuthonNexus 的“添加产品或项目”等入口配置实际业务来源。
+
 以下完整示例只供维护者手工配置或查阅字段：
 
 ```bash

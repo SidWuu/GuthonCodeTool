@@ -1,3 +1,4 @@
+const { runtimeConfigurationTarget } = require('./tool-runtime');
 const fs = require('node:fs');
 const path = require('node:path');
 const { fetchLatestRelease, detectCurrentVersion, runProcess, writeUpdateState, readUpdateState, sha256Stream } = require('./tool-updater');
@@ -258,11 +259,11 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
           switchBackend: async backend => {
             const previous = { mode: mode(), toolPath: config().get('toolPath', ''), scriptToolPath: config().get('scriptToolPath', ''), version: actual.toolVersion };
             const state = readUpdateState(context.globalStorageUri.fsPath);
-            if (mode() === 'script') await config().update('scriptToolPath', backend.toolEntry, vscode.ConfigurationTarget.Global);
+            if (mode() === 'script') await config().update('scriptToolPath', backend.toolEntry, runtimeConfigurationTarget(config(), 'scriptToolPath', vscode.ConfigurationTarget));
             else {
               writeUpdateState(context.globalStorageUri.fsPath, { activeVersion: backend.version, activePath: backend.toolPath,
                 previousVersion: actual.toolVersion, previousPath: previous.toolPath, source: source(), sha256: backend.sha256, updatedAt: new Date().toISOString() });
-              try { await config().update('toolPath', backend.toolPath, vscode.ConfigurationTarget.Global); }
+              try { await config().update('toolPath', backend.toolPath, runtimeConfigurationTarget(config(), 'toolPath', vscode.ConfigurationTarget)); }
               catch (error) { writeUpdateState(context.globalStorageUri.fsPath, state); throw error; }
             }
             const updatedTool = getTool();

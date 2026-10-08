@@ -23,7 +23,7 @@ function requestKind(command, args = []) {
 }
 
 function runtimeKey(tool) {
-  return JSON.stringify([tool.toolPath, tool.toolEntry || '', tool.toolHome]);
+  return JSON.stringify([tool.toolPath, tool.toolEntry || '', tool.toolHome, tool.env || {}]);
 }
 
 class ToolProcessClient {
@@ -66,7 +66,7 @@ class ToolProcessClient {
       'serve', '--stdio', '--home', tool.toolHome,
     ];
     const child = this.spawnProcess(tool.toolPath, args, {
-      shell: false, env: this.env, stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false, env: { ...this.env, ...(tool.env || {}) }, stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.child = child;
     let readyResolve;

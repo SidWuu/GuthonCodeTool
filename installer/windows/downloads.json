@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "python": {
+    "url": "https://www.python.org/ftp/python/3.14.3/python-3.14.3-embed-amd64.zip",
+    "sha256": "ad4961a479dedbeb7c7d113253f8db1b1935586b73c27488712beec4f2c894e6"
+  },
+  "prerequisites": [
+    {
+      "id": "codebuddy", "type": "exe", "elevate": false,
+      "url": "https://codebuddy-1328495429.cos.accelerate.myqcloud.com/aiide/win32-x64-user/CodeBuddy-win32-x64-user-4.12.1.39217423-757a5b2f.exe",
+      "sha256": "3fb09b0c6aef06e42b38c63571dd6118d6301cbcd075568c9620c7597e43d911",
+      "args": ["/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/mergetasks=!runcode"]
+    },
+    {
+      "id": "git", "type": "exe", "elevate": false,
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.1/Git-2.55.0-64-bit.exe",
+      "sha256": "0c66e4a5875da5a74f9754386de7555ba301503b03bbdcdbafa69dc6464e548d",
+      "args": ["/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER"]
+    },
+    {
+      "id": "svn", "type": "msi", "elevate": true,
+      "url": "https://downloads.sourceforge.net/project/tortoisesvn/1.14.9/Application/TortoiseSVN-1.14.9.29743-x64-svn-1.14.5.msi",
+      "sha256": "244f3d754212ff65d057a1a02f99dd59f8b4c7ea4e4dd33eae8fb9b52895eec2",
+      "args": ["/qn", "/norestart", "ADDLOCAL=ALL"]
+    }
+  ]
+}

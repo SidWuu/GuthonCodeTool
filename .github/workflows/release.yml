@@ -172,11 +172,59 @@ jobs:
             guthon-testing.zip
           if-no-files-found: error
 
+  build-installer:
+    needs: [build-app, build-plugins]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-GuthonCodeTool-windows
+          path: installer-components
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-plugins
+          path: installer-components
+      - uses: actions/cache@v4
+        with:
+          path: installer-inputs
+          key: windows-installer-inputs-${{ hashFiles('installer/windows/downloads.json') }}
+      - name: Fetch verified official dependencies
+        run: python scripts/fetch_installer_inputs.py --output installer-inputs
+      - name: Compile public unified installer
+        shell: pwsh
+        run: |
+          python scripts/build_installer_components.py --manifest-only --output installer-components
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $inputs = Get-Content installer-inputs/inputs.json -Raw | ConvertFrom-Json
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $compiler)) { throw '缺少 Inno Setup 编译器' }
+          python scripts/build_windows_installer.py --components-dir installer-components --python-zip installer-inputs/python.zip --python-sha256 "$($inputs.python.sha256)" --prerequisites installer-inputs/prerequisites.json --iscc "$compiler" --output dist/setup
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash dist/setup/GuthonCodeSetup.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  GuthonCodeSetup.exe" | Set-Content dist/setup/GuthonCodeSetup.sha256 -Encoding ascii
+      - name: Test compiled Windows installer
+        run: python scripts/check_windows_installer.py --entry dist/setup/GuthonCodeSetup.exe
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-installer
+          path: |
+            dist/setup/GuthonCodeSetup.exe
+            dist/setup/GuthonCodeSetup.sha256
+          if-no-files-found: error
+
   release:
     needs:
       - build-app
       - build-script
       - build-plugins
+      - build-installer
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -209,6 +257,8 @@ jobs:
             GuthonCodeTool-chrome.zip
             guthon-nexus-vscode.vsix
             guthon-testing.zip
+            GuthonCodeSetup.exe
+            GuthonCodeSetup.sha256
           )
           for name in "${expected[@]}"; do
             test -f "release/$name" || { echo "::error::缺少发行附件 $name"; exit 1; }
@@ -236,6 +286,8 @@ jobs:
             guthon-nexus-vscode.vsix \
             guthon-testing.zip \
             GuthonCodeTool-release.json \
+            GuthonCodeSetup.exe \
+            GuthonCodeSetup.sha256 \
             > GuthonCodeTool-checksums.txt
 
       - name: Sign release checksum metadata when an external key is configured
@@ -288,6 +340,8 @@ jobs:
             echo "本版本由 main 分支自动构建并发布。"
             echo
             echo "## 下载内容"
+            echo
+            echo "- Windows 一键安装：\`GuthonCodeSetup.exe\` 与同版 \`GuthonCodeSetup.sha256\`（团队地址安装时填写，公开包不内置内网配置）"
             echo
             echo "- Windows x64 应用：\`GuthonCodeTool-windows-x64.exe\`"
             echo "- macOS M1 及后续型号应用：\`GuthonCodeTool-macos-arm64.zip\`"

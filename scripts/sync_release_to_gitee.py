@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 TRUST = ROOT / "plugins/GuthonNexus/gushen-vscode-completion/data/release-trust.json"
 KEYCHAIN_SERVICE = "GuthonCodeTool.ReleaseMirror"
-MAX_ASSET_BYTES = 256 * 1024 * 1024
+MAX_ASSET_BYTES = 512 * 1024 * 1024
 METADATA_BYTES = 4 * 1024 * 1024
 EXPECTED_ASSETS = frozenset((
     "GuthonCodeTool-windows-x64.exe", "GuthonCodeTool-macos-arm64.zip",
@@ -32,6 +32,8 @@ EXPECTED_ASSETS = frozenset((
     "GuthonCodeTool-checksums.signature.json",
 ))
 CORE_ASSETS = EXPECTED_ASSETS - {"GuthonCodeTool-release.json"}
+INSTALLER_ASSETS = EXPECTED_ASSETS | {"GuthonCodeSetup.exe", "GuthonCodeSetup.sha256"}
+ASSET_SETS = (CORE_ASSETS, EXPECTED_ASSETS, INSTALLER_ASSETS)
 
 
 class MirrorError(Exception):
@@ -124,8 +126,8 @@ def run_command(command: list[str], *, timeout: int = 300) -> str:
 def verify_assets(directory: Path, tag: str) -> dict[str, str]:
     files = list(directory.iterdir())
     names = {file.name for file in files}
-    if names not in (CORE_ASSETS, EXPECTED_ASSETS):
-        raise MirrorError("发行目录必须包含完整签名附件（9 个，带三组件清单时为 10 个），不接受缺失或额外文件")
+    if names not in ASSET_SETS:
+        raise MirrorError("发行目录必须包含完整签名附件（9/10 个，含统一安装器时为 12 个），不接受缺失或额外文件")
     for file in files:
         if file.is_symlink() or not file.is_file() or not 0 < file.stat().st_size <= MAX_ASSET_BYTES:
             raise MirrorError(f"发行附件类型或大小无效：{file.name}")
@@ -312,7 +314,7 @@ def asset_map(release: dict) -> dict[str, dict]:
         if not isinstance(asset, dict) or not isinstance(asset.get("name"), str):
             raise MirrorError("Gitee 返回无效附件记录")
         name = asset["name"]
-        if name in EXPECTED_ASSETS:
+        if name in INSTALLER_ASSETS:
             if name in result:
                 raise MirrorError(f"Gitee 存在重复附件，请人工核查：{name}")
             result[name] = asset
@@ -415,8 +417,8 @@ def main(argv: list[str] | None = None) -> int:
                 if args.release_dir.is_symlink():
                     raise MirrorError("附件目录不能是符号链接")
                 source = args.release_dir.resolve(strict=True)
-                if {file.name for file in source.iterdir()} not in (CORE_ASSETS, EXPECTED_ASSETS):
-                    raise MirrorError("输入目录必须只包含完整的 9 或 10 个正式签名附件")
+                if {file.name for file in source.iterdir()} not in ASSET_SETS:
+                    raise MirrorError("输入目录必须只包含完整的 9/10/12 个正式签名附件")
                 for file in source.iterdir():
                     if file.is_symlink() or not file.is_file() or not 0 < file.stat().st_size <= MAX_ASSET_BYTES:
                         raise MirrorError("输入附件类型或大小无效")
@@ -429,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
                 names = {asset.get("name") for asset in assets}
                 if (metadata.get("tagName") != tag or metadata.get("isDraft") is not False
                         or metadata.get("isPrerelease") is not False or len(assets) != len(names)
-                        or names not in (CORE_ASSETS, EXPECTED_ASSETS)
+                        or names not in ASSET_SETS
                         or any(type(asset.get("size")) is not int or not 0 < asset["size"] <= MAX_ASSET_BYTES for asset in assets)):
                     raise MirrorError("GitHub 目标不是包含完整签名附件的稳定发行")
                 run_command(["gh", "release", "download", tag, "--repo", github, "--dir", str(directory)])

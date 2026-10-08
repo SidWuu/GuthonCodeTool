@@ -1,0 +1,63 @@
+name: Build GuthonCodeSetup
+
+on:
+  workflow_dispatch:
+    inputs:
+      marketplace_url:
+        description: "团队内网 guthon-team Git 插件市场地址（不含密码）"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Fetch verified official dependencies
+        shell: pwsh
+        run: |
+          python scripts/fetch_installer_inputs.py --output "$env:RUNNER_TEMP/installer-inputs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install build dependencies
+        run: python -m pip install pyinstaller -r scripts/python-requirements.txt
+      - name: Build and test current components
+        run: python scripts/build_installer_components.py --output dist/installer-components
+      - name: Compile and smoke-check GuthonCodeSetup
+        shell: pwsh
+        env:
+          MARKETPLACE_URL: ${{ inputs.marketplace_url }}
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          $inputs = Get-Content "$env:RUNNER_TEMP/installer-inputs/inputs.json" -Raw | ConvertFrom-Json
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $compiler)) { throw 'Windows runner 缺少 Inno Setup 编译器' }
+          python scripts/build_windows_installer.py --components-dir dist/installer-components --marketplace-url "$env:MARKETPLACE_URL" --python-zip "$env:RUNNER_TEMP/installer-inputs/python.zip" --python-sha256 "$($inputs.python.sha256)" --prerequisites "$env:RUNNER_TEMP/installer-inputs/prerequisites.json" --iscc "$compiler" --output dist/setup
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash dist/setup/GuthonCodeSetup.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  GuthonCodeSetup.exe" | Set-Content dist/setup/GuthonCodeSetup.sha256 -Encoding ascii
+      # Candidate carries a real intranet marketplace address; keep it in a private build repository.
+      - uses: actions/upload-artifact@v7
+        if: github.event.repository.private || inputs.marketplace_url == ''
+        with:
+          name: GuthonCodeSetup-windows-candidate
+          path: |
+            dist/setup/GuthonCodeSetup.exe
+            dist/setup/GuthonCodeSetup.sha256
+          if-no-files-found: error
+      - name: Explain candidate visibility
+        if: ${{ !github.event.repository.private && inputs.marketplace_url != '' }}
+        shell: pwsh
+        run: |
+          '编译完成，但本作业未公开内网配置。请在私有构建仓库运行此工作流以下载候选包。' >> $env:GITHUB_STEP_SUMMARY

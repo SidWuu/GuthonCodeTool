@@ -32,7 +32,7 @@ class ToolJsonClient {
       const child = this.spawnProcess(
         tool.toolPath,
         toolArguments(tool, command, args, workspaceKey),
-        { shell: false, env: process.env }
+        { shell: false, env: { ...process.env, ...(tool.env || {}) } }
       );
       const stdout = [];
       const stderr = [];
