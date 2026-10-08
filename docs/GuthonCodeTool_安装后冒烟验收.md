@@ -20,7 +20,7 @@ python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool/GuthonCode
 # pyz:     python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool-python.pyz
 ```
 
-脚本依次检查 `version`、`self-test`、`setup`、MCP stdio 握手、默认 28 个工具与只读模式 15 个工具，并自动删除临时 toolHome。此检查不读取真实配置，也不代替后续组件联调。
+脚本依次检查 `version`、`self-test`、`setup`、MCP stdio 握手与工具发现，并自动删除临时 toolHome。0.3.1 默认发现 56 个工具，只读模式发现 43 个工具；后续版本以该版本注册表与冒烟输出为准，脚本会从注册表计算期望数量。此检查不读取真实配置，也不代替后续组件联调。
 
 ## 实机检查矩阵
 
@@ -31,7 +31,7 @@ python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool/GuthonCode
 | Bridge | 启动由 Nexus 管理的 Bridge，检查 `127.0.0.1:17361` health；安装并重载 Chrome 扩展，在允许来源的测试页面观察按钮及目标工作区选择。 | health 结果、页面 origin、工作区身份、请求结果 |
 | Chrome → Nexus PAGE 定位 | 在模块开发页选中已知 PAGE，用 Bridge 弹窗打开 Nexus；VS Code 应显示 SVN 工作区选择，确认精确 PAGE ID 后打开预期虚拟分块。若 VS Code 被唤起但没有响应，检查实际安装 VSIX 的 `onUri` 能力，强制重装当前构建并重载窗口后复测。 | PAGE ID、安装包构建、工作区与源码身份、VS Code 实际结果 |
 | Chrome → Nexus 过程函数定位 | 选中已知过程函数页签，分别从 Bridge 弹窗和页面左下角按钮打开 Nexus；确认工作区选择、精确包名和函数名、候选源码身份及虚拟文档。PAGE 也从页面左下角按钮复测一次。 | 页签身份、包名与函数名、工作区、实际打开的源码；失败时记录 Chrome 和 VS Code 的第一条错误 |
-| MCP | 用发行应用或 pyz 的绝对路径注册 `mcp --stdio --home <toolHome>`；握手后默认发现 28 个工具，`--read-only` 发现 15 个查询工具；调用 `get_runtime_status` 并确认目标工作区。 | 命令和参数、协商协议版本、工具数、状态摘要 |
+| MCP | 用发行应用或 pyz 的绝对路径注册 `mcp --stdio --home <toolHome>`；握手后工具数应与该版本注册表及冒烟结果一致（0.3.1 为默认 56 个、只读 43 个）；`--read-only` 不得暴露写入工具；调用 `get_runtime_status` 并确认目标工作区。 | 命令和参数、协商协议版本、工具数、状态摘要 |
 | DATABASE | 在专用开发/测试目标解析 `workspaceKey`、环境、库/schema；探测只读连接，执行一条有界查询，再检查同步和 Workcopy 状态。 | 目标身份、探测结果、同步阶段及 Workcopy 差异 |
 | SVN | 使用有授权的测试根地址检出或复用工作副本；刷新索引，查询一个已知 PAGE 和过程函数；如需验证写入，只在受控目标用预览、幂等键和 SVN diff 检查，结束时按原有流程处理测试改动。 | 根地址身份、revision、索引状态、对象身份、diff |
 

@@ -10,10 +10,14 @@ on:
       - "config/example/**"
       - "plugins/GuthonBridge/**"
       - "plugins/GuthonNexus/**"
-      - "docs/releases/**"
       - ".github/scripts/**"
       - ".github/workflows/release.yml"
   workflow_dispatch:
+    inputs:
+      release_notes:
+        description: "可公开的中文发行说明；由本机私有文档提供，留空时使用提交说明"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -248,10 +252,18 @@ jobs:
           fi
 
       - name: Generate Chinese release notes
+        env:
+          INPUT_RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
-          version_notes="docs/releases/$RELEASE_TAG.md"
-          if [ -f "$version_notes" ]; then
-            cp "$version_notes" release-notes.md
+          if [ -n "$INPUT_RELEASE_NOTES" ]; then
+            python - <<'PY'
+          import os
+          from pathlib import Path
+          notes = os.environ["INPUT_RELEASE_NOTES"]
+          if not notes.strip():
+              raise SystemExit("发行说明不能只有空白")
+          Path("release-notes.md").write_text(notes, encoding="utf-8")
+          PY
             exit 0
           fi
 
@@ -314,15 +326,14 @@ jobs:
               --latest
           fi
 
-      - name: 同步 Gitee Release 附件
-        env:
-          GITEE_TOKEN: ${{ secrets.SYNCRELEASETOGITEE }}
-          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
-          GITEE_REPO: ${{ vars.GITEE_REPO }}
-          ASSET_DIR: release
-          RELEASE_NOTES_FILE: release-notes.md
+      - name: Report GitHub publication and local mirror command
         run: |
-          test -n "$GITEE_TOKEN" || { echo "::error::缺少 Secret SYNCRELEASETOGITEE"; exit 1; }
-          test -n "$GITEE_OWNER" || { echo "::error::缺少变量 GITEE_OWNER"; exit 1; }
-          test -n "$GITEE_REPO" || { echo "::error::缺少变量 GITEE_REPO"; exit 1; }
-          bash .github/scripts/sync_gitee_release.sh
+          {
+            echo "GitHub $RELEASE_TAG 已发布；Gitee 镜像单独同步，不影响构建结果。"
+            echo
+            echo "在维护者本机执行："
+            echo
+            echo '```bash'
+            echo ".venv/bin/python scripts/sync_release_to_gitee.py --tag $RELEASE_TAG"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

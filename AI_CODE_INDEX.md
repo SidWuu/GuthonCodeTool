@@ -154,7 +154,9 @@ Bridge `plugins/GuthonBridge/extension/task-client.js` 与 `background.js` 实�
 - `scripts/check_release_smoke.py`：用临时 toolHome 检查源码、zipapp 或应用的版本、自检、初始化与 MCP 工具发现（应用可直接传 macOS onedir 目录）；`scripts/check_public_docs.mjs` 校验四份公开 HTML 与图片引用后再部署 Pages。
 - `GuthonCodeTool.spec`：打包配置。
 - `scripts/sync_guthon_api.mjs`：从 `<toolHome>/config/sync.yaml` 读取谷神版本，更新 `<toolHome>/var/docs/谷神方言API/` 与插件补全数据。
-- `.github/workflows/release.yml`、`.github/scripts/sync_gitee_release.sh`：按 `[build]` 构建并发布 GitHub/Gitee Release；Gitee 附件同步可重复执行，`.github/workflows/sync-gitee-release.yml` 从既有 GitHub Release 手动补齐指定 tag 的镜像附件。
+- `.github/workflows/release.yml`：按 `[build]` 构建、签名并发布 GitHub Release；不等待 Gitee 镜像。
+- 发行说明源文件保存在本机忽略的 `docs/private/releases/`，仅作为提交和发行正文来源；CI 使用提交说明或手动传入的 `release_notes`，不读取私有目录。开发生成的 `*.vsix` 不跟踪，正式包在 Release 分发；Windows 指南配图继续跟踪，额外原始截图仅保存在忽略的私有目录。
+- `scripts/sync_release_to_gitee.py`：维护者本机下载指定 GitHub 签名发行、使用系统钥匙串令牌补传 Gitee 附件、逐项下载核验哈希；`--verify-only` 为无令牌只读验收。`.github/workflows/sync-gitee-release.yml` 复用此入口作为手动备用同步；使用方式见 `docs/RELEASE_MIRROR.md`，本地测试见 `tests/test_sync_gitee_release.py`。
 - `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs`：从 API 文档目录生成 `plugins/GuthonNexus/gushen-vscode-completion/data/index.json`。
 - `scripts/vault_crypto.mjs`：仅处理明确凭据迁移的标准输入，不创建明文文件；pyz/发行应用包含该公开辅助脚本。
 - `scripts/manage_release_signing.mjs`：维护者在仓库外生成专用私钥或验证已有公钥，输出内置信任文件；`scripts/verify_release.mjs` 用受信公钥校验下载目录的全部签名资产。

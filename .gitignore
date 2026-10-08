@@ -34,5 +34,7 @@ docs/private/
 _site/
 release/
 *.part
+# 本地开发安装包只留在磁盘，正式安装包通过 Release 分发。
+*.vsix
 # 测试只放在本地忽略的 tests/；scripts/ 下不得新增测试文件
 scripts/**/test_*.py

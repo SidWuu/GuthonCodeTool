@@ -1,97 +1,43 @@
 name: Sync Gitee Release
 
-# 手动补齐某个已发布 tag 的 Gitee 镜像附件。
-# 附件直接取自同 tag 的 GitHub Release，不重新构建，保证两侧附件完全一致。
+# 备用手动镜像同步。日常优先使用维护者本机，避免 GitHub 托管节点到 Gitee 的慢链路。
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "要补齐的发行标签，例如 v0.2.7"
+        description: "要同步的签名发行标签，例如 v0.3.1"
         required: true
         type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: gitee-release-mirror
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-
-      - name: Resolve release tag
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify and mirror signed release
         env:
           INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          if ! [[ "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::tag 必须是形如 v0.2.7 的发行标签"
-            exit 1
-          fi
-          echo "RELEASE_TAG=$INPUT_TAG" >> "$GITHUB_ENV"
-
-      - name: Download GitHub Release assets
-        run: |
-          mkdir -p release
-          gh release download "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --dir release \
-            --skip-existing
-
-      - name: Verify downloaded assets
-        run: |
-          expected=(
-            GuthonCodeTool-windows-x64.exe
-            GuthonCodeTool-macos-arm64.zip
-            GuthonCodeTool-python.pyz
-            GuthonCodeTool-python-requirements.txt
-            GuthonCodeTool-chrome.zip
-            guthon-nexus-vscode.vsix
-            guthon-testing.zip
-            GuthonCodeTool-checksums.txt
-          )
-          for name in "${expected[@]}"; do
-            test -f "release/$name" || { echo "::error::GitHub Release 缺少附件 $name"; exit 1; }
-          done
-          # Preserve historical unsigned tags, while signed tags must verify
-          # against the locally pinned public key before mirroring.
-          if [ -f release/GuthonCodeTool-checksums.signature.json ]; then
-            expected+=(GuthonCodeTool-checksums.signature.json)
-            node scripts/verify_release.mjs --release-dir release --trust-file plugins/GuthonNexus/gushen-vscode-completion/data/release-trust.json --version "${RELEASE_TAG#v}"
-          fi
-          if [ -f release/GuthonCodeTool-release.json ]; then
-            expected+=(GuthonCodeTool-release.json)
-          fi
-          actual=$(find release -maxdepth 1 -type f | wc -l)
-          test "$actual" -eq "${#expected[@]}" || {
-            echo "::error::GitHub Release 附件数量为 $actual，期望 ${#expected[@]}"
-            find release -maxdepth 1 -type f -printf '%f\n' | sort
-            exit 1
-          }
-          (cd release && sha256sum -c GuthonCodeTool-checksums.txt)
-          find release -maxdepth 1 -type f -printf '%f\n' | sort
-
-      - name: Prepare release notes
-        run: |
-          gh release view "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json body --jq .body > release-notes.md
-          test -s release-notes.md || printf 'GuthonCodeTool %s\n' "$RELEASE_TAG" > release-notes.md
-
-      - name: 同步 Gitee Release 附件
-        env:
           GITEE_TOKEN: ${{ secrets.SYNCRELEASETOGITEE }}
           GITEE_OWNER: ${{ vars.GITEE_OWNER }}
           GITEE_REPO: ${{ vars.GITEE_REPO }}
-          ASSET_DIR: release
-          RELEASE_NOTES_FILE: release-notes.md
         run: |
           test -n "$GITEE_TOKEN" || { echo "::error::缺少 Secret SYNCRELEASETOGITEE"; exit 1; }
           test -n "$GITEE_OWNER" || { echo "::error::缺少变量 GITEE_OWNER"; exit 1; }
           test -n "$GITEE_REPO" || { echo "::error::缺少变量 GITEE_REPO"; exit 1; }
-          bash .github/scripts/sync_gitee_release.sh
+          python scripts/sync_release_to_gitee.py --tag "$INPUT_TAG" --github-repo "$GITHUB_REPOSITORY" --gitee-repo "$GITEE_OWNER/$GITEE_REPO"
