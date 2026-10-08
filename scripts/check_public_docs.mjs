@@ -77,6 +77,16 @@ if (!qaScript) {
       errors.push(`QA ${item.id}: unknown OS`);
     }
     for (const [, href] of item.links || []) checkLink('GuthonCodeTool_QA.html', href);
+    // QA cards render links from descriptions and step strings, not only links[].
+    for (const field of Object.values(item)) {
+      const values = Array.isArray(field) ? field.flat() : [field];
+      for (const value of values) {
+        if (typeof value !== 'string') continue;
+        for (const [, href] of value.matchAll(/<a\b[^>]*\bhref="([^"]+)"/gi)) {
+          checkLink('GuthonCodeTool_QA.html', href);
+        }
+      }
+    }
   }
 }
 
