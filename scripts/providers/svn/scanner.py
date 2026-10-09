@@ -101,9 +101,9 @@ def _scan_page_json(path, checkout_path, system_id, data_source_id, names, revis
         data, double_encoded = _decode_json(raw)
         if not isinstance(data, dict):
             raise ValueError("PAGE JSON root must be an object")
+        # The payload supplies the logical PAGE identity; filenames only locate
+        # the physical SVN source and need not match a GuShen export's pageId.
         page_id = str(data.get("pageId") or path.stem)
-        if page_id != path.stem and not path.stem.startswith("SYS-"):
-            result["status"] = "IDENTITY_MISMATCH"
         fields = extract_page_scripts(data)
         result.update(
             {

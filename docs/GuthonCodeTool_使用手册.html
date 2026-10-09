@@ -251,6 +251,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <p>设置后，入口会变为“切换工作空间”。普通用户保持“发行模式”即可；维护者可选“开发模式”（仓库源码与 .venv），已有 64 位 Python 3.12+ 的开发人员可选“调试模式”（同一 Release 的 <code>GuthonCodeTool-python.pyz</code> 与 <code>GuthonCodeTool-checksums.txt</code>，两个文件放在同一目录）。调试模式会检查脚本、依赖、自检和 ToolHost 协议；三种模式共用本地数据目录，切换工作空间不会删除原目录。</p>
 <p>同机在 VS Code 和 CodeBuddy 使用 Nexus 时，在另一 IDE 的“工作区”节点点击“设置/切换工作空间”，选择已在使用、同时包含 <code>config/</code> 和 <code>var/</code> 的本地数据目录。插件先读取配置和产品/项目摘要，再接入已有工作空间；已有源码与各项目 <code>context/index.db</code> 直接供两端读取，不执行源码拉取或索引重建。后续一端新增产品、项目或更新索引时，在另一端点击“刷新已有工作空间状态”。两端须使用同一台电脑上可访问的同一目录。</p>
 <p>Nexus 复用 ToolHost；Bridge 使用有界工作区客户端池，同一工作区串行处理。普通“刷新 Guthon Nexus”只更新工作区列表和界面，不扫描全部 SVN working copy；需要检查本地变更时使用“刷新 SVN 变更”，需要访问远端时使用“检查 SVN 远程变更”。</p>
+<p>更新 Nexus 后重新加载窗口；插件按实际加载的版本和构建标识核验，加载目标构建后清除 Nexus 的待重载提示。编辑器添加的安装记录和 JSON 排版差异不算新构建，同版本的真实代码变化仍会提示更新。VS Code 与 CodeBuddy 分别核验各自安装。</p>
 <p>设置工作空间会创建缺失的六个配置文件，不会覆盖已经存在的配置；首次创建的 datasource/products/projects 注册表为空。设置后点击“添加产品或项目”，后续开发新增项目也使用同一入口，不必重新初始化或切换数据目录。</p>
 <div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>&lt;本地数据目录&gt;/
 ├── config/
@@ -311,7 +312,10 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 </ol>
 <aside class="notice"><div class="notice-icon">i</div><div>
 <p>SVN 默认完整检出 <code>svn.url</code>，<code>systems.include.mappings</code> 只用于身份和业务分组，不过滤目录。</p>
+<p>谷神 PAGE JSON 的文件名与内部 <code>pageId</code> 不同时仍可索引：逻辑身份取 JSON 的 <code>pageId</code>，缺少时取文件名；读取和写回绑定原授权文件路径，继续校验页面身份和内容哈希。升级后端后完整重建 SVN 索引，使新解析规则生效。</p>
 <p>用户名保存在 <code>sync.yaml</code>；密码由 SVN 凭据缓存或系统钥匙串管理，不写入 YAML。</p>
+<p>保存登录会检查当前配置的明确地址；路径被拒绝时继续验证其他配置地址，或当前工作区已有授权清单中、同一根地址下的子目录。不会猜测目录或跨工作区探测；密码、证书和网络错误直接返回。登录成功不代表完整根目录可检出，根目录无权限时需使用明确子目录范围或申请根权限。</p>
+<p>谷神 SVN 的旧 HTTPS 自签证书可能过期或与域名不匹配；工具默认兼容 <code>expired,cn-mismatch,unknown-ca,not-yet-valid,other</code>，检出、更新、远程检查和提交无需另外设置证书。维护者可用 <code>GUTHON_SVN_TRUSTED_CERT_FAILURES</code> 缩小允许集合；发行附件下载和验签继续使用原有校验。</p>
 </div></aside>
 
 <h3 id="2-4-驾驶舱与工作区管理">2.4 驾驶舱与工作区管理</h3>

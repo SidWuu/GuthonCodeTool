@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urlsplit
 
 from providers.svn.checkout import resolve_configured_scope, run_remote_svn
 from providers.svn.scope_import import (
@@ -16,6 +18,7 @@ from providers.svn.scope_import import (
     write_manifest,
     write_scope_config,
 )
+from .manifest import load_authorized_scope
 
 
 COMMON_CATEGORIES = {"skill", "public"}
@@ -241,26 +244,59 @@ def preview(workspace: dict) -> dict:
     }
 
 
+def _authentication_urls(workspace: dict, entries: list[dict], manifest_path: Path):
+    """Try explicit config first, then existing authorized children of its root."""
+    seen = set()
+    for entry in entries:
+        url = entry["url"]
+        if url not in seen:
+            seen.add(url)
+            yield url
+    roots = [urlsplit(entry["url"]) for entry in entries if entry["category"] == "root"]
+    if not roots or not manifest_path.is_file():
+        return
+    # Loading is deferred until configured URLs were denied. A successful root
+    # login does not depend on an older manifest or change checkout topology.
+    for entry in load_authorized_scope(workspace).entries:
+        candidate = urlsplit(entry.url)
+        if ".." in PurePosixPath(unquote(candidate.path)).parts:
+            continue
+        matches = any(
+            (candidate.scheme, candidate.netloc.casefold(), candidate.query)
+            == (root.scheme, root.netloc.casefold(), root.query)
+            and candidate.path.startswith(root.path.rstrip("/") + "/")
+            for root in roots
+        )
+        if matches and entry.url not in seen:
+            seen.add(entry.url)
+            yield entry.url
+
+
 def cache_authentication(workspace: dict, password: str) -> dict:
     """Authenticate once and let the native SVN client persist the password."""
 
     if not isinstance(password, str) or not password:
         raise SystemExit("SVN password must not be empty")
-    script_path, _manifest_path, config_path = _paths(workspace)
+    script_path, manifest_path, config_path = _paths(workspace)
     result, _source = _build_workspace_manifest(workspace, script_path, config_path)
     entries = result.manifest.get("entries") or []
     if not entries:
         raise SystemExit(f"SVN checkout script has no authorized entries for {workspace['workspaceKey']}")
-    run_remote_svn(
-        ["info", entries[0]["url"]],
-        workspace["svn"],
-        password=password,
+    last_denied = None
+    for url in _authentication_urls(workspace, entries, manifest_path):
+        try:
+            run_remote_svn(["info", url], workspace["svn"], password=password)
+        except SystemExit as error:
+            codes = set(re.findall(r"\bE\d{6}\b", str(error)))
+            if not codes.intersection({"E175013", "E220004"}) or not codes <= {"E170013", "E175013", "E220004"}:
+                raise
+            last_denied = error
+            continue
+        return {"ok": True, "action": "authentication-cached", "workspaceKey": workspace["workspaceKey"]}
+    raise SystemExit(
+        "当前工作区配置和已授权范围内没有可读取的 SVN 地址；"
+        "请导入当前账号的明确子目录范围，或申请配置地址的读取权限。\n" + str(last_denied)
     )
-    return {
-        "ok": True,
-        "action": "authentication-cached",
-        "workspaceKey": workspace["workspaceKey"],
-    }
 
 
 def import_scope(workspace: dict, *, accept_scope_change: bool = False) -> dict:

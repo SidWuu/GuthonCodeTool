@@ -121,7 +121,7 @@ SVN：
 - `scripts/providers/svn/nexus/page_nodes.py`、`page_mutation.py`、`page_field_mutation.py`、`mcp_server.py`：PAGE 节点/界面字段有界查询、未解析映射及引用风险诊断、源码新鲜度核验、编辑租约、受控节点写入及同集合单字段新增/拷贝；MCP 提供显式 `--read-only`，CLI `svn page-query` 和 Nexus 后端共用查询层。
 - `scripts/providers/svn/nexus/procedure_sources.py`、`procedure_mutation.py`：独立于 PAGE 投影的 SVN 对象索引就绪检查、过程函数无会话有界读取/调用方证据、精确身份编辑租约、预览和幂等本地写入；共用 `documents.py` 的授权与物理文件写回内核。
 - `scripts/providers/svn/nexus/inheritance_sources.py`：基于授权索引与两层源码哈希，有界读取项目原文、产品原文和展开内容；Nexus `virtual-fs.js` 默认将展开内容投影到项目可编辑标签页，并按编辑范围决定保留标记或物化，同时校验产品哈希；`diff-content.js` 将相同投影用于虚拟编辑器 Quick Diff 基线，物理 SVN diff 不变；`catalog.py` 将 `.inherit.gss` 记为独立物理产品层，但从逻辑过程函数目录和可写入口排除。
-- `scripts/providers/svn/nexus/source_queries.py`（无租约当前读、批读、分页对象摘要与健康度）、`catalog.py`、`documents.py`、`index_queries.py`、`manifest.py`、`scm.py`、`workspace.py`、`bootstrap.py`：Nexus 目录、文档与内部 PAGE 操作记录、有界查询、清单、SCM 与工作区初始化。
+- `scripts/providers/svn/nexus/source_queries.py`（无租约当前读、批读、分页对象摘要与健康度）、`catalog.py`、`documents.py`、`index_queries.py`、`manifest.py`、`scm.py`、`workspace.py`、`bootstrap.py`：Nexus 目录、文档与内部 PAGE 操作记录、有界查询、清单、SCM 与工作区初始化；`bootstrap.py` 的登录验证只探测当前配置及同一根下已有授权子目录，并经 stdin 交给 SVN 缓存密码。
 
 ## Guthon Nexus
 

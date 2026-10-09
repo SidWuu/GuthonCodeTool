@@ -33,6 +33,12 @@ function nexusFiles(root, overrides = new Map()) {
   const readme = ['readme.md', 'README.md'].find(name => fs.existsSync(path.join(root, name)));
   if (readme) files.set('readme.md', fs.readFileSync(path.join(root, readme)));
   for (const [name, bytes] of overrides) files.set(name, bytes);
+  if (files.has('package.json')) {
+    const manifest = JSON.parse(files.get('package.json').toString('utf8'));
+    // Editors add installation metadata and reformat the manifest after VSIX install.
+    delete manifest.__metadata;
+    files.set('package.json', Buffer.from(JSON.stringify(manifest, null, 2) + '\n'));
+  }
   return files;
 }
 

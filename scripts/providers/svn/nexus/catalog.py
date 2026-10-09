@@ -126,6 +126,8 @@ def _page_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) 
     data, double_encoded = _decode_json(raw)
     if not isinstance(data, dict):
         raise ValueError("PAGE JSON root must be an object")
+    # GuShen exports may retain a different filename; pageId is the logical
+    # identity, while source_path remains the authorized physical write target.
     page_id = str(data.get("pageId") or path.stem)
     result.update(
         source_id=page_id,
@@ -157,8 +159,6 @@ def _page_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) 
             ],
         ],
     )
-    if page_id != path.stem and not path.stem.startswith("SYS-"):
-        result["status"] = "IDENTITY_MISMATCH"
     return result
 
 

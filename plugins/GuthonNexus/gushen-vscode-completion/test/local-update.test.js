@@ -8,6 +8,7 @@ const { localRelease, prepareLocalUpdate } = require('../src/local-update');
 const { packageFingerprint, chromeFiles } = require('../src/extension-package');
 const { updatePlan, applyUpdate, managedChrome } = require('../src/component-update');
 const { createUpdateCenter } = require('../src/update-center');
+const { extensionBuildInfo } = require('../src/extension-build');
 function fixture(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-local-update-')); t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const source = path.join(home, 'source'), nexus = path.join(source, 'plugins/GuthonNexus/gushen-vscode-completion'), chrome = path.join(source, 'plugins/GuthonBridge/extension');
@@ -72,6 +73,43 @@ test('local build snapshots use installed tools, apply plugin files and never re
   assert.equal(fs.existsSync(path.join(f.nexus, 'guthon-nexus-vscode.vsix')), false);
   const managed = managedChrome(path.join(f.home, 'updates'));
   assert.equal(packageFingerprint(chromeFiles(managed.directory), new Set(['host-settings.js'])), local.catalog.components.bridge.buildId);
+});
+test('same-version local installation becomes active after reload despite editor metadata', async t => {
+  const f = fixture(t), local = localRelease(f.source), installed = path.join(f.home, 'installed');
+  for (const [name, bytes] of local.nexusFiles) {
+    const file = path.join(installed, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, bytes);
+  }
+  const manifestFile = path.join(installed, 'package.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestFile));
+  fs.writeFileSync(manifestFile, JSON.stringify({ ...manifest, __metadata: { installedTimestamp: 123, size: 456 } }));
+  const storage = path.join(f.home, 'editor'), stateFile = path.join(storage, 'nexus-install.json');
+  fs.mkdirSync(storage);
+  fs.writeFileSync(stateFile, JSON.stringify({ phase: 'INSTALLED', version: manifest.version,
+    buildId: local.catalog.components.nexus.buildId, home: f.home }));
+  const values = { executionMode: 'source-development', developmentRoot: f.source, toolHome: f.home, autoCheckUpdates: false };
+  function center(loadedBuildId) {
+    const result = createUpdateCenter({ vscode: { StatusBarAlignment: { Right: 1 },
+      window: { createStatusBarItem: () => ({ show() {}, dispose() {} }) },
+      workspace: { getConfiguration: () => ({ get: (key, fallback) => values[key] ?? fallback }) } },
+      context: { extensionPath: installed, globalStorageUri: { fsPath: storage } },
+      getTool: () => ({ mode: 'source-development' }), loadedVersion: manifest.version, loadedBuildId,
+      bridge: { isRunning: () => false }, refresh() {},
+      fetchRelease: () => assert.fail('local reload must not contact release sources') });
+    t.after(() => result.dispose()); return result;
+  }
+  const previous = center('previous-build');
+  await new Promise(resolve => setTimeout(resolve, 5));
+  await previous.check(true);
+  assert.equal(previous.snapshot.pending, true);
+  assert.equal(JSON.parse(fs.readFileSync(stateFile)).phase, 'INSTALLED');
+  previous.dispose();
+  const reloaded = center(extensionBuildInfo(installed).buildId);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  await reloaded.check(true);
+  assert.equal(JSON.parse(fs.readFileSync(stateFile)).phase, 'ACTIVE');
+  assert.equal(reloaded.snapshot.rows.find(row => row.id === 'nexus').update, false);
+  assert.equal(reloaded.snapshot.pending, false);
 });
 test('changing the source after inspection aborts local compilation', async t => {
   const f = fixture(t), local = localRelease(f.source);

@@ -46,10 +46,10 @@ Windows 指南使用的 `docs/windows-install-images/` 配图继续随指南提�
 GitHub 对应版本发布后执行：
 
 ```bash
-.venv/bin/python scripts/sync_release_to_gitee.py --tag v0.3.1
+.venv/bin/python scripts/sync_release_to_gitee.py --tag v0.3.3
 ```
 
-版本必须明确指定。默认来源为 `SidWuu/GuthonCodeTool`，目标为 `sidwu/GuthonCodeTool`。同步器只接受完整的稳定签名发行：0.3.0 为 9 个附件，带三组件清单的 0.3.1 为 10 个附件，含统一安装器的 0.3.2 为 12 个附件；不用于旧的未签名版本，不自动选择最新版本或创建 Git 标签。
+版本必须明确指定。默认来源为 `SidWuu/GuthonCodeTool`，目标为 `sidwu/GuthonCodeTool`。同步器只接受完整的稳定签名发行：0.3.0 为 9 个附件，带三组件清单的 0.3.1 为 10 个附件，含统一安装器的 0.3.2 及后续版本为 12 个附件；不用于旧的未签名版本，不自动选择最新版本或创建 Git 标签。
 
 执行过程：
 
@@ -68,7 +68,7 @@ GitHub 对应版本发布后执行：
 无需 Gitee 令牌即可执行真实下载验收：
 
 ```bash
-.venv/bin/python scripts/sync_release_to_gitee.py --tag v0.3.1 --verify-only
+.venv/bin/python scripts/sync_release_to_gitee.py --tag v0.3.3 --verify-only
 ```
 
 只读模式不会创建发行、修改说明或补传附件。发现缺失、签名错误、哈希冲突时返回非零退出码，不声称镜像完整。

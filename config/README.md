@@ -163,11 +163,11 @@ Nexus 的“导入/粘贴 SVN checkout 配置”可选择 `.sh/.bat` 或粘贴 c
 或无法识别的业务分类会阻止旧范围格式生成。凭据不会进入地址配置、清单、日志或公开配置。
 
 仅在需要覆盖默认 checkout 根或调整非核心高级能力时，才在产品/项目配置中增加 `svn:` 块。公共用户名只在 `sync.yaml` 的
-`svn.username` 配置一次；密码由 Nexus 临时交给 SVN 系统凭据存储。内部 SVN 可使用 HTTPS 自签证书；默认只信任 `unknown-ca`，不放行过期、域名不匹配等异常，维护者可通过 `GUTHON_SVN_TRUSTED_CERT_FAILURES` 显式配置允许集合。Nexus 多 working-copy 模式默认启用 `platform_save`；设置 `svn.capabilities.platform_save: false` 可禁用该提交入口；
+`svn.username` 配置一次；密码由 Nexus 临时交给 SVN 系统凭据存储。谷神 SVN 使用旧 HTTPS 自签证书，默认兼容 `expired,cn-mismatch,unknown-ca,not-yet-valid,other`，检出、更新、远程检查和提交共用该策略，无需另外设置证书。维护者可通过 `GUTHON_SVN_TRUSTED_CERT_FAILURES` 显式缩小允许集合；此设置只作用于 SVN，不影响发行附件下载和验签。Nexus 多 working-copy 模式默认启用 `platform_save`；设置 `svn.capabilities.platform_save: false` 可禁用该提交入口；
 保存仍需经过文件选择、内容哈希复核和远程最新状态检查；SVN 提交说明可选，留空可直接保存。
 
 Nexus 的“设置工作区 SVN 登录”读取 `sync.yaml` 中的公共用户名，只弹出一次密码输入框；密码不会进入 VS Code SecretStorage、
-YAML、授权清单、参数或日志。认证成功后由 SVN 自身按认证域保存，同一认证域下的所有产品和项目直接复用。
+YAML、授权清单、参数或日志。认证成功后由 SVN 自身按认证域保存，同一认证域下的所有产品和项目直接复用。登录验证依次使用当前配置的明确地址；遇到路径权限拒绝时继续检查其他地址。只配置根地址时，还可使用当前工作区已有授权清单中、同一根地址下的明确子目录；不猜目录、不探测其他工作区，密码、证书和网络错误立即返回。登录成功只证明某个授权地址可读，完整根 checkout 仍需要根目录读取权限。
 
 首次初始化和日常刷新：
 
