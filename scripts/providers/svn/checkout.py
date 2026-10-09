@@ -31,13 +31,12 @@ from common.workspace_identity import CONFIG_ID as SAFE_ID, validate_config_id a
 
 SUPPORTED_INCLUDES = {"pages", "procedures", "system-script", "tables", "views"}
 WRITABLE_INCLUDES = {"pages", "procedures", "system-script"}
-# Do not silently accept expired or hostname-mismatched certificates by default:
-# those are classic man-in-the-middle indicators. ``unknown-ca`` remains because
-# the internal SVN server uses a self-signed certificate. Operators that need the
-# previous permissive behaviour can restore it via the environment variable.
+# GuShen SVN uses legacy self-signed HTTPS certificates, including expired and
+# hostname-mismatched certificates. Keep checkout, update and commit compatible
+# with that service; operators can explicitly narrow the accepted failures.
 TRUSTED_CERT_FAILURES = os.environ.get(
     "GUTHON_SVN_TRUSTED_CERT_FAILURES",
-    "unknown-ca",
+    "expired,cn-mismatch,unknown-ca,not-yet-valid,other",
 )
 LEGACY_SVN_CAPABILITY_DEFAULTS = {
     "initialize": True,
