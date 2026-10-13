@@ -212,7 +212,7 @@ test('keeps a lazy PAGE leaf expandable before its fragments are loaded', async 
     workspaceKey: 'products.demo',
     identity: { sourceType: 'page', sourceId: 'PG-1', funId: '' },
   }]);
-  assert.equal(fragments[0].command.arguments[0].documentName, undefined);
+  assert.equal(fragments[0].command.arguments[0].documentName, 'serviceEvents / query / doMethodScript');
 });
 
 test('opens an independent PAGE service component as GSS', async () => {

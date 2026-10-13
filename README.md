@@ -194,6 +194,10 @@ SVN MCP 是与 Nexus、Bridge 并列的 AI 查询和受控源码修改入口，�
 
 默认提供 56 个工具；`--read-only` 暴露 43 个只读工具（含操作回查与候选预览），隐藏 13 个会写入源码、租约或恢复状态的工具。PAGE 写入限于授权 SVN working copy 中稳定的脚本/SQL 字符串节点及同一已识别 UI 字段集合内的单字段新增/拷贝，不支持任意 PAGE JSON、跨集合复制或反射组修改。过程函数按 `workspaceKey + sourceNamespace + sourceId + funId` 定位；唯一命中可省略 `workingCopyId`，多候选时必须补全，先读取、取得编辑租约、预览，再以幂等键写入本地物理文件并核对索引和 SVN diff；不提交 SVN。字段目录仅索引有组件宿主的界面字段；无原生身份的数据源列仍从字段集合按需读取。关系查询保留显式 `selectCodefieldId` 指向及未解析的 `otherSetFields` 证据；引用检查始终不批准自动删除，不能作为完整引用证明。stdio 握手支持 MCP `2025-03-26`、`2025-06-18` 和 `2025-11-25`；不回显未支持版本，客户端须确认协商结果。工具要求显式 `workspaceKey`。PAGE 语义索引和 SVN 对象索引分别用 `get_index_status`、`get_source_index_status` 检查；`REBUILD_REQUIRED` 需显式重建，`PARTIAL` 且 `projectionGapCount>0` 表示某些 JSON PAGE 有片段但缺少语义节点，可先按精确 `sourcePath` 执行 `svn reindex-file --path`，范围较多时重建工作区索引。缺口目标会返回 `INDEX_STALE`，不会误作空 PAGE。MCP 不会自行迁移真实索引。索引 generation 改变时旧分页游标会被拒绝。Nexus 的现有编辑入口不受影响。
 
+SVN MCP 风险标记按副作用区分：查询和预览为只读；编辑租约创建、续期、释放、写入后的索引与差异验证恢复及已完成日志的可恢复归档为非只读、非破坏性；源码写入保留破坏性标记。所有工具显式声明不访问开放世界。客户端仍可根据实际请求和授权策略要求审批；风险标记不替代服务端校验，`--read-only` 仍隐藏所有非只读工具。
+
+Bridge 的 web_accessible_resources 按 Chrome 要求使用 http://*/* 和 https://*/* 来源匹配；该字段不能用 /guthon/* 限制路径。内容脚本仍仅自动注入 /guthon/*，页面脚本继续校验允许的地址。若出现 Invalid match pattern，请更新扩展目录后重新加载。
+
 同一只读 PAGE 服务也可由 `svn page-query` 使用 JSON stdin 调用，并供 Nexus 后端按相同结果结构查询。Nexus 源码版的 SVN 源码树可对 PAGE JSON 使用“浏览 PAGE 语义节点”命令按页选择，再经过源码复核打开现有虚拟文档；尚无独立新面板，已安装 VSIX 需重新打包安装后才包含此命令。示例：
 
 ```bash
@@ -455,6 +459,8 @@ Nexus 状态栏和工具输出显示当前插件版本及代码/资源哈希，�
 0.3.0 补充：Nexus 提供排查/正式验证目标选择与明确范围采集、私有 AI 上下文文件导出；拉取历史支持固定快照分页、JSON/Markdown导出及本地精确归属记录的可恢复归档。模板 `--case-out` 生成不可直接执行的案例草稿，保留 `--max-rows`；旧诊断报告写入身份/案例摘要并登记脱敏历史。`--json` 或全局 `--format json` 返回 apiVersion=1并保留现有字段；文本/表格/CSV按显式格式输出，协议服务保持独立帧。
 
 同步推荐名为 `source-sync/source-sync-full/workspace-sync/index-rebuild/index-init`，既有命令仍可用。表与区域摘要有明确截断和索引证据边界；不构成运行或删除安全证明。具体平台交互见 [0.3.0 人工验收清单](docs/releases/v0.3.0-platform-acceptance.md)。
+
+SVN PAGE 脚本标签包含页面/节点标签与事件名；完整 PAGE_ID、JSON Pointer 和工作区可从标签路径及源码悬浮提示核对。内联差异 BASE 快照按完整脚本身份隔离，同一 PAGE 的不同事件不会因 BASE 内容相同而复用快照。已有标签会按完整身份复用；升级后关闭并重开旧标签以更新标题。
 
 ## 文档
 

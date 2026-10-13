@@ -528,6 +528,8 @@ codebuddy mcp list</code></pre></div>
 </ol>
 <h3 id="5-5-受控修改过程函数">5.5 受控修改过程函数</h3>
 <p>过程函数写入只针对完整身份确定且获授权的 SVN working copy 物理文件。调用 <code>open_procedure_edit</code> 获取短期 <code>editToken</code>，以 <code>preview_procedure</code> 提交完整 <code>content</code> 或精确 <code>replacements</code> 检查候选 hash（预览不落盘），再以同一 token、候选和唯一 <code>idempotencyKey</code> 调用 <code>update_procedure</code>。响应丢失时用 <code>get_procedure_operation</code> 按原 key 查询；后置索引或 SVN diff 核验未完成时，用返回的 <code>operationId</code> 调用 <code>resume_procedure_operation</code>。最后人工审阅目标文件 diff；不可将本地写入等同平台运行成功，也不可通过 MCP 提交 SVN。</p>
+<p>SVN MCP 风险标记按副作用区分：查询和预览为只读；编辑租约创建、续期、释放、写入后的索引与差异验证恢复及已完成日志的可恢复归档为非只读、非破坏性；源码写入保留破坏性标记。所有工具显式声明不访问开放世界。客户端仍可根据实际请求和授权策略要求审批；风险标记不替代服务端校验，--read-only 仍隐藏所有非只读工具。</p>
+<p>Bridge 的 web_accessible_resources 按 Chrome 要求使用 http://*/* 和 https://*/* 来源匹配；该字段不能用 /guthon/* 限制路径。内容脚本仍仅自动注入 /guthon/*，页面脚本继续校验允许的地址。若出现 Invalid match pattern，请更新扩展目录后重新加载。</p>
 <aside class="notice"><div class="notice-icon">!</div><div><p>写入依赖编辑租约、源码/索引 hash、授权范围和 SVN 状态的再次核对。实际使用时核对客户端工具清单、版本与目标工作区状态；出现未完成或外部改动时先查看 operation 状态和实际 diff，不强行覆盖。字段删除、移动与反射组写入仍未开放。</p></div></aside>
 <h3 id="5-6-新增与拷贝-page-字段">5.6 新增与拷贝 PAGE 字段</h3>
 <p>仅支持一份 PAGE 中<strong>同一个已识别 UI 字段集合</strong>的单字段新增或拷贝；不支持跨 PAGE、跨区域/集合、反射组、删除或移动。先用 <code>list_page_fields</code> 获取字段的 <code>collectionPointer</code>、<code>semanticFieldId</code> 和 <code>indexedSourceHash</code>；空集合可从 <code>list_page_nodes</code> 的 <code>FIELD_COLLECTION</code> 节点取 Pointer。目标必须属于表单、查询、主表或明细表组件，且当前索引与源码一致。</p>
@@ -755,5 +757,6 @@ const observer=new IntersectionObserver(entries=>{
 observed.forEach(item=>observer.observe(item));
 document.querySelectorAll('a[href^="http"]').forEach(link=>{link.target="_blank";link.rel="noopener"});
 </script>
+<p>SVN PAGE 脚本标签显示页面/节点标签与事件名；完整 PAGE_ID、JSON Pointer 和工作区可从标签路径及源码悬浮提示核对。内联差异按完整脚本身份隔离。升级后关闭并重开旧标签以更新标题。</p>
 </body>
 </html>

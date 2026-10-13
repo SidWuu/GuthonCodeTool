@@ -1098,7 +1098,7 @@ test("extension manifest injects the floating pull button on Guthon pages", () =
   assert.deepEqual(manifest.permissions.includes("storage"), true);
   assert.deepEqual(manifest.host_permissions, ["http://*/guthon/*", "https://*/guthon/*", "http://127.0.0.1/*"]);
   assert.deepEqual(manifest.content_scripts[0].matches, ["http://*/guthon/*", "https://*/guthon/*"]);
-  assert.deepEqual(manifest.web_accessible_resources[0].matches, ["http://*/guthon/*", "https://*/guthon/*"]);
+  assert.deepEqual(manifest.web_accessible_resources[0].matches, ["http://*/*", "https://*/*"]);
   assert.ok(manifest.web_accessible_resources[0].resources.includes("host-config.js"));
 });
 

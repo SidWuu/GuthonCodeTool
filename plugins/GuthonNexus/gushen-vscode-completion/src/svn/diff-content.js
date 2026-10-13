@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const { BoundedCache } = require('./bounded-cache');
 const path = require('node:path');
-const { SCHEME, decodeIdentity } = require('./virtual-fs');
+const { SCHEME, decodeIdentity, documentFilename } = require('./virtual-fs');
 
 const DIFF_SCHEME = 'guthon-svn-diff';
 
@@ -27,8 +27,8 @@ class SvnDiffContentProvider {
     return this.contents.get(uri.toString()) || '';
   }
 
-  storeOriginal(workspaceKey, sourcePath, content) {
-    return this._store(workspaceKey, sourcePath, 'original', content);
+  storeOriginal(workspaceKey, sourcePath, content, identity, displayName) {
+    return this._store(workspaceKey, sourcePath, 'original', content, '', identity, displayName);
   }
 
   _remove(uri) {
@@ -46,17 +46,17 @@ class SvnDiffContentProvider {
     }
   }
 
-  _store(workspaceKey, sourcePath, side, content, extension = '') {
+  _store(workspaceKey, sourcePath, side, content, extension = '', identity, displayName) {
     const text = String(content || '');
-    const snapshotKey = crypto.createHash('sha256').update(JSON.stringify([workspaceKey,sourcePath,side,extension])).update('\0').update(text).digest('hex');
+    const snapshotKey = crypto.createHash('sha256').update(JSON.stringify([workspaceKey,sourcePath,side,extension,identity])).update('\0').update(text).digest('hex');
     const existingUri = this.snapshotUris.get(snapshotKey);
     if (existingUri && this.contents.has(existingUri.toString())) return existingUri;
     this.sequence += 1;
     const uri = this.vscode.Uri.from({
       scheme: DIFF_SCHEME,
       authority: workspaceKey,
-      path: `/${side}/${safeDiffName(sourcePath)}${extension}`,
-      query: new URLSearchParams({ path: sourcePath, version: String(this.sequence) }).toString(),
+      path: `/${side}/${displayName || safeDiffName(sourcePath)}${extension}`,
+      query: new URLSearchParams({ path: sourcePath, ...(identity ? { identity: JSON.stringify(identity) } : {}), version: String(this.sequence) }).toString(),
     });
     const uriKey = uri.toString();
     if(Buffer.byteLength(text)>this.contents.maxBytes)throw new Error('差异快照超过编辑器缓存上限，请按单文件查看');
@@ -187,7 +187,9 @@ class SvnQuickDiffProvider {
     return this.contentProvider.storeOriginal(
       source.workspaceKey,
       sourcePath,
-      baseContent
+      baseContent,
+      source.identity,
+      source.identity ? path.posix.basename(uri.path) || documentFilename(source.identity) : undefined
     );
   }
 

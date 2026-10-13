@@ -138,6 +138,7 @@ async function showPageSemanticNodes(vscode, backend, virtualFs, element) {
       workspaceKey: sourceElement.workspaceKey, sourceType: 'page',
       sourceId: object.sourceId, funId: object.funId || '',
       sourcePath: object.sourcePath, jsonPointer: node.jsonPointer,
+      documentName: node.label || object.sourceName,
       fragmentType: node.nodeType === 'SQL' ? 'sql'
         : node.nodeType === 'FIELD_COLLECTION' ? 'fields' : '',
       workingCopyId: object.workingCopyId || object.scopeEntryId || '',

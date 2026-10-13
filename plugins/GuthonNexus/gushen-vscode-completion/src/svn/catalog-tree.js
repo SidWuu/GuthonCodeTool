@@ -252,7 +252,9 @@ class SvnCatalogTreeProvider {
       sourceType: object.sourceType,
       sourceId: object.sourceId,
       funId: object.funId || '',
-      documentName: serviceComponentDocumentName(object),
+      documentName: object.sourceType === 'page'
+        ? [object.sourceName, fragments?.[0]?.label].filter(Boolean).join(' · ')
+        : serviceComponentDocumentName(object),
       sourcePath: object.sourcePath || '',
       jsonPointer: fragments?.[0]?.jsonPointer || '',
       fragmentType: fragments?.[0]?.scriptType || '',
@@ -470,6 +472,8 @@ class SvnCatalogTreeProvider {
             sourcePath: element.object.sourcePath || '',
             jsonPointer: fragment.jsonPointer || '',
             fragmentType: fragment.scriptType || '',
+            documentName: element.object.sourceType === 'page'
+              ? [element.object.sourceName, fragment.label].filter(Boolean).join(' · ') : '',
             ...((element.object.workingCopyId || element.object.scopeEntryId)
               ? { workingCopyId: element.object.workingCopyId || element.object.scopeEntryId }
               : {}),

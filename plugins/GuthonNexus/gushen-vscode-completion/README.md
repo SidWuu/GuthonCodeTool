@@ -37,7 +37,7 @@ SVN virtual GSS documents warn about repeated local `#function` names and comple
 
 The Bridge popup and lower-left page control can pass the active PAGE ID or the active procedure's package and function name through a VS Code URI. `按页面编码定位本地 PAGE` and `按包名和函数名定位本地过程函数` provide equivalent manual checks. Nexus asks for the SVN workspace and any duplicate source identity before opening a controlled virtual document. Procedure lookup uses the package and function name, never the platform PR identifier.
 
-Every successful SVN save appends a durable delivery receipt instead of overwriting the previous save state. Nexus displays recent receipt IDs, revisions, files, and commit times. A receipt proves the SVN commit only; the separate Guthon platform submission and runtime validation remain outside Nexus tracking.
+Each SVN submit attempt records a durable delivery receipt. Nexus displays receipt IDs, confirmed revisions and files, and any remaining or uncertain results. Only files with a confirmed revision count as committed; a receipt alone does not prove success. After an interrupted submit, inspect SVN status/history and create a fresh preview before selecting still-modified files. Platform submission and runtime validation remain outside Nexus tracking.
 
 `工作区` → `运行模式` defaults to `发行模式`. Click `切换模式` to choose packaged, development, or script mode. Click `当前入口` to reselect and validate only the entry for the current mode: a packaged executable, a GuthonCodeTool source checkout containing `.venv` and `scripts/guthon_tool.py`, or a local Python plus the verified Release `.pyz`. Click `本地数据目录` to switch workspaces. Sidebar commands and Bridge requests use the selected runtime; switching back reuses the saved packaged application and the same data directory.
 
@@ -62,7 +62,7 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 - Lists all configured product and project workspaces and binds every action to its `workspaceKey`.
 - Shows a workspace cockpit with index, SVN, delivery, and recommended-action status.
 - Searches identities and indexed source facts through one workspace-level entry point and copies bounded AI context packages.
-- Keeps durable SVN delivery receipts and records explicit manual platform-submit confirmations.
+- Keeps durable SVN delivery receipts with confirmed commits and remaining or uncertain results.
 - Builds each workspace menu from the effective database/SVN capabilities returned by the tool.
 - Exports table schemas, bill types, system scripts, views, and source Markdown.
 - Runs environment checks and readonly source diagnosis.
@@ -70,7 +70,7 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 - Starts and stops Guthon Bridge without a separate Node.js installation or terminal command.
 - Switches between packaged, source development and verified Python zipapp modes. The zipapp currently requires a suitable local Python installation; managed Python runtime downloads are not yet shipped.
 - Lists mixed DATABASE/SVN projects together and lets each project select its own source provider.
-- Aggregates exact-URL SVN working copies into one business source tree and one SCM provider per workspace, with Chinese datasource-subsystem resource groups plus a separate public-source group.
+- Uses one repository-root working copy by default, with one business source tree and one SCM provider per workspace. Existing explicit scope entries remain supported; resource groups follow the workspace definitions returned by the backend.
 - Distinguishes same-named tables, views, and procedures by their datasource working copy/schema and carries `workingCopyId` through virtual-document reads; PAGE identities remain workspace-global and revision-deduplicated.
 - Streams each subsystem working copy's authorization, checkout/update, status, and indexing phase to the GuthonCodeTool output channel during SVN scope synchronization.
 - Decorates modified SVN files and their ancestor folders in the Guthon source tree, and uses VS Code's native SCM Quick Diff against SVN BASE for GitLens-like gutter colors, line highlights, overview markers, and click-to-peek local changes.
@@ -86,15 +86,15 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 - Loads the SVN tree from the local SQLite index and lazily parses only the selected PAGE file's editable fragments, avoiding a full checkout scan on every tree expansion.
 - Uses normalized SQLite call edges keyed by `source_record_id`, with covering indexes for target-caller and source-outgoing lookups. Existing indexes migrate transactionally and vacuum once on first open; compatibility views keep query/export results unchanged without storing repeated source metadata on every edge.
 - Opens a virtual document with an exact-file SVN status/hash check; browse actions skip unrelated working-copy and private-Git scans.
-- Preserves aggregate `systems/<SYSTEM_ID>` and `datasources/<DATA_SOURCE_ID>` working copies. System and datasource roots use `$.<Chinese name>` markers. Every subsystem follows the procedure datasource group order; systems sharing one datasource use `systems.include.mappings` declaration order as the stable tie-breaker. PAGE hierarchy, leaf labels, and sibling order come from `pages/index.md`; procedure package labels come from `procedures/index.md`, while packages and their functions sort alphabetically. Unindexed objects follow indexed entries. Table/view leaves show `object-id Chinese name`.
+- Browses indexed `systems/<SYSTEM_ID>` and `datasources/<DATA_SOURCE_ID>` source directories within the authorized checkout. System and datasource roots use `$.<Chinese name>` markers. Every subsystem follows the procedure datasource group order; systems sharing one datasource use `systems.include.mappings` declaration order as the stable tie-breaker. PAGE hierarchy, leaf labels, and sibling order come from `pages/index.md`; procedure package labels come from `procedures/index.md`, while packages and their functions sort alphabetically. Unindexed objects follow indexed entries. Table/view leaves show `object-id Chinese name`.
 - Provides the toolbar action `跳转所选 SVN 原文件`; selecting a module or any child method, field, SQL, or event resolves the owning module's authorized `sourcePath` and reveals the physical file in Explorer. The same action remains available from the context menu, but no longer occupies the end of every source label.
 - Provides `定位当前编辑源码`, which maps the active SVN virtual document or physical checkout file back to its stable Nexus node, expands its parent chain, and selects it. Locating a PAGE fragment parses only that PAGE lazily.
 - Adds native “谷神源码” toolbar actions for locating, jumping, expanding or collapsing the selected node, searching the current SVN workspace's complete local index, and refreshing. A procedure node's context menu can copy its function name or qualified `package.function` identity, and list indexed callers for exact-line navigation. Search runs once after input, does not depend on expanded nodes, and never scans the checkout; long source labels use the native horizontal scrollbar (`workbench.list.horizontalScrolling`, user-overridable).
-- Opens PAGE script/SQL/field fragments and procedure/system-script sources as guarded virtual documents without a second code copy; only standalone PAGE GSS service-component tabs replace an ID with the indexed Chinese service name, while named procedure functions retain their English function name.
-- Completes `Ctrl+S` after the guarded single-file write and incremental index update; SCM is updated from that verified result without synchronously rescanning every working copy, and the managed file-watcher event is suppressed to avoid duplicate indexing. Consecutive saves from the same virtual editor keep the provider version stable, while genuine external checkout changes still invalidate it and retain the hash-based overwrite guard.
+- Opens PAGE script/SQL/field fragments and procedure/system-script sources as guarded virtual documents without a second code copy. PAGE fragment tabs use available page/node labels and the exact event or field name; standalone GSS service components use the indexed service name, while procedures retain their function name. Virtual-document tooltips expose the source ID, JSON Pointer, and workspace. Tabs are reused by complete source identity, and inline SVN BASE snapshots include that identity so sibling events with identical BASE content remain separate. Close and reopen existing tabs after upgrading to refresh their titles.
+- Performs a guarded single-file write and incremental index update on `Ctrl+S`, then refreshes the workspace SCM status; a failed SCM refresh produces a warning without undoing the saved source. The managed file-watcher event is suppressed to avoid duplicate indexing. Consecutive saves from the same virtual editor keep the provider version stable, while genuine external checkout changes still invalidate it and retain the hash-based overwrite guard.
 - Parses backend code embedded in PAGE `raw.json` `serviceEvents` (including `beforeSaveScript`, `afterSaveScript`, and `beforeSqlSelectScript`) as named `GSS · <component/event>` fragments; these fragments remain minimal JSON Pointer writebacks to the original PAGE file.
 - Orders PAGE fragments by type as `GSS`, `JS`, `SQL`, then fields while preserving the source order inside each type.
-- Associates both current `.gss` files and legacy DATABASE `.vm` projections with VS Code's Java language mode and Java highlighting.
+- Associates `.gss` files with `guthon-gss` and legacy `.vm` projections with Java; Guthon GSS reuses the Java API completion data.
 - Uses the workspace call index for Go to Definition and Find References from SVN virtual documents.
 - Java, JavaScript, and SQL completions from generated local data.
 - Java syntax snippets for Gushen backend script directives.
@@ -105,7 +105,7 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 - Completion details:
   - Suggestion row shows the prefix and a short description.
   - Detail panel shows the snippet body and full description.
-- Works for saved files and untitled files when the language mode is `Java`, `JavaScript`, or `SQL`.
+- Works for saved files and untitled files when the language mode is Guthon GSS, `Java`, `JavaScript`, or `SQL`.
 - Shows the completion signature and description when hovering over a Gushen API.
 - Opens local procedure sources from `$vs.proc.invoke(...)` and `$proc.*` calls with Go to Definition (`Cmd+Click` on macOS, `Ctrl+Click` on Windows/Linux, or `F12`).
 
@@ -113,8 +113,7 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 
 The Windows suite download list and first-run instructions are maintained in the
 [Windows installation guide, chapter one](https://sidwuu.github.io/GuthonCodeTool/GuthonCodeTool_Windows安装步骤.html#one-click).
-Runtime switches and updates persist in the effective setting scope. Installation confirmation is one-time; project connections and indexes belong to later Nexus use. The installer remains a candidate;
-standalone extension settings are listed below.
+Runtime switches and updates persist in the effective setting scope. Installation confirmation is one-time; project connections and indexes belong to later Nexus use. Standalone extension settings are listed below.
 
 ```json
 {

@@ -40,11 +40,15 @@ function safeName(value) {
 }
 
 function documentFilename(identity) {
-  const name = safeName(
-    identity.documentName
+  let name = safeName(
+    (identity.documentName?.replace(/\s+\/\s+/g, ' · '))
       || identity.funId
       || identity.sourceId
   );
+  if (identity.sourceType === 'page' && identity.jsonPointer) {
+    const event = safeName(identity.jsonPointer.split('/').at(-1).replace(/~1/g, '/').replace(/~0/g, '~'));
+    if (!name.endsWith(event)) name = `${name} · ${event}`;
+  }
   const extension = documentExtension(identity);
   return name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`;
 }
@@ -90,6 +94,13 @@ class SvnVirtualFileSystem {
     this.cache = new BoundedCache({maxEntries:128,maxBytes:32*1024*1024,ttlMs:60_000,
       sizeOf:(record)=>Buffer.byteLength(JSON.stringify(record),'utf8'),
       isPinned:(key)=>this.vscode.workspace?.textDocuments?.some((document)=>document.uri.toString()===key)});
+    this.decorationRegistration = vscode.window?.registerFileDecorationProvider?.({
+      provideFileDecoration: (uri) => {
+        if (uri.scheme !== SCHEME) return undefined;
+        const identity = decodeIdentity(uri);
+        return { tooltip: `${identity.sourceId}\n${identity.jsonPointer || '/'}\n${identity.workspaceKey}` };
+      },
+    });
     this.inFlight = new Map();
     this.generations = new BoundedCache({maxEntries:512,isPinned:(key)=>this.inFlight.has(key)});
     this.closeRegistration = vscode.workspace?.onDidCloseTextDocument?.((document)=>{
@@ -104,10 +115,16 @@ class SvnVirtualFileSystem {
   }
 
   uriFor(identity) {
+    const existing = this.vscode.workspace?.textDocuments?.find((document) =>
+      document.uri.scheme === SCHEME && document.uri.authority === identity.workspaceKey
+      && encodeIdentity(decodeIdentity(document.uri)) === encodeIdentity(identity));
+    if (existing) return existing.uri;
     return this.vscode.Uri.from({
       scheme: SCHEME,
       authority: identity.workspaceKey,
-      path: `/${documentFilename(identity)}`,
+      path: identity.sourceType === 'page' && identity.jsonPointer
+        ? `/${safeName(identity.sourceId)}${identity.jsonPointer}/${documentFilename(identity)}`
+        : `/${documentFilename(identity)}`,
       query: encodeIdentity(identity),
     });
   }
@@ -389,6 +406,7 @@ class SvnVirtualFileSystem {
   }
 
   dispose() {
+    this.decorationRegistration?.dispose?.();
     this.closeRegistration?.dispose?.();
     for(const key of this.inFlight.keys())this.generations.set(key,(this.generations.get(key)||0)+1);
     this.cache.clear();

@@ -159,6 +159,7 @@ workspaceKey：
 <p>Nexus“运行模式 → 检查更新”统一检查后端、Nexus VSIX 与 Chrome Bridge，默认每天首次激活后后台检查；角标显示可更新数量。发行和调试模式点击确认后从所选发行源下载并验签，分别更新应用或pyz与依赖清单；开发模式从明确developmentRoot本地源码构建Nexus和Bridge，不访问发行源，后端继续使用工具源码。Nexus 自安装最后执行，安装后可立即重新加载窗口或稍后；Chrome 首次需要加载固定托管目录并配对，之后空闲时自动重载。 更新缓存、中断记录和备份保留在本地数据目录；Python 可选驱动缺失时会提示，不自动修改全局环境。</p>
 <p>明确同步入口可使用 <code>source-sync/source-sync-full/workspace-sync/index-rebuild/index-init</code>，旧命令保持同一行为。源码保存、SVN 提交、平台发布和业务运行分别核验。</p>
 </section>
+<section><h2>扩展加载与 MCP 风险提示</h2><p>SVN MCP 风险标记按副作用区分：查询和预览为只读；编辑租约创建、续期、释放、写入后的索引与差异验证恢复及已完成日志的可恢复归档为非只读、非破坏性；源码写入保留破坏性标记。所有工具显式声明不访问开放世界。客户端仍可根据实际请求和授权策略要求审批；风险标记不替代服务端校验，--read-only 仍隐藏所有非只读工具。</p><p>Bridge 的 web_accessible_resources 按 Chrome 要求使用 http://*/* 和 https://*/* 来源匹配；该字段不能用 /guthon/* 限制路径。内容脚本仍仅自动注入 /guthon/*，页面脚本继续校验允许的地址。若出现 Invalid match pattern，请更新扩展目录后重新加载。</p></section>
 </main>
 </div>
 

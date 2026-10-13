@@ -322,3 +322,25 @@ test('diff snapshots use bounded digest keys without retaining duplicated source
   for(const key of provider.snapshotUris.keys())assert.match(key,/^[a-f0-9]{64}$/);
   provider.dispose();
 });
+
+
+test('same PAGE events with identical BASE retain separate snapshots and titles', async () => {
+  const { encodeIdentity } = require('../src/svn/virtual-fs');
+  const vscode = { Uri: { from: fakeUri } };
+  const contentProvider = new SvnDiffContentProvider({ vscode });
+  const provider = new SvnQuickDiffProvider({ vscode, contentProvider,
+    backend: { read: async () => ({ sourcePath: 'pages/PG-1.json', baseContent: 'same BASE' }) } });
+  provider.setWorkspace({ workspaceKey: 'products.demo' });
+  const uri = (event) => fakeUri({ scheme: 'guthon-svn-edit', authority: 'products.demo',
+    path: `/凭证编辑 · 保存 · ${event}.gss`, query: encodeIdentity({
+      sourceType: 'page', sourceId: 'PG-1', jsonPointer: `/buttons/0/${event}` }) });
+  const before = await provider.provideOriginalResource(uri('beforeSaveScript'));
+  const after = await provider.provideOriginalResource(uri('afterSaveScript'));
+  assert.notEqual(before.toString(), after.toString());
+  assert.match(before.path, /beforeSaveScript.gss$/);
+  assert.match(after.path, /afterSaveScript.gss$/);
+  assert.equal(contentProvider.provideTextDocumentContent(before), 'same BASE');
+  assert.equal(contentProvider.provideTextDocumentContent(after), 'same BASE');
+  assert.equal((await provider.provideOriginalResource(uri('beforeSaveScript'))).toString(), before.toString());
+  provider.dispose(); contentProvider.dispose();
+});

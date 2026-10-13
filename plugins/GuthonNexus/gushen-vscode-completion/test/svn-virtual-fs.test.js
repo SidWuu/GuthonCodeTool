@@ -346,3 +346,45 @@ test('closing an editable virtual document releases exactly its backend lease',a
  assert.deepEqual(released,[['products.demo','session','document']]);
  assert.equal(provider.cache.has(uri.toString()),false);provider.dispose();
 });
+
+
+test('PAGE titles include readable owners and exact event while queries retain pointer identity', () => {
+  const identity = { sourceType: 'page', sourceId: 'PG-1', workspaceKey: 'products.demo',
+    documentName: '凭证编辑 / 保存', fragmentType: 'gss' };
+  for (const event of ['beforeSaveScript', 'afterSaveScript']) {
+    const source = { ...identity, jsonPointer: `/buttons/0/${event}` };
+    assert.equal(documentFilename(source), `凭证编辑 · 保存 · ${event}.gss`);
+    assert.equal(decodeIdentity({ authority: source.workspaceKey, query: encodeIdentity(source) }).jsonPointer, source.jsonPointer);
+  }
+});
+
+test('saving and refreshing sibling PAGE events keep document IDs and content isolated', async () => {
+  const values = new Map([
+    ['/buttons/0/beforeSaveScript', 'before'], ['/buttons/0/afterSaveScript', 'after'],
+  ]);
+  const writes = [];
+  const makeUri = (parts) => ({ ...parts, toString() { return `${this.scheme}://${this.authority}${this.path}?${this.query}`; } });
+  const vscode = {
+    EventEmitter: class { constructor() { this.event = () => {}; } fire() {} dispose() {} },
+    Uri: { from: makeUri }, workspace: { textDocuments: [] },
+  };
+  const fs = new SvnVirtualFileSystem({ vscode, backend: {
+    read: async (_, identity) => ({ editable: true, sessionId: 'session',
+      documentId: identity.jsonPointer, sourcePath: 'pages/PG-1.json',
+      content: values.get(identity.jsonPointer), baseContent: values.get(identity.jsonPointer) }),
+    write: async (_, session, id, content) => { writes.push(id); values.set(id, content); return {}; },
+  } });
+  const source = { workspaceKey: 'products.demo', sourceType: 'page', sourceId: 'PG-1', fragmentType: 'gss' };
+  const before = fs.uriFor({ ...source, jsonPointer: '/buttons/0/beforeSaveScript' });
+  const after = fs.uriFor({ ...source, jsonPointer: '/buttons/0/afterSaveScript' });
+  await Promise.all([fs.readFile(before), fs.readFile(after)]);
+  await fs.writeFile(before, Buffer.from('before edited'));
+  assert.equal((await fs.readFile(after)).toString(), 'after');
+  fs.invalidate('products.demo');
+  assert.equal((await fs.readFile(before)).toString(), 'before edited');
+  assert.equal((await fs.readFile(after)).toString(), 'after');
+  await fs.writeFile(before, Buffer.from('before'));
+  assert.deepEqual(writes, ['/buttons/0/beforeSaveScript', '/buttons/0/beforeSaveScript']);
+  assert.equal(values.get('/buttons/0/afterSaveScript'), 'after');
+  fs.dispose();
+});
