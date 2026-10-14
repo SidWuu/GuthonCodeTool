@@ -1265,8 +1265,9 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("pullCurrentProcedure(root, sourceButton)"), true);
   assert.equal(contentScript.includes('isModuleRoute() ? "inspect-hub-source" : "inspectCurrentProcedure"'), true);
   assert.equal(contentScript.includes('const pageSource = isModuleRoute() || target.mode === "page-source";'), true);
-  assert.equal(contentScript.includes('root.dataset.workspaceMode !== "database"'), true);
-  assert.equal(contentScript.includes('sourceButton.hidden = true'), true);
+  assert.equal(contentScript.includes('root.dataset.workspaceMode !== "database"'), false);
+  assert.equal(contentScript.includes('sourceButton.hidden = true'), false);
+  assert.equal(contentScript.includes('root.querySelector(".guthon-bridge-source-button").hidden'), false);
   assert.equal(contentScript.includes('svnMode && previousMode !== "svn"'), true);
   assert.equal(contentScript.includes('allowWorkspaceSelection = true'), true);
   assert.equal(contentScript.includes('allowWorkspaceSelection: false'), true);

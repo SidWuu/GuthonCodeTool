@@ -1,7 +1,7 @@
 /* Popup */
 body.guthon-bridge-popup {
   margin: 0;
-  padding: 16px;
+  padding: 12px;
   width: 336px;
   color: #1e293b;
   background: #f4f7fb;
@@ -14,7 +14,7 @@ body.guthon-bridge-popup {
 
 .guthon-bridge-popup .wrap {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .guthon-bridge-popup .head {
@@ -31,7 +31,7 @@ body.guthon-bridge-popup {
 
 .guthon-bridge-popup label {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   color: #475569;
   font-size: 12px;
 }
@@ -39,7 +39,7 @@ body.guthon-bridge-popup {
 .guthon-bridge-popup input {
   box-sizing: border-box;
   width: 100%;
-  padding: 8px 10px;
+  padding: 5px 8px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #fff;
@@ -69,8 +69,8 @@ body.guthon-bridge-popup {
 }
 
 .guthon-bridge-popup button {
-  min-height: 34px;
-  padding: 8px 10px;
+  min-height: 28px;
+  padding: 5px 8px;
   border: 1px solid #409eff;
   border-radius: 4px;
   color: #fff;
@@ -110,7 +110,7 @@ body.guthon-bridge-popup {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 38px;
+  min-height: 30px;
   border-color: #b7d8ff;
   border-radius: 8px;
   color: #1d5fb7;
@@ -129,12 +129,12 @@ body.guthon-bridge-popup {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   border-radius: 6px;
   color: #fff;
   background: #409eff;
-  font-size: 16px;
+  font-size: 13px;
   line-height: 1;
 }
 
@@ -150,8 +150,8 @@ body.guthon-bridge-popup {
 }
 
 .guthon-bridge-popup #status {
-  min-height: 72px;
-  padding: 10px;
+  min-height: 48px;
+  padding: 8px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   color: #0f172a;
@@ -772,4 +772,77 @@ tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
 .guthon-minimized-script-close:hover {
   color: #f56c6c;
   background: #f2f6fc;
+}
+
+/* Secondary popup actions and recent targets */
+.guthon-bridge-popup .recent-pull-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.guthon-bridge-popup .recent-pull-name {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.guthon-bridge-popup .recent-pull-workspace {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.guthon-bridge-popup .recent-pull-item p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #64748b;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.guthon-bridge-popup .recent-pull-action,
+.guthon-bridge-popup #refreshRecentPullsBtn,
+.guthon-bridge-popup .action-secondary {
+  min-height: 26px;
+  padding: 4px 7px;
+  border-color: #cbd5e1;
+  color: #475569;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.guthon-bridge-popup .recent-pull-action:hover,
+.guthon-bridge-popup #refreshRecentPullsBtn:hover,
+.guthon-bridge-popup .action-secondary:hover {
+  border-color: #409eff;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.guthon-bridge-popup .recent-pulls-heading {
+  position: relative;
+  padding-right: 30px;
+  line-height: 26px;
+}
+
+.guthon-bridge-popup #refreshRecentPullsBtn {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
 }

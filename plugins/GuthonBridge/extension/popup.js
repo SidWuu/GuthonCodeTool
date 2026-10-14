@@ -565,11 +565,25 @@ async function refreshRecentPulls() {
   list.replaceChildren();
   for (const entry of response.records || []) {
     const item = document.createElement('div');
+    item.className = 'recent-pull-item';
     const identity = entry.payload?.sourceId || entry.payload?.alias || entry.payload?.systemId || entry.payload?.dataSourceId
       || entry.payload?.dataSourceIds?.join(', ') || '导出对象';
     const description = `${entry.workspaceKey} · ${identity}${entry.payload?.funId ? '.'+entry.payload.funId : ''}`;
+    const info = document.createElement('div');
+    info.className = 'recent-pull-info';
+    const name = document.createElement('div');
+    name.className = 'recent-pull-name';
+    name.textContent = entry.payload?.funId || identity;
+    name.title = description;
+    const workspace = document.createElement('div');
+    workspace.className = 'recent-pull-workspace';
+    workspace.textContent = entry.workspaceKey;
+    info.append(name, workspace);
+    item.appendChild(info);
     const button = document.createElement('button');
-    button.type = 'button'; button.textContent = `再次拉取：${description}`;
+    button.className = 'recent-pull-action';
+    button.type = 'button'; button.textContent = '再次拉取';
+    button.title = description;
     button.addEventListener('click', async () => {
       try {
         const tab = await getActiveTab();
@@ -590,7 +604,9 @@ async function refreshRecentPulls() {
   }
   if (!(response.records || []).length) list.textContent='此平台暂无最近成功拉取记录';
 }
-document.getElementById('refreshRecentPullsBtn').addEventListener('click', () => {
+document.getElementById('refreshRecentPullsBtn').addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
   refreshRecentPulls().catch(error=>setStatus(error.message));
 });
 

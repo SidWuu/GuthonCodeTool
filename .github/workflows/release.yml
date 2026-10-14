@@ -10,10 +10,18 @@ on:
       - "config/example/**"
       - "plugins/GuthonBridge/**"
       - "plugins/GuthonNexus/**"
+      - "skills/guthon-testing/**"
+      - "installer/**"
+      - "GuthonCodeTool.spec"
       - ".github/scripts/**"
       - ".github/workflows/release.yml"
   workflow_dispatch:
     inputs:
+      release_mode:
+        description: "auto：按改动范围发布；full：强制全量构建"
+        type: choice
+        options: [auto, full]
+        default: auto
       release_notes:
         description: "可公开的中文发行说明；由本机私有文档提供，留空时使用提交说明"
         required: false
@@ -22,11 +30,40 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: github-release
+  cancel-in-progress: false
+
 jobs:
-  build-script:
+  plan:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       contains(github.event.head_commit.message, '[build]')
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+      version: ${{ steps.scope.outputs.version }}
+      tag: ${{ steps.scope.outputs.tag }}
+      bridge: ${{ steps.scope.outputs.bridge }}
+      nexus: ${{ steps.scope.outputs.nexus }}
+      skill: ${{ steps.scope.outputs.skill }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - id: scope
+        name: Resolve release scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_MODE: ${{ inputs.release_mode || 'auto' }}
+        run: python .github/scripts/release_plan.py
+
+  build-script:
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -50,9 +87,7 @@ jobs:
           if-no-files-found: error
 
   build-app:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.message, '[build]')
+    if: needs.plan.outputs.mode == 'full'
     strategy:
       matrix:
         include:
@@ -63,7 +98,7 @@ jobs:
             artifact: GuthonCodeTool-macos
             asset: GuthonCodeTool-macos-arm64.zip
     runs-on: ${{ matrix.os }}
-    needs: build-script
+    needs: [plan, build-script]
     steps:
       - uses: actions/checkout@v5
 
@@ -122,9 +157,8 @@ jobs:
           if-no-files-found: error
 
   build-plugins:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.message, '[build]')
+    needs: plan
+    if: needs.plan.outputs.mode == 'full' || needs.plan.outputs.mode == 'components'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -134,6 +168,7 @@ jobs:
           node-version: "22"
 
       - name: Test and package Guthon Nexus
+        if: needs.plan.outputs.nexus == 'true'
         working-directory: plugins/GuthonNexus/gushen-vscode-completion
         run: |
           release_version=$(tr -d '[:space:]' < ../../../VERSION)
@@ -149,10 +184,12 @@ jobs:
             --out ../../../guthon-nexus-vscode.vsix
 
       - name: Test Bridge
+        if: needs.plan.outputs.bridge == 'true'
         working-directory: plugins/GuthonBridge
         run: npm test
 
       - name: Package Bridge browser extension
+        if: needs.plan.outputs.bridge == 'true'
         working-directory: plugins/GuthonBridge
         run: |
           release_version=$(tr -d '[:space:]' < ../../VERSION)
@@ -160,6 +197,7 @@ jobs:
           zip -r ../../GuthonCodeTool-chrome.zip extension -x "*.DS_Store" "*.test.js"
 
       - name: Package Guthon Testing Skill
+        if: needs.plan.outputs.skill == 'true'
         working-directory: skills
         run: zip -r ../guthon-testing.zip guthon-testing -x "*.DS_Store"
 
@@ -173,7 +211,8 @@ jobs:
           if-no-files-found: error
 
   build-installer:
-    needs: [build-app, build-plugins]
+    needs: [plan, build-app, build-plugins]
+    if: needs.plan.outputs.mode == 'full'
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
@@ -220,7 +259,9 @@ jobs:
           if-no-files-found: error
 
   release:
+    if: needs.plan.outputs.mode == 'full'
     needs:
+      - plan
       - build-app
       - build-script
       - build-plugins
@@ -359,6 +400,9 @@ jobs:
             cat generated-notes.md
           } > release-notes.md
 
+      - name: Record published source
+        run: python .github/scripts/release_metadata.py --notes release-notes.md --sha "$GITHUB_SHA"
+
       - name: Create or update GitHub Release
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -391,3 +435,76 @@ jobs:
             echo ".venv/bin/python scripts/sync_release_to_gitee.py --tag $RELEASE_TAG"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  refresh-components:
+    needs: [plan, build-plugins]
+    if: needs.plan.outputs.mode == 'components'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Download and verify current release
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release
+          node scripts/verify_release.mjs --release-dir release --trust-file plugins/GuthonNexus/gushen-vscode-completion/data/release-trust.json --version "$RELEASE_VERSION"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > release-notes.md
+          cp -a release original-release
+          cp release-notes.md original-notes.md
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-plugins
+          path: replacements
+      - name: Replace only rebuilt components locally
+        env:
+          UPDATE_BRIDGE: ${{ needs.plan.outputs.bridge }}
+          UPDATE_NEXUS: ${{ needs.plan.outputs.nexus }}
+          UPDATE_SKILL: ${{ needs.plan.outputs.skill }}
+        run: |
+          python - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          assets = {'BRIDGE': 'GuthonCodeTool-chrome.zip', 'NEXUS': 'guthon-nexus-vscode.vsix', 'SKILL': 'guthon-testing.zip'}
+          selected = [name for key, name in assets.items() if os.environ['UPDATE_' + key] == 'true']
+          actual = sorted(p.name for p in Path('replacements').iterdir())
+          if sorted(selected) != actual:
+              raise SystemExit('Rebuilt assets differ from release plan')
+          for name in selected:
+              shutil.copyfile(Path('replacements') / name, Path('release') / name)
+          for name in ('GuthonCodeTool-release.json', 'GuthonCodeTool-checksums.signature.json'):
+              (Path('release') / name).unlink()
+          PY
+      - name: Regenerate catalog and checksums
+        run: |
+          node scripts/build_release_catalog.mjs --release-dir release --version "$RELEASE_VERSION"
+          python .github/scripts/release_metadata.py --release-dir release --notes release-notes.md --sha "$GITHUB_SHA" --components "$(find replacements -maxdepth 1 -type f -printf '%f ' | sort)"
+      - name: Sign and verify updated release
+        env:
+          GUTHON_RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.GUTHON_RELEASE_SIGNING_PRIVATE_KEY }}
+          GUTHON_RELEASE_SIGNING_KEY_ID: ${{ vars.GUTHON_RELEASE_SIGNING_KEY_ID }}
+        run: |
+          node scripts/sign_release.mjs --checksums release/GuthonCodeTool-checksums.txt --version "$RELEASE_VERSION" --out release/GuthonCodeTool-checksums.signature.json
+          node scripts/verify_release.mjs --release-dir release --trust-file plugins/GuthonNexus/gushen-vscode-completion/data/release-trust.json --version "$RELEASE_VERSION"
+      - name: Publish replacement assets to existing release
+        run: |
+          cp release/GuthonCodeTool-release.json release/GuthonCodeTool-checksums.txt release/GuthonCodeTool-checksums.signature.json replacements/
+          mkdir rollback
+          for file in replacements/*; do
+            cp "original-release/$(basename "$file")" rollback/
+          done
+          if ! gh release upload "$RELEASE_TAG" replacements/* --repo "$GITHUB_REPOSITORY" --clobber ||
+             ! gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md; then
+            echo "::error::组件发布失败，恢复原附件和说明"
+            gh release upload "$RELEASE_TAG" rollback/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file original-notes.md
+            exit 1
+          fi
+          echo "已替换 $RELEASE_TAG 的组件附件和签名元数据；未创建新版本，未重建应用或安装器。" >> "$GITHUB_STEP_SUMMARY"

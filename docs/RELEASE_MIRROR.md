@@ -2,6 +2,18 @@
 
 GitHub Actions 构建、签名并发布 GitHub Release 后结束发行任务。Gitee 镜像由维护者本机单独同步，失败不需要重新构建，也不修改已发布的附件。普通同事仍按 Nexus 中所选的 GitHub/Gitee 更新源使用工具。
 
+
+## 按组件更新当前 GitHub 版本
+
+`release.yml` 继续由 main 上含 `[build]` 的提交或手动运行触发。默认 `release_mode=auto`，以当前 `VERSION` 对应 Release 上记录的最后成功发布源码为基线判断改动范围；旧 Release 没有记录时使用原 tag 的提交。未发布的累计改动也纳入判断。
+
+- 只有 Bridge、Nexus 或 `skills/guthon-testing/` 改动时，只重建受影响的组件附件，替换同一个 Release 中的同名附件，不改 `VERSION`、不创建新 tag，不重建 Python、Windows/macOS 应用或安装器。
+- Bridge 本地服务由 Nexus 内置，因此服务端改动会同时重打包 Nexus；纯浏览器扩展改动只重打包 Chrome 附件。组件发布同步重建发行清单、完整附件摘要和签名，并在发布前验证保留附件与新附件。
+- 后端、运行配置模板、安装器、版本或构建流程等改动仍执行全量构建。仅文档或本地测试变化不发布。当前版本没有已发布 Release 时执行全量构建。
+- 手动选择 `release_mode=full` 可强制全量构建。组件替换要求当前发行签名有效且 CI 配有签名私钥；不能验证时停止，不以未签名元数据覆盖已签名发行。
+
+组件替换保留原发行说明、追加组件更新记录，不改 Release 的 tag 指向或 latest 状态。GitHub 附件逐个替换，客户端在短暂的元数据不一致期间会拒绝校验；上传或说明更新报错时流程尝试恢复原附件和说明。应用和一键安装器仍为原构建，新组件通过单独附件分发。GitHub 更新后仍需按下文同步 Gitee 镜像。
+
 ## 私有发行说明与公开材料
 
 维护者在本机 `docs/private/releases/v<版本>.md` 准备提交及发行说明；该目录已被 Git 忽略，源文件不提交。提交备注与 GitHub/Gitee Release 最终正文仍是公开内容，发布前需检查正文，不将凭据或内部地址直接作为发行正文。

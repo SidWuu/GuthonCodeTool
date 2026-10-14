@@ -315,13 +315,6 @@ function makeNativeButton(text, className) {
 
 async function pullCurrentProcedure(root, button = root.querySelector("button"), force = false) {
   try {
-    if (root.dataset.workspaceMode !== "database") {
-      const message = root.dataset.workspaceMode === "svn"
-        ? "当前工作区使用 SVN 源码模式；请在 Guthon Nexus 打开对象 Workcopy"
-        : "正在确认当前工作区源码模式，请稍后重试";
-      setMessage(root, message, "idle");
-      return;
-    }
     button.disabled = true;
     setButtonTextNode(button, "源码拉取");
     button.title = "正在从源码表拉取...";
@@ -621,7 +614,6 @@ function installSourcePullButton() {
     root.dataset.mode = mode;
     root.dataset.sharedButtons = "true";
     const sourceButton = makeNativeButton("源码拉取", "guthon-bridge-inline-button guthon-bridge-source-button");
-    sourceButton.hidden = true;
     root.appendChild(sourceButton);
     const systemAllButton = makeNativeButton("全部拉取", "guthon-bridge-system-script-all guthon-bridge-system-script-only");
     systemAllButton.addEventListener("click", () => exportCurrentSystemScripts(root, systemAllButton, true));
@@ -713,7 +705,6 @@ async function applyInlineWorkspaceMode() {
     root.dataset.workspaceMode = sourceMode;
     if (route.ok && route.workspaceKey) await publishPageContext(route.workspaceKey).catch(() => {});
     const svnMode = sourceMode === "svn";
-    root.querySelector(".guthon-bridge-source-button").hidden = svnMode;
     root.querySelector(".guthon-bridge-system-script-all").hidden = svnMode;
     if (svnMode && previousMode !== "svn") {
       setMessage(root, "当前工作区使用 SVN 源码模式；请在 Guthon Nexus 打开对象 Workcopy", "idle");
