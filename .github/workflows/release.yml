@@ -407,14 +407,12 @@ jobs:
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "GitHub Release $RELEASE_TAG 已存在，更新说明并补齐附件"
+            gh release upload "$RELEASE_TAG" release/* --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "GuthonCodeTool $RELEASE_TAG" \
               --notes-file release-notes.md \
               --latest
-            gh release upload "$RELEASE_TAG" release/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
           else
             gh release create "$RELEASE_TAG" release/* \
               --repo "$GITHUB_REPOSITORY" \

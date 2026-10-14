@@ -39,7 +39,7 @@ def main():
     head = run('git', 'rev-parse', 'HEAD')
     mode, selected = 'full', {'bridge', 'nexus', 'skill'}
     try:
-        release = json.loads(run('gh', 'release', 'view', tag, '--json', 'body,isDraft,isPrerelease', '--repo', os.environ['GITHUB_REPOSITORY']))
+        release = json.loads(run('gh', 'release', 'view', tag, '--json', 'body,isDraft,isPrerelease,isImmutable', '--repo', os.environ['GITHUB_REPOSITORY']))
     except subprocess.CalledProcessError:
         # A missing release requires all assets. Authentication/API failures must
         # not silently become a new publication.
@@ -55,6 +55,8 @@ def main():
         subprocess.run(['git', 'merge-base', '--is-ancestor', base, head], check=True)
         names = subprocess.check_output(['git', 'diff', '--no-renames', '--name-only', '-z', base, head]).decode().split('\0')
         mode, selected = classify([name for name in names if name])
+    if release and release.get('isImmutable') and mode != 'none':
+        raise SystemExit('Target release is immutable; increase VERSION to publish new assets')
     output = {'mode': mode, 'version': version, 'tag': tag}
     output.update({name: str(name in selected).lower() for name in ('bridge', 'nexus', 'skill')})
     with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
