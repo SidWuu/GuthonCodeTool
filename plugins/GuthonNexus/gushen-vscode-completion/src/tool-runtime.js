@@ -50,17 +50,7 @@ function isDirectory(dirPath) {
   try { return fs.statSync(dirPath).isDirectory(); } catch { return false; }
 }
 
-const PACKAGED_ENTRY_NAMES = ['GuthonCodeTool', 'GuthonCodeTool.exe'];
-
 function resolvePackagedTool(toolPath) {
-  // macOS 发行包是 onedir 目录，可执行文件位于目录内；选中文件夹时自动定位入口。
-  if (isDirectory(toolPath)) {
-    for (const name of PACKAGED_ENTRY_NAMES) {
-      const candidate = path.join(toolPath, name);
-      if (isFile(candidate)) return candidate;
-    }
-    return '';
-  }
   return isFile(toolPath) ? toolPath : '';
 }
 

@@ -703,6 +703,8 @@ def _svn_progress(message: str) -> None:
 
 
 def _reindex_svn(gusen_hub, config, workspace, on_progress=None) -> dict:
+    if on_progress is not None:
+        on_progress(f"{workspace['displayName']}｜索引｜后端 {application_version()} · {application_build_info()['buildId']}")
     conn = gusen_hub.connect_index_for_workspace(
         workspace,
         action="index-init",

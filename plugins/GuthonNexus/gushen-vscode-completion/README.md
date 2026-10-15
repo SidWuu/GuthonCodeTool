@@ -1,5 +1,8 @@
 # Guthon Nexus
 
+Packaged mode selects executable files on both platforms: the Windows EXE or the `GuthonCodeTool` launcher inside the intact macOS application directory. Application folders are not picker targets.
+
+
 Guthon Nexus is the VS Code development surface for GuthonCodeTool.
 
 It manages local Guthon workspaces, runs source and metadata synchronization, exposes workcopy maintenance tools, and provides offline Gushen API completions, hover documentation, and source navigation. It does not depend on IntelliCode or Copilot.
@@ -84,6 +87,7 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 - Lists Nexus-managed edits and safe externally modified tracked text files in one change manager. Selected files can be compared, reverted to the local SVN BASE, or saved. Text conflicts can be resolved through the physical working-copy merge result; additions, deletions, untracked files, property conflicts, and tree conflicts remain blocked. After an SVN update changes a clean file, an explicit Nexus update safely merges a tracked text modification, or a Nexus-managed text conflict is marked resolved, the current file becomes the edit-session baseline. Revert does not require a remote-current working copy, while `保存到谷神` checks the selected files themselves for remote out-of-date changes without being blocked by unrelated remote files in the same working copy.
 - Imports a selected `.sh/.bat` file or pasted checkout command into one `svn.url`, preserving unrelated YAML comments and entries. The generated `context/authorized-scope.json` contains one repository-root entry; legacy explicit `svn.scope` and `checkoutPaths` remain readable.
 - Coalesces physical file events into serial workspace batches. SVN refresh holds its lock through index publication; watcher batches then skip files whose hashes and SVN states are already indexed. Background indexing never falls back to a full rebuild. Only changed/failed batches print a summary, with exact paths retained for errors; an external index generation refreshes the visible tree once.
+- Builds optional search indexes once within the full-rebuild transaction, skips nonexistent old details for fresh records, and reports the actual backend version/build. Initial SVN output summarizes duplicate identities and bounds error details; the CLI result retains the complete diagnostics.
 - Updates the index in one transaction from actual SVN update paths: scans only added subtrees, removes deleted paths and their derived records, and skips no-op writes, including single repository-root checkouts. Deleted PAGE winners trigger PAGE-only alias recovery; inherited product files refresh their child projections. Initial or incompatible indexes still require a full rebuild.
 - Loads the SVN tree from the local SQLite index and lazily parses only the selected PAGE file's editable fragments, avoiding a full checkout scan on every tree expansion.
 - Uses normalized SQLite call edges keyed by `source_record_id`, with covering indexes for target-caller and source-outgoing lookups. Existing indexes migrate transactionally and vacuum once on first open; compatibility views keep query/export results unchanged without storing repeated source metadata on every edge.

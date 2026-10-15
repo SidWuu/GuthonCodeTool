@@ -208,6 +208,9 @@ def setup_schema(conn) -> None:
             ON gusen_data_access(source_fragment_id, table_name);
         CREATE INDEX IF NOT EXISTS gusen_logic_fact_source_idx
             ON gusen_logic_fact(source_fragment_id, fact_kind, line_start);
+        CREATE INDEX IF NOT EXISTS gusen_data_access_record_idx ON gusen_data_access(source_record_id);
+        CREATE INDEX IF NOT EXISTS gusen_logic_fact_record_idx ON gusen_logic_fact(source_record_id);
+        CREATE INDEX IF NOT EXISTS gusen_bill_route_record_idx ON gusen_bill_route(source_record_id);
         CREATE INDEX IF NOT EXISTS gusen_logic_fact_scope_idx
             ON gusen_logic_fact(source_fragment_id, scope_path, line_start, line_end);
         """
@@ -889,10 +892,12 @@ def index_source_details(
     *,
     page_data: dict | None = None,
     public_data=None,
+    replace_existing: bool = True,
 ) -> dict:
-    """Replace one source object's derived fragments and facts."""
+    """Index fragments and facts, clearing details only for an existing record."""
 
-    clear_source_details(conn, source_record_id)
+    if replace_existing:
+        clear_source_details(conn, source_record_id)
     fragments: dict[str, int] = {}
     for script in scripts:
         fragment_id = _insert_fragment(conn, source_record_id, script)

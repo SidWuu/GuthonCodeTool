@@ -1,4 +1,4 @@
-const { timedOutput, operationTimer } = require('./output-logging');
+const { timedOutput, operationTimer, indexResultSummary } = require('./output-logging');
 const fs = require('node:fs');
 const path = require('node:path');
 const vscode = require('vscode');
@@ -364,13 +364,16 @@ async function configuredRuntime(config, mode, options = {}) {
     }
     if (selectPackaged) {
       const selected = await vscode.window.showOpenDialog({
-        canSelectFiles: true, canSelectFolders: true, canSelectMany: false,
-        title: '选择 GuthonCodeTool 应用（macOS 可选中解压出的 GuthonCodeTool 文件夹）',
+        canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+        filters: process.platform === 'win32' ? { '可执行文件': ['exe'] } : undefined,
+        title: process.platform === 'win32'
+          ? '选择 GuthonCodeTool EXE 可执行文件'
+          : '选择 GuthonCodeTool 可执行文件（应用目录内的 GuthonCodeTool）',
       });
       if (!selected) return undefined;
       const candidate = resolvePackagedTool(selected[0].fsPath);
       if (!candidate) {
-        vscode.window.showErrorMessage('所选路径不是 GuthonCodeTool 应用：请选择可执行文件，或包含它的 GuthonCodeTool 文件夹');
+        vscode.window.showErrorMessage('请选择 GuthonCodeTool 可执行文件：Windows 选择 EXE，macOS 选择应用目录内的 GuthonCodeTool 启动文件');
         return undefined;
       }
       toolPath = candidate;
@@ -442,7 +445,9 @@ async function runToolCommand(
         onOutput: (value) => output.append(value),
         token,
       });
-      if (result?.stdout) output.append(result.stdout);
+      const summary = indexResultSummary(command, result);
+      if (summary !== undefined) output.appendLine(summary);
+      else if (result?.stdout) output.append(result.stdout);
       else output.appendLine(JSON.stringify(result, null, 2));
       output.appendLine(`GuthonCodeTool 完成：${command}`);
       vscode.window.showInformationMessage(`GuthonCodeTool 完成：${command}`);

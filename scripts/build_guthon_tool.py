@@ -49,6 +49,7 @@ HIDDEN_IMPORTS = (
     "common.page_projection",
     "common.query_hub_context",
     "common.source_facts",
+    "common.index_bulk",
     "common.source_format",
     "common.workspace_config",
     "common.workspace_assistant",

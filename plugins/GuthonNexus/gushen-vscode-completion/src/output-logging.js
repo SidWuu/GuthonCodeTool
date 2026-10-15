@@ -36,4 +36,19 @@ function operationTimer() {
   };
 }
 
-module.exports = { timestamp, timedOutput, operationTimer };
+function indexResultSummary(command, result) {
+  if (command !== 'svn') return undefined;
+  let payload = result;
+  if (typeof result?.stdout === 'string') {
+    try { payload = JSON.parse(result.stdout); } catch { return undefined; }
+  }
+  if (!payload?.reindex || typeof payload.reindex !== 'object' || Array.isArray(payload.reindex)) return undefined;
+  const index = payload.reindex;
+  return JSON.stringify({ ok: payload.ok, action: payload.action, workspaceKey: payload.workspaceKey,
+    workingCopies: payload.workingCopies, skippedWorkingCopies: payload.skipped?.length,
+    reindex: { mode: index.mode, changed: index.changed, counts: index.counts, failures: index.failures,
+      ignoredCount: index.ignored?.length || 0, errors: (index.errors || []).slice(0, 10),
+      omittedErrors: Math.max(0, (index.errors?.length || 0) - 10) } }, null, 2);
+}
+
+module.exports = { timestamp, timedOutput, operationTimer, indexResultSummary };

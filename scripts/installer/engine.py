@@ -1,4 +1,4 @@
-"""Offline Windows setup orchestration. No credentials or repository access."""
+"""Windows setup orchestration with bundled or pinned on-demand prerequisites."""
 from __future__ import annotations
 
 import argparse
@@ -14,6 +14,7 @@ import sys
 
 sys.dont_write_bytecode = True
 from common.persistence import atomic_text, file_lock
+from common.installer_downloads import fetch
 
 NEXUS_ID = "gushen-local.guthon-nexus-vscode"
 MISSING = object()
@@ -77,7 +78,42 @@ def verify_payload(root):
     bundle_id = hashlib.sha256(json.dumps(unsigned, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:20]
     if manifest.get("bundleId") != bundle_id:
         raise SetupError("安装清单身份不匹配")
+    for item in manifest.get("prerequisites", []):
+        if "url" in item:
+            validate_download(item)
     return manifest
+
+
+def validate_download(item):
+    from urllib.parse import urlsplit
+
+    if (set(item) != {"id", "type", "elevate", "url", "sha256", "args"}
+            or item["id"] not in {"codebuddy", "git", "svn"}
+            or item["type"] not in {"exe", "msi"}
+            or not isinstance(item["elevate"], bool)
+            or not isinstance(item["args"], list) or not item["args"]
+            or any(not isinstance(arg, str) or "\x00" in arg for arg in item["args"])
+            or not isinstance(item["sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", item["sha256"])):
+        raise SetupError("在线依赖清单无效")
+    url = urlsplit(item["url"])
+    if url.scheme != "https" or not url.hostname or url.username or url.password or url.fragment:
+        raise SetupError("在线依赖必须使用无凭据的 HTTPS 地址")
+
+
+def prerequisite_file(payload, item):
+    if "url" not in item:
+        return payload_path(payload, item["file"])
+    validate_download(item)
+    cache = Path(os.environ["LOCALAPPDATA"]) / "Guthon/downloads"
+    name = item["id"] + "-" + item["sha256"] + "." + item["type"]
+    target = payload_path(cache, name)
+    cache.mkdir(parents=True, exist_ok=True)
+    try:
+        with file_lock(cache / ".download.lock", timeout=1):
+            fetch(item["url"], item["sha256"], target, limit=512 * 1024 * 1024)
+    except ValueError as error:
+        raise SetupError(item["id"] + " 下载或校验失败；检查网络后重新运行安装器：" + str(error)) from None
+    return target
 
 
 def merge_managed(current, desired, previous, location=""):
@@ -293,7 +329,8 @@ class Installer:
                         prerequisite = next((p for p in manifest["prerequisites"] if p["id"] == name), None)
                         if not prerequisite:
                             raise SetupError("本包未包含 " + name + "，请使用完整安装包或先安装该组件")
-                        source = payload_path(self.payload, prerequisite["file"])
+                        self.step("下载并校验 " + name if "url" in prerequisite else "安装 " + name)
+                        source = prerequisite_file(self.payload, prerequisite)
                         command = (["msiexec.exe", "/i", source] if source.suffix.lower() == ".msi" else [source])
                         install_package([*command, *prerequisite["args"]], name + " 安装", prerequisite["elevate"])
                         detected = find_ide(self.ide_root) if name == "codebuddy" else find_program(name)

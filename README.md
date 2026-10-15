@@ -17,7 +17,7 @@ GuthonCodeTool 是独立工具源码仓库，只保存公开的工具代码、�
 ## Windows 安装入口
 
 GuthonCodeSetup 的下载清单和配置步骤集中在 [Windows 安装步骤第一章：一键安装配置](docs/GuthonCodeTool_Windows安装步骤.html#one-click)。
-v0.3.2 提供统一安装器；单独安装或修复仍可按同页手动章节操作。
+默认一键安装器采用精简联网模式：内置后端、Nexus、Bridge、独立 Python 与安装指南；复用已有 CodeBuddy、Git、SVN，仅对缺失工具从固定官方 HTTPS 地址下载并校验 SHA-256。下载失败可重新运行，已校验缓存会复用。首次安装缺失工具时需要联网；离线完整包仍可由维护者按原流程构建。单独安装或修复仍可按同页手动章节操作。
 维护者构建、组件职责与验收边界见 [统一安装器构建说明](docs/UNIFIED_INSTALLER.md)。
 
 GuthonCodeSetup 仅负责从零安装工具、插件和基础环境。一次性安装确认完成后，后续在 CodeBuddy 使用 GuthonNexus；产品／项目接入与索引属于后续业务操作。套件工作区自动启动 Bridge，日常不再显示安装助手。
@@ -164,6 +164,8 @@ printf '%s' '{"sql":"SELECT COUNT(*) AS total FROM DEMO_ORDER","maxRows":100}' |
 .venv/bin/python scripts/guthon_tool.py search --home "$GUTHON_HOME" --workspace products.demo-product -- --query 订单保存
 .venv/bin/python scripts/guthon_tool.py context-pack --home "$GUTHON_HOME" --workspace products.demo-product -- --source-id '<source-id>' --fun-id '<fun-id>'
 ```
+
+首次 SVN 索引仍需完整扫描一次：新记录直接建立明细，检索索引在同一事务末尾批量构建；取消或失败保留旧索引。完成日志只汇总对象、重复项和有限错误，不逐项展开重复文件清单。日志会记录实际后端版本与构建标识，Nexus 版本不能代替后端版本。
 
 SVN 日常更新按实际变更路径批量维护索引：新增目录只扫描对应子树，删除文件或目录清理对应索引，无变化时跳过解析和索引写入；单个 repository-root 也无需因普通增删重建整库。删除 PAGE 时会核对授权页面目录，以恢复可能被旧别名遮蔽的候选；继承文件变化会联动刷新子文件。首次建立或索引版本不兼容时仍需完整重建。
 
@@ -324,7 +326,7 @@ SVN 工作区的 `sync-all` 只扫描本地 SVN 范围并更新索引和摘要�
 Nexus 是随 VSIX 发布的 VS Code 扩展：
 
 1. 安装发布包中的 VSIX，执行 `Developer: Reload Window`。
-2. 打开左侧 “Guthon Nexus”，选择应用和长期保留的本地数据目录。
+2. 打开左侧 “Guthon Nexus”，选择可执行文件和长期保留的本地数据目录：Windows 选择 EXE，macOS 进入完整应用目录选择同名 `GuthonCodeTool` 启动文件。
    VS Code 与 CodeBuddy 同机使用时，在第二个 IDE 执行“设置/切换工作空间”，选择第一个 IDE 使用的同一数据目录；Nexus 读取现有产品、项目、工作区状态及 `context/index.db`，不重新创建项目、不拉取源码或重建索引。以后新增项目或索引有变化时，点击工作区视图的“刷新已有工作空间状态”。
 3. 编辑 `config/*.yaml`。
 4. 展开目标 `PRD`、`PRJ`，在该节点选择“源码来源：DATABASE / SVN”；全部产品和项目始终混合显示。运行模式独立选择开发、调试或发行。

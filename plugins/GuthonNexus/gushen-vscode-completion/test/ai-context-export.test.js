@@ -21,6 +21,9 @@ async function fixture(t) {
 test('exports indexed metadata by default, preserving namespace and working copy without source reads', async (t) => {
   const options = await fixture(t);
   const calls = [];
+  const writeOptions = [];
+  const writeFile = fs.writeFile.bind(fs);
+  t.mock.method(fs, 'writeFile', (...args) => { writeOptions.push(args[2]); return writeFile(...args); });
   const client = { run: async (...args) => { calls.push(args); return response(); } };
   const result = await exportAiContext({ ...options, client, backend: { pageQuery() { throw new Error('unexpected source read'); } } });
   assert.equal(path.dirname(result.artifactPath), await fs.realpath(path.join(options.workspace.root, 'context', 'ai')));
@@ -28,7 +31,10 @@ test('exports indexed metadata by default, preserving namespace and working copy
   assert.match(await fs.readFile(result.artifactPath, 'utf8'), /workingCopyId/);
   assert.ok(calls[0][2].includes('--source-namespace'));
   assert.ok(!calls[0][2].includes('--include-source'));
-  assert.equal((await fs.stat(result.artifactPath)).mode & 0o777, 0o600);
+  assert.deepEqual(writeOptions, [{ flag: 'wx', mode: 0o600 }]);
+  // Windows stat mode bits do not represent NTFS access control lists.
+  if (process.platform !== 'win32') assert.equal((await fs.stat(result.artifactPath)).mode & 0o777, 0o600);
+  assert.equal((await fs.stat(result.artifactPath)).isFile(), true);
 });
 
 test('refuses ambiguous or mismatched working copy/source identities before writing', async (t) => {

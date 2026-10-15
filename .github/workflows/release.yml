@@ -235,7 +235,7 @@ jobs:
           path: installer-inputs
           key: windows-installer-inputs-${{ hashFiles('installer/windows/downloads.json') }}
       - name: Fetch verified official dependencies
-        run: python scripts/fetch_installer_inputs.py --output installer-inputs
+        run: python scripts/fetch_installer_inputs.py --output installer-inputs --online
       - name: Compile public unified installer
         shell: pwsh
         run: |

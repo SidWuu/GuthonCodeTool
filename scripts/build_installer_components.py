@@ -53,7 +53,7 @@ def build(output):
         if not npm or not npx:
             raise SystemExit("需要 Node.js 和 npm")
         # Fixed command text only; user inputs never enter these CMD invocations.
-        for command in ("npm test", "npm run check", "npm run build:bridge"):
+        for command in ("npm run check", "npm test"):
             subprocess.run(command, cwd=nexus, shell=True, check=True)
         # vsce accepts absolute output paths; use Node directly instead of interpolating CMD arguments.
         subprocess.run("npm install --no-save --package-lock=false @vscode/vsce@3.9.2", cwd=temp, shell=True, check=True)

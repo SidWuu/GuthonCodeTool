@@ -1585,7 +1585,7 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
     after = local_path.stat()
     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns) or hashlib.sha256(raw_source).hexdigest() != item["source_hash"]:
         raise ValueError(f"Source changed during scan: {item['source_path']}")
-    conn.execute(
+    inserted = conn.execute(
         """
         INSERT OR REPLACE INTO gusen_source_record(
             source_layer, scope_id, project_id, source_namespace,
@@ -1632,17 +1632,9 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
             indexed_time,
         ),
     )
-    source_record = conn.execute(
-        "SELECT record_id FROM gusen_source_record WHERE provider='svn' AND source_path=? "
-        "AND source_namespace=? AND source_table=? AND source_id=? AND fun_id=?",
-        (
-            item["source_path"], item.get("source_namespace") or item.get("scope_entry_id") or item.get("working_copy_id") or "",
-            item["source_table"], item["source_id"], item.get("fun_id") or "",
-        ),
-    ).fetchone()
-    if source_record is None:
-        raise ValueError(f"SVN source record was not inserted: {item['source_path']}")
-    source_record_id = int(source_record["record_id"])
+    # No record_id is supplied to INSERT: SQLite allocates a fresh row. Its
+    # derived tables are empty, so a replacement cleanup would only scan them.
+    source_record_id = int(inserted.lastrowid)
     page_data = None
     public_data = None
     if local_path.suffix.lower() == ".json":
@@ -1669,6 +1661,7 @@ def _insert_svn_index_item(conn, workspace, item, indexed_time):
         list(item.get("scripts") or []),
         page_data=page_data,
         public_data=public_data,
+        replace_existing=False,
     )
     fragments = detail_index["fragments"]
     for script in item.get("scripts") or []:
@@ -1809,18 +1802,20 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
             try:
                 progress("开始索引事务")
                 conn.execute("BEGIN IMMEDIATE")
-                conn.execute("DELETE FROM gusen_invoke_call")
-                conn.execute("DELETE FROM gusen_dynamic_call")
-                source_facts.clear_all_details(conn)
-                conn.execute("DELETE FROM gusen_source_record")
-                progress("清理旧索引完成，开始扫描授权 working copy")
-                scan = catalog.scan(
-                    workspace,
-                    on_object=lambda item: _insert_svn_scan_item(conn, workspace, item, indexed_time),
-                    collect_objects=False,
-                    collect_modules=False,
-                    on_progress=on_progress,
-                )
+                from common.index_bulk import bulk_search_index
+                with bulk_search_index(conn, on_progress=progress):
+                    conn.execute("DELETE FROM gusen_invoke_call")
+                    conn.execute("DELETE FROM gusen_dynamic_call")
+                    source_facts.clear_all_details(conn)
+                    conn.execute("DELETE FROM gusen_source_record")
+                    progress("清理旧索引完成，开始扫描授权 working copy")
+                    scan = catalog.scan(
+                        workspace,
+                        on_object=lambda item: _insert_svn_scan_item(conn, workspace, item, indexed_time),
+                        collect_objects=False,
+                        collect_modules=False,
+                        on_progress=on_progress,
+                    )
                 if any(error.get("code") not in {"PARSE_ERROR"} for error in scan["errors"]):
                     progress(f"扫描发现身份或范围错误，回滚并保留旧索引")
                     conn.rollback()
