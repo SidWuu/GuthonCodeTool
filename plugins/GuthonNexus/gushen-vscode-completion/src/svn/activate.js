@@ -1,3 +1,4 @@
+const { timedOutput, operationTimer } = require('../output-logging');
 const path = require('node:path');
 const { SvnBackendClient } = require('./backend-client');
 const { fragmentLabel, SvnCatalogTreeProvider } = require('./catalog-tree');
@@ -371,7 +372,7 @@ function activateSvn({
   claimOperation,
   bridge,
 }) {
-  const operationOutput = vscode.window.createOutputChannel('Guthon Nexus SVN');
+  const operationOutput = timedOutput(vscode.window.createOutputChannel('Guthon Nexus SVN'));
   // 每次日志都 reveal 会把焦点反复抢到输出面板，后台索引输出尤其明显。
   const log = (operation, message) => {
     operationOutput.appendLine(`[Nexus SVN] ${operation}｜${message}`);
@@ -581,6 +582,7 @@ function activateSvn({
   );
 
   const withError = (action) => async (...args) => {
+    const elapsed = operationTimer();
     try {
       return await action(...args);
     } catch (error) {
@@ -588,6 +590,8 @@ function activateSvn({
       operationOutput.show(true);
       void vscode.window.showErrorMessage(`Guthon Nexus SVN：${error.message}`);
       return undefined;
+    } finally {
+      log('操作结束', `本次 SVN 操作完整耗时：${elapsed()}`);
     }
   };
   const firstResource = (value) => (Array.isArray(value) ? value[0] : value);
@@ -816,12 +820,6 @@ function activateSvn({
       button
     );
     if (confirmed !== button) return undefined;
-    // Platform-side pulls and the ensuing SVN update both produce checkout
-    // watcher events. The refresh command reindexes these exact files itself,
-    // so cancel pending watcher work before it can race for the SVN lock.
-    for (const change of selectedRemote) {
-      sourceWatcher?.suppress(workspaceKey, change.path, 30 * 60 * 1000);
-    }
     log(operation, `已确认，开始更新 ${selectedRemote.length} 个远程文件`);
     const result = await backend.refresh(workspaceKey, {
       sourcePath,

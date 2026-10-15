@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import tempfile
+from datetime import datetime
 import zipfile
 from pathlib import Path
 from importlib.resources import files
@@ -698,7 +699,7 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
 
 
 def _svn_progress(message: str) -> None:
-    print(f"[SVN] {message}", file=sys.stderr, flush=True)
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [SVN] {message}", file=sys.stderr, flush=True)
 
 
 def _reindex_svn(gusen_hub, config, workspace, on_progress=None) -> dict:
@@ -746,9 +747,7 @@ def _reindex_svn_files(
     )
     try:
         results = []
-        for index, source_path in enumerate(paths, 1):
-            if on_progress is not None:
-                on_progress(f"[{index}/{len(paths)}] {workspace['displayName']}｜索引｜更新文件 · {source_path}")
+        for source_path in paths:
             results.append(
                 gusen_hub.index_svn_workspace_file(connection, config, workspace, source_path)
             )
@@ -759,117 +758,65 @@ def _reindex_svn_files(
     return results
 
 
-def _reindex_svn_working_copies(
-    gusen_hub,
-    config,
-    workspace,
-    working_copy_ids: list[str],
-    on_progress=None,
-) -> dict:
-    connection = _connect_incremental_svn_index(
-        gusen_hub,
-        config,
-        workspace,
-        on_progress=on_progress,
+def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str]:
+    """Return canonical changed paths, including directories and deleted files."""
+
+    from providers.svn.nexus.manifest import (
+        load_authorized_scope, logical_path_for_entry, resolve_authorized_path,
     )
-    try:
-        result = gusen_hub.index_svn_workspace_working_copies(
-            connection,
-            config,
-            workspace,
-            working_copy_ids,
-            on_progress=on_progress,
-        )
-    finally:
-        connection.close()
-    if result.get("failures"):
-        raise SystemExit(f"Scoped SVN scan failed; existing index preserved: {result['errors']}")
-    return result
 
-
-def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str] | None:
-    """Return exact changed source paths, or None when the selected copies need a scoped scan."""
-
-    from providers.svn.nexus.manifest import load_authorized_scope, source_category
-
-    entries = {entry.id: entry for entry in load_authorized_scope(workspace).entries}
-    allowed_suffixes = {
-        "pages": {".json", ".gss"},
-        "procedures": {".gss"},
-        "system-script": {".gss", ".js", ".vm", ".sql"},
-        "tables": {".json"},
-        "views": {".json"},
-    }
-    logical_paths = []
-    merge_local = refresh_result.get("action") == "refreshed-with-local-merge"
+    scope = load_authorized_scope(workspace)
+    entries = {entry.id: entry for entry in scope.entries}
+    paths = []
     for updated in refresh_result.get("updated") or []:
         entry = entries.get(updated.get("id"))
         if entry is None:
-            return None
-        explicit_paths = list(updated.get("paths") or [])
-        if explicit_paths:
-            for logical_path in explicit_paths:
-                prefix = entry.local_subdir + "/"
-                if not str(logical_path).startswith(prefix):
-                    return None
-                relative = str(logical_path)[len(prefix):]
-                target = (entry.root / relative).resolve()
-                category = source_category(entry, relative)
-                if (
-                    not relative
-                    or relative == "."
-                    or entry.root.resolve() not in target.parents
-                    or target.suffix.lower() not in allowed_suffixes.get(category, set())
-                ):
-                    return None
-                logical_paths.append(str(logical_path))
-            continue
-        changes = list((updated.get("before") or {}).get("remoteChanges") or [])
-        if merge_local:
+            raise SystemExit("SVN refresh returned an unknown working copy")
+        paths.extend(updated.get("paths") or [])
+        for raw in updated.get("updatePaths") or []:
+            target = Path(raw)
+            if not target.is_absolute():
+                target = entry.root / target
+            relative = target.resolve().relative_to(entry.root.resolve()).as_posix()
+            paths.append(logical_path_for_entry(entry, relative) or entry.local_subdir)
+        changes = [] if updated.get("paths") else list((updated.get("before") or {}).get("remoteChanges") or [])
+        if refresh_result.get("action") == "refreshed-with-local-merge":
             changes.extend((updated.get("before") or {}).get("changes") or [])
             changes.extend((updated.get("after") or {}).get("changes") or [])
         for change in changes:
-            relative = Path(str(change.get("path") or "").replace("\\", "/")).as_posix().lstrip("/")
-            target = (entry.root / relative).resolve()
-            if (
-                not relative
-                or relative == "."
-                or entry.root.resolve() not in target.parents
-                or not target.is_file()
-                or target.suffix.lower() not in allowed_suffixes.get(source_category(entry, relative), set())
-            ):
-                return None
-            logical_paths.append(f"{entry.local_subdir}/{relative}")
-    return list(dict.fromkeys(logical_paths))
+            if updated.get("paths") and logical_path_for_entry(entry, change["path"]) not in updated["paths"]:
+                continue
+            # Directory property changes do not change source contents.
+            if change.get("item") in {"", "none", "normal"}:
+                if (change.get("properties") in {None, "", "none", "normal"}
+                        or not (entry.root / change["path"]).is_file()):
+                    continue
+            # SVN can mark ancestor directories modified when descendants
+            # changed. Their own contents are not source files; update
+            # notifications and added/deleted subtrees cover the real changes.
+            if change.get("item") == "modified" and (entry.root / change["path"]).is_dir():
+                continue
+            paths.append(logical_path_for_entry(entry, change["path"]) or entry.local_subdir)
+    normalized = []
+    for path in paths:
+        entry, _target, relative = resolve_authorized_path(scope, path)
+        normalized.append(logical_path_for_entry(entry, relative) or entry.local_subdir)
+    return list(dict.fromkeys(normalized))
 
 
 def _reindex_svn_refresh(gusen_hub, config, workspace, refresh_result: dict, on_progress=None) -> dict:
     if on_progress is not None:
         on_progress(f"{workspace['displayName']}｜索引｜开始更新后的增量索引")
     paths = _manifest_refresh_paths(workspace, refresh_result)
-    if paths is None:
-        result = _reindex_svn_working_copies(
-            gusen_hub,
-            config,
-            workspace,
-            [item.get("id") for item in refresh_result.get("updated") or [] if item.get("id")],
-            on_progress=on_progress,
+    connection = _connect_incremental_svn_index(gusen_hub, config, workspace, on_progress=on_progress)
+    try:
+        result = gusen_hub.index_svn_workspace_changes(
+            connection, config, workspace, paths, refresh_result, on_progress=on_progress,
         )
-    else:
-        files = _reindex_svn_files(
-            gusen_hub,
-            config,
-            workspace,
-            paths,
-            on_progress=on_progress,
-        )
-        result = {
-            "mode": "svn-incremental-refresh",
-            "workspaceKey": workspace["workspaceKey"],
-            "changed": sum(item.get("changed", 0) for item in files),
-            "failures": sum(item.get("failures", 0) for item in files),
-            "files": files,
-        }
+    finally:
+        connection.close()
+    if result.get("failures"):
+        raise SystemExit(f"Incremental SVN scan failed; existing index preserved: {result['errors']}")
     if on_progress is not None:
         on_progress(
             f"{workspace['displayName']}｜索引｜更新后的索引完成 · "

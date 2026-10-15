@@ -1,4 +1,5 @@
 const path = require('node:path');
+const { operationTimer } = require('../output-logging');
 
 const SOURCE_EXTENSIONS = new Set([
   '.json', '.gss', '.js', '.vm', '.sql', '.md', '.txt', '.yaml', '.yml',
@@ -26,6 +27,9 @@ class SvnSourceWatcher {
     this.timers = new Map();
     this.pending = new Map();
     this.suppressedUntil = new Map();
+    this.running = new Map();
+    this.generations = new Map();
+    this.disposed = false;
   }
 
   sync(workspaces) {
@@ -76,6 +80,7 @@ class SvnSourceWatcher {
   }
 
   _schedule(workspace, workingCopy, uri) {
+    if (this.disposed) return;
     const sourcePath = logicalSourcePath(workingCopy, uri.fsPath);
     if (!sourcePath) return;
     const key = `${workspace.workspaceKey}\0${sourcePath}`;
@@ -83,48 +88,91 @@ class SvnSourceWatcher {
     if (suppressedUntil > Date.now()) return;
     this.suppressedUntil.delete(key);
     this.pending.set(key, { workspace, sourcePath });
-    if (this.timers.has(workspace.workspaceKey)) return;
-    this.timers.set(workspace.workspaceKey, setTimeout(() => {
-      this.timers.delete(workspace.workspaceKey);
-      void this._flush(workspace.workspaceKey);
+    this._arm(workspace.workspaceKey);
+  }
+
+  _arm(workspaceKey) {
+    if (this.disposed || this.running.has(workspaceKey) || this.timers.has(workspaceKey)) return;
+    if (![...this.pending.keys()].some(key => key.startsWith(`${workspaceKey}\0`))) return;
+    this.timers.set(workspaceKey, setTimeout(() => {
+      this.timers.delete(workspaceKey);
+      void this._flush(workspaceKey).catch(error => {
+        if (!this.disposed) this.onOutput?.(`[SVN] 文件监听｜批次刷新失败：${error.message}\n`);
+      });
     }, this.debounceMs));
   }
 
   async _flush(workspaceKey) {
+    if (this.disposed) return;
+    if (this.running.has(workspaceKey)) return this.running.get(workspaceKey);
+    clearTimeout(this.timers.get(workspaceKey));
+    this.timers.delete(workspaceKey);
+    const task = Promise.resolve().then(() => this._drain(workspaceKey));
+    this.running.set(workspaceKey, task);
+    try {
+      return await task;
+    } finally {
+      this.running.delete(workspaceKey);
+      this._arm(workspaceKey);
+    }
+  }
+
+  async _drain(workspaceKey) {
     const items = [];
     for (const key of [...this.pending.keys()]) {
       if (!key.startsWith(`${workspaceKey}\0`)) continue;
       items.push(this.pending.get(key));
       this.pending.delete(key);
     }
-    if (!items.length) return;
-    const results = [];
+    if (!items.length || this.disposed) return;
+    const elapsed = operationTimer();
     const failures = [];
-    for (const { workspace, sourcePath } of items) {
+    const paths = new Set();
+    let changed = 0;
+    let deleted = 0;
+    let generationChanged = false;
+    // Bound the JSON request while keeping each workspace strictly serial.
+    for (let offset = 0; offset < items.length && !this.disposed; offset += 1000) {
+      const batch = items.slice(offset, offset + 1000).map(item => item.sourcePath);
       try {
-        const result = this.onOutput
-          ? await this.backend.reindexFile(
-            workspace.workspaceKey,
-            sourcePath,
-            { onOutput: this.onOutput }
-          )
-          : await this.backend.reindexFile(workspace.workspaceKey, sourcePath);
-        results.push({ sourcePath, result });
+        const result = await this.backend.reindexFiles(workspaceKey, batch);
+        changed += result.reindex?.changed || 0;
+        deleted += result.reindex?.deleted || 0;
+        for (const sourcePath of result.paths || []) paths.add(sourcePath);
+        if (result.indexGeneration && result.indexGeneration !== this.generations.get(workspaceKey)) {
+          generationChanged = true;
+          this.generations.set(workspaceKey, result.indexGeneration);
+        }
+        if (result.stale || result.ok === false) {
+          const errors = result.reindex?.errors || [];
+          for (const error of errors) failures.push({ sourcePath: error.path || batch[0], error: new Error(error.error || '索引未发布') });
+          if (!errors.length) failures.push({ sourcePath: batch[0], error: new Error('批次索引未发布') });
+        }
       } catch (error) {
-        failures.push({ sourcePath, error });
+        failures.push({ sourcePath: batch[0], error });
       }
     }
-    // 同一批源码变化只触发一次级联刷新；逐个文件回调会让一次保存产生多轮目录树、虚拟文档与 SCM 刷新。
+    if (this.disposed) return;
+    if (changed || deleted || failures.length) {
+      for (const failure of failures) this.onOutput?.(`[SVN] 文件监听｜失败 · ${failure.sourcePath} · ${failure.error.message}\n`);
+      this.onOutput?.(`[SVN] 文件监听｜批量索引汇总 · 文件 ${items.length} · 更新对象 ${changed} · 删除对象 ${deleted} · 失败 ${failures.length} · 完整耗时 ${elapsed()}\n`);
+    }
+    if (!changed && !deleted && !failures.length && !generationChanged) return;
+    // An external CLI may already have updated the index. Refresh its visible
+    // snapshot once per generation without parsing the same files again.
+    if (generationChanged) for (const item of items) paths.add(item.sourcePath);
     await this.onChanged?.(workspaceKey, {
       ok: failures.length === 0,
-      stale: results.some(({ result }) => result?.stale),
-      paths: results.map(({ sourcePath }) => sourcePath),
-      sourcePath: failures[0]?.sourcePath || results[0]?.sourcePath || '',
+      stale: failures.length > 0,
+      paths: [...paths],
+      sourcePath: failures[0]?.sourcePath || [...paths][0] || '',
       failures,
     });
   }
 
   dispose() {
+    this.disposed = true;
+    this.generations.clear();
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.pending.clear();

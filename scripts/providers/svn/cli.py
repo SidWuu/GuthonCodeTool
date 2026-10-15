@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -176,40 +177,41 @@ def _lifecycle(command):
         result["reindex"] = _reindex_svn(gusen_hub, config, workspace)
         gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
     elif parsed.action == 'refresh':
-        if manifest_layout:
-            if parsed.path and parsed.working_copy:
-                raise SystemExit("svn refresh accepts --path or --working-copy, not both")
-            from providers.svn.nexus import workspace as nexus_workspace
+        if manifest_layout and parsed.path and parsed.working_copy:
+            raise SystemExit("svn refresh accepts --path or --working-copy, not both")
+        if not manifest_layout and parsed.path:
+            raise SystemExit("svn refresh --path requires manifest-working-copies")
+        with checkout.operation_lock(workspace, "refresh-and-index", blocking=True):
+            if manifest_layout:
+                from providers.svn.nexus import workspace as nexus_workspace
 
-            result = nexus_workspace.refresh(
-                workspace,
-                merge_local=parsed.merge_local,
-                working_copy_ids=parsed.working_copy,
-                logical_paths=[parsed.path] if parsed.path else None,
-                on_progress=_svn_progress,
+                result = nexus_workspace.refresh(
+                    workspace,
+                    merge_local=parsed.merge_local,
+                    working_copy_ids=parsed.working_copy,
+                    logical_paths=[parsed.path] if parsed.path else None,
+                    on_progress=_svn_progress,
+                )
+            else:
+                result = checkout.refresh(
+                    workspace,
+                    gusen_hub.CONFIG_DIR,
+                    bootstrap,
+                    prune=parsed.prune,
+                    on_progress=_svn_progress,
+                )
+            result["reindex"] = (
+                _reindex_svn_refresh(
+                    gusen_hub,
+                    config,
+                    workspace,
+                    result,
+                    on_progress=_svn_progress,
+                )
+                if manifest_layout
+                else _reindex_svn(gusen_hub, config, workspace, on_progress=_svn_progress)
             )
-        else:
-            if parsed.path:
-                raise SystemExit("svn refresh --path requires manifest-working-copies")
-            result = checkout.refresh(
-                workspace,
-                gusen_hub.CONFIG_DIR,
-                bootstrap,
-                prune=parsed.prune,
-                on_progress=_svn_progress,
-            )
-        result["reindex"] = (
-            _reindex_svn_refresh(
-                gusen_hub,
-                config,
-                workspace,
-                result,
-                on_progress=_svn_progress,
-            )
-            if manifest_layout
-            else _reindex_svn(gusen_hub, config, workspace, on_progress=_svn_progress)
-        )
-        gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
+            gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
     elif parsed.action == 'status':
         checkout.require_capability(workspace, "status")
         if manifest_layout:
@@ -647,6 +649,35 @@ def _reindex_file(command):
     return result
 
 
+def _reindex_files(command):
+    """Quiet batch maintenance for physical file events; never rebuild a workspace."""
+    from providers.svn.nexus.incremental import reindex_changed_files
+    from providers.svn.nexus.procedure_sources import source_index_status
+
+    if not command.manifest_layout:
+        raise SystemExit("svn reindex-files requires manifest-working-copies")
+    payload = json.load(sys.stdin)
+    paths = payload.get("paths") if isinstance(payload, dict) else None
+    if (not isinstance(paths, list) or not 1 <= len(paths) <= 1000
+            or any(not isinstance(path, str) or not path.strip() for path in paths)):
+        raise SystemExit("svn reindex-files expects JSON paths containing 1..1000 logical paths")
+    with checkout.operation_lock(command.workspace, "watcher-index", blocking=True):
+        health = source_index_status(command.workspace)
+        if health["buildStatus"] not in {"READY", "PARTIAL"}:
+            raise SystemExit("后台增量索引需要现有兼容索引；请显式重建工作区索引，后台不会执行全量重建")
+        connection = command.hub.connect_index_for_workspace(command.workspace, action="watcher-index")
+        try:
+            result = reindex_changed_files(connection, command.workspace, paths)
+            generation = connection.execute(
+                "SELECT state_value FROM gusen_sync_state WHERE state_key='source_catalog_generation'"
+            ).fetchone()
+        finally:
+            connection.close()
+    return {"ok": True, "workspaceKey": command.workspace["workspaceKey"],
+            "reindex": result, "paths": result.get("paths", []), "stale": bool(result["failures"]),
+            "indexGeneration": generation[0] if generation else None}
+
+
 def _maintenance(command):
     parsed = command.parsed
     gusen_hub = command.hub
@@ -794,12 +825,15 @@ ACTION_HANDLERS = {
                     "delivery-status", "revert-preview", "platform-save-preview", "revert",
                     "platform-save"), _scm),
     "reindex-file": _reindex_file,
+    "reindex-files": _reindex_files,
     "page-query": _page_query,
 }
 
 
 def run(parsed, extra_args, hub, config, workspace, *, on_progress, reindex,
         reindex_files, reindex_refresh):
+    if parsed.action == "reindex-files":
+        on_progress = None
     command = SvnCommand(parsed, extra_args, hub, config, workspace, on_progress,
                          reindex, reindex_files, reindex_refresh)
     # Preserve validation precedence: maintenance actions predate layout flags.
@@ -808,6 +842,15 @@ def run(parsed, extra_args, hub, config, workspace, *, on_progress, reindex,
             raise SystemExit("--prune is only available for the legacy sparse SVN layout")
         if not command.manifest_layout and (parsed.merge_local or parsed.working_copy):
             raise SystemExit("--merge-local and --working-copy require manifest-working-copies")
-    result = ACTION_HANDLERS[parsed.action](command)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    started = time.perf_counter()
+    try:
+        result = ACTION_HANDLERS[parsed.action](command)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    finally:
+        if on_progress is not None:
+            elapsed = round((time.perf_counter() - started) * 1000)
+            seconds, milliseconds = divmod(elapsed, 1000)
+            minutes, seconds = divmod(seconds, 60)
+            hours, minutes = divmod(minutes, 60)
+            on_progress(f"本次 SVN 操作完整耗时：{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}")

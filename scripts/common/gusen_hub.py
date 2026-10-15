@@ -2052,6 +2052,13 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
     }
 
 
+def index_svn_workspace_changes(conn, cfg, workspace, paths, refresh_result, on_progress=None):
+    """Publish an SVN update's affected files and deletions in one transaction."""
+    from providers.svn.nexus.incremental import index_changes
+
+    return index_changes(conn, workspace, paths, refresh_result, on_progress=on_progress)
+
+
 def index_svn_workspace_file(conn, cfg, workspace, source_path):
     """Atomically replace one physical file's objects and outgoing call edges."""
 

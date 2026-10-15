@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -28,6 +29,16 @@ from .manifest import (
 HEADER_FIELD = re.compile(r"(?m)^[ \t]*\*[ \t]*@(?P<key>[A-Za-z]+)[ \t]*(?P<value>[^\r\n]*)\r?$")
 TEXT_SUFFIXES = {".gss", ".js", ".vm", ".sql"}
 GENERIC_TEXT_SUFFIXES = {*TEXT_SUFFIXES, ".json", ".md", ".txt", ".yaml", ".yml"}
+SOURCE_SUFFIXES = {
+    "pages": {".json", ".gss"}, "procedures": {".gss"},
+    "system-script": TEXT_SUFFIXES, "tables": {".json"}, "views": {".json"},
+    "skill": GENERIC_TEXT_SUFFIXES, "public": GENERIC_TEXT_SUFFIXES,
+}
+
+
+def source_file_supported(entry: ScopeEntry, path: Path) -> bool:
+    category = source_category(entry, path.relative_to(entry.root).as_posix()) or entry.category
+    return path.suffix.lower() in SOURCE_SUFFIXES.get(category, set())
 
 
 def header_fields(text: str) -> dict[str, str]:
@@ -47,8 +58,9 @@ def _decode_json(text: str):
     return data, False
 
 
-def _revision_map(root: Path) -> dict[str, str]:
-    result = run_svn(["info", "-R", "--xml", str(root)])
+def _revision_map(root: Path, paths=None) -> dict[str, str]:
+    args = ["info", "-R", "--xml", str(root)] if paths is None else ["info", "--xml", "--", *map(str, paths)]
+    result = run_svn(args)
     document = ET.fromstring(result.stdout)
     revisions = {}
     for node in document.findall("entry"):
@@ -287,18 +299,30 @@ def _generic_read_only_object(entry: ScopeEntry, path: Path, revisions: dict, ch
 def _object_for_file(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) -> dict | None:
     relative = path.relative_to(entry.root)
     category = source_category(entry, relative)
-    suffix = path.suffix.lower()
-    if category == "pages" and suffix in {".json", ".gss"}:
+    if not source_file_supported(entry, path):
+        return None
+    if category == "pages":
         return _page_object(entry, path, revisions, changes)
-    if category == "procedures" and suffix == ".gss":
+    if category == "procedures":
         return _procedure_object(entry, path, revisions, changes)
-    if category == "system-script" and suffix in TEXT_SUFFIXES:
+    if category == "system-script":
         return _system_script_object(entry, path, revisions, changes)
-    if category in {"tables", "views"} and suffix == ".json":
+    if category in {"tables", "views"}:
         return _metadata_object(entry, path, revisions, changes, category)
-    if category in {"skill", "public"} and suffix in GENERIC_TEXT_SUFFIXES:
+    if category in {"skill", "public"}:
         return _generic_read_only_object(entry, path, revisions, changes)
     return None
+
+
+def working_copy_files(root: Path):
+    """Enumerate a subtree without entering SVN administration or linked directories."""
+    from common.operation_control import checkpoint
+
+    for directory, children, files in os.walk(root):
+        checkpoint()
+        children[:] = [name for name in children if name != ".svn" and not (Path(directory) / name).is_symlink()]
+        for name in files:
+            yield Path(directory) / name
 
 
 def scan(
@@ -370,10 +394,7 @@ def scan(
         if on_progress is not None:
             on_progress(f"[{index}/{total}] {label}｜索引｜解析授权文件")
         scanned_files = 0
-        paths = []
-        for path in entry.root.rglob("*"):
-            checkpoint()
-            paths.append(path)
+        paths = list(working_copy_files(entry.root))
         for path in sorted(paths):
             checkpoint()
             if not path.is_file() or ".svn" in path.parts:

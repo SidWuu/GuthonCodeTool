@@ -331,3 +331,17 @@ test('passes the one-time SVN password only through stdin for native caching', a
   assert.equal(calls[0].args.includes('demo-password'), false);
   assert.deepEqual(JSON.parse(calls[0].input), { password: 'demo-password' });
 });
+
+test('batches watcher paths in one quiet stdin request', async () => {
+  const calls = [];
+  const client = new SvnBackendClient({ getTool: async () => ({ toolPath: '/tool', toolHome: '/home' }),
+    spawnProcess: fakeSpawn(calls, { ok: true, paths: [], reindex: { changed: 0 } }) });
+  await client.reindexFiles('projects.demo', ['systems/SYS/pages/one.json', 'systems/SYS/pages/two.json']);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].args.at(-1), 'reindex-files');
+  assert.deepEqual(JSON.parse(calls[0].input), { paths: ['systems/SYS/pages/one.json', 'systems/SYS/pages/two.json'] });
+});
+
+test('error messages omit timestamped SVN progress already streamed to output', () => {
+  assert.equal(backendErrorMessage('[14:52:45.557] [SVN] 索引完成\nsvn: real failure', '', 1), 'svn: real failure');
+});

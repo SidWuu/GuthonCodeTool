@@ -165,6 +165,12 @@ printf '%s' '{"sql":"SELECT COUNT(*) AS total FROM DEMO_ORDER","maxRows":100}' |
 .venv/bin/python scripts/guthon_tool.py context-pack --home "$GUTHON_HOME" --workspace products.demo-product -- --source-id '<source-id>' --fun-id '<fun-id>'
 ```
 
+SVN 日常更新按实际变更路径批量维护索引：新增目录只扫描对应子树，删除文件或目录清理对应索引，无变化时跳过解析和索引写入；单个 repository-root 也无需因普通增删重建整库。删除 PAGE 时会核对授权页面目录，以恢复可能被旧别名遮蔽的候选；继承文件变化会联动刷新子文件。首次建立或索引版本不兼容时仍需完整重建。
+
+文件监听事件按工作区合并并串行批量处理，哈希和状态已与索引一致的文件跳过解析和写入。SVN 更新与索引发布共用操作锁，监听器等待发布完成后核验；后台不会自动全量重建。正常监听仅输出批次汇总，已更新文件不刷屏，失败保留具体路径。
+
+GuthonCodeTool 和 Guthon Nexus SVN 输出每行左侧显示 HH:mm:ss.SSS 时间戳，操作结束输出完整耗时（含失败或取消）；Nexus 更新操作的最终汇总包含后续 SCM 和视图刷新。
+
 SVN 工作区要求 SVN 1.10+ 客户端。在 Nexus 的目标项目节点选择 SVN，并在已有的
 `config/products.yaml`（项目写在 `config/projects.yaml`）对应条目中配置唯一 `svn.url`。Nexus 对该地址执行一次完整 checkout；`systems.include.mappings` 不参与目录筛选。地址无效、权限不足、网络或认证失败都会终止本次 checkout 并显示错误。
 新增工作区时也可选择谷神平台为当前产品/项目下载的 `svnCheckoutHere.sh`（macOS/Linux）或 `svnCheckoutHere.bat`

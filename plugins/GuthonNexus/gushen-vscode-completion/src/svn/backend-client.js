@@ -4,7 +4,7 @@ function backendErrorMessage(stderr, stdout, code) {
   const stderrLines = String(stderr || '')
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('[SVN] '));
+    .filter((line) => line && !/^\s*(?:\[\d{2}:\d{2}:\d{2}\.\d{3}\]\s*)?\[SVN\] /.test(line));
   return stderrLines.join('\n') || String(stdout || '').trim() || `退出码 ${code}`;
 }
 
@@ -141,6 +141,10 @@ class SvnBackendClient {
 
   reindexFile(workspaceKey, sourcePath, options = {}) {
     return this.run(workspaceKey, ['reindex-file', '--path', sourcePath], undefined, options);
+  }
+
+  reindexFiles(workspaceKey, sourcePaths) {
+    return this.run(workspaceKey, ['reindex-files'], { paths: sourcePaths });
   }
 
   preview(workspaceKey, action, sessionId, options = {}) {

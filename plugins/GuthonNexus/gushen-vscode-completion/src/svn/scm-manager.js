@@ -268,6 +268,10 @@ class SvnScmManager {
     record.inFlight ||= new Map();
     if(record.inFlight.has(key))return record.inFlight.get(key);
     const generation=(record.statusRequest||0)+1;record.statusRequest=generation;
+    // Local refreshes supersede local snapshots, but cannot invalidate an
+    // independent remote check that must clear obsolete remote resources.
+    const remoteGeneration = remote ? (record.remoteRequest || 0) + 1 : undefined;
+    if (remote) record.remoteRequest = remoteGeneration;
     const pending=(async()=>{
       let value=await this.backend.scmStatus(workspace.workspaceKey,remote,options);
       if((options.workingCopyIds||[]).length){
@@ -275,8 +279,16 @@ class SvnScmManager {
         const local=await this.backend.scmStatus(workspace.workspaceKey,false,{});
         value={...local,remoteChecked:value.remoteChecked,remoteChanges:value.remoteChanges};
       }
-      if(this.providers.get(workspace.workspaceKey)!==record || record.statusRequest!==generation)return record.status;
-      return this._applyStatus(record,value);
+      if(this.providers.get(workspace.workspaceKey)!==record)return record.status;
+      const acceptLocal = record.statusRequest === generation;
+      const acceptRemote = remote && record.remoteRequest === remoteGeneration && value.remoteChecked;
+      if (!acceptLocal && !acceptRemote) return record.status;
+      const local = acceptLocal ? value : record.status;
+      return this._applyStatus(record, {
+        ...local,
+        remoteChecked: Boolean(acceptRemote),
+        remoteChanges: acceptRemote ? value.remoteChanges : [],
+      });
     })().finally(()=>record.inFlight.delete(key));
     record.inFlight.set(key,pending);return pending;
   }
@@ -345,6 +357,8 @@ class SvnScmManager {
   clearRemote(workspaceKey) {
     const record = this.record(workspaceKey);
     if (!record) return;
+    // An explicit update invalidates any older in-flight remote response.
+    record.remoteRequest = (record.remoteRequest || 0) + 1;
     if (record.status) {
       this._applyStatus(record, { ...record.status, remoteChecked: true, remoteChanges: [] });
     }

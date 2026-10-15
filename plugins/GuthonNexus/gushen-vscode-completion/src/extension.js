@@ -1,3 +1,4 @@
+const { timedOutput, operationTimer } = require('./output-logging');
 const fs = require('node:fs');
 const path = require('node:path');
 const vscode = require('vscode');
@@ -113,7 +114,7 @@ let toolOutputChannel = null;
 // 复用同一个输出通道：每条命令都新建通道会持续泄漏，并反复把焦点抢到输出面板。
 function toolOutput() {
   if (!toolOutputChannel) {
-    toolOutputChannel = vscode.window.createOutputChannel('GuthonCodeTool');
+    toolOutputChannel = timedOutput(vscode.window.createOutputChannel('GuthonCodeTool'));
   }
   return toolOutputChannel;
 }
@@ -434,6 +435,7 @@ async function runToolCommand(
     'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
   }[tool.mode] || tool.mode;
   const execute = async (token) => {
+    const elapsed = operationTimer();
     output.appendLine(`运行：${command}${workspaceKey ? ` · ${workspaceKey}` : ''}（${modeLabel}）`);
     try {
       const result = await processClient.request(tool, command, extraArgs, workspaceKey, stdinPayload, {
@@ -452,6 +454,8 @@ async function runToolCommand(
       if (error.code === 'OPERATION_CANCELLED') vscode.window.showInformationMessage(`${label}已取消${target}。详情见“输出 → GuthonCodeTool”`);
       else vscode.window.showErrorMessage(`${label}失败${target}（${modeLabel}）：${error.message}。详情见“输出 → GuthonCodeTool”`);
       return false;
+    } finally {
+      output.appendLine(`本次命令完整耗时：${elapsed()}`);
     }
   };
   const progressExecute = () => command === 'reindex'
@@ -1585,6 +1589,7 @@ function activate(context) {
       if (!workspaceKey) return vscode.window.showErrorMessage('无法解析 SVN 项目');
       let release = claimToolRun(TOOL_COMMANDS.svn, workspaceKey);
       if (!release) return false;
+      const elapsed = operationTimer();
       try {
         if (!await svnServices.saveDirtyDocuments(workspaceKey, '更新 SVN', '更新 SVN')) return false;
         const workspaces = await listSvnWorkspaces();
@@ -1675,6 +1680,9 @@ function activate(context) {
         return completed;
       } finally {
         if (release) release();
+        const summary = `本次更新操作完整耗时：${elapsed()}`;
+        toolOutput().appendLine(summary);
+        svnServices.log('更新 SVN', summary);
       }
     }),
     vscode.commands.registerCommand('gushenCompletion.showSvnStatus', async (workspaceKey) => {

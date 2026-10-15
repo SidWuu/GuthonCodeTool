@@ -686,7 +686,9 @@ async function applyInlineWorkspaceMode() {
   root.dataset.workspaceModeChecking = "true";
   try {
     const inspected = await runPageCommand("inspect-hub-source");
-    if (!inspected?.ok) { setMessage(root, inspected?.message || "页面识别失败，请刷新页面", "error"); return; }
+    // Automatic discovery may run before a PAGE or procedure is selected.
+    // Keep the toolbar idle; explicit actions report missing targets themselves.
+    if (!inspected?.ok) return;
     const route = await sendWorkspaceRequest(
       "route-workspace",
       inspected.data || {},
@@ -698,7 +700,8 @@ async function applyInlineWorkspaceMode() {
         .filter(Boolean)
     );
     const sourceMode = route?.workspace?.sourceMode || (candidateModes.size === 1 ? [...candidateModes][0] : "");
-    if (!sourceMode) { setMessage(root, route?.message || "尚未匹配工作区，请打开扩展弹窗选择", "idle"); return; }
+    // Background matching is best-effort; only user actions surface failures.
+    if (!sourceMode) return;
     const previousMode = root.dataset.workspaceMode;
     root.dataset.workspaceModeKey = cacheKey;
     root.dataset.workspaceModeCheckedAt = String(Date.now());

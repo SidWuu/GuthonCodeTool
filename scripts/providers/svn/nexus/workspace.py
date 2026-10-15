@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -388,6 +389,15 @@ def refresh(
                     "id": entry.id,
                     "before": before,
                     "after": after,
+                    # SVN notification columns are locale independent. Include
+                    # actual update paths as remote status may predate a commit.
+                    "updatePaths": [
+                        match.group(1)
+                        for line in update_result.stdout.splitlines()
+                        if (match := re.match(r"^[ADUCGERB ][ADUCGERB ][ADUCGERB ][ADUCGERB ] (.+)$", line))
+                        and line[:4].strip()
+                        and (line[0] != " " or Path(match.group(1)).is_file())
+                    ],
                     "cleanupPerformed": cleanup_performed,
                     "paths": [logical for _target, _relative, logical in targets],
                 }

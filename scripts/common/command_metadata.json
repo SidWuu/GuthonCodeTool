@@ -544,6 +544,12 @@
       "options": "--keyword <text> [--limit <n>] [--cursor <token>]",
       "kind": "read",
       "timeoutMs": 120000
+    },
+    "reindex-files": {
+      "summary": "批量维护文件监听器发现的过期索引，跳过已更新文件，不自动全量重建",
+      "options": "JSON stdin: {\"paths\":[\"<逻辑路径>\", ...]}，1..1000 个路径",
+      "kind": "write",
+      "timeoutMs": 120000
     }
   },
   "configIdPattern": "[A-Za-z0-9][A-Za-z0-9._-]*",

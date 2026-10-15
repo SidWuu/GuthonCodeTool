@@ -394,3 +394,50 @@ test('scoped refresh rereads all local working copies instead of retaining remov
   const record=manager.ensure(workspace());manager._applyStatus(record,{ok:true,workspaceKey:'projects.demo',clean:false,workingCopies:[],changes:[{path:'old.gss',workingCopyId:'other'}],groups:{}});
   await manager.refresh(workspace(),{workingCopyIds:['selected']});assert.equal(scans,2);assert.deepEqual(record.status.changes,[]);manager.dispose();
 });
+
+for (const remoteFinishesFirst of [true, false]) {
+  test(`remote empty response clears cached files during newer local refresh (${remoteFinishesFirst ? 'remote' : 'local'} finishes first)`, async () => {
+    const pending = [];
+    const manager = new SvnScmManager({ vscode: fakeVscode(), backend: {
+      scmStatus: async (_key, remote) => new Promise(resolve => pending.push({ remote, resolve })),
+    } });
+    const record = manager.ensure(workspace());
+    const clean = { ok: true, clean: true, changes: [], workingCopies: [], groups: {} };
+    manager._applyStatus(record, { ...clean, remoteChecked: true,
+      remoteChanges: [{ path: 'old.json', workingCopyId: 'systems-domestic', item: 'modified' }] });
+    const remote = manager.refreshRemote(workspace());
+    const local = manager.refresh(workspace());
+    const remoteResult = { ...clean, remoteChecked: true, remoteChanges: [] };
+    const change = { path: 'new-local.gss', workingCopyId: 'systems-domestic', item: 'modified' };
+    const localResult = { ...clean, clean: false, changes: [change], groups: { LOCAL_MODIFIED: [change] }, remoteChecked: false };
+    if (remoteFinishesFirst) {
+      pending[0].resolve(remoteResult); await remote;
+      pending[1].resolve(localResult); await local;
+    } else {
+      pending[1].resolve(localResult); await local;
+      pending[0].resolve(remoteResult); await remote;
+    }
+    assert.deepEqual(record.status.remoteChanges, []);
+    assert.deepEqual(record.status.changes, [change]);
+    assert.equal(record.sourceControl.count, 1);
+    assert.ok([...record.groups.values()].every(group => group.resourceStates.every(item => !item.contextValue.startsWith('guthonSvn.REMOTE'))));
+    manager.dispose();
+  });
+}
+
+test('explicit remote clearing invalidates an in-flight pre-update response', async () => {
+  let finish;
+  const manager = new SvnScmManager({ vscode: fakeVscode(), backend: {
+    scmStatus: async () => new Promise(resolve => { finish = resolve; }),
+  } });
+  const record = manager.ensure(workspace());
+  manager._applyStatus(record, { ok: true, clean: true, changes: [], workingCopies: [], groups: {}, remoteChecked: true, remoteChanges: [] });
+  const remote = manager.refreshRemote(workspace());
+  manager.clearRemote('projects.demo');
+  finish({ ok: true, clean: true, changes: [], workingCopies: [], groups: {}, remoteChecked: true,
+    remoteChanges: [{ path: 'old.json', workingCopyId: 'systems-domestic', item: 'modified' }] });
+  await remote;
+  assert.deepEqual(record.status.remoteChanges, []);
+  assert.equal(record.sourceControl.count, 0);
+  manager.dispose();
+});

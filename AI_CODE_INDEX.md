@@ -35,7 +35,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | Workcopy | `scripts/common/workcopy_store.py` | `scripts/common/gusen_hub.py`（公开门面/运行时覆盖） | `tests/test_workcopy.py` |
 | 上下文有界查询 | `scripts/common/query_hub_context.py` | `scripts/providers/svn/nexus/index_queries.py` | `tests/test_gusen_hub.py` |
 | SVN 检出与范围导入 | `scripts/providers/svn/checkout.py` | `scripts/providers/svn/scope_import.py` | `tests/test_svn_scope_import.py` |
-| SVN 索引与浏览 | `scripts/providers/svn/nexus/catalog.py` | `scripts/providers/svn/nexus/documents.py`（会话写入与内部 PAGE 操作记录） | `tests/test_svn_nexus_workspace.py` |
+| SVN 索引与浏览 | `scripts/providers/svn/nexus/catalog.py` | `scripts/providers/svn/nexus/incremental.py`（更新后的批量增删索引）、`scripts/providers/svn/nexus/documents.py`（会话写入与内部 PAGE 操作记录） | `tests/test_svn_nexus_workspace.py` |
 | 通用有界源码读取 / 摘要 / 索引健康度 | `scripts/providers/svn/nexus/source_queries.py` | `scripts/providers/svn/nexus/mcp_server.py`、`scripts/common/workspace_assistant.py` | `tests/test_svn_nexus_workspace.py` |
 | SVN PAGE 语义节点/界面字段与 MCP | `scripts/providers/svn/nexus/page_nodes.py` | `scripts/common/page_projection.py`、`scripts/common/source_facts.py`、`scripts/providers/svn/nexus/page_mutation.py`（节点编辑租约）、`scripts/providers/svn/nexus/page_field_mutation.py`（单字段新增/拷贝）、`scripts/providers/svn/nexus/mcp_server.py`、`scripts/guthon_tool.py` | `tests/test_page_semantics.py`、`tests/test_page_mcp.py`、`tests/test_svn_nexus_workspace.py` |
 | SVN 过程函数 MCP 读写 | `scripts/providers/svn/nexus/procedure_sources.py` | `scripts/providers/svn/nexus/procedure_mutation.py`、`scripts/providers/svn/nexus/documents.py`（共享租约/写回与操作记录）、`scripts/providers/svn/nexus/mcp_server.py` | `tests/test_svn_nexus_workspace.py`、`tests/test_page_mcp.py` |
@@ -113,6 +113,7 @@ SVN：
 
 - `scripts/providers/svn/cli.py`：按生命周期、文档、索引查询、PAGE查询、SCM、维护分组的 action→handler 编排；统一 CLI 注入原进度/reindex 回调。
 
+- `scripts/providers/svn/nexus/incremental.py`：支持监听批次跳过已更新文件，按 SVN update 实际路径批量解析、清理删除项及关联索引，目录仅展开受影响子树，PAGE 删除核对页面别名，事务发布与继承关联刷新。
 - `scripts/providers/svn/checkout.py`：检出/更新、操作锁与 working copy 清单。
 - `scripts/providers/svn/scanner.py`、`projection.py`、`group_inference.py`、`dedup.py`：扫描、虚拟文档投影、模块归并与去重。
 - `scripts/providers/svn/writeback.py`：受控写回与差异校验。
@@ -128,6 +129,10 @@ SVN：
 `plugins/GuthonNexus/gushen-vscode-completion/src/onboarding.js` 和 `plugins/GuthonNexus/gushen-vscode-completion/src/onboarding-team.js`负责从零安装后的工具／插件环境确认、内网仓库检查与公钥引导；完成后日常不再弹出，不执行业务接入或索引。
 
 `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` 是命令与视图注册入口；`tool-runtime.js` 决定 source-development/script/packaged 命令并写入 runtime descriptor；`tool-process-client.js` 复用 ToolHost，长写入期间可延迟启动独立只读进程，不重放写入；`script-runtime.js` 校验本地 Python 与 pyz；`tool-workspace.js` 负责设置/切换及接入已有工作空间；`workspace-registry.js` 与 `workspace-assistant.js` 维护工作区列表；`bridge-process.js` 启停 Bridge；`definition.js`、`selector.js`、`rules.js`、`tool-json-client.js`、`source-mode.js`、`database-config.js`、`tool-updater.js` 分别承担跳转、选择器、补全规则、ToolHost JSON 调用、源码模式、数据库配置与发行应用自更新。
+
+Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/source-watcher.js` 按工作区串行合并文件事件，调用 `backend-client.js` 的 `reindexFiles`；后端 `svn reindex-files` 只增量维护过期文件，不回退全量重建，正常日志只输出批次汇总。
+
+Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/output-logging.js` 为工具及 SVN 输出提供逐行毫秒时间戳和单调时钟耗时。
 
 Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/quick-open.js` 负责单工作区/唯一候选直接定位；`plugins/GuthonNexus/gushen-vscode-completion/src/svn/bounded-cache.js` 为虚拟文档、差异和继承提供有界缓存，打开的文档保留租约。
 
