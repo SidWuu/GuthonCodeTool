@@ -1,3 +1,4 @@
+const path = require('node:path');
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
@@ -432,7 +433,7 @@ test('resolves a Nexus source module only inside its workspace checkout', () => 
   const fragment = { kind: 'fragment', parent: module };
   assert.equal(
     resolveSourcePath(workspaces, fragment),
-    '/workspace/checkout/pages/SYS-1/PG-1.json'
+    path.resolve('/workspace/checkout/pages/SYS-1/PG-1.json')
   );
   assert.equal(sourceModuleElement(fragment), module);
   assert.equal(workspaceKeyFromElement(fragment), 'products.demo');

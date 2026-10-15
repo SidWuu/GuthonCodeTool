@@ -47,8 +47,12 @@ test('maintainer provisions private keys outside the repository and verifies exa
   const args=[script,'generate','--key-dir',keys,'--key-id','fixture','--trust-out',trust];
   const result=spawnSync(process.execPath,args,{encoding:'utf8'});
   assert.equal(result.status,0,result.stderr);assert.ok(!result.stdout.includes('PRIVATE KEY'));
-  assert.equal(fs.statSync(path.join(keys,'release-private.pem')).mode&0o777,0o600);
-  assert.equal(fs.statSync(keys).mode&0o777,0o700);
+  // POSIX mode assertions apply on POSIX; Windows permissions use NTFS ACLs.
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(path.join(keys,'release-private.pem')).mode&0o777,0o600);
+    assert.equal(fs.statSync(keys).mode&0o777,0o700);
+  }
+  assert.equal(fs.statSync(path.join(keys,'release-private.pem')).isFile(),true);
   assert.equal(signingModule.readTrustFile(trust).requireSignature,true);
   assert.notEqual(spawnSync(process.execPath,args).status,0);
   const app=path.join(directory,'app.exe');fs.writeFileSync(app,'fixture application');
