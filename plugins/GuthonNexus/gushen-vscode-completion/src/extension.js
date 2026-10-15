@@ -1,4 +1,4 @@
-const { timedOutput, operationTimer } = require('./output-logging');
+const { timedOutput, operationTimer, indexResultSummary } = require('./output-logging');
 const fs = require('node:fs');
 const path = require('node:path');
 const vscode = require('vscode');
@@ -442,7 +442,9 @@ async function runToolCommand(
         onOutput: (value) => output.append(value),
         token,
       });
-      if (result?.stdout) output.append(result.stdout);
+      const summary = indexResultSummary(command, result);
+      if (summary !== undefined) output.appendLine(summary);
+      else if (result?.stdout) output.append(result.stdout);
       else output.appendLine(JSON.stringify(result, null, 2));
       output.appendLine(`GuthonCodeTool 完成：${command}`);
       vscode.window.showInformationMessage(`GuthonCodeTool 完成：${command}`);

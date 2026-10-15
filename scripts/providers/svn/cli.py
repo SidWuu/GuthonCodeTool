@@ -109,64 +109,65 @@ def _lifecycle(command):
         from providers.svn.nexus import workspace as nexus_workspace
         from providers.svn.nexus.manifest import load_authorized_scope
 
-        manifest_path = workspace["svn"].get("scopeManifestPath")
-        had_working_copies = False
-        _svn_progress(f"{workspace['displayName']}｜授权范围｜检查现有 working copy")
-        if manifest_path and manifest_path.is_file():
-            old_scope = load_authorized_scope(workspace)
-            had_working_copies = any((entry.root / ".svn").is_dir() for entry in old_scope.entries)
-            if had_working_copies:
-                current = nexus_workspace.status(workspace, on_progress=_svn_progress)
-                if not current["status"]["clean"] and not parsed.merge_local:
-                    raise SystemExit(
-                        "SVN scope sync is blocked by local changes; review them first or explicitly allow merge-local"
-                    )
-        _svn_progress(f"{workspace['displayName']}｜授权范围｜读取可编辑范围配置（无配置时导入签出脚本）")
-        scope_import = nexus_bootstrap.import_scope(
-            workspace,
-            accept_scope_change=parsed.accept_scope_change,
-        )
-        _svn_progress(
-            f"{workspace['displayName']}｜授权范围｜完成 · working copy {scope_import.get('entries', 0)}"
-        )
-        initialized = nexus_workspace.initialize(workspace, on_progress=_svn_progress)
-        refreshed = (
-            nexus_workspace.refresh(
+        with checkout.operation_lock(workspace, "initialize-and-index", blocking=True):
+            manifest_path = workspace["svn"].get("scopeManifestPath")
+            had_working_copies = False
+            _svn_progress(f"{workspace['displayName']}｜授权范围｜检查现有 working copy")
+            if manifest_path and manifest_path.is_file():
+                old_scope = load_authorized_scope(workspace)
+                had_working_copies = any((entry.root / ".svn").is_dir() for entry in old_scope.entries)
+                if had_working_copies:
+                    current = nexus_workspace.status(workspace, on_progress=_svn_progress)
+                    if not current["status"]["clean"] and not parsed.merge_local:
+                        raise SystemExit(
+                            "SVN scope sync is blocked by local changes; review them first or explicitly allow merge-local"
+                        )
+            _svn_progress(f"{workspace['displayName']}｜授权范围｜读取可编辑范围配置（无配置时导入签出脚本）")
+            scope_import = nexus_bootstrap.import_scope(
                 workspace,
-                merge_local=parsed.merge_local,
-                on_progress=_svn_progress,
+                accept_scope_change=parsed.accept_scope_change,
             )
-            if had_working_copies
-            else None
-        )
-        initialized_scope = initialized.get("scope") or {}
-        refreshed_status = (refreshed or {}).get("status") or {}
-        source_label = "script" if scope_import.get("source") == "script" else "config"
-        result = {
-            "ok": True,
-            "action": (
-                f"updated-from-{source_label}" if had_working_copies
-                else f"checked-out-from-{source_label}"
-            ),
-            "scopeImport": scope_import,
-            "workingCopies": len(initialized_scope.get("workingCopies") or []),
-            "skipped": initialized_scope.get("skipped") or [],
-            "clean": bool((refreshed_status or initialized_scope).get("clean")),
-            "updated": len((refreshed or {}).get("updated") or []),
-            "reindex": _reindex_svn(
-                gusen_hub,
-                config,
-                workspace,
-                on_progress=_svn_progress,
-            ),
-        }
-        _svn_progress(
-            f"{workspace['displayName']}｜完成｜"
-            f"{'更新' if had_working_copies else '检出'} {result['workingCopies']} 个 working copy · "
-            f"跳过 {len(result['skipped'])} 个 · "
-            f"索引对象 {result['reindex'].get('changed', 0)}"
-        )
-        gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
+            _svn_progress(
+                f"{workspace['displayName']}｜授权范围｜完成 · working copy {scope_import.get('entries', 0)}"
+            )
+            initialized = nexus_workspace.initialize(workspace, on_progress=_svn_progress)
+            refreshed = (
+                nexus_workspace.refresh(
+                    workspace,
+                    merge_local=parsed.merge_local,
+                    on_progress=_svn_progress,
+                )
+                if had_working_copies
+                else None
+            )
+            initialized_scope = initialized.get("scope") or {}
+            refreshed_status = (refreshed or {}).get("status") or {}
+            source_label = "script" if scope_import.get("source") == "script" else "config"
+            result = {
+                "ok": True,
+                "action": (
+                    f"updated-from-{source_label}" if had_working_copies
+                    else f"checked-out-from-{source_label}"
+                ),
+                "scopeImport": scope_import,
+                "workingCopies": len(initialized_scope.get("workingCopies") or []),
+                "skipped": initialized_scope.get("skipped") or [],
+                "clean": bool((refreshed_status or initialized_scope).get("clean")),
+                "updated": len((refreshed or {}).get("updated") or []),
+                "reindex": _reindex_svn(
+                    gusen_hub,
+                    config,
+                    workspace,
+                    on_progress=_svn_progress,
+                ),
+            }
+            _svn_progress(
+                f"{workspace['displayName']}｜完成｜"
+                f"{'更新' if had_working_copies else '检出'} {result['workingCopies']} 个 working copy · "
+                f"跳过 {len(result['skipped'])} 个 · "
+                f"索引对象 {result['reindex'].get('changed', 0)}"
+            )
+            gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
     elif parsed.action == 'init':
         if manifest_layout:
             from providers.svn.nexus import workspace as nexus_workspace

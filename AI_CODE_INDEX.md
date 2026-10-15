@@ -50,7 +50,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | Nexus → 平台定位、有界 pageContext 与 Bearer SSE | `plugins/GuthonBridge/bridge/page-context.js` | `plugins/GuthonBridge/extension/event-client.js`、`plugins/GuthonBridge/extension/background.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/browser-navigation.js` | `plugins/GuthonBridge/bridge/page-context.test.js`、`plugins/GuthonBridge/bridge/navigation-server.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/browser-navigation.test.js` |
 | Chrome Bridge 扩展与 PAGE/过程函数定位入口 | `plugins/GuthonBridge/extension/content.js`、`plugins/GuthonBridge/extension/popup.js` | `plugins/GuthonBridge/extension/page-bridge.js`、`plugins/GuthonBridge/extension/nexus-locator.js`、`plugins/GuthonBridge/extension/background.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/page-locator.js` | `plugins/GuthonBridge/bridge/server.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/page-locator.test.js` |
 | 发行构建 | `scripts/build_guthon_tool.py` | `GuthonCodeTool.spec` | `tests/test_build_guthon_tool.py` |
-| Windows 统一安装器与官方依赖下载 | `scripts/installer/engine.py` | `scripts/build_windows_installer.py`、`scripts/build_installer_components.py`、`scripts/fetch_installer_inputs.py`、`scripts/check_installer_runtime.py`、`scripts/check_windows_installer.py`、`installer/windows/GuthonCodeSetup.iss`、`.github/workflows/build-installer.yml` | `tests/test_windows_installer.py` |
+| Windows 统一安装器与官方依赖下载 | `scripts/installer/engine.py` | `scripts/build_windows_installer.py`、`scripts/build_installer_components.py`、`scripts/fetch_installer_inputs.py`、`scripts/common/installer_downloads.py`（构建/运行时共享的固定 HTTPS 下载与校验）、`scripts/check_installer_runtime.py`、`scripts/check_windows_installer.py`、`installer/windows/GuthonCodeSetup.iss`、`.github/workflows/build-installer.yml` | `tests/test_windows_installer.py` |
 | 谷神 API 补全数据 | `scripts/sync_guthon_api.mjs` | `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs` | 两个脚本的 `--self-test` |
 | 三组件更新 | `plugins/GuthonNexus/gushen-vscode-completion/src/update-center.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/component-update.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/release-catalog.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/update-archive.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/tool-updater.js`、`scripts/build_release_catalog.mjs` | `plugins/GuthonNexus/gushen-vscode-completion/test/component-update.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/update-center.test.js` |
 | 环境自检 | `scripts/common/doctor.py` | `scripts/guthon_tool.py` | `scripts/guthon_tool.py self-test --home <临时目录>` |
@@ -63,6 +63,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `scripts/common/gusen_hub.py` | 工作区解析、索引连接、同步、Workcopy、状态与自动暂存的共享实现；`workspace_agent_context` 输出 `indexFirst` 可运行示例。 |
 | `scripts/common/workspace_config.py` | 工作区创建/删除与 YAML 读写。 |
 | `scripts/common/workspace_assistant.py` | 工作区摘要、就绪状态与助手输出。 |
+| `scripts/common/index_bulk.py` | 在完整重建事务内暂停逐行检索索引触发器，批量构建并恢复；失败回滚数据和触发器。 |
 | `scripts/common/source_facts.py` | 源码身份、事实解析与可重建 PAGE 节点/界面字段投影。 |
 | `scripts/common/index_schema_comments.py` | SQLite 索引表及字段的可查询注释。 |
 | `scripts/common/page_projection.py` | PAGE 虚拟文档投影、共享脚本/字段集合提取、语义节点/界面字段描述符及保留已有字段原文的单项插入。 |

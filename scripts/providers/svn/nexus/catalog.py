@@ -63,10 +63,13 @@ def _revision_map(root: Path, paths=None) -> dict[str, str]:
     result = run_svn(args)
     document = ET.fromstring(result.stdout)
     revisions = {}
+    # SVN emits versioned physical paths. Normalize metadata lexically instead
+    # of resolving every entry through the filesystem (costly on Windows).
+    root_path = Path(os.path.abspath(root))
     for node in document.findall("entry"):
         raw = Path(node.get("path") or "")
         try:
-            relative = raw.resolve().relative_to(root.resolve()).as_posix()
+            relative = Path(os.path.abspath(raw)).relative_to(root_path).as_posix()
         except ValueError:
             continue
         revisions[relative] = node.get("revision") or ""

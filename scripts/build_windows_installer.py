@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage a verified offline suite, then compile GuthonCodeSetup.exe with Inno Setup."""
+"""Stage a verified online or offline suite, then compile GuthonCodeSetup.exe with Inno Setup."""
 from __future__ import annotations
 
 import argparse
@@ -121,6 +121,7 @@ def prepare(args, stage):
     (stage / "installer/common").mkdir(parents=True)
     shutil.copy2(ROOT / "scripts/installer/engine.py", stage / "installer/engine.py")
     shutil.copy2(ROOT / "scripts/common/persistence.py", stage / "installer/common/persistence.py")
+    shutil.copy2(ROOT / "scripts/common/installer_downloads.py", stage / "installer/common/installer_downloads.py")
     package_windows_guide(stage)
     (stage / "installer/common/__init__.py").write_text("", encoding="utf-8")
     prerequisites = []
@@ -129,6 +130,11 @@ def prepare(args, stage):
         if set(spec) != {"schemaVersion", "prerequisites"} or spec["schemaVersion"] != 1:
             raise ValueError("依赖安装包清单无效")
         for item in spec["prerequisites"]:
+            if "url" in item:
+                from installer.engine import validate_download
+                validate_download(item)
+                prerequisites.append(dict(item))
+                continue
             if set(item) != {"id", "file", "sha256", "args", "elevate"} or item["id"] not in ("codebuddy", "git", "svn"):
                 raise ValueError("依赖仅允许 codebuddy、git、svn")
             source = Path(item["file"])

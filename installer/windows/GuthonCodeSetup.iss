@@ -37,7 +37,7 @@ ButtonInstall=安装(&I)
 ButtonCancel=取消
 ButtonFinish=完成
 WelcomeLabel1=欢迎安装 Guthon 开发套件
-WelcomeLabel2=安装器将准备开发工具、Nexus、Bridge 和团队插件环境。已有工作数据会保留。首次使用仍需登录个人账号并确认工作区与插件信任。
+WelcomeLabel2=安装器会复用已有工具，缺少 CodeBuddy、Git 或 SVN 时联网下载并校验，然后准备开发工具、Nexus、Bridge 和团队插件环境。已有工作数据会保留。首次使用仍需登录个人账号并确认工作区与插件信任。
 FinishedHeadingLabel=Guthon 环境已准备
 FinishedLabel=请查看安装结果，打开 CodeBuddy 完成一次性插件确认，后续使用 GuthonNexus。
 

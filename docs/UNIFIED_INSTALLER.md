@@ -22,7 +22,7 @@ GuthonCodeSetup 只负责从零安装工具、插件和基础环境；完成后�
   不复制 Guard、规范、Linter，不克隆维护仓库。客户端从市场获取／更新插件，实际 SessionStart
   使用已安装插件携带的版本化规范幂等初始化或更新工作区；不是每个聊天重新 clone 内网仓库。
 - 私有 Python：应用自带解释器，供安装器和市场插件 Hook 使用；不修改系统 Python 或全局 PATH。
-- CodeBuddy IDE、Git、SVN：官方下载的离线安装程序，用于没有对应组件的电脑；已有组件复查后复用。
+- CodeBuddy IDE、Git、SVN：默认检测后按需下载固定版本的官方安装程序并校验 SHA-256；已有组件复查后复用。离线完整构建仍可捆绑安装程序。
 
 Guard 0.2.10 候选支持私有 Python、UTF-8 与 SessionStart 最小运行回执。
 向导要求该回执来自本次安装之后，安装／启用状态不能代替实际 Hook 运行。
@@ -37,7 +37,7 @@ Release 获取；SVN 从 TortoiseSVN 官方 SourceForge 分发源获取。三项
 Microsoft WinGet 仓库的对应版本清单；版本不会在构建时静默追最新。
 下载失败、HTTP 降级或摘要不匹配会停止，不跳过校验。静默安装与 UAC／重启仍需 Windows 实测。
 下载前先校验本地缓存，摘要匹配就复用文件；不以构建电脑已安装的系统 Python 或 IDE 代替发行载荷。
-员工运行离线包时先检测 CodeBuddy/Git/SVN 并自检，存在且可用时跳过对应安装。
+员工运行安装器时先检测 CodeBuddy/Git/SVN 并自检，存在且可用时跳过对应安装。
 Python 固定使用套件内独立运行时，不探测或复用系统 Python，也无需在员工电脑再次下载它。
 
 构建机需 Windows x64、Python 3.12+、Node.js、Inno Setup 6.4+。
@@ -90,3 +90,17 @@ CodeBuddy 内网市场提示和真实 SessionStart、SVN 登录／检出／完�
 [SVN 清单](https://github.com/microsoft/winget-pkgs/blob/master/manifests/t/TortoiseSVN/TortoiseSVN/1.14.9.29743/TortoiseSVN.TortoiseSVN.installer.yaml)。
 
 安装确认记录与安装包身份关联，完成后日常启动不再打开助手。套件工作区启用 Bridge 自动启动；普通工作区保持原默认行为。
+
+## 精简联网构建
+
+发行 CI 使用 `fetch_installer_inputs.py --online`，只下载内置 Python；三个工具的固定 URL、SHA-256、安装参数写入载荷清单，受同版安装器签名和哈希保护。安装时只有检测不到的工具才下载到用户本地缓存，校验完成后原子发布再启动安装。失败可重跑，不执行未经校验的文件；保留静默安装、UAC 和首次确认流程。
+
+维护者沿用已有构建命令时，去掉输入获取命令的 `--online` 即生成离线依赖载荷，再传入同一 `--prerequisites` 构建完整包。`--existing-tools` 仅供已有工具环境试用，不作为精简安装的替代。
+
+体积变化应比较实际编译 EXE；载荷总大小只能说明组成变化。macOS 可验证载荷、下载和安装编排逻辑，Windows EXE 编译、首次联网安装与 UAC 仍需 Windows runner 验证。
+
+## Windows 后端候选验证
+
+手动运行 `Build GuthonCodeSetup` 工作流，默认 `components_only=true`：只构建当前源码的 Windows 后端与插件候选，不创建 Release、不编译或安装整套依赖。下载 `GuthonCodeTool-windows-components-candidate` artifact，内含后端 EXE、Nexus VSIX、组件清单与 SHA256SUMS。已有同事环境验证索引优化时替换后端；同时安装配套 Nexus 才能验证日志摘要显示。核对候选 buildId，版本号可能与当前正式版相同。
+
+需要验证精简联网安装器时显式将 `components_only` 设为 `false`。构建始终来自所选远程分支的提交，本机未提交改动不会进入候选包。
