@@ -364,13 +364,16 @@ async function configuredRuntime(config, mode, options = {}) {
     }
     if (selectPackaged) {
       const selected = await vscode.window.showOpenDialog({
-        canSelectFiles: true, canSelectFolders: true, canSelectMany: false,
-        title: '选择 GuthonCodeTool 应用（macOS 可选中解压出的 GuthonCodeTool 文件夹）',
+        canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+        filters: process.platform === 'win32' ? { '可执行文件': ['exe'] } : undefined,
+        title: process.platform === 'win32'
+          ? '选择 GuthonCodeTool EXE 可执行文件'
+          : '选择 GuthonCodeTool 可执行文件（应用目录内的 GuthonCodeTool）',
       });
       if (!selected) return undefined;
       const candidate = resolvePackagedTool(selected[0].fsPath);
       if (!candidate) {
-        vscode.window.showErrorMessage('所选路径不是 GuthonCodeTool 应用：请选择可执行文件，或包含它的 GuthonCodeTool 文件夹');
+        vscode.window.showErrorMessage('请选择 GuthonCodeTool 可执行文件：Windows 选择 EXE，macOS 选择应用目录内的 GuthonCodeTool 启动文件');
         return undefined;
       }
       toolPath = candidate;

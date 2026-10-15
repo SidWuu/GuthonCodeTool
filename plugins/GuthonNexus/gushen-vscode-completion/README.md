@@ -1,5 +1,8 @@
 # Guthon Nexus
 
+Packaged mode selects executable files on both platforms: the Windows EXE or the `GuthonCodeTool` launcher inside the intact macOS application directory. Application folders are not picker targets.
+
+
 Guthon Nexus is the VS Code development surface for GuthonCodeTool.
 
 It manages local Guthon workspaces, runs source and metadata synchronization, exposes workcopy maintenance tools, and provides offline Gushen API completions, hover documentation, and source navigation. It does not depend on IntelliCode or Copilot.

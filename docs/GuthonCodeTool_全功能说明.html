@@ -497,7 +497,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <h2 id="11-构建发布与验证">11. 构建、发布与验证</h2>
 <h3 id="11-1-发行物">11.1 发行物</h3>
 <p>Windows 的 GuthonCodeSetup 下载清单与首次配置统一见 <a href="GuthonCodeTool_Windows安装步骤.html#one-click">Windows 安装步骤第一章：一键安装配置</a>。默认一键安装器采用精简联网模式：内置后端、Nexus、Bridge、独立 Python 与安装指南；复用已有 CodeBuddy、Git、SVN，仅对缺失工具从固定官方 HTTPS 地址下载并校验 SHA-256。下载失败可重新运行，已校验缓存会复用。首次安装缺失工具时需要联网；离线完整包仍可由维护者按原流程构建。单独安装或修复仍可采用手动流程。</p>
-<p>Python 应用使用 PyInstaller 构建，并内置公开配置模板与版本信息：Windows 为单文件 EXE，macOS 为目录形态（onedir）。构建必须在目标系统执行，以生成 Windows x64 应用和 macOS ARM64 应用。发布流程同时完成：</p>
+<p>Python 应用使用 PyInstaller 构建，并内置公开配置模板与版本信息：Windows 为单文件 EXE，macOS 为目录形态（onedir）。Nexus 发行模式统一选择可执行文件：Windows 选择 EXE，macOS 进入完整应用目录选择同名启动文件。构建必须在目标系统执行，以生成 Windows x64 应用和 macOS ARM64 应用。发布流程同时完成：</p>
 <ul>
 <li>运行 Python、Nexus 与 Bridge 的相关测试。</li>
 <li>打包 Guthon Nexus VSIX 和 Guthon Bridge Chrome ZIP。</li>

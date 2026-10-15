@@ -326,7 +326,7 @@ SVN 工作区的 `sync-all` 只扫描本地 SVN 范围并更新索引和摘要�
 Nexus 是随 VSIX 发布的 VS Code 扩展：
 
 1. 安装发布包中的 VSIX，执行 `Developer: Reload Window`。
-2. 打开左侧 “Guthon Nexus”，选择应用和长期保留的本地数据目录。
+2. 打开左侧 “Guthon Nexus”，选择可执行文件和长期保留的本地数据目录：Windows 选择 EXE，macOS 进入完整应用目录选择同名 `GuthonCodeTool` 启动文件。
    VS Code 与 CodeBuddy 同机使用时，在第二个 IDE 执行“设置/切换工作空间”，选择第一个 IDE 使用的同一数据目录；Nexus 读取现有产品、项目、工作区状态及 `context/index.db`，不重新创建项目、不拉取源码或重建索引。以后新增项目或索引有变化时，点击工作区视图的“刷新已有工作空间状态”。
 3. 编辑 `config/*.yaml`。
 4. 展开目标 `PRD`、`PRJ`，在该节点选择“源码来源：DATABASE / SVN”；全部产品和项目始终混合显示。运行模式独立选择开发、调试或发行。

@@ -140,15 +140,18 @@ test('migrates the old development setting and keeps script paths separate', () 
   fs.rmSync(root, { recursive: true });
 });
 
-test('resolves the macOS onedir application folder to its launcher', () => {
+test('requires the executable file on both platforms instead of accepting application folders', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-packaged-'));
   const launchDir = path.join(root, 'GuthonCodeTool');
   fs.mkdirSync(path.join(launchDir, '_internal'), { recursive: true });
   const launcher = path.join(launchDir, 'GuthonCodeTool');
   fs.writeFileSync(launcher, '');
 
-  assert.equal(resolvePackagedTool(launchDir), launcher);
+  assert.equal(resolvePackagedTool(launchDir), '');
   assert.equal(resolvePackagedTool(launcher), launcher);
+  const windows = path.join(root, 'GuthonCodeTool-windows-x64.exe');
+  fs.writeFileSync(windows, '');
+  assert.equal(resolvePackagedTool(windows), windows);
   assert.equal(resolvePackagedTool(path.join(root, 'missing')), '');
   assert.equal(resolvePackagedTool(path.join(launchDir, '_internal')), '');
   fs.rmSync(root, { recursive: true });
@@ -202,4 +205,20 @@ test('Nexus lists every configured workspace and binds commands to workspaceKey'
   assert.equal(extension.includes("'回退到上一版本'"), true);
   assert.equal(manifest.contributes.configuration.properties['gushenCompletion.updateSource'].default, 'gitee');
   assert.equal(manifest.contributes.commands.some(({ command }) => command === 'gushenCompletion.checkToolUpdate'), true);
+});
+
+test('packaged application picker selects files only on Windows and macOS', () => {
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../src/extension.js'), 'utf8');
+  const optionsSource = /if \(selectPackaged\) \{\s*const selected = await vscode\.window\.showOpenDialog\((\{[\s\S]*?\})\);/.exec(source);
+  assert.ok(optionsSource, 'packaged picker must be present');
+  for (const platform of ['win32', 'darwin']) {
+    const options = vm.runInNewContext(`(${optionsSource[1]})`, { process: { platform } });
+    assert.equal(options.canSelectFiles, true);
+    assert.equal(options.canSelectFolders, false);
+    assert.equal(options.canSelectMany, false);
+    assert.match(options.title, /可执行文件/);
+    if (platform === 'win32') assert.equal(options.filters['可执行文件'][0], 'exe');
+    else assert.equal(options.filters, undefined);
+  }
 });
