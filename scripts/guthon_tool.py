@@ -684,7 +684,8 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
     try:
         with gusen_hub.operation_generated_files() as generated_paths:
             result_code = _run_workspace_command(command, extra_args, gusen_hub, config, workspace)
-        if result_code:
+        # Doctor returns structured check failures as a normal diagnostic result.
+        if result_code and command != "doctor":
             raise RuntimeError(f"{command} failed with exit code {result_code}")
         if step:
             gusen_hub.update_workspace_state(config, workspace, step, "SUCCESS")

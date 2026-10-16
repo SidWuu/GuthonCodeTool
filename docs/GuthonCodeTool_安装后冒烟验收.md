@@ -20,7 +20,7 @@ python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool/GuthonCode
 # pyz:     python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool-python.pyz
 ```
 
-脚本依次检查 `version`、`self-test`、`setup`、MCP stdio 握手与工具发现，并自动删除临时 toolHome。0.3.1 默认发现 56 个工具，只读模式发现 43 个工具；后续版本以该版本注册表与冒烟输出为准，脚本会从注册表计算期望数量。此检查不读取真实配置，也不代替后续组件联调。
+脚本依次检查 `version`、`self-test`、`setup`、`doctor --json`、MCP stdio 握手与工具发现，并自动删除临时 toolHome。0.3.1 默认发现 56 个工具，只读模式发现 43 个工具；后续版本以该版本注册表与冒烟输出为准，脚本会从注册表计算期望数量。doctor 必须通过 Python、临时配置和补全数据资源检查；数据库驱动、系统凭据库和 Bridge 状态完整输出，留待目标机器验收，不作为构建机的资源检查门禁。此检查不读取真实配置，也不代替后续组件联调。
 
 ## 实机检查矩阵
 

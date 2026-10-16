@@ -58,6 +58,27 @@ def resolve_entry(entry: Path) -> Path:
     return entry
 
 
+def check_doctor(command: list[str], home: str) -> None:
+    """Gate shipped resources, independently of the build host's optional services."""
+    result = subprocess.run(
+        [*command, "doctor", "--json", "--home", home],
+        capture_output=True, text=True, encoding="utf-8", timeout=120,
+    )
+    if result.returncode not in (0, 1):
+        raise RuntimeError(f"doctor exited {result.returncode}: {result.stderr.strip()}")
+    payload = json.loads(result.stdout)
+    checks = payload.get("data")
+    if not isinstance(checks, list):
+        raise RuntimeError(f"doctor returned no check results: {payload}")
+    required = {"python", "config", "vscode-data"}
+    passed = {item["name"] for item in checks if item["status"] == "PASS"}
+    if required - passed:
+        raise RuntimeError(f"doctor required checks failed or missing: {sorted(required - passed)}; {checks}")
+    # Database drivers/credential stores and Bridge depend on the build host.
+    # Keep their results visible without making them a resource-packaging gate.
+    print("doctor: " + json.dumps(checks, ensure_ascii=False))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--entry", type=Path, required=True, help="Path to EXE, macOS app, pyz, or source CLI")
@@ -82,9 +103,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="guthon-release-smoke-") as home:
         run([*command, "self-test", "--home", home])
         run([*command, "setup", "--home", home])
+        check_doctor(command, home)
         all_tools = mcp_tools(command, home, read_only=False)
         readonly_tools = mcp_tools(command, home, read_only=True)
-    print(f"PASS: {version['version']} · self-test · MCP {len(all_tools)}/{len(readonly_tools)} tools · temporary toolHome")
+    print(f"PASS: {version['version']} · self-test · doctor resources · MCP {len(all_tools)}/{len(readonly_tools)} tools · temporary toolHome")
     return 0
 
 
