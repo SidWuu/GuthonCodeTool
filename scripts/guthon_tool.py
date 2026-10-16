@@ -508,10 +508,14 @@ def _setup_config(home: Path) -> list[Path]:
     return created
 
 
-def _auto_add_operation_enabled(command: str, extra_args: list[str]) -> bool:
+def _auto_add_operation_enabled(command: str, extra_args: list[str], workspace=None) -> bool:
+    # SVN owns its checkout and selection ledger; Git workcopy auto-add belongs
+    # to DATABASE exports. Never enumerate legacy DATABASE trees for SVN work.
+    if command == "svn" or workspace and workspace.get("sourceMode") == "svn":
+        return False
     if command in {"source-mode", "workspace-summary", "search", "context-pack", "database-target-configure"}:
         return False
-    return not (command == "svn" and extra_args and extra_args[0] in SVN_BROWSE_ACTIONS)
+    return True
 
 
 def run(command: str, home: Path, extra_args: list[str], selected_workspace=None) -> int:
@@ -660,8 +664,10 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
             f"{command} is unavailable in SVN source mode for {workspace['workspaceKey']}; "
             "use the local SVN index or an explicit database workspace"
         )
+    if command == "svn" and extra_args[:1] != ["reindex-files"]:
+        _svn_progress(f"请求已进入后端 · {extra_args[0] if extra_args else 'svn'} · {workspace['workspaceKey']}")
     auto_add_git = bool((config.get("sync", {}).get("rules") or {}).get("pull_auto_add_git"))
-    auto_add_operation = auto_add_git and _auto_add_operation_enabled(command, extra_args)
+    auto_add_operation = auto_add_git and _auto_add_operation_enabled(command, extra_args, workspace)
     before = set()
     if workspace and auto_add_operation:
         workspace_prefix = gusen_hub.workspace_var_prefix(workspace)

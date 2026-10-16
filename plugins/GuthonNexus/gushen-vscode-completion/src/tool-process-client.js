@@ -141,6 +141,7 @@ class ToolProcessClient {
       const job = this.active;
       this.active = null;
       clearTimeout(job.timer);
+      clearTimeout(job.queueTimer);
       job.cancelSubscription?.dispose();
       if (!job.settled) {
         job.settled = true;
@@ -175,6 +176,7 @@ class ToolProcessClient {
       this.jobs = [];
       for (const job of jobs) {
         clearTimeout(job.timer);
+        clearTimeout(job.queueTimer);
         job.cancelSubscription?.dispose();
         if (!job.settled) {
           job.settled = true;
@@ -195,7 +197,9 @@ class ToolProcessClient {
     if (this.active || !this.child || this.starting) return;
     const job = this.jobs.shift();
     if (!job) return;
+    clearTimeout(job.queueTimer);
     this.active = job;
+    if (job.queuedAt) job.onOutput?.(`[ToolHost] 排队结束 · ${job.request.command} ${job.request.args[0] || ''} · 等待 ${Date.now() - job.queuedAt} ms\n`);
     job.timer = setTimeout(() => {
       if (!job.settled) {
         job.timeoutError = new Error(job.kind === 'write'
@@ -230,6 +234,7 @@ class ToolProcessClient {
             if (job.settled) return;
             if (this.active !== job) {
               this.jobs = this.jobs.filter(item => item !== job);
+              clearTimeout(job.queueTimer);
               job.settled = true;
               job.cancelSubscription?.dispose();
               const error = new Error('已取消尚未执行的请求'); error.code = 'OPERATION_CANCELLED';
@@ -243,6 +248,19 @@ class ToolProcessClient {
               }
             } else job.onOutput?.('当前 ToolHost 版本不支持协作式取消，原任务继续。\n');
           };
+          if (this.active || this.jobs.length) {
+            job.queuedAt = Date.now();
+            job.onOutput?.(`[ToolHost] 请求排队 · ${command} ${args[0] || ''} · 等待前一个操作完成，最多 120 秒\n`);
+            job.queueTimer = setTimeout(() => {
+              if (job.settled || this.active === job) return;
+              this.jobs = this.jobs.filter(item => item !== job);
+              job.settled = true;
+              job.cancelSubscription?.dispose();
+              const error = new Error('ToolHost 排队超过等待上限，请等待当前操作完成后重试；本请求尚未发送，未执行写入。');
+              error.code = 'TOOLHOST_QUEUE_TIMEOUT';
+              job.reject(error);
+            }, options.queueTimeoutMs || 120000);
+          }
           this.jobs.push(job);
           if (commandMetadata(command, args)?.cancellable && options.token) {
             job.cancelSubscription = options.token.onCancellationRequested(cancel);
@@ -276,6 +294,7 @@ class ToolProcessClient {
     this.jobs = [];
     for (const job of jobs) {
       clearTimeout(job.timer);
+      clearTimeout(job.queueTimer);
       job.cancelSubscription?.dispose();
       if (!job.settled) {
         job.settled = true;

@@ -11,6 +11,8 @@ import json
 import os
 import re
 import subprocess
+import sys
+from datetime import datetime
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -316,6 +318,8 @@ def operation_lock(
     blocking=False,
     timeout_seconds: float | None = None,
 ):
+    if blocking and timeout_seconds is None:
+        timeout_seconds = 60
     if timeout_seconds is not None and timeout_seconds <= 0:
         raise ValueError("SVN operation lock timeout must be positive")
     lock_path = workspace["contextDir"] / ".svn-operation.lock"
@@ -349,7 +353,10 @@ def operation_lock(
     open_mode = "rb" if shared and fcntl is not None else "r+b"
     with lock_path.open(open_mode) as handle:
         deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+        waiting = False
         while True:
+            from common.operation_control import checkpoint
+            checkpoint()
             try:
                 if fcntl is not None:
                     mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
@@ -367,6 +374,10 @@ def operation_lock(
                     msvcrt.locking(handle.fileno(), lock_mode, 1)
                 break
             except (BlockingIOError, OSError) as error:
+                if not waiting and deadline is not None:
+                    waiting = True
+                    timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+                    print(f"[{timestamp}] [SVN] 等待工作区操作锁 · {workspace['workspaceKey']} · {action} · 最多 {timeout_seconds:g} 秒", file=sys.stderr, flush=True)
                 if deadline is None:
                     raise SystemExit(
                         f"Another SVN operation is active for {workspace['workspaceKey']}"

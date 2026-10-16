@@ -230,3 +230,32 @@ test('workspace identity derives the same public metadata contract as Python',()
  for(const key of ['products.demo','projects.123','products.a_b-c.d'])assert.equal(isWorkspaceKey(key),true);
  for(const key of ['',null,undefined,'products..','projects._bad','projects../x','PRD demo'])assert.equal(isWorkspaceKey(key),false);
 });
+
+test('queue timeout rejects unsent work without killing or replaying the active write', async () => {
+  const slowHost = `
+    const readline=require('node:readline');
+    console.log(JSON.stringify({type:'ready',protocolVersion:1}));
+    readline.createInterface({input:process.stdin}).on('line',line=>{
+      const r=JSON.parse(line);
+      setTimeout(()=>console.log(JSON.stringify({type:'result',id:r.id,ok:true,result:{command:r.command}})),120);
+    });`;
+  let starts = 0;
+  const client = new ToolProcessClient({ spawnProcess: () => {
+    starts++;
+    return spawn(process.execPath, ['-e', slowHost], { stdio: ['pipe', 'pipe', 'pipe'] });
+  } });
+  const tool={toolPath:'/fixture',toolHome:'/fixture'};
+  const logs=[];
+  try {
+    const active=client.request(tool,'svn',['refresh'],'projects.demo');
+    while (!client.active) await new Promise(resolve=>setTimeout(resolve,5));
+    await assert.rejects(client.request(tool,'svn',['platform-save-preview'],'projects.demo',undefined,
+      {queueTimeoutMs:20,onOutput:value=>logs.push(value)}),error=>error.code==='TOOLHOST_QUEUE_TIMEOUT' && /尚未发送/.test(error.message));
+    assert.ok(client.child);
+    assert.equal(client.jobs.length,0);
+    assert.equal((await active).command,'svn');
+    assert.equal((await client.request(tool,'workspaces')).command,'workspaces');
+    assert.equal(starts,1);
+    assert.match(logs.join(''),/请求排队/);
+  } finally {await client.stop();}
+});
