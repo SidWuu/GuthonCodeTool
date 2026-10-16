@@ -401,7 +401,7 @@ Nexus 与 Bridge 各自维护一个常驻 ToolHost。普通工作区请求复用
 
 首次从 Nexus 启动 Bridge 后，使用“复制 Bridge 配对令牌”，在 Chrome 扩展弹窗的配对设置中粘贴；端口须与 Nexus 的 `bridgePort` 一致（默认 17361）。令牌只存本地运行目录与 Chrome 扩展存储，不输入平台页面。Bridge 拒绝网页 Origin，业务请求携带 Bearer 令牌，导出根固定为 `<toolHome>/var/nexus/bridge/exports`；维护者可显式配置 `GUTHON_BRIDGE_EXPORT_ROOT`。平台页面提示不展示本机路径或原始异常详情；详情保留在扩展弹窗和本地工具侧。网页与 MAIN world 仍共享脚本环境，配对不证明平台自身没有 XSS。端口占用会明确报错，不会自动接管另一实例。
 
-DATABASE `pull_diff_check=true` 继续保留本地 Workcopy；设置 false 或显式强制覆盖时，先备份到相邻 `.guthon-trash/<时间戳>/`。`force=true` 还须在 JSON 中给出 `confirmation`，值为完整工作区键。`workcopy trash-list` 列备份，`workcopy restore <backup> --check` 预览，正式恢复附 `--confirmation products.<id>`，当前副本也会先备份。远程未找到源码时返回失败及缓存可用提示，不修改 Workcopy；需要缓存时使用 `create-workcopy`。自动暂存仅在独立 var Git 仓库中处理本次明确生成且原本未跟踪的文件，排除回收站、日志和同时手工新增的文件。
+DATABASE `pull_diff_check=true` 继续保留本地 Workcopy；设置 false 或显式强制覆盖时，先备份到相邻 `.guthon-trash/<时间戳>/`。`force=true` 还须在 JSON 中给出 `confirmation`，值为完整工作区键。`workcopy trash-list` 列备份，`workcopy restore <backup> --check` 预览，正式恢复附 `--confirmation products.<id>`，当前副本也会先备份。远程未找到源码时返回失败及缓存可用提示，不修改 Workcopy；需要缓存时使用 `create-workcopy`。自动暂存仅在独立 var Git 仓库中处理本次明确生成且原本未跟踪的文件，排除回收站、日志和同时手工新增的文件。Git 路径按原始字节传递，支持中文路径，不依赖 Windows 的默认 GBK 编码。
 
 工作区列表返回 `configErrors`，单个坏配置不阻断无关工作区；冲突身份及重叠的 SVN 范围仍拒绝使用。源码镜像写入与 SQLite 行更新保存恢复记录，失败回滚，下一次同步先恢复未完成事务。SVN 重建可发布 `PARTIAL` 的合法对象索引并保留坏文件错误；身份或授权错误保留旧索引。PARTIAL 不算完全同步成功。内容与状态未变时 generation 不再空转；继承解析版本变化后执行一次完整 `reindex`。
 

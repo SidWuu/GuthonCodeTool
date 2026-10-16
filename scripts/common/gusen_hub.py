@@ -2880,10 +2880,10 @@ def _add_generated_paths(generated_paths, before=()):
     repo_root = Path(VAR_DIR).resolve()
     try:
         root = subprocess.run(["git", "-C", str(repo_root), "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True, check=False)
+                              capture_output=True, check=False)
     except FileNotFoundError:
         return {"gitAddStatus": "GIT_UNAVAILABLE", "gitAdded": 0}
-    if root.returncode or Path(root.stdout.strip()).resolve() != repo_root:
+    if root.returncode or Path(os.fsdecode(root.stdout).rstrip("\r\n")).resolve() != repo_root:
         return {"gitAddStatus": "OUTSIDE_VAR_REPOSITORY", "gitAdded": 0}
     allowed = set()
     for path in generated_paths:
@@ -2901,12 +2901,14 @@ def _add_generated_paths(generated_paths, before=()):
         try:
             result = subprocess.run(
                 ["git", "-C", str(repo_root), "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
-                input="\0".join(paths) + "\0", capture_output=True, text=True, check=False,
+                input=b"\0".join(os.fsencode(path) for path in paths) + b"\0",
+                capture_output=True, check=False,
             )
         except FileNotFoundError:
             return {"gitAddStatus": "GIT_UNAVAILABLE", "gitAdded": 0}
     if result.returncode:
-        return {"gitAddStatus": "FAILED", "gitAdded": 0, "gitAddMessage": result.stderr.strip()}
+        return {"gitAddStatus": "FAILED", "gitAdded": 0,
+                "gitAddMessage": result.stderr.decode("utf-8", errors="replace").strip()}
     return {"gitAddStatus": "ADDED", "gitAdded": len(paths), "gitRoot": str(repo_root)}
 
 
@@ -2919,12 +2921,15 @@ def untracked_files(repo_root=None, pathspec=None):
         result = subprocess.run(
             command,
             capture_output=True,
-            text=True,
             check=False,
         )
     except FileNotFoundError:
         return set()
-    return set(result.stdout.split("\0")) - {""} if result.returncode == 0 else set()
+    # Git -z emits raw paths. Preserve their bytes, including embedded newlines,
+    # instead of decoding the pipe using Windows' locale-dependent text codec.
+    if result.returncode:
+        return set()
+    return {os.fsdecode(path) for path in result.stdout.split(b"\0") if path}
 
 
 def workspace_var_prefix(workspace):
