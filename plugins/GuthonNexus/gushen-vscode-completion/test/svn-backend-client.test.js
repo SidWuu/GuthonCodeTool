@@ -5,7 +5,7 @@ const { backendErrorMessage, SvnBackendClient } = require('../src/svn/backend-cl
 
 test('removes streamed SVN progress from backend errors', () => {
   const message = backendErrorMessage(
-    '[SVN] 提交 Nexus 修改｜校验选择\n提交中断（已完成：无）\nSVN 提交被谷神平台阻止：过程函数[x]已被其他用户签出\n',
+    '[SVN] 提交本地修改｜校验选择\n提交中断（已完成：无）\nSVN 提交被谷神平台阻止：过程函数[x]已被其他用户签出\n',
     '',
     1
   );

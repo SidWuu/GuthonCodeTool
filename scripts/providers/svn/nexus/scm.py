@@ -944,7 +944,7 @@ def platform_save(
         selected_groups = _selected_groups(selected)
         _progress(
             on_progress,
-            f"提交 Nexus 修改｜校验选择 · {len(selected_groups)} 个分组 / {len(selected)} 个文件",
+            f"提交本地修改｜校验选择 · {len(selected_groups)} 个分组 / {len(selected)} 个文件",
         )
         prepared = [
             (
@@ -1042,7 +1042,7 @@ def platform_save(
         platform_state = _platform_state(workspace)
         _progress(
             on_progress,
-            f"提交 Nexus 修改｜完成 · {len(saved_groups)} 个分组 / {len(selected)} 个文件 · "
+            f"提交本地修改｜完成 · {len(saved_groups)} 个分组 / {len(selected)} 个文件 · "
             f"r{'、'.join(revisions)}",
         )
         return {

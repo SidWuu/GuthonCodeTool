@@ -3,7 +3,7 @@ const CHANGE_STATES = {
   EXTERNAL_MODIFIED: { id: 'external', label: '其他本地修改', icon: 'diff-modified' },
   CONFLICT: { id: 'conflict', label: '冲突/阻断', icon: 'warning' },
   UNTRACKED: { id: 'untracked', label: '未跟踪文件', icon: 'question' },
-  REMOTE: { id: 'remote', label: '远程变更', icon: 'cloud-download' },
+  REMOTE: { id: 'remote', label: '远程变更' },
 };
 const LOCAL_STATES = Object.keys(CHANGE_STATES).filter((state) => state !== 'REMOTE');
 const CHANGE_DIFF_STATUSES = {
@@ -197,7 +197,7 @@ class SvnScmManager {
       const definition = CHANGE_STATES[state];
       const diffStatus = changeDiffStatus(change);
       const textConflict = isTextConflict(change, state);
-      const canOpenNexus = !['CONFLICT', 'UNTRACKED'].includes(state)
+      const canOpenNexus = ['LOCAL_MODIFIED', 'EXTERNAL_MODIFIED'].includes(state)
         && change.item !== 'deleted'
         && change.sourceType
         && change.sourceId;
@@ -221,10 +221,10 @@ class SvnScmManager {
           textConflict
             ? '.text'
             : canOpenNexus ? '.nexus' : ''
-        }`,
+        }${['LOCAL_MODIFIED', 'EXTERNAL_MODIFIED'].includes(state) && change.selectable ? '.selectable' : ''}`,
         decorations: {
-          iconPath: new this.vscode.ThemeIcon(
-            ['CONFLICT', 'REMOTE'].includes(state) ? definition.icon : diffStatus.icon
+          iconPath: state === 'REMOTE' ? undefined : new this.vscode.ThemeIcon(
+            state === 'CONFLICT' ? definition.icon : diffStatus.icon
           ),
           tooltip: `${definition.label} · ${diffStatus.label} · ${changeDisplayName(change)}\n${change.path}\n${change.workingCopyId}`,
           strikeThrough: state === 'CONFLICT',

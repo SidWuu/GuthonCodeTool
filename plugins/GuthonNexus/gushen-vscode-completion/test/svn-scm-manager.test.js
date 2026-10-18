@@ -55,6 +55,18 @@ function workspace() {
   };
 }
 
+function inlineCommands(contextValue) {
+  const manifest = require('../package.json');
+  return manifest.contributes.menus['scm/resourceState/context'].filter((item) => {
+    if (!item.group.startsWith('inline@')) return false;
+    const clause = item.when.split(' && ').find((part) => part.startsWith('scmResourceState '));
+    const regex = clause.match(/^scmResourceState =~ \/(.*)\/$/);
+    if (regex) return new RegExp(regex[1]).test(contextValue);
+    const equal = clause.match(/^scmResourceState == (\S+)$/);
+    return equal && equal[1] === contextValue;
+  }).map((item) => item.command);
+}
+
 test('SCM always exposes save-to-Guthon in Nexus SVN mode', () => {
   const vscode = fakeVscode();
   const manager = new SvnScmManager({ vscode, backend: {} });
@@ -289,6 +301,79 @@ test('keeps remote changes across local refreshes and replaces them after a remo
   await manager.refresh(workspace());
   assert.equal(record.groups.get('subsystem-flat-0008').resourceStates.length, 1);
   assert.equal(record.sourceControl.count, 1);
+  manager.dispose();
+});
+
+test('local and remote changes to the same indexed file retain distinct diff targets and actions', async () => {
+  const vscode = fakeVscode();
+  const change = {
+    path: 'pages/SYS-1/PG-1.json', item: 'modified', workingCopyId: 'systems-domestic',
+    sourceType: 'page', sourceId: 'PG-1', sourceName: '示例页面', selectable: true,
+  };
+  const manager = new SvnScmManager({ vscode, backend: {
+    scmStatus: async () => ({ changes: [change], groups: { LOCAL_MODIFIED: [change] }, remoteChecked: false }),
+  } });
+  const record = manager.ensure(workspace());
+  manager._applyStatus(record, {
+    changes: [change], groups: { LOCAL_MODIFIED: [change] },
+    remoteChecked: true, remoteChanges: [change],
+  });
+  // Local refreshes after cancelling the update must preserve remote rows.
+  await manager.refresh(workspace());
+  const [local, remote] = record.groups.get('subsystem-flat-0008').resourceStates;
+  assert.equal(local.contextValue, 'guthonSvn.LOCAL_MODIFIED.nexus.selectable');
+  assert.equal(remote.contextValue, 'guthonSvn.REMOTE');
+  assert.notEqual(local.resourceUri.query, remote.resourceUri.query);
+  assert.equal(local.command.arguments[2], false);
+  assert.equal(remote.command.arguments[2], true);
+  assert.equal(local.decorations.iconPath.id, 'diff-modified');
+  assert.equal(remote.decorations.iconPath, undefined);
+  assert.match(remote.decorations.tooltip, /远程变更/);
+  assert.deepEqual(inlineCommands(remote.contextValue), ['gushenCompletion.updateSingleSvnChange']);
+  assert.deepEqual(inlineCommands(local.contextValue), [
+    'gushenCompletion.openSvnChangeInNexus',
+    'gushenCompletion.revertSingleSvnChange', 'gushenCompletion.saveSelectedSvnNexusChanges',
+  ]);
+  manager.dispose();
+});
+
+for (const state of ['LOCAL_MODIFIED', 'EXTERNAL_MODIFIED']) {
+  for (const indexed of [false, true]) {
+    test(`safe ${state} file exposes submit, revert and view without requiring index identity (${indexed})`, () => {
+      const manager = new SvnScmManager({ vscode: fakeVscode(), backend: {} });
+      const record = manager.ensure(workspace());
+      const change = {
+        path: 'procedures/save.gss', item: 'modified', workingCopyId: 'datasources-0008',
+        selectable: true, sessionManaged: state === 'LOCAL_MODIFIED',
+        ...(indexed ? { sourceType: 'procedure', sourceId: 'demo#save' } : {}),
+      };
+      manager._applyStatus(record, { changes: [change], groups: { [state]: [change] } });
+      const [resource] = record.groups.get('subsystem-flat-0008').resourceStates;
+      const commands = inlineCommands(resource.contextValue);
+      assert.ok(commands.includes('gushenCompletion.saveSelectedSvnNexusChanges'));
+      assert.ok(commands.includes('gushenCompletion.revertSingleSvnChange'));
+      assert.ok(commands.includes(indexed ? 'gushenCompletion.openSvnChangeInNexus' : 'gushenCompletion.showSvnRawDiff'));
+      assert.equal(commands.includes('gushenCompletion.updateSingleSvnChange'), false);
+      manager.dispose();
+    });
+  }
+}
+
+test('blocked local files, conflicts, untracked files and placeholders never expose submit or revert', () => {
+  const manager = new SvnScmManager({ vscode: fakeVscode(), backend: {} });
+  const record = manager.ensure(workspace());
+  const groups = Object.fromEntries(['LOCAL_MODIFIED', 'EXTERNAL_MODIFIED', 'CONFLICT', 'UNTRACKED'].map((state) => [state, [{
+    path: `${state}.gss`, item: state === 'CONFLICT' ? 'conflicted' : 'modified',
+    selectable: false, workingCopyId: 'datasources-0008', sourceType: 'procedure', sourceId: state,
+  }]]));
+  manager._applyStatus(record, { changes: Object.values(groups).flat(), groups });
+  for (const item of record.groups.get('subsystem-flat-0008').resourceStates) {
+    assert.equal(inlineCommands(item.contextValue).includes('gushenCompletion.saveSelectedSvnNexusChanges'), false);
+    assert.equal(inlineCommands(item.contextValue).includes('gushenCompletion.revertSingleSvnChange'), false);
+  }
+  manager._applyStatus(record, { changes: [], groups: {} });
+  const [placeholder] = record.groups.get('subsystem-flat-0008').resourceStates;
+  assert.deepEqual(inlineCommands(placeholder.contextValue), []);
   manager.dispose();
 });
 

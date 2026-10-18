@@ -6,13 +6,13 @@ const {
   indexedPageFieldCandidates,
   callerIdentity,
   callerLabel,
-  nexusCandidateIds,
+  selectedCandidateIds,
   notifyInformation,
   openSvnConflictMerge,
   procedureIdentityFromElement,
   referenceTarget,
   resolveSourcePath,
-  runFocusedTreeCommand,
+  runSelectedTreeCommand,
   selectCandidates,
   selectEditableIdentity,
   showProcedureCallers,
@@ -75,7 +75,7 @@ test('shows completion notifications without keeping an SVN operation claimed', 
   resolveNotification();
 });
 
-test('all and single submit selections include Nexus-managed candidates only', () => {
+test('all and single submit selections include authorized external and Nexus candidates', () => {
   const preview = {
     candidates: [
       { id: 'nexus-a', path: 'pages/a.json', workingCopyId: 'system-a', sessionManaged: true },
@@ -83,11 +83,11 @@ test('all and single submit selections include Nexus-managed candidates only', (
       { id: 'nexus-c', path: 'procedures/c.gss', workingCopyId: 'datasource-c', sessionManaged: true },
     ],
   };
-  assert.deepEqual(nexusCandidateIds(preview), ['nexus-a', 'nexus-c']);
-  assert.deepEqual(nexusCandidateIds(preview, 'procedures/c.gss'), ['nexus-c']);
-  assert.deepEqual(nexusCandidateIds(preview, 'pages/b.json'), []);
-  assert.deepEqual(nexusCandidateIds(preview, '', ['system-a']), ['nexus-a']);
-  assert.deepEqual(nexusCandidateIds(preview, ['pages/a.json', 'procedures/c.gss']), [
+  assert.deepEqual(selectedCandidateIds(preview), ['nexus-a', 'external', 'nexus-c']);
+  assert.deepEqual(selectedCandidateIds(preview, 'procedures/c.gss'), ['nexus-c']);
+  assert.deepEqual(selectedCandidateIds(preview, 'pages/b.json'), ['external']);
+  assert.deepEqual(selectedCandidateIds(preview, '', ['system-a']), ['nexus-a', 'external']);
+  assert.deepEqual(selectedCandidateIds(preview, ['pages/a.json', 'procedures/c.gss']), [
     'nexus-a',
     'nexus-c',
   ]);
@@ -446,13 +446,91 @@ test('resolves a Nexus source module only inside its workspace checkout', () => 
   );
 });
 
-test('runs native tree actions after focusing the SVN source view', async () => {
-  const calls = [];
-  await runFocusedTreeCommand({
-    commands: { executeCommand: async (command) => calls.push(command) },
-  }, 'list.expand');
-  assert.deepEqual(calls, ['gushenCompletion.svnSourceView.focus', 'list.expand']);
+test('collapsing a selected PAGE keeps it closed after focus returns with other pages expanded', async () => {
+  const directory = { kind: 'directory' };
+  const firstPage = { kind: 'object', parent: directory };
+  const secondPage = { kind: 'object', parent: directory };
+  const fragment = { kind: 'fragment', parent: firstPage };
+  const expanded = new Set([directory, firstPage, secondPage]);
+  // Native keyboard navigation can move focus without changing the selection.
+  let focused = secondPage;
+  const treeView = {
+    selection: [fragment],
+    async reveal(element, options) {
+      assert.deepEqual(options, { focus: true, select: true, expand: false });
+      this.selection = [element];
+      focused = element;
+    },
+  };
+  const restoreViewFocus = () => {
+    for (let parent = treeView.selection[0]?.parent; parent; parent = parent.parent) {
+      expanded.add(parent);
+    }
+  };
+  const vscode = {
+    commands: {
+      async executeCommand(command) {
+        assert.equal(command, 'list.collapseAllToFocus');
+        for (const element of expanded) {
+          for (let ancestor = element; ancestor; ancestor = ancestor.parent) {
+            if (ancestor === focused) expanded.delete(element);
+          }
+        }
+        treeView.selection = [focused];
+      },
+    },
+  };
 
+  await runSelectedTreeCommand(vscode, treeView, 'list.collapseAllToFocus');
+  restoreViewFocus();
+  assert.equal(expanded.has(firstPage), false);
+  assert.equal(expanded.has(secondPage), true);
+  assert.equal(expanded.has(directory), true);
+  assert.deepEqual(treeView.selection, [firstPage]);
+
+  await runSelectedTreeCommand(vscode, treeView, 'list.collapseAllToFocus');
+  restoreViewFocus();
+  assert.deepEqual([...expanded], [directory, secondPage]);
+});
+
+test('tree actions wait for the selected container to be revealed before running', async () => {
+  for (const kind of ['workspace', 'category', 'directory', 'object', 'fragment', 'document', 'message']) {
+    const container = { kind: 'directory' };
+    const selected = { kind, parent: container };
+    const target = ['fragment', 'document', 'message'].includes(kind) ? container : selected;
+    let finishReveal;
+    const calls = [];
+    const treeView = {
+      selection: [selected],
+      reveal(element, options) {
+        assert.equal(element, target);
+        assert.deepEqual(options, { focus: true, select: true, expand: false });
+        calls.push('reveal');
+        return new Promise((resolve) => { finishReveal = resolve; });
+      },
+    };
+    const action = runSelectedTreeCommand({
+      commands: { executeCommand: async (command) => calls.push(command) },
+    }, treeView, 'list.expand');
+    assert.deepEqual(calls, ['reveal']);
+    finishReveal();
+    await action;
+    assert.deepEqual(calls, ['reveal', 'list.expand']);
+  }
+});
+
+test('tree actions without a selected container do not affect another focused view', async () => {
+  for (const selection of [[], [{ kind: 'document' }]]) {
+    await runSelectedTreeCommand({
+      commands: { executeCommand: () => assert.fail('must not run a global list command') },
+    }, {
+      selection,
+      reveal: () => assert.fail('must not reveal without a target'),
+    }, 'list.collapseAllToFocus');
+  }
+});
+
+test('contributes SVN source navigation and SCM actions', () => {
   const manifest = require('../package.json');
   const svnSearch = manifest.contributes.menus['view/title'].find((item) =>
     item.when.includes('gushenCompletion.svnSourceView') && item.group === 'navigation@3'
@@ -474,7 +552,11 @@ test('runs native tree actions after focusing the SVN source view', async () => 
   const rootCommands = manifest.contributes.menus['scm/title'].map((item) => item.command);
   const groupCommands = groupMenus.map((item) => item.command);
   assert.deepEqual(groupCommands, rootCommands);
-  assert.equal(rootCommands.length, 4);
+  assert.deepEqual(rootCommands, [
+    'gushenCompletion.refreshSvnScm',
+    'gushenCompletion.saveAllSvnNexusChanges',
+    'gushenCompletion.updateAllSvnChanges',
+  ]);
   assert(groupMenus.every((item) => item.group.startsWith('inline@')));
   assert(!rootCommands.includes('gushenCompletion.refreshSvn'));
   const sourceMenus = manifest.contributes.menus['view/item/context'];
