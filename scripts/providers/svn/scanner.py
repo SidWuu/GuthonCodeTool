@@ -142,11 +142,13 @@ def _scan_page_json(path, checkout_path, system_id, data_source_id, names, revis
 
 
 def _scan_page_gss(path, checkout_path, system_id, data_source_id, names, revision_map, status_map):
-    result = _base_object(path, checkout_path, "page", revision_map, status_map)
+    inherited = path.name.casefold().endswith(".inherit.gss")
+    result = _base_object(path, checkout_path, "page-inherit" if inherited else "page", revision_map, status_map)
     text = decode_source(path.read_bytes())[0]
     header = _header_fields(text)
-    page_id = header.get("pageId") or path.stem
-    alias = header.get("pageAliasId") or path.stem
+    fallback_id = path.stem[:-len(".inherit")] if inherited else path.stem
+    page_id = header.get("pageId") or fallback_id
+    alias = header.get("pageAliasId") or fallback_id
     relative_in_system = path.relative_to(checkout_path / "pages" / system_id).as_posix()
     result.update(
         {
@@ -156,7 +158,7 @@ def _scan_page_gss(path, checkout_path, system_id, data_source_id, names, revisi
             "source_name": header.get("pageName") or names.get(relative_in_system, alias),
             "system_id": system_id,
             "data_source_id": data_source_id,
-            "scripts": [{"script_type": "gss", "json_path": "", "content": text}],
+            "scripts": [] if inherited else [{"script_type": "gss", "json_path": "", "content": text}],
         }
     )
     return result

@@ -7,7 +7,7 @@ import re
 
 MARKER = re.compile(r"^[ \t]*(?P<return>return[ \t]+)?@?inherit\(\);[ \t]*$")
 POSSIBLE_MARKER = re.compile(r"(?<![A-Za-z0-9_])@?inherit\s*\(")
-SOURCE_CATALOG_VERSION = "svn-source-catalog-v3"
+SOURCE_CATALOG_VERSION = "svn-source-catalog-v5"
 
 
 def procedure_body(text: str) -> tuple[str, int]:

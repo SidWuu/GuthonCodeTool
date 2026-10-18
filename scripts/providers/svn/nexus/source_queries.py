@@ -130,7 +130,7 @@ def list_sources(workspace: dict, *, source_namespace: str = "", source_type: st
         after = page_nodes._decode_cursor(cursor, generation, query, key_length=1) if cursor else None
         if after and not after[0].isdecimal():
             raise page_nodes.PageIndexError("INVALID_CURSOR", "Invalid source record position")
-        clauses = ["provider='svn'", "scope_id=?", "source_table<>'procedure-inherit'"]
+        clauses = ["provider='svn'", "scope_id=?", "source_table NOT IN ('procedure-inherit','page-inherit')"]
         params = [workspace["scopeId"]]
         for column, value in (("source_namespace", source_namespace), ("source_table", source_type)):
             if value:

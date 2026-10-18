@@ -438,7 +438,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <tr><td><code>list_procedure_callers</code></td><td>读取精确过程函数的有界调用方索引证据。</td></tr>
 <tr><td><code>list_page_nodes</code></td><td>分页列出 PAGE 脚本、SQL 与字段集合节点，不返回整页 JSON。</td></tr>
 <tr><td><code>read_page_nodes</code></td><td>从授权源码定点读取所选 PAGE 节点正文。</td></tr>
-<tr><td><code>read_inherited_source</code></td><td>按精确身份有界读取项目原文、产品原文、展开片段和来源位置；不创建编辑租约。过程函数需带 <code>workingCopyId</code>，PAGE 需带项目脚本 <code>jsonPointer</code>。</td></tr>
+<tr><td><code>read_inherited_source</code></td><td>按精确身份有界读取项目原文、产品原文、展开片段和来源位置；不创建编辑租约。过程函数需带 <code>workingCopyId</code>，PAGE JSON 需带项目脚本 <code>jsonPointer</code>，PAGE GSS 使用页面身份。</td></tr>
 <tr><td><code>list_page_fields</code></td><td>分页列出有组件宿主的 UI 字段身份、区域和集合位置；可用 <code>fieldIdPrefix</code> 按字面前缀筛选，分页游标绑定此过滤条件。</td></tr>
 <tr><td><code>search_page_fields</code></td><td>在同一工作区和命名空间中按字面前缀分页查找其他 PAGE 的 UI 字段，返回 PAGE、集合与表列来源；不推断页面间引用。</td></tr>
 <tr><td><code>get_page_field</code></td><td>按稳定身份或附带源码 hash 的 Pointer 读取单个 UI 字段。</td></tr>
@@ -447,7 +447,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <tr><td><code>get_source_context</code></td><td>读取精确 PAGE 的片段目录、表访问与逻辑事实摘要，附带片段 Pointer 和索引行号；结果有界。</td></tr>
 </tbody>
 </table>
-<p>SVN 项目过程函数将普通 <code>.gss</code> 与同目录的 <code>.inherit.gss</code> 关联为一个逻辑函数；后者作为只读产品层。Nexus 默认在项目可编辑标签页显示展开后的完整源码，以低饱和度整行背景区分产品与项目段，编辑器差异基线也同步展开，避免把继承段误标为修改。只改项目段时保存仍保留继承标记；改动产品段时将完整候选保存到项目文件或 PAGE 项目事件，并复核产品哈希。<code>return @inherit();</code> 等不能证明控制流等价的标记需在保存产品改动时显式核对。只读来源视图仍可用于查看两层物理来源，升级后须完整重建本地 SVN 索引。</p>
+<p>SVN 项目过程函数将普通 <code>.gss</code> 与同目录的 <code>.inherit.gss</code> 关联为一个逻辑函数；后者作为只读产品层。Nexus 默认在项目可编辑标签页显示展开后的完整源码，以低饱和度整行背景区分产品与项目段，编辑器差异基线也同步展开，避免把继承段误标为修改。只改项目段时保存仍保留继承标记；改动产品段时将完整候选保存到项目文件或 PAGE 项目事件，并复核产品哈希。<code>return @inherit();</code> 等不能证明控制流等价的标记需在保存产品改动时显式核对。PAGE 产品事件集合存在时，省略的事件键按空源码处理；仅含继承标志且展开后为空的事件不生成 Nexus 源码分块。项目附加代码与非空产品代码仍保留；产品集合缺失或结构异常仍提示继承诊断。原始 PAGE JSON 不变，升级后需完整重建本地 SVN 索引。PAGE 服务组件的项目 <code>.gss</code> 与同目录同名 <code>.inherit.gss</code> 也按项目层和只读产品层关联；父文件独立索引，不参与 PAGE 别名去重，也不能取得编辑权限。全量重建、单文件刷新和变更批次刷新均保持该分层，编辑与保存始终落到项目子文件。只读来源视图仍可用于查看两层物理来源，升级后须完整重建本地 SVN 索引。</p>
 <h4>编辑流程与操作回查（下表为常用入口；完整分类以 tools/list 为准）</h4>
 <table class="comparison-table">
 <thead><tr><th>工具</th><th>作用</th></tr></thead>
@@ -536,6 +536,8 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <li>拉取历史按固定快照分页，可导出 JSON/Markdown。归档先预览，再确认完整工作区键；有备份可恢复，共享 Bridge 日志只导出、不清理。</li>
 <li>强制覆盖 Workcopy 前先备份；<code>workcopy trash-list</code> 查看备份，<code>workcopy restore &lt;backup&gt; --check</code> 预览恢复，再按提示确认。</li>
 </ul>
+<p>Bridge 字段复制支持输入组件和表格组件：复制弹窗同时列出显示字段和隐藏字段，隐藏字段以灰色和“隐藏”标识区分并可勾选；粘贴保留隐藏状态，在两组字段中按 <code>fieldId</code> 统一去重。项目继承字段的 <code>inherit()</code> / <code>@inherit()</code> 脚本按产品源码展开后复制，空结果保留为空；缺少产品来源或无法安全展开时提示错误。平台保存仍需手动执行。</p>
+
 <h3>索引与更新</h3><p>首次使用新增语义与正文检索需完整重建索引。SVN 重建支持协作式取消；它不等于取消远程 update 或 commit。<code>PARTIAL</code> 表示存在扫描错误或覆盖缺口，应按目标对象修复和刷新，不能按空结果处理。</p>
 <p>Nexus“运行模式 → 检查更新”统一检查后端、Nexus VSIX 与 Chrome Bridge，默认每天首次激活后后台检查；角标显示可更新数量。发行和调试模式点击确认后从所选发行源下载并验签，分别更新应用或pyz与依赖清单；开发模式从明确developmentRoot本地源码构建Nexus和Bridge，不访问发行源，后端继续使用工具源码。Nexus 自安装最后执行，安装后可立即重新加载窗口或稍后；Chrome 首次需要加载固定托管目录并配对，之后空闲时自动重载。 更新缓存、中断记录和备份保留在本地数据目录；Python 可选驱动缺失时会提示，不自动修改全局环境。</p>
 <p>明确同步入口可使用 <code>source-sync/source-sync-full/workspace-sync/index-rebuild/index-init</code>，旧命令保持同一行为。源码保存、SVN 提交、平台发布和业务运行分别核验。</p>

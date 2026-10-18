@@ -846,7 +846,7 @@
       const vue = host && [host, ...host.querySelectorAll("*")]
         .map(getVueInstance)
         .find((item) => Array.isArray(item?.[fieldsKey]));
-      if (vue) return { fields: vue[fieldsKey] };
+      if (vue) return { vue, fields: vue[fieldsKey], hiddenFields: Array.isArray(vue.hideFields) ? vue.hideFields : [] };
     }
     throw new Error("当前组件不支持字段平移");
   }
@@ -855,24 +855,48 @@
     return field?.label || field?.name || field?.title || field?.fieldName || field?.fieldId || `字段 ${index + 1}`;
   }
 
+  function getFieldsMoverEntries(context) {
+    return [
+      ...context.fields.map((field) => ({ field, hidden: false })),
+      ...context.hiddenFields.map((field) => ({ field, hidden: true }))
+    ];
+  }
+
   function readFieldsMoverSource() {
-    return findFieldsMoverContext().fields.map((field, index) => ({ index, label: getFieldsMoverLabel(field, index), fieldId: field?.fieldId || "" }));
+    return getFieldsMoverEntries(findFieldsMoverContext()).map(({ field, hidden }, index) => ({
+      index, label: getFieldsMoverLabel(field, index), fieldId: field?.fieldId || "", hidden
+    }));
   }
 
   function copyFieldsMoverSource(payload) {
-    const fields = findFieldsMoverContext().fields;
+    const entries = getFieldsMoverEntries(findFieldsMoverContext());
     const indexes = Array.isArray(payload?.indexes) ? payload.indexes : [];
-    const chosen = indexes.map(Number).filter((index) => Number.isInteger(index) && fields[index]);
+    const chosen = [...new Set(indexes.map(Number))].filter((index) => Number.isInteger(index) && entries[index]);
     if (!chosen.length) throw new Error("请至少选择一个字段");
-    copiedFields = window.GuthonFieldsMoverCore.cloneFields(chosen.map((index) => fields[index]));
+    copiedFields = chosen.map((index) => ({
+      hidden: entries[index].hidden,
+      field: window.GuthonFieldsMoverCore.cloneFields([entries[index].field])[0]
+    }));
     return { copied: copiedFields.length };
   }
 
   function pasteFieldsMoverSource() {
     if (!copiedFields?.length) throw new Error("没有已复制的字段");
-    const fields = findFieldsMoverContext().fields;
-    const result = window.GuthonFieldsMoverCore.planAppendFields(fields, window.GuthonFieldsMoverCore.cloneFields(copiedFields));
-    fields.push(...result.toAppend);
+    const context = findFieldsMoverContext();
+    const entries = copiedFields.map((entry) => ({
+      hidden: entry.hidden, field: window.GuthonFieldsMoverCore.cloneFields([entry.field])[0]
+    }));
+    const result = window.GuthonFieldsMoverCore.planAppendFields(
+      [...context.fields, ...context.hiddenFields], entries.map((entry) => entry.field)
+    );
+    const accepted = new Set(result.toAppend);
+    if (entries.some((entry) => entry.hidden && accepted.has(entry.field)) && !Array.isArray(context.vue.hideFields)) {
+      if (context.vue.$set) context.vue.$set(context.vue, "hideFields", context.hiddenFields);
+      else context.vue.hideFields = context.hiddenFields;
+    }
+    entries.forEach(({ field, hidden }) => {
+      if (accepted.has(field)) (hidden ? context.hiddenFields : context.fields).push(field);
+    });
     return { pasted: result.toAppend.length, duplicate: result.skippedDuplicate.length, invalid: result.skippedInvalid.length };
   }
 

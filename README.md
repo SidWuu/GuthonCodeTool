@@ -217,6 +217,8 @@ echo '{"name":"list_page_nodes","arguments":{"sourceNamespace":"pages-SYS-1","so
 
 `list_page_fields` 另支持可选 `fieldIdPrefix`，按字面前缀在精确 PAGE 内分页筛选；与 `fieldId` 的精确匹配不同，`%` 和 `_` 不作为通配符。
 
+PAGE 服务组件的项目 `.gss` 与同目录同名 `.inherit.gss` 也按项目层和只读产品层关联；父文件独立索引，不参与 PAGE 别名去重，也不能取得编辑权限。全量重建、单文件刷新和变更批次刷新均保持该分层，编辑与保存始终落到项目子文件。升级后须完整重建本地 SVN 索引。
+
 SVN 项目过程函数的 `.gss` 与 `.inherit.gss` 会按同目录同名归为一个逻辑函数；产品文件只读。Nexus 打开项目过程函数或 PAGE 项目脚本时，直接在可编辑标签页显示展开后的完整源码，以低饱和度整行蓝灰背景标识产品继承段。编辑器的差异基线使用相同展开结果，产品继承内容本身不会显示为修改；物理 SVN 差异仍反映真实写入。仅修改项目段并保存时，物理项目源码保留 `@inherit`；修改产品段时，保存会把完整候选写入项目源码，并复核产品哈希。`return @inherit();` 的控制流不能自动证明等价，修改产品段后保存需显式核对。MCP `read_inherited_source` 仍按精确身份有界返回两层原文、展开片段、来源位置和哈希；读取前需完成一次完整索引重建。原有“查看展开后的继承源码”仍可用于只读来源核对。写入后须审阅 SVN diff。
 
 PAGE 节点写入流程为 `open_page_node_edit → preview_page_nodes → update_page_nodes → get_page_operation / resume_page_operation`；字段新增/拷贝为 `open_page_field_insert → preview_page_field_insert → insert_page_field → get_page_operation / resume_page_operation`；过程函数为 `open_procedure_edit → preview_procedure → update_procedure → get_procedure_operation / resume_procedure_operation`。新增字段始终生成新 `id`；仅当候选原有 `guid` 键时才生成新 `guid`，省略时保持省略。正式写入要求工作区 `edit` 能力、授权文件、未过期的编辑令牌、当前源码与索引一致及调用方提供 `idempotencyKey`；响应丢失后先用该 key 查询原 operation，避免盲目重写。写入仅保存到本地 SVN working copy，**不会提交 SVN**。需要强制只读的客户端可在 `--stdio` 后加 `--read-only`，此时发现 43 个只读工具。字段删除、移动和反射组写入仍不开放；此前版本的真实工作区曾完成 28 个工具的本地调用验证及受控撤销测试。过往版本曾完成 VSIX 安装及真实索引抽样；本轮新增能力仍以当前源码与测试为准，需重新构建安装后验收；Windows、AI 自主路由、真实项目的 Nexus 展开交互与故障矩阵仍需验收。使用写入后必须人工核对 SVN diff，不把工具响应当作平台运行结果。
@@ -361,7 +363,7 @@ Bridge 默认监听 `127.0.0.1:17361`，支持：
 - 数据库工作区的 PAGE、过程函数、系统脚本拉取，以及表结构、单据类型和视图导出。
 - SVN 工作区的旧源码拉取/数据库导出按钮自动隐藏，服务端也会拒绝旧接口；checkout、虚拟编辑、索引和 SCM
   集中在 Nexus。Bridge 本身继续保留页面身份路由和与源码拉取无关的页面能力。
-- 模块页面字段复制。
+- 模块页面字段复制：可勾选灰色标识的隐藏字段，粘贴保留隐藏状态；项目继承脚本展开后复制，空结果保留为空。
 - 在模块开发页从当前激活的 PAGE 页签取页面编码，交给 Nexus 按精确索引定位；Nexus 仍要求选择 SVN 工作区和多候选源码。
 - 请求级工作区自动匹配和歧义选择。
 - Nexus 的 PAGE/过程函数源码可反向定位到已打开的平台页签；多页签当次选择并重新核验来源与工作区。pageContext 只保留有界元数据，Bearer SSE 传定位指令/回执及工作区上下文变化，不默认推送正文或选中文本。

@@ -1004,7 +1004,7 @@ def find_source_candidates(conn, scope_id, keyword, limit=10, include_paths=Fals
     query = f"%{keyword.strip()}%"
     if include_paths and ("/" in keyword or "\\" in keyword or re.search(r"\.(?:gss|json|vm|js|java|sql)$", keyword, re.I)):
         normalized = keyword.replace("\\", "/").strip()
-        return conn.execute("SELECT source_layer,project_id,source_namespace,working_copy_id,source_table,source_id,source_alias_id,fun_id,source_name,local_path,status,provider,source_path,source_hash,svn_revision,system_id,data_source_id FROM gusen_source_record WHERE scope_id=? AND (source_path LIKE ? OR replace(local_path, char(92), '/') LIKE ?) ORDER BY source_path,source_namespace,record_id LIMIT ?",
+        return conn.execute("SELECT source_layer,project_id,source_namespace,working_copy_id,source_table,source_id,source_alias_id,fun_id,source_name,local_path,status,provider,source_path,source_hash,svn_revision,system_id,data_source_id FROM gusen_source_record WHERE scope_id=? AND source_table NOT IN ('procedure-inherit','page-inherit') AND (source_path LIKE ? OR replace(local_path, char(92), '/') LIKE ?) ORDER BY source_path,source_namespace,record_id LIMIT ?",
                             (scope_id,"%"+normalized+"%","%"+normalized+"%",limit)).fetchall()
     fts_clause, fts_params = identity_search.candidate_clause(conn, keyword.strip(), allow_like_wildcards=True)
     return conn.execute(
@@ -1012,7 +1012,7 @@ def find_source_candidates(conn, scope_id, keyword, limit=10, include_paths=Fals
         SELECT source_layer, project_id, source_namespace, working_copy_id, source_table, source_id, source_alias_id, fun_id, source_name,
                local_path, status, provider, source_path, source_hash, svn_revision, system_id, data_source_id
         FROM gusen_source_record
-        WHERE scope_id=?
+        WHERE scope_id=? AND source_table NOT IN ('procedure-inherit','page-inherit')
           AND (source_id LIKE ? OR source_alias_id LIKE ? OR fun_id LIKE ? OR source_name LIKE ?)
           {"AND " + fts_clause if fts_clause else ""}
         ORDER BY source_name, source_alias_id, fun_id, source_namespace, record_id
@@ -1024,7 +1024,7 @@ def find_source_candidates(conn, scope_id, keyword, limit=10, include_paths=Fals
 
 def query_source_context(conn, scope_id, source_id, fun_id="", limit=20, source_namespace=""):
     limit = max(1, min(int(limit), 20))
-    filters = ["scope_id=?", "source_id=?"]
+    filters = ["scope_id=?", "source_id=?", "source_table NOT IN ('procedure-inherit','page-inherit')"]
     params = [scope_id, source_id]
     if fun_id:
         filters.append("fun_id=?")
@@ -1974,7 +1974,7 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
                            scope_entry_id, source_namespace
                     FROM gusen_source_record
                     WHERE provider='svn' AND source_table=? AND source_id=? AND fun_id=?
-                      AND working_copy_id NOT IN ({})
+                      AND scope_entry_id NOT IN ({})
                       LIMIT 1
                     """.format(",".join("?" for _ in selected)),
                     (
@@ -2017,7 +2017,7 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
             existing = conn.execute(
                 "SELECT source_table, source_id, fun_id, scope_entry_id, source_namespace "
                 "FROM gusen_source_record "
-                f"WHERE provider='svn' AND working_copy_id IN ({placeholders})",
+                f"WHERE provider='svn' AND scope_entry_id IN ({placeholders})",
                 selected,
             ).fetchall()
             for row in existing:
@@ -2076,7 +2076,7 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
                     child_path = scanned["path"][:-len(".inherit.gss")] + ".gss"
                     conn.execute(
                         "UPDATE gusen_source_record SET status='STALE', indexed_time=? "
-                        "WHERE provider='svn' AND source_table='procedure' AND source_path=?",
+                        "WHERE provider='svn' AND source_table IN ('procedure','page') AND source_path=?",
                         (_now(), child_path),
                     )
                 _advance_page_semantic_generation(conn)
@@ -2109,6 +2109,17 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
                     """,
                     (item["source_table"], item["source_id"], item.get("fun_id") or "", scanned["path"]),
                 ).fetchone()
+                # Older catalogs could index a PAGE product GSS as the editable
+                # PAGE. Reclassify that exact authorized file before comparing
+                # alias candidates, so a child refresh cannot retain its parent.
+                if collision and collision["source_path"].casefold().endswith(".inherit.gss"):
+                    parent_scan = catalog.scan_file(workspace, collision["source_path"])
+                    parent_item = parent_scan.get("object")
+                    if parent_scan["errors"] or not parent_item or parent_item["source_table"] != "page-inherit":
+                        raise ValueError("Cannot verify indexed PAGE product layer; rebuild the local SVN index")
+                    _delete_svn_index_item(conn, workspace, dict(collision))
+                    _insert_svn_index_item(conn, workspace, parent_item, _now())
+                    collision = None
                 if collision:
                     collision_item = dict(collision)
                     if is_newer_page(item, collision_item):
@@ -2140,11 +2151,11 @@ def index_svn_workspace_file(conn, cfg, workspace, source_path):
                 _delete_svn_index_item(conn, workspace, row)
             if item:
                 _insert_svn_index_item(conn, workspace, item, _now())
-                if item["source_table"] == "procedure-inherit":
+                if item["source_table"] in {"procedure-inherit", "page-inherit"}:
                     child_path = item["source_path"][:-len(".inherit.gss")] + ".gss"
                     child_scan = catalog.scan_file(workspace, child_path)
                     child_item = child_scan.get("object")
-                    if child_item and child_item["source_table"] == "procedure" and not child_scan["errors"]:
+                    if child_item and child_item["source_table"] == item["source_table"].removesuffix("-inherit") and not child_scan["errors"]:
                         previous_child = conn.execute(
                             "SELECT source_table, source_id, fun_id, scope_entry_id, source_namespace "
                             "FROM gusen_source_record WHERE provider='svn' AND source_path=?",

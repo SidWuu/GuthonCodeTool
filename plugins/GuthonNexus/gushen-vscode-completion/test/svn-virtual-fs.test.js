@@ -236,11 +236,12 @@ test('revalidates a stale readonly virtual tab before rejecting save', async () 
   provider.dispose();
 });
 
-test('opens inherited source inline and preserves marker when only project text changes', async () => {
+for (const sourceType of ['procedure', 'page']) {
+ test(`${sourceType} GSS opens inherited source inline and preserves the project marker`, async () => {
   class EventEmitter { constructor() { this.event = () => {}; } dispose() {} }
   const vscode = { EventEmitter, FileType: { File: 1 },
     FileSystemError: { NoPermissions: (message) => new Error(message) } };
-  const uri = { authority: 'projects.demo', query: 'sourceType=procedure&sourceId=pkg%23save&funId=save&workingCopyId=wc',
+  const uri = { authority: 'projects.demo', query: `sourceType=${sourceType}&sourceId=pkg%23save&funId=save&workingCopyId=wc`,
     toString: () => 'guthon-svn-edit://projects.demo/save.gss' };
   const project = 'before();\n@inherit();\nafter();';
   const effective = 'before();\nproduct();\nafter();';
@@ -250,6 +251,7 @@ test('opens inherited source inline and preserves marker when only project text 
       sourceNamespace: 'datasources/1', sourcePath: 'pkg/save.gss', content: project }),
     pageQuery: async (_workspace, name, args) => {
       assert.equal(name, 'read_inherited_source');
+      assert.equal(args.sourceType, sourceType);
       assert.equal(args.sourceNamespace, 'datasources/1');
       return { inheritanceStatus: 'ACTIVE', indexGeneration: 'gen',
         project: { sourceHash: 'project-hash' }, product: { sourceHash: 'product-hash' },
@@ -282,6 +284,8 @@ test('opens inherited source inline and preserves marker when only project text 
   assert.equal(writes[2][3], `other();\n${project}`);
   provider.dispose();
 });
+
+}
 
 test('materializes edited product source with its checked hash', async () => {
   class EventEmitter { constructor() { this.event = () => {}; } dispose() {} }

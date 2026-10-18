@@ -1242,7 +1242,10 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("字段平移"), true);
   assert.equal(contentScript.includes("复制字段"), true);
   assert.equal(contentScript.includes("粘贴字段"), true);
-  assert.equal(contentScript.includes("全选字段"), true);
+  const moverActions = contentScript.match(/<div class="guthon-bridge-fields-mover-actions">(.*?)<\/div>/)[1];
+  assert.deepEqual([...moverActions.matchAll(/<button\b[^>]*>(.*?)<\/button>/g)].map((match) => match[1]), [
+    "全选", "复制", "取消",
+  ]);
   assert.equal(contentScript.includes("guthon-bridge-fields-mover-select-all"), true);
   assert.equal(contentScript.includes("item.checked = true"), true);
   assert.equal(contentScript.includes("showFieldsMoverOverlay"), true);

@@ -66,7 +66,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `scripts/common/index_bulk.py` | 在完整重建事务内暂停逐行检索索引触发器，批量构建并恢复；失败回滚数据和触发器。 |
 | `scripts/common/source_facts.py` | 源码身份、事实解析与可重建 PAGE 节点/界面字段投影。 |
 | `scripts/common/index_schema_comments.py` | SQLite 索引表及字段的可查询注释。 |
-| `scripts/common/page_projection.py` | PAGE 虚拟文档投影、共享脚本/字段集合提取、语义节点/界面字段描述符及保留已有字段原文的单项插入。 |
+| `scripts/common/page_projection.py` | PAGE 虚拟文档投影、共享脚本/字段集合提取、语义节点/界面字段描述符及保留已有字段原文的单项插入；共享 PAGE 产品事件解析省略已确认的空继承分块，并供精确继承读取复用。 |
 | `scripts/common/inheritance.py` | 过程函数与 PAGE 项目脚本的继承标记识别、有效内容派生与来源片段；派生结果不作为可写物理文件。 |
 | `scripts/common/source_format.py` | 源码编解码与格式元数据。 |
 | `scripts/common/export_hub_markdown.py` | 全量 Markdown 导出。 |
@@ -122,7 +122,7 @@ SVN：
 - `scripts/providers/svn/nexus/edit_leases.py`：未过期、源码未变更的租约续期与精确释放；`operation_maintenance.py`：有界巡检与确认后归档完成记录，拒绝 pending、损坏或活动租约记录。
 - `scripts/providers/svn/nexus/page_nodes.py`、`page_mutation.py`、`page_field_mutation.py`、`mcp_server.py`：PAGE 节点/界面字段有界查询、未解析映射及引用风险诊断、源码新鲜度核验、编辑租约、受控节点写入及同集合单字段新增/拷贝；MCP 提供显式 `--read-only`，CLI `svn page-query` 和 Nexus 后端共用查询层。
 - `scripts/providers/svn/nexus/procedure_sources.py`、`procedure_mutation.py`：独立于 PAGE 投影的 SVN 对象索引就绪检查、过程函数无会话有界读取/调用方证据、精确身份编辑租约、预览和幂等本地写入；共用 `documents.py` 的授权与物理文件写回内核。
-- `scripts/providers/svn/nexus/inheritance_sources.py`：基于授权索引与两层源码哈希，有界读取项目原文、产品原文和展开内容；Nexus `virtual-fs.js` 默认将展开内容投影到项目可编辑标签页，并按编辑范围决定保留标记或物化，同时校验产品哈希；`diff-content.js` 将相同投影用于虚拟编辑器 Quick Diff 基线，物理 SVN diff 不变；`catalog.py` 将 `.inherit.gss` 记为独立物理产品层，但从逻辑过程函数目录和可写入口排除。
+- `scripts/providers/svn/nexus/inheritance_sources.py`：基于授权索引与两层源码哈希，有界读取项目原文、产品原文和展开内容；Nexus `virtual-fs.js` 默认将展开内容投影到项目可编辑标签页，并按编辑范围决定保留标记或物化，同时校验产品哈希；`diff-content.js` 将相同投影用于虚拟编辑器 Quick Diff 基线，物理 SVN diff 不变；`catalog.py` 将过程函数和 PAGE 服务组件的 `.inherit.gss` 记为独立只读产品层，排除逻辑目录、PAGE 别名去重和可写入口；`manifest.py` 对所有布局统一拒绝父文件写入。
 - `scripts/providers/svn/nexus/source_queries.py`（无租约当前读、批读、分页对象摘要与健康度）、`catalog.py`、`documents.py`、`index_queries.py`、`manifest.py`、`scm.py`、`workspace.py`、`bootstrap.py`：Nexus 目录、文档与内部 PAGE 操作记录、有界查询、清单、SCM 与工作区初始化；`bootstrap.py` 的登录验证只探测当前配置及同一根下已有授权子目录，并经 stdin 交给 SVN 缓存密码。
 
 ## Guthon Nexus

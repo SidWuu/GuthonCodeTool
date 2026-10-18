@@ -80,7 +80,7 @@ function changeDocumentName(change) {
 function changeUri(vscode, workspaceKey, change, state = '') {
   const params = new URLSearchParams({ path: change.path });
   if (state) params.set('state', state);
-  for (const key of ['workingCopyId', 'sourceType', 'sourceId', 'funId', 'jsonPointer']) {
+  for (const key of ['workingCopyId', 'sourceWorkingCopyId', 'sourceType', 'sourceId', 'funId', 'jsonPointer']) {
     if (change[key]) params.set(key, change[key]);
   }
   const documentName = changeDocumentName(change);
@@ -297,7 +297,8 @@ class SvnScmManager {
   refreshRemote(workspace, options = {}) { return this._refresh(workspace,true,options); }
 
   async refreshAll(workspaces, options = {}) {
-    const expected = new Set(workspaces.map((workspace) => workspace.workspaceKey));
+    // A status refresh may target only a subset. Repository lifetime is owned
+    // by syncWorkspaces with the complete workspace list, never by status IO.
     const results = [];
     for (const workspace of workspaces) {
       try {
@@ -305,9 +306,6 @@ class SvnScmManager {
       } catch (error) {
         results.push({ ok: false, workspaceKey: workspace.workspaceKey, error });
       }
-    }
-    for (const workspaceKey of this.providers.keys()) {
-      if (!expected.has(workspaceKey)) this.remove(workspaceKey);
     }
     return results;
   }

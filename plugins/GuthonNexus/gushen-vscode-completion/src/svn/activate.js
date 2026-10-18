@@ -37,6 +37,9 @@ async function selectCandidates(vscode, preview, title) {
 }
 
 async function selectEditableIdentity(vscode, backend, identity) {
+  if (identity.sourceWorkingCopyId) {
+    identity = { ...identity, workingCopyId: identity.sourceWorkingCopyId };
+  }
   const isPageJson = identity.sourceType === 'page'
     && String(identity.sourcePath || '').toLowerCase().endsWith('.json');
   if (!isPageJson || identity.jsonPointer) return identity;
@@ -653,6 +656,7 @@ function activateSvn({
       sourcePath: params.get('path') || '',
       state: params.get('state') || '',
       workingCopyId: params.get('workingCopyId') || '',
+      sourceWorkingCopyId: params.get('sourceWorkingCopyId') || '',
       sourceType: params.get('sourceType') || '',
       sourceId: params.get('sourceId') || '',
       funId: params.get('funId') || '',
@@ -1011,10 +1015,7 @@ function activateSvn({
         throw new Error('请先选择过程函数或 PAGE 项目脚本');
       }
       let pointer = selected?.fragment?.jsonPointer || '';
-      if (object.sourceType === 'page') {
-        if (!String(object.sourcePath || '').toLowerCase().endsWith('.json')) {
-          throw new Error('请选择 PAGE JSON 中的项目事件脚本');
-        }
+      if (object.sourceType === 'page' && String(object.sourcePath || '').toLowerCase().endsWith('.json')) {
         if (!pointer) {
           const listing = await backend.fragments(source.workspaceKey, object);
           const candidates = (listing.fragments || []).filter((item) => item.jsonPointer
@@ -1293,6 +1294,7 @@ function activateSvn({
   async function refresh(workspaceKey = '') {
     catalogTree.refresh(workspaceKey);
     const workspaces = await listSvnWorkspaces();
+    if (!workspaceKey) scm.syncWorkspaces(workspaces);
     const selected = workspaceKey
       ? workspaces.filter((workspace) => workspace.workspaceKey === workspaceKey)
       : workspaces;

@@ -1186,7 +1186,8 @@ def write(workspace: dict, *, session_id: str, document_id: str, content: str,
         )
         item = prepared["item"]
         pointer = prepared["document"].get("jsonPointer") or ""
-        if item["source_table"] == "procedure" or (item["source_table"] == "page" and pointer):
+        if item["source_table"] == "procedure" or (item["source_table"] == "page" and (
+                pointer or str(item["source_path"]).lower().endswith(".gss"))):
             before = decode_source(prepared["sourceBytes"])[0]
             after = decode_source(prepared["afterBytes"])[0]
             if pointer:

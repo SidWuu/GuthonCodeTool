@@ -26,7 +26,7 @@ SCRIPT_KEYS = {
     "sql",
 }
 EVENT_SUPERS = {"serviceEvents": "superServiceEvents", "pageEvents": "superPageEvents"}
-PAGE_NODE_PARSER_VERSION = "page-nodes-v2"
+PAGE_NODE_PARSER_VERSION = "page-nodes-v3"
 PAGE_FIELD_PARSER_VERSION = "page-fields-v1"
 PAGE_FIELD_RELATION_PARSER_VERSION = "page-field-relations-v2"
 SERVICE_EVENT_KEYS = {"beforeSave", "afterSave", "beforeSqlSelect"}
@@ -145,6 +145,35 @@ def resolve_inherited_script(script: str, inherited: str | None) -> str:
     return projection["effective"] if projection["status"] == "ACTIVE" else script
 
 
+def inherited_page_script(value, pointer: str) -> tuple[str, str | None]:
+    """Resolve the same-page product layer; exports omit empty event keys.
+
+    An existing super-event mapping proves the layer is present. A missing
+    event in that mapping is empty; a missing or malformed mapping is unknown.
+    """
+    parts = pointer_parts(pointer)
+    product_parts = list(parts)
+    if "pageEvents" in parts:
+        product_parts[parts.index("pageEvents")] = "superPageEvents"
+    elif "serviceEvents" in parts:
+        product_parts[parts.index("serviceEvents")] = "superServiceEvents"
+    elif parts and parts[-1] == "script":
+        product_parts[-1] = "superScript"
+    else:
+        return "", None
+    product_pointer = json_pointer(product_parts)
+    try:
+        parent = pointer_value(value, json_pointer(product_parts[:-1]))
+        if not isinstance(parent, dict):
+            return product_pointer, None
+        event_mapping = len(product_parts) >= 2 and product_parts[-2] in EVENT_SUPERS.values()
+        default = "" if event_mapping else None
+        inherited = parent.get(product_parts[-1], default)
+    except (KeyError, IndexError, TypeError, ValueError):
+        inherited = None
+    return product_pointer, inherited if isinstance(inherited, str) else None
+
+
 def script_extension(key: str, event_type: str | None) -> str:
     if key == "sql":
         return "sql"
@@ -195,12 +224,16 @@ def _node_display_label(value: dict, node_kind: str | None = None) -> str:
     return str(fallback).strip() if isinstance(fallback, (str, int, float)) else ""
 
 
-def extract_page_scripts(value, *, missing_product_as_empty=False) -> list[ScriptField]:
-    """Return every explicit script string with a stable pointer and readable unique filename."""
+def extract_page_scripts(value, *, missing_product_as_empty=False, include_empty_inherited=False) -> list[ScriptField]:
+    """Project explicit scripts, omitting inheritance that resolves to no content.
+
+    Exact source inspection can include empty inherited strings; missing product
+    data remains visible unless the caller explicitly defines it as empty.
+    """
 
     fields = []
 
-    def walk(current, parts, display_path, inherited_scripts=None, event_type=None, node_kind=None, source_display=None):
+    def walk(current, parts, display_path, event_type=None, node_kind=None, source_display=None):
         source_display = source_display or []
         if isinstance(current, dict):
             label = _node_display_label(current, node_kind)
@@ -212,21 +245,15 @@ def extract_page_scripts(value, *, missing_product_as_empty=False) -> list[Scrip
             for key, child in current.items():
                 child_parts = parts + [key]
                 if is_script_key(key, event_type) and isinstance(child, str):
-                    inherited = (inherited_scripts or {}).get(key)
-                    if key == "script":
-                        inherited = current.get("superScript")
-                    inherited = inherited if isinstance(inherited, str) else "" if missing_product_as_empty else None
+                    pointer = json_pointer(child_parts)
+                    super_pointer, inherited = inherited_page_script(value, pointer)
+                    if inherited is None and missing_product_as_empty:
+                        inherited = ""
                     projection = project_inheritance(child, inherited)
                     effective = projection["effective"] if projection["status"] == "ACTIVE" else child
-                    pointer = json_pointer(child_parts)
-                    super_parts = list(child_parts)
-                    if "pageEvents" in super_parts:
-                        super_parts[super_parts.index("pageEvents")] = "superPageEvents"
-                    elif "serviceEvents" in super_parts:
-                        super_parts[super_parts.index("serviceEvents")] = "superServiceEvents"
-                    elif key == "script":
-                        super_parts[-1] = "superScript"
-                    super_pointer = json_pointer(super_parts)
+                    if (not include_empty_inherited and projection["status"] == "ACTIVE"
+                            and not effective.strip()):
+                        continue
                     origins = tuple({**segment, "jsonPointer":
                                      super_pointer if segment["layer"] == "product" else pointer}
                                     for segment in projection["segments"])
@@ -245,19 +272,17 @@ def extract_page_scripts(value, *, missing_product_as_empty=False) -> list[Scrip
                         )
                     )
                 elif key not in EVENT_SUPERS.values():
-                    inherited = current.get(EVENT_SUPERS.get(key, ""), {})
                     walk(
                         child,
                         child_parts,
                         next_display,
-                        inherited if isinstance(inherited, dict) else None,
                         key if key in EVENT_SUPERS else event_type,
                         "button" if key in {"button", "buttons"} else None,
                         next_source_display,
                     )
         elif isinstance(current, list):
             for index, child in enumerate(current):
-                walk(child, parts + [index], display_path, inherited_scripts, event_type, node_kind, source_display)
+                walk(child, parts + [index], display_path, event_type, node_kind, source_display)
 
     walk(value, [], [])
     return fields

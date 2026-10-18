@@ -149,7 +149,7 @@ class SvnVirtualFileSystem {
     let inheritance;
     if (value.editable && identity.workspaceKey.startsWith('projects.')
       && ['procedure', 'page'].includes(identity.sourceType)
-      && (identity.sourceType === 'procedure' || identity.jsonPointer)
+      && (identity.sourceType === 'procedure' || identity.jsonPointer || /\.gss$/i.test(value.sourcePath || ''))
       && /@?inherit\s*\(/.test(value.content)
       && this.backend.pageQuery) {
       let offset = 0;

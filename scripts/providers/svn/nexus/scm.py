@@ -120,6 +120,9 @@ def _change_metadata(indexed: dict[str, dict], logical_path: str) -> dict:
         return {}
     return {
         "sourceType": item.get("sourceType") or "",
+        # SCM workingCopyId identifies the physical operation scope; editing
+        # must use the indexed object's identity, which can include a system.
+        "sourceWorkingCopyId": item.get("workingCopyId") or "",
         "sourceId": item.get("sourceId") or "",
         "sourceName": item.get("sourceName") or "",
         "funId": item.get("funId") or "",

@@ -265,7 +265,7 @@ def search_sources(
         after = _decode_cursor(cursor, generation, query, key_length=5) if cursor else None
         if after and not after[-1].isdecimal():
             raise PageIndexError("INVALID_CURSOR", "Source search cursor has no valid record position")
-        clauses = ["provider='svn'", "source_table<>'procedure-inherit'", "(instr(lower(source_id), ?) > 0 OR "
+        clauses = ["provider='svn'", "source_table NOT IN ('procedure-inherit','page-inherit')", "(instr(lower(source_id), ?) > 0 OR "
                    "instr(lower(source_alias_id), ?) > 0 OR "
                    "instr(lower(COALESCE(source_name, '')), ?) > 0)"]
         params: list[object] = [keyword.lower(), keyword.lower(), keyword.lower()]

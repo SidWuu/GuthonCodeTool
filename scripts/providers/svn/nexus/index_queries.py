@@ -349,7 +349,7 @@ def catalog(workspace: dict) -> dict:
                 SELECT source_table, source_namespace, source_id, source_alias_id, fun_id, source_name, source_path,
                        local_path, working_copy_id, scope_entry_id, system_id, data_source_id, status
                 FROM gusen_source_record
-                WHERE provider='svn' AND source_table<>'procedure-inherit'
+                WHERE provider='svn' AND source_table NOT IN ('procedure-inherit','page-inherit')
                 ORDER BY source_path
                 """
             ).fetchall()
@@ -503,7 +503,7 @@ def definition(workspace: dict, *, alias: str, fun_id: str) -> dict:
             SELECT source_table, source_id, source_alias_id, fun_id, source_name, source_path,
                    working_copy_id, scope_entry_id, status
             FROM gusen_source_record
-            WHERE provider='svn' AND scope_id=? AND source_table<>'procedure-inherit' AND source_alias_id=? AND fun_id=?
+            WHERE provider='svn' AND scope_id=? AND source_table NOT IN ('procedure-inherit','page-inherit') AND source_alias_id=? AND fun_id=?
             ORDER BY source_table, source_id
             """,
             (workspace["scopeId"], normalized_alias, normalized_fun),
@@ -571,7 +571,7 @@ def find(workspace: dict, *, keyword: str, limit: int = 10) -> dict:
             limit,
         )
         total = connection.execute(
-            "SELECT COUNT(*) FROM gusen_source_record WHERE scope_id=? "
+            "SELECT COUNT(*) FROM gusen_source_record WHERE scope_id=? AND source_table NOT IN ('procedure-inherit','page-inherit') "
             "AND (source_id LIKE ? OR source_alias_id LIKE ? OR fun_id LIKE ? OR source_name LIKE ?)",
             (workspace["scopeId"], *([f"%{keyword.strip()}%"] * 4)),
         ).fetchone()[0]
@@ -588,7 +588,7 @@ def context(workspace: dict, *, source_id: str, fun_id: str = "", limit: int = 2
     with _connection(workspace) as connection:
         matches = connection.execute(
             "SELECT source_namespace, source_table, source_id, fun_id, source_path FROM gusen_source_record "
-            "WHERE scope_id=? AND source_id=? " + ("AND fun_id=? " if fun_id else "") + "LIMIT 2",
+            "WHERE scope_id=? AND source_id=? AND source_table NOT IN ('procedure-inherit','page-inherit') " + ("AND fun_id=? " if fun_id else "") + "LIMIT 2",
             (workspace["scopeId"], source_id, *([fun_id] if fun_id else [])),
         ).fetchall()
         if len(matches) > 1:

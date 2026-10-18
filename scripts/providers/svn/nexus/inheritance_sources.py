@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from common.inheritance import SOURCE_CATALOG_VERSION, procedure_body, project
-from common.page_projection import extract_page_scripts, pointer_parts, pointer_value, json_pointer
+from common.page_projection import extract_page_scripts, inherited_page_script, pointer_value
 from common.source_format import decode_source
 from providers.svn.checkout import require_capability
 
@@ -15,7 +15,6 @@ from .index_queries import _connection
 
 
 MAX_READ_CHARS = 24_000
-SUPER_KEYS = {"pageEvents": "superPageEvents", "serviceEvents": "superServiceEvents"}
 
 
 def _window(value: str | None, offset: int, size: int) -> dict | None:
@@ -54,28 +53,40 @@ def read_inherited_source(
 
     invalid_parent_header = False
 
-    if source_type == "procedure":
-        if not working_copy_id or not fun_id or json_pointer_value:
+    if source_type == "procedure" or not json_pointer_value:
+        if source_type == "procedure" and (not working_copy_id or not fun_id or json_pointer_value):
             raise page_nodes.PageIndexError("INVALID_LOCATOR", "Exact procedure identity is required")
-        record, generation = procedure_sources._record(
-            workspace, source_namespace=source_namespace, source_id=source_id,
-            fun_id=fun_id, working_copy_id=working_copy_id,
-        )
+        if source_type == "procedure":
+            record, generation = procedure_sources._record(
+                workspace, source_namespace=source_namespace, source_id=source_id,
+                fun_id=fun_id, working_copy_id=working_copy_id,
+            )
+        else:
+            with _connection(workspace) as conn:
+                generation = page_nodes._require_source_ready(conn)
+                record = page_nodes._page_record(conn, source_namespace, source_id, fun_id)
+            if not record["source_path"].lower().endswith(".gss"):
+                raise page_nodes.PageIndexError("INVALID_LOCATOR", "PAGE JSON requires an exact script pointer")
+            if working_copy_id and working_copy_id != record["working_copy_id"]:
+                raise page_nodes.PageIndexError("SOURCE_IDENTITY_MISMATCH", "PAGE working copy differs from selection")
+            working_copy_id = record["working_copy_id"]
         project_original, project_hash = procedure_sources._current_source(workspace, record)
+        if indexed_source_hash and indexed_source_hash != project_hash:
+            raise page_nodes.PageIndexError("SOURCE_STALE", "Source changed since selection")
         parent_path = record["source_path"][:-len(".gss")] + ".inherit.gss"
         with _connection(workspace) as conn:
             rows = conn.execute(
-                "SELECT * FROM gusen_source_record WHERE provider='svn' AND source_table='procedure-inherit' "
+                "SELECT * FROM gusen_source_record WHERE provider='svn' AND source_table=? "
                 "AND source_namespace=? AND working_copy_id=? AND source_path=? LIMIT 2",
-                (source_namespace, working_copy_id, parent_path),
+                (source_type + "-inherit", source_namespace, working_copy_id, parent_path),
             ).fetchall()
         if len(rows) > 1:
-            raise page_nodes.PageIndexError("SOURCE_AMBIGUOUS", "Inherited procedure is ambiguous")
+            raise page_nodes.PageIndexError("SOURCE_AMBIGUOUS", "Inherited GSS is ambiguous")
         parent = dict(rows[0]) if rows else None
         if parent and (parent["source_id"] != source_id or parent["fun_id"] != fun_id):
-            raise page_nodes.PageIndexError("SOURCE_IDENTITY_MISMATCH", "Inherited procedure identity differs from project source")
+            raise page_nodes.PageIndexError("SOURCE_IDENTITY_MISMATCH", "Inherited GSS identity differs from project source")
         if parent and parent["status"] not in {"OK", "SVN_DIRTY"}:
-            raise page_nodes.PageIndexError("SOURCE_STALE", "Inherited procedure is not ready")
+            raise page_nodes.PageIndexError("SOURCE_STALE", "Inherited GSS is not ready")
         if parent:
             product_original, product_hash = procedure_sources._current_source(workspace, parent)
             product_body, product_offset = procedure_body(product_original)
@@ -100,26 +111,13 @@ def read_inherited_source(
         data = json.loads(decode_source(raw)[0])
         if isinstance(data, str):
             data = json.loads(data)
-        scripts = {field.json_pointer for field in extract_page_scripts(data)}
+        # Empty inherited events are absent from Nexus projections, but exact
+        # two-layer source inspection must still be able to verify their origin.
+        scripts = {field.json_pointer for field in extract_page_scripts(data, include_empty_inherited=True)}
         if json_pointer_value not in scripts:
             raise page_nodes.PageIndexError("NODE_NOT_FOUND", "Pointer is not a project script")
         project_original = pointer_value(data, json_pointer_value)
-        parts = pointer_parts(json_pointer_value)
-        product_parts = list(parts)
-        if "pageEvents" in parts:
-            product_parts[parts.index("pageEvents")] = "superPageEvents"
-        elif "serviceEvents" in parts:
-            product_parts[parts.index("serviceEvents")] = "superServiceEvents"
-        elif len(parts) >= 2 and parts[-1] == "script":
-            product_parts[-1] = "superScript"
-        else:
-            product_parts = []
-        product_pointer = json_pointer(product_parts) if product_parts else ""
-        try:
-            inherited = pointer_value(data, product_pointer) if product_pointer else None
-        except (KeyError, IndexError, TypeError, ValueError):
-            inherited = None
-        product_original = inherited if isinstance(inherited, str) else None
+        product_pointer, product_original = inherited_page_script(data, json_pointer_value)
         product_body = product_original
         product_offset = 0
         product_hash = project_hash if product_original is not None else None
@@ -130,7 +128,7 @@ def read_inherited_source(
     projection = project(project_original, product_body, product_offset=product_offset)
     if invalid_parent_header:
         projection["status"] = "INVALID_PRODUCT_HEADER"
-        projection["diagnostic"] = "Inherited procedure has an unterminated generated header"
+        projection["diagnostic"] = "Inherited GSS has an unterminated generated header"
     for segment in projection["segments"]:
         original = product_original if segment["layer"] == "product" else project_original
         rendered = projection["effective"][segment["start"]:segment["end"]]

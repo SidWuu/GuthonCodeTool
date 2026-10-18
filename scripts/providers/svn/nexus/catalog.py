@@ -97,7 +97,7 @@ def _base_object(entry: ScopeEntry, path: Path, source_table: str, revisions: di
     if entry.category == "root":
         identity = source_identity(entry, relative)
         if identity:
-            owner = "systems" if source_table in {"page", "system-script"} else "datasources"
+            owner = "systems" if source_table in {"page", "page-inherit", "system-script"} else "datasources"
             source_namespace = f"{entry.id}:{owner}/{identity}"
             working_copy_id = source_namespace
     return {
@@ -121,21 +121,30 @@ def _identity_from_path(entry: ScopeEntry, path: Path) -> str:
 
 
 def _page_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) -> dict:
-    result = _base_object(entry, path, "page", revisions, changes)
+    inherited = path.name.casefold().endswith(".inherit.gss")
+    result = _base_object(entry, path, "page-inherit" if inherited else "page", revisions, changes)
     system_id = _identity_from_path(entry, path)
     if path.suffix.lower() == ".gss":
         text = decode_source(path.read_bytes())[0]
         header = header_fields(text)
-        page_id = header.get("pageId") or path.stem
+        fallback_id = path.stem[:-len(".inherit")] if inherited else path.stem
+        page_id = header.get("pageId") or fallback_id
         result.update(
             source_id=page_id,
-            source_alias_id=header.get("pageAliasId") or path.stem,
+            source_alias_id=header.get("pageAliasId") or fallback_id,
             fun_id="",
-            source_name=header.get("pageName") or path.stem,
+            source_name=header.get("pageName") or fallback_id,
             system_id=system_id,
             data_source_id="",
-            scripts=[{"script_type": "gss", "json_path": "", "content": text}],
+            scripts=[],
         )
+        if not inherited:
+            projection, origins, mismatch = _physical_gss_projection(entry, path, text, {"pageId": page_id})
+            if mismatch:
+                result["status"] = "INHERIT_IDENTITY_MISMATCH"
+            result["scripts"] = [{"script_type": "gss", "json_path": "",
+                                  "content": projection["effective"] if projection["status"] == "ACTIVE" else text,
+                                  "originMap": origins}]
         return result
     raw = decode_source(path.read_bytes())[0]
     data, double_encoded = _decode_json(raw)
@@ -177,6 +186,32 @@ def _page_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) 
     return result
 
 
+def _physical_gss_projection(entry: ScopeEntry, path: Path, text: str, identity: dict):
+    """Project a child GSS against its read-only sibling product layer."""
+    parent_path = path.with_name(path.stem + ".inherit.gss")
+    parent_present = (parent_path.is_file() and not parent_path.is_symlink()
+                      and parent_path.resolve().is_relative_to(entry.root.resolve()))
+    parent_text = decode_source(parent_path.read_bytes())[0] if parent_present else None
+    parent_body, parent_offset = procedure_body(parent_text) if parent_text is not None else (None, 0)
+    if parent_text is not None and parent_text.lstrip("\ufeff").startswith("/**") and parent_offset == 0:
+        parent_body = None
+    parent_header = header_fields(parent_text) if parent_text is not None else {}
+    mismatch = any(parent_header.get(key) and parent_header[key] != value for key, value in identity.items())
+    projection = project_inheritance(text, None if mismatch else parent_body, product_offset=parent_offset)
+    origins = []
+    if projection["status"] == "ACTIVE":
+        for segment in projection["segments"]:
+            is_product = segment["layer"] == "product"
+            original = parent_text if is_product else text
+            rendered = projection["effective"][segment["start"]:segment["end"]]
+            leading = len(rendered) - len(rendered.lstrip("\r\n"))
+            origins.append({**segment,
+                            "sourceLine": original.count("\n", 0, segment["sourceStart"] + leading) + 1,
+                            "sourcePath": _logical_path(entry, parent_path if is_product else path),
+                            "sourceHash": file_hash(parent_path if is_product else path)})
+    return projection, origins, mismatch
+
+
 def _procedure_object(entry: ScopeEntry, path: Path, revisions: dict, changes: dict) -> dict:
     inherited = path.name.casefold().endswith(".inherit.gss")
     result = _base_object(entry, path, "procedure-inherit" if inherited else "procedure", revisions, changes)
@@ -190,36 +225,13 @@ def _procedure_object(entry: ScopeEntry, path: Path, revisions: dict, changes: d
     indexed_script = text
     origin_map = []
     if not inherited:
-        parent_path = path.with_name(path.stem + ".inherit.gss")
-        parent_present = (parent_path.is_file() and not parent_path.is_symlink()
-                          and parent_path.resolve().is_relative_to(entry.root.resolve()))
-        parent_text = decode_source(parent_path.read_bytes())[0] if parent_present else None
-        parent_body, parent_offset = procedure_body(parent_text) if parent_text is not None else (None, 0)
-        if parent_text is not None and parent_text.lstrip("\ufeff").startswith("/**") and parent_offset == 0:
-            parent_body = None
-        parent_header = header_fields(parent_text) if parent_text is not None else {}
-        parent_identity_matches = (
-            not parent_header.get("packageId") or parent_header["packageId"] == package
-        ) and (
-            not parent_header.get("functionId") or parent_header["functionId"] == function_id
+        projection, origin_map, mismatch = _physical_gss_projection(
+            entry, path, text, {"packageId": package, "functionId": function_id},
         )
-        projection = project_inheritance(
-            text, parent_body if parent_identity_matches else None, product_offset=parent_offset,
-        )
-        if not parent_identity_matches:
+        if mismatch:
             result["status"] = "INHERIT_IDENTITY_MISMATCH"
         if projection["status"] == "ACTIVE":
             indexed_script = projection["effective"]
-            parent_source_path = _logical_path(entry, parent_path)
-            for segment in projection["segments"]:
-                is_product = segment["layer"] == "product"
-                original = parent_text if is_product else text
-                rendered = indexed_script[segment["start"]:segment["end"]]
-                leading = len(rendered) - len(rendered.lstrip("\r\n"))
-                origin_map.append({**segment,
-                                   "sourceLine": original.count("\n", 0, segment["sourceStart"] + leading) + 1,
-                                   "sourcePath": parent_source_path if is_product else result["source_path"],
-                                   "sourceHash": file_hash(parent_path) if is_product else result["source_hash"]})
     result.update(
         source_id=f"{package}#{function_id}",
         source_alias_id=package,

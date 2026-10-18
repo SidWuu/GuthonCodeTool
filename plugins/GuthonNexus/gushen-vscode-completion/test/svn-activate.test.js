@@ -1,5 +1,7 @@
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { changeUri } = require('../src/svn/scm-manager');
+
 const test = require('node:test');
 const {
   activeSourceIdentity,
@@ -593,4 +595,33 @@ test('maps the active virtual editor back to its Nexus source identity', () => {
     funId: '',
     jsonPointer: '/pageSetup/pageEvents/onOpenScript',
   });
+});
+
+test('SCM editing uses indexed identity while retaining the physical operation scope', async () => {
+  const change = {
+    path: 'systems/SYS-1/pages/PG-1.json', sourceType: 'page', sourceId: 'PG-1',
+    workingCopyId: 'repository-root',
+    sourceWorkingCopyId: 'repository-root:systems/SYS-1',
+  };
+  const uri = changeUri({ Uri: { from: value => value } }, 'products.demo', change);
+  const params = new URLSearchParams(uri.query);
+  assert.equal(params.get('workingCopyId'), 'repository-root');
+  const identity = {
+    workspaceKey: uri.authority, sourcePath: params.get('path'),
+    sourceType: params.get('sourceType'), sourceId: params.get('sourceId'),
+    workingCopyId: params.get('workingCopyId'),
+    sourceWorkingCopyId: params.get('sourceWorkingCopyId'),
+  };
+  const editable = await selectEditableIdentity({}, {
+    fragments: async (key, value) => {
+      assert.equal(key, 'products.demo');
+      assert.equal(value.workingCopyId, change.sourceWorkingCopyId);
+      return { fragments: [{ jsonPointer: '/script', scriptType: 'js' }] };
+    },
+  }, identity);
+  assert.equal(editable.workingCopyId, change.sourceWorkingCopyId);
+  assert.equal(editable.jsonPointer, '/script');
+  assert.equal(identity.workingCopyId, 'repository-root');
+  const script = await selectEditableIdentity({}, {}, { ...identity, sourcePath: 'page.gss' });
+  assert.equal(script.workingCopyId, change.sourceWorkingCopyId);
 });

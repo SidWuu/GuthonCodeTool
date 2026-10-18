@@ -67,6 +67,47 @@ function inlineCommands(contextValue) {
   }).map((item) => item.command);
 }
 
+test('subset and empty status refreshes preserve other registered repositories', async () => {
+  const calls = [];
+  const manager = new SvnScmManager({ vscode: fakeVscode(), backend: {
+    scmStatus: async (key) => {
+      calls.push(key);
+      return { ok: true, changes: [], groups: {} };
+    },
+  } });
+  const first = workspace();
+  const second = { ...workspace(), workspaceKey: 'products.demo' };
+  manager.syncWorkspaces([first, second]);
+  const secondRecord = manager.record(second.workspaceKey);
+  await manager.refreshAll([first]);
+  await manager.refreshAll([]);
+  assert.deepEqual(calls, [first.workspaceKey]);
+  assert.equal(manager.record(second.workspaceKey), secondRecord);
+  assert.equal(secondRecord.sourceControl.disposed, false);
+  manager.syncWorkspaces([first]);
+  assert.equal(manager.record(second.workspaceKey), undefined);
+  assert.equal(secondRecord.sourceControl.disposed, true);
+  manager.dispose();
+});
+
+test('an in-flight status refresh cannot remove a newly registered repository', async () => {
+  let finish;
+  const manager = new SvnScmManager({ vscode: fakeVscode(), backend: {
+    scmStatus: () => new Promise(resolve => { finish = resolve; }),
+  } });
+  const first = workspace();
+  const second = { ...workspace(), workspaceKey: 'products.demo' };
+  manager.syncWorkspaces([first]);
+  const pending = manager.refreshAll([first]);
+  manager.syncWorkspaces([first, second]);
+  const secondRecord = manager.record(second.workspaceKey);
+  finish({ ok: true, changes: [], groups: {} });
+  await pending;
+  assert.equal(manager.record(second.workspaceKey), secondRecord);
+  assert.equal(secondRecord.sourceControl.disposed, false);
+  manager.dispose();
+});
+
 test('SCM always exposes save-to-Guthon in Nexus SVN mode', () => {
   const vscode = fakeVscode();
   const manager = new SvnScmManager({ vscode, backend: {} });

@@ -807,9 +807,9 @@ async function showFieldsMoverOverlay(root) {
   overlay.id = FIELDS_MOVER_OVERLAY_ID;
   overlay.innerHTML = `
     <div class="guthon-bridge-fields-mover-panel">
-      <div class="guthon-bridge-fields-mover-head"><strong>复制字段</strong><button type="button" class="guthon-bridge-fields-mover-close">关闭</button></div>
-      <div class="guthon-bridge-fields-mover-list">${fields.map((field) => `<label class="guthon-bridge-fields-mover-item"><input type="checkbox" data-index="${field.index}" /><span>${escapeHtml(field.label)} <span class="guthon-bridge-fields-mover-meta">${escapeHtml(field.fieldId || "无字段编码")}</span></span></label>`).join("") || "当前组件没有字段"}</div>
-      <div class="guthon-bridge-fields-mover-actions"><button type="button" class="guthon-bridge-fields-mover-select-all">全选字段</button><button type="button" class="guthon-bridge-fields-mover-cancel">取消</button><button type="button" class="guthon-bridge-fields-mover-copy">复制</button></div>
+      <div class="guthon-bridge-fields-mover-head"><strong>复制字段</strong><button type="button" class="el-button el-button--default el-button--mini is-plain guthon-bridge-fields-mover-close">关闭</button></div>
+      <div class="guthon-bridge-fields-mover-list">${fields.map((field) => `<label class="guthon-bridge-fields-mover-item${field.hidden ? " is-hidden" : ""}"><input type="checkbox" data-index="${field.index}" /><span>${escapeHtml(field.label)}${field.hidden ? "（隐藏）" : ""} <span class="guthon-bridge-fields-mover-meta">${escapeHtml(field.fieldId || "无字段编码")}</span></span></label>`).join("") || "当前组件没有字段"}</div>
+      <div class="guthon-bridge-fields-mover-actions"><button type="button" class="el-button el-button--default el-button--mini is-plain guthon-bridge-fields-mover-select-all">全选</button><button type="button" class="el-button el-button--default el-button--mini is-plain guthon-bridge-fields-mover-copy">复制</button><button type="button" class="el-button el-button--default el-button--mini is-plain guthon-bridge-fields-mover-cancel">取消</button></div>
     </div>`;
   const close = () => removeNode(FIELDS_MOVER_OVERLAY_ID);
   overlay.querySelector(".guthon-bridge-fields-mover-close").addEventListener("click", close);

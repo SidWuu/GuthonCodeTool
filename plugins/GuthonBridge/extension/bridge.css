@@ -846,3 +846,8 @@ tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
   border-color: transparent;
   background: transparent;
 }
+
+#guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-item.is-hidden {
+  color: #909399;
+  background: #f5f7fa;
+}
