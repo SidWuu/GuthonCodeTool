@@ -26,8 +26,9 @@ SUPPORTED_CATEGORIES = {
     "public",
 }
 
-WRITABLE_SOURCE_CATEGORIES = {"pages", "procedures", "system-script"}
+WRITABLE_SOURCE_CATEGORIES = {"pages", "procedures", "system-script", "views"}
 WRITABLE_SOURCE_SUFFIXES = {
+    "views": {".json"},
     "pages": {".json", ".gss"},
     "procedures": {".gss"},
     "system-script": {".gss", ".js", ".vm", ".sql"},
@@ -280,7 +281,7 @@ def load_authorized_scope(workspace: dict) -> AuthorizedScope:
         subdirs.append(posix_subdir)
         writable = raw.get(
             "writable",
-            category in {"root", "systems", "datasources", "pages", "procedures", "system-script"},
+            category in {"root", "systems", "datasources", *WRITABLE_SOURCE_CATEGORIES},
         )
         if not isinstance(writable, bool):
             raise SystemExit(f"writable must be boolean for scope entry {entry_id}")

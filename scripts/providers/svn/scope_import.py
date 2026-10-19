@@ -25,7 +25,7 @@ from .nexus.manifest import (
 
 
 CHECKOUT_ACTIONS = {"checkout", "co"}
-WRITABLE_CATEGORIES = {"systems", "datasources", "pages", "procedures", "system-script"}
+WRITABLE_CATEGORIES = {"systems", "datasources", "pages", "procedures", "system-script", "views"}
 OPTIONS_WITH_VALUES = {
     "--changelist",
     "--config-dir",

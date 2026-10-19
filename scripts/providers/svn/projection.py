@@ -204,6 +204,21 @@ def _open_workcopy(workspace: dict, row, scope: dict) -> dict:
                     "projectionHash": _sha_bytes(content),
                 }
             )
+    elif source_table == "view" and source_path.suffix.lower() == ".json":
+        data = json.loads(text)
+        raw_snapshot = "raw.json"
+        _atomic_bytes(target / raw_snapshot, source_bytes)
+        if isinstance(data, dict) and isinstance(data.get("viewSql"), str):
+            value = data["viewSql"]
+            projection_path = "scripts/view.sql"
+            content = value.encode("utf-8")
+            _atomic_bytes(target / projection_path, content)
+            mappings.append({
+                "projectionPath": projection_path, "jsonPointer": "/viewSql",
+                "key": "viewSql", "scriptType": "view_sql",
+                "originalValue": value, "originalHash": text_hash(value),
+                "projectionHash": _sha_bytes(content),
+            })
     else:
         if source_table in {"table", "view"}:
             extension = ".json"
@@ -223,7 +238,8 @@ def _open_workcopy(workspace: dict, row, scope: dict) -> dict:
                 "projectionHash": file_hash(target / projection_path),
             }
         )
-    writable = source_table in {"page", "procedure", "system-script"} and not double_encoded
+    writable = (source_table in {"page", "procedure", "system-script"}
+                or (source_table == "view" and bool(mappings))) and not double_encoded
     meta = {
         "version": META_VERSION,
         "provider": "svn",

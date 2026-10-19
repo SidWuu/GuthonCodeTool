@@ -279,6 +279,13 @@ def _document_content(item: dict, json_pointer: str) -> tuple[str, str]:
             raise SystemExit(f"PAGE JSON Pointer is not a text field: {json_pointer}")
         script_type = str(fragment.get("script_type") or "js")
         return value, f"page-{script_type}"
+    if item["source_table"] == "view" and json_pointer == "/viewSql":
+        data = json.loads(text)
+        if not isinstance(data, dict) or not isinstance(data.get("viewSql"), str):
+            raise SystemExit("VIEW SQL must be an existing JSON string")
+        if data.get("viewId") != item["source_id"]:
+            raise SystemExit("VIEW identity changed in the SVN source")
+        return data["viewSql"], "view-sql"
     if json_pointer:
         scripts, _double_encoded = _object_scripts(item)
         script = next((script for script in scripts if script.get("json_path") == json_pointer), None)
@@ -286,6 +293,14 @@ def _document_content(item: dict, json_pointer: str) -> tuple[str, str]:
             raise SystemExit(f"Virtual fragment was not found: {json_pointer}")
         return str(script.get("content") or ""), "read-only-fragment"
     return text, "whole-file"
+
+
+def _document_writable(item: dict, pointer: str, fragment_type: str) -> bool:
+    """Keep VIEW metadata read-only even under a writable datasource scope."""
+    if item["source_table"] == "view":
+        return (Path(item["local_path"]).suffix.lower() == ".json"
+                and pointer == "/viewSql" and fragment_type == "view-sql")
+    return item["source_table"] in {"page", "procedure", "system-script"}
 
 
 def _content_at_pointer(text: str, json_pointer: str, fragment_type: str) -> str:
@@ -528,7 +543,7 @@ def read(
         editable = bool(
             workspace["capabilities"].get("svn.edit")
             and source_path_writable(entry, relative_path)
-            and item["source_table"] in {"page", "procedure", "system-script"}
+            and _document_writable(item, json_pointer, fragment_type)
             and not external
         )
         document_key = json.dumps(
@@ -647,7 +662,9 @@ def _session_document(workspace: dict, session: dict, document_id: str) -> dict:
     if entry is None:
         raise SystemExit("SVN object is no longer writable in the authorization scope")
     relative_path = relative_path_for_entry(entry, item["source_path"])
-    if not source_path_writable(entry, relative_path):
+    if (not source_path_writable(entry, relative_path)
+            or not _document_writable(item, document.get("jsonPointer") or "",
+                                      document.get("fragmentType") or "")):
         raise SystemExit("SVN object is no longer writable in the authorization scope")
     return {
         "document": document,
@@ -706,12 +723,14 @@ def _prepare_write(
         raise SystemExit("SVN source encoding or newline format changed")
     pointer = document.get("jsonPointer") or ""
     fragment_type = document.get("fragmentType") or ""
-    is_page_fragment = fragment_type in PAGE_FRAGMENT_TYPES
+    is_json_fragment = fragment_type in PAGE_FRAGMENT_TYPES | {"view-sql"}
     current_value = None
-    if is_page_fragment:
+    if is_json_fragment:
         data = json.loads(source_text)
         if isinstance(data, str):
             raise SystemExit("Double-encoded PAGE JSON is read-only")
+        if fragment_type == "view-sql" and data.get("viewId") != item["source_id"]:
+            raise SystemExit("VIEW identity changed in the SVN source")
         current_value = pointer_value(data, pointer)
         current_document = (
             json.dumps(current_value, ensure_ascii=False, indent=2)
@@ -731,7 +750,7 @@ def _prepare_write(
         raise SystemExit("SVN edit lease predates concurrency protection; reopen the virtual document")
     if current_hash != expected_source_hash:
         can_rebase_fragment = (
-            is_page_fragment
+            is_json_fragment
             and ledger_is_current
             and current_document_hash == expected_document_hash
         )
@@ -739,7 +758,7 @@ def _prepare_write(
             raise SystemExit("SVN_EDIT_CONFLICT: source changed after this document was opened")
     elif not ledger_is_current:
         raise SystemExit("SVN edit session source ledger is stale; reopen the virtual document")
-    if is_page_fragment and current_document_hash != expected_document_hash:
+    if is_json_fragment and current_document_hash != expected_document_hash:
         raise SystemExit(f"SVN_EDIT_CONFLICT: PAGE JSON Pointer changed after open: {pointer}")
 
     if content is not None and replacements is not None:
@@ -757,7 +776,7 @@ def _prepare_write(
             base_content = _content_at_pointer(base_source_text, pointer, fragment_type)
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             base_content = ""
-    if is_page_fragment:
+    if is_json_fragment:
         if fragment_type == "page-fields":
             try:
                 replacement = json.loads(content)
@@ -780,7 +799,8 @@ def _prepare_write(
             )
         after_bytes = encode_source_exact(after_text, detected_format)
         parsed_after = json.loads(after_text)
-        if str(parsed_after.get("pageId") or item["source_id"]) != item["source_id"]:
+        if (item["source_table"] == "page"
+                and str(parsed_after.get("pageId") or item["source_id"]) != item["source_id"]):
             raise SystemExit("PAGE identity changed during virtual document save")
     else:
         try:

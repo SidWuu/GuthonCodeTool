@@ -32,7 +32,7 @@ from common.persistence import atomic_text
 from common.workspace_identity import CONFIG_ID as SAFE_ID, validate_config_id as validate_identity_id
 
 SUPPORTED_INCLUDES = {"pages", "procedures", "system-script", "tables", "views"}
-WRITABLE_INCLUDES = {"pages", "procedures", "system-script"}
+WRITABLE_INCLUDES = {"pages", "procedures", "system-script", "views"}
 # GuShen SVN uses legacy self-signed HTTPS certificates, including expired and
 # hostname-mismatched certificates. Keep checkout, update and commit compatible
 # with that service; operators can explicitly narrow the accepted failures.

@@ -300,7 +300,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <tr><td><strong>PAGE：</strong>按索引中的模型、模块和页面顺序展示，内部固定分为 GSS、JavaScript、SQL、字段及服务事件。</td><td>脚本与 SQL 以虚拟文档投影，可受控写回原始 JSON；字段用于定位和分析。</td></tr>
 <tr><td><strong>过程函数：</strong>按包名和函数名组织，支持复制稳定身份、跳转与调用位置。</td><td>函数源码可以受控编辑，写回对应物理文件。</td></tr>
 <tr><td><strong>系统脚本：</strong>按业务子系统分组。</td><td>可受控编辑和提交。</td></tr>
-<tr><td><strong>表与视图：</strong>作为结构和引用事实进入索引。</td><td>只读展示，不通过虚拟文档改写定义。</td></tr>
+<tr><td><strong>表与视图：</strong>作为结构和引用事实进入索引。</td><td>视图仅允许编辑已有的 <code>viewSql</code> SQL 字符串；表格定义（含字段新增、修改）、视图字段和其他元数据保持只读。视图字段由平台解析 SQL 自动生成。</td></tr>
 </tbody>
 </table>
 <h3 id="5-3-受控编辑">5.3 受控编辑</h3>

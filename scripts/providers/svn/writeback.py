@@ -35,8 +35,8 @@ from providers.svn.projection import (
 
 
 AUDIT_FILE = "svn-writeback.ndjson"
-WRITABLE_ROOTS = {"pages", "procedures", "system-script"}
-SOURCE_ROOTS = {"page": "pages", "procedure": "procedures", "system-script": "system-script"}
+WRITABLE_ROOTS = {"pages", "procedures", "system-script", "views"}
+SOURCE_ROOTS = {"page": "pages", "procedure": "procedures", "system-script": "system-script", "view": "views"}
 
 
 def _sha(value: bytes) -> str:
@@ -107,7 +107,7 @@ def _source_path(workspace: dict, meta: dict) -> tuple[Path, str]:
     if expected_root in {"pages", "system-script"} and len(relative.parts) > 1:
         if str(meta.get("systemId") or "") != relative.parts[1]:
             raise SystemExit("SVN Workcopy system identity does not match its source path")
-    if expected_root == "procedures" and len(relative.parts) > 1:
+    if expected_root in {"procedures", "views"} and len(relative.parts) > 1:
         if str(meta.get("dataSourceId") or "") != relative.parts[1]:
             raise SystemExit("SVN Workcopy data source identity does not match its source path")
     candidate = checkout / relative
@@ -207,6 +207,9 @@ def _append_audit(path: Path, record: dict) -> None:
 
 
 def _validate_identity(meta: dict, data) -> None:
+    if meta["sourceTable"] == "view":
+        if not isinstance(data, dict) or data.get("viewId") != meta["sourceId"]:
+            raise SystemExit("VIEW identity changed in the SVN source")
     if meta["sourceTable"] == "page" and isinstance(data, dict):
         page_id = str(data.get("pageId") or meta["sourceId"])
         if page_id != meta["sourceId"]:
@@ -231,6 +234,13 @@ def _prepare(workspace: dict, workcopy_path: Path) -> dict:
     if not any(svn_path == path or svn_path.startswith(path + "/") for path in scoped_paths):
         raise SystemExit("SVN Workcopy source path is outside the configured sparse scope")
     verify_repository_fingerprint(workspace, expected_fingerprint)
+    if meta.get("sourceTable") == "view" and (
+        not meta.get("mappings") or any(
+            mapping.get("jsonPointer") != "/viewSql"
+            for mapping in meta["mappings"]
+        )
+    ):
+        raise SystemExit("VIEW writeback permits only the /viewSql string")
     if not meta.get("writable"):
         raise SystemExit("This SVN object is read-only or cannot be safely written back")
     source_path, relative = _source_path(workspace, meta)
@@ -264,7 +274,7 @@ def _prepare(workspace: dict, workcopy_path: Path) -> dict:
             "projectionChanges": projection_changes,
             "diff": "",
         }
-    if meta["sourceTable"] == "page" and source_path.suffix.lower() == ".json":
+    if meta["sourceTable"] in {"page", "view"} and source_path.suffix.lower() == ".json":
         data = json.loads(source_text_value)
         if isinstance(data, str):
             raise SystemExit("Double-encoded PAGE JSON is read-only because minimal token replacement is not safe")
@@ -363,7 +373,7 @@ def _save(workspace: dict, workcopy_path: Path, check_only=False) -> dict:
     new_hash = _sha(prepared["after"])
     new_text = source_text(prepared["after"])[0]
     raw_path = None
-    if meta["sourceTable"] == "page" and prepared["sourcePath"].suffix.lower() == ".json":
+    if meta["sourceTable"] in {"page", "view"} and prepared["sourcePath"].suffix.lower() == ".json":
         data = json.loads(new_text)
         for mapping in meta["mappings"]:
             value = pointer_value(data, mapping["jsonPointer"])

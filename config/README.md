@@ -144,6 +144,8 @@ projects:
 也可以每行直接写 `<url> <localSubdir>`（支持 `->` 或 `=>` 分隔）。配置文件只允许字面量 URL 和相对目录，
 不会保存用户名、密码或脚本变量；修改 `svn.url` 后执行“检出/更新完整 SVN 仓库”即可重建当前工作区的内部清单。
 
+SVN 授权范围中的 `views` 类目支持修改已有的 `viewSql` 字符串；`root`、`datasources` 聚合范围遵循同一规则。显式 `writable: false` 继续拒绝修改，不会自动提升已有授权。旧清单若将 `views` 显式设为只读，需核对后调整该目标条目。表格定义（含字段新增、修改）及视图字段/其他元数据只读；视图字段由平台解析 SQL 自动生成。
+
 Nexus 的“导入/粘贴 SVN checkout 配置”可选择 `.sh/.bat` 或粘贴 checkout 内容，并把唯一根地址写入当前 `products.yaml/projects.yaml` 的 `svn.url`；随后“检出/更新完整 SVN 仓库”会先显示地址及清单变更，确认后再写入脱敏清单、检出或更新。等价 CLI：
 
 ```bash
