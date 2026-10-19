@@ -35,6 +35,29 @@ for (const name of pageNames) {
   if (/\/Users\/[^/\s<"']+\//.test(html) || /ssh:\/\/git@/i.test(html)) {
     errors.push(`${name}: possible private path or repository URL`);
   }
+  const main = body.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+  if (!main || (body.match(/<main\b/gi) || []).length !== 1) {
+    errors.push(`${name}: expected one main content area`);
+  }
+  // Documentation belongs to its chapters / searchable questions, not footer patches.
+  const footerEnd = body.indexOf('</footer>');
+  if (footerEnd >= 0 && /<(?:p|section|h[1-6]|ul|ol)\b/i.test(body.slice(footerEnd + 9))) {
+    errors.push(`${name}: narrative content after the footer must move into the main content`);
+  }
+  if (main && name !== 'GuthonCodeTool_QA.html') {
+    const tocTargets = new Set([...body.matchAll(/<a\b[^>]*class="[^"]*\btoc-link\b[^"]*"[^>]*href="#([^"]+)"/gi)]
+      .map(match => match[1]));
+    for (const section of main[1].matchAll(/<section\b([^>]*)>([\s\S]*?)<\/section>/gi)) {
+      const heading = section[2].match(/<h2\b([^>]*)>/i);
+      if (!heading) continue;
+      const id = `${section[1]} ${heading[1]}`.match(/\bid="([^"]+)"/i)?.[1];
+      if (!id || !tocTargets.has(id)) errors.push(`${name}: chapter missing from the contents: ${id || '(no id)'}`);
+    }
+  }
+  if (main && name === 'GuthonCodeTool_QA.html' && /<section\b/i.test(main[1]
+    .replace(/<section\b[^>]*class="support"[^>]*>[\s\S]*?<\/section>/i, ''))) {
+    errors.push(`${name}: answers must be searchable qaItems, not standalone chapters`);
+  }
   pages.set(name, { html, body, ids: new Set(ids) });
 }
 
@@ -71,6 +94,10 @@ if (!qaScript) {
   const ids = items.map((item) => item.id);
   if (new Set(ids).size !== ids.length) errors.push('QA: duplicate item id');
   for (const item of items) {
+    for (const field of ['id', 'title', 'lead', 'symptom', 'verify']) {
+      if (typeof item[field] !== 'string' || !item[field].trim()) errors.push(`QA ${item.id}: missing ${field}`);
+    }
+    if (!item.steps?.length) errors.push(`QA ${item.id}: missing actionable answer`);
     if (!categories.includes(item.category)) errors.push(`QA ${item.id}: unknown category`);
     if (!['all', 'database', 'svn'].includes(item.mode)) errors.push(`QA ${item.id}: unknown mode`);
     if (!item.os?.length || item.os.some((os) => !['mac', 'windows'].includes(os))) {

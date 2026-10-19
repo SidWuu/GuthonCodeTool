@@ -237,13 +237,15 @@ test('revalidates a stale readonly virtual tab before rejecting save', async () 
 });
 
 for (const sourceType of ['procedure', 'page']) {
- test(`${sourceType} GSS opens inherited source inline and preserves the project marker`, async () => {
+ for (const marker of ['@inherit();', '@inherit()']) {
+ test(`${sourceType} GSS opens inherited source inline and preserves ${marker}`, async () => {
   class EventEmitter { constructor() { this.event = () => {}; } dispose() {} }
   const vscode = { EventEmitter, FileType: { File: 1 },
     FileSystemError: { NoPermissions: (message) => new Error(message) } };
   const uri = { authority: 'projects.demo', query: `sourceType=${sourceType}&sourceId=pkg%23save&funId=save&workingCopyId=wc`,
     toString: () => 'guthon-svn-edit://projects.demo/save.gss' };
-  const project = 'before();\n@inherit();\nafter();';
+  const project = `before();\n${marker}\nafter();`;
+  const markerEnd = 10 + marker.length;
   const effective = 'before();\nproduct();\nafter();';
   const writes = [];
   const backend = {
@@ -257,8 +259,8 @@ for (const sourceType of ['procedure', 'page']) {
         project: { sourceHash: 'project-hash' }, product: { sourceHash: 'product-hash' },
         segments: [
           { layer: 'project', start: 0, end: 10, sourceStart: 0, sourceEnd: 10 },
-          { layer: 'product', start: 10, end: 20, sourceStart: 10, sourceEnd: 21 },
-          { layer: 'project', start: 20, end: effective.length, sourceStart: 21, sourceEnd: project.length },
+          { layer: 'product', start: 10, end: 20, sourceStart: 10, sourceEnd: markerEnd },
+          { layer: 'project', start: 20, end: effective.length, sourceStart: markerEnd, sourceEnd: project.length },
         ],
         effective: { content: effective }, projectOriginal: { content: project },
         productOriginal: { content: 'product();' }, complete: true };
@@ -285,6 +287,7 @@ for (const sourceType of ['procedure', 'page']) {
   provider.dispose();
 });
 
+ }
 }
 
 test('materializes edited product source with its checked hash', async () => {

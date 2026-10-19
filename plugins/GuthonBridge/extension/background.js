@@ -14,7 +14,7 @@ chrome.runtime.onInstalled.addListener(() => {
       }).catch(() => {});
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ["host-settings.js", "host-config.js", "nexus-locator.js", "workspace-selection.js", "task-client.js", "content.js"]
+        files: ["host-settings.js", "host-config.js", "nexus-locator.js", "workspace-selection.js", "task-client.js", "platform-layout.js", "content.js"]
       }).catch(() => {});
     });
   });

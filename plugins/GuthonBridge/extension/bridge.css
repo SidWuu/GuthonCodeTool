@@ -851,3 +851,71 @@ tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
   color: #909399;
   background: #f5f7fa;
 }
+
+/* Management lists: keep navigation, queries and actions outside the scrolling body. */
+.guthon-layout-viewport {
+  height: var(--guthon-layout-height) !important;
+  box-sizing: border-box;
+}
+.guthon-layout-column,
+.guthon-layout-row,
+.guthon-layout-grid {
+  display: flex !important;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+.guthon-layout-column,
+.guthon-layout-grid { flex-direction: column !important; }
+.guthon-layout-row { flex-direction: row !important; }
+.guthon-layout-column > *,
+.guthon-layout-grid > * { flex-shrink: 0; }
+.guthon-layout-row > :not(.guthon-layout-column):not(.guthon-layout-row):not(.guthon-layout-grid) {
+  flex-shrink: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.guthon-layout-row .system-tree { height: 100%; overflow: auto; }
+.guthon-layout-grid { overflow-x: auto !important; }
+.guthon-layout-grid > .gd-action-bnt,
+.guthon-layout-grid > .el-pagination { position: sticky; left: 0; }
+.guthon-layout-table {
+  display: flex !important;
+  flex-direction: column;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  width: 100% !important;
+}
+/* Keep operation buttons at a usable width on narrow screens; scroll the complete grid. */
+.guthon-layout-viewport:has(.system-tree) .guthon-layout-table { min-width: 1100px; }
+.guthon-layout-table > .el-table__header-wrapper,
+.guthon-layout-table > .el-table__footer-wrapper { flex-shrink: 0; }
+.guthon-layout-table > .el-table__body-wrapper {
+  flex: 1 1 0;
+  min-height: 0;
+  height: auto !important;
+  max-height: none !important;
+  overflow: auto !important;
+  overscroll-behavior: contain;
+}
+.guthon-layout-table > .el-table__fixed,
+.guthon-layout-table > .el-table__fixed-right {
+  height: 100% !important;
+}
+.guthon-layout-table .el-table__fixed-body-wrapper {
+  height: auto !important;
+  max-height: none !important;
+  bottom: 0;
+}
+
+/* The table catalog also has a card view without an Element table wrapper. */
+.guthon-layout-scroller {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  overflow: auto !important;
+  overscroll-behavior: contain;
+}

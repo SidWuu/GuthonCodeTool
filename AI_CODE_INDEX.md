@@ -150,6 +150,8 @@ Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/quick-open.js` 负�
 
 `plugins/GuthonBridge/bridge/server.js` 是本地服务入口，读取 `GUTHON_TOOL_HOME`；`plugins/GuthonBridge/extension/` 下 `content.js`、`background.js`、`page-bridge.js`、`workspace-selection.js` 分别负责页面注入与页签变化刷新、后台路由、页面桥与工作区选择。`nexus-locator.js` 为弹窗和页面左下角入口生成 PAGE/过程函数 URI，Nexus `activate.js` 的 URI handler 复用 `page-locator.js` 的精确定位流程。
 
+Bridge `plugins/GuthonBridge/extension/platform-layout.js` 按管理页签和实际列表容器（含数据表管理的表格与卡片视图）设置滚动布局，由 `content.js` 在主机校验后启停，`bridge.css` 提供列表独立滚动、固定查询/操作区及小屏横向滚动；动态页面挂载、页签切换和窗口缩放触发更新，退出页面或扩展失效时清理。
+
 Bridge `plugins/GuthonBridge/extension/task-client.js` 与 `background.js` 实现短请求提交/轮询及 worker 重启恢复；`host-config.js` 验证显式 IPv4/IPv6 范围，不扩大默认授权。`plugins/GuthonBridge/extension/task-history.js` 保存有界成功目标元数据，重拉丢弃旧 force/confirmation，固定原平台来源。
 
 `plugins/GuthonBridge/bridge/page-context.js` 保留有界、有租约的身份快照及不重放的导航回执；`plugins/GuthonBridge/extension/event-client.js` 用 Bearer fetch 解析 SSE；Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/browser-navigation.js` 明确选择工作区平台页签并复用 page-bridge 的精确对象导航。浏览器正文不进入快照，来源/工作区在服务端及浏览器重新校验；DOM 事件替代编辑器扫描，元数据心跳只用于租约和 worker 恢复。
@@ -161,7 +163,7 @@ Bridge `plugins/GuthonBridge/extension/task-client.js` 与 `background.js` 实�
 - `scripts/build_guthon_tool.py`：PyInstaller 打包，包含配置模板、版本/构建信息、命令元数据、凭据辅助脚本和 doctor 所需的 Nexus 补全数据；macOS 用 onedir 保持可执行文件路径稳定，Windows 用单文件 EXE。
 - `scripts/build_script_tool.py`：构建不含第三方依赖和私有数据的 Python zipapp；`scripts/check_toolhost.py` 验证连续请求。
 - `scripts/check_nexus_commands.mjs`：校验Nexus贡献、注册、激活、菜单与CLI元数据引用；CI重建后定向检查生成副本diff。
-- `scripts/check_release_smoke.py`：用临时 toolHome 检查源码、zipapp 或应用的版本、自检、初始化、doctor 必需资源与 MCP 工具发现（应用可直接传 macOS onedir 目录）；`scripts/check_public_docs.mjs` 校验四份公开 HTML 与图片引用后再部署 Pages。
+- `scripts/check_release_smoke.py`：用临时 toolHome 检查源码、zipapp 或应用的版本、自检、初始化、doctor 必需资源与 MCP 工具发现（应用可直接传 macOS onedir 目录）；`scripts/check_public_docs.mjs` 校验四份公开 HTML 的脚本、链接、图片、章节目录、页脚内容位置及 QA 数据后再部署 Pages。
 - `GuthonCodeTool.spec`：打包配置。
 - `scripts/sync_guthon_api.mjs`：从 `<toolHome>/config/sync.yaml` 读取谷神版本，更新 `<toolHome>/var/docs/谷神方言API/` 与插件补全数据。
 - `.github/workflows/release.yml`：按 `[build]` 发布；`.github/scripts/release_plan.py` 按最后发布源码选择全量构建或同版本组件替换，`release_metadata.py` 更新完整附件摘要和发布基线。组件更新保留应用/安装器，只替换受影响附件及签名元数据；不等待 Gitee 镜像。
@@ -172,7 +174,7 @@ Bridge `plugins/GuthonBridge/extension/task-client.js` 与 `background.js` 实�
 - `scripts/manage_release_signing.mjs`：维护者在仓库外生成专用私钥或验证已有公钥，输出内置信任文件；`scripts/verify_release.mjs` 用受信公钥校验下载目录的全部签名资产。
 - `scripts/sign_release.mjs` 与 `plugins/GuthonNexus/gushen-vscode-completion/src/release-signature.js`：外部 Ed25519 私钥签 checksum、固定独立公钥验证；私钥不进入仓库，未配置时不声称签名验证。
 - `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-bridge.mjs`：从 Bridge 源码生成 Nexus 内的 Bridge 副本，并从 `scripts/common/command_metadata.json` 生成插件命令元数据。
-- `docs/GuthonCodeTool_使用手册.html`、`docs/GuthonCodeTool_Windows安装步骤.html`、`docs/GuthonCodeTool_全功能说明.html`、`docs/GuthonCodeTool_QA.html`：用户手册、Windows 安装子页面、全功能说明与 QA 页，行为变化时同步。
+- `docs/GuthonCodeTool_使用手册.html`、`docs/GuthonCodeTool_Windows安装步骤.html`、`docs/GuthonCodeTool_全功能说明.html`、`docs/GuthonCodeTool_QA.html`：用户操作步骤、Windows 安装步骤、完整能力参考与常见疑问。文档维护按 `AGENTS.md` 的“公开文档分工”选择实际受影响章节，不逐页追加功能说明。
 
 ## Validation
 
