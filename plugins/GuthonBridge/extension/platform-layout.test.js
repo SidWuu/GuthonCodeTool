@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function fixture(id = 'gdpaas_dev_moduleConfigList', { cards = false } = {}) {
+function fixture(id = 'gdpaas_dev_moduleConfigList', { cards = false, platform = 2, version = '', legacyShell = false, treeClass = 'system-tree', wrappedCategory = false } = {}) {
   function element(classes = '', children = []) {
     const names = new Set(classes.split(' ').filter(Boolean));
     const styles = new Map();
@@ -16,16 +16,18 @@ function fixture(id = 'gdpaas_dev_moduleConfigList', { cards = false } = {}) {
       getBoundingClientRect: () => ({ top: 80 }),
       contains: node => node === e || children.some(c => c.contains(node)),
       closest: selector => e.matches(selector) ? e : e.parentElement?.closest(selector),
+      querySelector: selector => e.querySelectorAll(selector)[0] || null,
       querySelectorAll: selector => children.flatMap(c => [...(c.matches(selector) ? [c] : []), ...c.querySelectorAll(selector)])
     };
     for (const c of children) c.parentElement = e;
     return e;
   }
-  const table = element(cards ? 'table-context' : 'el-table');
+  const table = element(cards ? 'table-context' : 'el-table', cards ? []
+    : [element('el-table__header-wrapper'), element('el-table__body-wrapper')]);
   const grid = element(cards ? 'table-free-view' : 'gd-page-data-table', [table]);
   const category = element('tree-box');
-  const context = element('context-box', [category, element('main-box', [grid])]);
-  const systems = element('', [element('system-tree')]);
+  const context = element('context-box', [wrappedCategory ? element('el-col', [category]) : category, element('main-box', [grid])]);
+  const systems = element('', [element(treeClass)]);
   const split = element('', [systems, element('', [element('gd-main-search-box'), context])]);
   const dialogTable = element('el-table');
   const dialog = element('el-dialog__wrapper', [element('gd-page-data-table', [dialogTable])]);
@@ -34,8 +36,13 @@ function fixture(id = 'gdpaas_dev_moduleConfigList', { cards = false } = {}) {
   tab.id = 'tab-' + id;
   const events = new Map();
   let notify, pending, disconnected = false, stoppedFrames = 0;
+  const shell = { querySelector: selector => selector === '.gs-version-info'
+    ? (version || legacyShell ? { textContent: `版本号：${version}发布日：` } : null)
+    : selector === ':scope > .menu-root' ? (platform === 2 ? {} : null)
+    : ['.gd-template-menubar', '.layout-ceiling'].includes(selector) ? (legacyShell ? {} : null)
+    : selector === '.pageTabs' ? {} : root };
   const sandbox = {
-    document: { body: {}, querySelector: () => root, querySelectorAll: () => [tab] },
+    document: { body: {}, querySelector: () => platform === 0 ? null : shell, querySelectorAll: () => [tab] },
     window: { innerHeight: 800, addEventListener: (k,v) => events.set(k,v), removeEventListener: k => events.delete(k) },
     getComputedStyle: () => ({ visibility: 'visible' }),
     requestAnimationFrame: f => { pending = f; return 1; },
@@ -87,6 +94,76 @@ test('table catalog cards scroll below the toolbar and release hidden Vue views'
   assert.ok(f.table.classList.contains('guthon-layout-scroller'));
   f.stop();
   assert.equal(f.table.classList.contains('guthon-layout-scroller'), false);
+});
+
+test('views, scheduler and bill types share bounded wide grids', () => {
+  for (const id of ['gdpaas_sys_views', 'gdpaas_basesetup_scheduler', 'gdpaas_basesetup_billcode', 'gdpaas_basesetup_codes']) {
+    const f = fixture(id);
+    assert.ok(f.grid.classList.contains('guthon-layout-wide-grid'));
+    assert.ok(f.table.classList.contains('guthon-layout-table'));
+    f.stop();
+    assert.equal(f.grid.classList.contains('guthon-layout-wide-grid'), false);
+  }
+});
+
+test('bill types preserve the datasource tree beside the query and list column', () => {
+  const f = fixture('gdpaas_basesetup_billcode', { treeClass: 'datasource-tree' });
+  assert.ok(f.split.classList.contains('guthon-layout-row'));
+  assert.equal(f.split.classList.contains('guthon-layout-column'), false);
+  assert.ok(f.grid.classList.contains('guthon-layout-wide-grid'));
+  f.stop();
+});
+
+test('dictionary preserves category trees wrapped in a layout column', () => {
+  const f = fixture('gdpaas_basesetup_codes', { wrappedCategory: true });
+  assert.ok(f.context.classList.contains('guthon-layout-row'));
+  assert.equal(f.context.classList.contains('guthon-layout-column'), false);
+  assert.ok(f.grid.classList.contains('guthon-layout-wide-grid'));
+  f.stop();
+});
+
+test('unknown shells and unsupported versions safely skip every optimized page', () => {
+  for (const id of ['gdpaas_sys_tables', 'gdpaas_dev_moduleConfigList', 'gdpaas_dev_systemscript',
+    'gdpaas_dev_devLogsList', 'gdpaas_dev_partUpgrade', 'gdpaas_sys_views', 'gdpaas_basesetup_scheduler', 'gdpaas_basesetup_billcode', 'gdpaas_basesetup_codes']) {
+    for (const options of [{ platform: 1 }, { platform: 0 }, { version: '1.4.0' }]) {
+      const f = fixture(id, options);
+      assert.equal(f.root.classList.contains('guthon-layout-viewport'), false);
+      f.notify(); f.flush();
+      assert.equal(f.table.classList.contains('guthon-layout-table'), false);
+      f.stop();
+    }
+  }
+});
+
+test('explicit 1.5 shells reuse compatible controls without assuming a side menu', () => {
+  for (const id of ['gdpaas_sys_tables', 'gdpaas_dev_devLogsList', 'gdpaas_dev_partUpgrade',
+    'gdpaas_dev_moduleConfigList', 'gdpaas_dev_systemscript', 'gdpaas_sys_views', 'gdpaas_basesetup_scheduler', 'gdpaas_basesetup_billcode', 'gdpaas_basesetup_codes']) {
+    const f = fixture(id, { platform: 1, version: '1.5.0' });
+    assert.ok(f.table.classList.contains('guthon-layout-table'));
+    f.stop();
+  }
+});
+
+test('1.5 shell enables all scrolling pages even when version metadata is empty after reload', () => {
+  for (const id of ['gdpaas_sys_tables', 'gdpaas_dev_devLogsList', 'gdpaas_dev_partUpgrade',
+    'gdpaas_dev_moduleConfigList', 'gdpaas_dev_systemscript', 'gdpaas_sys_views', 'gdpaas_basesetup_scheduler', 'gdpaas_basesetup_billcode', 'gdpaas_basesetup_codes']) {
+    const f = fixture(id, { platform: 1, legacyShell: true });
+    assert.ok(f.table.classList.contains('guthon-layout-table'));
+    f.notify(); f.flush();
+    assert.ok(f.root.classList.contains('guthon-layout-viewport'));
+    f.stop();
+  }
+  const unsupported = fixture('gdpaas_sys_views', { platform: 1, legacyShell: true, version: '1.4.0' });
+  assert.equal(unsupported.root.classList.contains('guthon-layout-viewport'), false);
+  unsupported.stop();
+});
+
+test('missing table internals are safely released during a dynamic remount', () => {
+  const f = fixture('gdpaas_sys_views');
+  f.table.children.length = 0;
+  f.notify(); f.flush();
+  assert.equal(f.table.classList.contains('guthon-layout-table'), false);
+  f.stop();
 });
 
 test('unsupported development pages are untouched', () => {

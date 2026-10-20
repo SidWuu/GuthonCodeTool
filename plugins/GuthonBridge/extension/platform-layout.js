@@ -1,7 +1,8 @@
 (function () {
   const pageIds = new Set([
     'gdpaas_sys_tables', 'gdpaas_dev_devLogsList', 'gdpaas_dev_partUpgrade',
-    'gdpaas_dev_moduleConfigList', 'gdpaas_dev_systemscript'
+    'gdpaas_dev_moduleConfigList', 'gdpaas_dev_systemscript',
+    'gdpaas_sys_views', 'gdpaas_basesetup_scheduler', 'gdpaas_basesetup_billcode', 'gdpaas_basesetup_codes'
   ]);
   const prefix = 'guthon-layout-';
 
@@ -26,19 +27,36 @@
       };
       const active = Array.from(document.querySelectorAll('[role="tab"][aria-selected="true"]'))
         .find(tab => visible(tab) && pageIds.has(tab.id.replace(/^tab-/, '')));
-      const root = document.querySelector('.gd-layout-content-main');
+      // Version metadata may remain empty after reload; validate the known shell as well.
+      const shell = document.querySelector('#app-main-target.gd-main-layout');
+      const versionInfo = shell?.querySelector('.gs-version-info');
+      const version = versionInfo?.textContent.match(/版本号\s*[:：]\s*(\d+)\.(\d+)/);
+      const supportedVersion = version
+        ? version[1] === '2' || (version[1] === '1' && version[2] === '5')
+        : Boolean(shell?.querySelector(':scope > .menu-root')
+          || (versionInfo && shell?.querySelector('.gd-template-menubar')
+            && shell.querySelector('.layout-ceiling')));
+      const supported = supportedVersion && shell?.querySelector('.pageTabs');
+      const root = supported ? shell.querySelector('.gd-layout-content-main') : null;
       if (active && root && visible(root)) {
         const selector = active.id === 'tab-gdpaas_sys_tables'
           ? '.gd-page-data-table, .table-free-view' : '.gd-page-data-table';
         const lists = Array.from(root.querySelectorAll(selector))
-          .filter(table => visible(table) && !table.closest('.el-dialog__wrapper, .gd-dialog-tab-page'));
+          .filter(list => visible(list) && !list.closest('.el-dialog__wrapper, .gd-dialog-tab-page'))
+          .filter(list => Array.from(list.children).some(child => list.matches('.table-free-view')
+            ? child.matches('.table-context')
+            : child.matches('.el-table') && child.querySelector('.el-table__header-wrapper')
+              && child.querySelector('.el-table__body-wrapper')));
         for (const list of lists) {
           const cards = list.matches('.table-free-view');
           mark(list, cards ? 'column' : 'grid');
+          if (!cards && ['tab-gdpaas_sys_views', 'tab-gdpaas_basesetup_scheduler', 'tab-gdpaas_basesetup_billcode', 'tab-gdpaas_basesetup_codes'].includes(active.id)) {
+            mark(list, 'wide-grid');
+          }
           for (let node = list.parentElement; node && root.contains(node); node = node.parentElement) {
-            // Preserve the platform's two horizontal splits (system tree and category tree).
-            const row = Array.from(node.children).some(child => child.matches('.tree-box, .system-tree')
-              || Array.from(child.children).some(n => n.matches('.system-tree')));
+            // Preserve the platform's horizontal splits around navigation trees.
+            const row = Array.from(node.children).some(child => child.matches('.tree-box, .system-tree, .datasource-tree')
+              || Array.from(child.children).some(n => n.matches('.tree-box, .system-tree, .datasource-tree')));
             mark(node, row ? 'row' : 'column');
             if (node === root) break;
           }

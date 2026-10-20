@@ -150,7 +150,7 @@ Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/quick-open.js` 负�
 
 `plugins/GuthonBridge/bridge/server.js` 是本地服务入口，读取 `GUTHON_TOOL_HOME`；`plugins/GuthonBridge/extension/` 下 `content.js`、`background.js`、`page-bridge.js`、`workspace-selection.js` 分别负责页面注入与页签变化刷新、后台路由、页面桥与工作区选择。`nexus-locator.js` 为弹窗和页面左下角入口生成 PAGE/过程函数 URI，Nexus `activate.js` 的 URI handler 复用 `page-locator.js` 的精确定位流程。
 
-Bridge `plugins/GuthonBridge/extension/platform-layout.js` 按管理页签和实际列表容器（含数据表管理的表格与卡片视图）设置滚动布局，由 `content.js` 在主机校验后启停，`bridge.css` 提供列表独立滚动、固定查询/操作区及小屏横向滚动；动态页面挂载、页签切换和窗口缩放触发更新，退出页面或扩展失效时清理。
+Bridge `plugins/GuthonBridge/extension/platform-layout.js` 核对 2.0/1.5 布局与控件结构（兼容版本栏为空）后，按管理页签和实际列表容器（含数据表管理表格/卡片、视图管理、定时任务、单据类型、数据字典）设置滚动布局，由 `content.js` 在主机校验后启停，`bridge.css` 提供列表独立滚动、固定查询/操作区及小屏横向滚动；动态页面挂载、页签切换和窗口缩放触发更新，退出页面或扩展失效时清理。
 
 Bridge `plugins/GuthonBridge/extension/task-client.js` 与 `background.js` 实现短请求提交/轮询及 worker 重启恢复；`host-config.js` 验证显式 IPv4/IPv6 范围，不扩大默认授权。`plugins/GuthonBridge/extension/task-history.js` 保存有界成功目标元数据，重拉丢弃旧 force/confirmation，固定原平台来源。
 
