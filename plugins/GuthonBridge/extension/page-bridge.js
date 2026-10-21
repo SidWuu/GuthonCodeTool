@@ -364,7 +364,7 @@
     if (searchResult.code && searchResult.code !== 0) {
       throw new Error(searchResult.message || "搜索过程函数失败");
     }
-    const procedure = resolveProcedure(searchResult, target.procedureKeyword, target.funId, true, target.dataSourceId);
+    const procedure = resolveProcedure(searchResult, target.procedureKeyword, target.funId, true, target.dataSourceId, target.procedureId);
     if (!procedure.dataSourceId) {
       throw new Error(`未解析到过程函数数据源: ${target.procedureKeyword}.${target.funId}`);
     }
@@ -795,7 +795,93 @@
     }
   }
 
+  const checkoutColumns = new Map();
+  const checkoutMessages = new Map();
+
+  function checkoutProcedureTarget(row) {
+    if (!row || typeof row.procedureId !== 'string' || !row.procedureId
+      || !/^[A-Za-z_$][\w.$]*$/.test(row.procedureAliasId || '')
+      || !/^[A-Za-z_$][\w$]*$/.test(row.funId || '')) return null;
+    return {procedureId: row.procedureId, procedureKeyword: row.procedureAliasId, funId: row.funId};
+  }
+
+  function installCheckoutProcedureLinks() {
+    const desired = new Set();
+    const dialogs = new Set();
+    for (const wrapper of document.querySelectorAll('.module-page-search')) {
+      if (!wrapper.getClientRects().length || getComputedStyle(wrapper).display === 'none'
+        || wrapper.querySelector('.el-dialog__title')?.textContent.trim() !== '由我签出的页面') continue;
+      for (const table of wrapper.querySelectorAll('.el-table')) {
+        const tableVm = getVueInstance(table);
+        const columns = tableVm?.store?.states?.columns;
+        const nativeColumn = tableVm?.$children?.find(child => child.$options?.name === 'ElTableColumn'
+          && child.columnConfig?.type === 'selection');
+        const hiddenColumns = tableVm?.$refs?.hiddenColumns;
+        if (!Array.isArray(columns) || !nativeColumn || !hiddenColumns || nativeColumn.$el?.parentNode !== hiddenColumns || typeof tableVm.$options?._base !== 'function'
+          || !['checkOutUserName', 'checkOutDate', 'procedureAliasId', 'funId'].every(key => columns.some(c => c.property === key))) continue;
+        dialogs.add(wrapper);
+        desired.add(table);
+        if (checkoutColumns.has(table)) continue;
+        const opening = new Set();
+        const columnNode = tableVm.$createElement(nativeColumn.constructor, {
+          props: {label: '操作', width: 50, align: 'center', headerAlign: 'center', className: 'guthon-checkout-operation', columnKey: 'guthon-checkout-open'},
+          scopedSlots: {default: ({row}) => {
+            const target = checkoutProcedureTarget(row);
+            return tableVm.$createElement('button', {
+              class: 'el-button load-bnt el-button--primary el-button--mini is-plain guthon-checkout-open',
+              attrs: {type: 'button', 'aria-label': '打开过程函数', title: target ? `打开 ${row.procedureAliasId}.${row.funId}` : '缺少完整过程函数身份',
+                disabled: !target || opening.has(`${row.procedureId}@${row.funId}`)},
+              on: {click: async event => {
+                event.preventDefault(); event.stopPropagation();
+                if (!target) return;
+                const key = `${row.procedureId}@${row.funId}`;
+                if (opening.has(key)) return;
+                opening.add(key);
+                const button = event.currentTarget;
+                button.disabled = true;
+                let message = checkoutMessages.get(wrapper);
+                if (!message) {
+                  message = document.createElement('div');
+                  message.className = 'guthon-checkout-message';
+                  message.setAttribute('role', 'status');
+                  wrapper.querySelector('.el-dialog__body')?.appendChild(message);
+                  checkoutMessages.set(wrapper, message);
+                }
+                message.textContent = '正在打开过程函数…';
+                try {
+                  await navigateToProcedure(target, null);
+                  message.textContent = '';
+                  wrapper.querySelector('.el-dialog__headerbtn')?.click();
+                } catch (error) {
+                  message.textContent = `打开失败：${error.message}`;
+                } finally {
+                  opening.delete(key); button.disabled = false;
+                }
+              }}
+            }, [tableVm.$createElement('i', {class: 'el-icon-edit-outline', attrs: {'aria-hidden': 'true'}})]);
+          }}
+        });
+        // Mount after the selection column so Element lays out headers,
+        // body cells and colgroups together, including after filtering and refresh.
+        const host = document.createElement('div');
+        hiddenColumns.insertBefore(host, nativeColumn.$el.nextSibling);
+        const column = new tableVm.$options._base({parent: tableVm, render: () => columnNode});
+        column.$mount(host);
+        checkoutColumns.set(table, column);
+      }
+    }
+    for (const [table, column] of checkoutColumns) {
+      if (!desired.has(table)) {
+        column.$destroy(); column.$el.remove(); checkoutColumns.delete(table);
+      }
+    }
+    for (const [wrapper, message] of checkoutMessages) {
+      if (!dialogs.has(wrapper)) { message.remove(); checkoutMessages.delete(wrapper); }
+    }
+  }
+
   function installProcedureNavigation() {
+    installCheckoutProcedureLinks();
     Array.from(document.querySelectorAll(".script-editor")).forEach((element) => {
       const vm = getVueInstance(element);
       [vm?.editor || vm?.$refs?.editor?.editor, vm?.viewer].filter(Boolean).forEach((editor) => {
@@ -1953,7 +2039,7 @@
     return null;
   }
 
-  function resolveProcedure(searchResult, procedureKeyword, funId, strict = false, dataSourceId = '') {
+  function resolveProcedure(searchResult, procedureKeyword, funId, strict = false, dataSourceId = '', expectedProcedureId = '') {
     const matches = collectMatches(searchResult, funId);
     const packageLower = String(procedureKeyword || "").toLowerCase();
     const exactFun = matches.find((item) => {
@@ -1973,6 +2059,7 @@
     if (strict) {
       const candidates = matches.filter(item => {
         if (String(item.funId || '') !== String(funId)) return false;
+        if (expectedProcedureId && String(pickFirst(item, ['procedureId', 'procId', 'id', 'value'])) !== expectedProcedureId) return false;
         if (dataSourceId && String(pickFirst(item, ['dataSourceId', 'datasourceId', 'data_source_id'])) !== dataSourceId) return false;
         return ['procedureName', 'procedureAliasId', 'className', 'procName', 'fullName', 'id']
           .some(key => String(item[key] || '') === procedureKeyword || String(item[key] || '') === `${procedureKeyword}.${funId}`);
@@ -2222,6 +2309,10 @@
     document.removeEventListener('pointerdown', installProcedureNavigation, true);
     document.removeEventListener('focusin', scheduleNavigation, true);
     clearProcedureLinks();
+    for (const column of checkoutColumns.values()) { column.$destroy(); column.$el.remove(); }
+    checkoutColumns.clear();
+    for (const message of checkoutMessages.values()) message.remove();
+    checkoutMessages.clear();
     highlightProcedureTitle(null);
     navigationDisposables.forEach((disposable) => disposable?.dispose?.());
     if (window.GuthonProcedureNavigation === navigationApi) {

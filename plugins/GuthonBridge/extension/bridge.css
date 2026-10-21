@@ -921,3 +921,19 @@ tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
   overflow: auto !important;
   overscroll-behavior: contain;
 }
+
+/* Checkout navigation uses Element's native column sizing and row rendering. */
+.guthon-checkout-operation > .cell {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.guthon-checkout-open.el-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  float: none;
+  margin: 0;
+  padding: 5px;
+}
+.guthon-checkout-message { color: #e6a23c; padding-top: 6px; }
