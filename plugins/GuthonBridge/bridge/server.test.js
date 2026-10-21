@@ -1477,6 +1477,25 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   };
   vm.runInNewContext(pageBridge, context);
   const resolve = window.GuthonProcedureNavigation.resolveProcedureTarget;
+  const resolveComponent = window.GuthonProcedureNavigation.resolveServiceComponentTarget;
+  for (const scope of ['proc', 'thread']) {
+    for (const quote of ['"', "'"]) {
+      const call = `$vs.${scope}.runServiceComp(\n ${quote}PG-DEMO-123${quote}, $args, true)`;
+      for (const delta of [0, 3, 10]) {
+        assert.deepEqual({...resolveComponent(call, call.indexOf('PG-DEMO-123') + delta)}, {componentId:'PG-DEMO-123'});
+      }
+      assert.equal(resolveComponent(call, call.indexOf('$args')), null);
+      assert.equal(resolveComponent(call, call.indexOf('runServiceComp')), null);
+    }
+  }
+  for (const call of [
+    '$vs.proc.runServiceComp($componentId, $args)',
+    '$vs.thread.runServiceComp("PG-DEMO" + $suffix, $args)',
+    '$vs.proc.runServiceComp("$componentId", $args)',
+    '$vs.thread.runServiceCompFutureTask("PG-DEMO", $args)',
+    '$vs.proc.invoke("PG-DEMO", "save", $args)',
+  ]) assert.equal(resolveComponent(call, Math.max(0, call.indexOf('PG-DEMO'))), null);
+
   const resolveDefinition = window.GuthonProcedureNavigation.resolveProcedureDefinitionTarget;
   const resolveDefinitionText = window.GuthonProcedureNavigation.resolveProcedureDefinitionText;
   const resolveLocal = window.GuthonProcedureNavigation.resolveLocalFunctionTarget;
@@ -1502,6 +1521,25 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
     { procedureKeyword: "com.golden.demo.back", funId: "updateBacknum" }
   );
   assert.equal(resolve("$vs.proc.invoke($package, $method, $params);", 25), null);
+  for (const method of ['run', 'runFutureTask']) {
+    for (const quote of ['"', "'"]) {
+      const call = `$vs.thread.${method}(\n ${quote}com.golden.demo.common${quote},\n ${quote}saveForecast${quote}, $params)`;
+      for (const offset of [call.indexOf('saveForecast'), call.indexOf('saveForecast') + 5]) {
+        assert.deepEqual({ ...resolve(call, offset) }, { procedureKeyword: 'com.golden.demo.common', funId: 'saveForecast' });
+      }
+      assert.equal(resolve(call, call.indexOf('com.golden.demo.common')), null);
+      assert.equal(resolve(call, call.indexOf('$params')), null);
+    }
+  }
+  for (const call of [
+    '$vs.thread.run($package, "saveForecast", $args)',
+    '$vs.thread.run("$package", "saveForecast", $args)',
+    '$vs.thread.run("demo.pkg", $method, $args)',
+    '$vs.thread.runFutureTask("demo.pkg", "saveForecast" + $suffix, $args)',
+    '$vs.thread.runFutureTaskExtra("demo.pkg", "saveForecast", $args)',
+    '$vs.proc.runServiceComp("PG-DEMO", "saveForecast")',
+    '$vs.thread.runServiceComp("PG-DEMO", "saveForecast")',
+  ]) assert.equal(resolve(call, call.indexOf('saveForecast')), null);
   const definition = "function com.golden.demo.common.saveForecast() {";
   assert.deepEqual(
     { ...resolveDefinition(definition, definition.indexOf("saveForecast")) },
@@ -1554,6 +1592,9 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
     { __vue__: treeVm }
   ];
   await window.GuthonProcedureNavigation.openModuleCaller({ source_id: "PG-1" });
+  assert.equal(openedPage, page);
+  openedPage = null;
+  await window.GuthonProcedureNavigation.openModuleCaller({source_id: 'PG-1', exact: true});
   assert.equal(openedPage, page);
   const otherTree = {modules: [{pageId: 'PG-1'}], $parent: moduleVm};
   context.document.querySelectorAll = () => [

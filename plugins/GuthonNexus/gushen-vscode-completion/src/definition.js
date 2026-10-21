@@ -2,9 +2,18 @@ const path = require('node:path');
 
 const PROCEDURE_PATH = /\/workspace\/((PRD|PRJ) [^/]+)\/source\/(workcopy|readonly)\/([^/]+)\//;
 
+function serviceComponentTargetAt(source, offset) {
+  const calls = /\$vs\.(?:proc|thread)\.runServiceComp\s*\(\s*(['"])([A-Za-z0-9_.-]{1,100})\1(?=\s*[,\)])/g;
+  for (const match of source.matchAll(calls)) {
+    const start = match.index + match[0].length - match[2].length - 1;
+    if (offset >= start && offset < start + match[2].length) return { componentId: match[2] };
+  }
+  return null;
+}
+
 function procedureTargetAt(source, offset) {
-  const invoke = /\$vs\.proc\.invoke\s*\(\s*(['"])([A-Za-z_][\w.]*)\1\s*,\s*(['"])([A-Za-z_]\w*)\3/g;
-  for (const match of source.matchAll(invoke)) {
+  const directCalls = /\$vs\.(?:proc\.invoke|thread\.(?:run|runFutureTask))\s*\(\s*(['"])([A-Za-z_][\w.]*)\1\s*,\s*(['"])([A-Za-z_]\w*)\3(?=\s*[,\)])/g;
+  for (const match of source.matchAll(directCalls)) {
     const start = match.index + match[0].lastIndexOf(match[4]);
     if (offset >= start && offset <= start + match[4].length) {
       return { alias: match[2], fun: match[4] };
@@ -85,4 +94,4 @@ function selectDefinitionPaths(paths, currentPath) {
     .map((item) => item.filePath);
 }
 
-module.exports = { localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt, selectDefinitionPaths };
+module.exports = { serviceComponentTargetAt, localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt, selectDefinitionPaths };

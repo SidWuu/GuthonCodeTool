@@ -138,7 +138,7 @@ Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/output-logging.js` 为�
 
 Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/quick-open.js` 负责单工作区/唯一候选直接定位；`plugins/GuthonNexus/gushen-vscode-completion/src/svn/bounded-cache.js` 为虚拟文档、差异和继承提供有界缓存，打开的文档保留租约。
 
-`plugins/GuthonNexus/gushen-vscode-completion/src/svn/page-locator.js` 验证平台定位 URI 和精确对象分享链接；URI 不携带本机路径或租约。
+`plugins/GuthonNexus/gushen-vscode-completion/src/svn/page-locator.js` 验证平台定位 URI 和精确对象分享链接，并按 PAGE ID 精确查询服务组件 GSS 定义；URI 不携带本机路径或租约。
 
 `plugins/GuthonNexus/gushen-vscode-completion/src/pull-history-view.js` 渲染拉取历史；`plugins/GuthonNexus/gushen-vscode-completion/src/svn/editor-assistance.js` 融合本地函数、PAGE 字段与过程函数索引候选，取消或文档变更时丢弃迟到结果。
 

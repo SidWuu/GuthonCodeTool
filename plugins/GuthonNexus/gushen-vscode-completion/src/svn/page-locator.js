@@ -30,6 +30,12 @@ function findExactPageCandidates(backend, workspaceKey, pageId) {
     source.sourceId === id && source.sourcePath.toLowerCase().endsWith('.json'));
 }
 
+function findExactServiceComponentCandidates(backend, workspaceKey, componentId) {
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(componentId)) throw new Error('服务组件需要有效的静态组件 ID');
+  return findExactSourceCandidates(backend, workspaceKey, componentId, 'page', (source) =>
+    source.sourceId === componentId && source.sourcePath.toLowerCase().endsWith('.gss'));
+}
+
 function findExactProcedureCandidates(backend, workspaceKey, alias, funId) {
   if (!PROCEDURE_ALIAS.test(alias) || !FUNCTION_ID.test(funId)) {
     throw new Error('过程函数需要有效的包名和函数名');
@@ -98,6 +104,7 @@ function buildSourceLocatorLink(identity) {
 
 module.exports = {
   findExactPageCandidates,
+  findExactServiceComponentCandidates,
   findExactProcedureCandidates,
   procedureFromFullName,
   sourceLocatorFromUri,

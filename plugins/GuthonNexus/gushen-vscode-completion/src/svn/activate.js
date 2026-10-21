@@ -5,14 +5,14 @@ const { fragmentLabel, SvnCatalogTreeProvider } = require('./catalog-tree');
 const { SvnScmManager, workspaceKeyFromSourceControlId } = require('./scm-manager');
 const { decodeIdentity, SCHEME, SvnVirtualFileSystem } = require('./virtual-fs');
 const { SCHEME: INHERIT_SCHEME, SvnInheritanceView } = require('./inheritance-view');
-const { localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt } = require('../definition');
+const { localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt, serviceComponentTargetAt } = require('../definition');
 const { SvnSourceWatcher } = require('./source-watcher');
 const { updateRemoteChanges } = require('./remote-update');
 const { registerEditorAssistance } = require('./editor-assistance');
 const {navigateInBrowser} = require('./browser-navigation');
 const { impactEvidenceChoices, impactMarkdown, loadImpact } = require('./impact-preview');
 const {
-  findExactPageCandidates, findExactProcedureCandidates,
+  findExactPageCandidates, findExactProcedureCandidates, findExactServiceComponentCandidates,
   procedureFromFullName, sourceLocatorFromUri, buildSourceLocatorLink,
 } = require('./page-locator');
 const {
@@ -546,6 +546,21 @@ function activateSvn({
         const localOffset = localFunctionDefinitionAt(source, offset);
         if (localOffset !== null) {
           return new vscode.Location(document.uri, document.positionAt(localOffset));
+        }
+        const component = serviceComponentTargetAt(source, offset);
+        if (component) {
+          const candidates = await findExactServiceComponentCandidates(backend, document.uri.authority, component.componentId);
+          return Promise.all(candidates.map(async candidate => {
+            const element = await catalogTree.locate({ workspaceKey: document.uri.authority, ...candidate });
+            const identity = element?.command?.arguments?.[0];
+            if (!identity || element.object?.sourceId !== candidate.sourceId
+              || element.object.sourcePath !== candidate.sourcePath
+              || element.object.sourceNamespace !== candidate.sourceNamespace
+              || element.object.workingCopyId !== candidate.workingCopyId) {
+              throw new Error('服务组件索引与源码树不一致，请刷新源码树和索引后重试');
+            }
+            return new vscode.Location(virtualFs.uriFor(identity), new vscode.Position(0, 0));
+          }));
         }
         const target = procedureTargetAt(source, offset);
         if (!target) return undefined;

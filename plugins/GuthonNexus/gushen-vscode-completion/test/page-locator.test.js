@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
-  findExactPageCandidates, findExactProcedureCandidates,
+  findExactPageCandidates, findExactProcedureCandidates, findExactServiceComponentCandidates,
   procedureFromFullName, sourceLocatorFromUri, buildSourceLocatorLink,
 } = require('../src/svn/page-locator');
 
@@ -97,4 +97,26 @@ test('procedure locator keeps exact package and function across duplicate source
   assert.equal(calls[0].name, 'search_sources');
   assert.equal(calls[0].args.sourceType, 'procedure');
   assert.equal(calls[0].args.keyword, 'com.demo.pkg#save');
+});
+
+test('service component locator uses exact PAGE ID and GSS source with full identity', async () => {
+  const candidate = {sourceType:'page', sourceId:'PG-COMP', sourceNamespace:'system-A',
+    sourcePath:'pages/SYS-A/renamed-component.gss', workingCopyId:'wc-a'};
+  const backend = {async pageQuery(workspaceKey, name, args) {
+    assert.equal(workspaceKey, 'products.demo');
+    assert.equal(name, 'search_sources');
+    assert.equal(args.sourceType, 'page');
+    assert.equal(args.keyword, 'PG-COMP');
+    return {indexGeneration:'g1', sources:[candidate,
+      {...candidate, sourceNamespace:'system-B', workingCopyId:'wc-b'},
+      {...candidate, sourcePath:'pages/PG-COMP.json'},
+      {...candidate, sourceType:'page-inherit', sourcePath:'pages/PG-COMP.inherit.gss'},
+      {...candidate, sourceId:'PG-COMP-OTHER'},
+      {...candidate, workingCopyId:''},
+    ]};
+  }};
+  const result = await findExactServiceComponentCandidates(backend, 'products.demo', 'PG-COMP');
+  assert.deepEqual(result.map(source => source.workingCopyId), ['wc-a', 'wc-b']);
+  assert.equal(result[0].sourcePath, candidate.sourcePath);
+  assert.throws(() => findExactServiceComponentCandidates(backend, 'products.demo', '../PG-COMP'), /组件 ID/);
 });

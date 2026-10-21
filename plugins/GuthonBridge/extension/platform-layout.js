@@ -54,9 +54,11 @@
             mark(list, 'wide-grid');
           }
           for (let node = list.parentElement; node && root.contains(node); node = node.parentElement) {
-            // Preserve the platform's horizontal splits around navigation trees.
-            const row = Array.from(node.children).some(child => child.matches('.tree-box, .system-tree, .datasource-tree')
-              || Array.from(child.children).some(n => n.matches('.tree-box, .system-tree, .datasource-tree')));
+            // Only a tree beside the list branch establishes a horizontal split.
+            // A tree inside that branch must not turn its query/instructions parent into a row.
+            const row = Array.from(node.children).some(child => !child.contains(list)
+              && (child.matches('.tree-box, .system-tree, .datasource-tree')
+                || Array.from(child.children).some(n => n.matches('.tree-box, .system-tree, .datasource-tree'))));
             mark(node, row ? 'row' : 'column');
             if (node === root) break;
           }

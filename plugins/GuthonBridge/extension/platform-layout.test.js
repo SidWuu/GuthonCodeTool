@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function fixture(id = 'gdpaas_dev_moduleConfigList', { cards = false, platform = 2, version = '', legacyShell = false, treeClass = 'system-tree', wrappedCategory = false } = {}) {
+function fixture(id = 'gdpaas_dev_moduleConfigList', { cards = false, platform = 2, version = '', legacyShell = false, treeClass = 'system-tree', wrappedCategory = false, outerTree = true, tip = false } = {}) {
   function element(classes = '', children = []) {
     const names = new Set(classes.split(' ').filter(Boolean));
     const styles = new Map();
@@ -28,7 +28,8 @@ function fixture(id = 'gdpaas_dev_moduleConfigList', { cards = false, platform =
   const category = element('tree-box');
   const context = element('context-box', [wrappedCategory ? element('el-col', [category]) : category, element('main-box', [grid])]);
   const systems = element('', [element(treeClass)]);
-  const split = element('', [systems, element('', [element('gd-main-search-box'), context])]);
+  const queryColumn = element('', [element('gd-main-search-box'), ...(tip ? [element('tip-box')] : []), context]);
+  const split = outerTree ? element('', [systems, queryColumn]) : queryColumn;
   const dialogTable = element('el-table');
   const dialog = element('el-dialog__wrapper', [element('gd-page-data-table', [dialogTable])]);
   const root = element('', [split, dialog]);
@@ -51,7 +52,7 @@ function fixture(id = 'gdpaas_dev_moduleConfigList', { cards = false, platform =
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('./platform-layout.js'), 'utf8'), sandbox);
   const stop = sandbox.GuthonBridgePlatformLayout.start();
-  return {root, grid, table, tab, split, context, systems, dialogTable, events, stop,
+  return {root, grid, table, tab, split, context, systems, queryColumn, dialogTable, events, stop,
     notify: () => notify(), flush: () => { const f=pending; pending=null; f?.(); },
     state: () => ({pending, disconnected, stoppedFrames})};
 }
@@ -68,6 +69,29 @@ test('only list ancestors are constrained; both trees stay beside the independen
   assert.equal(f.root.style.getPropertyValue('--guthon-layout-height'), '720px');
   assert.equal(f.root.scrollTop, 0);
   f.stop();
+});
+
+test('queries and instructions stay above tree/list splits on both platform versions', () => {
+  for (const version of ['2.0.0', '1.5.0']) {
+    for (const [id, options] of [
+      ['gdpaas_sys_tables', {outerTree:false}],
+      ['gdpaas_sys_tables', {outerTree:false, cards:true}],
+      ['gdpaas_sys_views', {outerTree:false}],
+      ['gdpaas_dev_moduleConfigList', {tip:true}],
+      ['gdpaas_basesetup_codes', {outerTree:false, wrappedCategory:true}],
+    ]) {
+      const f = fixture(id, {version, ...options});
+      assert.ok(f.queryColumn.classList.contains('guthon-layout-column'), `${version} ${id}: queries above content`);
+      assert.equal(f.queryColumn.classList.contains('guthon-layout-row'), false);
+      assert.ok(f.context.classList.contains('guthon-layout-row'), `${version} ${id}: tree beside list`);
+      if (options.outerTree !== false) assert.ok(f.split.classList.contains('guthon-layout-row'));
+      f.events.get('resize')(); f.flush();
+      assert.ok(f.queryColumn.classList.contains('guthon-layout-column'));
+      assert.equal(f.queryColumn.classList.contains('guthon-layout-row'), false);
+      f.stop();
+      assert.equal(f.queryColumn.classList.contains('guthon-layout-column'), false);
+    }
+  }
 });
 
 test('table management main list is enhanced without requiring field-specific headers', () => {

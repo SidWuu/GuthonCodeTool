@@ -16,7 +16,7 @@ const {
   shouldProvideApiCompletions,
 } = require('./rules');
 const { createDocumentSelector } = require('./selector');
-const { procedureTargetAt, selectDefinitionPaths } = require('./definition');
+const { procedureTargetAt, serviceComponentTargetAt, selectDefinitionPaths } = require('./definition');
 const { prepareWorkspaceSetup, promptWorkspaceCreation, workspaceActions } = require('./tool-workspace');
 const { promptDatabaseDiagnosis } = require('./database-config');
 const { exportAiContext, validateContextResult } = require('./ai-context-export');
@@ -229,10 +229,27 @@ function createProvider(context) {
 function createDefinitionProvider() {
   return {
     async provideDefinition(document, position) {
-      const target = procedureTargetAt(document.getText(), document.offsetAt(position));
-      if (!target) return undefined;
-      const pattern = `**/procedure/${target.alias}/${target.fun}/source.vm`;
-      const uris = await vscode.workspace.findFiles(pattern, '**/.guthon-baseline/**');
+      const source = document.getText();
+      const offset = document.offsetAt(position);
+      const component = serviceComponentTargetAt(source, offset);
+      const target = procedureTargetAt(source, offset);
+      if (!component && !target) return undefined;
+      const pattern = component
+        ? `**/page/**/* ${component.componentId}/scripts/compScript.vm`
+        : `**/procedure/${target.alias}/${target.fun}/source.vm`;
+      let uris = await vscode.workspace.findFiles(pattern, '**/.guthon-baseline/**');
+      if (component) {
+        const matches = await Promise.all(uris.map(async uri => {
+          try {
+            const meta = JSON.parse(await fs.promises.readFile(path.join(path.dirname(uri.fsPath), '..', 'meta.json'), 'utf8'));
+            return meta.source_table === 'page' && meta.source_id === component.componentId;
+          } catch (error) {
+            if (error.code === 'ENOENT') return false;
+            throw error;
+          }
+        }));
+        uris = uris.filter((uri, index) => matches[index]);
+      }
       const selected = new Set(selectDefinitionPaths(uris.map((uri) => uri.fsPath), document.uri.fsPath));
       return uris.filter((uri) => selected.has(uri.fsPath))
         .map((uri) => new vscode.Location(uri, new vscode.Position(0, 0)));

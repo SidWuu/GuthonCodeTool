@@ -171,12 +171,22 @@
     return "";
   }
 
+  function resolveServiceComponentTarget(source, offset) {
+    if (typeof source !== 'string' || !Number.isInteger(offset)) return null;
+    const calls = /\$vs\.(?:proc|thread)\.runServiceComp\s*\(\s*(['"])([A-Za-z0-9_.-]{1,100})\1(?=\s*[,\)])/g;
+    for (const match of source.matchAll(calls)) {
+      const start = match.index + match[0].length - match[2].length - 1;
+      if (offset >= start && offset < start + match[2].length) return { componentId: match[2] };
+    }
+    return null;
+  }
+
   function resolveProcedureTarget(source, offset) {
     if (typeof source !== "string" || !Number.isInteger(offset)) {
       return null;
     }
-    const invoke = /\$vs\.proc\.invoke\s*\(\s*(['"])([^'"]+)\1\s*,\s*(['"])([A-Za-z_]\w*)\3/g;
-    for (const match of source.matchAll(invoke)) {
+    const directCalls = /\$vs\.(?:proc\.invoke|thread\.(?:run|runFutureTask))\s*\(\s*(['"])([^'"$\\]+)\1\s*,\s*(['"])([A-Za-z_]\w*)\3(?=\s*[,\)])/g;
+    for (const match of source.matchAll(directCalls)) {
       const methodStart = match.index + match[0].lastIndexOf(match[4]);
       if (offset >= methodStart && offset <= methodStart + match[4].length) {
         return { procedureKeyword: match[2], funId: match[4] };
@@ -265,6 +275,8 @@
     if (definition) {
       return { definition: true, target: definition, word, lineNumber: position.lineNumber };
     }
+    const component = resolveServiceComponentTarget(model.getValue(), offset);
+    if (component) return { component, word, lineNumber: position.lineNumber };
     const target = resolveProcedureTarget(model.getValue(), offset);
     return target ? { target, word, lineNumber: position.lineNumber } : null;
   }
@@ -818,6 +830,9 @@
               editor.setPosition?.({ lineNumber: hit.local.lineNumber, column: 1 });
               editor.revealLineInCenter?.(hit.local.lineNumber);
               editor.focus?.();
+            } else if (hit.component) {
+              minimizeScriptEditor(element);
+              await openModuleCaller({ source_id: hit.component.componentId, exact: true });
             } else if (hit.definition) {
               requestProcedureCallers(hit.target);
             } else {
@@ -2164,6 +2179,7 @@
   document.addEventListener("keyup", onNavigationKeyUp);
   const navigationApi = {
     resolveProcedureTarget,
+    resolveServiceComponentTarget,
     resolveProcedureDefinitionTarget,
     resolveProcedureDefinitionText,
     resolveLocalFunctionTarget,
