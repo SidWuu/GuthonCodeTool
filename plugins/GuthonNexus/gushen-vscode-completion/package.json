@@ -239,7 +239,7 @@
       { "command": "gushenCompletion.refreshSvnSourceView", "title": "Guthon Nexus: 刷新谷神源码", "icon": "$(refresh)" },
       { "command": "gushenCompletion.refreshSvnScm", "title": "Guthon Nexus: 刷新 SVN 变更", "icon": "$(refresh)" },
       { "command": "gushenCompletion.showSvnDiff", "title": "Guthon Nexus: 查看 SVN 差异" },
-      { "command": "gushenCompletion.showSvnRawDiff", "title": "Guthon Nexus: 查看 SVN 原始文件差异" },
+      { "command": "gushenCompletion.showSvnRawDiff", "title": "Guthon Nexus: 查看 SVN 原始文件差异", "icon": "$(diff)" },
       { "command": "gushenCompletion.revertSvnQuickDiffChange", "title": "Guthon Nexus: 撤销当前差异块", "icon": "$(discard)" },
       { "command": "gushenCompletion.showSvnHistory", "title": "Guthon Nexus: 查看 SVN 历史", "icon": "$(history)" },
       { "command": "gushenCompletion.manageSvnChanges", "title": "Guthon Nexus: 管理本地源码变更", "icon": "$(source-control)" },

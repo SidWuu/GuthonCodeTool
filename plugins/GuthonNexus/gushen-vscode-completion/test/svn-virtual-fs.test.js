@@ -244,9 +244,10 @@ for (const sourceType of ['procedure', 'page']) {
     FileSystemError: { NoPermissions: (message) => new Error(message) } };
   const uri = { authority: 'projects.demo', query: `sourceType=${sourceType}&sourceId=pkg%23save&funId=save&workingCopyId=wc`,
     toString: () => 'guthon-svn-edit://projects.demo/save.gss' };
-  const project = `before();\n${marker}\nafter();`;
-  const markerEnd = 10 + marker.length;
-  const effective = 'before();\nproduct();\nafter();';
+  const prefix = `/** Inherit ${marker}; without ${marker} parent is inactive. */\nbefore();\n`;
+  const project = `${prefix}${marker}\nafter();`;
+  const markerEnd = prefix.length + marker.length;
+  const effective = `${prefix}product();\nafter();`;
   const writes = [];
   const backend = {
     read: async () => ({ editable: true, sessionId: 's', documentId: 'd',
@@ -258,9 +259,9 @@ for (const sourceType of ['procedure', 'page']) {
       return { inheritanceStatus: 'ACTIVE', indexGeneration: 'gen',
         project: { sourceHash: 'project-hash' }, product: { sourceHash: 'product-hash' },
         segments: [
-          { layer: 'project', start: 0, end: 10, sourceStart: 0, sourceEnd: 10 },
-          { layer: 'product', start: 10, end: 20, sourceStart: 10, sourceEnd: markerEnd },
-          { layer: 'project', start: 20, end: effective.length, sourceStart: markerEnd, sourceEnd: project.length },
+          { layer: 'project', start: 0, end: prefix.length, sourceStart: 0, sourceEnd: prefix.length },
+          { layer: 'product', start: prefix.length, end: prefix.length + 10, sourceStart: 0, sourceEnd: 10 },
+          { layer: 'project', start: prefix.length + 10, end: effective.length, sourceStart: markerEnd, sourceEnd: project.length },
         ],
         effective: { content: effective }, projectOriginal: { content: project },
         productOriginal: { content: 'product();' }, complete: true };
@@ -270,6 +271,12 @@ for (const sourceType of ['procedure', 'page']) {
   const provider = new SvnVirtualFileSystem({ vscode, backend });
   assert.equal((await provider.readFile(uri)).toString(), effective);
   assert.equal(await provider.diffBaseContent(uri, project), effective);
+  assert.equal(await provider.diffBaseContent(uri, project.replaceAll('\n', '\r\n')),
+    effective.replaceAll('\n', '\r\n'));
+  assert.equal(await provider.diffBaseContent(uri, project.replace('before();', 'baseBefore();')),
+    effective.replace('before();', 'baseBefore();'));
+  const ambiguousBase = `${project}\n${marker}`;
+  assert.equal(await provider.diffBaseContent(uri, ambiguousBase), ambiguousBase);
   provider.trackDocumentChange({ document: { uri }, contentChanges: [
     { rangeOffset: 0, rangeLength: 0, text: 'custom();\n' },
   ] });

@@ -368,8 +368,11 @@ class SvnVirtualFileSystem {
     const inherited = this.cache.get(uri.toString())?.inheritance;
     const marker = inherited?.marker;
     if (!marker || typeof physicalBase !== 'string') return physicalBase;
-    const position = physicalBase.indexOf(marker);
-    if (position < 0 || physicalBase.indexOf(marker, position + 1) >= 0) return physicalBase;
+    // Match the complete marker line; generated headers also mention inherit().
+    const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const matches = [...physicalBase.matchAll(new RegExp(`^${escapedMarker}(?=\\r?$)`, 'gm'))];
+    if (matches.length !== 1) return physicalBase;
+    const position = matches[0].index;
     return physicalBase.slice(0, position) + inherited.productText
       + physicalBase.slice(position + marker.length);
   }
