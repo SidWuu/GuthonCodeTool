@@ -360,6 +360,12 @@
       "kind": "read",
       "timeoutMs": 120000
     },
+    "page-editor": {
+      "summary": "本地 PAGE 可视化编辑快照、联合预检、受控保存与恢复",
+      "stdin": "{\"action\":\"open|preview|save|resume\",...}",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
     "page-query": {
       "summary": "按 JSON stdin 调用只读 PAGE 有界查询工具",
       "stdin": "{\"name\": \"list_page_nodes|read_page_nodes|search_sources|...\", \"arguments\": {...}}",

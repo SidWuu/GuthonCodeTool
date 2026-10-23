@@ -1,0 +1,14 @@
+/* Host chrome only. Never override platform input, table, font or layout styles. */
+html,body { margin:0; padding:0; background:#fff; }
+#native-toolbar { height:44px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:0 14px; background:#f7f9fc; border-bottom:1px solid #e5e9f0; color:#243247; font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+#native-toolbar strong { font-weight:600; }#native-mode { margin-left:12px; color:#64748b; }
+#native-toolbar .native-actions { display:flex; align-items:center; gap:6px; }
+#native-toolbar button { border:1px solid #dbe2ed; background:#fff; color:#334155; border-radius:4px; padding:5px 9px; cursor:pointer; font:inherit; }
+#native-toolbar #native-save { background:#287cec; color:white; border-color:#287cec; }
+#native-toolbar button:disabled { opacity:.45; cursor:default; }
+#native-toolbar label { display:flex; align-items:center; gap:6px; color:#64748b; margin-left:10px; }
+#native-width { width:82px; padding:4px 6px; border:1px solid #dbe2ed; border-radius:4px; background:#fff; color:#334155; font:inherit; }
+#native-evidence { background:#f8fafc; padding:5px 14px; color:#64748b; font:11px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; overflow-wrap:anywhere; }
+#offline-status { padding:4px 14px; min-height:24px; color:#64748b; border-bottom:1px solid #e5e9f0; font:11px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+#native-stage { overflow:auto; background:#fff; }
+@media(max-width:900px) { #native-toolbar { height:auto; min-height:44px; flex-wrap:wrap; padding:8px 12px; } }

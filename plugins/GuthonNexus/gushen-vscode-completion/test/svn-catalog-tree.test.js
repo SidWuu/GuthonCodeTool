@@ -170,6 +170,26 @@ test('sorts PAGE fragments as GSS, JS, SQL, then fields', () => {
   );
 });
 
+test('PAGE JSON keeps lazy event expansion and binds single click to the local page editor',async()=>{
+  const calls=[];
+  const provider=new SvnCatalogTreeProvider({
+    vscode:{EventEmitter:class {constructor(){this.event=()=>{};}fire(){}dispose(){}}},
+    backend:{async fragments(){calls.push('fragments');return {fragments:[{scriptType:'js',jsonPointer:'/pageSetup/pageEvents/onOpenScript',label:'打开事件'}]};}},
+    listSvnWorkspaces:async()=>[],
+  });
+  for (const fragments of [null,[{scriptType:'js',jsonPointer:'/pageSetup/pageEvents/onOpenScript',label:'打开事件'}]]) {
+    const [page]=await provider.getChildren({kind:'directory',workspaceKey:'projects.demo',children:[{
+      kind:'source',label:'示例页面',object:{sourceType:'page',sourceId:'PG-1',sourcePath:'pages/PG-1.json',fragments,status:'OK'},
+    }]});
+    assert.equal(page.kind,'object');assert.equal(page.command.command,'gushenCompletion.openLocalPageEditor');
+    assert.deepEqual(page.command.arguments[0],{object:page.object,workspaceKey:page.workspaceKey});
+    const [event]=await provider.getChildren(page);
+    assert.equal(event.command.command,'gushenCompletion.openSvnDocument');
+    assert.equal(event.command.arguments[0].jsonPointer,'/pageSetup/pageEvents/onOpenScript');
+  }
+  assert.equal(calls.length,1);
+});
+
 test('keeps a lazy PAGE leaf expandable before its fragments are loaded', async () => {
   const fragmentCalls = [];
   const provider = new SvnCatalogTreeProvider({

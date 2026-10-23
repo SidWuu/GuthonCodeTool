@@ -1,5 +1,6 @@
 const { timedOutput, operationTimer } = require('../output-logging');
 const path = require('node:path');
+const {PageEditorController} = require('../page-editor/controller');
 const { SvnBackendClient } = require('./backend-client');
 const { fragmentLabel, SvnCatalogTreeProvider } = require('./catalog-tree');
 const { SvnScmManager, workspaceKeyFromSourceControlId } = require('./scm-manager');
@@ -417,6 +418,7 @@ function activateSvn({
         && document.isDirty
     );
     if (!documents.length) {
+      await pageEditor.saveDirty(workspaceKey);
       if (operation) log(operation, '未发现未保存的 SVN 虚拟文档');
       return true;
     }
@@ -431,6 +433,7 @@ function activateSvn({
       if (operation) log(operation, `保存虚拟文档 · ${document.uri.path || document.uri.toString()}`);
       if (!await document.save()) return false;
     }
+    await pageEditor.saveDirty(workspaceKey);
     if (operation) log(operation, '虚拟文档已保存到本地 checkout');
     return true;
   }
@@ -438,7 +441,10 @@ function activateSvn({
   virtualFs = new SvnVirtualFileSystem({
     vscode,
     backend,
-    onWillSave: (workspaceKey, sourcePath) => sourceWatcher?.suppress(workspaceKey, sourcePath),
+    onWillSave: (workspaceKey, sourcePath, uri) => {
+      pageEditor.beforeCodeSave(uri);
+      sourceWatcher?.suppress(workspaceKey, sourcePath);
+    },
     onOutput: streamBackendOutput,
     onSaved: async (workspaceKey, result, uri, wasInherited) => {
       if (wasInherited && result.written) {
@@ -455,6 +461,8 @@ function activateSvn({
       }
       inheritanceView.invalidate(workspaceKey);
       const savedIdentity = decodeIdentity(uri);
+      try { await pageEditor.codeSaved(uri); }
+      catch (error) { vscode.window.showWarningMessage(`代码已保存，但本地页面刷新失败：${error.message}`); }
       try {
         if (!await scm.applySaved({ ...result, ...savedIdentity })) await refreshWorkspaceScm(workspaceKey);
       } catch (error) {
@@ -994,7 +1002,22 @@ function activateSvn({
     }),
   });
 
+  const pageEditor = new PageEditorController({vscode, context, backend, virtualFs, getTool,
+    onResourceOutput: (workspaceKey,message) => {
+      if (message.startsWith('开始准备平台资源')) operationOutput.show(true);
+      log('PAGE 平台资源',`${workspaceKey}｜${message}`);
+    },
+    onSaved: async (workspaceKey, sourcePath) => {
+      virtualFs.invalidate(workspaceKey, true, undefined, sourcePath ? [sourcePath] : undefined);
+      catalogTree.refresh(workspaceKey);
+      await refreshWorkspaceScm(workspaceKey);
+    }});
   const commands = [
+    vscode.commands.registerCommand('gushenCompletion.openLocalPageEditor', withError(async element => {
+      const source = sourceModuleElement(element || treeView.selection[0]);
+      if (!source?.object) throw new Error('请在 SVN 源码树选择 PAGE');
+      return pageEditor.open({...source.object, workspaceKey: source.workspaceKey});
+    })),
     vscode.commands.registerCommand('gushenCompletion.openSvnSourceInBrowser', withError(async (element) => {
       let source = sourceModuleElement(element || treeView.selection[0]);
       if (!source) {
@@ -1344,6 +1367,7 @@ function activateSvn({
       referenceRegistration.dispose();
       uriHandler.dispose();
       for (const command of commands) command.dispose();
+      pageEditor.dispose();
       virtualFs.dispose();
       inheritanceView.dispose();
       diffContent.dispose();

@@ -55,7 +55,7 @@ a{color:var(--primary);text-underline-offset:3px}
 .section{min-width:0;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:34px;margin:0 0 22px;box-shadow:0 10px 30px rgba(28,47,94,.055)}
 h2{margin:0 0 22px;font-size:29px;line-height:1.25;letter-spacing:-.015em}
 h2:after{content:"";display:block;width:46px;height:4px;margin-top:12px;border-radius:5px;background:linear-gradient(90deg,var(--primary),#9eb0f5)}
-h3{margin:31px 0 12px;padding-top:2px;font-size:21px;line-height:1.38}h4{margin:25px 0 10px;font-size:17px}
+h3{margin:31px 0 12px;padding-top:2px;font-size:21px;line-height:1.38}h4{margin:25px 0 10px;font-size:17px}h5{margin:20px 0 8px;font-size:15px;line-height:1.5}
 p{margin:10px 0}strong{font-weight:750}
 ul,ol{padding-left:1.45em;margin:12px 0 19px}li{margin:6px 0}li::marker{color:var(--primary)}
 code{font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace;font-size:.91em;background:var(--primary-soft);border:1px solid var(--line);border-radius:6px;padding:1px 5px}
@@ -312,7 +312,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <table class="comparison-table">
 <thead><tr><th>对象与展示</th><th>编辑边界</th></tr></thead>
 <tbody>
-<tr><td><strong>PAGE：</strong>按索引中的模型、模块和页面顺序展示，内部固定分为 GSS、JavaScript、SQL、字段及服务事件。</td><td>脚本与 SQL 以虚拟文档投影，可受控写回原始 JSON；字段用于定位和分析。</td></tr>
+<tr><td><strong>PAGE：</strong>按索引中的模型、模块和页面顺序展示，内部固定分为 GSS、JavaScript、SQL、字段及服务事件。</td><td>脚本与 SQL 以虚拟文档投影，可受控写回原始 JSON；本地页面编辑器提供支持范围内的字段属性与同容器排序。</td></tr>
 <tr><td><strong>过程函数：</strong>按包名和函数名组织，支持复制稳定身份、跳转与调用位置。</td><td>函数源码可以受控编辑，写回对应物理文件。</td></tr>
 <tr><td><strong>系统脚本：</strong>按业务子系统分组。</td><td>可受控编辑和提交。</td></tr>
 <tr><td><strong>表与视图：</strong>作为结构和引用事实进入索引。</td><td>视图仅允许编辑已有的 <code>viewSql</code> SQL 字符串；表格定义（含字段新增、修改）、视图字段和其他元数据保持只读。视图字段由平台解析 SQL 自动生成。</td></tr>
@@ -328,6 +328,40 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <li>保留编码、BOM、换行和文件权限，以最小范围原子替换，再按物理文件增量刷新索引。</li>
 </ol>
 <p><code>svn read-batch</code> 可以一次读取多个对象；<code>write-batch</code> 会先预检全部目标，拒绝同一物理文件出现两次，任一写入失败时恢复已写文件，全部成功后统一更新索引。短时读写使用带超时的跨进程锁，长操作使用工作区操作锁，解决 Nexus、CLI 和自动化同时访问同一 checkout 的竞争。</p>
+<h4 id="page-local-editor">本地页面编辑与预览</h4>
+<p>此功能适用于 SVN 工作区的 JSON PAGE。字段、按钮和代码管理可独立使用；原版布局显示另需对应平台的设计器静态资源。具体操作见<a href="GuthonCodeTool_使用手册.html#local-page-editor">使用手册</a>。</p>
+<h5 id="page-editor-capabilities">能力与源码树的关系</h5>
+<p>单击 PAGE 打开本地编辑器，双击或点击展开箭头继续展开原有事件与字段节点。预览标题、标签页和树根显示“页面名称 · PAGE ID”；名称优先采用源码树目录索引中的有效名称，PAGE ID 占位值不作为名称。</p>
+<p>预览树隐藏行、列、匿名容器及没有业务标题的单项页签包装，保留表单、表格与有业务标题的页签。页面事件、区域脚本与 SQL、按钮和字段按归属组织，只显示已有事件。点击区域定位清单，点击字段或按钮显示已有属性，点击事件进入共用代码编辑器。</p>
+<table class="comparison-table">
+<thead><tr><th>对象</th><th>支持范围</th></tr></thead>
+<tbody>
+<tr><td>字段</td><td>修改已导出的标题、宽高、标签宽度、输入最大长度、隐藏和只读等受支持属性；调整同一字段集合内的顺序。</td></tr>
+<tr><td>区域按钮</td><td>在所属区域的字段清单上方显示，可修改已有名称、别名及受支持的显示属性，调整同一区域按钮顺序，并进入已有前端脚本和服务事件。</td></tr>
+<tr><td>事件与 SQL</td><td>与源码树共用代码标签、继承解析和受控保存流程。仅修改项目段时保留继承标记；修改产品段按既有规则校验并物化到项目源码。</td></tr>
+<tr><td>高级字段配置</td><td>属性面板不等价于完整字段 JSON；数据源字段集合、复杂嵌套配置和未开放属性仍需原有源码分块入口。</td></tr>
+</tbody>
+</table>
+<h5 id="page-editor-save">草稿与保存边界</h5>
+<p>布局和属性调整进入页面草稿，已有属性、代码及排序操作可联合预检，经现有页面租约原子写回、刷新索引并验证差异。源码身份、授权范围及内容哈希继续由原有写回流程校验。保存到本地不触发平台同步、编译或 SVN 提交。</p>
+<p>代码标签的未保存输入由 IDE 管理。代码通过共用编辑器保存后，页面更新基线并保留无冲突的属性与按钮草稿；同一脚本或属性存在不同修改时保留草稿并要求比较。排序保存需关闭相关已保存代码标签，以免位置变化后旧标签指向其他对象。</p>
+<p>页面草稿保存在 IDE 私有工作区存储。源码变化时保留旧草稿用于导出比较；保存结果不明确时保留请求并提供恢复检查。预览内现有字段或按钮身份不唯一时限制修改；未知控件的属性保持只读，同集合排序独立校验身份。</p>
+<h5 id="page-editor-assets">平台资源、缓存与版本</h5>
+<p>Nexus 使用 IDE 自带运行时读取平台入口 HTML，动态解析实际引用的脚本和样式地址，再下载同源静态依赖。文件名中的构建后缀不写死；普通使用无需开发者工具、独立 Node.js 或手工填写资源目录。</p>
+<p>静态文件由 Nexus 直接获取，不共享浏览器 Cookie。是否允许匿名下载取决于平台部署；浏览器已登录不保证 Nexus 能取得受保护资源，此时可导入已有资源包。在线“去平台对照”仍需要浏览器登录。</p>
+<p>资源自动存于当前显式本地数据目录 <code>&lt;toolHome&gt;/var/nexus/page-designer/</code>：</p>
+<ul>
+<li><code>platforms/&lt;平台标识&gt;/&lt;构建指纹&gt;/</code>：保存 <code>snapshot.json</code> 校验清单与 <code>guthon/</code> 静态文件；同平台同构建复用，不同平台或构建隔离。</li>
+<li><code>workspaces/&lt;工作区标识&gt;.json</code>：记录 workspaceKey 对应的平台入口和所选资源版本；切换只影响当前工作区。</li>
+</ul>
+<p>构建指纹包含入口 HTML 及入口脚本、样式的实际摘要，不能只凭版本名称或主程序文件名判断。下载先进入临时目录，完整校验后才激活；失败、不兼容或缓存损坏时不覆盖现有可用资源，也不改用其他平台的快照。</p>
+<p>打开已绑定页面时，成功的版本检查结果在 24 小时内复用；到期再次打开会检查平台构建。检查失败时保留已校验缓存并标明离线状态，短时间内不重复失败请求。发现新构建时提示下载切换或继续旧缓存，不静默替换；支持手动检查、导入和选择缓存版本回退。</p>
+<p>从资源菜单到下载、校验及打开视图，同工作区重复点击复用当前任务。资源按钮在处理期间禁用，完成或失败后恢复；通知与“Guthon Nexus SVN”输出显示阶段、逐文件进度、累计大小及完成结果。</p>
+<h5 id="page-editor-limits">限制与效果验收</h5>
+<p>当前不提供字段或按钮增删、跨容器移动、新增属性或事件、业务脚本执行及 SQL 查询。静态快照不包含自动采集的工作区系统样式、字典或自定义组件元数据，缺失内容不视为完整支持。</p>
+<p>原版设计器负责布局显示，字段与代码管理页不模拟平台外观。原版资源校验成功只证明文件与构建符合检查条件，不证明与在线平台效果一致；系统动态样式、组件、运行时行为及业务结果仍需客户端和平台验收。对照应使用相同 PAGE 版本、内容区宽度、缩放和设计/运行模式。</p>
+<h5 id="page-editor-maintenance">维护者准备资源包</h5>
+<p>维护脚本与 Nexus 共用资源下载和校验实现。准备新快照可执行 <code>node scripts/prepare_page_designer.mjs --platform-url https://platform.example/guthon/index.html --output /absolute/new-directory</code>；已有快照可用 <code>--source /absolute/platform-assets</code> 校验，或同时指定新的 <code>--output</code> 复制。已有输出目录不覆盖，资源不进入公开 VSIX。</p>
 <h4>项目与产品继承</h4>
 <p>独占一行的 <code>inherit()</code> / <code>@inherit()</code> 标记支持带分号或省略分号；注释、字符串和其他表达式内的相似文本不作为继承入口。解析版本变化后，应完整重建目标 SVN 工作区索引。</p>
 <p>SVN 项目过程函数将普通 <code>.gss</code> 与同目录的 <code>.inherit.gss</code> 关联为一个逻辑函数；后者作为只读产品层。Nexus 默认在项目可编辑标签页显示展开后的完整源码，以低饱和度整行背景区分产品与项目段，编辑器差异基线也同步展开，避免把继承段误标为修改。只改项目段时保存仍保留继承标记；改动产品段时将完整候选保存到项目文件或 PAGE 项目事件，并复核产品哈希。<code>return @inherit();</code> 等不能证明控制流等价的标记需在保存产品改动时显式核对。</p>

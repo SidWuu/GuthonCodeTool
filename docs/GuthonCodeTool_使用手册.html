@@ -81,7 +81,7 @@ a{color:var(--primary);text-underline-offset:3px}
 .wiki-section{min-width:0;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:34px;margin:0 0 22px;box-shadow:0 10px 30px rgba(28,47,94,.055)}
 h2{margin:0 0 22px;font-size:29px;line-height:1.25;letter-spacing:-.015em}
 h2:after{content:"";display:block;width:46px;height:4px;margin-top:12px;border-radius:5px;background:linear-gradient(90deg,var(--primary),#9eb0f5)}
-h3{margin:31px 0 12px;padding-top:2px;font-size:21px;line-height:1.38}h4{margin:25px 0 10px;font-size:17px}
+h3{margin:31px 0 12px;padding-top:2px;font-size:21px;line-height:1.38}h4{margin:25px 0 10px;font-size:17px}h5{margin:20px 0 8px;font-size:15px;line-height:1.5}
 p{margin:10px 0}strong{font-weight:750}
 ul,ol{padding-left:1.45em;margin:12px 0 19px}li{margin:6px 0}li::marker{color:var(--primary)}
 code{font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace;font-size:.91em;background:var(--primary-soft);border:1px solid var(--line);border-radius:6px;padding:1px 5px}
@@ -487,6 +487,31 @@ args = ["mcp", "--stdio", "--home", "/本地数据目录"]</code></pre></div>
 </ol>
 <p>“刷新 Guthon Nexus”只刷新界面；“刷新 SVN 变更”查看本地状态；“更新全部远程变更”访问服务器。按需要选择入口，避免重复执行正在进行的任务。</p>
 <p>项目继承脚本会显示展开内容，并用背景区分产品段与项目段。只改项目段时保留继承；改动产品段时会把完整内容写入项目源码。保存前核对来源，保存后检查实际差异。</p>
+<h4 id="local-page-editor">本地查看与图形化调整 PAGE</h4>
+<p>字段、按钮和代码编辑可以直接使用；只有查看原版页面布局时才需要准备平台资源。此功能用于 SVN 工作区的 JSON PAGE。</p>
+<h5 id="local-page-edit">打开页面并编辑字段、按钮和代码</h5>
+<ol>
+<li>在“谷神源码”树单击 PAGE，打开本地页面编辑器。双击 PAGE 或点击展开箭头，可继续使用原有事件与字段节点；右键“本地页面编辑与预览”也可打开。</li>
+<li>在左侧选择区域、字段或按钮。中间清单会定位到对应项；点击整行字段或区域上方的按钮，可在右侧修改已有属性，或使用“上移”“下移”调整顺序。</li>
+<li>需要编辑事件或 SQL 时，从左侧树或右侧事件按钮打开代码。它与源码树使用同一代码标签，项目继承脚本也按相同规则展开。</li>
+<li>先在代码标签按 Ctrl/Cmd+S 保存代码，再点击页面顶部“保存到本地”保存字段、按钮等调整。页面支持撤销、重做和“查看修改前”；保存完成后，从源代码管理检查 SVN 差异。</li>
+</ol>
+<p>保存排序前先保存代码。排序保存会关闭此 PAGE 的已保存代码标签，需要时从页面重新打开事件。保存到本地不会自动同步、编译或提交谷神平台。</p>
+<h5 id="local-page-resources">准备并打开原版设计视图</h5>
+<ol>
+<li>在页面顶部“谷神”按钮组点击“平台资源”，选择“连接谷神平台并准备资源”，填写当前工作区的平台 <code>/guthon/index.html</code> 地址。</li>
+<li>等待资源准备。通知和“输出 → Guthon Nexus SVN”显示下载进度；完成后提示资源已校验，并自动打开原版设计视图。</li>
+<li>后续点击“原版设计视图”查看布局；点击原版视图中的“草稿与代码”返回字段与代码管理。两处调整均需保存到本地。</li>
+<li>平台升级时，通过“平台资源 → 检查平台资源更新”检查并选择是否切换；需要回退时选择“选择已缓存版本 / 回退”。已有资源包可用“导入已有本地资源包”。</li>
+</ol>
+<p>准备资源与浏览器登录的关系见<a href="GuthonCodeTool_QA.html?q=下载资源%20登录">登录与下载问题</a>；下载没有进度或失败时，查看<a href="GuthonCodeTool_QA.html?q=下载进度">进度与失败处理</a>。字段清单用于管理，不表示实际页面布局。</p>
+<h5 id="local-page-compare">比较修改并到平台验收</h5>
+<ol>
+<li>在原版视图使用“查看修改前”比较上次本地保存与当前草稿。</li>
+<li>需要与在线平台对照时，将窗口宽度设为平台页面内容区宽度，确认浏览器已登录对应平台，再点击“去平台对照”。</li>
+<li>按既有流程完成平台同步、编译与实际页面验证。同一页面版本、内容区宽度和缩放下的效果仍需核验。</li>
+</ol>
+<p>保存结果不明确或发生冲突时，先“导出草稿”保留输入；提示保存待核对时使用“恢复保存检查”。完整支持范围、缓存位置和验证边界见<a href="GuthonCodeTool_全功能说明.html#page-local-editor">本地页面编辑与预览说明</a>。</p>
 <h4>常用定位与辅助</h4>
 <ul>
 <li>使用“搜索工作区完整索引”查找对象；已知编码时可在命令面板选择“按页面编码定位本地 PAGE”或“按包名和函数名定位本地过程函数”。</li>

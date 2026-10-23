@@ -1,3 +1,4 @@
+const {fragmentIdentity} = require('./virtual-fs');
 const CATEGORY_LABELS = {
   pages: '页面',
   procedures: '过程函数',
@@ -243,24 +244,13 @@ class SvnCatalogTreeProvider {
   _sourceElement(child, parent, workspaceKey) {
     const object = child.object;
     const fragments = object.fragments;
+    const localPage = object.sourceType === 'page' && /\.json$/i.test(object.sourcePath || '');
     const opensReadOnlyMetadata = Array.isArray(fragments) && fragments.length === 0
       && ['table', 'view', 'skill', 'public'].includes(object.sourceType);
-    const opensDirectly = Array.isArray(fragments)
+    const opensDirectly = !localPage && Array.isArray(fragments)
       && (fragments.length === 1 || opensReadOnlyMetadata);
-    const identity = {
-      workspaceKey,
-      sourceType: object.sourceType,
-      sourceId: object.sourceId,
-      funId: object.funId || '',
-      documentName: object.sourceType === 'page'
-        ? [object.sourceName, fragments?.[0]?.label].filter(Boolean).join(' · ')
-        : serviceComponentDocumentName(object),
-      sourcePath: object.sourcePath || '',
-      jsonPointer: fragments?.[0]?.jsonPointer || '',
-      fragmentType: fragments?.[0]?.scriptType || '',
-    };
-    const workingCopyId = object.workingCopyId || object.scopeEntryId || '';
-    if (workingCopyId) identity.workingCopyId = workingCopyId;
+    const identity = fragmentIdentity(workspaceKey, object, fragments?.[0]);
+    if (object.sourceType !== 'page') identity.documentName=serviceComponentDocumentName(object);
     const element = {
       kind: opensDirectly ? 'document' : 'object',
       label: child.label,
@@ -274,6 +264,7 @@ class SvnCatalogTreeProvider {
         ? { command: 'gushenCompletion.openSvnDocument', title: '打开 SVN 源码', arguments: [identity] }
         : undefined,
     };
+    if (localPage) element.command={command:'gushenCompletion.openLocalPageEditor',title:'打开本地页面编辑器',arguments:[{object,workspaceKey}]};
     this.objectElements.set(this._objectKey(workspaceKey, object), element);
     this.sourcePathElements.set(`${workspaceKey}\n${object.sourcePath}`, element);
     return element;
@@ -464,20 +455,7 @@ class SvnCatalogTreeProvider {
         command: {
           command: 'gushenCompletion.openSvnDocument',
           title: '打开 SVN 源码分块',
-          arguments: [{
-            workspaceKey: element.workspaceKey,
-            sourceType: element.object.sourceType,
-            sourceId: element.object.sourceId,
-            funId: element.object.funId || '',
-            sourcePath: element.object.sourcePath || '',
-            jsonPointer: fragment.jsonPointer || '',
-            fragmentType: fragment.scriptType || '',
-            documentName: element.object.sourceType === 'page'
-              ? [element.object.sourceName, fragment.label].filter(Boolean).join(' · ') : '',
-            ...((element.object.workingCopyId || element.object.scopeEntryId)
-              ? { workingCopyId: element.object.workingCopyId || element.object.scopeEntryId }
-              : {}),
-          }],
+          arguments: [fragmentIdentity(element.workspaceKey, element.object, fragment)],
         },
       }));
       return element.children;

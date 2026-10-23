@@ -816,6 +816,20 @@ MAINTENANCE_ACTIONS = {
     "lease-renew", "lease-release", "operations", "operation-gc", "blame",
     "changed-sources", "table-references", "text-search",
 }
+
+
+def _page_editor(command):
+    if not command.manifest_layout:
+        raise SystemExit("svn page-editor requires manifest-working-copies")
+    from providers.svn.nexus import page_editor, page_nodes
+
+    try:
+        result = page_editor.run(command.workspace, command.config, json.load(sys.stdin))
+        return {"ok": True, **result}
+    except (ValueError, TypeError, KeyError, page_nodes.PageIndexError) as error:
+        raise SystemExit(f"PAGE_EDITOR: {error}") from error
+
+
 ACTION_HANDLERS = {
     **dict.fromkeys(("auth-cache", "scope-preview", "scope-import", "sync-from-script",
                     "sync-from-bat", "sync-from-config", "init", "refresh", "status"), _lifecycle),
@@ -828,6 +842,7 @@ ACTION_HANDLERS = {
     "reindex-file": _reindex_file,
     "reindex-files": _reindex_files,
     "page-query": _page_query,
+    "page-editor": _page_editor,
 }
 
 

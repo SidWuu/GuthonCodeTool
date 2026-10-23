@@ -1125,12 +1125,16 @@ def resume_page_node_operation(workspace: dict, config: dict, *, operation_id: s
         }
 
 
-def _page_operation_request_hash(session_id: str, changes: list[dict], field_insert=None, field_update=None) -> str:
+def _page_operation_request_hash(
+    session_id: str, changes: list[dict], field_insert=None, field_update=None, editor_operations=None,
+) -> str:
     request = {"sessionId": session_id, "changes": changes}
     if field_insert is not None:
         request["fieldInsert"] = field_insert
     if field_update is not None:
         request["fieldUpdate"] = field_update
+    if editor_operations is not None:
+        request["editorOperations"] = editor_operations
     return _text_hash(json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
@@ -1306,11 +1310,14 @@ def write_page_nodes_batch(
     idempotency_key: str | None = None, dry_run: bool = False,
     field_insert: dict | None = None,
     field_update: dict | None = None,
+    editor_operations: list[dict] | None = None,
 ) -> dict:
-    """Apply several leased PAGE string fragments to one source snapshot and physical file.
+    """Apply leased PAGE changes to one source snapshot and physical file.
 
     The optional single-field insertion uses the same lease and operation
     ledger, while preserving every existing field token in the source text.
+    Visual editor operations use one anchor lease and validate their complete
+    typed candidate before entering this same atomic write and recovery path.
     """
 
     require_capability(workspace, "edit")
@@ -1325,9 +1332,11 @@ def write_page_nodes_batch(
     if field_update is not None and (field_insert is not None or not isinstance(field_update, dict)
             or set(field_update) != {"index", "patch"} or len(changes) != 1):
         raise SystemExit("PAGE field update requires one exact label candidate")
+    if editor_operations is not None and (field_insert is not None or field_update is not None or len(changes) != 1):
+        raise SystemExit("PAGE editor requires one source-bound anchor lease")
     operation_path = _page_operation_path(workspace, idempotency_key) if idempotency_key is not None else None
     try:
-        request_hash = (_page_operation_request_hash(session_id, changes, field_insert, field_update)
+        request_hash = (_page_operation_request_hash(session_id, changes, field_insert, field_update, editor_operations)
                         if operation_path else "")
     except (TypeError, ValueError) as error:
         raise SystemExit("PAGE node batch request must contain JSON-compatible values") from error
@@ -1352,6 +1361,11 @@ def write_page_nodes_batch(
         prepared = []
         document_ids = set()
         pointers = set()
+        allowed_fragments = PAGE_FRAGMENT_TYPES - {"page-fields"}
+        if editor_operations is not None:
+            allowed_fragments = PAGE_FRAGMENT_TYPES
+        elif field_insert is not None or field_update is not None:
+            allowed_fragments = {"page-fields"}
         for index, change in enumerate(changes, 1):
             if not isinstance(change, dict) or set(change) != {"documentId", "content"}:
                 raise SystemExit(f"PAGE node change {index} requires documentId and content only")
@@ -1365,8 +1379,7 @@ def write_page_nodes_batch(
             pointer = item["document"].get("jsonPointer") or ""
             if (item["item"]["source_table"] != "page"
                     or item["path"].suffix.lower() != ".json"
-                    or item["document"].get("fragmentType") not in
-                    ({"page-fields"} if field_insert is not None or field_update is not None else PAGE_FRAGMENT_TYPES - {"page-fields"})
+                    or item["document"].get("fragmentType") not in allowed_fragments
                     or not pointer):
                 raise SystemExit("PAGE batch target is not an allowed leased fragment")
             if pointer in pointers:
@@ -1384,7 +1397,17 @@ def write_page_nodes_batch(
         if not isinstance(data, dict):
             raise SystemExit("Double-encoded PAGE JSON is read-only")
         base_source_text = _base_source_text(first["path"])
-        if field_insert is not None:
+        if editor_operations is not None:
+            from common.page_editor import apply_operations
+
+            after_text = apply_operations(source_text, editor_operations)
+            # The anchor is an authorization lease, never the source of edits.
+            anchor = first["document"]["jsonPointer"]
+            anchor_value = pointer_value(json.loads(after_text), anchor)
+            first["content"] = (json.dumps(anchor_value, ensure_ascii=False, indent=2)
+                                if first["document"]["fragmentType"] == "page-fields" else anchor_value)
+            first["physicalChanged"] = after_text != source_text
+        elif field_insert is not None:
             pointer = first["document"]["jsonPointer"]
             original_fields = pointer_value(data, pointer)
             candidate_fields = json.loads(first["content"])

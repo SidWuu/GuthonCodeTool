@@ -53,6 +53,24 @@ function documentFilename(identity) {
   return name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`;
 }
 
+function pageDisplayName(source) {
+  const identities = new Set([source.sourceId,source.pageId,source.sourceAliasId]
+    .filter(value=>typeof value==='string').map(value=>value.trim().toUpperCase()));
+  for (const value of [source.treeLabel,source.pageName,source.sourceName]) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const name=value.trim();
+    if (!identities.has(name.toUpperCase()) && !/^PG-[0-9A-F-]+$/i.test(name)) return name;
+  }
+  return '';
+}
+
+function fragmentIdentity(workspaceKey, source, fragment = {}) {
+  return {workspaceKey, sourceType:source.sourceType, sourceId:source.sourceId, funId:source.funId || '',
+    sourcePath:source.sourcePath || '', jsonPointer:fragment.jsonPointer || '', fragmentType:fragment.scriptType || '',
+    documentName:source.sourceType === 'page' ? [pageDisplayName(source), fragment.label].filter(Boolean).join(' · ') : '',
+    ...((source.workingCopyId || source.scopeEntryId) ? {workingCopyId:source.workingCopyId || source.scopeEntryId} : {})};
+}
+
 function encodeIdentity(identity) {
   const params = new URLSearchParams();
   params.set('sourceType', identity.sourceType);
@@ -223,7 +241,8 @@ class SvnVirtualFileSystem {
       document.uri.toString() === uri.toString() && document.isDirty);
     const record = await this._load(uri, !alreadyDirty);
     const document = await this.vscode.workspace.openTextDocument(uri);
-    const editor = await this.vscode.window.showTextDocument(document, { preview: false });
+    const editor = await this.vscode.window.showTextDocument(document, { preview: false,
+      ...(options.viewColumn ? {viewColumn:options.viewColumn} : {}) });
     const requestedLine = Number(options.lineNumber);
     if (Number.isFinite(requestedLine) && requestedLine > 0) {
       const line = Math.min(requestedLine - 1, Math.max(0, document.lineCount - 1));
@@ -302,7 +321,7 @@ class SvnVirtualFileSystem {
         throw this.vscode.FileSystemError.NoPermissions('需要先核对继承函数的控制流');
       }
     }
-    this.onWillSave?.(record.identity.workspaceKey, record.value.sourcePath);
+    await this.onWillSave?.(record.identity.workspaceKey, record.value.sourcePath, uri);
     const result = this.onOutput
       ? await this.backend.write(
         record.identity.workspaceKey,
@@ -423,6 +442,8 @@ module.exports = {
   decodeIdentity,
   documentExtension,
   documentFilename,
+  pageDisplayName,
+  fragmentIdentity,
   encodeIdentity,
   utf16Offset,
 };

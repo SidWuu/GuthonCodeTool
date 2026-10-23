@@ -1,0 +1,57 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, #75819555); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, #75819588); }
+::-webkit-scrollbar-corner { background: transparent; }
+html { height: 100%; overflow: hidden; }
+body { height: 100%; overflow: hidden; display: flex; flex-direction: column; margin: 0; font: 13px/1.5 var(--vscode-font-family, sans-serif); color: var(--vscode-foreground, #cbd5e1); background: var(--vscode-editor-background, #16191f); }
+header { flex: none; padding: 16px 20px 10px; border-bottom: 1px solid var(--vscode-panel-border, #ffffff12); }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.heading h1 { font-size: 17px; margin: 2px 0; font-weight: 600; }
+.eyebrow { font-size: 10px; letter-spacing: 1.6px; color: var(--vscode-descriptionForeground, #8996a8); }
+#status { color: var(--vscode-descriptionForeground, #8996a8); font-size: 12px; }
+#baseline { margin: 4px 0 12px; color: var(--vscode-descriptionForeground, #8996a8); font-size: 11px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.action-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.action-group + .action-group { padding-left: 16px; border-left: 1px solid var(--vscode-panel-border, #ffffff20); }
+.group-label { color: var(--vscode-descriptionForeground, #8996a8); font-size: 11px; margin-right: 2px; }
+button { border: 1px solid var(--vscode-panel-border, #ffffff14); border-radius: 5px; padding: 6px 11px; color: inherit; background: var(--vscode-button-secondaryBackground, #ffffff08); font: inherit; cursor: pointer; }
+button:hover { background: var(--vscode-list-hoverBackground, #ffffff12); }
+button:disabled { opacity: .4; cursor: default; }
+button.primary { background: var(--vscode-button-background, #2674c9); color: var(--vscode-button-foreground, #fff); border-color: transparent; }
+.region-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+.region-buttons button.selected { border-color: var(--vscode-focusBorder, #66a8ff); background: var(--vscode-list-activeSelectionBackground, #217fca22); }
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr) 260px; overflow: hidden; }
+main > * { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+nav { padding: 18px 12px; border-right: 1px solid var(--vscode-panel-border, #ffffff12); }
+aside h2 { font-size: 14px; margin: 6px 0 20px; }
+summary { cursor: pointer; margin: 12px 0 6px; font-size: 12px; }
+.tree-link { display: block; width: 100%; text-align: left; border: 0; border-radius: 3px; background: transparent; font-size: 12px; padding: 6px 8px; overflow-wrap: anywhere; }
+.tree-node > summary { margin: 3px 0; overflow-wrap: anywhere; }
+.tree-node > summary .tree-link { display: inline-block; width: calc(100% - 18px); padding: 4px; vertical-align: top; }
+.tree-children { margin-left: 3px; padding-left: 8px; border-left: 1px solid var(--vscode-panel-border, #ffffff12); }
+.tree-root > summary { font-weight: 600; font-size: 13px; margin: 10px 0; }
+.tree-code { font: 11px/1.5 var(--vscode-editor-font-family, monospace); padding: 5px 4px; }
+#canvas { padding: 18px 20px; }
+.resource-note { color: var(--vscode-descriptionForeground, #8996a8); font-size: 11px; overflow-wrap: anywhere; margin: 8px 0 0; }
+.collection { margin-bottom: 26px; }
+.collection.active-region { outline: 1px solid var(--vscode-focusBorder, #66a8ff); outline-offset: 4px; }
+.collection-heading { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.collection-heading h2 { margin: 0; font-size: 14px; }.muted { color: var(--vscode-descriptionForeground, #8996a8); font-size: 11px; }
+table { border-collapse: collapse; width: 100%; min-width: 520px; } th { text-align: left; font-size: 11px; font-weight: 400; color: var(--vscode-descriptionForeground, #8996a8); }
+th, td { border-bottom: 1px solid var(--vscode-panel-border, #ffffff12); padding: 9px 10px; } td { font-size: 12px; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--vscode-list-hoverBackground, #ffffff12); }
+tr.selected, .tree-link.selected { background: var(--vscode-list-activeSelectionBackground, #217fca22); color: var(--vscode-list-activeSelectionForeground, inherit); }
+tbody tr:focus-visible { outline: 1px solid var(--vscode-focusBorder, #66a8ff); outline-offset: -1px; }
+.field-name { width: 24%; }.field-id { color: var(--vscode-descriptionForeground, #8996a8); overflow-wrap: anywhere; width: 45%; }
+aside { border-left: 1px solid var(--vscode-panel-border, #ffffff12); padding: 24px 18px; overflow: auto; }
+aside h3 { font-size: 14px; } aside code { font-size: 11px; color: var(--vscode-descriptionForeground, #8996a8); overflow-wrap: anywhere; }
+aside > label { display: block; margin: 16px 0; font-size: 12px; } aside label input { display: block; margin-top: 6px; width: 100%; }
+aside input[type=checkbox] { width: auto; } aside > button { margin: 4px 0; text-align: left; }
+input { border: 1px solid var(--vscode-input-border, #ffffff20); background: var(--vscode-input-background, #ffffff06); color: var(--vscode-input-foreground, #cbd5e1); border-radius: 4px; padding: 7px 9px; font: inherit; }
+#search { width: 220px; margin-left: auto; } .empty,.notice { color: var(--vscode-descriptionForeground, #8996a8); font-size: 12px; }
+#changes { flex: none; max-height: 28vh; overflow: auto; border-top: 1px solid var(--vscode-panel-border, #ffffff12); padding: 6px 20px; } #changes summary { font-size: 12px; margin: 4px 0; } pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+@media (max-width: 950px) { main { grid-template-columns: 220px minmax(0, 1fr) 220px; } #canvas { padding: 14px 12px; } aside { padding: 18px 12px; } }

@@ -66,6 +66,7 @@ Both runtimes retain the non-UI entry points: `create-workcopy`, `workcopy`, `qu
 - Shows a workspace cockpit with index, SVN, delivery, and recommended-action status.
 - Searches identities and indexed source facts through one workspace-level entry point and copies bounded AI context packages.
 - Keeps durable SVN delivery receipts with confirmed commits and remaining or uncertain results.
+- Opens a local PAGE draft with property editing, script/SQL code tabs, supported same-container ordering and atomic local save. Layout rendering uses the original platform designer; use “平台资源” to bind each workspace to its platform, prepare verified resources, check upgrades or select an older cached build; the editor does not execute business events or SQL.
 - Builds each workspace menu from the effective database/SVN capabilities returned by the tool.
 - Exports table schemas, bill types, system scripts, views, and source Markdown.
 - Runs environment checks and readonly source diagnosis.
