@@ -13,8 +13,8 @@ test('pageContext and SSE require Bearer, reject web Origin and recheck workspac
 require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
  const r=JSON.parse(line), p=r.input;
  if(r.command!=='route' || JSON.stringify(p).includes('PRIVATE'))process.exit(3);
- const valid=p.workspaceKey==='products.demo' && p.pageOrigin==='https://platform.test' && p.dataSourceId==='DS-1';
- process.stdout.write(JSON.stringify({type:'result',id:r.id,ok:valid,...(valid?{result:{ok:true,workspaceKey:p.workspaceKey}}:{error:{message:'Page identity does not match workspace'}})})+'\\n');
+ const valid=p.workspaceKey==='products.demo' && p.pageOrigin==='https://platform.test' && ['DS-1','DS-2'].includes(p.dataSourceId);
+ process.stdout.write(JSON.stringify({type:'result',id:r.id,ok:valid,...(valid?{result:{ok:true,workspaceKey:p.workspaceKey,workspace:{capabilities:{'svn.edit':p.dataSourceId==='DS-1'}}}}:{error:{message:'Page identity does not match workspace'}})})+'\\n');
 });`);
   const port = 17548;
   const child = spawn(process.execPath, ['server.js'], {cwd: __dirname,
@@ -53,6 +53,17 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
     assert.equal(receipt.state, 'SUCCEEDED');
     const state = await (await fetch(base + `/navigationResult?workspaceKey=products.demo&requestId=${accepted.requestId}`, {headers})).json();
     assert.equal(state.state, 'SUCCEEDED');
+    const lifecycle = await (await post('/pageLifecycle', {contextId:published.context.contextId,workspaceKey:payload.workspaceKey,
+      target:{action:'copy',pageId:'PG-1',properties:{pageAliasId:'demo.copy'}}})).json();
+    assert.equal(lifecycle.state,'PENDING');
+    const lifecycleFrame = new TextDecoder().decode((await reader.read()).value);
+    assert.match(lifecycleFrame,/event: page-lifecycle/);
+    await post('/navigationResult',{...payload,requestId:lifecycle.requestId,ok:true,data:{state:'SUCCEEDED',page:{pageId:'PG-NEW'}}});
+    const lifecycleResult = await (await fetch(base + `/navigationResult?workspaceKey=products.demo&requestId=${lifecycle.requestId}`,{headers})).json();
+    assert.equal(lifecycleResult.data.page.pageId,'PG-NEW');
+    const readonly = await (await post('/pageContext',{...payload,tabId:2,metadata:{dataSourceId:'DS-2'}})).json();
+    assert.equal((await post('/pageLifecycle',{contextId:readonly.context.contextId,workspaceKey:payload.workspaceKey,target:{action:'delete',pageId:'PG-1'}})).status,400);
+    await post('/removePageContext',{clientId:payload.clientId,tabId:2});
     await post('/removePageContext', {clientId: payload.clientId, tabId: 1});
     const contexts = await (await fetch(base + '/pageContext?workspaceKey=products.demo', {headers})).json();
     assert.equal(contexts.contexts.length, 0);

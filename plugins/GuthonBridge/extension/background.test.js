@@ -78,6 +78,25 @@ test('background owns origin and pairs every backend request at the configured p
   assert.equal(JSON.parse(f.calls[0].options.body).pageOrigin,'https://gusen.steel56.com.cn');
 });
 
+test('PAGE lifecycle writes are injected only after exact workspace and edit capability verification', async () => {
+  const f=fixture();const tab={id:1,url:'https://gusen.steel56.com.cn/guthon/'};
+  f.context.chrome.tabs.get=async()=>tab;
+  f.context.chrome.tabs.sendMessage=async()=>({ok:true,data:{systemId:'SYS-1',systemIds:['SYS-1']}});
+  let injected=0;
+  f.context.runPageLifecycle=async()=>{};
+  f.context.chrome.scripting={executeScript:async options=>{injected++;assert.equal(options.world,'MAIN');return [{result:{state:'SUCCEEDED',page:{pageId:'PG-NEW'}}}];}};
+  await f.send({type:'publish-page-context',payload:{workspaceKey:'products.demo',metadata:{systemId:'SYS-1'}}},{id:f.id,tab});
+  const command={requestId:'lifecycle-1',clientId:'a'.repeat(32),contextId:`${'a'.repeat(32)}:1`,tabId:1,
+    workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',target:{type:'page-lifecycle',action:'create'}};
+  await f.context.handleBridgeEvent('page-lifecycle',command);
+  assert.equal(injected,0);
+  f.context.fetch=async(url,options)=>{f.calls.push({url,options});return {ok:true,json:async()=>({ok:true,workspaceKey:'products.demo',workspace:{capabilities:{'svn.edit':true}}})};};
+  await f.context.handleBridgeEvent('page-lifecycle',command);
+  assert.equal(injected,1);
+  const receipt=JSON.parse(f.calls.filter(call=>call.url.endsWith('/navigationResult')).at(-1).options.body);
+  assert.equal(receipt.data.page.pageId,'PG-NEW');
+});
+
 test('popup health uses authenticated status and reports non-JSON proxy responses', async () => {
   const f = fixture();
   const sender = {id:f.id,url:`chrome-extension://${f.id}/popup.html`};

@@ -10,6 +10,7 @@ import json
 import math
 import re
 from common.inheritance import project as inheritance_projection
+from common import page_design, page_structure
 
 from common.page_projection import (
     _JsonValueLocator, extract_page_field_entities, extract_page_nodes,
@@ -27,7 +28,16 @@ PROPERTIES = {
     "maxTextLength": "输入最大长度", "isDisabled": "只读", "isHide": "隐藏",
 }
 KNOWN_FIELDS = {"text", "password", "textarea", "number", "numeric", "date", "datetime", "datesearch", "numsearch",
-                "time", "select", "checkbox", "radio", "label", "button"}
+                "time", "select", "checkbox", "radio", "label", "button", "file", "line"}
+# The contract and structure operations are shared by every AI creation path.
+_structure_targets = page_structure.targets
+_create = page_structure.apply
+
+
+def _add_member(text, pointer, name, value):
+    if name in pointer_value(json.loads(text), pointer):
+        raise ValueError("Creation requires an absent member of an object")
+    return page_structure.set_value(text, pointer + "/" + name, value)
 
 
 def _data(text):
@@ -109,8 +119,15 @@ def describe(text):
                       "eventScope": node.event_scope, "content": content,
                       "editable": not inherited,
                       "reason": "继承脚本请使用 Nexus 原有继承编辑入口" if inherited else ""})
+    insert_targets, event_owners = _structure_targets(data)
     return {"pageId": data["pageId"], "pageName": str(data.get("pageName") or ""),
             "collections": list(collections.values()), "nodes": nodes,
+            "insertTargets": [{"collectionPointer": pointer, "kind": kind,
+                               "componentType": page_structure.component_type(data, pointer)} for pointer, kind in insert_targets.items()],
+            "eventOwners": [{"ownerPointer": pointer, "ownerType": kind,
+                             "eventsPointer": target, "allowedEvents": {key: sorted(names) for key, names in page_design.allowed_events(kind, data.get("pageSetup", {}) if pointer == "/pageSetup" else pointer_value(data, pointer)).items()},
+                             "properties": sorted(page_design.property_paths(kind))}
+                            for pointer, (kind, target) in event_owners.items()],
             "previewMode": "原版设计视图 · 平台一致性待验收 · 不执行业务脚本", "remoteStatus": "远程状态未核验"}
 
 
@@ -156,11 +173,14 @@ def apply_operations(text, operations):
     model = describe(text)
     collections = {item["pointer"]: item for item in model["collections"]}
     nodes = {item["pointer"]: item for item in model["nodes"]}
-    edits, orders, seen = [], [], set()
+    edits, orders, creations, members, aliases, seen = [], [], [], [], set(), set()
     for op in operations:
         if not isinstance(op, dict):
             raise ValueError("Operation must be an object")
         kind = op.get("kind")
+        if kind in {"insert", "event", "patch", "removeEvent", "remove", "move", "copy", "datasource", "layout", "grid", "repairIdentities"}:
+            creations.append(op)
+            continue
         if kind == "property" and set(op) == {"kind", "collectionPointer", "fieldKey", "property", "value"}:
             collection = collections.get(op["collectionPointer"])
             fields = [item for item in (collection or {}).get("fields", []) if item["key"] == op["fieldKey"]]
@@ -168,10 +188,15 @@ def apply_operations(text, operations):
                 raise ValueError("Field is unknown, ambiguous or outside a supported UI region")
             field = fields[0]
             name = op["property"]
-            if name not in {item["name"] for item in field["properties"]}:
+            button_property = collection["kind"] == "BUTTONS" and name in BUTTON_PROPERTIES
+            if name not in {item["name"] for item in field["properties"]} and not button_property:
                 raise ValueError("Only declared existing presentation properties may be edited")
             pointer = field["pointer"] + "/" + name
-            _property_value(name, op["value"], pointer_value(data, pointer))
+            _property_value(name, op["value"], spans[pointer][2] if pointer in spans else None)
+            if button_property and name == "name" and not op["value"].strip():
+                raise ValueError("Button name must be nonempty")
+            if name == "aliasName":
+                aliases.add(collection["pointer"])
             value = op["value"]
         elif kind == "text" and set(op) == {"kind", "jsonPointer", "content"}:
             pointer, value = op["jsonPointer"], op["content"]
@@ -199,11 +224,48 @@ def apply_operations(text, operations):
         if pointer in seen:
             raise ValueError("Repeated property or script target")
         seen.add(pointer)
+        if pointer not in spans:
+            members.append((field["pointer"], name, value))
+            continue
         start, end, current = spans[pointer]
         if current != value or type(current) is not type(value):
             edits.append((start, end, _encoded(value)))
     for start, end, value in sorted(edits, reverse=True):
         text = text[:start] + value + text[end:]
+    for pointer, name, value in members:
+        text = _add_member(text, pointer, name, value)
+    for pointer in aliases:
+        buttons = pointer_value(json.loads(text), pointer)
+        names = [button["aliasName"].casefold() for button in buttons if button.get("aliasName")]
+        if len(names) != len(set(names)):
+            raise ValueError("Button aliases must be unique in their region")
+    if creations and orders:
+        raise ValueError("Create and reorder in separate source-bound sessions to avoid shifted owners")
+    if any(op.get("kind") in {"remove", "move", "removeEvent", "layout", "repairIdentities"} for op in creations) and len(operations) != 1:
+        raise ValueError("Remove/move must use a separate source-bound session to avoid shifted owners")
+    # Insertion appends; destructive operations are isolated from snapshot pointers.
+    for op in creations:
+        text = _create(text, op)
+    if creations:
+        final_data, _ = _data(text)
+        for op in creations:
+            if op.get("kind") not in {"insert", "copy"} or not op["collectionPointer"].endswith("/fields"):
+                continue
+            target = (op.get("item", {}).get("selectBox") or {}).get("selectCodefieldId")
+            if target and sum(field.get("fieldId") == target for field in pointer_value(final_data, op["collectionPointer"])) != 1:
+                raise ValueError("New selectCodefieldId must resolve uniquely in the target field group")
+            parent = pointer_value(final_data, op.get("targetCollectionPointer", op["collectionPointer"]).rpartition("/")[0])
+            if parent.get("type") == "input-grid":
+                from common.page_layout import validate_grid
+                validate_grid(parent)
+            fields = parent.get("fields", [])
+            for field in fields:
+                for reference, reverse in (("childFieldId", "parentFieldId"), ("parentFieldId", "childFieldId")):
+                    if not field.get(reference):
+                        continue
+                    related = [other for other in fields if other.get("fieldId") == field[reference]]
+                    if len(related) != 1 or related[0] is field or related[0].get(reverse) != field.get("fieldId"):
+                        raise ValueError("Composite fields require unique reciprocal parent/child bindings in the same group")
     for pointer, keys in orders:
         data, spans = _data(text)
         fields = pointer_value(data, pointer)

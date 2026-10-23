@@ -1,6 +1,6 @@
 {
   "name": "guthon-bridge",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "private": true,
   "description": "Chrome extension + local bridge for Guthon low-code development tools.",
   "scripts": {

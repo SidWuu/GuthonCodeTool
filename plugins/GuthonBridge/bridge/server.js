@@ -567,7 +567,7 @@ const server = http.createServer(async (req, res) => {
     res.once('finish', complete); res.once('close', complete);
   }
 
-  if (req.method === 'POST' && ['/pageContext', '/removePageContext', '/navigate', '/navigationResult'].includes(req.url)) {
+  if (req.method === 'POST' && ['/pageContext', '/removePageContext', '/navigate', '/pageLifecycle', '/navigationResult'].includes(req.url)) {
     try {
       const payload = await readBody(req);
       if (req.url === '/pageContext') {
@@ -582,7 +582,8 @@ const server = http.createServer(async (req, res) => {
       const context = pageContexts.get(payload.contextId, payload.workspaceKey);
       const route = await resolveRequestWorkspace(context);
       if (!route.ok || route.workspaceKey !== context.workspaceKey) throw new Error('页面身份已不属于目标工作区，请刷新平台上下文');
-      return sendJson(res, 202, pageContexts.navigate(payload));
+      if (req.url === '/pageLifecycle' && payload.target?.action !== 'inspect' && route.workspace?.capabilities?.['svn.edit'] !== true) throw new Error('工作区未授权 PAGE 平台写入');
+      return sendJson(res, 202, req.url === '/pageLifecycle' ? pageContexts.lifecycle(payload) : pageContexts.navigate(payload));
     } catch (error) { return sendJson(res, 400, {ok: false, message: error.message}); }
   }
 

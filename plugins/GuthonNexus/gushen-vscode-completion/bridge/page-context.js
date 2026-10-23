@@ -18,6 +18,15 @@ function navigationTarget(value) {
   throw new Error('浏览器定位需要精确 PAGE ID 或过程函数包名和函数名');
 }
 
+function lifecycleTarget(value) {
+  if (!value || !['inspect', 'create', 'copy', 'delete'].includes(value.action)) throw new Error('无效的 PAGE 生命周期操作');
+  if (value.pageId && !PAGE.test(value.pageId)) throw new Error('PAGE 身份无效');
+  if (['copy', 'delete'].includes(value.action) && !PAGE.test(value.pageId || '')) throw new Error('必须指定来源 PAGE');
+  if (JSON.stringify(value).length > 12000) throw new Error('PAGE 生命周期参数过大');
+  return Object.fromEntries(['action','pageId','properties','expectedVersion','expectedPage']
+    .filter(key => value[key] !== undefined).map(key => [key,value[key]]).concat([['type','page-lifecycle']]));
+}
+
 function snapshot(payload) {
   if (!WORKSPACE.test(payload?.workspaceKey) || !CLIENT.test(payload?.clientId)
       || !Number.isInteger(payload.tabId) || payload.tabId < 0) throw new Error('页面快照缺少有效工作区或页签身份');
@@ -88,23 +97,24 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     if (!item) throw new Error('平台页签快照已过期或不属于目标工作区，请在平台刷新定位上下文');
     return item;
   }
-  function navigate(payload) {
+  function dispatch(payload, lifecycle = false) {
     const context = get(payload.contextId, payload.workspaceKey);
-    const target = navigationTarget(payload.target);
+    const target = lifecycle ? lifecycleTarget(payload.target) : navigationTarget(payload.target);
     if (![...subscribers].some(s => s.clientId === context.clientId && !s.res.destroyed)) throw new Error('浏览器事件连接未就绪，请刷新平台页签');
     if (commands.size >= 64) throw new Error('浏览器定位请求过多，请等待完成');
     const item = {requestId: crypto.randomUUID(), contextId: context.contextId, clientId: context.clientId,
       tabId: context.tabId, workspaceKey: context.workspaceKey, pageOrigin: context.pageOrigin,
-      target, state: 'PENDING', expiresAt: now() + commandTtlMs};
+      target, state: 'PENDING', expiresAt: now() + (lifecycle ? 120000 : commandTtlMs)};
     commands.set(item.requestId, item);
-    emit('navigate', item, s => s.clientId === context.clientId);
+    emit(lifecycle ? 'page-lifecycle' : 'navigate', item, s => s.clientId === context.clientId);
     return {ok: true, requestId: item.requestId, state: item.state};
   }
   function result(payload) {
     expire();
     const item = commands.get(payload.requestId);
     if (!item || item.workspaceKey !== payload.workspaceKey) throw new Error('定位请求已过期或不属于目标工作区；禁止自动重放');
-    return {ok: true, requestId: item.requestId, state: item.state, message: item.message || ''};
+    return {ok: true, requestId: item.requestId, state: item.state, message: item.message || '',
+      ...(item.target.type === 'page-lifecycle' ? {data: item.data || null} : {})};
   }
   function complete(payload) {
     expire();
@@ -113,6 +123,10 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     if (item.state !== 'PENDING') return result(item);
     item.state = payload.ok === true ? 'SUCCEEDED' : 'FAILED';
     item.message = text(payload.message, 512);
+    if (item.target.type === 'page-lifecycle' && payload.data && JSON.stringify(payload.data).length <= 32000) {
+      item.data = Object.fromEntries(['state','action','page','sourceVersion','modules','systemIds','message','platformApplied']
+        .filter(key => payload.data[key] !== undefined).map(key => [key,payload.data[key]]));
+    }
     emit('navigation-result', result(item), s => s.workspaceKey === item.workspaceKey);
     return result(item);
   }
@@ -129,7 +143,7 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     res.on('close', () => {clearInterval(heartbeat); subscribers.delete(subscriber);});
   }
   function dispose() {for (const s of subscribers) s.res.end(); subscribers.clear();}
-  return {publish, list, remove, get, navigate, result, complete, subscribe, expire, dispose};
+  return {publish, list, remove, get, navigate: payload => dispatch(payload), lifecycle: payload => dispatch(payload, true), result, complete, subscribe, expire, dispose};
 }
 
 module.exports = {createPageContexts, snapshot, navigationTarget};

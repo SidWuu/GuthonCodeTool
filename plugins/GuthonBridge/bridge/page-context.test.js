@@ -60,3 +60,19 @@ test('reconnection replaces stale subscriber and never replays navigation', () =
   try {assert.equal(old.destroyed, true); assert.equal(res.frames.join('').includes('navigate'), false);}
   finally {registry.dispose();}
 });
+
+test('PAGE lifecycle uses exact paired context, bounded metadata receipts and no reconnect replay', () => {
+  const registry=createPageContexts();const context=registry.publish(payload);const res=response();
+  registry.subscribe(res,{clientId:payload.clientId});
+  try {
+    const request=registry.lifecycle({contextId:context.contextId,workspaceKey:context.workspaceKey,
+      target:{action:'copy',pageId:'PG-1',properties:{pageAliasId:'demo.copy'},execute:'PRIVATE'}});
+    assert.ok(res.frames.join('').includes('event: page-lifecycle'));
+    assert.equal(res.frames.join('').includes('PRIVATE'),false);
+    registry.complete({...payload,requestId:request.requestId,ok:true,data:{state:'SUCCEEDED',page:{pageId:'PG-NEW'},script:'PRIVATE'}});
+    const result=registry.result({workspaceKey:context.workspaceKey,requestId:request.requestId});
+    assert.equal(result.data.page.pageId,'PG-NEW');assert.equal(JSON.stringify(result).includes('PRIVATE'),false);
+    const next=response();registry.subscribe(next,{clientId:payload.clientId});
+    assert.equal(next.frames.join('').includes('page-lifecycle'),false);
+  } finally {registry.dispose();}
+});

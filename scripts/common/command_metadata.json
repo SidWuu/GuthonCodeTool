@@ -361,8 +361,8 @@
       "timeoutMs": 120000
     },
     "page-editor": {
-      "summary": "本地 PAGE 可视化编辑快照、联合预检、受控保存与恢复",
-      "stdin": "{\"action\":\"open|preview|save|resume\",...}",
+      "summary": "PAGE 设计契约、身份诊断、可视化快照、结构预检与受控保存恢复",
+      "stdin": "{\"action\":\"contract|inspect|validate|open|structure-open|preview|save|resume\",...}",
       "kind": "write",
       "timeoutMs": 120000
     },

@@ -9,6 +9,7 @@ import uuid
 
 from common.page_projection import extract_page_field_entities, pointer_value
 from common.source_format import decode_source
+from common.page_design import prepare_member
 from providers.svn.checkout import atomic_json, operation_lock, require_capability
 
 from . import documents, page_nodes
@@ -131,6 +132,7 @@ def open_field_insert(
         candidate["id"] = uuid.uuid4().hex.upper()
         if "guid" in candidate:
             candidate["guid"] = uuid.uuid4().hex.upper()
+        candidate = prepare_member(candidate, parent["type"], identity_seed=candidate["id"])
         all_fields = extract_page_field_entities(parsed)
         for identity_key in ("id", "guid"):
             if identity_key not in candidate:

@@ -160,7 +160,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <a class="toc-link toc-sub" href="#5-3-查询与排错" data-title="5.3 查询源码">5.3 查询源码</a>
 <a class="toc-link toc-sub" href="#5-4-受控修改-page-节点" data-title="5.4 修改 PAGE 脚本或 SQL">5.4 修改 PAGE 脚本或 SQL</a>
 <a class="toc-link toc-sub" href="#5-5-受控修改过程函数" data-title="5.5 修改过程函数">5.5 修改过程函数</a>
-<a class="toc-link toc-sub" href="#5-6-新增与拷贝-page-字段" data-title="5.6 新增或拷贝 PAGE 字段">5.6 新增或拷贝 PAGE 字段</a>
+<a class="toc-link toc-sub" href="#5-6-新增与拷贝-page-字段" data-title="5.6 用 AI 调整 PAGE 设计">5.6 用 AI 调整 PAGE 设计</a>
 <a class="toc-link" href="#6-日常工作流" data-title="6. 日常工作流">6. 日常工作流</a>
 <a class="toc-link toc-sub" href="#6-1-database-工作流" data-title="6.1 DATABASE 工作流">6.1 DATABASE 工作流</a>
 <a class="toc-link toc-sub" href="#6-2-svn-工作流" data-title="6.2 SVN 工作流">6.2 SVN 工作流</a>
@@ -461,8 +461,13 @@ args = ["mcp", "--stdio", "--home", "/本地数据目录"]</code></pre></div>
 <p>明确提出要改的 PAGE、脚本或 SQL 以及预期行为。要求 AI 先读取现状、预览差异，再修改已授权的本地源码；完成后在 Nexus SCM 审阅差异。MCP 不提交 SVN，也不替代平台测试。</p>
 <h3 id="5-5-受控修改过程函数">5.5 修改过程函数</h3>
 <p>提供完整包名、函数名和目标工作区。确认候选与差异后再修改。若提示写入结果未知，先查询原操作记录，不重复发起同一次修改；处理方法见<a href="GuthonCodeTool_QA.html?q=MCP%20%E5%86%99%E5%85%A5">MCP 写入问题</a>。</p>
-<h3 id="5-6-新增与拷贝-page-字段">5.6 新增或拷贝 PAGE 字段</h3>
-<p>明确指定 PAGE、同一字段集合、字段编码和插入位置。当前支持单字段新增或同集合拷贝；修改后检查配置、顺序与引用，并在平台核验。完整限制见<a href="GuthonCodeTool_全功能说明.html#9-4-调用流程">受控修改流程</a>。</p>
+<h3 id="5-6-新增与拷贝-page-字段">5.6 用 AI 调整 PAGE 设计</h3>
+<p>让 AI 调整已授权 PAGE 的字段、按钮、事件、数据源或布局时，明确页面、所属区域和预期行为。已有页面无需先在平台填写事件占位注释；整页新建、复制、删除按下一节操作；菜单仍按平台流程准备。</p>
+<ol><li>更新后重启 MCP，确认存在结构编辑工具；没有时让 AI 核对当前 CLI 是否支持同一受控入口。</li><li>让 AI 先查询设计能力并检查当前页面，再按平台配置准备候选、补齐绑定并预览差异。删除或移动前核对依赖关系。</li><li>检查后保存本地候选；在平台核验字段显示、后续属性编辑、按钮点击、查询联动和权限，确认保存重开后成员数量及配置正确，随后按团队流程提交或发布。</li></ol>
+<p>单字段新增和同集合拷贝仍可使用原入口；图形面板的常用属性编辑以面板显示的范围为准。支持范围和接口参数见<a href="GuthonCodeTool_全功能说明.html#page-structure-edit">结构编辑参考</a>。</p>
+<h3 id="5-7-page-lifecycle">5.7 用 AI 新建、复制或删除整个页面</h3>
+<ol><li>更新工具和 Bridge Chrome 扩展，重启 MCP。登录谷神平台，选择目标系统并展开模块目录，在 Bridge 弹窗绑定目标工作区。</li><li>向 AI 说明目标模块、页面类型、名称和别名；复制时提供来源页面，删除时明确精确目标。AI 应先读取当前平台上下文和页面版本，再展示操作预览。</li><li>核对预览的平台、来源、目标和操作范围后执行。此处会直接改变平台页面；源码结构编辑则仍保存到本地。</li><li>若结果等待中或未知，让 AI 查询原操作记录，先在平台核对，不能换请求重复创建或删除。成功后刷新平台目录，再按现有同步流程更新本地源码和索引。</li></ol>
+<p>整页操作不会自动提交 SVN 或发布。详细参数和状态含义见<a href="GuthonCodeTool_全功能说明.html#page-lifecycle">PAGE 生命周期参考</a>。</p>
 
 </section>
 

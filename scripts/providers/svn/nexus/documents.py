@@ -503,6 +503,7 @@ def read(
     fun_id: str = "",
     json_pointer: str = "",
     working_copy_id: str = "",
+    _design_anchor: bool = False,
 ) -> dict:
     require_capability(workspace, "browse")
     # An editable read also creates an edit lease in the shared session ledger,
@@ -518,7 +519,17 @@ def read(
         if entry is None:
             raise SystemExit(f"SVN object is outside the current authorization scope: {item['source_path']}")
         path = Path(item["local_path"])
-        content, fragment_type = _document_content(item, json_pointer)
+        if _design_anchor:
+            # Internal immutable anchor: a blank PAGE need not invent a script
+            # just to acquire the ordinary source/session authorization lease.
+            if item["source_table"] != "page" or path.suffix.lower() != ".json" or json_pointer != "/pageId":
+                raise SystemExit("Invalid PAGE design anchor")
+            content = json.loads(decode_source(path.read_bytes())[0]).get("pageId")
+            if not isinstance(content, str) or content != item["source_id"]:
+                raise SystemExit("PAGE design anchor identity mismatch")
+            fragment_type = "page-js"
+        else:
+            content, fragment_type = _document_content(item, json_pointer)
         base_content = _base_document_content(path, json_pointer, fragment_type)
         session = load_session(workspace)
         known_file = session["files"].get(item["source_path"])
@@ -784,6 +795,11 @@ def _prepare_write(
                 raise SystemExit("PAGE fields fragment must be valid JSON") from error
             if not isinstance(replacement, list) or any(not isinstance(field, dict) for field in replacement):
                 raise SystemExit("PAGE fields fragment must be an array of objects")
+            from common import page_design, page_structure
+            if pointer in page_structure.targets(data)[0]:
+                replacement = page_design.prepare_collection(current_value, replacement,
+                    page_structure.component_type(data, pointer), identity_seed=current_hash + pointer)
+                content = json.dumps(replacement, ensure_ascii=False, indent=2)
             after_text = replace_json_value(source_text, pointer, replacement, current_value)
         else:
             encoded_replacements = {}
@@ -1493,6 +1509,16 @@ def write_page_nodes_batch(
             "written": physical_changed, "status": state, "results": results,
         }
         if dry_run:
+            created_nodes = []
+            design_diagnostics = {}
+            if editor_operations is not None:
+                from common.page_projection import extract_page_nodes
+                from common.page_structure import inspect
+                design_diagnostics = inspect(parsed_after)
+                before_pointers = {node.json_pointer for node in extract_page_nodes(data)}
+                created_nodes = [{"jsonPointer": node.json_pointer, "nodeType": node.node_type,
+                                  "eventScope": node.event_scope}
+                                 for node in extract_page_nodes(parsed_after) if node.json_pointer not in before_pointers]
             return {
                 "ok": True, "dryRun": True, "workspaceKey": workspace["workspaceKey"],
                 "sourcePath": first["item"]["source_path"],
@@ -1502,6 +1528,8 @@ def write_page_nodes_batch(
                 "changed": physical_changed, "byteDelta": len(after_bytes) - len(first["sourceBytes"]),
                 "nodes": [{"jsonPointer": item["jsonPointer"], "changed": item["changed"]}
                           for item in results],
+                **({"createdNodes": created_nodes} if editor_operations is not None else {}),
+                **({"designDiagnostics": design_diagnostics} if editor_operations is not None else {}),
             }
         if operation_path:
             if operation is None:

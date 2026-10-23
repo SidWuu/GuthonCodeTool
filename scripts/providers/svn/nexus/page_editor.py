@@ -6,7 +6,6 @@ import uuid
 import json
 
 from common.page_editor import describe, MAX_PAGE_BYTES
-from common.page_projection import extract_page_nodes
 from common.source_format import decode_source
 from providers.svn.checkout import atomic_json, file_hash, operation_lock, require_capability
 from . import documents, page_field_mutation, page_nodes
@@ -23,13 +22,9 @@ def open_editor(workspace, *, source_namespace, source_id, fun_id=""):
             raise ValueError("PAGE exceeds the 4 MB local editor limit")
         text = decode_source(path.read_bytes())[0]
         model = describe(text)
-        anchor = next((node for node in extract_page_nodes(data)
-                       if node.node_type == "FIELD_COLLECTION"), None)
-        if anchor is None:
-            anchor = next((node for node in extract_page_nodes(data) if node.node_type in {"SCRIPT", "SQL"}), None)
         opened = documents.read(workspace, source_type="page", source_id=source_id, fun_id=fun_id,
-                                json_pointer=anchor.json_pointer if anchor else "",
-                                working_copy_id=record["working_copy_id"])
+                                json_pointer="/pageId", working_copy_id=record["working_copy_id"],
+                                _design_anchor=True)
         token = ""
         if opened["editable"]:
             if opened["sourceHash"] != record["source_hash"]:
@@ -40,6 +35,8 @@ def open_editor(workspace, *, source_namespace, source_id, fun_id=""):
                 "kind": "PAGE_EDITOR", "documentId": opened["documentId"],
                 "sessionId": opened["sessionId"], "sourcePath": record["source_path"],
                 "sourceHash": opened["sourceHash"], "scopeDigest": load_authorized_scope(workspace).digest,
+                "sourceNamespace": source_namespace, "sourceId": source_id, "funId": fun_id,
+                "documentHash": opened["documentHash"],
                 "expiresAt": int(time.time()) + 30 * 60, "anchorContent": opened["content"],
             }
             documents._prune_document_leases(session)
@@ -47,6 +44,7 @@ def open_editor(workspace, *, source_namespace, source_id, fun_id=""):
         result = {"workspaceKey": workspace["workspaceKey"], "sourceNamespace": source_namespace,
                 "sourceId": source_id, "funId": fun_id, "workingCopyId": record["working_copy_id"],
                 "sourcePath": record["source_path"], "sourceHash": opened["sourceHash"],
+                "sessionId": opened["sessionId"], "documentId": opened["documentId"],
                 "baseRevision": record.get("svn_revision", ""), "editToken": token,
                 "editable": bool(token), "model": model, "sourceText": text,
                 "expiresAt": session["pageEditTokens"][token]["expiresAt"] if token else 0}
@@ -94,13 +92,24 @@ def run(workspace, config, payload):
     if not isinstance(payload, dict):
         raise ValueError("PAGE editor requires a JSON object")
     action = payload.get("action")
-    if action == "open" and set(payload) <= {"action", "sourceNamespace", "sourceId", "funId"}:
+    if action == "contract" and set(payload) == {"action"}:
+        from common.page_design import contract
+        return contract()
+    if action == "validate" and set(payload) == {"action", "content"}:
+        from common.page_editor import _data
+        from common.page_structure import inspect
+        return inspect(_data(payload["content"])[0])
+    if action == "inspect" and set(payload) <= {"action", "sourceNamespace", "sourceId", "funId"}:
+        return inspect_design(workspace, source_namespace=payload["sourceNamespace"],
+            source_id=payload["sourceId"], fun_id=payload.get("funId", ""))
+    if action in {"open", "structure-open"} and set(payload) <= {"action", "sourceNamespace", "sourceId", "funId"}:
         if (any(not isinstance(payload.get(key), str) or not payload[key].strip() or len(payload[key]) > 512
                 for key in ("sourceNamespace", "sourceId"))
                 or not isinstance(payload.get("funId", ""), str) or len(payload.get("funId", "")) > 512):
             raise ValueError("Explicit sourceNamespace and sourceId are required")
-        return open_editor(workspace, source_namespace=payload["sourceNamespace"],
-                           source_id=payload["sourceId"], fun_id=payload.get("funId", ""))
+        opener = open_structure_edit if action == "structure-open" else open_editor
+        return opener(workspace, source_namespace=payload["sourceNamespace"],
+                      source_id=payload["sourceId"], fun_id=payload.get("funId", ""))
     if action in {"preview", "save"} and set(payload) <= {"action", "editToken", "operations", "idempotencyKey"}:
         if not isinstance(payload.get("editToken"), str):
             raise ValueError("editToken is required")
@@ -113,3 +122,27 @@ def run(workspace, config, payload):
             raise ValueError("operationId must be text")
         return documents.resume_page_node_operation(workspace, config, operation_id=payload["operationId"])
     raise ValueError("Unsupported PAGE editor action or arguments")
+
+
+def open_structure_edit(workspace, *, source_namespace, source_id, fun_id=""):
+    """Expose structure locators to AI without returning whole PAGE/script bodies."""
+    require_capability(workspace, "edit")
+    opened = open_editor(workspace, source_namespace=source_namespace, source_id=source_id, fun_id=fun_id)
+    if not opened["editable"]:
+        raise ValueError("PAGE structure is not editable; inspect authorization and external modifications")
+    model = opened.pop("model")
+    opened.pop("sourceText")
+    return {**opened, "insertTargets": model["insertTargets"], "eventOwners": model["eventOwners"],
+            "collections": [{"pointer": group["pointer"], "kind": group["kind"],
+                             "fields": [{"key": field["key"], "pointer": field["pointer"], "label": field["label"]}
+                                        for field in group["fields"]]} for group in model["collections"]]}
+
+
+def inspect_design(workspace, *, source_namespace, source_id, fun_id=""):
+    from common.page_structure import inspect
+    require_capability(workspace, "browse")
+    with operation_lock(workspace, "page-design-inspect", shared=True):
+        generation, record, data = page_field_mutation._source_snapshot(workspace, source_namespace, source_id, fun_id)
+        return {"workspaceKey": workspace["workspaceKey"], "sourceNamespace": source_namespace,
+                "sourceId": source_id, "sourceHash": record["source_hash"],
+                "indexGeneration": generation, **inspect(data)}

@@ -1,4 +1,4 @@
-importScripts("host-settings.js", "host-config.js", "nexus-locator.js", "task-history.js", "event-client.js", "component-client.js");
+importScripts("host-settings.js", "host-config.js", "nexus-locator.js", "task-history.js", "event-client.js", "component-client.js", "page-lifecycle.js");
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.tabs.query({}, (tabs) => {
@@ -82,11 +82,11 @@ chrome.alarms?.onAlarm.addListener(alarm => { if (alarm.name === 'guthon-compone
 chrome.runtime.onStartup?.addListener(() => { void reportComponent(); });
 void reportComponent();
 async function handleBridgeEvent(event, command) {
-  if (event !== 'navigate') return;
+  if (!['navigate', 'page-lifecycle'].includes(event)) return;
   const identity = await clientId();
   if (command.clientId !== identity || !Number.isInteger(command.tabId)
       || command.contextId !== `${identity}:${command.tabId}` || !publishedTabs.has(command.tabId)) return;
-  let ok = false; let message = '';
+  let ok = false; let message = ''; let data;
   try {
     const tab = await chrome.tabs.get(command.tabId);
     if (!GuthonBridgeHost.isAllowed(tab.url) || new URL(tab.url).origin !== command.pageOrigin) throw new Error('平台页签来源已改变');
@@ -94,6 +94,17 @@ async function handleBridgeEvent(event, command) {
     if (!inspected?.ok) throw new Error('无法读取当前平台身份，请刷新页签');
     const route = await bridgeRequest('/routeWorkspace', {...inspected.data, pageOrigin: command.pageOrigin, workspaceKey: command.workspaceKey});
     if (!route.ok || route.workspaceKey !== command.workspaceKey) throw new Error('当前平台身份不属于目标工作区');
+    if (event === 'page-lifecycle') {
+      if (command.target?.type !== 'page-lifecycle') throw new Error('PAGE 生命周期命令类型不匹配');
+      if (command.target.action !== 'inspect' && route.workspace?.capabilities?.['svn.edit'] !== true) throw new Error('当前工作区未授权 PAGE 平台写入');
+      const results = await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',func:runPageLifecycle,
+        args:[{...command.target, expectedOrigin:command.pageOrigin, systemIds:[inspected.data.systemId,...(inspected.data.systemIds || [])].filter(Boolean)}]});
+      if (!results?.[0]?.result) throw new Error('PAGE 生命周期结果未知');
+      data = results[0].result; ok = true;
+      await bridgeRequest('/navigationResult', {requestId: command.requestId, clientId: identity,
+        tabId: command.tabId, workspaceKey: command.workspaceKey, ok, data});
+      return;
+    }
     if (!['page', 'procedure'].includes(command.target?.type)) throw new Error('不支持的定位对象类型');
     if (command.target.type === 'procedure' && !inspected.data.dataSourceId) throw new Error('未识别当前平台数据源，请先选择数据源');
     const opened = await chrome.tabs.sendMessage(tab.id, {type: 'run-page-command', command: 'open-source-target',
