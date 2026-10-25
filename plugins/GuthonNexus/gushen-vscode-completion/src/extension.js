@@ -21,7 +21,8 @@ const { prepareWorkspaceSetup, promptWorkspaceCreation, workspaceActions } = req
 const { promptDatabaseDiagnosis } = require('./database-config');
 const { exportAiContext, validateContextResult } = require('./ai-context-export');
 const { ToolJsonClient } = require('./tool-json-client');
-const { searchPickItems, workspaceCockpit } = require('./workspace-assistant');
+const { workspaceCockpit } = require('./workspace-assistant');
+const { showWorkspaceSearch } = require('./workspace-search');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 const {
   normalizeExecutionMode, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime,
@@ -638,7 +639,7 @@ class ToolTreeDataProvider {
         '创建本地配置并选择源码来源'
       ), ...workspaces.map((item) => {
         const actions = workspaceActions(item);
-        const cockpit = workspaceCockpit(item);
+        const cockpit = workspaceCockpit(item, this.indexRecovery?.(item.workspaceKey));
         const node = new vscode.TreeItem(item.displayName, vscode.TreeItemCollapsibleState.Collapsed);
         node.command = {
           command: 'gushenCompletion.expandProjectSource',
@@ -668,6 +669,7 @@ class ToolTreeDataProvider {
           : undefined;
         node.children = [
           cockpitNode,
+          toolItem('检查此工作区环境', 'gushenCompletion.runDoctor', 'pulse', undefined, [item.workspaceKey]),
           toolItem(
             `源码来源：${sourceModeLabel(item.sourceMode)}`,
             'gushenCompletion.selectWorkspaceSourceMode',
@@ -793,6 +795,7 @@ function activate(context) {
     onToolTreeChanged: () => toolView.refresh(),
     claimOperation: (workspaceKey, label) => claimToolRun(TOOL_COMMANDS.svn, workspaceKey, label),
   });
+  toolView.indexRecovery = svnServices.indexRecovery;
   const refreshToolData = () => {
     workspaceRegistry.invalidate();
     toolView.refresh();
@@ -877,41 +880,20 @@ function activate(context) {
     const requestedKey = typeof workspaceValue === 'string' ? workspaceValue : '';
     const workspace = await selectWorkspace(requestedKey, sourceMode);
     if (!workspace) return undefined;
-    const query = await vscode.window.showInputBox({
+    const selected = await showWorkspaceSearch({
+      vscode,
       title: `统一搜索 · ${workspace.displayName}`,
-      prompt: '搜索源码名称、ID、函数、条件、赋值、异常、表读写或调用关系',
       value: vscode.window.activeTextEditor?.selection && !vscode.window.activeTextEditor.selection.isEmpty
         ? vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection).trim().slice(0,100) : '',
-      validateInput: (value) => String(value || '').trim() ? undefined : '请输入搜索关键词',
-    });
-    if (!query) return undefined;
-    const result = await assistantClient.run(
-      workspace.workspaceKey,
-      TOOL_COMMANDS.search,
-      ['--query', query, '--limit', '30']
-    );
-    if (!result.items?.length) {
-      return vscode.window.showInformationMessage(`未找到与“${query}”相关的本地索引结果`);
-    }
-    const selected = await vscode.window.showQuickPick(searchPickItems(result), {
-      title: `统一搜索 · ${result.items.length} 条结果`,
-      matchOnDescription: true,
-      matchOnDetail: true,
+      defaultAction: exportOnly ? 'context-file' : 'open',
+      search: query => assistantClient.run(workspace.workspaceKey, TOOL_COMMANDS.search, ['--query', query, '--limit', '30']),
     });
     if (!selected) return undefined;
-    if (exportOnly) return saveAiContext(workspace, selected.item.identity);
-    const action = await vscode.window.showQuickPick([
-      { label: '打开源码', value: 'open', description: selected.item.filePath || selected.item.identity?.sourcePath || '' },
-      { label: '复制精简 AI 上下文', value: 'context', description: '定位、关键关系和最多 5 条高价值事实' },
-      { label: '复制详细 AI 上下文', value: 'context-detailed', description: '用于需要更多调用关系和事实的深入分析' },
-      { label: '导出 AI 上下文文件', value: 'context-file', description: '保存到当前私有工作区 context/ai，提供绝对路径' },
-    ], { title: selected.label });
-    if (!action) return undefined;
-    if (action.value === 'context-file') return saveAiContext(workspace, selected.item.identity);
-    if (action.value === 'context') {
+    if (selected.action === 'context-file') return saveAiContext(workspace, selected.item.identity);
+    if (selected.action === 'context') {
       return copyAiContext(workspace.workspaceKey, selected.item.identity);
     }
-    if (action.value === 'context-detailed') {
+    if (selected.action === 'context-detailed') {
       return copyAiContext(workspace.workspaceKey, selected.item.identity, true);
     }
     if (workspace.sourceMode === 'svn' && selected.item.identity?.sourceType) {
@@ -919,6 +901,7 @@ function activate(context) {
         workspaceKey: workspace.workspaceKey,
         ...selected.item.identity,
       });
+      if (!identity) return undefined;
       return svnServices.virtualFs.open(
         identity,
         selected.item.line > 0 ? { lineNumber: selected.item.line } : {}
@@ -1444,7 +1427,26 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.exportBillTypes', (workspaceKey) => runTool(TOOL_COMMANDS.exportBillTypes, [], true, workspaceKey)),
     vscode.commands.registerCommand('gushenCompletion.exportSystemScripts', (workspaceKey) => runTool(TOOL_COMMANDS.exportSystemScripts, [], true, workspaceKey)),
     vscode.commands.registerCommand('gushenCompletion.exportViews', (workspaceKey) => runTool(TOOL_COMMANDS.exportViews, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.runDoctor', () => runTool(TOOL_COMMANDS.doctor, ['--json'])),
+    vscode.commands.registerCommand('gushenCompletion.runDoctor', async (workspaceValue = '') => {
+      const workspaceKey = typeof workspaceValue === 'string' ? workspaceValue : workspaceValue?.guthonWorkspaceKey || '';
+      const release = claimToolRun(TOOL_COMMANDS.doctor, workspaceKey);
+      if (!release) return;
+      try {
+        const tool = await configuredTool({writeDescriptor: false});
+        if (!tool) return;
+        const signature = () => {
+          const settings = vscode.workspace.getConfiguration('gushenCompletion');
+          return JSON.stringify(['executionMode', 'toolHome', 'toolPath', 'developmentRoot', 'scriptPythonPath', 'scriptToolPath', 'bridgePort']
+            .map(key => settings.get(key, '')));
+        };
+        const runtime = signature(), {showEnvironmentCheck} = require('./environment-check');
+        return await showEnvironmentCheck({vscode, workspaceKey,
+          bridgePort: vscode.workspace.getConfiguration('gushenCompletion').get('bridgePort', 17361),
+          client: new ToolJsonClient({getTool: async () => tool, processClient}),
+          isCurrent: () => signature() === runtime});
+      } catch (error) { return vscode.window.showErrorMessage(`环境检查未完成：${error.message}`); }
+      finally { release(); }
+    }),
     vscode.commands.registerCommand('gushenCompletion.runDiagnosis', async (workspaceKey) => {
       const selected = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: false, canSelectMany: false, filters: { JSON: ['json'] }, title: '选择排查定义 JSON' });
       if (selected) return runTool(TOOL_COMMANDS.diagnose, [selected[0].fsPath], true, workspaceKey);

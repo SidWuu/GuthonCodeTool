@@ -195,3 +195,184 @@ test('large event bursts use bounded batches rather than file requests', async (
     assert.deepEqual(outputs, []);
   } finally { watcher.dispose(); }
 });
+
+function recoveryFixture(backend, extra = {}) {
+  const store = new Map(), changes = [], watched = [];
+  const state = {get: key => store.get(key), async update(key, value) { if (value === undefined) store.delete(key); else store.set(key, value); }};
+  const workspace = {workspaceKey: 'projects.demo', root: path.resolve('/workspace/demo'),
+    workingCopies: [{id: 'wc', root: path.resolve('/checkout/demo'), localSubdir: '.'}]};
+  const vscode = {RelativePattern: class {}, workspace: {createFileSystemWatcher() {
+    const watcher = {onDidChange(fn) {this.changed = fn; return {dispose() {}};}, onDidCreate: () => ({dispose() {}}),
+      onDidDelete: () => ({dispose() {}}), dispose() {this.disposed = true;}};
+    watched.push(watcher); return watcher;
+  }}};
+  const watcher = new SvnSourceWatcher({vscode, backend, state, debounceMs: 10000, retryDelays: [],
+    onChanged: async (_key, result) => changes.push(result), ...extra});
+  watcher.sync([workspace]);
+  const enqueue = name => watcher._schedule(workspace, workspace.workingCopies[0], {fsPath: path.join(workspace.workingCopies[0].root, name)});
+  return {watcher, workspace, store, state, vscode, changes, watched, enqueue};
+}
+
+test('a failed transaction retains every submitted path and targeted retry clears persisted recovery', async t => {
+  const calls = []; let fail = true;
+  const f = recoveryFixture({reindexFiles: async (_key, paths) => {
+    calls.push(paths);
+    return fail ? {ok: false, stale: true, reindex: {errors: [{path: 'bad.json', error: 'invalid JSON'}]}}
+      : {ok: true, paths: [], reindex: {changed: 0, skippedFiles: paths.length}};
+  }}); t.after(() => f.watcher.dispose());
+  f.enqueue('bad.json'); f.enqueue('good.json'); await f.watcher._flush(f.workspace.workspaceKey); await f.watcher.persistence;
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount, 2);
+  assert.deepEqual([...f.store.values()][0].failures.map(item => item.path), ['bad.json', 'good.json']);
+  fail = false; await f.watcher.retry(f.workspace.workspaceKey); await f.watcher.persistence;
+  assert.deepEqual(calls, [['bad.json', 'good.json'], ['bad.json', 'good.json']]);
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount, 0);
+  assert.equal(f.store.size, 0);
+  assert.equal(f.changes.at(-1).stale, false);
+  assert.deepEqual(f.changes.at(-1).paths, ['bad.json', 'good.json']);
+});
+
+test('automatic retries stop after the bounded backoff attempts', {timeout: 2000}, async t => {
+  let calls = 0, complete;
+  const done = new Promise(resolve => { complete = resolve; });
+  const f = recoveryFixture({reindexFiles: async () => { calls++; throw new Error('read unavailable'); }}, {
+    retryDelays: [0, 0], onRecoveryChanged: key => {
+      const state = f.watcher.recoveryState(key);
+      if (calls === 3 && !state.retryScheduled && !state.retrying) complete();
+    },
+  }); t.after(() => f.watcher.dispose());
+  f.enqueue('one.json'); await f.watcher._flush(f.workspace.workspaceKey); await done;
+  assert.equal(calls, 3); assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount, 1);
+});
+
+test('restarting restores only paths in the exact workspace and checkout identity', async t => {
+  const f = recoveryFixture({reindexFiles: async () => { throw new Error('offline'); }});
+  t.after(() => f.watcher.dispose());
+  f.enqueue('one.json'); await f.watcher._flush(f.workspace.workspaceKey); await f.watcher.persistence; f.watcher.dispose();
+  const saved = [...f.store.values()][0];
+  saved.failures.push(null, {path: '../escape.json', message: 'bad'}, {path: '.svn/private.json', message: 'bad'}, {path: '/outside.json', message: 'bad'});
+  const calls = [];
+  const restored = new SvnSourceWatcher({vscode: f.vscode, state: f.state, retryDelays: [],
+    backend: {reindexFiles: async (_key, paths) => { calls.push(paths); return {ok: true, paths, reindex: {changed: paths.length}}; }}});
+  t.after(() => restored.dispose()); restored.sync([f.workspace]);
+  assert.equal(restored.recoveryState(f.workspace.workspaceKey).failedCount, 1);
+  restored.sync([{...f.workspace, root: path.resolve('/workspace/other'), workingCopies: [{id: 'wc', root: path.resolve('/checkout/other'), localSubdir: '.'}]}]);
+  assert.equal(restored.recoveryState(f.workspace.workspaceKey).failedCount, 0);
+  restored.sync([f.workspace]); assert.equal(restored.recoveryState(f.workspace.workspaceKey).failedCount, 1);
+  await restored.retry(f.workspace.workspaceKey); assert.deepEqual(calls, [['one.json']]);
+});
+
+test('changing a checkout during a read cannot publish the old failure into the new workspace', async t => {
+  let release, started;
+  const began = new Promise(resolve => { started = resolve; });
+  const f = recoveryFixture({reindexFiles: async () => { started(); await new Promise(resolve => { release = resolve; }); throw new Error('old checkout failed'); }});
+  t.after(() => f.watcher.dispose()); f.enqueue('old.json'); const pending = f.watcher._flush(f.workspace.workspaceKey); await began;
+  f.watcher.sync([{...f.workspace, workingCopies: [{id: 'wc', root: path.resolve('/checkout/new'), localSubdir: '.'}]}]);
+  release(); await pending;
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount, 0); assert.equal(f.changes.length, 0);
+});
+
+test('disposing cancels delayed retries while retaining the persisted failure list', async () => {
+  let calls = 0;
+  const f = recoveryFixture({reindexFiles: async () => { calls++; throw new Error('offline'); }}, {retryDelays: [10]});
+  f.enqueue('one.json'); await f.watcher._flush(f.workspace.workspaceKey); await f.watcher.persistence; f.watcher.dispose();
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(calls, 1); assert.equal(f.store.size, 1);
+});
+
+test('large failed batches retain all paths while retry requests remain bounded', async t => {
+  const sizes = []; let fail = true;
+  const f = recoveryFixture({reindexFiles: async (_key, paths) => {
+    sizes.push(paths.length);
+    if (fail) throw new Error('temporary read failure');
+    return {ok: true, paths, reindex: {changed: paths.length}};
+  }}); t.after(() => f.watcher.dispose());
+  for (let i = 0; i < 1001; i++) f.enqueue(i + '.json');
+  await f.watcher._flush(f.workspace.workspaceKey);
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount, 1001);
+  fail = false; await f.watcher.retry(f.workspace.workspaceKey);
+  assert.deepEqual(sizes, [1000, 1, 1000, 1]);
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount, 0);
+});
+
+test('changing a logical checkout prefix replaces callbacks and disposal prevents re-registration', async t => {
+  const calls = [];
+  const f = recoveryFixture({reindexFiles: async (_key, paths) => {calls.push(paths); return {ok: true, paths, reindex: {changed: paths.length}};}});
+  t.after(() => f.watcher.dispose());
+  const old = f.watched[0], next = {...f.workspace, workingCopies: [{...f.workspace.workingCopies[0], localSubdir: 'pages/new'}]};
+  f.watcher.sync([next]); assert.equal(old.disposed, true); assert.equal(f.watched.length, 2);
+  old.changed({fsPath: path.join(next.workingCopies[0].root, 'old.json')});
+  f.watched[1].changed({fsPath: path.join(next.workingCopies[0].root, 'one.json')});
+  await f.watcher._flush(next.workspaceKey); assert.deepEqual(calls, [['pages/new/one.json']]);
+  f.watcher.dispose(); f.watcher.sync([next]); assert.equal(f.watched.length, 2);
+});
+
+test('adding a checkout preserves failed files belonging to an unchanged working copy', async t => {
+  const f = recoveryFixture({reindexFiles: async () => {throw new Error('offline');}});
+  t.after(() => f.watcher.dispose()); f.enqueue('one.json'); await f.watcher._flush(f.workspace.workspaceKey);
+  const next = {...f.workspace, workingCopies: [...f.workspace.workingCopies,
+    {id: 'extra', root: path.resolve('/checkout/extra'), localSubdir: 'extra'}]};
+  f.watcher.sync([next]); assert.equal(f.watcher.recoveryState(next.workspaceKey).failedCount, 1);
+  await f.watcher.persistence;
+  const restarted = new SvnSourceWatcher({vscode: f.vscode, state: f.state, retryDelays: [], backend: f.watcher.backend});
+  t.after(() => restarted.dispose()); restarted.sync([next]);
+  assert.equal(restarted.recoveryState(next.workspaceKey).failedCount, 1);
+});
+
+test('persisted recovery binds the most specific logical checkout rather than its root prefix', async t => {
+  const f = recoveryFixture({reindexFiles: async () => {throw new Error('offline');}});
+  t.after(() => f.watcher.dispose());
+  const extra = {id: 'extra', root: path.resolve('/checkout/extra'), localSubdir: 'extra'};
+  const next = {...f.workspace, workingCopies: [...f.workspace.workingCopies, extra]};
+  f.watcher.sync([next]); f.watched.at(-1).changed({fsPath: path.join(extra.root, 'one.json')});
+  await f.watcher._flush(next.workspaceKey); await f.watcher.persistence;
+  assert.equal([...f.store.values()][0].failures[0].root, extra.root);
+  const restarted = new SvnSourceWatcher({vscode: f.vscode, state: f.state, retryDelays: [], backend: f.watcher.backend});
+  t.after(() => restarted.dispose()); restarted.sync([next]);
+  assert.equal(restarted.recoveryState(next.workspaceKey).failedCount, 1);
+});
+
+test('exact parse errors isolate the failed file and publish the remaining healthy paths',async t=>{
+  const calls=[];
+  const f=recoveryFixture({reindexFiles:async(_key,paths)=>{calls.push(paths);
+    return paths.includes('bad.json') ? {ok:true,stale:true,reindex:{errors:[{path:'bad.json',code:'SOURCE_PARSE_FAILED',error:'invalid JSON'}]}}
+      : {ok:true,paths,reindex:{changed:paths.length}};
+  }},{retryDelays:[10000]});t.after(()=>f.watcher.dispose());
+  f.enqueue('bad.json');f.enqueue('good.json');await f.watcher._flush(f.workspace.workspaceKey);
+  assert.deepEqual(calls,[['bad.json','good.json'],['good.json']]);
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount,1);
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).retryScheduled,false);
+  f.enqueue('another.json');await f.watcher._flush(f.workspace.workspaceKey);
+  assert.deepEqual(calls.at(-1),['another.json']);
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount,1);
+});
+
+test('unrelated changes do not reset exhausted transport retry budgets',async t=>{
+  const calls=[];const f=recoveryFixture({reindexFiles:async(_key,paths)=>{calls.push(paths);
+    if(paths.includes('bad.json'))throw new Error('unavailable');return {ok:true,paths,reindex:{changed:1}};
+  }});t.after(()=>f.watcher.dispose());f.enqueue('bad.json');await f.watcher._flush(f.workspace.workspaceKey);
+  const record=f.watcher.scopes.get(f.workspace.workspaceKey);record.autoAttempts=2;
+  f.enqueue('good.json');await f.watcher._flush(f.workspace.workspaceKey);
+  assert.equal(record.autoAttempts,2);assert.deepEqual(calls.at(-1),['good.json']);
+  f.enqueue('bad.json');assert.equal(record.autoAttempts,0);
+});
+
+test('identity and associated-source diagnostics keep the batch atomic and require targeted intervention',async t=>{
+  const calls=[];const f=recoveryFixture({reindexFiles:async(_key,paths)=>{calls.push(paths);return {
+    ok:true,stale:true,reindex:{errors:[{path:'bad.json',error:'duplicate object identity'}]}};
+  }},{retryDelays:[10000]});t.after(()=>f.watcher.dispose());
+  f.enqueue('bad.json');f.enqueue('other.json');await f.watcher._flush(f.workspace.workspaceKey);
+  assert.equal(calls.length,1);assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount,2);
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).retryScheduled,false);
+  await f.watcher.retry(f.workspace.workspaceKey);assert.equal(calls.length,2);
+  assert.deepEqual(calls[1],['bad.json','other.json']);
+});
+
+test('healthy file events do not postpone a failed file backoff deadline',async t=>{
+  const f=recoveryFixture({reindexFiles:async(_key,paths)=>{
+    if(paths.includes('bad.json'))throw new Error('temporary');return {ok:true,paths,reindex:{changed:1}};
+  }},{retryDelays:[10000]});t.after(()=>f.watcher.dispose());
+  f.enqueue('bad.json');await f.watcher._flush(f.workspace.workspaceKey);
+  const record=f.watcher.scopes.get(f.workspace.workspaceKey),timer=record.retryTimer;
+  f.enqueue('good.json');await f.watcher._flush(f.workspace.workspaceKey);
+  assert.equal(record.retryTimer,timer);
+});

@@ -1,13 +1,15 @@
-function workspaceCockpit(item) {
+function workspaceCockpit(item, recovery) {
   const cockpit = item.cockpit || {};
-  const health = cockpit.health || 'ACTION_REQUIRED';
+  const stale = item.sourceMode === 'svn' && recovery?.failedCount > 0;
+  const health = stale && cockpit.health === 'READY' ? 'ACTION_REQUIRED' : cockpit.health || 'ACTION_REQUIRED';
   const indexReady = Boolean(item.index?.ready);
   const rows = [
     {
-      label: `本地事实索引：${indexReady ? '可用' : '待建立'}`,
-      description: indexReady ? '点击搜索全部本地索引' : '点击建立索引',
-      icon: indexReady ? 'pass-filled' : 'warning',
-      command: indexReady
+      label: `本地事实索引：${stale ? '待恢复' : indexReady ? '可用' : '待建立'}`,
+      description: stale ? `${recovery.failedCount} 个文件 · ${recovery.retrying ? '正在定向刷新' : recovery.retryScheduled ? '等待自动重试' : '点击定向重试'}`
+        : indexReady ? '点击搜索全部本地索引' : '点击建立索引',
+      icon: stale ? 'warning' : indexReady ? 'pass-filled' : 'warning',
+      command: stale ? 'gushenCompletion.retrySvnIndexFailures' : indexReady
         ? 'gushenCompletion.searchWorkspace'
         : item.sourceMode === 'svn'
           ? 'gushenCompletion.reindexCalls'
@@ -27,7 +29,7 @@ function workspaceCockpit(item) {
   }
   if (item.sourceMode === 'svn') {
     rows.push({
-      label: `SVN 本地变更：${cockpit.dirtyWorkingCopies || 0}`,
+      label: `SVN 本地变更：${cockpit.dirtyWorkingCopies || 0} 个工作副本`,
       description: `${cockpit.workingCopyCount || 0} 个 working copy · 点击查看实时状态`,
       icon: cockpit.dirtyWorkingCopies ? 'source-control' : 'pass',
       command: 'gushenCompletion.manageSvnChanges',
@@ -45,7 +47,8 @@ function workspaceCockpit(item) {
   }
   return {
     label: '工作区驾驶舱',
-    description: health === 'READY' ? '就绪' : health === 'FAILED' ? '需处理失败' : `${cockpit.issueCount || 0} 项待处理`,
+    description: health === 'READY' ? (cockpit.dirtyWorkingCopies ? '就绪 · 有本地修改' : '就绪')
+      : health === 'FAILED' ? '需处理失败' : `${(cockpit.issueCount || 0) + (stale ? 1 : 0)} 项待处理`,
     icon: health === 'READY' ? 'dashboard' : health === 'FAILED' ? 'error' : 'warning',
     rows,
   };

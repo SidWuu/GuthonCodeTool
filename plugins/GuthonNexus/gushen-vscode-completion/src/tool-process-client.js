@@ -214,8 +214,7 @@ class ToolProcessClient {
   async request(tool, command, args = [], workspaceKey = '', input = undefined, options = {}) {
     if (this.disposed) throw new Error('ToolHost 客户端已关闭');
     const kind = requestKind(command, args);
-    if (kind === 'read' && this.allowReadLane && this.active?.kind === 'write'
-        && this.active.timeoutMs > 120000) {
+    if (kind === 'read' && this.allowReadLane && this.active?.kind === 'write') {
       this.readClient ||= new ToolProcessClient(this.readClientOptions);
       return this.readClient.request(tool, command, args, workspaceKey, input, options);
     }

@@ -2,6 +2,9 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const {PageDraft} = require('./model');
 const {buildOutline} = require('./outline');
+const {draftChanges} = require('./comparison');
+const {mergePageDraft} = require('./source-merge');
+const {PageRecoveryStore} = require('./recovery-store');
 const {nativeHtml} = require('./platform-assets');
 const {projectNative, nativeChanges} = require('./native-model');
 const {DesignerResources} = require('./resource-manager');
@@ -11,10 +14,14 @@ const escape = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<
 const pageKey = identity => JSON.stringify([identity.workspaceKey, identity.sourceNamespace, identity.sourceId, identity.funId || '']);
 
 class PageEditorController {
-  constructor({vscode, context, backend, virtualFs, getTool, resources = new DesignerResources({getTool}), onSaved = async () => {}, onResourceOutput = () => {}}) {
+  constructor({vscode, context, backend, virtualFs, getTool, resources = new DesignerResources({getTool}),
+    recoveryStore = new PageRecoveryStore(context), maxClosedPages = 4, maxClosedBytes = 16 * 1024 * 1024,
+    onSaved = async () => {}, onResourceOutput = () => {}}) {
     Object.assign(this, {vscode, context, backend, virtualFs, onSaved, onResourceOutput});
     this.resources = resources;
+    Object.assign(this, {recoveryStore, maxClosedPages, maxClosedBytes});
     this.pages = new Map(); this.opening = new Map(); this.resourceJobs = new Map();
+    this.comparisonRefreshes = new Map(); this.disposed = false;
     this.registrations = [vscode.workspace.onDidChangeTextDocument(event => this.documentChanged(event.document)),
       vscode.workspace.onDidSaveTextDocument?.(document=>this.documentChanged(document)),
       vscode.workspace.onDidCloseTextDocument?.(document=>this.documentChanged(document))].filter(Boolean);
@@ -26,7 +33,119 @@ class PageEditorController {
     result.model.pageName = pageDisplayName(identity)
       || pageDisplayName({...result,pageName:result.model.pageName}) || pageDisplayName(page);
     result.model.outline = buildOutline(page,result.model);
+    result.loadedAt = new Date().toISOString();
     return result;
+  }
+  async refreshComparison(session) {
+    const snapshot=session.snapshot;
+    if (session.comparisonRequest?.snapshot === snapshot) return session.comparisonRequest.promise;
+    const request = {snapshot};
+    session.comparisonRequest = request;
+    request.promise = Promise.resolve().then(async () => {
+      try {
+        const result = await this.backend.run(session.identity.workspaceKey, ['page-editor'], {action:'comparison',
+          sourceNamespace:session.identity.sourceNamespace, sourceId:session.identity.sourceId,
+          funId:session.identity.funId || '', sourceHash:snapshot.sourceHash});
+        if (this.disposed || session.snapshot!==snapshot) return;
+        if (result.sourceHash !== snapshot.sourceHash) throw new Error('比较基线与当前页面不一致，请重新载入');
+        session.svnComparison = result;
+      } catch (error) {
+        if (this.disposed || session.snapshot!==snapshot) return;
+        session.svnComparison = {available:false,message:error.message};
+      }
+      this.publish(session);
+    }).finally(() => { if (session.comparisonRequest === request) delete session.comparisonRequest; });
+    return request.promise;
+  }
+  async sourceChanged(workspaceKey, paths) {
+    for (const session of this.pages.values()) {
+      if (session.identity.workspaceKey !== workspaceKey || !paths.includes(session.snapshot.sourcePath)) continue;
+      await this.refreshSource(session);
+    }
+  }
+  archiveDraft(session) {
+    session.recovery = {sourceHash: session.snapshot.sourceHash, operations: session.draft.operations(),
+      nativeRecovery: session.nativeRecovery, pending: session.pending, sourceMerge: session.sourceMerge?.evidence,
+      previous: (session.recovery === session.savedRecovery ? session.recoveryReference : null) || session.recovery || null};
+  }
+  async refreshSource(session, origin = 'external', expectedMerge) {
+    const baseline = session.snapshot, generation = (session.sourceReadGeneration || 0) + 1;
+    let ownedSnapshot = baseline;
+    session.sourceReadGeneration = generation;
+    if (session.busy || session.pending) { session.sourceStale = true; this.publish(session); return; }
+    session.sourceReads = (session.sourceReads || 0) + 1;
+    try {
+      const fresh = await this.snapshot(session.identity);
+      if (this.disposed || session.sourceReadGeneration !== generation || session.snapshot !== baseline
+        || (expectedMerge && session.sourceMerge !== expectedMerge)) return;
+      if (session.busy || session.pending) { session.sourceStale = true; this.publish(session); return; }
+      const sameIdentity = ['workspaceKey', 'sourceNamespace', 'sourceId', 'workingCopyId', 'sourcePath', 'funId']
+        .every(key => (baseline[key] || '') === (fresh[key] || ''));
+      if (origin === 'external' && fresh.sourceHash === baseline.sourceHash && sameIdentity && fresh.editable === baseline.editable) {
+        if (session.sourceMerge) this.archiveDraft(session);
+        if (session.sourceMerge || session.sourceStale) session.draft.version++;
+        session.sourceStale = false; session.sourceMerge = null;
+        await this.persist(session); await this.refreshComparison(session); this.publish(session); return;
+      }
+      const previous = session.draft, oldMerge = session.sourceMerge;
+      const choices = oldMerge?.draft === previous && oldMerge.evidence.sourceHash === fresh.sourceHash ? oldMerge.evidence.choices : {};
+      const dirtyCode = this.vscode.workspace.textDocuments.some(doc => doc.isDirty && this.owns(session.identity, doc));
+      const reason = session.blocked || (dirtyCode ? '此 PAGE 的代码有未保存输入，请先保留代码和草稿再重新载入'
+        : session.native?.unconfirmed ? '原版设置对话框尚未确认，请先保留其输入并关闭，再重新载入'
+        : session.nativeRecovery ? '原版设计器仍有待核对候选，请先导出草稿并保留输入，再重新载入' : '');
+      const result = reason ? {blockedReason: reason, conflicts: [], paths: []} : mergePageDraft(baseline, previous, fresh, choices);
+      const evidence = {baseSourceHash: baseline.sourceHash, sourceHash: fresh.sourceHash,
+        blockedReason: result.blockedReason, paths: result.paths, conflicts: result.conflicts, choices};
+      if (oldMerge && (oldMerge.evidence.sourceHash !== fresh.sourceHash
+        || (result.blockedReason && oldMerge.evidence.conflicts.length))) this.archiveDraft(session);
+      if (result.blockedReason || result.conflicts.some(conflict => !conflict.choice)) {
+        previous.version++;
+        session.sourceStale = true;
+        session.sourceMerge = {snapshot: fresh, draft: previous, evidence};
+        session.status = result.blockedReason || `${result.conflicts.filter(conflict => !conflict.choice).length} 项外部修改冲突，请查看并逐项选择`;
+        session.svnComparison = {available: false, message: '本地文件已外部更新，请先处理外部修改冲突'};
+        await this.persist(session); this.publish(session); return;
+      }
+      if (Object.keys(choices).length) this.archiveDraft(session);
+      result.draft.version = previous.version + 1;
+      ownedSnapshot = fresh;
+      session.snapshot = fresh; session.draft = result.draft; session.sourceStale = false; session.sourceMerge = null;
+      session.status = origin === 'code' ? '代码已通过共用编辑器保存；页面草稿已同步'
+        : `外部修改已载入 · ${result.appliedCount} 项窗口调整已保留${result.absorbedCount ? ` · ${result.absorbedCount} 项已包含在文件中` : ''}`;
+      await this.persist(session); await this.refreshComparison(session); this.publish(session);
+    } catch (error) {
+      if (this.disposed || session.sourceReadGeneration !== generation || session.snapshot !== ownedSnapshot) return;
+      session.sourceStale = true; session.status = '页面更新核对失败：' + error.message;
+      session.svnComparison = {available: false, message: session.status};
+      if (session.sourceMerge) session.sourceMerge.evidence.blockedReason = session.status;
+      await this.persist(session); this.publish(session);
+    } finally {
+      session.sourceReads--; this.pruneClosedPages();
+    }
+  }
+  async statusChanged(workspaceKey) {
+    if (this.disposed) return;
+    let refresh = this.comparisonRefreshes.get(workspaceKey);
+    if (refresh) { refresh.queued = true; return refresh.promise; }
+    refresh = {};
+    this.comparisonRefreshes.set(workspaceKey, refresh);
+    refresh.promise = (async () => {
+      do {
+        await new Promise(resolve => { refresh.wake = resolve; refresh.timer = setTimeout(resolve, 100); });
+        refresh.wake = null; refresh.queued = false;
+        if (this.disposed) break;
+        for (const session of this.pages.values()) {
+          if (session.identity.workspaceKey!==workspaceKey || session.closed || session.busy || session.sourceStale) continue;
+          // A commit can change BASE during an earlier read without changing the working file.
+          await session.comparisonRequest?.promise;
+          if (!this.disposed && !session.closed && !session.busy && !session.sourceStale) await this.refreshComparison(session);
+        }
+      } while (refresh.queued && !this.disposed);
+      this.comparisonRefreshes.delete(workspaceKey);
+    })().finally(() => {
+      if (this.comparisonRefreshes.get(workspaceKey) === refresh) this.comparisonRefreshes.delete(workspaceKey);
+    });
+    return refresh.promise;
   }
   owns(identity, document) {
     if (document.uri.scheme !== SVN_SCHEME) return false;
@@ -43,34 +162,94 @@ class PageEditorController {
   }
   beforeCodeSave(uri) {
     for (const session of this.pages.values()) if (this.owns(session.identity,{uri})
-      && (session.busy || session.pending || session.native?.unconfirmed))
-      throw new Error('请先完成页面保存检查，或确认/取消原版设置对话框，再保存代码；当前输入已保留');
+      && (session.busy || session.pending || session.native?.unconfirmed || session.sourceStale))
+      throw new Error(session.sourceStale ? '本地文件已外部更新，请保留代码输入与页面草稿，重新载入并核对后再保存'
+        : '请先完成页面保存检查，或确认/取消原版设置对话框，再保存代码；当前输入已保留');
   }
   async persist(session) {
+    session.persistedClose = false;
+    const recovery = session.recovery;
+    const previousPersistence = session.persistence;
     const state = {
       sourceHash: session.snapshot.sourceHash, operations: session.draft.operations(),
       pending: session.pending || null, nativeRecovery: session.nativeRecovery || null, recovery: session.recovery || null,
+      sourceMerge: session.sourceMerge?.evidence || null,
     };
-    session.persistence = (session.persistence || Promise.resolve()).catch(() => {}).then(() =>
-      this.context.workspaceState.update(session.storageKey, state));
-    await session.persistence;
+    const persistence = (previousPersistence || Promise.resolve()).catch(() => {}).then(async () => {
+      if (recovery) {
+        const saved = recovery === session.savedRecovery && session.recoveryReference
+          ? session.recoveryReference : await this.recoveryStore.save(session.storageKey, recovery);
+        state.recovery = saved;
+        if (session.recovery === recovery) { session.savedRecovery = recovery; session.recoveryReference = saved; }
+      }
+      await this.context.workspaceState.update(session.storageKey, state);
+    });
+    session.persistence = persistence;
+    await persistence;
+    if (session.closed && session.persistence === persistence) {
+      session.persistedClose = true;
+      const history = [...session.draft.past, ...session.draft.future]
+        .flatMap(entries => entries.map(entry => [entry.before, entry.after]));
+      session.closedBytes = Buffer.byteLength(JSON.stringify([session.snapshot, session.draft.model,
+        session.draft.baseline, session.draft.operations(), session.recovery, history]));
+      this.pruneClosedPages();
+    }
+  }
+  pruneClosedPages() {
+    if (this.disposed) return;
+    const closed = [...this.pages].filter(([, session]) => session.closed && !session.native && !session.busy && !session.pending && !session.sourceMerge?.applying
+      && !session.sourceReads && !this.resourceJobs.has(session.identity.workspaceKey)
+      && !session.sourceStale && !session.sourceMerge && !session.draft.operations().length && !session.nativeRecovery && !session.blocked
+      && !this.vscode.workspace.textDocuments.some(document => document.isDirty && this.owns(session.identity, document))
+      && session.persistedClose).sort(([, left], [, right]) => left.closedAt - right.closedAt);
+    let count = closed.length, bytes = closed.reduce((sum, [, session]) => sum + session.closedBytes, 0);
+    for (const [key, session] of closed) {
+      if (count <= this.maxClosedPages && bytes <= this.maxClosedBytes) break;
+      this.pages.delete(key); count--; bytes -= session.closedBytes;
+    }
   }
   publish(session) {
-    void session.panel.webview.postMessage({type: 'state', version: session.draft.version,
-      model: session.draft.model, baseline: session.draft.baseline,
-      operations: session.draft.operations(), editable: session.snapshot.editable && !session.blocked && !session.busy,
-      busy: session.busy, blocked: session.blocked, recovery: session.recovery,
+    const merge = session.sourceMerge;
+    const sourceMerge = merge ? {...merge.evidence, choices: {...merge.evidence.choices}, applying: !!merge.applying,
+      conflicts: merge.evidence.conflicts.map(conflict => {
+        const display = value => (conflict.kind === 'text' ? String(value) : JSON.stringify(value, null, 2)) ?? '属性不存在';
+        const texts = [conflict.before, conflict.file, conflict.local].map(display);
+        return {id: conflict.id, label: conflict.label, pointer: conflict.pointer, choice: conflict.choice,
+          texts: texts.map(value => value.slice(0, 8000)), truncated: texts.some(value => value.length > 8000)};
+      })} : null;
+    if (!session.closed) {
+      const previous = session.published, operations = session.draft.operations(), signature = JSON.stringify(operations);
+      const full = previous?.draft !== session.draft || previous?.snapshot !== session.snapshot;
+      const sequence = session.messageSequence = (session.messageSequence || 0) + 1;
+      const message = {type: 'state', update: full ? 'full' : 'patch', sequence, baseSequence: previous?.sequence,
+      ...(full ? {baseline: session.draft.baseline} : {}), pageName: session.draft.model.pageName,
+      ...(full || previous.signature !== signature ? {operations} : {}), version: session.draft.version,
+      editable: session.snapshot.editable && !session.blocked && !session.busy && !session.sourceStale && !session.native?.unconfirmed,
+      sourceMerge,
+      busy: session.busy, blocked: session.blocked, recovery: session.recovery ? {available: true} : null,
       resourceBusy: this.resourceJobs.has(session.identity.workspaceKey),
       codeDirty: this.vscode.workspace.textDocuments.some(doc=>doc.isDirty && this.owns(session.identity,doc)),
       status: session.status || '', sourceHash: session.snapshot.sourceHash,
-      baseRevision: session.snapshot.baseRevision, pending: session.pending,
+      baseRevision: session.snapshot.baseRevision, pending: session.pending ? {operationId: session.pending.operationId || '', awaitingVerification: true} : null,
+      comparison: {...(full || previous.svn !== session.svnComparison ? {svn:session.svnComparison || {available:false,message:'正在读取 SVN BASE…'}} : {}),
+        ...(full || previous.signature !== signature ? {local:draftChanges(session.draft)} : {}),
+        savedAt:session.snapshot.loadedAt, sourceStale:!!session.sourceStale},
       designer: session.resourceInfo ? {app:session.resourceInfo.app,digest:session.resourceInfo.digest,
         platformUrl:session.resourceInfo.platformUrl,build:session.resourceInfo.build,message:session.resourceInfo.message,
-        state:session.resourceInfo.state,updateAvailable:session.resourceInfo.updateAvailable} : null});
+        state:session.resourceInfo.state,updateAvailable:session.resourceInfo.updateAvailable} : null};
+      session.published = {draft: session.draft, snapshot: session.snapshot, sequence, signature, svn: session.svnComparison};
+      void Promise.resolve(session.panel.webview.postMessage(message)).then(delivered => {
+        if (delivered === false && session.published?.sequence === sequence) session.published = null;
+      }).catch(() => { if (session.published?.sequence === sequence) session.published = null; });
+    }
     const pageTitle = [session.draft.model.pageName, session.identity.sourceId].filter(Boolean).join(' · ');
     session.panel.title = `${session.draft.operations().length ? '● ' : ''}${pageTitle} · 本地页面`;
     if (session.native) session.native.panel.title = `${pageTitle} · 原版设计视图`;
-    if (session.native && session.native.version !== session.draft.version) {
+    if (session.native && session.sourceStale) {
+      void session.native.panel.webview.postMessage({type: 'nativeError', error: '本地文件已外部更新，设计器输入保留；请返回“草稿与代码”核对'});
+      return;
+    }
+    if (session.native && !session.native.unconfirmed && session.native.version !== session.draft.version) {
       const projected = session.native.before
         ? {data: JSON.parse(session.snapshot.sourceText), model: session.draft.baseline}
         : projectNative(session.snapshot, session.draft);
@@ -78,10 +257,10 @@ class PageEditorController {
       void session.native.panel.webview.postMessage({type: 'nativeDocument', version: session.draft.version,
         data: projected.data, systemId: 'offline', before: !!session.native.before,
         pageName: session.draft.model.pageName,
-        editable: session.snapshot.editable && !session.blocked && !session.native.before,
+        editable: session.snapshot.editable && !session.blocked && !session.sourceStale && !session.native.before,
         sourceHash: session.snapshot.sourceHash, baseRevision: session.snapshot.baseRevision,
         resourceApp: session.native.assets.app, resourceDigest: session.native.assets.digest,
-        resourceStatus: session.resourceInfo?.message || '', platformUrl:session.resourceInfo?.platformUrl || ''});
+        resourceStatus: session.sourceStale ? '本地文件已外部更新，草稿基线已过期' : session.resourceInfo?.message || '', platformUrl:session.resourceInfo?.platformUrl || ''});
     }
   }
   error(session, error) { session.status = error.message; this.publish(session); }
@@ -112,37 +291,12 @@ class PageEditorController {
       if (session.busy || session.pending || session.blocked) {
         session.blocked ||= '代码已保存；页面有待核对操作，请导出草稿后重新载入'; this.publish(session); continue;
       }
-      try {
-        const snapshot = await this.snapshot(session.identity), previous = session.draft;
-        const draft = new PageDraft(snapshot.model);
-        for (const op of previous.operations()) {
-          if (op.kind === 'text') {
-            const old = previous.baseline.nodes.find(item => item.pointer === op.jsonPointer);
-            const fresh = draft.model.nodes.find(item => item.key === old?.key);
-            if (!fresh || (fresh.content !== old.content && fresh.content !== op.content)) throw new Error('同一脚本存在两份不同修改');
-            if (fresh.content !== op.content) draft.text(fresh.key, op.content);
-          } else {
-            const old = previous.baseline.collections.find(item => item.pointer === op.collectionPointer);
-            const fresh = draft.model.collections.find(item => item.pointer === op.collectionPointer);
-            if (!fresh) throw new Error('页面区域发生变化');
-            if (op.kind === 'order') {
-              if (JSON.stringify(old.fields.map(f=>f.key)) !== JSON.stringify(fresh.fields.map(f=>f.key))) throw new Error('字段顺序发生变化');
-              draft.order(op.collectionPointer,op.fieldKeys);
-            } else {
-              const value = collection => collection.fields.find(f=>f.key===op.fieldKey)?.properties.find(p=>p.name===op.property)?.value;
-              if (JSON.stringify(value(old)) !== JSON.stringify(value(fresh))) throw new Error('字段属性发生变化');
-              draft.property(op.collectionPointer,op.fieldKey,op.property,op.value);
-            }
-          }
-        }
-        draft.version = previous.version + 1; session.snapshot = snapshot; session.draft = draft;
-        session.status = '代码已通过共用编辑器保存；页面草稿已同步';
-      } catch (error) { session.blocked = `${error.message}；代码已保存，页面草稿保留，请导出并比较后重新载入`; }
-      await this.persist(session); this.publish(session);
+      await this.refreshSource(session, 'code');
     }
   }
   async save(session) {
-    if (session.busy || session.blocked) throw new Error(session.blocked || '页面正在保存');
+    if (session.native?.unconfirmed) throw new Error('请先确认或取消原版设置对话框，再保存页面草稿');
+    if (session.busy || session.blocked || session.sourceStale) throw new Error(session.blocked || (session.sourceStale ? '本地文件已外部更新，请保留草稿后重新载入' : '页面正在保存'));
     const operations = session.draft.operations();
     if (!operations.length) { session.status = '当前草稿已保存'; this.publish(session); return; }
     if (!session.snapshot.editable) throw new Error('当前页面只读');
@@ -197,6 +351,9 @@ class PageEditorController {
     const snapshot = await this.snapshot(session.identity);
     const next = new PageDraft(snapshot.model); next.version = session.draft.version + 1;
     session.snapshot = snapshot; session.draft = next; session.pending = null; session.blocked = '';
+    session.sourceStale=false;
+    session.sourceMerge=null;
+    await this.refreshComparison(session);
     session.status = '本地已保存 · 索引与差异已验证 · 平台结果待验收';
     await this.persist(session);
     try { await this.onSaved(session.identity.workspaceKey, session.snapshot.sourcePath); }
@@ -204,7 +361,8 @@ class PageEditorController {
   }
   async message(session, message) {
     if (!message || typeof message.type !== 'string') return;
-    if (message.type === 'ready') { this.publish(session); return; }
+    if (message.type === 'ready') { session.published = null; this.publish(session); return; }
+    if (message.type === 'compare') { await this.refreshComparison(session); return; }
     if (message.type === 'manageResources') {
       await this.manageResources(session); this.publish(session); return;
     }
@@ -212,18 +370,22 @@ class PageEditorController {
       await this.resourceTask(session,()=>this.importAssets(session)); return;
     }
     if (message.type === 'export') {
+      const recovery = await this.recoveryStore.expand(session.storageKey, session.recovery);
       const doc = await this.vscode.workspace.openTextDocument({language: 'json', content: JSON.stringify(
-        {sourceHash: session.snapshot.sourceHash, operations: session.draft.operations(), recovery: session.recovery,
-          nativeRecovery: session.nativeRecovery, pending: session.pending}, null, 2)});
+        {sourceHash: session.snapshot.sourceHash, operations: session.draft.operations(), recovery,
+          sourceMerge: session.sourceMerge?.evidence, nativeRecovery: session.nativeRecovery, pending: session.pending}, null, 2)});
       await this.vscode.window.showTextDocument(doc); this.publish(session); return;
     }
     if (message.type === 'reload') {
       if (session.busy) throw new Error('页面正在保存，请稍后重新载入');
+      if (session.sourceMerge?.applying) throw new Error('正在核对外部修改，请等待完成后重新载入');
+      if (session.native?.unconfirmed) throw new Error('请先保留原版设置对话框的输入并关闭，再重新载入');
       const snapshot = await this.snapshot(session.identity);
-      session.recovery = {sourceHash: session.snapshot.sourceHash, operations: session.draft.operations(),
-        nativeRecovery: session.nativeRecovery, pending: session.pending, previous: session.recovery || null};
+      this.archiveDraft(session);
       const draft = new PageDraft(snapshot.model); draft.version = session.draft.version + 1;
       session.snapshot = snapshot; session.draft = draft; session.blocked = ''; session.nativeRecovery = null; session.pending = null;
+      session.sourceStale=false; session.sourceMerge=null;
+      await this.refreshComparison(session);
       session.status = '已重新载入；旧草稿保留在“导出草稿”中';
       await this.persist(session); this.publish(session); return;
     }
@@ -243,8 +405,28 @@ class PageEditorController {
       this.publish(session); return;
     }
     if (message.version !== session.draft.version) { this.publish(session); throw new Error('界面版本已变化，请重试'); }
-    if (message.type === 'native') { await this.openNative(session); this.publish(session); return; }
+    if (message.type === 'resolveSourceConflict') {
+      const merge = session.sourceMerge;
+      if (!merge || merge.applying || merge.evidence.blockedReason || session.busy || session.pending || session.blocked
+        || message.sourceHash !== merge.evidence.sourceHash || !['draft', 'file'].includes(message.choice))
+        throw new Error('外部修改状态已变化，请查看当前冲突');
+      const conflict = merge.evidence.conflicts.find(item => item.id === message.id);
+      if (!conflict) throw new Error('冲突项已变化，请重新选择');
+      conflict.choice = message.choice; merge.evidence.choices[conflict.id] = message.choice;
+      session.draft.version++; await this.persist(session);
+      const remaining = merge.evidence.conflicts.filter(item => !item.choice).length;
+      if (remaining) { session.status = `${remaining} 项外部修改冲突待选择`; this.publish(session); return; }
+      merge.applying = true; this.publish(session);
+      try { await this.refreshSource(session, 'resolve', merge); }
+      finally { merge.applying = false; this.publish(session); }
+      return;
+    }
+    if (message.type === 'native') {
+      if (session.sourceStale) throw new Error('请先处理外部修改冲突，再打开原版设计视图');
+      await this.openNative(session); this.publish(session); return;
+    }
     if (message.type === 'openCode' || message.type === 'diff') {
+      if (session.sourceStale) throw new Error('本地文件已外部更新，请保留草稿后重新载入再打开代码');
       const node = session.draft.model.nodes.find(item => item.key === message.key);
       if (!node) throw new Error('节点已变化');
       if (message.type === 'diff') await this.vscode.commands.executeCommand('gushenCompletion.showSvnDiff',
@@ -253,7 +435,7 @@ class PageEditorController {
       this.publish(session);
       return;
     }
-    if (session.busy || session.blocked || !session.snapshot.editable) throw new Error(session.blocked || '页面当前不可修改');
+    if (session.busy || session.blocked || session.sourceStale || session.native?.unconfirmed || !session.snapshot.editable) throw new Error(session.blocked || '页面当前不可修改，请保留草稿后重新载入');
     if (message.type === 'property') session.draft.property(message.collectionPointer, message.fieldKey, message.name, message.value);
     else if (message.type === 'order') session.draft.order(message.collectionPointer, message.fieldKeys);
     else if (message.type === 'undo') session.draft.undo();
@@ -274,9 +456,12 @@ class PageEditorController {
     const panel = this.vscode.window.createWebviewPanel('guthon.pageEditor', `${title} · 本地页面`,
       this.vscode.ViewColumn.Active, {enableScripts: true, retainContextWhenHidden: true,
         localResourceRoots: [this.vscode.Uri.file(path.join(this.context.extensionPath, 'src/page-editor'))]});
-    session.panel = panel; session.closed = false;
+    session.panel = panel; session.closed = false; session.persistedClose = false; session.published = null;
     panel.webview.onDidReceiveMessage(message => { void this.message(session, message).catch(error => this.error(session, error)); });
-    panel.onDidDispose(() => { session.closed = true; void this.persist(session).catch(error => this.vscode.window.showErrorMessage(error.message)); });
+    panel.onDidDispose(() => {
+      session.closed = true; session.closedAt = Date.now();
+      void this.persist(session).catch(error => this.vscode.window.showErrorMessage(error.message));
+    });
     panel.webview.html = this.html(panel.webview);
   }
   async openPage(identity) {
@@ -291,11 +476,11 @@ class PageEditorController {
           if (existing.native) void existing.native.panel.webview.postMessage({type:'nativeTitle',pageName:name,pageId:identity.sourceId});
         }
       }
-      if (existing.closed) this.mount(existing);
-      if (existing.native) existing.native.panel.reveal();
-      else if (await this.resources.cached(identity.workspaceKey)) await this.openNative(existing);
-      else existing.panel.reveal();
+      const reopening = existing.closed;
+      if (reopening) this.mount(existing);
+      existing.panel.reveal();
       this.publish(existing);
+      if (reopening) await this.refreshComparison(existing);
       return existing;
     }
     if (this.vscode.workspace.textDocuments.some(doc => doc.isDirty && this.owns(identity, doc)))
@@ -306,7 +491,9 @@ class PageEditorController {
       draft: new PageDraft(snapshot.model), busy: false, blocked: '', status: '',
       storageKey: 'guthon.pageDraft.' + crypto.createHash('sha256').update(key).digest('hex')};
     const recovered = this.context.workspaceState.get(session.storageKey);
-    session.recovery = recovered?.recovery;
+    session.recoveryReference = recovered?.recovery?.kind === 'page-recovery-v1' ? recovered.recovery : null;
+    session.recovery = await this.recoveryStore.head(session.storageKey, recovered?.recovery);
+    session.savedRecovery = session.recovery;
     session.nativeRecovery = recovered?.nativeRecovery;
     if (recovered?.pending) {
       session.pending = recovered.pending; session.recovery = recovered;
@@ -315,10 +502,14 @@ class PageEditorController {
       if (recovered.sourceHash === snapshot.sourceHash) session.draft.restore(recovered.operations);
       else { session.recovery = recovered; session.status = '发现旧基线草稿，请导出比较；未覆盖当前页面'; }
     }
+    if (recovered?.sourceMerge && session.recovery !== recovered) {
+      session.recovery = recovered;
+      session.status = '上次外部修改报告已保留在“导出草稿”中，请核对当前文件';
+    }
     this.pages.set(key, session);
     this.mount(session);
-    try { if (await this.resources.cached(identity.workspaceKey)) await this.openNative(session); }
-    catch (error) { this.error(session,error); }
+    this.publish(session);
+    await this.refreshComparison(session);
     return session;
   }
   async importAssets(session) {
@@ -433,7 +624,7 @@ class PageEditorController {
     panel.onDidDispose(() => { if (session.native === native) session.native = null; this.publish(session); });
     panel.webview.onDidReceiveMessage(message => { void (async () => {
       if (message?.type === 'nativeReady') { native.version = -1; this.publish(session); return; }
-      if(message?.type==='nativeEditState') {native.unconfirmed=!!message.unconfirmed;return;}
+      if(message?.type==='nativeEditState') {native.unconfirmed=!!message.unconfirmed;this.publish(session);return;}
       if(message?.type==='nativeResources') {await this.manageResources(session);return;}
       if (message?.type === 'nativeManager') {
         if (session.closed) this.mount(session);
@@ -452,7 +643,7 @@ class PageEditorController {
         if (message.baseline?.pageId !== session.identity.sourceId) throw new Error('原版设计器身份无效');
         native.baseline = message.baseline; return;
       }
-      if (native.before || session.blocked || session.busy || !session.snapshot.editable) throw new Error(session.blocked || '当前画面为只读基线或页面不可修改');
+      if (native.before || session.blocked || session.busy || session.sourceStale || !session.snapshot.editable) throw new Error(session.blocked || '当前画面为只读基线或页面不可修改');
       if (message.type === 'nativeCandidate') {
         if (!native.baseline) throw new Error('原版设计器尚未建立基线');
         session.nativeRecovery = message.candidate;
@@ -485,10 +676,12 @@ class PageEditorController {
       <link rel="stylesheet" href="${uri('editor.css')}"><title>本地页面</title></head><body>
       <header><div class="heading"><div><span class="eyebrow">GUTHON NEXUS · PAGE WORKSPACE</span><h1 id="title">本地页面</h1></div><span id="status" role="status"></span></div><p id="baseline"></p>
       <div class="toolbar"><div class="action-group" role="group" aria-label="谷神平台与设计器"><span class="group-label">谷神</span><button id="native" class="primary">原版设计视图</button><button id="manageResources">平台资源</button></div>
-      <div class="action-group" role="group" aria-label="本地编辑"><span class="group-label">本地</span><button id="save">保存到本地</button><button id="undo">撤销</button><button id="redo">重做</button><button id="before">查看修改前</button><button id="export">导出草稿</button><button id="reload">重新载入</button><button id="resume">恢复保存检查</button></div><input id="search" type="search" placeholder="筛选字段名称或编码" aria-label="筛选字段"></div>
+      <div class="action-group" role="group" aria-label="本地编辑"><span class="group-label">本地</span><button id="save">保存到本地</button><button id="undo">撤销</button><button id="redo">重做</button><button id="compare" aria-expanded="false" aria-controls="compare-menu">比较改动</button><div id="compare-menu" hidden><button id="compare-svn">与 SVN 基线比较</button><button id="compare-local">与本地保存版本比较</button></div><button id="source-merge" hidden>外部修改冲突</button><button id="exit-compare" hidden>返回当前草稿</button><button id="export">导出草稿</button><button id="reload">重新载入</button><button id="resume">恢复保存检查</button></div><input id="search" type="search" placeholder="筛选字段名称或编码" aria-label="筛选字段"></div>
+      <p class="diff-legend"><span class="diff-svn">M · SVN 本地未提交</span><span class="diff-local">● · 窗口未保存</span><span id="comparison-status"></span></p>
       <p id="resources" class="resource-note"></p></header>
       <main><nav id="tree" aria-label="页面结构"></nav><section id="canvas" aria-label="字段与代码管理"></section><aside id="properties"></aside></main>
       <details id="changes"><summary>上次本地保存 → 当前草稿 · 修改明细</summary><pre id="delta"></pre></details>
+      <script nonce="${nonce}" src="${uri('model.js')}"></script><script nonce="${nonce}" src="${uri('state.js')}"></script>
       <script nonce="${nonce}" src="${uri('editor.js')}"></script></body></html>`;
   }
   async saveDirty(workspaceKey) {
@@ -498,6 +691,10 @@ class PageEditorController {
     }
   }
   dispose() {
+    this.disposed = true;
+    for (const refresh of this.comparisonRefreshes.values()) {
+      clearTimeout(refresh.timer); refresh.wake?.();
+    }
     for (const session of this.pages.values()) {
       session.native?.panel.dispose();
       session.panel.dispose();

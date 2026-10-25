@@ -19,11 +19,11 @@ class ToolJsonClient {
     this.outputLabel = outputLabel;
   }
 
-  async run(workspaceKey, command, args = [], input, { onOutput, timeoutMs = requestTimeoutMs(command, args) } = {}) {
+  async run(workspaceKey, command, args = [], input, { onOutput, timeoutMs = requestTimeoutMs(command, args), queueTimeoutMs } = {}) {
     const tool = await this.getTool();
     if (!tool) throw new Error('请先配置 GuthonCodeTool 运行模式和本地数据目录');
     if (this.processClient) {
-      const payload = await this.processClient.request(tool, command, args, workspaceKey, input, {onOutput});
+      const payload = await this.processClient.request(tool, command, args, workspaceKey, input, {onOutput, timeoutMs, queueTimeoutMs});
       if (payload?.ok !== true) throw payloadError(payload);
       return payload;
     }

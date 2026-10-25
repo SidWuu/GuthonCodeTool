@@ -17,7 +17,7 @@
     const loadId = ++generation; loading = true; waiting = false; baseline = null; version = message.version;
     document.getElementById('native-title').textContent = [message.pageName || message.data.pageName, message.data.pageId].filter(Boolean).join(' · ');
     document.getElementById('native-mode').textContent = message.before ? '上次本地保存 · 只读' : '当前草稿';
-    document.getElementById('native-compare').textContent = message.before ? '返回当前草稿' : '查看修改前';
+    document.getElementById('native-compare').textContent = message.before ? '返回当前草稿' : '查看本地保存版本';
     document.getElementById('native-save').disabled = !message.editable;
     evidence();
     vm.isLoadOk = false; await vm.$nextTick();

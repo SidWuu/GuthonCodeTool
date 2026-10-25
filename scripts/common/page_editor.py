@@ -87,6 +87,9 @@ def describe(text):
             if not isinstance(field, dict):
                 continue
             field_type = "button" if kind == "BUTTONS" else field.get("type", "")
+            # Native search-box serializes only its reset configuration in buttons[0];
+            # the query button is drawn by the component, not stored as an editable button.
+            button_role = "RESET" if kind == "BUTTONS" and parent.get("type") == "search-box" and index == 0 else ""
             supported = known and unique and field_type in KNOWN_FIELDS
             properties = []
             for name, label in ({**PROPERTIES, **BUTTON_PROPERTIES} if kind == "BUTTONS" else PROPERTIES).items():
@@ -94,7 +97,9 @@ def describe(text):
                     continue
                 properties.append({"name": name, "label": label, "value": field[name]})
             items.append({"key": keys[index], "pointer": pointer + "/" + str(index),
-                          "label": str((field.get("name") if kind == "BUTTONS" else None) or field.get("label") or field.get("disName") or keys[index]),
+                          "label": "重置" if button_role else str((field.get("name") if kind == "BUTTONS" else None)
+                              or field.get("label") or field.get("disName") or ("未命名按钮" if kind == "BUTTONS" else keys[index])),
+                          "buttonRole": button_role,
                           "type": field_type, "properties": properties, "editable": supported,
                           "reason": "" if supported else "未知控件、区域或字段身份不唯一，属性仅查看"})
         collections[pointer] = {"pointer": pointer, "label": str(parent.get("name") or parent.get("id") or pointer),

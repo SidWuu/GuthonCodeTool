@@ -457,8 +457,6 @@ def _workspace_cockpit(summary: dict) -> dict:
         messages.append("工作区资料尚未达到完整一致状态")
     elif summary.get("status") == "UNINITIALIZED" and index_ready:
         messages.append("工作区尚未完成初始化")
-    if dirty_count:
-        messages.append(f"{dirty_count} 个 SVN working copy 存在本地变更")
     if skipped_working_copies:
         messages.append(f"{len(skipped_working_copies)} 个 SVN scope 无权限或不存在，已跳过")
     return {

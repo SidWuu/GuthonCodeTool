@@ -650,12 +650,15 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
         return 0
     if selected_workspace:
         gusen_hub.set_workspace(selected_workspace)
+    if command == "doctor":
+        from common import doctor
+        return doctor.main(extra_args, workspace_key=selected_workspace or "")
     if command not in GLOBAL_COMMANDS and command != "pull" and not selected_workspace:
         raise SystemExit("Missing --workspace. Use products.<id> or projects.<id>.")
 
     config = gusen_hub.load_config()
     workspace = None if command in GLOBAL_COMMANDS or command == "pull" and not selected_workspace else gusen_hub.resolve_workspace(config)
-    if (command in DATABASE_COMMANDS or command == "doctor") and selected_workspace:
+    if command in DATABASE_COMMANDS and selected_workspace:
         workspace = gusen_hub.resolve_workspace(config, selected_workspace)
     checkpoint()
     restrict_to_index(command == 'reindex' and workspace is not None and workspace['sourceMode'] == 'svn')
@@ -992,10 +995,7 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
     if command in SCRIPT_COMMANDS:
         module_name, function_name = SCRIPT_COMMANDS[command]
         module = importlib.import_module(module_name)
-        delegated_args = extra_args
-        if command == "doctor" and workspace:
-            delegated_args = [*extra_args, "--workspace-key", workspace["workspaceKey"]]
-        result = getattr(module, function_name)(delegated_args)
+        result = getattr(module, function_name)(extra_args)
         if isinstance(result, dict):
             return 0 if result.get("ok", True) else 1
         return int(result) if isinstance(result, (bool, int)) else 0

@@ -72,6 +72,25 @@ async function selectEditableIdentity(vscode, backend, identity) {
   };
 }
 
+async function openChangedSource({vscode,backend,virtualFs,catalogTree,pageEditor}, identity) {
+  if (!identity.workspaceKey || !identity.sourceType || !identity.sourceId)
+    throw new Error('所选文件没有对应的 Nexus 源码对象，无法跳转编辑');
+  const target=identity.sourceWorkingCopyId ? {...identity,workingCopyId:identity.sourceWorkingCopyId} : identity;
+  if (target.sourceType==='page' && /\.json$/i.test(target.sourcePath || '') && !target.jsonPointer) {
+    const source=sourceModuleElement(await catalogTree.locate(target));
+    const object=source?.object;
+    if (!object?.sourceNamespace || source.workspaceKey!==target.workspaceKey
+      || object.sourceType!==target.sourceType || object.sourceId!==target.sourceId || (object.funId || '')!==(target.funId || '')
+      || String(object.sourcePath || '').replace(/\\/g,'/')!==target.sourcePath.replace(/\\/g,'/')
+      || (target.workingCopyId && object.workingCopyId!==target.workingCopyId)
+      || (target.sourceNamespace && object.sourceNamespace!==target.sourceNamespace))
+      throw new Error('SCM 文件与当前 PAGE 索引身份不一致，请刷新源码索引后重试');
+    return pageEditor.open({...object,workspaceKey:target.workspaceKey});
+  }
+  const editable=await selectEditableIdentity(vscode,backend,target);
+  return editable ? virtualFs.open(editable) : undefined;
+}
+
 async function showPageSemanticNodes(vscode, backend, virtualFs, element) {
   const sourceElement = sourceModuleElement(element);
   const object = sourceElement?.object;
@@ -400,11 +419,15 @@ function activateSvn({
     vscode, backend, contentProvider: diffContent,
     projectBase: (uri, base) => virtualFs.diffBaseContent(uri, base),
   });
+  let pageEditor;
   const scm = new SvnScmManager({
     vscode,
     backend,
     quickDiffProvider: quickDiff,
-    onStatusChanged: (workspaceKey, status) => catalogTree.setStatus(workspaceKey, status),
+    onStatusChanged: (workspaceKey, status) => {
+      catalogTree.setStatus(workspaceKey, status);
+      void pageEditor?.statusChanged(workspaceKey).catch(error=>streamBackendOutput(`PAGE 比较状态刷新失败：${error.message}\n`));
+    },
   });
   async function refreshWorkspaceScm(workspaceKey, options = {}) {
     const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
@@ -474,8 +497,11 @@ function activateSvn({
   sourceWatcher = new SvnSourceWatcher({
     vscode,
     backend,
+    state: context.workspaceState,
+    onRecoveryChanged: () => onToolTreeChanged?.(),
     onChanged: async (workspaceKey, result) => {
       catalogTree.refresh(workspaceKey);
+      await pageEditor.sourceChanged(workspaceKey, [...(result?.paths || []), ...(result?.failures || []).map(item=>item.sourcePath)]);
       virtualFs.invalidate(workspaceKey, true, undefined, [...(result?.paths || []), ...(result?.failures || []).map((item)=>item.sourcePath), ...(result?.sourcePath ? [result.sourcePath] : [])]);
       inheritanceView.invalidate(workspaceKey);
       try {
@@ -484,9 +510,10 @@ function activateSvn({
         vscode.window.showWarningMessage(`SVN 原文件变化后 SCM 刷新失败：${error.message}`);
       }
       onToolTreeChanged?.();
-      if (result?.stale || result?.ok === false) {
+      const recovery = sourceWatcher.recoveryState(workspaceKey);
+      if ((result?.stale || result?.ok === false) && !recovery.retryScheduled) {
         vscode.window.showWarningMessage(
-          `SVN 原文件变化已识别，但索引保留为 stale：${result.sourcePath}`
+          `SVN 索引仍有 ${recovery.failedCount} 个文件待恢复，旧索引已保留；请在驾驶舱点击索引行定向重试。`
         );
       }
     },
@@ -924,12 +951,7 @@ function activateSvn({
 
   const openSvnChangeInNexus = async (value) => {
     const resource = singleResource(value);
-    const identity = changeIdentity(resource);
-    if (!identity.workspaceKey || !identity.sourceType || !identity.sourceId) {
-      throw new Error('所选文件没有对应的 Nexus 源码对象，无法跳转编辑');
-    }
-    const editableIdentity = await selectEditableIdentity(vscode, backend, identity);
-    return editableIdentity ? virtualFs.open(editableIdentity) : undefined;
+    return openChangedSource({vscode,backend,virtualFs,catalogTree,pageEditor},changeIdentity(resource));
   };
 
   const showDeliveryReceipt = async (workspaceValue) => {
@@ -1002,7 +1024,7 @@ function activateSvn({
     }),
   });
 
-  const pageEditor = new PageEditorController({vscode, context, backend, virtualFs, getTool,
+  pageEditor = new PageEditorController({vscode, context, backend, virtualFs, getTool,
     onResourceOutput: (workspaceKey,message) => {
       if (message.startsWith('开始准备平台资源')) operationOutput.show(true);
       log('PAGE 平台资源',`${workspaceKey}｜${message}`);
@@ -1214,6 +1236,21 @@ function activateSvn({
       runSelectedTreeCommand(vscode, treeView, 'list.expand'))),
     vscode.commands.registerCommand('gushenCompletion.collapseSelectedSvnSource', withError(() =>
       runSelectedTreeCommand(vscode, treeView, 'list.collapseAllToFocus'))),
+    vscode.commands.registerCommand('gushenCompletion.retrySvnIndexFailures', withError((workspaceValue) => runClaimedValue(
+      workspaceValue,
+      async () => {
+        const workspaces = await listSvnWorkspaces();
+        const workspaceKey = workspaceKeyOf(workspaceValue);
+        const workspace = workspaceKey ? workspaces.find(item => item.workspaceKey === workspaceKey)
+          : workspaces.length === 1 ? workspaces[0]
+          : (await vscode.window.showQuickPick(workspaces.map(item => ({label: item.displayName, workspace: item})),
+            {title: '选择需要恢复索引的 SVN 工作区'}))?.workspace;
+        if (workspaceKey && !workspace) throw new Error('目标 SVN 工作区不存在，请刷新工作区后重试');
+        if (!workspace) return;
+        sourceWatcher.sync(workspaces);
+        await sourceWatcher.retry(workspace.workspaceKey);
+      }
+    ))),
     vscode.commands.registerCommand('gushenCompletion.refreshSvnSourceView', withError((workspaceKey) => runClaimed(
       workspaceKey || '',
       async () => {
@@ -1386,6 +1423,7 @@ function activateSvn({
     log,
     refresh,
     refreshWorkspaceList,
+    indexRecovery: workspaceKey => sourceWatcher.recoveryState(workspaceKey),
     saveDirtyDocuments,
     selectedWorkspaceKey() {
       return workspaceKeyFromElement(treeView.selection?.[0]);
@@ -1402,6 +1440,7 @@ module.exports = {
   selectedCandidateIds,
   notifyInformation,
   openSvnConflictMerge,
+  openChangedSource,
   callerIdentity,
   callerLabel,
   procedureIdentityFromElement,

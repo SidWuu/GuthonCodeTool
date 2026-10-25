@@ -224,6 +224,23 @@ test('read metadata remains responsive during a long write without replaying it'
  assert.equal(client.child,null);assert.equal(client.readClient,null);
 });
 
+test('interactive reads use the read lane during a normal-duration background index write',async()=>{
+ const host=`const readline=require('node:readline');let held;
+ console.log(JSON.stringify({type:'ready',protocolVersion:1}));
+ const done=r=>console.log(JSON.stringify({id:r.id,type:'result',ok:true,result:{command:r.command,workspaceKey:r.workspaceKey}}));
+ readline.createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);
+ if(r.release){done(held);held=null;}else if(r.command==='svn')held=r;else done(r);});`;
+ let starts=0;const client=new ToolProcessClient({spawnProcess:()=>{starts++;return spawn(process.execPath,['-e',host],{stdio:['pipe','pipe','pipe']});}});
+ const tool={toolPath:'/fixture',toolHome:'/home'};const writing=client.request(tool,'svn',['reindex-files'],'products.demo',{paths:['one.json']});
+ writing.catch(()=>{});
+ try {
+   while(!client.active)await new Promise(resolve=>setTimeout(resolve,2));
+   const result=await client.request(tool,'search',[],'projects.other',undefined,{timeoutMs:2000});
+   assert.equal(result.workspaceKey,'projects.other');assert.equal(starts,2);assert.equal(client.active.kind,'write');
+   client.child.stdin.write(JSON.stringify({release:true})+'\n');await writing;
+ } finally {await client.stop();}
+});
+
 
 test('workspace identity derives the same public metadata contract as Python',()=>{
  const {isWorkspaceKey}=require('../src/workspace-identity');

@@ -7,7 +7,7 @@ import json
 
 from common.page_editor import describe, MAX_PAGE_BYTES
 from common.source_format import decode_source
-from providers.svn.checkout import atomic_json, file_hash, operation_lock, require_capability
+from providers.svn.checkout import atomic_json, file_hash, operation_lock, require_capability, run_svn_binary, svn_info
 from . import documents, page_field_mutation, page_nodes
 from .manifest import load_authorized_scope, resolve_authorized_path
 
@@ -53,6 +53,40 @@ def open_editor(workspace, *, source_namespace, source_id, fun_id=""):
         return result
 
 
+def comparison_base(workspace, *, source_namespace, source_id, source_hash, fun_id=""):
+    """Read the local SVN BASE without granting a new edit lease or contacting HEAD."""
+    require_capability(workspace, "browse")
+    require_capability(workspace, "status")
+    with operation_lock(workspace, "page-editor-comparison", shared=True):
+        _, record, _ = page_field_mutation._source_snapshot(workspace, source_namespace, source_id, fun_id)
+        _, path, _ = resolve_authorized_path(load_authorized_scope(workspace), record["source_path"])
+        if record["source_hash"] != source_hash or file_hash(path) != source_hash:
+            raise ValueError("PAGE comparison baseline is stale; reload the local page")
+        base = run_svn_binary(["cat", "-r", "BASE", "--", str(path)], check=False)
+        if base.returncode:
+            return {"available": False, "sourceHash": source_hash,
+                    "message": "无法读取此文件的 SVN BASE（新文件可能尚无基线），未使用空页面替代"}
+        if len(base.stdout) > MAX_PAGE_BYTES:
+            raise ValueError("SVN BASE exceeds the 4 MB PAGE comparison limit")
+        text = decode_source(base.stdout)[0]
+        base_data = json.loads(text)
+        if base_data.get("pageId") != source_id:
+            raise ValueError("SVN BASE PAGE identity does not match the local page")
+        revision = svn_info(path).get("revision", "")
+        if file_hash(path) != source_hash:
+            raise ValueError("PAGE source changed while reading SVN BASE; reload the local page")
+        from common.page_comparison import compare_pages
+        current_text = decode_source(path.read_bytes())[0]
+        changes = compare_pages(base_data, json.loads(current_text))
+        if file_hash(path) != source_hash:
+            raise ValueError("PAGE source changed during comparison; reload the local page")
+        result = {"available": True, "sourceHash": source_hash, "baseRevision": revision,
+                  "changes": changes, "formatOnly": text != current_text and not changes["total"]}
+        if len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > 6 * 1024 * 1024:
+            raise ValueError("PAGE comparison exceeds response budget; inspect the full diff in SCM")
+        return result
+
+
 def save_editor(workspace, config, *, edit_token, operations, idempotency_key="", dry_run=False):
     require_capability(workspace, "edit")
     with operation_lock(workspace, "page-editor-save", blocking=True,
@@ -92,6 +126,12 @@ def run(workspace, config, payload):
     if not isinstance(payload, dict):
         raise ValueError("PAGE editor requires a JSON object")
     action = payload.get("action")
+    if action == "comparison" and set(payload) <= {"action", "sourceNamespace", "sourceId", "funId", "sourceHash"}:
+        if any(not isinstance(payload.get(key), str) or not payload[key].strip()
+               for key in ("sourceNamespace", "sourceId", "sourceHash")):
+            raise ValueError("Explicit PAGE identity and sourceHash are required for comparison")
+        return comparison_base(workspace, source_namespace=payload["sourceNamespace"], source_id=payload["sourceId"],
+                               source_hash=payload["sourceHash"], fun_id=payload.get("funId", ""))
     if action == "contract" and set(payload) == {"action"}:
         from common.page_design import contract
         return contract()

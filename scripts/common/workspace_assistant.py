@@ -84,11 +84,12 @@ def unified_search(workspace: dict, query: str, limit: int = 20) -> dict:
     if not normalized:
         raise SystemExit("统一搜索需要输入关键词")
     bounded_limit = max(1, min(int(limit), 50))
+    candidate_limit = min(bounded_limit, 10)
     with _connection(workspace) as connection:
         candidates = [
             dict(row)
             for row in gusen_hub.find_source_candidates(
-                connection, workspace["scopeId"], normalized, min(bounded_limit, 10), include_paths=True
+                connection, workspace["scopeId"], normalized, candidate_limit, include_paths=True
             )
         ]
         exact_source_match = any(
@@ -184,7 +185,7 @@ def unified_search(workspace: dict, query: str, limit: int = 20) -> dict:
             "sources": sum(item["kind"] == "source" for item in items),
             "facts": sum(item["kind"] == "fact" for item in items),
         },
-        "truncated": bool(fact_result.get("truncated")) or len(items) >= bounded_limit,
+        "truncated": bool(fact_result.get("truncated")) or len(candidates) >= candidate_limit or len(items) >= bounded_limit,
     }
 
 

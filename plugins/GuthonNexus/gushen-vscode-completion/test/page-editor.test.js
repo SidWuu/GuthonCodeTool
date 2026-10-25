@@ -17,6 +17,8 @@ function model() {return {pageId:'PG-1', collections:[{pointer:'/views/0/fields'
   nodes:[{key:'A-event',pointer:'/views/0/fields/0/pageEvents/onChangeScript',content:'old();',type:'SCRIPT',editable:true},
     {key:'sql',pointer:'/views/0/datasource/sql',content:'select 1',type:'SQL',editable:true}]};}
 const clone = value => JSON.parse(JSON.stringify(value));
+const recoveryRoot = require('node:fs').mkdtempSync(path.join(os.tmpdir(),'page-recovery-tests-'));
+test.after(()=>fs.rm(recoveryRoot,{recursive:true,force:true}));
 
 test('one draft combines properties, code and order; undo/redo and recovery remain coherent',()=>{
   const draft=new PageDraft(model());
@@ -97,10 +99,14 @@ function hostFixture() {
     FileType:{File:1},FilePermission:{Readonly:1},FileSystemError:{FileNotFound:()=>new Error('missing'),NoPermissions:()=>new Error('readonly')},
     WorkspaceEdit:class {replace(){}},Range:class {},commands:{async executeCommand(){}},
     workspace:{textDocuments:documents,registerFileSystemProvider(){return {dispose(){}};},onDidChangeTextDocument(){return {dispose(){}};},async applyEdit(){return true;}},
-    window:{async showErrorMessage(){},createWebviewPanel(){const panel={title:'',webview:{cspSource:'local:',asWebviewUri:()=>({toString:()=> 'local:file'}),async postMessage(message){panel.latest=message;},onDidReceiveMessage(fn){panel.receive=fn;}},reveal(){},onDidDispose(fn){panel.closed=fn;},dispose(){panel.closed?.();}};panels.push(panel);return panel;}}};
+    window:{async showErrorMessage(){},createWebviewPanel(){const receiver=new (require('../src/page-editor/state').PageStateReceiver)();
+      const panel={title:'',webview:{cspSource:'local:',asWebviewUri:()=>({toString:()=> 'local:file'}),async postMessage(message){ panel.wire=clone(message);
+        panel.latest=message.type==='state' ? receiver.receive(clone(message))?.state : message;
+      },onDidReceiveMessage(fn){panel.receive=fn;}},reveal(){},onDidDispose(fn){panel.closed=fn;},dispose(){panel.closed?.();}};panels.push(panel);return panel;}}};
   const identity={workspaceKey:'products.demo',sourceNamespace:'pages-A',sourceId:'PG-1',sourceType:'page'};
   const snapshot={...identity,workingCopyId:'wc',sourceHash:'a'.repeat(64),editToken:'token',editable:true,model:model(),sourceText:JSON.stringify(source)};
   const backend={async run(key,args,payload){calls.push({key,args,payload});if(payload.action==='open')return clone(snapshot);
+    if(payload.action==='comparison') return {available:true,sourceHash:snapshot.sourceHash,baseRevision:'1',changes:{rows:[],paths:[],total:0}};
     if(payload.action==='preview')return {candidateSourceHash:'b'.repeat(64)};
     if(payload.action==='save') {
       const draft=new PageDraft(snapshot.model);draft.restore(payload.operations);
@@ -108,7 +114,7 @@ function hostFixture() {
       snapshot.sourceHash='b'.repeat(64);
     }
     return {operationId:'op',localVerificationComplete:true,currentSourceMatches:true,currentIndexMatches:true,currentDiffMatches:true,state:'DIFF_VERIFIED'};}};
-  const context={extensionPath:'/extension',workspaceState:{get:key=>store.get(key),async update(key,value){store.set(key,value);}}};
+  const context={extensionPath:'/extension',storageUri:{fsPath:recoveryRoot},workspaceState:{get:key=>store.get(key),async update(key,value){store.set(key,value);}}};
   return {vscode,context,backend,identity,snapshot,panels,store,calls,documents,resources:{cached:async()=>null,resolve:async()=>null}};
 }
 
@@ -213,7 +219,7 @@ test('code save rebases matching native code drafts and preserves conflicts for 
   f.snapshot.model.nodes[0].content='local();';await host.codeSaved(uri);
   assert.equal(session.draft.operations().length,0);
   session.draft.text('A-event','native();');f.snapshot.model.nodes[0].content='editor();';
-  await host.codeSaved(uri);assert.match(session.blocked,/两份不同修改/);
+  await host.codeSaved(uri);assert.equal(session.sourceStale,true);assert.equal(session.sourceMerge.evidence.conflicts[0].local,'native();');
   assert.equal(session.draft.model.nodes[0].content,'native();');
 });
 
@@ -235,7 +241,7 @@ test('controller owns one PAGE and saves a mixed draft through preflight and exi
   await host.open(f.identity);assert.equal(f.panels.length,1);
   session.draft.text('sql','select 2');session.draft.order('/views/0/fields',['fieldId:B','fieldId:A']);
   await host.save(session);
-  assert.deepEqual(f.calls.map(call=>call.payload.action),['open','preview','save','open']);
+  assert.deepEqual(f.calls.map(call=>call.payload.action),['open','comparison','preview','save','open','comparison']);
   assert.ok(f.calls.every(call=>call.args[0]==='page-editor'));assert.equal(session.pending,null);
   assert.equal(session.draft.model.nodes.find(n=>n.key==='sql').content,'select 2');
   assert.equal(session.draft.model.collections[0].fields[0].key,'fieldId:B');
@@ -267,15 +273,22 @@ test('old-baseline recovery never applies to a newer source and stale UI message
   await assert.rejects(secondHost.message(session,{type:'property',version:77}),/版本/);
 });
 
-test('configured PAGE opens the original designer by default and compares a read-only saved baseline', async t => {
+test('configured PAGE defaults to the local manager; explicit native view compares a read-only saved baseline', async t => {
   const assets = await assetsFixture(t), f = hostFixture();
   const verified=await verifyAssets(assets.root);
-  f.resources={cached:async()=>({}),resolve:async()=>({assets:verified,app:verified.app,digest:verified.digest,build:'a'.repeat(64),platformUrl:'http://example.invalid/guthon/index.html',message:'cached'})};
+  let resourceReads=0;
+  f.resources={cached:async()=>{resourceReads++;return {};},resolve:async()=>{resourceReads++;return {assets:verified,app:verified.app,digest:verified.digest,build:'a'.repeat(64),platformUrl:'http://example.invalid/guthon/index.html',message:'cached'};}};
   const host = new PageEditorController(f), session = await host.open(f.identity);
+  assert.equal(f.panels.length,1);assert.equal(resourceReads,0);assert.equal(session.native,undefined);
+  await host.message(session,{type:'native',version:session.draft.version});
   assert.equal(f.panels.length, 2);
   assert.equal(session.native.panel, f.panels[1]);
   assert.match(session.native.panel.webview.html, /native-stage/);
   assert.equal(session.native.assets.app, 'guthon/js/app.abc123.js');
+  let revealedNative=0,revealedManager=0;
+  session.native.panel.reveal=()=>revealedNative++;session.panel.reveal=()=>revealedManager++;
+  assert.equal(await host.open(f.identity),session);
+  assert.equal(revealedManager,1);assert.equal(revealedNative,0);assert.equal(f.panels.length,2);
   session.draft.property('/views/0/fields', 'fieldId:A', 'label', 'changed'); host.publish(session);
   assert.equal(session.native.panel.latest.data.views[0].fields[0].label, 'changed');
   const version = session.draft.version;
@@ -401,4 +414,396 @@ test('failed resource tasks release the UI guard and a retry prompts once again'
   for (let i=0;i<2;i++) await assert.rejects(host.message(session,{type:'manageResources'}),/网络不可达/);
   assert.equal(inputs,2);assert.equal(session.panel.latest.resourceBusy,false);
   assert.equal(host.resourceJobs.size,0);assert.equal(logs.filter(message=>/资源操作失败/.test(message)).length,2);
+});
+
+test('draft comparison excludes saved SVN changes and keeps labels, order and event pointers stable',()=>{
+  const {draftChanges}=require('../src/page-editor/comparison');
+  const draft=new PageDraft(model());
+  assert.equal(draftChanges(draft).total,0);
+  draft.property('/views/0/fields','fieldId:A','label','窗口草稿');
+  draft.order('/views/0/fields',['fieldId:B','fieldId:A']);
+  draft.text('A-event','draft();');
+  const diff=draftChanges(draft);
+  assert.equal(diff.total,3);
+  assert.equal(diff.rows[0].beforeText,'"A"');
+  assert.equal(diff.rows[0].afterText,'"窗口草稿"');
+  assert.equal(diff.rows[2].pointer,'/views/0/fields/0/pageEvents/onChangeScript');
+  assert.deepEqual(diff.rows[1].afterText,JSON.stringify(['B','窗口草稿'],null,2));
+  const saved=new PageDraft(draft.model);
+  assert.equal(draftChanges(saved).total,0);
+});
+
+test('SVN comparison is refreshed independently of the preserved window draft',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.property('/views/0/fields','fieldId:A','label','草稿');
+  const oldOperations=session.draft.operations();
+  await host.message(session,{type:'compare',version:session.draft.version});
+  assert.deepEqual(session.draft.operations(),oldOperations);
+  assert.equal(session.panel.latest.comparison.local.total,1);
+  assert.equal(session.panel.latest.comparison.svn.sourceHash,f.snapshot.sourceHash);
+  const savedVersion=session.draft.version;
+  f.backend.run=async()=>{throw new Error('SVN BASE unavailable');};
+  await host.message(session,{type:'compare',version:savedVersion});
+  assert.equal(session.panel.latest.comparison.svn.available,false);
+  assert.match(session.panel.latest.comparison.svn.message,/unavailable/);
+  assert.equal(session.draft.version,savedVersion);
+});
+
+test('external source refresh loads a clean page and preserves a dirty page as a stale baseline',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  f.snapshot.model.collections[0].fields[0].properties[0].value='外部修改';f.snapshot.sourceHash='c'.repeat(64);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.equal(session.draft.baseline.collections[0].fields[0].properties[0].value,'外部修改');
+  assert.equal(session.draft.operations().length,0);
+  session.draft.property('/views/0/fields','fieldId:A','label','窗口修改');
+  f.snapshot.model.collections[0].fields[0].properties[0].value='再次外部修改';
+  f.snapshot.sourceHash='d'.repeat(64);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.equal(session.sourceStale,true);
+  assert.equal(session.panel.latest.editable,false);
+  assert.equal(session.draft.operations()[0].value,'窗口修改');
+  assert.equal(session.snapshot.sourceHash,'c'.repeat(64));
+  await assert.rejects(host.save(session),/外部更新/);
+  await host.message(session,{type:'reload',version:session.draft.version});
+  assert.equal(session.sourceStale,false);
+  assert.equal(session.draft.operations().length,0);
+  assert.equal(session.recovery.operations[0].value,'窗口修改');
+});
+
+test('SCM status refresh updates a committed SVN baseline without clearing local draft differences',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.property('/views/0/fields','fieldId:A','label','草稿');
+  session.svnComparison={available:true,sourceHash:f.snapshot.sourceHash,baseRevision:'1',changes:{rows:[{}],paths:['/views/0/fields/0/label'],total:1}};
+  await host.statusChanged(f.identity.workspaceKey);
+  assert.equal(session.panel.latest.comparison.svn.changes.total,0);
+  assert.equal(session.panel.latest.comparison.local.total,1);
+  assert.equal(session.draft.operations()[0].value,'草稿');
+});
+
+test('concurrent comparison reads share one request for the same page snapshot',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
+  let release,reads=0;
+  f.backend.run=async()=>{reads++;return new Promise(resolve=>{release=resolve;});};
+  const pending=Array.from({length:8},()=>host.refreshComparison(session));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(reads,1);
+  release({available:true,sourceHash:session.snapshot.sourceHash,baseRevision:'2',changes:{total:0}});
+  await Promise.all(pending);
+  assert.equal(session.svnComparison.baseRevision,'2');
+  assert.equal(session.comparisonRequest,undefined);
+});
+
+test('bursts of SCM notifications share one comparison refresh',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f);
+  await host.open(f.identity);f.calls.length=0;
+  await Promise.all(Array.from({length:8},()=>host.statusChanged(f.identity.workspaceKey)));
+  assert.equal(f.calls.filter(call=>call.payload.action==='comparison').length,1);
+  assert.equal(host.comparisonRefreshes.size,0);
+});
+
+test('a commit during a comparison read schedules a trailing read of the new BASE',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
+  let started,release,reads=0;
+  const firstRead=new Promise(resolve=>{started=resolve;});
+  f.backend.run=async()=>{
+    const result={available:true,sourceHash:session.snapshot.sourceHash,baseRevision:String(++reads),changes:{total:0}};
+    if(reads===1){started();await new Promise(resolve=>{release=resolve;});}
+    return result;
+  };
+  const first=host.statusChanged(f.identity.workspaceKey);
+  await firstRead;
+  const second=host.statusChanged(f.identity.workspaceKey);
+  release();await Promise.all([first,second]);
+  assert.equal(reads,2);
+  assert.equal(session.svnComparison.baseRevision,'2');
+});
+
+test('closed pages defer status comparisons until reopened while preserving their drafts',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.text('sql','unsaved');f.panels[0].dispose();f.calls.length=0;
+  await host.statusChanged(f.identity.workspaceKey);
+  assert.equal(f.calls.length,0);
+  assert.equal(await host.open(f.identity),session);
+  assert.deepEqual(f.calls.map(call=>call.payload.action),['comparison']);
+  assert.equal(session.draft.operations()[0].content,'unsaved');
+});
+
+test('disposing the controller settles a pending status refresh without reading a disposed page',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f);
+  await host.open(f.identity);f.calls.length=0;
+  const pending=host.statusChanged(f.identity.workspaceKey);host.dispose();await pending;
+  assert.equal(f.calls.length,0);
+  assert.equal(host.comparisonRefreshes.size,0);
+});
+
+test('a late comparison cannot overwrite a newer page snapshot',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
+  const releases=[];
+  f.backend.run=async(key,args,payload)=>new Promise(resolve=>releases.push(()=>resolve({available:true,sourceHash:payload.sourceHash,changes:{total:0}})));
+  const old=host.refreshComparison(session);
+  await new Promise(resolve=>setImmediate(resolve));
+  session.snapshot={...session.snapshot,sourceHash:'c'.repeat(64)};
+  const current=host.refreshComparison(session);
+  await new Promise(resolve=>setImmediate(resolve));
+  releases[1]();await current;releases[0]();await old;
+  assert.equal(session.svnComparison.sourceHash,'c'.repeat(64));
+});
+
+test('external changes migrate independent window edits without writing the file',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.property('/views/0/fields','fieldId:A','label','窗口 A');
+  f.snapshot.model.collections[0].fields[1].properties[0].value='外部 B';f.snapshot.sourceHash='c'.repeat(64);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.equal(session.sourceStale,false);assert.equal(session.sourceMerge,null);
+  assert.equal(session.snapshot.sourceHash,'c'.repeat(64));
+  assert.equal(session.draft.model.collections[0].fields[1].properties[0].value,'外部 B');
+  assert.equal(session.draft.operations()[0].value,'窗口 A');
+  assert.equal(f.calls.some(call=>['preview','save'].includes(call.payload.action)),false);
+  assert.equal([...f.store.values()][0].sourceHash,'c'.repeat(64));
+});
+
+test('external conflicts apply together after explicit choices and preserve external values on save',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.property('/views/0/fields','fieldId:A','label','窗口 A');
+  session.draft.property('/views/0/fields','fieldId:B','width',18);session.draft.text('sql','select draft');
+  f.snapshot.model.collections[0].fields[0].properties[0].value='文件 A';
+  f.snapshot.model.collections[0].fields[1].properties[1].value=24;f.snapshot.sourceHash='c'.repeat(64);
+  const file=clone(source);file.views[0].fields[0].label='文件 A';file.views[0].fields[1].width=24;f.snapshot.sourceText=JSON.stringify(file);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.equal(session.draft.operations().length,3);assert.equal(session.snapshot.sourceHash,'a'.repeat(64));
+  const [first,second]=session.sourceMerge.evidence.conflicts;
+  const choose=async(id,choice)=>host.message(session,{type:'resolveSourceConflict',id,choice,sourceHash:'c'.repeat(64),version:session.draft.version});
+  await choose(first.id,'draft');assert.equal(session.sourceStale,true);assert.equal(session.snapshot.sourceHash,'a'.repeat(64));
+  await choose(second.id,'file');assert.equal(session.sourceStale,false);assert.equal(session.sourceMerge,null);
+  assert.deepEqual(session.draft.operations().map(op=>op.kind),['property','text']);
+  assert.equal(session.draft.model.collections[0].fields[1].properties[1].value,24);
+  assert.equal(session.recovery.sourceMerge.conflicts[1].local,18);
+  assert.equal(f.calls.some(call=>call.payload.action==='save'),false);
+  await host.save(session);
+  assert.equal(JSON.parse(f.snapshot.sourceText).views[0].fields[0].label,'窗口 A');
+  assert.equal(JSON.parse(f.snapshot.sourceText).views[0].fields[1].width,24);
+});
+
+test('the final conflict choice is rechecked against the latest file and never carried to a newer hash',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.property('/views/0/fields','fieldId:A','label','窗口');
+  f.snapshot.model.collections[0].fields[0].properties[0].value='文件一';f.snapshot.sourceHash='c'.repeat(64);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  const conflict=session.sourceMerge.evidence.conflicts[0];
+  f.snapshot.model.collections[0].fields[0].properties[0].value='文件二';f.snapshot.sourceHash='d'.repeat(64);
+  await host.message(session,{type:'resolveSourceConflict',id:conflict.id,choice:'draft',sourceHash:'c'.repeat(64),version:session.draft.version});
+  assert.equal(session.sourceStale,true);assert.equal(session.snapshot.sourceHash,'a'.repeat(64));
+  assert.equal(session.sourceMerge.evidence.sourceHash,'d'.repeat(64));
+  assert.equal(session.sourceMerge.evidence.conflicts[0].choice,null);
+  assert.equal(session.sourceMerge.evidence.conflicts[0].file,'文件二');
+  await assert.rejects(host.message(session,{type:'resolveSourceConflict',id:conflict.id,choice:'draft',sourceHash:'c'.repeat(64),version:session.draft.version}),/状态已变化/);
+});
+
+test('dirty code and unconfirmed native dialogs preserve the old draft without reloading the designer',async()=>{
+  for(const native of [false,true]){
+    const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+    const host=new PageEditorController(f),session=await host.open(f.identity);
+    session.draft.property('/views/0/fields','fieldId:A','label','窗口');
+    const messages=[];
+    if(native)session.native={unconfirmed:true,version:session.draft.version,panel:{webview:{postMessage:message=>messages.push(message)}}};
+    else f.documents.push({isDirty:true,uri:f.vscode.Uri.from({scheme:'guthon-svn-edit',authority:'products.demo',path:'/event.js',
+      query:new URLSearchParams({sourceType:'page',sourceId:'PG-1',workingCopyId:'wc'}).toString()})});
+    f.snapshot.sourceHash='c'.repeat(64);
+    await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+    assert.equal(session.sourceStale,true);assert.equal(session.draft.operations()[0].value,'窗口');
+    assert.match(session.sourceMerge.evidence.blockedReason,native?/尚未确认/:/未保存输入/);
+    assert.equal(messages.some(message=>message.type==='nativeDocument'),false);
+    if(native)await assert.rejects(host.message(session,{type:'reload'}),/对话框/);
+  }
+});
+
+test('inputs arriving during an external read are included in the migrated draft',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity),run=f.backend.run;
+  let release,started;const began=new Promise(resolve=>{started=resolve;});
+  f.snapshot.sourceHash='c'.repeat(64);
+  f.backend.run=async(...args)=>{const result=await run(...args);if(args[2].action==='open'){started();await new Promise(resolve=>{release=resolve;});}return result;};
+  const refresh=host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);await began;
+  await host.message(session,{type:'property',collectionPointer:'/views/0/fields',fieldKey:'fieldId:A',name:'label',value:'等待时输入',version:session.draft.version});
+  release();await refresh;
+  assert.equal(session.snapshot.sourceHash,'c'.repeat(64));assert.equal(session.draft.operations()[0].value,'等待时输入');
+});
+
+test('overlapping source reads accept only the newest snapshot',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity),run=f.backend.run,releases=[];
+  f.backend.run=async(...args)=>{const result=await run(...args);if(args[2].action==='open')await new Promise(resolve=>releases.push(resolve));return result;};
+  f.snapshot.sourceHash='c'.repeat(64);const first=host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  await new Promise(resolve=>setImmediate(resolve));
+  f.snapshot.sourceHash='d'.repeat(64);const second=host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  await new Promise(resolve=>setImmediate(resolve));
+  releases[1]();await second;releases[0]();await first;
+  assert.equal(session.snapshot.sourceHash,'d'.repeat(64));
+});
+
+test('conflict evidence is persisted in full while webview previews are bounded and restart does not auto-apply',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.text('sql','D'.repeat(10000));f.snapshot.model.nodes[1].content='F'.repeat(10000);f.snapshot.sourceHash='c'.repeat(64);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.equal(session.panel.latest.sourceMerge.conflicts[0].truncated,true);
+  assert.equal(session.panel.latest.sourceMerge.conflicts[0].texts[1].length,8000);
+  assert.equal([...f.store.values()][0].sourceMerge.conflicts[0].file.length,10000);
+  const restarted=await new PageEditorController(f).open(f.identity);
+  assert.equal(restarted.draft.operations().length,0);
+  assert.equal(restarted.recovery.sourceMerge.conflicts[0].local.length,10000);
+  assert.equal(f.calls.some(call=>call.payload.action==='save'),false);
+});
+
+test('unknown saves remain pending when source events arrive',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  session.pending={idempotencyKey:'existing-save'};session.draft.text('sql','pending');f.calls.length=0;
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.deepEqual(session.pending,{idempotencyKey:'existing-save'});assert.equal(session.sourceStale,true);assert.equal(f.calls.length,0);
+});
+
+test('reverting an external conflict preserves its report and keeps the original undo history',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.property('/views/0/fields','fieldId:A','label','窗口');const previous=session.draft;
+  f.snapshot.model.collections[0].fields[0].properties[0].value='文件';f.snapshot.sourceHash='c'.repeat(64);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  f.snapshot.model.collections[0].fields[0].properties[0].value='A';f.snapshot.sourceHash='a'.repeat(64);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.equal(session.sourceStale,false);assert.equal(session.sourceMerge,null);assert.equal(session.draft,previous);
+  assert.equal(session.recovery.sourceMerge.conflicts[0].file,'文件');
+  session.draft.undo();assert.equal(session.draft.operations().length,0);
+});
+
+test('a changed checkout identity is rejected even when the new file hash is identical',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.property('/views/0/fields','fieldId:A','label','窗口');f.snapshot.workingCopyId='different';
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.equal(session.sourceStale,true);assert.match(session.sourceMerge.evidence.blockedReason,/身份/);
+  assert.equal(session.snapshot.workingCopyId,'wc');assert.equal(session.draft.operations()[0].value,'窗口');
+});
+
+test('restart retains an earlier conflict report when the file has returned to the draft baseline',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.property('/views/0/fields','fieldId:A','label','窗口');
+  f.snapshot.model.collections[0].fields[0].properties[0].value='文件';f.snapshot.sourceHash='c'.repeat(64);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  f.snapshot.model.collections[0].fields[0].properties[0].value='A';f.snapshot.sourceHash='a'.repeat(64);
+  const restarted=await new PageEditorController(f).open(f.identity);
+  assert.equal(restarted.draft.operations()[0].value,'窗口');
+  assert.equal(restarted.recovery.sourceMerge.conflicts[0].file,'文件');
+  assert.equal(restarted.sourceMerge,undefined);
+});
+
+test('a draft storage failure after migration retains the new in-memory inputs and surfaces the error',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.property('/views/0/fields','fieldId:A','label','窗口');f.snapshot.sourceHash='c'.repeat(64);
+  const update=f.context.workspaceState.update;let attempts=0;
+  f.context.workspaceState.update=async(...args)=>{if(++attempts===1)throw new Error('storage unavailable');return update(...args);};
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.equal(session.snapshot.sourceHash,'c'.repeat(64));assert.equal(session.draft.operations()[0].value,'窗口');
+  assert.equal(session.sourceStale,true);assert.match(session.panel.latest.status,/storage unavailable/);
+  assert.equal([...f.store.values()][0].operations[0].value,'窗口');
+});
+
+test('an unprocessed native candidate prevents migration and remains available for export',async()=>{
+  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  session.nativeRecovery={pageId:'PG-1',unsupportedInput:'preserve'};f.snapshot.sourceHash='c'.repeat(64);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.equal(session.sourceStale,true);assert.match(session.sourceMerge.evidence.blockedReason,/待核对候选/);
+  assert.equal([...f.store.values()][0].nativeRecovery.unsupportedInput,'preserve');
+});
+
+test('page publications send one baseline then small patches and resynchronize on ready',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
+  assert.equal(session.panel.wire.update,'patch');assert.equal(session.panel.wire.baseline,undefined);
+  await host.message(session,{type:'property',collectionPointer:'/views/0/fields',fieldKey:'fieldId:A',name:'label',value:'changed',version:session.draft.version});
+  const wire=session.panel.wire;assert.equal(wire.model,undefined);assert.equal(wire.baseline,undefined);
+  assert.equal(wire.operations[0].value,'changed');assert.ok(JSON.stringify(wire).length<5000);
+  assert.equal(session.panel.latest.model.collections[0].fields[0].properties[0].value,'changed');
+  const sequence=wire.sequence;host.publish(session);assert.equal(session.panel.wire.operations,undefined);
+  assert.equal(session.panel.wire.comparison.svn,undefined);assert.equal(session.panel.wire.comparison.local,undefined);
+  await host.message(session,{type:'ready'});assert.equal(session.panel.wire.update,'full');
+  assert.ok(session.panel.wire.sequence>sequence);assert.equal(session.panel.latest.operations[0].value,'changed');
+});
+
+test('closing a persisted clean page reclaims it while unsaved pages remain pinned',async()=>{
+  const f=hostFixture(),host=new PageEditorController({...f,maxClosedPages:0}),session=await host.open(f.identity);
+  f.panels[0].dispose();await session.persistence;await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(host.pages.size,0);
+  const reopened=await host.open(f.identity);assert.notEqual(reopened,session);
+  reopened.draft.text('sql','keep unsaved');f.panels.at(-1).dispose();await reopened.persistence;await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(host.pages.size,1);assert.equal((await host.open(f.identity)).draft.operations()[0].content,'keep unsaved');
+});
+
+test('recovery history uses compact private references while export retains all archived values',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
+  for(let i=0;i<12;i++){
+    session.draft.text('sql','x'.repeat(10000)+i);host.archiveDraft(session);await host.persist(session);
+  }
+  const stored=[...f.store.values()][0];assert.equal(stored.recovery.kind,'page-recovery-v1');
+  assert.ok(JSON.stringify(stored.recovery).length<150);assert.equal(session.recovery.previous.kind,'page-recovery-v1');
+  host.publish(session);assert.deepEqual(session.panel.wire.recovery,{available:true});
+  const expanded=await host.recoveryStore.expand(session.storageKey,session.recovery);let count=0,item=expanded;
+  while(item){assert.match(item.operations[0].content,/^x/);count++;item=item.previous;}
+  assert.equal(count,12);
+});
+
+test('reopening legacy recovery migrates nested state before publishing a compact reference',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
+  const legacy={sourceHash:'old',operations:[{kind:'text',content:'keep'}],previous:{sourceHash:'older',operations:[],previous:null}};
+  f.store.set(session.storageKey,{sourceHash:session.snapshot.sourceHash,operations:[],recovery:legacy});
+  const restarted=new PageEditorController(f),restored=await restarted.open(f.identity);
+  await restarted.persist(restored);
+  const saved=f.store.get(session.storageKey).recovery;assert.equal(saved.kind,'page-recovery-v1');
+  assert.deepEqual(await restarted.recoveryStore.expand(restored.storageKey,saved),legacy);
+});
+
+test('a closed page is reclaimed only after its newest queued state has persisted',async()=>{
+  const f=hostFixture(),host=new PageEditorController({...f,maxClosedPages:0}),session=await host.open(f.identity);
+  const update=f.context.workspaceState.update,releases=[];
+  f.context.workspaceState.update=async(...args)=>{await new Promise(resolve=>releases.push(resolve));return update(...args);};
+  f.panels[0].dispose();const first=session.persistence;
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(releases.length,1);
+  const second=host.persist(session);releases[0]();await first;
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(releases.length,2);
+  host.pruneClosedPages();assert.equal(host.pages.size,1);assert.equal(session.persistedClose,false);
+  releases[1]();await second;assert.equal(host.pages.size,0);
+});
+
+test('a failed close persistence keeps the session until a later successful retry',async()=>{
+  const f=hostFixture(),host=new PageEditorController({...f,maxClosedPages:0}),session=await host.open(f.identity);
+  const update=f.context.workspaceState.update;f.context.workspaceState.update=async()=>{throw new Error('cannot persist close');};
+  f.panels[0].dispose();await assert.rejects(session.persistence,/cannot persist close/);
+  host.pruneClosedPages();assert.equal(host.pages.size,1);assert.equal(session.persistedClose,false);
+  f.context.workspaceState.update=update;await host.persist(session);assert.equal(host.pages.size,0);
+});
+
+test('closed pages with stale sources or unsaved code remain pinned even without page operations',async()=>{
+  for(const reason of ['stale','dirtyCode']){
+    const f=hostFixture(),host=new PageEditorController({...f,maxClosedPages:0}),session=await host.open(f.identity);
+    if(reason==='stale')session.sourceStale=true;
+    else f.documents.push({isDirty:true,uri:f.vscode.Uri.from({scheme:'guthon-svn-edit',authority:'products.demo',path:'/event.js',
+      query:new URLSearchParams({sourceType:'page',sourceId:'PG-1',workingCopyId:'wc'}).toString()})});
+    f.panels[0].dispose();await session.persistence;await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(host.pages.size,1);assert.equal(session.draft.operations().length,0);
+    session.sourceStale=false;f.documents.length=0;await host.persist(session);assert.equal(host.pages.size,0);
+  }
+});
+
+test('closed-page byte estimates include redo history rather than only the current clean model',async()=>{
+  const f=hostFixture(),host=new PageEditorController({...f,maxClosedPages:4,maxClosedBytes:100000}),session=await host.open(f.identity);
+  for(let i=0;i<12;i++)session.draft.text('sql','x'.repeat(20000)+i);
+  for(let i=0;i<12;i++)session.draft.undo();assert.equal(session.draft.operations().length,0);
+  f.panels[0].dispose();await session.persistence;await new Promise(resolve=>setImmediate(resolve));
+  assert.ok(session.closedBytes>100000);assert.equal(host.pages.size,0);
 });

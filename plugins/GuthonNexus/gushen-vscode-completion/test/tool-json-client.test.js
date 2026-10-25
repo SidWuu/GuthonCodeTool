@@ -8,6 +8,15 @@ test('JSON transport keeps semantic error codes for configuration preflight',asy
  await assert.rejects(client.run('products.demo','database-target-list'),error=>error.code==='CONFIG_INVALID' && error.message==='bad configuration');
 });
 
+test('reused transport forwards execution and queue timeouts without changing workspace identity',async()=>{
+  let request;
+  const client=new ToolJsonClient({getTool:async()=>({toolPath:'/tool',toolHome:'/home'}),
+    processClient:{request:async(...args)=>{request=args;return {ok:true};}}});
+  const onOutput=()=>{};
+  await client.run('products.demo','search',['--query','save'],undefined,{timeoutMs:37,queueTimeoutMs:43,onOutput});
+  assert.equal(request[3],'products.demo');assert.deepEqual(request[5],{timeoutMs:37,queueTimeoutMs:43,onOutput});
+});
+
 test('shared one-shot transport bounds output and never retries an unknown write', async () => {
   const kills = [], children = [];
   const spawnProcess = () => {

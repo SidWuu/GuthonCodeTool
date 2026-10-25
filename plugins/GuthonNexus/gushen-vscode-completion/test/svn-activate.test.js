@@ -11,6 +11,7 @@ const {
   selectedCandidateIds,
   notifyInformation,
   openSvnConflictMerge,
+  openChangedSource,
   procedureIdentityFromElement,
   referenceTarget,
   resolveSourcePath,
@@ -624,4 +625,30 @@ test('SCM editing uses indexed identity while retaining the physical operation s
   assert.equal(identity.workingCopyId, 'repository-root');
   const script = await selectEditableIdentity({}, {}, { ...identity, sourcePath: 'page.gss' });
   assert.equal(script.workingCopyId, change.sourceWorkingCopyId);
+});
+
+test('SCM whole PAGE editing opens the local manager with exact indexed identity and no fragment picker',async()=>{
+  const identity={workspaceKey:'projects.demo',sourceType:'page',sourceId:'PG-1',sourcePath:'systems/SYS-1/pages/PG-1.json',
+    workingCopyId:'repository-root',sourceWorkingCopyId:'repository-root:systems/SYS-1'};
+  const object={sourceType:'page',sourceId:'PG-1',sourceNamespace:'repository-root:systems/SYS-1',
+    sourcePath:identity.sourcePath,workingCopyId:identity.sourceWorkingCopyId,treeLabel:'示例主页面'};
+  const opened=[];
+  const result=await openChangedSource({vscode:{window:{showQuickPick(){throw Error('Must not pick fragments');}}},
+    backend:{fragments(){throw Error('Must not load fragments');}},virtualFs:{open(){throw Error('Not a fragment');}},
+    catalogTree:{async locate(target){assert.equal(target.workingCopyId,identity.sourceWorkingCopyId);return {object,workspaceKey:identity.workspaceKey};}},
+    pageEditor:{async open(target){opened.push(target);return 'local-manager';}}},identity);
+  assert.equal(result,'local-manager');assert.deepEqual(opened,[{...object,workspaceKey:'projects.demo'}]);
+  assert.equal(identity.workingCopyId,'repository-root');
+});
+
+test('SCM PAGE routing rejects mismatched catalog objects and preserves explicit script/SQL opens',async()=>{
+  const identity={workspaceKey:'projects.demo',sourceType:'page',sourceId:'PG-1',sourcePath:'pages/PG-1.json',workingCopyId:'wc'};
+  const object={...identity,sourceNamespace:'systems/SYS-1'};
+  const dependencies={vscode:{},backend:{fragments(){throw Error('Unexpected fragments');}},
+    virtualFs:{async open(target){return target;}},pageEditor:{open(){throw Error('Must not route wrong source');}}};
+  for (const mismatch of [{sourcePath:'pages/PG-2.json'},{sourceId:'PG-2'},{workingCopyId:'other'},{sourceNamespace:''}]) {
+    await assert.rejects(openChangedSource({...dependencies,catalogTree:{async locate(){return {object:{...object,...mismatch},workspaceKey:'projects.demo'};}}},identity),/索引身份不一致/);
+  }
+  for (const target of [{...identity,sourcePath:'pages/PG-1.gss'},{...identity,jsonPointer:'/pageSetup/pageEvents/onOpenScript'}])
+    assert.deepEqual(await openChangedSource(dependencies,target),target);
 });

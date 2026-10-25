@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from common.operation_control import checkpoint, publication_barrier, OperationCancelled
@@ -168,7 +169,10 @@ def index_changes(conn, workspace, paths, refresh_result, on_progress=None, *, s
                     except OperationCancelled:
                         raise
                     except (Exception, SystemExit) as error:
-                        result["errors"].append({"path": logical, "error": str(error)})
+                        code = ("SOURCE_PARSE_FAILED" if isinstance(error, (json.JSONDecodeError, UnicodeError))
+                                else "SOURCE_READ_RETRYABLE" if isinstance(error, OSError) and not isinstance(error, PermissionError)
+                                else "SOURCE_INDEX_BLOCKED")
+                        result["errors"].append({"path": logical, "error": str(error), "code": code})
                     result["scannedFiles"] += 1
                 progress(f"已核对 {result['scannedFiles']} 个变更及关联文件")
 
