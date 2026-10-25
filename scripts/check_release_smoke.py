@@ -80,6 +80,9 @@ def check_doctor(command: list[str], home: str) -> None:
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="strict")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--entry", type=Path, required=True, help="Path to EXE, macOS app, pyz, or source CLI")
     parser.add_argument("--python", type=Path, help="Python path for a .py or .pyz entry; defaults to this interpreter")
