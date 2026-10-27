@@ -24,7 +24,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 |---|---|---|---|
 | CLI 命令与参数 | `scripts/guthon_tool.py` | `scripts/common/gusen_hub.py` | `tests/test_guthon_tool.py` |
 | 工作区配置/创建 | `scripts/common/workspace_config.py` | `scripts/common/gusen_hub.py` | `tests/test_workspace_config.py` |
-| 工作区路由与解析 | `scripts/common/workspace_registry.py` | `scripts/providers/svn/nexus/workspace.py` | `tests/test_workspace_routing.py` |
+| 工作区路由与解析 | `scripts/common/workspace_registry.py`（注册身份与 provider）、`scripts/common/workspace_selection.py`（名称/别名、路径与任务 prompt 选择） | `scripts/guthon_tool.py`（workspace-resolve）、`scripts/providers/svn/nexus/mcp_server.py`（共用选择器）、`scripts/providers/svn/nexus/workspace.py` | `tests/test_workspace_routing.py`、`tests/test_workspace_selection.py` |
 | 工作区助手/状态摘要 | `scripts/common/workspace_assistant.py` | `scripts/common/gusen_hub.py` | `tests/test_workspace_assistant_features.py` |
 | Nexus 统一搜索与快速打开 | `plugins/GuthonNexus/gushen-vscode-completion/src/workspace-search.js`（共用搜索窗口、输入合并、迟到结果隔离与结果操作） | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/quick-open.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/workspace-search.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/quick-open.test.js` |
 | DATABASE 拉取/导出 | `scripts/providers/database/export_table_schema_sql.py` | `scripts/common/gusen_hub.py` | `tests/test_export_table_schema_sql.py` |

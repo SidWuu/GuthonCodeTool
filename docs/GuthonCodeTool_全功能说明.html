@@ -249,6 +249,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>products:
   demo-product:
     name: 示例产品
+    aliases: [示例简称]
     datasource: demo-product-dev
     systems:
       include:
@@ -259,6 +260,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
     page_origins: []</code></pre></div>
 <p><code>mappings</code> 的键为系统 alias，每项对应一对 <code>system_id/data_source_id</code>。SVN 用它识别与分组完整检出的源码；DATABASE 按 alias 查询并使用本地 <code>system-data.json</code> 缓存。项目拥有自己的数据源 ID，不复用产品值。源码模式不写入产品/项目 YAML，而保存在各工作区的 <code>context/source-mode.json</code>。</p>
 <p>工作区列表以 <code>configErrors</code> 返回单项配置错误，不阻断无关工作区；冲突身份和重叠 SVN 授权范围仍拒绝使用。不要通过更换目录名绕过身份校验。</p>
+<p><code>aliases</code> 是可选的工作区名称数组，用于名称与任务 prompt 定位；与系统 <code>mappings</code> 的 alias 不同，不改变稳定 ID、源码来源或目录。名称按规范化后的完整文本匹配，不以模糊子串猜测；重名或别名冲突返回候选，指定产品/项目类型可缩小范围。</p>
 <h3 id="3-2-创建切换与删除">3.2 创建、切换与删除</h3>
 <ol>
 <li><strong>首次设置：</strong><code>setup</code> 只创建缺失的公开模板和空注册表，不覆盖已有配置。</li>
@@ -285,7 +287,9 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <div><strong>命令自省</strong><span><code>help &lt;command&gt;</code>，以及任意命令的 <code>--help</code>；<code>svn &lt;action&gt; --help</code> 单独说明该 action 的专属参数。</span></div>
 </div>
 <p>同步与索引也提供语义明确的别名：<code>source-sync</code> 对应 <code>sync-source</code>、<code>source-sync-full</code> 对应 <code>sync-source-all</code>、<code>workspace-sync</code> 对应 <code>sync-all</code>、<code>index-rebuild</code> 对应 <code>reindex</code>；<code>index-init</code> 用于索引初始化。具体参数以当前入口的帮助为准。</p>
-<p><code>workspace-resolve</code> 可从当前工作目录返回唯一工作区、provider、索引就绪度和下一步建议，不读取源码正文。它用于让 Agent 先确定边界，再执行小范围检索；若路径无法唯一对应工作区则明确失败。</p>
+<p><code>workspace-resolve</code> 返回唯一工作区、实际 <code>root</code>、provider、索引就绪度和下一步建议，不读取源码正文。支持 <code>--workspace</code>、<code>--name</code>、<code>--kind product|project</code>、<code>--path</code>、<code>--prompt</code>、<code>--current-workspace</code>；<code>--stdin</code> 可接收同等选择字段的 JSON，避免把 prompt 拼入 shell。名称、别名、prompt 与路径都复用同一注册清单，不能定位时返回结构化候选或错误，不选择默认工作区。</p>
+<p>MCP 的 <code>resolve_workspace</code> 同样支持 <code>workspaceKey</code>、<code>name</code>、<code>kind</code>、<code>path</code>、<code>prompt</code> 和 <code>currentWorkspaceKey</code>；后续业务工具仍显式传工作区键。配套 guthon-guard 提供 <code>guthon-use</code> 命令/Skill，并通过提交 Hook 保存当前对话目标。参考来源不作为目标，多个目标或与既有绑定冲突需要明确选择。宿主不提供 Hook 身份时只解析，由调用方携带上下文；不设置全局 ACTIVE。操作步骤见<a href="GuthonCodeTool_使用手册.html#agent-workspace-selection">选择 AI 任务目标</a>。</p>
+<p>CLI <code>--stdin</code> 的 JSON 字段为 <code>workspace_key</code>、<code>name</code>、<code>kind</code>、<code>path</code>、<code>prompt</code>、<code>current_workspace</code>；例如 <code>{"name":"示例项目","kind":"project"}</code>。MCP 使用其工具 schema 中的驼峰字段；两者复用相同解析服务。</p>
 <p>返回结果中的 <code>indexFirst.examples</code> 同时给出各场景可直接复制运行的完整 argv（含 <code>--home</code>、<code>--workspace</code> 与必填参数），使 Agent 不依赖外部文档即可发起有界查询；参数仍可随时用 <code>help</code> 或 <code>--help</code> 复核。</p>
 <h4 id="runtime-cli-reference">CLI 与 runtime descriptor 参考</h4>
 <p>以下源码命令从工具仓库根运行。先将 <code>GUTHON_HOME</code> 显式设为真实本地数据目录；Windows PowerShell 使用 <code>.\.venv\Scripts\python.exe</code>。发行与调试环境使用运行描述文件中的实际入口，不照搬源码路径。公共参数属于统一 CLI，子命令专属参数放在 <code>--</code> 后：</p>

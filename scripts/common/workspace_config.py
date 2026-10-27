@@ -230,6 +230,8 @@ def _workspace_body(payload: dict, datasource_id: str) -> list[str]:
         "    # 按需维护系统别名、系统 ID 和数据源 ID。",
         "    mappings: {}",
     ]
+    if payload.get("aliases"):
+        body.insert(1, "aliases: " + json.dumps(payload["aliases"], ensure_ascii=False))
     body.extend(
         [
             f"source_layer: {'PRODUCT' if payload['kind'] == 'product' else 'PROJECT'}",
@@ -365,6 +367,9 @@ def _create_workspace(home: Path, payload: dict, gusen_hub) -> dict:
     workspace_id = _required_text(payload.get("id"), "id")
     svn_checkout.validate_config_id(workspace_id)
     name = _required_text(payload.get("name"), "name")
+    aliases = payload.get("aliases", [])
+    if not isinstance(aliases, list) or any(not isinstance(alias, str) or not alias.strip() for alias in aliases):
+        raise SystemExit("aliases must be an array of nonempty names")
     source_mode = str(payload.get("sourceMode") or "").strip().lower()
     if source_mode not in SOURCE_MODES:
         raise SystemExit("sourceMode must be database or svn")
@@ -383,7 +388,8 @@ def _create_workspace(home: Path, payload: dict, gusen_hub) -> dict:
         raise SystemExit(f"Duplicate {root_key} display name: {name}")
 
     workspace_key = f"{root_key}.{workspace_id}"
-    normalized = {**payload, "kind": kind, "id": workspace_id, "name": name, "sourceMode": source_mode}
+    normalized = {**payload, "kind": kind, "id": workspace_id, "name": name, "sourceMode": source_mode,
+                  "aliases": list(dict.fromkeys(alias.strip() for alias in aliases))}
     datasource_id = ""
     datasource_body = None
     if source_mode == "database" and isinstance(normalized.get("datasource"), dict):

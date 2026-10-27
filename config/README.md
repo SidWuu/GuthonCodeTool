@@ -150,7 +150,8 @@ Nexus 的“导入/粘贴 SVN checkout 配置”可选择 `.sh/.bat` 或粘贴 c
 
 ```bash
 .venv/bin/python scripts/guthon_tool.py source-mode --home "$GUTHON_HOME" --workspace products.demo-product -- set --mode svn
-.venv/bin/python scripts/guthon_tool.py workspace-resolve --home "$GUTHON_HOME"  # 在 PRD/PRJ cwd 中解析身份、index.ready 和可复制的有界查询示例
+.venv/bin/python scripts/guthon_tool.py workspace-resolve --home "$GUTHON_HOME"  # 按当前 PRD/PRJ 路径解析身份与索引建议
+.venv/bin/python scripts/guthon_tool.py workspace-resolve --home "$GUTHON_HOME" --name "示例项目" --kind project  # 可从 var 根按注册名称解析
 .venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- scope-preview
 .venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- scope-import  # JSON stdin: {"text":"...","source":"script"}
 .venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- sync-from-script --accept-scope-change

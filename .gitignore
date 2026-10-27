@@ -38,3 +38,4 @@ release/
 *.vsix
 # 测试只放在本地忽略的 tests/；scripts/ 下不得新增测试文件
 scripts/**/test_*.py
+.codex/

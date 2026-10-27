@@ -178,6 +178,11 @@ def build_import_svn_scope_parser() -> argparse.ArgumentParser:
 def build_workspace_resolve_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="guthon_tool.py workspace-resolve")
     parser.add_argument("--path", default=str(Path.cwd()))
+    parser.add_argument("--name", default="", help="Exact registered name or alias")
+    parser.add_argument("--kind", choices=["product", "project"], default="")
+    parser.add_argument("--prompt", default="", help="Resolve an unambiguous task target")
+    parser.add_argument("--current-workspace", default="", help="Conversation-local previous workspaceKey")
+    parser.add_argument("--stdin", action="store_true", help="Read selectors as JSON; useful for lifecycle hooks")
     return parser
 
 
@@ -658,6 +663,8 @@ def run(command: str, home: Path, extra_args: list[str], selected_workspace=None
 
     config = gusen_hub.load_config()
     workspace = None if command in GLOBAL_COMMANDS or command == "pull" and not selected_workspace else gusen_hub.resolve_workspace(config)
+    if command == "workspace-resolve" and selected_workspace:
+        workspace = gusen_hub.resolve_workspace(config, selected_workspace)
     if command in DATABASE_COMMANDS and selected_workspace:
         workspace = gusen_hub.resolve_workspace(config, selected_workspace)
     checkpoint()
@@ -840,9 +847,18 @@ def _reindex_svn_refresh(gusen_hub, config, workspace, refresh_result: dict, on_
 def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
     if command == "workspace-resolve":
         parsed = build_workspace_resolve_parser().parse_args(extra_args)
-        resolved = gusen_hub.resolve_workspace_for_path(config, parsed.path)
-        print(json.dumps({"ok": True, **gusen_hub.workspace_agent_context(config, resolved)}, ensure_ascii=False))
-        return 0
+        from common.workspace_selection import select_workspace
+        selectors = {"workspace_key": workspace["workspaceKey"] if workspace else "",
+                     "name": parsed.name, "kind": parsed.kind, "path": parsed.path,
+                     "prompt": parsed.prompt, "current_workspace": parsed.current_workspace}
+        if parsed.stdin:
+            supplied = json.load(sys.stdin)
+            if not isinstance(supplied, dict) or set(supplied) - set(selectors):
+                raise SystemExit("workspace-resolve stdin must be a JSON object of supported selectors")
+            selectors.update(supplied)
+        result = select_workspace(config, **selectors)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0 if result["ok"] or result.get("action") == "list" else 1
     if command in DATABASE_COMMANDS:
         from common import database_cli
         parsed = build_database_parser(command).parse_args(extra_args)

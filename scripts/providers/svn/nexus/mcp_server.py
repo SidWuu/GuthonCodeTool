@@ -71,8 +71,9 @@ CONTENT = {"type": "string", "maxLength": 500_000}
 PAGE = {"workspaceKey": STRING, "sourceNamespace": STRING, "sourceId": STRING, "funId": STRING}
 TOOLS = [
     _tool("get_runtime_status", "Read local runtime version and configured workspace count.", {}, []),
-    _tool("resolve_workspace", "Resolve an explicit workspaceKey or list bounded candidates.",
-          {"workspaceKey": STRING}, []),
+    _tool("resolve_workspace", "Resolve a key, exact name/alias, path or unambiguous task prompt; no global active workspace.",
+          {"workspaceKey": STRING, "name": STRING, "kind": {"type": "string", "enum": ["product", "project"]},
+           "path": STRING, "prompt": {"type": "string", "maxLength": 16000}, "currentWorkspaceKey": STRING}, []),
     _tool("get_index_status", "Read PAGE node index readiness without changing the index.",
           {"workspaceKey": STRING}, ["workspaceKey"]),
     _tool("get_source_index_status", "Read shared SVN object catalog readiness independently of PAGE projections.",
@@ -452,19 +453,23 @@ class PageMcpServer:
                     "transport": "stdio", "readOnly": not self.enable_writes,
                     "workspaceCount": len(workspaces), "configErrors": config_errors}
         if name == "resolve_workspace":
+            from common.workspace_selection import select_workspace
             config = gusen_hub.load_config()
-            key = _require_string(arguments, "workspaceKey", optional=True)
-            if key:
-                workspace = gusen_hub.resolve_workspace(config, key)
-                return {"workspaceKey": workspace["workspaceKey"], "sourceMode": workspace["sourceMode"],
-                        "displayName": workspace["displayName"], "capabilities": workspace["capabilities"]}
-            candidates = gusen_hub.list_workspaces(config)
+            result = select_workspace(config, workspace_key=arguments.get("workspaceKey", ""),
+                                      name=arguments.get("name", ""), kind=arguments.get("kind", ""),
+                                      path=arguments.get("path"), prompt=arguments.get("prompt", ""),
+                                      current_workspace=arguments.get("currentWorkspaceKey", ""))
+            if result["ok"]:
+                if result.get("workspaceKey"):
+                    workspace = gusen_hub.resolve_workspace(config, result["workspaceKey"])
+                    result["capabilities"] = workspace["capabilities"]
+                return result
             error = page_nodes.PageIndexError(
-                "WORKSPACE_AMBIGUOUS" if len(candidates) > 1 else "WORKSPACE_REQUIRED",
-                "Select an explicit workspaceKey",
-                next_action="Call resolve_workspace with one candidate workspaceKey",
+                result["error"]["code"], result["error"]["message"],
+                next_action="Call resolve_workspace with an exact name/kind or candidate workspaceKey",
             )
-            error.candidates = [item["workspaceKey"] for item in candidates[:50]]
+            error.candidates = [item["workspaceKey"] for item in result["candidates"]]
+            error.candidate_details = result["candidates"]
             raise error
         if name == "resolve_database_target":
             from common import database_test_artifacts
@@ -948,6 +953,7 @@ class PageMcpServer:
                 "code": error.code, "stage": name, "retryable": error.retryable,
                 "message": str(error), "nextAction": error.next_action,
                 "candidates": getattr(error, "candidates", []),
+                "candidateDetails": getattr(error, "candidate_details", []),
             }}
             return _response(request_id, result=_result(
                 envelope, error=True, structured=self.protocol_version in STRUCTURED_RESULT_VERSIONS,

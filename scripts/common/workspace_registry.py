@@ -171,6 +171,10 @@ def _list_workspaces_strict(config):
             name = str(item.get("name") or "").strip()
             if not name:
                 raise SystemExit(f"Missing name for {kind}.{item_id}")
+            aliases = item.get("aliases", [])
+            if not isinstance(aliases, list) or any(not isinstance(alias, str) or not alias.strip() for alias in aliases):
+                raise SystemExit(f"aliases must be an array of nonempty names for {kind}.{item_id}")
+            workspace_aliases = list(dict.fromkeys(alias.strip() for alias in aliases))
             if name in seen_names[kind]:
                 raise SystemExit(f"Duplicate {kind} display name: {name}")
             seen_names[kind].add(name)
@@ -216,6 +220,7 @@ def _list_workspaces_strict(config):
                     "type": "product" if kind == "products" else "project",
                     "id": str(item_id),
                     "name": name,
+                    "aliases": workspace_aliases,
                     "displayName": f"{prefix} {name}",
                     "layer": layer,
                     "scopeId": str(item_id),
@@ -473,6 +478,7 @@ def _workspace_cockpit(summary: dict) -> dict:
 def workspace_config_digest(config, workspace):
     workspace_config = dict(workspace["config"])
     workspace_config.pop("source_mode", None)
+    workspace_config.pop("aliases", None)  # Task navigation does not change source synchronization.
     payload = {
         "workspace": workspace_config,
         "sourceMode": workspace["sourceMode"],
@@ -489,6 +495,7 @@ def legacy_workspace_config_digest(config, workspace):
     """Recognize state written before provider selection moved out of YAML."""
 
     workspace_config = dict(workspace["config"])
+    workspace_config.pop("aliases", None)
     workspace_config["source_mode"] = workspace["sourceMode"]
     payload = {
         "workspace": workspace_config,
@@ -701,6 +708,7 @@ def workspace_summary(config, workspace):
         "type": workspace["type"],
         "id": workspace["id"],
         "name": workspace["name"],
+        "aliases": workspace.get("aliases", []),
         "displayName": workspace["displayName"],
         "root": str(workspace["root"]),
         "sourceMode": workspace["sourceMode"],

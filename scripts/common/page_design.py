@@ -221,9 +221,12 @@ def validate_member(item, component, *, button=False):
         if name in item and (not isinstance(item[name], list) or any(not isinstance(child, dict) for child in item[name])):
             raise ValueError(name + " must be an array of button objects")
     if not button and item.get("type") == "select":
-        if not item.get("selectBox", {}).get("codeType"):
+        code_type = item.get("selectBox", {}).get("codeType")
+        if not code_type:
             raise ValueError("Select field requires selectBox.codeType")
-        if component not in {"table-main", "table-item"} and not item.get("selectCompId"):
+        # Native dropdowns can receive their options from the page at runtime.
+        page_options = type(code_type) in {int, float} and code_type == 1
+        if component not in {"table-main", "table-item"} and not page_options and not item.get("selectCompId"):
             raise ValueError("Select field requires selectCompId")
         if item["selectBox"].get("selectCodefieldId") == item["fieldId"]:
             raise ValueError("Select field cannot reflect to itself")

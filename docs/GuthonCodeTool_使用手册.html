@@ -267,6 +267,10 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>向导创建工作区后，继续完成对应路线的配置。</li>
 </ol>
 <p>产品和项目分别管理。后续命令或 MCP 配置需要工作区键时，从 Nexus 或配置中读取 <code>products.&lt;id&gt;</code> / <code>projects.&lt;id&gt;</code>，不要使用显示名称代替。配置项的完整职责见<a href="GuthonCodeTool_全功能说明.html#3-1-稳定身份与配置">工作区配置参考</a>。</p>
+<h4 id="agent-workspace-selection">选择 AI 任务目标</h4>
+<p>安装配套版本的 GuthonCodeTool 和 guthon-guard 后，CodeBuddy 可继续打开 <code>var/</code>。输入 <code>/guthon-use 项目 项目名称</code> 或 <code>/guthon-use 产品 产品名称</code>；若客户端显示命名空间，使用 <code>/guthon-guard:guthon-use</code>。Codex 可调用 <code>$guthon-use</code> 并说明目标。</p>
+<p>核对返回的产品/项目名称后继续提需求。提交 Hook 可从需求中识别唯一注册名称；后续追问沿用当前对话目标。需要切换时再次明确选择；输入 <code>list</code> 列候选、<code>status</code> 查看当前目标、<code>clear</code> 清除绑定。只作为参考的其他项目不会成为写入目标。</p>
+<p>出现重名、多个目标或目标冲突时，按候选明确选择后再修改。没有实际 Hook 时仍可解析目标，由 Agent 在当前对话中携带上下文；不要把解析成功当作已保存会话绑定。详细适用条件见<a href="GuthonCodeTool_全功能说明.html#3-3-命令与运行描述">任务目标解析</a>。</p>
 
 <h3 id="2-2-database-路线">2.2 DATABASE 路线</h3>
 <ol>

@@ -5,6 +5,8 @@ products:
   demo-product:
     # 产品名称，用作 readonly、workcopy 和数据库快照的目录名。
     name: 示例产品
+    # 可选工作区别名，仅用于精确名称/prompt 定位；不会改变稳定 ID 或目录。
+    aliases: []
     # 源码来源不写在 YAML；Nexus 项目节点负责选择，未设置时默认 DATABASE。
     # 引用 datasource.yaml 中的数据源标识。
     datasource: demo-product-dev
