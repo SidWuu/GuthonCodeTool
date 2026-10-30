@@ -13,9 +13,7 @@ from .manifest import load_authorized_scope, logical_path_for_entry, resolve_aut
 
 
 def _status_allows_indexing(change):
-    return (change.get("item") in {"modified", "normal", "none", ""}
-            and not any(change.get(key) for key in ("treeConflicted", "switched", "wcLocked"))
-            and change.get("properties") != "conflicted")
+    return catalog.svn_state_block(change) is None
 
 
 def reindex_changed_files(conn, workspace, paths):
@@ -36,7 +34,7 @@ def index_changes(conn, workspace, paths, refresh_result, on_progress=None, *, s
     result = {
         "mode": "svn-incremental-refresh", "workspaceKey": workspace["workspaceKey"],
         "changed": 0, "deleted": 0, "failures": 0, "errors": [], "ignored": [],
-        "scannedFiles": 0, "skippedFiles": 0, "paths": [],
+        "blocked": [], "scannedFiles": 0, "skippedFiles": 0, "paths": [],
     }
 
     def progress(message):
@@ -138,17 +136,28 @@ def index_changes(conn, workspace, paths, refresh_result, on_progress=None, *, s
 
         # Check conflicts before deleting anything; missing files from a successful
         # clean update are deletions, but conflicted/missing local files are not.
+        # Unversioned artifacts such as ``.mine`` or ``.r1234`` are not source
+        # files: they must neither be parsed nor block the rest of the batch.
+        blocked = {}
         grouped = {}
         for logical in sorted(candidates):
             checkpoint()
             entry, path, relative = resolve_authorized_path(scope, logical)
+            if not (path.is_dir() or catalog.source_file_supported(entry, path)):
+                candidates.discard(logical)
+                continue
             changes = changes_by_entry.get(entry.id, {})
             for changed_path, change in changes.items():
                 if relative == changed_path or relative.startswith(changed_path.rstrip("/") + "/") or changed_path == ".":
-                    if not _status_allows_indexing(change):
-                        result["errors"].append({"path": logical, "error": "unsupported local SVN state after update"})
-            if path.is_file() and catalog.source_file_supported(entry, path):
+                    block = catalog.svn_state_block(change)
+                    if block:
+                        code, message = block
+                        blocked[logical] = {"path": logical, "error": message, "code": code}
+            if logical in blocked:
+                continue
+            if path.is_file():
                 grouped.setdefault(entry.id, (entry, []))[1].append((logical, path, relative))
+        result["blocked"] = [blocked[key] for key in sorted(blocked)]
 
         objects = []
         for entry, files in grouped.values():
@@ -214,13 +223,17 @@ def index_changes(conn, workspace, paths, refresh_result, on_progress=None, *, s
             result.update(failures=len(result["errors"]), indexPreserved=True)
             return result
 
-        if not objects and not existing:
+        pending = [logical for logical in candidates if logical not in blocked]
+        if not objects and not pending:
             progress("无源码内容变化，跳过索引写入")
             return result
-        progress(f"批量发布 · 涉及路径 {len(candidates)} 个 · 解析对象 {len(objects)} 个")
+        progress(
+            f"批量发布 · 涉及路径 {len(pending)} 个 · 解析对象 {len(objects)} 个"
+            + (f" · 冲突阻断 {len(blocked)} 个" if blocked else "")
+        )
         try:
             conn.execute("BEGIN IMMEDIATE")
-            for logical in sorted(candidates):
+            for logical in sorted(pending):
                 checkpoint()
                 entry, target, _relative = resolve_authorized_path(scope, logical)
                 rows = conn.execute(

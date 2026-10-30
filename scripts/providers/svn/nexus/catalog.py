@@ -41,6 +41,28 @@ def source_file_supported(entry: ScopeEntry, path: Path) -> bool:
     return path.suffix.lower() in SOURCE_SUFFIXES.get(category, set())
 
 
+def svn_state_block(change: dict | None) -> tuple[str, str] | None:
+    """Describe a local SVN state that must be resolved before a file can be indexed.
+
+    The returned message is user-facing: it names the required action instead of
+    surfacing a JSON parse failure caused by conflict markers.
+    """
+
+    if not change:
+        return None
+    item = change.get("item") or ""
+    properties = change.get("properties") or ""
+    if (item in {"modified", "normal", "none", ""}
+            and not any(change.get(key) for key in ("treeConflicted", "switched", "wcLocked"))
+            and properties != "conflicted"):
+        return None
+    if change.get("treeConflicted"):
+        return "SOURCE_SVN_CONFLICT", "SVN 树冲突未解决，请处理冲突后重建索引"
+    if item == "conflicted" or properties == "conflicted":
+        return "SOURCE_SVN_CONFLICT", "SVN 文本冲突未解决，请完成三方合并并标记「SVN 冲突为已解决」"
+    return "SOURCE_SVN_STATE", f"SVN 本地状态为 {item or properties or 'unknown'}，暂不支持索引"
+
+
 def header_fields(text: str) -> dict[str, str]:
     start = 1 if text.startswith("\ufeff") else 0
     if text[start:].startswith("/**"):
@@ -406,6 +428,11 @@ def scan(
             on_progress(f"[{index}/{total}] {label}｜索引｜读取文件版本信息")
         revision_map = _revision_map(entry.root)
         change_map = {change["path"]: change for change in current.get("changes") or []}
+        conflicted_paths = {}
+        for changed_path, change in change_map.items():
+            block = svn_state_block(change)
+            if block and block[0] == "SOURCE_SVN_CONFLICT":
+                conflicted_paths[changed_path] = block[1]
         if on_progress is not None:
             on_progress(f"[{index}/{total}] {label}｜索引｜解析授权文件")
         scanned_files = 0
@@ -431,6 +458,22 @@ def scan(
                         "status": "SVN_DIRTY" if relative in change_map else "OK",
                     }
                 )
+            conflict_message = conflicted_paths.get(relative)
+            if conflict_message and source_file_supported(entry, path):
+                logical_path = _logical_path(entry, path)
+                errors.append(
+                    {
+                        "scopeEntryId": entry.id,
+                        "path": logical_path,
+                        "code": "SOURCE_SVN_CONFLICT",
+                        "error": conflict_message,
+                    }
+                )
+                if on_progress is not None:
+                    on_progress(
+                        f"[{index}/{total}] {label}｜索引｜冲突阻断 · {logical_path} · {conflict_message}"
+                    )
+                continue
             try:
                 item = _object_for_file(entry, path, revision_map, change_map)
                 if item:
@@ -577,8 +620,9 @@ def scan_file(workspace: dict, logical_path: str) -> dict:
         }
     changes = {change["path"]: change for change in svn_path_changes(entry.root, path)}
     revisions = {relative: _file_revision(path)}
-    change = changes.get(relative)
-    if change and change.get("item") not in {"modified", "normal", "none", ""}:
+    block = svn_state_block(changes.get(relative))
+    if block:
+        code, message = block
         return {
             "object": None,
             "path": normalized,
@@ -586,7 +630,8 @@ def scan_file(workspace: dict, logical_path: str) -> dict:
                 {
                     "scopeEntryId": entry.id,
                     "path": normalized,
-                    "error": f"unsupported SVN state for indexing: {change.get('item')}",
+                    "code": code,
+                    "error": message,
                 }
             ],
         }

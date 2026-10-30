@@ -346,6 +346,29 @@ test('exact parse errors isolate the failed file and publish the remaining healt
   assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount,1);
 });
 
+test('conflict-blocked files are logged and never retried while healthy paths publish',async t=>{
+  const calls=[],outputs=[];
+  const f=recoveryFixture({reindexFiles:async(_key,paths)=>{calls.push(paths);return {
+    ok:true,stale:false,paths:paths.filter(sourcePath=>sourcePath!=='conflict.json'),
+    reindex:{changed:paths.length-1,deleted:0,failures:0,errors:[],blocked:[
+      {path:'conflict.json',code:'SOURCE_SVN_CONFLICT',error:'SVN 文本冲突未解决，请完成三方合并并标记「SVN 冲突为已解决」'},
+    ]}};
+  }},{retryDelays:[10000],onOutput:message=>outputs.push(message)});
+  t.after(()=>f.watcher.dispose());
+  f.enqueue('conflict.json');f.enqueue('good.json');await f.watcher._flush(f.workspace.workspaceKey);
+  assert.equal(calls.length,1);
+  assert.deepEqual(calls[0],['conflict.json','good.json']);
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount,1);
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).retryScheduled,false);
+  assert.ok(outputs.some(line=>line.includes('冲突阻断 · conflict.json')));
+  assert.ok(outputs.some(line=>line.includes('冲突阻断 1')));
+  f.enqueue('another.json');await f.watcher._flush(f.workspace.workspaceKey);
+  assert.deepEqual(calls.at(-1),['another.json']);
+  assert.equal(f.watcher.recoveryState(f.workspace.workspaceKey).failedCount,1);
+  f.enqueue('conflict.json');await f.watcher._flush(f.workspace.workspaceKey);
+  assert.deepEqual(calls.at(-1),['conflict.json']);
+});
+
 test('unrelated changes do not reset exhausted transport retry budgets',async t=>{
   const calls=[];const f=recoveryFixture({reindexFiles:async(_key,paths)=>{calls.push(paths);
     if(paths.includes('bad.json'))throw new Error('unavailable');return {ok:true,paths,reindex:{changed:1}};

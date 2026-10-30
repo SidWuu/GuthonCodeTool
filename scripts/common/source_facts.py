@@ -906,8 +906,11 @@ def index_source_details(
         label = str(script.get("label") or pointer or source.get("source_name") or source.get("source_id") or "")
         content = str(script.get("content") or "")
         from common import source_text_search
+        is_field_collection = str(script.get("script_type") or "").lower() == "fields"
+        if is_field_collection:
+            content = source_text_search.compact_field_content(content)
         source_text_search.index_body(conn, source_record_id, pointer, content, source.get("source_hash") or "")
-        if str(script.get("script_type") or "").lower() == "fields":
+        if is_field_collection:
             continue
         facts = _insert_logic_facts(conn, source_record_id, fragment_id, content, label)
         _insert_data_accesses(conn, source_record_id, fragment_id, content, facts, label)

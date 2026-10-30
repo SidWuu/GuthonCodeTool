@@ -502,6 +502,7 @@ args = ["mcp", "--stdio", "--home", "/本地数据目录"]</code></pre></div>
 <li>按 <code>Ctrl+S</code>（macOS 为 <code>Cmd+S</code>）保存到本地工作副本。</li>
 <li>在源代码管理中打开文件，检查“SVN BASE ↔ 工作副本”差异。</li>
 </ol>
+<p>更新后若“输出 → Guthon Nexus SVN”出现“冲突阻断”，表示这些文件存在未解决的 SVN 冲突：其余文件已按本次更新建立索引，被阻断文件保留上一次索引内容且不再自动重试。按下方“提交与冲突”逐个完成三方合并并标记已解决，再重建索引。</p>
 <p>“刷新 Guthon Nexus”只刷新界面；“刷新 SVN 变更”查看本地状态；“更新全部远程变更”访问服务器。按需要选择入口，避免重复执行正在进行的任务。</p>
 <p>项目继承脚本会显示展开内容，并用背景区分产品段与项目段。只改项目段时保留继承；改动产品段时会把完整内容写入项目源码。保存前核对来源，保存后检查实际差异。</p>
 <h4 id="local-page-editor">本地查看与图形化调整 PAGE</h4>
@@ -581,6 +582,14 @@ args = ["mcp", "--stdio", "--home", "/本地数据目录"]</code></pre></div>
 <li>检查预览中的配置、专属目录和 SVN checkout；项目文档有保留需要时先备份。</li>
 <li>确认后执行删除，目标目录进入系统废纸篓。检查其他工作区仍在。</li>
 </ol>
+<h4 id="index-storage">整理本地索引空间</h4>
+<ol>
+<li>在目标工作区完成保存，等待正在执行的索引操作结束。确认使用的是当前 GuthonCodeTool 后端。</li>
+<li>用当前后端入口执行 <code>index-compact --home &lt;本地数据目录&gt; --workspace &lt;workspaceKey&gt;</code>。预期返回空间预览，尚未执行整理。</li>
+<li>确认目标和可用磁盘空间后，在同一命令末尾增加 <code>--apply</code>。等待返回成功，并比较结果中的整理前后大小；索引不一定每次都能缩小。</li>
+<li>重新搜索一个已知对象，确认仍能打开源码。整理不会替代源码更新，也不会清理 Git 历史或 SVN 缓存。</li>
+</ol>
+<p>适用于 DATABASE 和 SVN 的已存在本地索引。命令参数、正文格式和限制见<a href="GuthonCodeTool_全功能说明.html#index-storage">索引存储与空间整理</a>。</p>
 <h3 id="7-3-常见问题">7.3 遇到问题</h3>
 <p>在<a href="GuthonCodeTool_QA.html">问题解决中心</a>按系统、源码模式或错误原文搜索。先查看“输出 → GuthonCodeTool / Guthon Bridge”的首条失败信息，再按对应问答处理；需要求助时使用页面提供的脱敏模板。</p>
 <h3 id="7-4-验收清单">7.4 首次使用检查</h3>

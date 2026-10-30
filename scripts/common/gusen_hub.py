@@ -1455,9 +1455,14 @@ def run_sync_once(args=None, on_progress=None):
                 ok=not result["failures"],
             )
             if result["failures"]:
+                blocked = result.get("blocked") or []
+                action = (
+                    f"；{_svn_blocked_detail(blocked)}，请合并后标记「SVN 冲突为已解决」再重建索引"
+                    if blocked else ""
+                )
                 if not result.get("indexPreserved", True):
-                    raise IndexPartialError(f"SVN index PARTIAL; {result['failures']} scoped path errors")
-                raise SystemExit(f"SVN scan completed with {result['failures']} scoped path errors; old index preserved")
+                    raise IndexPartialError(f"SVN 索引已发布（PARTIAL）{action}：{result['failures']} 个文件待处理")
+                raise SystemExit(f"SVN 扫描未更新索引（已保留旧索引）：{result['failures']} 个错误{action}")
             return result
         if parsed.init_only:
             export_knowledge_readme(conn, index_name, workspace["workspaceKey"], workspace["sourceMode"])
@@ -1781,6 +1786,17 @@ def _store_svn_scan_diagnostics(conn, scan):
         conn.execute("INSERT OR REPLACE INTO gusen_sync_state(state_key,state_value) VALUES(?,?)", (key, value))
 
 
+def _svn_conflict_errors(scan):
+    """Return the scan errors that only need the user to resolve SVN conflicts."""
+
+    return [error for error in scan.get("errors") or [] if error.get("code") == "SOURCE_SVN_CONFLICT"]
+
+
+def _svn_blocked_detail(blocked, limit=5):
+    paths = [str(item.get("path") or "") for item in blocked[:limit]]
+    return f"冲突阻断 {len(blocked)} 个：{'、'.join(paths)}" + (" 等" if len(blocked) > limit else "")
+
+
 def index_svn_workspace(conn, cfg, workspace, on_progress=None):
     checkpoint()
     svn_checkout.require_capability(workspace, "reindex")
@@ -1816,7 +1832,9 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
                         collect_modules=False,
                         on_progress=on_progress,
                     )
-                if any(error.get("code") not in {"PARSE_ERROR"} for error in scan["errors"]):
+                blocked = _svn_conflict_errors(scan)
+                fatal_codes = {"PARSE_ERROR", "SOURCE_SVN_CONFLICT"}
+                if any(error.get("code") not in fatal_codes for error in scan["errors"]):
                     progress(f"扫描发现身份或范围错误，回滚并保留旧索引")
                     conn.rollback()
                     scan["indexPreserved"] = True
@@ -1831,7 +1849,12 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
                     publication_barrier()
                     conn.commit()
                     scan["indexPreserved"] = False
-                    progress("索引事务已提交" + ("（PARTIAL，坏文件见 errors）" if scan["errors"] else ""))
+                    partial = ""
+                    if scan["errors"]:
+                        partial = "（PARTIAL，坏文件见 errors）"
+                        if blocked:
+                            partial = f"（PARTIAL，{_svn_blocked_detail(blocked)}）"
+                    progress("索引事务已提交" + partial)
             except (Exception, OperationCancelled) as error:
                 conn.rollback()
                 progress("索引扫描已取消，事务已回滚" if isinstance(error, OperationCancelled) else "索引事务异常，已回滚并保留旧索引")
@@ -1874,7 +1897,12 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
                     raise
     if scan["errors"]:
         preserved = scan.get("indexPreserved", True)
-        progress(f"扫描错误 · {len(scan['errors'])} 个 · " + ("旧索引已保留" if preserved else "已发布部分可用索引"))
+        blocked = _svn_conflict_errors(scan)
+        detail = f" · {_svn_blocked_detail(blocked)}" if blocked else ""
+        progress(
+            f"扫描错误 · {len(scan['errors'])} 个{detail} · "
+            + ("旧索引已保留" if preserved else "已发布部分可用索引")
+        )
         return {
             "mode": "svn-scan",
             "provider": "svn",
@@ -1885,6 +1913,7 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
             "counts": scan["counts"],
             "failures": len(scan["errors"]),
             "errors": scan["errors"],
+            "blocked": blocked,
             "ignored": scan.get("ignored") or [],
             "indexPreserved": preserved,
             "buildStatus": "FAILED" if preserved else "PARTIAL",
@@ -1906,6 +1935,7 @@ def index_svn_workspace(conn, cfg, workspace, on_progress=None):
         "counts": scan["counts"],
         "failures": len(scan["errors"]),
         "errors": scan["errors"],
+        "blocked": [],
         "ignored": scan.get("ignored") or [],
         "checkoutClean": scan["status"]["clean"],
         "checkoutChanges": scan["status"]["changes"],
@@ -1947,9 +1977,11 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
             on_progress=on_progress,
         )
         errors = list(scan["errors"])
+        blocked = _svn_conflict_errors(scan)
         selected_set = set(selected)
         if errors:
-            progress(f"扫描发现 {len(errors)} 个错误，保留旧索引")
+            detail = f" · {_svn_blocked_detail(blocked)}" if blocked else ""
+            progress(f"扫描发现 {len(errors)} 个错误{detail}，保留旧索引")
             return {
                 "mode": "svn-scoped-refresh",
                 "provider": "svn",
@@ -1958,6 +1990,7 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
                 "changed": 0,
                 "failures": len(errors),
                 "errors": errors,
+                "blocked": blocked,
                 "indexPreserved": True,
             }
         placeholders = ",".join("?" for _ in selected)
@@ -2003,7 +2036,8 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
                         )
             if errors:
                 conn.rollback()
-                progress(f"扫描发现 {len(errors)} 个错误，保留旧索引")
+                detail = f" · {_svn_blocked_detail(blocked)}" if blocked else ""
+                progress(f"扫描发现 {len(errors)} 个错误{detail}，保留旧索引")
                 return {
                     "mode": "svn-scoped-refresh",
                     "provider": "svn",
@@ -2012,6 +2046,7 @@ def index_svn_workspace_working_copies(conn, cfg, workspace, working_copy_ids, o
                     "changed": 0,
                     "failures": len(errors),
                     "errors": errors,
+                    "blocked": blocked,
                     "indexPreserved": True,
                 }
             existing = conn.execute(

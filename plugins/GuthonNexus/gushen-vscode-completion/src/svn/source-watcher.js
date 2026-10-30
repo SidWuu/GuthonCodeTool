@@ -260,8 +260,9 @@ class SvnSourceWatcher {
           generationChanged = true;
           this.generations.set(workspaceKey, result.indexGeneration);
         }
-        if (result.stale || result.ok === false || result.reindex?.errors?.length || result.reindex?.failures) {
-          const errors = result.reindex?.errors || [];
+        const errors = result.reindex?.errors || [];
+        const blockedItems = result.reindex?.blocked || [];
+        if (result.stale || result.ok === false || errors.length) {
           for (const error of errors) failures.push({ sourcePath: error.path || batch[0], error: new Error(error.error || '索引未发布') });
           if (!errors.length) failures.push({ sourcePath: batch[0], error: new Error('批次索引未发布') });
           const messages = new Map(errors.map(error => [error.path, error.error]));
@@ -276,6 +277,19 @@ class SvnSourceWatcher {
               if (healthy.length) batches.unshift(healthy);
             }
           }
+        } else if (blockedItems.length) {
+          // Conflict-blocked files are isolated: the remaining paths were published
+          // and must not be retried until the user resolves the SVN conflict.
+          const blockedPaths = new Set(blockedItems.map(item => item?.path).filter(sourcePath => batch.includes(sourcePath)));
+          for (const item of blockedItems) {
+            if (!blockedPaths.has(item?.path)) continue;
+            const message = String(item.error || 'SVN 本地状态阻断索引').slice(0, 500);
+            failures.push({ sourcePath: item.path, blocked: true, error: new Error(message) });
+            record.failures.set(item.path, message);
+            record.blocked.add(item.path);
+            paths.add(item.path);
+          }
+          for (const sourcePath of batch) if (!blockedPaths.has(sourcePath)) { record.failures.delete(sourcePath); record.blocked.delete(sourcePath); }
         } else for (const sourcePath of batch) { record.failures.delete(sourcePath); record.blocked.delete(sourcePath); }
       } catch (error) {
         if (this.scopes.get(workspaceKey) !== record || this.disposed) return;
@@ -288,8 +302,13 @@ class SvnSourceWatcher {
     this._armRetry(record);
     if (previousFailures || failures.length) this._publishRecovery(record);
     if (changed || deleted || failures.length) {
-      for (const failure of failures) this.onOutput?.(`[SVN] 文件监听｜失败 · ${failure.sourcePath} · ${failure.error.message}\n`);
-      this.onOutput?.(`[SVN] 文件监听｜批量索引汇总 · 文件 ${items.length} · 更新对象 ${changed} · 删除对象 ${deleted} · 失败 ${failures.length} · 完整耗时 ${elapsed()}\n`);
+      for (const failure of failures) {
+        const label = failure.blocked ? '冲突阻断' : '失败';
+        this.onOutput?.(`[SVN] 文件监听｜${label} · ${failure.sourcePath} · ${failure.error.message}\n`);
+      }
+      const blockedCount = failures.filter(failure => failure.blocked).length;
+      this.onOutput?.(`[SVN] 文件监听｜批量索引汇总 · 文件 ${items.length} · 更新对象 ${changed} · 删除对象 ${deleted} · 失败 ${failures.length}`
+        + `${blockedCount ? ` · 冲突阻断 ${blockedCount}` : ''} · 完整耗时 ${elapsed()}\n`);
     }
     if (!changed && !deleted && !failures.length && !generationChanged && !previousFailures) return;
     // An external CLI may already have updated the index. Refresh its visible

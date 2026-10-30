@@ -99,6 +99,11 @@
       "kind": "read",
       "timeoutMs": 120000
     },
+    "index-compact": {
+      "kind": "read",
+      "timeoutMs": 1800000,
+      "writeFlags": ["--apply"]
+    },
     "command-metadata": {
       "kind": "read",
       "timeoutMs": 120000

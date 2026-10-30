@@ -68,6 +68,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `scripts/common/workspace_config.py` | 工作区创建/删除与 YAML 读写。 |
 | `scripts/common/workspace_assistant.py` | 工作区摘要、就绪状态与助手输出。 |
 | `scripts/common/index_bulk.py` | 在完整重建事务内暂停逐行检索索引触发器，批量构建并恢复；失败回滚数据和触发器。 |
+| `scripts/common/index_maintenance.py` | 显式预览或压实派生索引，紧凑保存字段集合正文并整理检索索引；保留源码、定位元数据和变更历史。 |
 | `scripts/common/source_facts.py` | 源码身份、事实解析与可重建 PAGE 节点/界面字段投影。 |
 | `scripts/common/index_schema_comments.py` | SQLite 索引表及字段的可查询注释。 |
 | `scripts/common/page_projection.py` | PAGE 虚拟文档投影、共享脚本/字段集合提取、语义节点/界面字段描述符及保留已有字段原文的单项插入；共享 PAGE 产品事件解析省略已确认的空继承分块，并供精确继承读取复用。 |

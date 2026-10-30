@@ -118,7 +118,7 @@ CLI_COMMANDS = (
     "database-target-resolve", "database-target-configure", "database-probe",
     "database-describe", "database-query-readonly", "workspace-summary", "search",
     "context-pack", "source-map", "search-all", "pull-log", "parser-feedback", "index-doctor", "source-mode", "route", "init", "svn", "sync-source-all",
-    "sync-source", "reindex", "sync-all", "pull", "export-markdown",
+    "sync-source", "reindex", "index-compact", "sync-all", "pull", "export-markdown",
     *SCRIPT_COMMANDS, "self-test", *sorted(DATABASE_COMMANDS - {"database-target-resolve", "database-target-configure", "database-probe", "database-describe", "database-query-readonly"}),
 )
 CLI_COMMANDS=(*CLI_COMMANDS,*COMMAND_ALIASES)
@@ -253,6 +253,12 @@ def build_index_doctor_parser():
     return parser
 
 
+def build_index_compact_parser():
+    parser = argparse.ArgumentParser(prog="guthon_tool.py index-compact")
+    parser.add_argument("--apply", action="store_true", help="compact the derived index; omit to preview")
+    return parser
+
+
 def build_pull_log_parser():
     parser = argparse.ArgumentParser(prog="guthon_tool.py pull-log")
     parser.add_argument("action", choices=("tail", "summary", "export", "archive", "restore"))
@@ -367,6 +373,7 @@ COMMAND_PARSER_BUILDERS = {
     "database-query-readonly": lambda: build_database_parser("database-query-readonly"),
     "source-mode": build_source_mode_parser,
     "index-doctor": build_index_doctor_parser,
+    "index-compact": build_index_compact_parser,
     "pull-log": build_pull_log_parser,
     "source-map": build_source_map_parser,
     "search-all": build_search_all_parser,
@@ -518,7 +525,7 @@ def _auto_add_operation_enabled(command: str, extra_args: list[str], workspace=N
     # to DATABASE exports. Never enumerate legacy DATABASE trees for SVN work.
     if command == "svn" or workspace and workspace.get("sourceMode") == "svn":
         return False
-    if command in {"source-mode", "workspace-summary", "search", "context-pack", "database-target-configure"}:
+    if command in {"source-mode", "workspace-summary", "search", "context-pack", "database-target-configure", "index-compact"}:
         return False
     return True
 
@@ -733,8 +740,17 @@ def _reindex_svn(gusen_hub, config, workspace, on_progress=None) -> dict:
         conn.close()
     if result.get("failures"):
         if result.get("indexPreserved", True):
-            raise SystemExit(f"SVN scan failed; existing index preserved: {result['errors']}")
-        raise gusen_hub.IndexPartialError(f"SVN scan PARTIAL; valid objects published, fix errors and reindex: {result['errors']}")
+            raise SystemExit(f"SVN 索引未更新，已保留旧索引：{result['errors']}")
+        blocked = result.get("blocked") or []
+        detail = ""
+        if blocked:
+            paths = [item.get("path") or "" for item in blocked[:5]]
+            detail = (
+                f"；冲突阻断 {len(blocked)} 个：{'、'.join(paths)}"
+                + (" 等" if len(blocked) > 5 else "")
+                + "，请合并后标记「SVN 冲突为已解决」再重建索引"
+            )
+        raise gusen_hub.IndexPartialError(f"SVN 索引已发布（PARTIAL）{detail}：{result['errors']}")
     return result
 
 
@@ -780,6 +796,7 @@ def _reindex_svn_files(
 def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str]:
     """Return canonical changed paths, including directories and deleted files."""
 
+    from providers.svn.nexus import catalog
     from providers.svn.nexus.manifest import (
         load_authorized_scope, logical_path_for_entry, resolve_authorized_path,
     )
@@ -815,6 +832,12 @@ def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str]:
             # notifications and added/deleted subtrees cover the real changes.
             if change.get("item") == "modified" and (entry.root / change["path"]).is_dir():
                 continue
+            # Conflict artifacts (.mine, .r1234) and other unversioned files are
+            # not authorized source and must not become incremental index paths.
+            if change.get("item") in {"unversioned", "ignored", "external"}:
+                target = entry.root / change["path"]
+                if not (target.is_file() and catalog.source_file_supported(entry, target)):
+                    continue
             paths.append(logical_path_for_entry(entry, change["path"]) or entry.local_subdir)
     normalized = []
     for path in paths:
@@ -834,12 +857,17 @@ def _reindex_svn_refresh(gusen_hub, config, workspace, refresh_result: dict, on_
         )
     finally:
         connection.close()
+    blocked = result.get("blocked") or []
+    if on_progress is not None:
+        for item in blocked:
+            on_progress(f"{workspace['displayName']}｜索引｜冲突阻断 · {item['path']} · {item['error']}")
     if result.get("failures"):
-        raise SystemExit(f"Incremental SVN scan failed; existing index preserved: {result['errors']}")
+        raise SystemExit(f"增量索引未发布，已保留旧索引：{result['errors']}")
     if on_progress is not None:
         on_progress(
             f"{workspace['displayName']}｜索引｜更新后的索引完成 · "
             f"对象 {result.get('changed', 0)} · 失败 {result.get('failures', 0)}"
+            + (f" · 冲突阻断 {len(blocked)} 个待合并" if blocked else "")
         )
     return result
 
@@ -928,6 +956,11 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         parsed = build_index_doctor_parser().parse_args(extra_args)
         result = index_health(workspace, limit=parsed.limit) if workspace.get("sourceMode") == "svn" else gusen_hub.workspace_index_state(workspace)
         print(json.dumps({"ok": True, "workspaceKey": workspace["workspaceKey"], **result}, ensure_ascii=False, indent=2))
+        return 0
+    if command == "index-compact":
+        from common.index_maintenance import compact_index
+        parsed = build_index_compact_parser().parse_args(extra_args)
+        print(json.dumps(compact_index(workspace, apply=parsed.apply), ensure_ascii=False, indent=2))
         return 0
     if command in {"search", "context-pack"}:
         from common import workspace_assistant

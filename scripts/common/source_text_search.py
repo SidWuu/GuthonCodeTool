@@ -8,6 +8,11 @@ VERSION = 'source-text-v1'
 MAX_BODY_CHARS = 2_000_000
 
 
+def compact_field_content(content: str) -> str:
+    """Keep JSON values intact while omitting whitespace in derived search bodies."""
+    return json.dumps(json.loads(content), ensure_ascii=False, separators=(',', ':'))
+
+
 def setup(conn):
     conn.executescript('''
     CREATE TABLE IF NOT EXISTS source_body_content(
