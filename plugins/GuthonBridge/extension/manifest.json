@@ -50,6 +50,7 @@
         "workspace-selection.js",
         "task-client.js",
         "platform-layout.js",
+        "tab-sorter.js",
         "content.js"
       ],
       "run_at": "document_end"

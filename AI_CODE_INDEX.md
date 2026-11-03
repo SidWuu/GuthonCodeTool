@@ -163,6 +163,8 @@ Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/quick-open.js` 负�
 
 Bridge `plugins/GuthonBridge/extension/platform-layout.js` 核对 2.0/1.5 布局与控件结构（兼容版本栏为空）后，按管理页签和实际列表容器（含数据表管理表格/卡片、视图管理、定时任务、单据类型、数据字典）设置滚动布局，由 `content.js` 在主机校验后启停，`bridge.css` 提供列表独立滚动、固定查询/操作区及小屏横向滚动；动态页面挂载、页签切换和窗口缩放触发更新，退出页面或扩展失效时清理。
 
+Bridge `plugins/GuthonBridge/extension/tab-sorter.js` 由 `content.js` 启停，在已知卡片标签栏内拖动排序，仅移动标签头，保留原生编辑器实例；首页与菜单固定。上层功能标签按平台 origin 保存到扩展本地存储，PAGE/过程函数标签仅在当前页面会话保留；观察挂载和重绘恢复顺序，清理时还原原顺序及属性。交互与注入回归见 `plugins/GuthonBridge/extension/tab-sorter.test.js`。
+
 Bridge `plugins/GuthonBridge/extension/task-client.js` 与 `background.js` 实现短请求提交/轮询及 worker 重启恢复；`host-config.js` 验证显式 IPv4/IPv6 范围，不扩大默认授权。`plugins/GuthonBridge/extension/task-history.js` 保存有界成功目标元数据，重拉丢弃旧 force/confirmation，固定原平台来源。
 
 `plugins/GuthonBridge/bridge/page-context.js` 保留有界、有租约的身份快照及不重放的导航回执；`plugins/GuthonBridge/extension/event-client.js` 用 Bearer fetch 解析 SSE；Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/browser-navigation.js` 明确选择工作区平台页签并复用 page-bridge 的精确对象导航。浏览器正文不进入快照，来源/工作区在服务端及浏览器重新校验；DOM 事件替代编辑器扫描，元数据心跳只用于租约和 worker 恢复。

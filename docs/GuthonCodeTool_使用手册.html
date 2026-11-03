@@ -407,7 +407,7 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 
 <section class="wiki-section">
 <h2 id="4-bridge">4. Bridge 网页辅助</h2>
-<p>需要从谷神网页拉取对象、复制字段、跳转源码或改善管理列表滚动时，使用 Chrome Bridge。</p>
+<p>需要从谷神网页拉取对象、复制字段、跳转源码、排列标签或改善管理列表滚动时，使用 Chrome Bridge。</p>
 <h3 id="4-1-安装-chrome-扩展">4.1 安装 Chrome 扩展</h3>
 <ol>
 <li>使用 Windows 一键安装器时，选择向导提供的扩展目录。手动安装时，解压同一 Release 的 <code>GuthonCodeTool-chrome.zip</code> 到固定目录。</li>
@@ -430,8 +430,9 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 <li><strong>Nexus → 平台：</strong>在源码树右键 PAGE 或过程函数，选择“在谷神平台定位源码”，按提示选择已打开的平台页签。</li>
 <li><strong>复制与粘贴字段：</strong>在模块开发页打开复制模式，勾选需要的字段（含灰色标识的隐藏字段），再选择目标组件粘贴。检查字段与继承脚本结果后，手动保存平台页面。</li>
 <li><strong>管理列表：</strong>数据表管理主列表、表字段列表、开发日志和增量发布保留顶部按钮；模块参数、系统脚本的查询区和左侧树保留可见。直接滚动列表，小屏幕可用横向滚动条访问操作列。</li>
+<li id="bridge-tab-sort"><strong>标签排序：</strong>按住顶部功能标签或下方 PAGE、过程函数标签的文字，拖到同一排目标标签的左半边或右半边，看到蓝色插入线后松开。标签移到对应位置；首页和右侧菜单固定，关闭标签仍点击原来的关闭按钮。标签过多时拖到左右边缘继续滚动。上层顺序会在同一平台地址恢复，下层顺序保留到刷新页面为止。详细范围见<a href="GuthonCodeTool_全功能说明.html#bridge-tab-sort">标签排序说明</a>。</li>
 </ul>
-<p>字段辅助和列表滚动可在扩展加载后直接使用；源码拉取及双向定位还需本地服务与相应工作区。长任务结果不明时，先在弹窗点击“查询待恢复任务”，确认原结果后再决定是否重拉。</p>
+<p>字段辅助、标签排序和列表滚动可在扩展加载后直接使用；源码拉取及双向定位还需本地服务与相应工作区。长任务结果不明时，先在弹窗点击“查询待恢复任务”，确认原结果后再决定是否重拉。</p>
 
 </section>
 

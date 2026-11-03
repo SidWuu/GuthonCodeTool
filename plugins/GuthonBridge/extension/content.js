@@ -3,6 +3,7 @@ if (!globalThis.GuthonBridgeHost?.isAllowed(location.href)) return;
 globalThis.__guthonContentCleanup?.();
 for (const id of ['guthon-bridge-floating-root', 'guthon-bridge-copy-overlay', 'guthon-bridge-fields-mover-overlay', 'guthon-bridge-callers-overlay']) document.getElementById(id)?.remove();
 const stopPlatformLayout = globalThis.GuthonBridgePlatformLayout?.start();
+const stopTabSorter = globalThis.GuthonBridgeTabSorter?.start();
 const documentListeners = [];
 function listenDocument(type, listener, options) {
   document.addEventListener(type, listener, options);
@@ -51,6 +52,7 @@ function getStorageLocal() {
 
 function stopExtensionLoops() {
   stopPlatformLayout?.();
+  stopTabSorter?.();
   if (gIntervalId !== null) {
     clearInterval(gIntervalId);
     gIntervalId = null;

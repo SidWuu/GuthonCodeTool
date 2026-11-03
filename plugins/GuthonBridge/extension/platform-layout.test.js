@@ -232,7 +232,7 @@ test('automatic and manual injection both load layout before content lifecycle s
   const files = manifest.content_scripts[0].js;
   assert.ok(files.indexOf('platform-layout.js') < files.indexOf('content.js'));
   const background=fs.readFileSync(require.resolve('./background.js'),'utf8');
-  assert.match(background,/"platform-layout.js", "content.js"/);
+  assert.match(background,/"platform-layout.js", "tab-sorter.js", "content.js"/);
   const content=fs.readFileSync(require.resolve('./content.js'),'utf8');
   assert.ok(content.indexOf('GuthonBridgeHost?.isAllowed') < content.indexOf('GuthonBridgePlatformLayout?.start'));
   assert.match(content,/function stopExtensionLoops\(\) \{\s+stopPlatformLayout\?\.\(\);/);

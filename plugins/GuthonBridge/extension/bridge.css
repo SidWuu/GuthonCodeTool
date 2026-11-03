@@ -852,6 +852,12 @@ tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
   background: #f5f7fa;
 }
 
+/* Sortable platform headers keep the native tab, close button and editor panel. */
+.el-tabs__item.guthon-tab-sortable { cursor: grab; }
+.el-tabs__item.guthon-tab-dragging { opacity: .45; cursor: grabbing; }
+.el-tabs__item.guthon-tab-drop-before { box-shadow: inset 3px 0 #409eff; }
+.el-tabs__item.guthon-tab-drop-after { box-shadow: inset -3px 0 #409eff; }
+
 /* Management lists: keep navigation, queries and actions outside the scrolling body. */
 .guthon-layout-viewport {
   height: var(--guthon-layout-height) !important;

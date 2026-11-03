@@ -12,6 +12,9 @@ MARKER = re.compile(r'<!-- guthon-release-source: ([a-f0-9]{40}) -->')
 def classify(paths):
     selected = set()
     for name in paths:
+        # Tests and this scope selector are not shipped in component archives.
+        if name.endswith('.test.js') or name == '.github/scripts/release_plan.py':
+            continue
         if name.startswith('plugins/GuthonBridge/'):
             selected.add('bridge')
             if name.startswith('plugins/GuthonBridge/bridge/'):
