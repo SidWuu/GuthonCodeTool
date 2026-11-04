@@ -356,7 +356,7 @@ def _result_columns(cursor):
     return columns
 
 
-def _execute_dicts(cursor, sql: str, params: tuple = ()) -> tuple[list[str], list[dict]]:
+def _execute_dicts(cursor, sql: str, params: tuple | dict = ()) -> tuple[list[str], list[dict]]:
     cursor.execute(sql, params)
     columns = _result_columns(cursor)
     raw_rows = cursor.fetchall()
@@ -369,7 +369,7 @@ def _execute_dicts(cursor, sql: str, params: tuple = ()) -> tuple[list[str], lis
     return columns, rows
 
 
-def _json_value(value: Any) -> tuple[Any, bool]:
+def _json_value(value: Any, *, max_chars: int | None = MAX_CELL_CHARS) -> tuple[Any, bool]:
     if value is None or isinstance(value, (bool, int, float)):
         return value, False
     if isinstance(value, decimal.Decimal):
@@ -380,30 +380,34 @@ def _json_value(value: Any) -> tuple[Any, bool]:
         text = value.hex()
     else:
         text = str(value)
-    return text[:MAX_CELL_CHARS], len(text) > MAX_CELL_CHARS
+    if max_chars is None:
+        if isinstance(value, (dict, list)):
+            text = json.dumps(value, ensure_ascii=False)
+        return text, False
+    return text[:max_chars], len(text) > max_chars
 
 
-def _normalize_rows(rows: list[dict], limit: int) -> tuple[list[dict], str]:
+def _normalize_rows(rows: list[dict], limit: int, *, max_chars: int | None = MAX_CELL_CHARS) -> tuple[list[dict], str]:
     row_truncated = len(rows) > limit
     cell_truncated = False
     normalized = []
     for row in rows[:limit]:
         converted = {}
         for key, value in row.items():
-            converted[key], truncated = _json_value(value)
+            converted[key], truncated = _json_value(value, max_chars=max_chars)
             cell_truncated = cell_truncated or truncated
         normalized.append(converted)
     truncation = "rows" if row_truncated else "cell" if cell_truncated else "none"
     return normalized, truncation
 
 
-def _truncation_details(rows: list[dict], limit: int) -> dict:
+def _truncation_details(rows: list[dict], limit: int, *, max_chars: int | None = MAX_CELL_CHARS) -> dict:
     return {
         "rows": len(rows) > limit,
         "cells": [
-            {"row": index + 1, "column": str(key), "maxChars": MAX_CELL_CHARS}
+            {"row": index + 1, "column": str(key), "maxChars": max_chars}
             for index, row in enumerate(rows[:limit])
-            for key, value in row.items() if _json_value(value)[1]
+            for key, value in row.items() if _json_value(value, max_chars=max_chars)[1]
         ],
     }
 
@@ -422,13 +426,14 @@ def _metadata_table_names(cursor, connection: dict, references: list[str]) -> se
         sql = f"SELECT table_name FROM information_schema.tables WHERE table_schema=%s AND UPPER(table_name) IN ({placeholders})"
         params = (connection.get("schema") or "public", *names)
     else:
-        placeholders = ", ".join([f":{index + 2}" for index in range(len(names))])
+        table_params = {f"table_name_{index}": name for index, name in enumerate(names)}
+        placeholders = ", ".join(f":{key}" for key in table_params)
         sql = (
-            f"SELECT TABLE_NAME FROM ALL_TABLES WHERE OWNER=:1 AND UPPER(TABLE_NAME) IN ({placeholders}) "
-            f"UNION SELECT VIEW_NAME FROM ALL_VIEWS WHERE OWNER=:1 AND UPPER(VIEW_NAME) IN ({placeholders})"
+            f"SELECT TABLE_NAME FROM ALL_TABLES WHERE OWNER=:schema_name AND UPPER(TABLE_NAME) IN ({placeholders}) "
+            f"UNION SELECT VIEW_NAME FROM ALL_VIEWS WHERE OWNER=:schema_name AND UPPER(VIEW_NAME) IN ({placeholders})"
         )
-        params = (schema.upper(), *names)
-    _, rows = _execute_dicts(cursor, sql, tuple(params))
+        params = {"schema_name": schema.upper(), **table_params}
+    _, rows = _execute_dicts(cursor, sql, params)
     return {str(next(iter(row.values()))).upper() for row in rows}
 
 
@@ -558,9 +563,11 @@ def _explain_cursor(cursor, connection, target, sql, max_rows=MAX_ROWS):
     limit = max(1, min(int(max_rows), MAX_ROWS))
     raw = cursor.fetchmany(limit + 1)
     rows = [value if isinstance(value, dict) else dict(zip(columns, value)) for value in raw]
-    normalized, truncation = _normalize_rows(rows, limit)
+    # Plans are diagnostic JSON: truncating a cell destroys the plan structure.
+    # Business query cells retain the default limit; row limits still apply here.
+    normalized, truncation = _normalize_rows(rows, limit, max_chars=None)
     return {'ok':True, 'columns':columns, 'rows':normalized, 'truncation':truncation,
-            'truncationDetails':_truncation_details(rows,limit), 'maxRows':limit,
+            'truncationDetails':_truncation_details(rows,limit,max_chars=None), 'maxRows':limit,
             'kind':'execution-plan', 'queryExecuted':False, 'analyze':False,
             'evidenceBoundary':'优化器估计计划，不是业务查询结果或实际执行成本'}
 
