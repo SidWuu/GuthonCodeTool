@@ -36,7 +36,7 @@ test('API command rejects a missing project before running any backend request',
 test('cancelled API address prompt does not change configuration',async t=>{
   const f=fixture(t);f.vscode.window.showInputBox=async()=>undefined;
   await f.handlers.get('gushenCompletion.configureApiSource')('projects.demo');
-  assert.deepEqual(f.calls,[['api',['status']]]);assert.deepEqual(f.errors,[]);
+  assert.deepEqual(f.calls,[['api',['status','--stdin']]]);assert.deepEqual(f.errors,[]);
 });
 test('login shows captcha and passes remember to shared backend credential store',async()=>{
   const calls=[],handlers=new Map(),secrets=new Map(),inputs=['alice','password','1234'];let html='',disposed=false;

@@ -17,6 +17,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   const stateProcessClient = new ToolProcessClient();
   const stateClient = new ToolJsonClient({getTool,processClient:stateProcessClient,outputLabel:'谷神 API 编辑状态'});
   const run = async (key,action,input) => {
+    if(action==='status') input={...input,changesOnly:true};
     try {return await client.run(key,'api',[action,...(input === undefined ? []:['--stdin'])],input);}
     catch(error) {if(error.code==='API_LOGIN_REQUIRED' && !['session','status'].includes(action)) onUpdated?.();throw error;}
   };

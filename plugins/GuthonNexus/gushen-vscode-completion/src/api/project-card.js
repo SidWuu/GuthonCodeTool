@@ -13,9 +13,9 @@ function cardModel(workspace,status,authentication={authenticated:true,session:s
     version:session?.mainVersion?`${session.mainVersion}@${session.dateVersion}`:'登录后显示',
     address:status.settings.serverUrl||'',user:session?.userName||'',
     scope:status.settings.allSystems?'全部子系统':`${status.settings.systemIds.length} 个子系统`,
-    sourceCount:files.length,changed:files.filter(file=>file.state!=='CLEAN').length,
+    sourceCount:status.summary?.sourceCount ?? files.length,changed:status.summary?.changedCount ?? files.filter(file=>file.state!=='CLEAN').length,
     canPull:!!status.settings.serverUrl&&(status.settings.allSystems||status.settings.systemIds.length>0),
-    canUpload:files.some(file=>file.state==='MODIFIED'&&!file.readonly)};
+    canUpload:status.summary ? status.summary.uploadableCount>0 : files.some(file=>file.state==='MODIFIED'&&!file.readonly)};
 }
 function projectCardHtml(model,{nonce=crypto.randomBytes(18).toString('base64'),css='',form={}}={}) {
   const e=escapeHtml;

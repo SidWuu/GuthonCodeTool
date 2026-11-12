@@ -63,6 +63,21 @@ test('catalog displays the rebuild action when index scope is stale',async()=>{
   const root=(await f.ui.getChildren())[0],items=await f.ui.getChildren(root);
   assert.equal(items[0].label,'索引范围已过期');assert.equal(items[0].command,'gushenCompletion.reindexCalls');
 });
+
+test('reopened source tree shows persisted diagnostics without rebuilding the index',async()=>{
+  const f=fixture(),calls=[],reports=[];
+  f.ui.run=async(_key,action)=>{calls.push(action);assert.equal(action,'catalog');return {indexGeneration:'g',partialSourceCount:2,objects:[
+    {path:'systems/A/incomplete.xml',diagnostic:'API_PAGE_FORMAT_INVALID'},
+    {path:'datasources/DS/views/V.xml',diagnostic:'API_VIEW_FORMAT_UNSUPPORTED'}]};};
+  f.vscode.workspace.openTextDocument=async data=>{reports.push(data.content);return data;};
+  f.ui.syncWorkspaces(['projects.a']);
+  const items=await f.ui.getChildren((await f.ui.getChildren())[0]);
+  const warning=items.find(item=>item.kind==='message');
+  assert.equal(warning.command,'gushenCompletion.showApiIndexDiagnostics');
+  await f.ui.showIndexDiagnostics('projects.a');
+  assert.match(reports[0],/API_PAGE_FORMAT_INVALID/);assert.match(reports[0],/API_VIEW_FORMAT_UNSUPPORTED/);
+  assert.deepEqual(calls,['catalog']);
+});
 test('partial upload reports unknown and unattempted files without claiming success',async()=>{
   const f=fixture(),reports=[];f.vscode.workspace.openTextDocument=async data=>(reports.push(data.content),data);
   f.ui.run=async(_key,action,input)=>{

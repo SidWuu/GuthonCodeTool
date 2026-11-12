@@ -235,11 +235,11 @@
     "viewSqlProjectionParsedWithoutSourceChanges": 18
   },
   "validation": {
-    "checkedAt": "2026-11-12T12:09:25.851738+00:00",
-    "apiTests": 135,
+    "checkedAt": "2026-11-12T14:10:23.652859+00:00",
+    "apiTests": 137,
     "retainedSharedPythonTests": 182,
     "buildAndInstallerTests": 34,
-    "nexusTests": 432,
+    "nexusTests": 434,
     "bridgeTests": 111,
     "sourceAndPyzAndMacApplicationSmoke": "passed",
     "mcpTools": {
@@ -267,9 +267,12 @@
     },
     "publicDocs": {
       "pages": 4,
-      "qaItems": 75,
+      "qaItems": 76,
       "syntaxLinksAndSearch": "passed"
     },
-    "vsixSha256": "88ada67322638694427a3b834959bf03a51e34e2da91e1b6400594e8de1aa191"
+    "vsixSha256": "a1498a1927eecd9a5ea1e3a2c9d42925148d16734fb6e83cca32fae7d1a16f33",
+    "largeWorkspaceStatus": "16000 clean fixture objects plus changed/out-of-scope objects; full counts retained and compact response bounded",
+    "codeBuddy": "installed Nexus and packaged backend: compact status, full-project catalog paging, source hash context, search and persisted diagnostic display passed; existing source and unrelated configuration preserved",
+    "fullProjectIndex": "completed across the selected project; missing native identities or SQL are reported per object, without generating source facts for those objects"
   }
 }

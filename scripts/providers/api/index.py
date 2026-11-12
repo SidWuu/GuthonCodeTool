@@ -302,8 +302,13 @@ def _index_item(conn, workspace, item):
     name = str(
         meta.get("pageName") or meta.get("funName") or meta.get("title") or source_id
     )
-    fmt = page_format(item)
-    diagnostic = "API_PAGE_XML_UNSUPPORTED" if fmt == "unsupported-xml" else ""
+    try:
+        fmt = page_format(item)
+        diagnostic = "API_PAGE_XML_UNSUPPORTED" if fmt == "unsupported-xml" else ""
+    except (ValueError, TypeError):
+        if not text.lstrip("\ufeff \t\r\n").startswith("<"):
+            raise
+        fmt, diagnostic = "unsupported", "API_PAGE_FORMAT_INVALID"
     view_sql = None
     if kind == "view":
         from .view_editor import extract_sql
@@ -400,6 +405,7 @@ def _diagnostics(conn):
             "code": row["diagnostic"],
             "message": {
                 "API_PAGE_XML_UNSUPPORTED": "未知 PAGE XML 格式仅可读取原文，未生成结构或源码事实",
+                "API_PAGE_FORMAT_INVALID": "PAGE 格式或编码与元数据不符，仅保留原文，未生成结构或源码事实",
                 "API_VIEW_FORMAT_UNSUPPORTED": "视图缺少可核验身份或 SQL，未生成源码事实",
                 "API_VIEW_IDENTITY_MISSING": "视图元数据缺少平台编码，未生成源码事实",
                 "API_IDENTITY_MISMATCH": "视图源码编码与平台对象不一致，未生成源码事实",

@@ -104,11 +104,26 @@ def execute(workspace, action, payload):
     if action == "status":
         from common.workspace_registry import workspace_index_state
 
+        changes_only = payload.get("changesOnly", False)
+        if type(changes_only) is not bool:
+            raise ApiError("API_INPUT_INVALID", "changesOnly 必须是布尔值")
+        files = store.status()
+        active = [item for item in files if item["inScope"]]
         return {
             "settings": settings(workspace),
             "checkoutPath": str(workspace["providerSourceRoot"]),
             "workspaceRoot": str(workspace["root"]),
-            "files": store.status(),
+            "files": [item for item in files if item["state"] != "CLEAN"]
+            if changes_only else files,
+            "summary": {
+                "sourceCount": len(active),
+                "changedCount": sum(item["state"] != "CLEAN" for item in active),
+                "uploadableCount": sum(
+                    item["state"] == "MODIFIED" and not item["readonly"]
+                    for item in active
+                ),
+            },
+            "changesOnly": changes_only,
             "index": workspace_index_state(workspace),
             "sessionPersistence": "current-toolhost-or-system-keyring",
             "lastLogin": last_login(workspace),

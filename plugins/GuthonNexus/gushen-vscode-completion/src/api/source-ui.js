@@ -114,6 +114,10 @@ class ApiSourceUI {
         }
         parent.children.push({label:object.label || object.name || parts.at(-1),key:item.key,object,parent:parent===root ? item : parent});
       }
+      if(partial && !this.indexDiagnostics.has(item.key)) {
+        const diagnostics=objects.filter(object=>object.diagnostic).map(object=>({path:object.path,code:object.diagnostic}));
+        this.indexDiagnostics.set(item.key,{complete:false,diagnosticCount:partial,diagnostics:diagnostics.slice(0,100),truncated:diagnostics.length>100});
+      }
       const sort = node => {node.children.sort((a,b)=>Boolean(b.children)-Boolean(a.children) || a.label.localeCompare(b.label));node.children.filter(x=>Array.isArray(x.children)).forEach(sort);}; sort(root);const diagnostic=this.indexDiagnostics.get(item.key);const count=Math.max(partial,diagnostic?.diagnosticCount || 0);
       if(count || diagnostic?.complete===false) root.children.push({kind:'message',label:`索引不完整${count ? `：${count} 个诊断` : ''}，点击查看`,key:item.key,parent:item,command:diagnostic ? 'gushenCompletion.showApiIndexDiagnostics' : 'gushenCompletion.reindexCalls'});
       const recovery=this.indexRecovery?.(item.key);if(recovery?.paths.length) root.children.push({kind:'message',label:`${recovery.paths.length} 个源码文件等待索引更新，点击重试`,key:item.key,parent:item,command:'gushenCompletion.retryApiIndexFailures'});

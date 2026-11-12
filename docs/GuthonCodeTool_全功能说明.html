@@ -182,7 +182,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <h2 id="3-工作区与配置">3. 工作区与配置</h2>
 <h3 id="3-1-稳定身份与配置">3.1 稳定身份与配置</h3><p>产品与项目分别使用 <code>products.&lt;id&gt;</code>、<code>projects.&lt;id&gt;</code>；注册表中的配置 ID 跨两类工作区保持唯一。每个项目配置独立 API 地址、系统与数据源范围。checkout、基线和操作记录绑定该平台身份；已有基线后更换平台地址需要另建项目或明确迁移，不能复用原项目源码向其他平台上传。多个项目分别在各自窗口打开。</p><h4 id="workspace-config-reference">配置字段与故障隔离</h4><p><code>products.yaml</code>、<code>projects.yaml</code> 保存注册信息；API 项目配置和基线位于目标工作区的 <code>context/api</code>。<code>datasource.yaml</code>、<code>database-testing.yaml</code> 用于独立数据库诊断与测试；<code>sync.yaml</code> 的 <code>guthon_api</code> 用于方言文档资源。真实地址、密码和业务内容不应写入公开示例。</p>
 <h3 id="3-2-创建切换与删除">3.2 创建、切换与删除</h3><p>在 Nexus 创建项目并明确选择目标；删除前核对预览及保留的数据。任务开始时按明确目标或路径解析 workspaceKey，不依赖全局默认项目。</p>
-<h3 id="3-3-命令与运行描述">3.3 命令与运行描述</h3><h4 id="runtime-cli-reference">CLI 与 runtime descriptor 参考</h4><p>使用 <code>api &lt;action&gt; --stdin</code> 传递结构化输入，CLI 与 ToolHost 共用工作区身份。动作包括配置、登录、拉取、定向刷新、状态、目录、读取、编辑、差异、冲突处理、上传、回读核对、索引和查询；完整参数以当前命令帮助为准。凭据通过标准输入传递，不放入命令参数。</p><p>运行描述使用显式 toolHome 和命令数组；发行、源码及调试模式的入口不同。实际能力以当前安装版本为准。</p>
+<h3 id="3-3-命令与运行描述">3.3 命令与运行描述</h3><h4 id="runtime-cli-reference">CLI 与 runtime descriptor 参考</h4><p>使用 <code>api &lt;action&gt; --stdin</code> 传递结构化输入，CLI 与 ToolHost 共用工作区身份。动作包括配置、登录、拉取、定向刷新、状态、目录、读取、编辑、差异、冲突处理、上传、回读核对、索引和查询；完整参数以当前命令帮助为准。凭据通过标准输入传递，不放入命令参数。</p><p>Nexus 刷新状态时只请求完整范围的汇总和非干净文件清单，避免大项目状态超出传输预算；<code>api status</code> 默认仍返回完整文件列表，<code>changesOnly: true</code> 可仅返回变更项及 <code>summary</code> 计数。原生 XML 无法解析时，索引保留对应对象的原文与诊断，其他可解析对象继续处理；这类诊断对象不生成结构事实。重新打开窗口后，可直接从源码树查看已保存的目录诊断，无需再次重建整个索引。</p><p>运行描述使用显式 toolHome 和命令数组；发行、源码及调试模式的入口不同。实际能力以当前安装版本为准。</p>
 </section>
 
 <section class="section">

@@ -13,6 +13,13 @@ test('project card counts only current scope and escapes project data',()=>{
   assert(html.includes('data-action="pull"'));assert(html.includes('data-action="upload"'));
 });
 
+test('project card keeps full-project counts when status returns changes only',()=>{
+  const model=cardModel({workspaceKey:'projects.a',name:'A'},
+    {settings:{serverUrl:'https://project.invalid',allSystems:true,systemIds:[]},files:[],
+      summary:{sourceCount:16000,changedCount:0,uploadableCount:0}});
+  assert.equal(model.sourceCount,16000);assert.equal(model.changed,0);assert.equal(model.canUpload,false);
+});
+
 test('project card binds actions to its resolved project, ignoring forged workspace IDs',async()=>{
   const registrations=[],calls=[],messages=[];
   const provider=new ProjectCardProvider({context:{extensionPath:require('node:path').resolve(__dirname,'..')},
