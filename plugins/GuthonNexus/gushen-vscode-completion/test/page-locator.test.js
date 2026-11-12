@@ -1,122 +1,24 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
-const {
-  findExactPageCandidates, findExactProcedureCandidates, findExactServiceComponentCandidates,
-  procedureFromFullName, sourceLocatorFromUri, buildSourceLocatorLink,
-} = require('../src/svn/page-locator');
-
-test('object share links roundtrip exact identity and reject ambiguity or local paths', () => {
-  const identity = {workspaceKey:'products.demo',sourceType:'procedure',sourceId:'example.pkg#save',
-    workingCopyId:'source:one',sourceNamespace:'source:one',funId:'save'};
-  const link = buildSourceLocatorLink({...identity, localPath:'/private/source',editToken:'secret'});
-  assert.ok(!link.includes('/private/source'));
-  assert.ok(!link.includes('secret'));
-  const url = new URL(link);
-  const uri = {authority:url.hostname,path:url.pathname,query:url.search.slice(1)};
-  assert.deepEqual(sourceLocatorFromUri(uri), {type:'source',identity});
-  assert.throws(()=>sourceLocatorFromUri({...uri,query:uri.query+'&workspaceKey=products.other'}),/重复/);
-  assert.throws(()=>sourceLocatorFromUri({...uri,query:uri.query+'&localPath=/tmp/source'}),/未知/);
-  assert.throws(()=>buildSourceLocatorLink({...identity,workspaceKey:''}),/精确身份/);
-  assert.throws(()=>buildSourceLocatorLink({...identity,workingCopyId:''}),/精确身份/);
+const test=require('node:test');const assert=require('node:assert/strict');
+const {parseSourceLink,sourceLink,findExactCandidates}=require('../src/api/navigation');
+const uri=(path,query)=>({authority:'gushen-local.guthon-nexus-vscode',path,query});
+test('API source share link roundtrips project and exact relative path',()=>{
+  const link=new URL(sourceLink('projects.demo','systems/S/pages/测试.json'));
+  assert.deepEqual(parseSourceLink(uri(link.pathname,link.search.slice(1))),{type:'open-source',workspaceKey:'projects.demo',path:'systems/S/pages/测试.json'});
+  assert.throws(()=>parseSourceLink(uri('/open-source','workspaceKey=projects.demo&path=../escape')),/路径/);
+  assert.throws(()=>parseSourceLink(uri('/open-source','workspaceKey=projects.demo&path=a&path=b')),/字段/);
 });
-
-test('external PAGE locator accepts one PAGE ID and rejects extra routing state', () => {
-  const uri = { authority: 'gushen-local.guthon-nexus-vscode', path: '/locate-page', query: 'pageId=PG-1234-5678' };
-  assert.deepEqual(sourceLocatorFromUri(uri), { type: 'page', pageId: 'PG-1234-5678' });
-  assert.equal(sourceLocatorFromUri({ ...uri, path: '/other' }), null);
-  assert.throws(() => sourceLocatorFromUri({ ...uri, query: `${uri.query}&workspaceKey=products.demo` }), /唯一/);
-  assert.throws(() => sourceLocatorFromUri({ ...uri, query: `${uri.query}&pageId=PG-OTHER` }), /唯一/);
-  assert.throws(() => sourceLocatorFromUri({ ...uri, query: 'pageId=../other' }), /唯一/);
+test('external PAGE and procedure links require exact unique identity',()=>{
+  assert.deepEqual(parseSourceLink(uri('/locate-page','pageId=PG-123')),{type:'locate-page',pageId:'PG-123'});
+  assert.throws(()=>parseSourceLink(uri('/locate-page','pageId=PG-1&pageId=PG-2')),/字段/);
+  assert.deepEqual(parseSourceLink(uri('/locate-procedure','alias=demo.pkg&funId=save')),{type:'locate-procedure',alias:'demo.pkg',funId:'save'});
+  assert.throws(()=>parseSourceLink(uri('/locate-procedure','alias=demo.pkg&funId=save&extra=x')),/字段/);
 });
-
-test('external procedure locator accepts only package and function identities', () => {
-  const uri = { authority: 'gushen-local.guthon-nexus-vscode', path: '/locate-procedure',
-    query: 'alias=com.golden.demo.common&funId=saveForecast' };
-  assert.deepEqual(sourceLocatorFromUri(uri), {
-    type: 'procedure', alias: 'com.golden.demo.common', funId: 'saveForecast',
-  });
-  assert.deepEqual(procedureFromFullName('com.golden.demo.common.saveForecast'),
-    sourceLocatorFromUri(uri));
-  assert.throws(() => sourceLocatorFromUri({ ...uri, query: `${uri.query}&workingCopyId=other` }), /唯一/);
-  assert.throws(() => sourceLocatorFromUri({ ...uri, query: `${uri.query}&funId=other` }), /唯一/);
-  assert.throws(() => sourceLocatorFromUri({ ...uri, query: 'alias=../demo&funId=save' }), /唯一/);
-  assert.throws(() => procedureFromFullName('saveForecast'), /完整包名/);
+test('exact PAGE and procedure candidates preserve distinct paths across index pages',async()=>{
+  const calls=[],run=async(_key,_action,input)=>{calls.push(input.offset);return {indexGeneration:'g',hits:input.offset===0?
+    [{path:'a',sourceType:'page',sourceId:'PG-1'},{path:'a',sourceType:'page',sourceId:'PG-1'}]:[{path:'b',sourceType:'page',sourceId:'PG-1'},{path:'c',sourceType:'procedure',alias:'demo',funId:'save'}],nextOffset:input.offset?null:100};};
+  const pages=await findExactCandidates(run,'projects.demo','page','PG-1',x=>x.sourceId==='PG-1');assert.deepEqual(pages.items.map(x=>x.path),['a','b']);assert.deepEqual(calls,[0,100]);
+  const functions=await findExactCandidates(run,'projects.demo','procedure','save',x=>x.alias==='demo' && x.funId==='save');assert.deepEqual(functions.items.map(x=>x.path),['c']);
 });
-
-test('PAGE locator keeps exact IDs and full source identities across index pages', async () => {
-  const calls = [];
-  const backend = { async pageQuery(workspaceKey, name, args) {
-    calls.push({ workspaceKey, name, args });
-    return args.cursor ? {
-      indexGeneration: 'g1', sources: [{ sourceType: 'page', sourceId: 'PG-1',
-        sourceNamespace: 'system-B', sourcePath: 'b/PG-1.json', workingCopyId: 'wc-b' }],
-    } : {
-      indexGeneration: 'g1', nextCursor: 'next', sources: [
-        { sourceType: 'page', sourceId: 'PG-10', sourcePath: 'a/PG-10.json', workingCopyId: 'wc-a' },
-        { sourceType: 'page', sourceId: 'PG-1', sourceNamespace: 'system-A',
-          sourcePath: 'a/PG-1.json', workingCopyId: 'wc-a' },
-      ],
-    };
-  } };
-  const result = await findExactPageCandidates(backend, 'products.demo', 'PG-1');
-  assert.equal(result.length, 2);
-  assert.deepEqual(result.map((item) => item.sourceNamespace), ['system-A', 'system-B']);
-  assert.equal(calls[0].args.sourceType, 'page');
-  assert.equal(calls[1].args.cursor, 'next');
-});
-
-test('PAGE locator refuses a changed index generation', async () => {
-  let count = 0;
-  const backend = { async pageQuery() {
-    return { indexGeneration: ++count === 1 ? 'g1' : 'g2', nextCursor: count === 1 ? 'next' : '' };
-  } };
-  await assert.rejects(findExactPageCandidates(backend, 'products.demo', 'PG-1'), /索引已变化/);
-});
-
-test('procedure locator keeps exact package and function across duplicate source identities', async () => {
-  const calls = [];
-  const backend = { async pageQuery(workspaceKey, name, args) {
-    calls.push({ workspaceKey, name, args });
-    return args.cursor ? {
-      indexGeneration: 'g1', sources: [{ sourceType: 'procedure',
-        sourceId: 'com.demo.pkg#save', sourceAliasId: 'com.demo.pkg', funId: 'save',
-        sourceNamespace: 'DS-B', sourcePath: 'b/com/demo/pkg/save.gss', workingCopyId: 'wc-b' }],
-    } : {
-      indexGeneration: 'g1', nextCursor: 'next', sources: [
-        { sourceType: 'procedure', sourceId: 'com.demo.pkg#saveExtra',
-          sourceAliasId: 'com.demo.pkg', funId: 'saveExtra', sourceNamespace: 'DS-A',
-          sourcePath: 'a/saveExtra.gss', workingCopyId: 'wc-a' },
-        { sourceType: 'procedure', sourceId: 'com.demo.pkg#save',
-          sourceAliasId: 'com.demo.pkg', funId: 'save', sourceNamespace: 'DS-A',
-          sourcePath: 'a/save.gss', workingCopyId: 'wc-a' },
-      ],
-    };
-  } };
-  const result = await findExactProcedureCandidates(backend, 'products.demo', 'com.demo.pkg', 'save');
-  assert.deepEqual(result.map((source) => source.workingCopyId), ['wc-a', 'wc-b']);
-  assert.equal(calls[0].name, 'search_sources');
-  assert.equal(calls[0].args.sourceType, 'procedure');
-  assert.equal(calls[0].args.keyword, 'com.demo.pkg#save');
-});
-
-test('service component locator uses exact PAGE ID and GSS source with full identity', async () => {
-  const candidate = {sourceType:'page', sourceId:'PG-COMP', sourceNamespace:'system-A',
-    sourcePath:'pages/SYS-A/renamed-component.gss', workingCopyId:'wc-a'};
-  const backend = {async pageQuery(workspaceKey, name, args) {
-    assert.equal(workspaceKey, 'products.demo');
-    assert.equal(name, 'search_sources');
-    assert.equal(args.sourceType, 'page');
-    assert.equal(args.keyword, 'PG-COMP');
-    return {indexGeneration:'g1', sources:[candidate,
-      {...candidate, sourceNamespace:'system-B', workingCopyId:'wc-b'},
-      {...candidate, sourcePath:'pages/PG-COMP.json'},
-      {...candidate, sourceType:'page-inherit', sourcePath:'pages/PG-COMP.inherit.gss'},
-      {...candidate, sourceId:'PG-COMP-OTHER'},
-      {...candidate, workingCopyId:''},
-    ]};
-  }};
-  const result = await findExactServiceComponentCandidates(backend, 'products.demo', 'PG-COMP');
-  assert.deepEqual(result.map(source => source.workingCopyId), ['wc-a', 'wc-b']);
-  assert.equal(result[0].sourcePath, candidate.sourcePath);
-  assert.throws(() => findExactServiceComponentCandidates(backend, 'products.demo', '../PG-COMP'), /组件 ID/);
+test('exact locator rejects index generation changes rather than mixing snapshots',async()=>{
+  await assert.rejects(findExactCandidates(async(_k,_a,p)=>({indexGeneration:String(p.offset),hits:[],nextOffset:p.offset?null:100}),'projects.demo','page','PG-1',()=>true),/索引已变化/);
 });

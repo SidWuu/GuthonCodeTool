@@ -1,6 +1,6 @@
 # GuthonCodeTool 安装后冒烟验收
 
-本清单用于每次正式发行后的 macOS、Windows 实机验收。自动化构建只能证明构建产物在 CI 环境启动并通过协议检查；VSIX、Chrome 扩展、实际页面、受控数据库和 SVN 工作副本需要逐项记录实机证据。验收时使用专用开发或测试工作区，避免在生产环境执行写入。
+本清单用于每次正式发行后的 macOS、Windows 实机验收。自动化构建只能证明构建产物在 CI 环境启动并通过协议检查；VSIX、Chrome 扩展、实际页面、受控数据库和 API 项目需要逐项记录实机证据。验收时使用专用开发或测试工作区，避免在生产环境执行写入。
 
 ## 发行产物和记录
 
@@ -8,8 +8,8 @@
 
 | 平台 | 应用入口 | 脚本入口 | 需安装的界面组件 |
 | --- | --- | --- | --- |
-| macOS Apple Silicon | 解压 `GuthonCodeTool-macos-arm64.zip` 后的 `GuthonCodeTool` 文件夹入口 `GuthonCodeTool/GuthonCodeTool` | `GuthonCodeTool-python.pyz` 与 Python 3.12+ | `guthon-nexus-vscode.vsix`、`GuthonCodeTool-chrome.zip` |
-| Windows x64 | `GuthonCodeTool-windows-x64.exe` | 同一 pyz 与 Python 3.12+ | 同一 VSIX、Chrome 扩展 ZIP |
+| macOS Apple Silicon | 解压 `GuthonCodeTool-macos-arm64.zip` 后的 `GuthonCodeTool` 文件夹入口 `GuthonCodeTool/GuthonCodeTool` | `GuthonCodeTool-python.pyz` 与 Python 3.12+ | `guthon-nexus-vscode.vsix`；浏览器增强按需安装 Chrome 扩展 |
+| Windows x64 | `GuthonCodeTool-windows-x64.exe` | 同一 pyz 与 Python 3.12+ | 同一 VSIX；浏览器增强按需安装 Chrome 扩展 |
 
 先对下载件核对 `GuthonCodeTool-checksums.txt`，再在空的临时数据目录运行仓库内的冒烟脚本：
 
@@ -29,17 +29,20 @@ python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool/GuthonCode
 | 应用和 ToolHost | 在 Nexus 选择该发行应用和独立数据目录，执行“检查本地环境”；运行模式、入口路径、数据目录可在工作区树中核对，输出包含成功阶段。连续执行两次只读查询，ToolHost 保持可用。 | 入口路径、版本、输出首尾和 ToolHost 状态 |
 | VSIX | 安装同版 VSIX、重载 VS Code；活动栏出现 Guthon Nexus，目标 `workspaceKey` 的项目和驾驶舱可见。 | VSIX 版本、工作区身份、驾驶舱状态 |
 | Bridge | 启动由 Nexus 管理的 Bridge，检查 `127.0.0.1:17361` health；安装并重载 Chrome 扩展，在允许来源的测试页面观察按钮及目标工作区选择。 | health 结果、页面 origin、工作区身份、请求结果 |
-| Chrome → Nexus PAGE 定位 | 在模块开发页选中已知 PAGE，用 Bridge 弹窗打开 Nexus；VS Code 应显示 SVN 工作区选择，确认精确 PAGE ID 后打开预期虚拟分块。若 VS Code 被唤起但没有响应，检查实际安装 VSIX 的 `onUri` 能力，强制重装当前构建并重载窗口后复测。 | PAGE ID、安装包构建、工作区与源码身份、VS Code 实际结果 |
+| Chrome → Nexus PAGE 定位 | 在模块开发页选中已知 PAGE，用 Bridge 弹窗打开 Nexus；VS Code 应定位当前 API 项目，确认精确 PAGE ID 后打开预期源码。若 VS Code 被唤起但没有响应，检查实际安装 VSIX 的 `onUri` 能力，强制重装当前构建并重载窗口后复测。 | PAGE ID、安装包构建、工作区与源码身份、VS Code 实际结果 |
 | Chrome → Nexus 过程函数定位 | 选中已知过程函数页签，分别从 Bridge 弹窗和页面左下角按钮打开 Nexus；确认工作区选择、精确包名和函数名、候选源码身份及虚拟文档。PAGE 也从页面左下角按钮复测一次。 | 页签身份、包名与函数名、工作区、实际打开的源码；失败时记录 Chrome 和 VS Code 的第一条错误 |
-| MCP | 用发行应用或 pyz 的绝对路径注册 `mcp --stdio --home <toolHome>`；握手后工具数应与当前版本注册表及冒烟结果一致；`--read-only` 不得暴露写入工具；调用 `get_runtime_status` 并确认目标工作区。 | 命令和参数、协商协议版本、工具数、状态摘要 |
-| DATABASE | 在专用开发/测试目标解析 `workspaceKey`、环境、库/schema；探测只读连接，执行一条有界查询，再检查同步和 Workcopy 状态。 | 目标身份、探测结果、同步阶段及 Workcopy 差异 |
-| SVN | 使用有授权的测试根地址检出或复用工作副本；刷新索引，查询一个已知 PAGE 和过程函数；如需验证写入，只在受控目标用预览、幂等键和 SVN diff 检查，结束时按原有流程处理测试改动。 | 根地址身份、revision、索引状态、对象身份、diff |
+| MCP | 用发行应用或 pyz 的绝对路径注册 `mcp --stdio --home <toolHome>`；握手后工具数应与当前版本注册表及冒烟结果一致；`--read-only` 不得暴露写入工具；调用 `get_api_status` 并确认目标工作区。 | 命令和参数、协商协议版本、工具数、状态摘要 |
+| 数据库诊断 | 在专用开发/测试目标解析 `workspaceKey`、环境、库/schema；探测只读连接并执行一条有界查询。 | 目标身份、探测结果、查询完整性与诊断历史 |
+| API 源码 | 仅安装 Nexus，登录已授权项目，选择部分子系统，拉取并核验唯一 checkout。查询已知 PAGE/过程函数与调用方，检查原生 XML/JSON 页面预览及本地差异。 | 项目和范围、下载对象数、索引覆盖、当前文件哈希 |
+| API 写入（单独授权） | 在明确允许写入的测试对象上预览并保存本地修改；上传后逐项回读，检查部分失败、未知结果与恢复。数据库结构动作另行授权。 | 本地操作记录、上传阶段、远端回读哈希；未实写项目记录未执行 |
+| 项目卡片 | 未登录时直接输入地址、账号和密码；登录后显示四行摘要、范围与源码状态，提供更新/上传操作。窄侧栏不出现横向滚动。 | 登录和已登录状态、密度、键盘可达性及主题 |
+| 官方能力更新 | 从 Nexus 检查 Open VSX；校验来源包，核对临时编辑器说明和兼容资源生效，回退后核对补全数据。 | 来源版本/摘要、实际生效资源、兼容限制与回退记录 |
 
 若任一项失败，先记录当前运行模式、入口路径、toolHome、`workspaceKey` 和“输出 → GuthonCodeTool”的首条失败阶段；再按 [QA](GuthonCodeTool_QA.html) 的对应问题处理。MCP 写入响应不明时保留原 `idempotencyKey`，先查询原操作，不直接重试写入。
 
 ## 本次执行记录
 
-此文件是验收模板。实际安装、真实页面、数据库和 SVN 的结果需在每次发行时另行填写，不能由源码测试推断。
+此文件是验收模板。实际安装、真实页面、数据库和 API 的结果需在每次发行时另行填写，不能由源码测试推断。
 
 ## 统一安装器额外验收
 
@@ -48,4 +51,4 @@ python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool/GuthonCode
 员工步骤见 [Windows 安装步骤第一章](GuthonCodeTool_Windows安装步骤.html#one-click)，
 维护者构建见 [统一安装器构建说明](UNIFIED_INSTALLER.md)。这些 Windows 实机检查尚未执行。
 
-安装器专项验收须使用没有业务工作区的新目录：确认未创建产品／项目、未收集 SVN 业务密码、未检出源码或建立业务索引，仍可完成工具与插件环境安装；完成后再次启动不得重新弹出安装助手。
+安装器专项验收须使用没有业务工作区的新目录：确认未创建产品／项目、未收集业务平台密码、未拉取源码或建立业务索引，仍可完成工具与插件环境安装；完成后再次启动不得重新弹出安装助手。

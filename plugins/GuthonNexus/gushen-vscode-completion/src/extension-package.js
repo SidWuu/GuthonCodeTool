@@ -26,7 +26,7 @@ function readFiles(root, folders, allowed) {
 function nexusFiles(root, overrides = new Map()) {
   const files = readFiles(root, ['src', 'bridge', 'data', 'resources', 'syntaxes'], name =>
     !/\.test\.js$/.test(name) && !['data/java.json', 'data/javascript.json', 'data/sql.json'].includes(name)
-    && /\.(js|json|png|svg|jpg|css|html|xml)$/.test(name));
+    && (name === 'resources/official-language-support/LICENSE.txt' || /\.(js|json|png|svg|jpg|css|html|xml)$/.test(name)));
   for (const name of ['package.json', 'tool-version.json', 'rules.json']) {
     const file = path.join(root, name); if (fs.existsSync(file)) files.set(name, fs.readFileSync(file));
   }
@@ -35,6 +35,16 @@ function nexusFiles(root, overrides = new Map()) {
   for (const [name, bytes] of overrides) files.set(name, bytes);
   if (files.has('package.json')) {
     const manifest = JSON.parse(files.get('package.json').toString('utf8'));
+    if (manifest.dependencies?.['jsonc-parser']) {
+      const dependencyRoot = path.join(root, 'node_modules', 'jsonc-parser');
+      const required = ['package.json', 'LICENSE.md', 'lib/umd/main.js', ...['edit', 'format', 'parser', 'scanner', 'string-intern'].map(name => `lib/umd/impl/${name}.js`)];
+      if (!fs.existsSync(dependencyRoot) || !fs.lstatSync(dependencyRoot).isDirectory() || fs.lstatSync(dependencyRoot).isSymbolicLink()) throw new Error('缺少 Nexus 运行依赖 jsonc-parser，请先执行 npm ci');
+      const dependencyFiles = readFiles(root, ['node_modules/jsonc-parser'], name => required.includes(name.slice('node_modules/jsonc-parser/'.length)));
+      for (const name of required) if (!dependencyFiles.has('node_modules/jsonc-parser/' + name)) throw new Error('Nexus 运行依赖 jsonc-parser 不完整：' + name);
+      const dependency = JSON.parse(dependencyFiles.get('node_modules/jsonc-parser/package.json').toString('utf8'));
+      if (dependency.name !== 'jsonc-parser' || dependency.version !== manifest.dependencies['jsonc-parser'] || dependency.main !== './lib/umd/main.js') throw new Error('Nexus 运行依赖 jsonc-parser 版本或入口不匹配，请执行 npm ci');
+      for (const [name, bytes] of dependencyFiles) files.set(name, bytes);
+    }
     // Editors add installation metadata and reformat the manifest after VSIX install.
     delete manifest.__metadata;
     files.set('package.json', Buffer.from(JSON.stringify(manifest, null, 2) + '\n'));
@@ -70,7 +80,7 @@ function bridgeBundle(sourceRoot) {
   const bytes = fs.readFileSync(path.join(sourceRoot, 'scripts', 'common', 'command_metadata.json'));
   const metadata = JSON.parse(bytes.toString('utf8'));
   if (metadata.schemaVersion !== 1 || !Number.isInteger(metadata.defaultTimeoutMs) || metadata.defaultTimeoutMs <= 0) throw new Error('Invalid ToolHost command metadata');
-  for (const registry of [metadata.commands, metadata.svnActions]) {
+  for (const registry of [metadata.commands, metadata.apiActions]) {
     if (!registry || typeof registry !== 'object' || Array.isArray(registry)) throw new Error('Invalid ToolHost command registry');
     for (const value of Object.values(registry)) if (!value || !['read', 'write'].includes(value.kind) || !Number.isInteger(value.timeoutMs) || value.timeoutMs <= 0) throw new Error('Invalid ToolHost command entry');
   }

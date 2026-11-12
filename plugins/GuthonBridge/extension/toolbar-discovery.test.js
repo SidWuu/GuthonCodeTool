@@ -17,7 +17,7 @@ test('automatic toolbar discovery stays quiet until a target is available and re
     FLOATING_ROOT_ID: 'toolbar',
     location: { origin: 'https://platform.example', pathname: '/index.html', hash: '#/gdpaas/dev/modules' },
     runPageCommand: async () => target,
-    sendWorkspaceRequest: async () => { routes++; return { ok: true, workspaceKey: 'projects.demo', workspace: { sourceMode: 'database' } }; },
+    sendWorkspaceRequest: async () => { routes++; return { ok: true, workspaceKey: 'projects.demo', workspace: { sourceMode: 'api' } }; },
     publishPageContext: async () => { published++; },
     setMessage: (...args) => messages.push(args),
   });
@@ -31,7 +31,7 @@ test('automatic toolbar discovery stays quiet until a target is available and re
   await context.applyInlineWorkspaceMode();
   assert.equal(routes, 1);
   assert.equal(published, 1);
-  assert.equal(root.dataset.workspaceMode, 'database');
+  assert.ok(root.dataset.workspaceModeCheckedAt);
   assert.equal(messages.length, 0);
 });
 
@@ -66,8 +66,8 @@ test('automatic routing stays quiet when Bridge is offline and recovers on the n
   assert.equal(root.dataset.workspaceModeCheckedAt, undefined);
   assert.equal(root.dataset.workspaceModeChecking, undefined);
   assert.equal(published, 0);
-  route = { ok: true, workspaceKey: 'projects.demo', workspace: { sourceMode: 'database' } };
+  route = { ok: true, workspaceKey: 'projects.demo', workspace: { sourceMode: 'api' } };
   await context.applyInlineWorkspaceMode();
-  assert.equal(root.dataset.workspaceMode, 'database');
+  assert.ok(root.dataset.workspaceModeCheckedAt);
   assert.equal(published, 1);
 });

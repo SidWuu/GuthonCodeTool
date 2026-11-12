@@ -9,7 +9,7 @@
   "max_rows": 200,
   "source_files": [
     {
-      "path": "var/workspace/PRD 示例产品/source/readonly/示例过程/source.vm",
+      "path": "var/checkout/demo-product/datasources/DEMO_DS/procedures/demo/示例函数.gss",
       "function": "示例函数"
     }
   ],
@@ -17,7 +17,7 @@
     {
       "id": "01",
       "name": "检查入口数据",
-      "source": "示例过程/source.vm:1",
+      "source": "demo/示例函数.gss:1",
       "logic": "源码只处理状态为 0 的入口数据",
       "sql": "SELECT E.ID, E.PROCESS_STATUS FROM DEMO_EVENT E WHERE E.BUSINESS_BATCH = %s AND E.PROCESS_STATUS = 0",
       "bindings": [

@@ -35,9 +35,9 @@
   const intersects = (a,b) => within(a,b) || within(b,a);
   function markDiff(control, pointers) {
     control.dataset.diffPaths = JSON.stringify(pointers);
-    for (const [mode, label] of [['svn','M'],['local','●']]) {
+    for (const [mode, label] of [['baseline','M'],['local','●']]) {
       const info=state.comparison?.[mode];
-      const paths=mode==='svn' && !info?.available ? [] : (mode==='svn' ? info?.changes?.paths : info?.paths) || [];
+      const paths=mode==='baseline' && !info?.available ? [] : (mode==='baseline' ? info?.changes?.paths : info?.paths) || [];
       if (!pointers.some(pointer=>paths.some(path=>within(path,pointer)))) continue;
       control.append(el('span',label,'diff-badge diff-'+mode));
       control.classList.add('has-diff-'+mode);
@@ -45,16 +45,16 @@
   }
   function renderComparison() {
     const root=$('canvas'); root.replaceChildren(); selectedRow=null;
-    const svn=compareMode==='svn', info=svn ? state.comparison?.svn?.changes : state.comparison?.local;
-    const heading=el('div',undefined,'comparison-heading '+(svn?'diff-svn':'diff-local'));
-    heading.append(el('h2',svn?'SVN BASE → 本地已保存源码':'本地保存版本 → 当前窗口草稿'));
-    heading.append(el('p',svn ? `只读 · SVN BASE r${state.comparison?.svn?.baseRevision || state.baseRevision || '未知'} · 不包含窗口未保存草稿`
+    const baseline=compareMode==='baseline', info=baseline ? state.comparison?.baseline?.changes : state.comparison?.local;
+    const heading=el('div',undefined,'comparison-heading '+(baseline?'diff-baseline':'diff-local'));
+    heading.append(el('h2',baseline?'API 基线 → 本地已保存源码':'本地保存版本 → 当前窗口草稿'));
+    heading.append(el('p',baseline ? `只读 · API 基线版本 ${state.comparison?.baseline?.apiVersion || state.apiVersion || '未知'} · 不包含窗口未保存草稿`
       : `只读 · 本地基线载入于 ${state.comparison?.savedAt ? new Date(state.comparison.savedAt).toLocaleString() : '未知'} · ${state.sourceHash.slice(0,12)}`));
     root.append(heading);
-    if (svn && !state.comparison?.svn?.available) {root.append(el('p',state.comparison?.svn?.message || '正在读取 SVN BASE…','notice'));return;}
+    if (baseline && !state.comparison?.baseline?.available) {root.append(el('p',state.comparison?.baseline?.message || '正在读取 API 基线…','notice'));return;}
     if (!info) return;
     if (info.truncated) root.append(el('p',`共 ${info.total} 项差异，仅展示前 ${info.rows.length} 项；完整差异请从源代码管理查看。`,'notice'));
-    if (svn && state.comparison.svn.formatOnly) root.append(el('p','仅 JSON 格式或键顺序发生变化，页面结构和值相同；原文差异请从源代码管理查看。','notice'));
+    if (baseline && state.comparison.baseline.formatOnly) root.append(el('p','仅 JSON 格式或键顺序发生变化，页面结构和值相同；原文差异请从源代码管理查看。','notice'));
     const collection=state.model.collections.find(item=>item.pointer===selection?.collection);
     const field=collection?.fields.find(item=>item.key===selection?.key);
     const code=state.model.nodes.find(item=>item.key===selectedCode);
@@ -70,7 +70,7 @@
       const kind={added:'新增',removed:'删除',modified:'修改',order:'排序'}[row.kind] || '修改';
       section.append(el('h3',`${kind} · ${row.label || '页面配置'}`),el('code',row.pointer || '/'));
       const columns=el('div',undefined,'comparison-columns');
-      for (const [name,content] of [[svn?'SVN BASE':'本地保存版本',row.beforeText],[svn?'本地已保存源码':'当前窗口草稿',row.afterText]]) {
+      for (const [name,content] of [[baseline?'API 基线':'本地保存版本',row.beforeText],[baseline?'本地已保存源码':'当前窗口草稿',row.afterText]]) {
         const side=el('div');side.append(el('h4',name),el('pre',content));columns.append(side);
       }
       section.append(columns);root.append(section);
@@ -243,15 +243,15 @@
       const layout=branch('layout','页面布局',page,true,selectedRegion!==undefined || model.outline.layout.some(entry=>selectedNode && within(selectedNode.pointer,entry.pointer)),undefined,['/views']);
       model.outline.layout.forEach(entry=>layoutEntry(entry,layout));
     }
-    const removed=state.comparison?.svn?.available ? state.comparison.svn.changes.rows.filter(row=>row.kind==='removed') : [];
+    const removed=state.comparison?.baseline?.available ? state.comparison.baseline.changes.rows.filter(row=>row.kind==='removed') : [];
     if (removed.length) {
-      const group=branch('svn-removed',`SVN 已删除项 (${removed.length})`,page,false,!!selection?.removed);
+      const group=branch('baseline-removed',`基线已删除项 (${removed.length})`,page,false,!!selection?.removed);
       for (const row of removed) {
         const control=button(row.label || '已删除配置',()=>{
-          selection={removed:row.beforePointer};selectedCode=undefined;compareMode='svn';query='';$('search').value='';
+          selection={removed:row.beforePointer};selectedCode=undefined;compareMode='baseline';query='';$('search').value='';
           render();revealSelection();
-        },false,'tree-link diff-svn');
-        control.append(el('span','M','diff-badge diff-svn'));group.append(control);
+        },false,'tree-link diff-baseline');
+        control.append(el('span','M','diff-badge diff-baseline'));group.append(control);
       }
     }
   }
@@ -282,6 +282,8 @@
       section.append(header);
       for (const set of buttons) {
         const bar = el('div', undefined, 'region-buttons');
+        const openButtons=button('编辑按钮 JSON',()=>send('openFields',{collectionPointer:set.pointer}),!!compareMode || !!state.comparison?.sourceStale);
+        openButtons.title=`打开 ${set.label || '按钮集合'} 的原始 JSON`;bar.append(openButtons);
         for (const item of set.fields.filter(matches)) {
           const control = button(title(item), ()=>select(set,item));
           control.dataset.field = set.pointer + '|' + item.key;
@@ -294,6 +296,8 @@
         if (bar.childElementCount) section.append(bar);
       }
       for (const collection of fieldSets) {
+        const openFields=button('编辑字段 JSON',()=>send('openFields',{collectionPointer:collection.pointer}),!!compareMode || !!state.comparison?.sourceStale);
+        openFields.title=`打开 ${collection.label || '字段集合'} 的原始 JSON`;section.append(openFields);
         const fields = collection.fields.filter(matches);
         if (!fields.length) continue;
         const table = el('table');
@@ -375,7 +379,7 @@
     document.title = $('title').textContent + ' · 本地页面';
     $('status').textContent = state.blocked || (state.codeDirty ? '代码有未保存输入，请先在代码标签保存' : state.status)
       || (state.operations.length ? `${state.operations.length} 项未保存修改` : '已保存到本地');
-    $('baseline').textContent = `SVN ${state.baseRevision || '未知'} · ${state.sourceHash.slice(0, 12)} · ${model.remoteStatus} · ${compareMode ? '只读比较' : '当前草稿'}`;
+    $('baseline').textContent = `API 基线 ${state.apiVersion || '未知'} · ${state.sourceHash.slice(0, 12)} · ${model.remoteStatus} · ${compareMode ? '只读比较' : '当前草稿'}`;
     for (const id of ['save', 'undo', 'redo']) $(id).disabled = !state.editable || !!compareMode;
     for (const id of ['native','manageResources']) $(id).disabled=!!state.resourceBusy;
     $('native').disabled ||= !!state.comparison?.sourceStale;
@@ -383,7 +387,7 @@
     $('source-merge').hidden = !state.sourceMerge;
     $('exit-compare').hidden = !compareMode;
     $('comparison-status').textContent = state.sourceMerge ? state.sourceMerge.blockedReason || '存在外部修改冲突，请逐项核对'
-      : state.comparison?.sourceStale ? '本地文件已外部更新，请保留输入并重新核对' : state.comparison?.svn?.available ? '' : state.comparison?.svn?.message || '';
+      : state.comparison?.sourceStale ? '本地文件已外部更新，请保留输入并重新核对' : state.comparison?.baseline?.available ? '' : state.comparison?.baseline?.message || '';
     $('resources').textContent = state.designer
       ? `${state.designer.platformUrl} · ${state.designer.message || '使用已校验缓存'} · 页面效果待验收`
       : '原版设计器按需打开；点击“原版设计视图”使用已绑定资源，或通过“平台资源”连接与管理。';
@@ -418,7 +422,7 @@
         const paths = JSON.parse(control.dataset.diffPaths);
         if (!paths.some(pointer => changedFields.some(field => within(field, pointer)))) continue;
         for (const badge of control.querySelectorAll(':scope > .diff-badge')) badge.remove();
-        control.classList.remove('has-diff-svn', 'has-diff-local');
+        control.classList.remove('has-diff-baseline', 'has-diff-local');
         markDiff(control, paths);
       }
     }
@@ -438,7 +442,7 @@
     if (state.sourceMerge && mergeHash !== state.sourceMerge.sourceHash) compareMode = 'external';
     if (compareMode === 'external' && !state.sourceMerge) compareMode = '';
     awaiting = false;
-    const changedView = previousMode !== compareMode || previousState?.comparison?.svn !== state.comparison?.svn
+    const changedView = previousMode !== compareMode || previousState?.comparison?.baseline !== state.comparison?.baseline
       || previousState?.editable !== state.editable || previousState?.pageName !== state.pageName;
     render(changedView ? null : received); flush();
   });
@@ -452,7 +456,7 @@
     $('compare-menu').hidden = !$('compare-menu').hidden;
     $('compare').setAttribute('aria-expanded',String(!$('compare-menu').hidden));
   });
-  for (const mode of ['svn','local']) $('compare-'+mode).addEventListener('click', () => {
+  for (const mode of ['baseline','local']) $('compare-'+mode).addEventListener('click', () => {
     compareMode=mode; $('compare-menu').hidden=true; $('compare').setAttribute('aria-expanded','false');
     render(); send('compare');
   });

@@ -1,4 +1,4 @@
-"""Source-preserving inheritance projection for SVN procedure and PAGE scripts."""
+"""Source-preserving inheritance projection for procedure and PAGE scripts."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import re
 
 MARKER = re.compile(r"^[ \t]*(?P<return>return[ \t]+)?@?inherit\(\);?[ \t]*$")
 POSSIBLE_MARKER = re.compile(r"(?<![A-Za-z0-9_])@?inherit\s*\(")
-SOURCE_CATALOG_VERSION = "svn-source-catalog-v6"
 
 
 def procedure_body(text: str) -> tuple[str, int]:

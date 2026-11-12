@@ -28,7 +28,7 @@ function readiness({ report, toolVersion, nexusVersion, hook, chrome, clients = 
     && Number.isFinite(Date.parse(hook.observedAt)) && Date.parse(hook.observedAt) >= Date.parse(report.installedAt));
   const bridge = Boolean(chrome.installId && clients.some(item => item.installId === chrome.installId
     && item.version === chrome.version && item.protocolVersion === 2));
-  return { tool, team, bridge, complete: tool && team && bridge };
+  return { tool, team, bridge, complete: tool && team };
 }
 
 function escapeHtml(value) {
@@ -39,7 +39,7 @@ function page(snapshot, nonce) {
   const cards = [
     ['tool', 'GuthonCodeTool 与 GuthonNexus', '运行入口已由安装器配置。检查当前后端和 Nexus 是否可用。', [['refresh', '检查运行环境']]],
     ['team', '安装内网 guthon-team 插件', '先连接公司网络。首次使用需在内网 Git 网站开通账号和仓库权限；SSH 来源将公钥添加到“用户设置 → SSH/GPG 公钥”，私钥留在本机。点击首次连接授权后，核对团队提供的服务器指纹再确认信任。检查仓库访问，再从 CodeBuddy 插件市场安装 guthon-guard。重载插件并开始一个新聊天，由 SessionStart 初始化和更新工作区规范。', [['gitweb', '打开内网 Git 网站'], ['key', '生成或复制 SSH 公钥'], ['authorize', '首次连接授权'], ['repository', '检查内网仓库'], ['team', '打开插件市场'], ['reload', '复制重载插件命令'], ['refresh', '检查 Hook 运行']]],
-    ['bridge', '连接现有 Chrome 的 GuthonBridge', '首次加载：打开扩展管理页，启用开发者模式，点击“加载已解压的扩展”，选择向导提供的目录。然后在 GuthonBridge 的“本机 Bridge 配对”粘贴令牌，点击“保存并连接”。', [['hosts', '平台地址规则（按需）'], ['chrome', '打开 Chrome 扩展管理'], ['folder', '定位并复制扩展目录'], ['token', '复制配对令牌'], ['refresh', '检查浏览器连接']]],
+    ['bridge', '浏览器增强：GuthonBridge（可选）', 'API 源码开发可以直接使用 Nexus。需要网页增强时首次加载：打开扩展管理页，启用开发者模式，点击“加载已解压的扩展”，选择向导提供的目录。然后在 GuthonBridge 的“本机 Bridge 配对”粘贴令牌，点击“保存并连接”。', [['hosts', '平台地址规则（按需）'], ['chrome', '打开 Chrome 扩展管理'], ['folder', '定位并复制扩展目录'], ['token', '复制配对令牌'], ['refresh', '检查浏览器连接']]],
   ];
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';"><style nonce="${nonce}">
 body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);max-width:900px;margin:30px auto;padding:0 24px;line-height:1.7}section{border:1px solid var(--vscode-panel-border);border-radius:10px;padding:18px;margin:16px 0}button{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:0;padding:9px 14px;margin:5px;border-radius:5px;cursor:pointer}h2{font-size:19px;margin:0}p{margin:12px 0}.error{color:var(--vscode-errorForeground)}.hint{opacity:.8}select{max-width:100%;padding:8px}</style></head><body>
@@ -63,7 +63,7 @@ function chromeExecutable(env = process.env) {
 function nextAction(status) {
   if (!status.tool) return 'refresh';
   if (!status.team) return 'team';
-  return status.bridge ? 'finish' : 'chrome';
+  return 'finish';
 }
 
 function createOnboarding({ vscode, context, getTool, client, bridge, spawnProcess = spawn }) {

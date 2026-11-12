@@ -17,8 +17,8 @@ description: Diagnose GuShen development or test database issues through GuthonC
 
 1. 读取目标目录的 `AGENTS.md`，并按其中路由加载谷神基线、模块/运行模式、实际 API、业务事实、当前 provider 源码和结构资料。
 2. 使用显式 `workspaceKey`，保留开始时已有差异；按需求完成理解、验收条件、调用链分析、实现、静态检查和定向回归。
-3. DATABASE 只修改 workcopy；SVN 只通过已授权读写会话修改并定向刷新索引。不要用数据库测试切换或回退源码 provider。
-4. 本地保存、SVN working-copy 修改、平台提交和平台运行是不同证据。需要平台行为验证时，先取得待测代码实际生效的版本和触发证据。
+3. 源码仅使用 API checkout，通过当前项目的受控文档/PAGE 编辑服务修改并定向刷新索引；数据库诊断不参与源码同步。
+4. 本地保存、API 上传回读、结构同步和平台运行是不同证据。需要平台行为验证时，先取得待测代码实际生效的版本和触发证据。
 
 ## 自动解析数据库目标
 

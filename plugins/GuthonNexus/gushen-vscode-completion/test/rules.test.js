@@ -259,11 +259,12 @@ test('keeps all matching prefix segments available for continued filtering', () 
   assert.equal(fuzzyMatch('strin', filterText), true);
 });
 
-test('leaves dollar-prefixed completion to VS Code local variables', () => {
+test('keeps local variables separate while allowing the official public object', () => {
   assert.equal(shouldProvideApiCompletions(''), false);
   assert.equal(shouldProvideApiCompletions('#'), false);
   assert.equal(shouldProvideApiCompletions('.'), false);
-  assert.equal(shouldProvideApiCompletions('$'), false);
+  assert.equal(shouldProvideApiCompletions('$'), true);
+  assert.equal(shouldProvideApiCompletions('$vs.proc.'), true);
   assert.equal(shouldProvideApiCompletions('$form'), false);
   assert.equal(shouldProvideApiCompletions('strin'), true);
 });

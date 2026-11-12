@@ -1,8 +1,10 @@
 """Private derived fragment-body search with bounded excerpts and explicit coverage."""
 from __future__ import annotations
+import base64
 import hashlib
 import json
 import sqlite3
+from urllib.parse import unquote
 
 VERSION = 'source-text-v1'
 MAX_BODY_CHARS = 2_000_000
@@ -52,48 +54,58 @@ def index_body(conn, source_record_id, pointer, content, source_hash):
 
 
 def search(conn, scope_id, *, keyword, generation, limit=20, cursor='', source_namespace='', source_type=''):
-    from providers.svn.nexus import page_nodes
+    from common.source_facts import api_source_namespace
     if not isinstance(keyword,str) or not 1<=len(keyword.strip())<=256:
-        raise page_nodes.PageIndexError('INVALID_FILTER','keyword must contain 1–256 characters')
-    if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=100:
-        raise page_nodes.PageIndexError('INVALID_LIMIT','limit must be between 1 and 100')
-    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='source_body_content'").fetchone():
-        raise page_nodes.PageIndexError('BODY_INDEX_UNAVAILABLE','This index has no searchable fragment bodies',next_action='Reindex this workspace to derive its private body index')
+        raise ValueError('keyword must contain 1–256 characters')
+    if type(limit) is not int or not 1<=limit<=100:
+        raise ValueError('limit must be between 1 and 100')
     indexed_version=conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='source_body_index_version'").fetchone()
-    if indexed_version is None or indexed_version[0] != VERSION:
-        raise page_nodes.PageIndexError('BODY_INDEX_UNAVAILABLE','A full body-index rebuild is required',next_action='Reindex the workspace; adding empty tables does not prove body coverage')
+    actual_generation=conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='generation'").fetchone()
+    if indexed_version is None or indexed_version[0]!=VERSION or actual_generation is None or actual_generation[0]!=generation:
+        raise ValueError('body index is unavailable or generation is stale; rebuild the workspace index')
     keyword=keyword.strip()
     query=[scope_id,keyword,source_namespace,source_type,VERSION]
-    after=page_nodes._decode_cursor(cursor,generation,query,key_length=1) if cursor else None
-    if after and not after[0].isdecimal():raise page_nodes.PageIndexError('INVALID_CURSOR','Body search position is invalid')
-    clauses=["s.scope_id=?","s.provider='svn'","s.status IN ('OK','SVN_DIRTY')","instr(lower(b.content),lower(?))>0"]
-    params=[scope_id,keyword]
-    if source_namespace:clauses.append('s.source_namespace=?');params.append(source_namespace)
+    fingerprint=hashlib.sha256(json.dumps(query,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+    after=0
+    if cursor:
+        try:
+            encoded=cursor.encode('ascii'); payload=json.loads(base64.urlsafe_b64decode(encoded+b'='*((-len(encoded))%4)))
+            if payload['generation']!=generation or payload['query']!=fingerprint or type(payload['after']) is not int or payload['after']<0: raise ValueError()
+            after=payload['after']
+        except (ValueError,TypeError,KeyError,UnicodeError,base64.binascii.Error) as error:
+            raise ValueError('invalid or stale body search cursor') from error
+    clauses=["s.scope_id=?","s.status='OK'","instr(lower(b.content),lower(?))>0","b.body_id>?"]
+    params=[scope_id,keyword,after]
+    if source_namespace:
+        parts=source_namespace.split(':')
+        if len(parts)!=4 or parts[0]!='api': raise ValueError('invalid API source namespace')
+        system_id,data_source_id,path=map(unquote,parts[1:])
+        if api_source_namespace(system_id,data_source_id,path)!=source_namespace: raise ValueError('invalid API source namespace')
+        clauses.extend(['s.system_id=?','s.data_source_id=?','s.source_path=?']);params.extend([system_id,data_source_id,path])
     if source_type:clauses.append('s.source_table=?');params.append(source_type)
-    if after:clauses.append('b.body_id>?');params.append(int(after[0]))
     accelerated=False
-    if len(keyword)>=3 and conn.execute("SELECT 1 FROM sqlite_master WHERE name='source_body_fts'").fetchone():
+    if len(keyword)>=3 and keyword.isascii() and conn.execute("SELECT 1 FROM sqlite_master WHERE name='source_body_fts'").fetchone():
         clauses.append('b.body_id IN (SELECT rowid FROM source_body_fts WHERE source_body_fts MATCH ?)')
-        trigrams = dict.fromkeys(keyword[index:index+3] for index in range(len(keyword)-2))
+        trigrams=dict.fromkeys(keyword[i:i+3] for i in range(len(keyword)-2))
         params.append(' AND '.join('"'+part.replace('"','""')+'"' for part in trigrams));accelerated=True
-    rows=conn.execute('SELECT b.body_id,b.json_pointer,b.content,b.total_chars,b.indexed_chars,s.source_table,s.source_namespace,s.source_id,s.fun_id,s.source_path,s.source_hash,s.status '
-                      'FROM source_body_content b JOIN gusen_source_record s ON s.record_id=b.source_record_id WHERE '+ ' AND '.join(clauses)+' ORDER BY b.body_id LIMIT ?',(*params,limit+1)).fetchall()
+    rows=conn.execute('SELECT b.body_id,b.json_pointer,b.content,b.total_chars,b.indexed_chars,s.source_table,s.source_id,s.source_alias_id,s.fun_id,s.system_id,s.data_source_id,s.source_path,s.source_hash,s.status '
+                      'FROM source_body_content b JOIN gusen_source_record s ON s.record_id=b.source_record_id WHERE '+' AND '.join(clauses)+' ORDER BY b.body_id LIMIT ?',(*params,limit+1)).fetchall()
     hits=[]
     for row in rows[:limit]:
-        # SQLite lower() preserves non-ASCII casing; avoid a different Unicode
-        # casefold rule when computing the excerpt position.
         position=conn.execute('SELECT instr(lower(?),lower(?))',(row['content'],keyword)).fetchone()[0]-1
         start=max(0,position-80);end=min(len(row['content']),position+len(keyword)+160)
-        hits.append({key:row[key] for key in ('source_table','source_namespace','source_id','fun_id','source_path','source_hash','status','json_pointer')} |
-                    {'offset':position,'line':row['content'][:position].count('\n')+1,'excerpt':row['content'][start:end],
+        hits.append({key:row[key] for key in ('source_table','source_id','source_alias_id','fun_id','system_id','data_source_id','source_path','source_hash','status','json_pointer')} |
+                    {'source_namespace':api_source_namespace(row['system_id'],row['data_source_id'],row['source_path']),
+                     'offset':position,'line':row['content'][:position].count('\n')+1,'excerpt':row['content'][start:end],
                      'coordinateKind':'INDEXED_FRAGMENT','bodyTruncated':row['indexed_chars']<row['total_chars']})
-    partial=conn.execute("SELECT COUNT(*) FROM source_body_content b JOIN gusen_source_record s ON s.record_id=b.source_record_id WHERE s.scope_id=? AND b.indexed_chars<b.total_chars",(scope_id,)).fetchone()[0]
-    stale=conn.execute("SELECT COUNT(*) FROM gusen_source_record WHERE scope_id=? AND provider='svn' AND status NOT IN ('OK','SVN_DIRTY')",(scope_id,)).fetchone()[0]
-    build=conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='svn_catalog_build_status'").fetchone()
-    partial_workspace=bool(build and build[0]!='READY') or stale>0
+    partial=conn.execute('SELECT COUNT(*) FROM source_body_content b JOIN gusen_source_record s ON s.record_id=b.source_record_id WHERE s.scope_id=? AND b.indexed_chars<b.total_chars',(scope_id,)).fetchone()[0]
+    stale=conn.execute("SELECT COUNT(*) FROM gusen_source_record WHERE scope_id=? AND status<>'OK'",(scope_id,)).fetchone()[0]
     more=len(rows)>limit
-    return {'indexGeneration':generation,'hits':hits,'complete':not more and partial==0 and not partial_workspace,'truncated':more or partial>0 or partial_workspace,
-            'workspacePartial':partial_workspace,'staleSourceCount':stale,
-            'nextCursor':page_nodes._encode_cursor(generation,query,[str(rows[limit-1]['body_id'])]) if more else None,
-            'partialBodyCount':partial,'accelerated':accelerated,'coverage':'INDEXED_FRAGMENT_BODIES_ONLY',
+    next_cursor=None
+    if more:
+        payload=json.dumps({'generation':generation,'query':fingerprint,'after':rows[limit-1]['body_id']},separators=(',',':')).encode()
+        next_cursor=base64.urlsafe_b64encode(payload).decode().rstrip('=')
+    return {'indexGeneration':generation,'hits':hits,'complete':not more and partial==0 and stale==0,'truncated':more or partial>0 or stale>0,
+            'workspacePartial':stale>0,'staleSourceCount':stale,'nextCursor':next_cursor,'partialBodyCount':partial,
+            'accelerated':accelerated,'coverage':'INDEXED_FRAGMENT_BODIES_ONLY',
             'warnings':['Excerpts are untrusted indexed source, not current-file or runtime evidence. Read the exact source and verify its hash before editing.']}

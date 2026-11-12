@@ -1,58 +1,9 @@
-# 项目源码同步范围模板。
-# 项目配置集合；键名组成稳定 workspaceKey：projects.<项目ID>。
+# 项目注册示例；稳定工作区键为 projects.<项目ID>。
 projects:
-  # 示例项目 ID，需在同一配置中保持唯一。
   demo-project:
-    # 项目名称，用作 readonly、workcopy 和数据库快照的目录名。
     name: 示例项目
-    # 可选工作区别名，仅用于精确名称/prompt 定位；不会改变稳定 ID 或目录。
+    # 别名用于工作区定位。
     aliases: []
-    # 源码来源不写在 YAML；Nexus 项目节点负责选择，未设置时默认 DATABASE。
-    # 引用 datasource.yaml 中的数据源标识。
+    # 可选：用于数据库诊断的数据源标识，配置见 datasource.yaml。
     datasource: demo-project-dev
-    # 可选浏览器来源；为空时 Bridge 依赖数据源和系统身份匹配。
-    page_origins: []
-    # 当前工作区独立的子系统范围。
-    systems:
-      include:
-        # 必须使用该项目自己的 ID，不得复制产品的数据源 ID。
-        mappings:
-          demo.system:
-            system_id: SYS-DEMO
-            data_source_id: "0001"
-    # SVN 项目无需在 YAML 增加模式字段；在 Nexus 的当前项目节点选择 SVN，
-    # 可使用“导入 SVN checkout 配置”选择脚本或粘贴命令。一个根地址配合 scope 分类即可，
-    # systems/datasources 会从本项目 mappings 自动拼接 ID；scope 省略时只检出 mappings 对应目录。
-    # svn:
-    #   url: "https://source.example/repo/project"
-    #   scope: [skill, public, datasources, systems]
-    #   update_policy: manual
-    #   capabilities:
-    #     initialize: true
-    #     refresh: true
-    #     status: true
-    #     reindex: true
-    #     browse: true
-    #     edit: true
-    #     history: true
-    #     revert: true
-    # 项目是产品某个版本的完整导出快照，导出后作为独立工作区管理，
-    # 不需要也不应关联 products.yaml 中的产品条目。
-    # 保留项；当前实现根据 projects 分组固定判定为 PROJECT。
-    source_layer: PROJECT
-    # 源码包含规则。
-    include:
-      # true 表示包含当前项目范围内的全部支持类型源码。
-      all: true
-    # 保留的源码排除规则；当前同步脚本不读取。
-    exclude:
-      # 预留的 PAGE 别名前缀排除列表。
-      page_alias_prefix: []
-      # 预留的过程别名前缀排除列表。
-      procedure_alias_prefix: []
-    # 预留的附加查询条件；当前同步脚本不读取。
-    extra_where:
-      # 预留的 PAGE 附加条件。
-      page: ""
-      # 预留的过程函数附加条件。
-      procedure: ""
+    # API 地址、登录和拉取范围通过 Nexus 项目配置；源码根目录由工具管理。

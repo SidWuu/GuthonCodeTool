@@ -21,7 +21,6 @@ CONFIG_FILES = (
     "datasource.yaml",
     "products.yaml",
     "projects.yaml",
-    "source-tables.yaml",
     "sync.yaml",
 )
 EXTENSION_DATA = "plugins/GuthonNexus/gushen-vscode-completion/data"
@@ -40,21 +39,6 @@ def result(name, status, message, **details):
 def _database_requirements(workspaces):
     """Inspect configured capabilities without resolving passwords or opening connections."""
     engines, connections = set(), []
-    for workspace in workspaces:
-        if workspace["sourceMode"] != "database":
-            continue
-        source = workspace.get("datasource") or {}
-        if not source:
-            raise DependencyConfigError("products.yaml" if workspace["workspaceKey"].startswith("products.") else "projects.yaml",
-                                        f"{workspace['workspaceKey']} 尚未配置 DATABASE 数据源")
-        engine = source.get("type") or "mysql"
-        if not isinstance(engine, str):
-            raise DependencyConfigError("datasource.yaml", "DATABASE 数据源类型必须为字符串")
-        engine = engine.strip().lower()
-        engine = {"mariadb": "mysql", "postgres": "postgresql"}.get(engine, engine)
-        if engine not in {"mysql", "postgresql"}:
-            raise DependencyConfigError("datasource.yaml", f"{workspace['workspaceKey']} 的 DATABASE 源码模式仅支持 MySQL/PostgreSQL")
-        engines.add(engine); connections.append(source)
     testing_path = gusen_hub.CONFIG_DIR / "database-testing.yaml"
     if testing_path.is_file():
         from common import database_test_artifacts as artifacts

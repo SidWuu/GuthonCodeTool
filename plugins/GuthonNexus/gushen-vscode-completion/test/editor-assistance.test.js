@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { completions, diagnostics, documentKind, fieldReferencePrefix, registerEditorAssistance } = require('../src/svn/editor-assistance');
-const {procedureCompletionTarget} = require('../src/svn/editor-assistance');
+const { completions, diagnostics, documentKind, fieldReferencePrefix, registerEditorAssistance } = require('../src/source/editor-assistance');
+const {procedureCompletionTarget} = require('../src/source/editor-assistance');
 
 test('procedure suggestions only query bounded literal invoke/find argument prefixes', () => {
   for (const [source,argument,prefix] of [["$vs.proc.invoke('demo",'alias','demo'],["$vs.proc.invoke('demo.pkg', 'sa",'function','sa'],['$vs.proc.find("de','alias','de']]) {
@@ -42,8 +42,8 @@ test('indexed procedures retain namespace provenance and reject results after do
 });
 
 function document(sourceType, jsonPointer, languageId = 'json') {
-  const params = new URLSearchParams({ sourceType, sourceId: 'PG-1', jsonPointer });
-  return { uri: { scheme: 'guthon-svn-edit', query: params.toString(), authority: 'products.demo' }, languageId };
+  const params = new URLSearchParams({path:'page.json',pointer:jsonPointer});
+  return { uri: { scheme: 'guthon-api-edit', query: params.toString(), authority: 'products.demo' }, languageId };
 }
 
 test('diagnoses repeated GSS function definitions at the second declaration', () => {
@@ -66,7 +66,7 @@ test('completes and diagnoses PAGE field IDs only within the active collection',
   assert.deepEqual(completions('fields', '[{"fieldId":', 12), []);
 });
 
-test('limits assistance to supported SVN virtual documents', () => {
+test('limits assistance to supported API source documents', () => {
   assert.equal(documentKind(document('page', '/views/0/fields')), 'fields');
   assert.equal(documentKind(document('procedure', '', 'guthon-gss')), 'gss');
   assert.equal(documentKind({ ...document('page', '/views/0/fields'), uri: { scheme: 'file' } }), '');

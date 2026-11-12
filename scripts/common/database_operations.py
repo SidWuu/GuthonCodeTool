@@ -256,7 +256,7 @@ def load_template(directory, name):
 
 
 def build_diagnosis_case(template, parameters, *, workspace_key, datasource, database, source_evidence, max_rows=100):
-    from providers.database.run_source_diagnosis import validate_case
+    from common.source_diagnosis import validate_case
     if not artifacts.WORKSPACE_KEY.fullmatch(workspace_key) or not datasource or not source_evidence.strip():
         raise readonly.DatabaseReadonlyError('CONFIG_INVALID','案例草稿需要明确workspaceKey、datasource和源码证据')
     if isinstance(max_rows,bool) or not isinstance(max_rows,int) or not 1<=max_rows<=100:

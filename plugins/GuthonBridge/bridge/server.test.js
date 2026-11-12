@@ -33,9 +33,9 @@ process.stdout.write(JSON.stringify({type:'ready',protocolVersion:1})+'\\n');
 readline.createInterface({input:process.stdin}).on('line', line => {
   const request = JSON.parse(line);
   let result;
-  if (request.command === 'route') result = {ok:true,workspaceKey:request.input.workspaceKey};
+  if (request.command === 'route') result = {ok:true,workspaceKey:request.input.workspaceKey,workspace:{capabilities:{'source.read':true}}};
   else {
-    const argv = ${JSON.stringify(legacy[0])} === 'pull' ? ['--json-stdin'] : ['--workspace',request.workspaceKey,...request.args];
+    const argv = ${JSON.stringify(legacy[0])} === 'pull' ? ['--json-stdin'] : request.args;
     const out = spawnSync(${JSON.stringify(env.TEST_EXECUTABLE)},[${JSON.stringify(env[legacy[1]])},...argv],{input:JSON.stringify(request.input)});
     if (out.status !== 0) { process.stdout.write(JSON.stringify({type:'result',id:request.id,ok:false,error:{message:out.stderr.toString()}})+'\\n'); return; }
     result = JSON.parse(out.stdout.toString());
@@ -120,6 +120,12 @@ test("saveRemoteFile writes only into the configured export root", async () => {
     assert.equal(response.status, 200, data.message);
     assert.equal(data.ok, true);
     assert.equal(data.filePath, path.join(fs.realpathSync(outputDir), "doPreRequestScript.java"));
+    assert.equal(fs.readFileSync(data.filePath, "utf8"), "function body");
+    const conflict = await bridgeFetch(`http://127.0.0.1:${port}/saveRemoteFile`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({objectKey: "demo.pkg#doPreRequestScript", outputDir, content: "new body", metadata: {extension: "java", funId: "doPreRequestScript"}})
+    });
+    assert.equal(conflict.status, 409);
     assert.equal(fs.readFileSync(data.filePath, "utf8"), "function body");
     assert.equal(fs.existsSync(path.join(outputDir, "demo.pkg")), false);
   } finally {
@@ -231,158 +237,6 @@ test("logPullFailure records the page pull failure reason", async () => {
   }
 });
 
-test("pullHubSource delegates structured payload to the configured hub command", async () => {
-  const port = 17462;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-hub-command-"));
-  const hubScript = path.join(tmp, "fake-hub.js");
-  const workCopyPath = path.join(tmp, "work-copy");
-  const logPath = path.join(tmp, "pull-log.ndjson");
-  fs.writeFileSync(
-    hubScript,
-    `
-process.stdin.setEncoding("utf8");
-let raw = "";
-process.stdin.on("data", (chunk) => raw += chunk);
-process.stdin.on("end", () => {
-  const payload = JSON.parse(raw || "{}");
-  if (payload.sourceType !== "procedure" || payload.alias !== "demo.pkg" || payload.funId !== "save") {
-    process.stderr.write("bad payload");
-    process.exit(2);
-  }
-  process.stdout.write(JSON.stringify({
-    ok: true,
-    changed: false,
-    workCopyPath: ${JSON.stringify(workCopyPath)},
-    workCopyStatus: "LOCAL_CHANGED",
-    workCopyAction: "PRESERVED",
-    localChanged: true,
-    gitAddStatus: "ADDED",
-    gitAdded: 4
-  }));
-});
-`,
-    "utf8",
-  );
-  const server = spawn(process.execPath, ["bridge/server.js"], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      GUTHON_BRIDGE_PORT: String(port),
-      TEST_EXECUTABLE: process.execPath,
-      TEST_PULL_SCRIPT: hubScript,
-      GUTHON_PULL_LOG_PATH: logPath
-    },
-    stdio: "ignore"
-  });
-
-  try {
-    await waitForHealth(port);
-    const response = await bridgeFetch(`http://127.0.0.1:${port}/pullHubSource`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        workspaceKey: "projects.demo-project",
-        sourceType: "procedure",
-        alias: "demo.pkg",
-        funId: "save"
-      })
-    });
-    const data = await response.json();
-
-    assert.equal(response.status, 200, data.message);
-    assert.equal(data.ok, true);
-    assert.equal(data.workCopyPath, workCopyPath);
-    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
-    assert.equal(log.pullType, "source");
-    assert.equal(log.trigger, "manual");
-    assert.equal(log.ok, true);
-    assert.match(log.time, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-    assert.deepEqual(log.summary, {
-      workspaceKey: "projects.demo-project",
-      sourceType: "procedure",
-      sourceId: "",
-      alias: "demo.pkg",
-      funId: "save",
-      changed: false,
-      pulled: "",
-      workCopyPath,
-      workCopyStatus: "LOCAL_CHANGED",
-      workCopyAction: "PRESERVED",
-      localChanged: true,
-      gitAddStatus: "ADDED",
-      gitAdded: 4
-    });
-  } finally {
-    server.kill();
-  }
-});
-
-test("pullHubSource uses the configured Python tool entry in development mode", async () => {
-  const port = 17466;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-development-tool-"));
-  const toolEntry = path.join(tmp, "fake-tool.js");
-  const toolHome = path.join(tmp, "home");
-  const logPath = path.join(tmp, "pull-log.ndjson");
-  const startsPath = path.join(tmp, "tool-starts.txt");
-  fs.writeFileSync(
-    toolEntry,
-    `
-const args = process.argv.slice(2);
-require('node:fs').appendFileSync(${JSON.stringify(startsPath)}, 'start\\n');
-if (JSON.stringify(args) !== JSON.stringify(["serve", "--stdio", "--home", ${JSON.stringify(toolHome)}])) {
-  process.stderr.write(JSON.stringify(args));
-  process.exit(2);
-}
-const readline = require('node:readline');
-process.stdout.write(JSON.stringify({ type: 'ready', protocolVersion: 1 }) + '\\n');
-readline.createInterface({ input: process.stdin }).on('line', line => {
-  const request = JSON.parse(line);
-  if (request.command === 'route') { process.stdout.write(JSON.stringify({ id: request.id, type: 'result', ok: true, result: {ok:true,workspaceKey:request.input.workspaceKey} }) + '\\n'); return; }
-  if (request.command !== 'pull' || request.workspaceKey !== 'projects.demo-project') process.exit(3);
-  process.stdout.write(JSON.stringify({ id: request.id, type: 'result', ok: true, result: { ok: true, mode: 'development' } }) + '\\n');
-});
-`,
-    "utf8",
-  );
-  const server = spawn(process.execPath, ["bridge/server.js"], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      GUTHON_BRIDGE_PORT: String(port),
-      GUTHON_TOOL_PATH: process.execPath,
-      GUTHON_TOOL_ENTRY: toolEntry,
-      GUTHON_TOOL_HOME: toolHome,
-      GUTHON_PULL_LOG_PATH: logPath,
-    },
-    stdio: "ignore",
-  });
-
-  try {
-    await waitForHealth(port);
-    const response = await bridgeFetch(`http://127.0.0.1:${port}/pullHubSource`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceKey: "projects.demo-project", sourceType: "procedure", alias: "demo.pkg", funId: "save" }),
-    });
-    const data = await response.json();
-
-    assert.equal(response.status, 200, data.message);
-    assert.equal(data.ok, true);
-    assert.equal(data.mode, "development");
-    const second = await bridgeFetch(`http://127.0.0.1:${port}/pullHubSource`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceKey: "projects.demo-project", sourceType: "procedure", alias: "demo.pkg", funId: "save" }),
-    });
-    assert.equal((await second.json()).mode, "development");
-    assert.equal(fs.readFileSync(startsPath, "utf8").trim().split("\n").length, 1);
-  } finally {
-    server.kill();
-  }
-});
-
 test("routeWorkspace validates page identity and strips local paths", async () => {
   const port = 17468;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-workspace-summary-"));
@@ -406,7 +260,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   if (payload.workspaceKey !== "products.demo" || payload.checkoutPath !== "/must/not/be/forwarded") process.exit(3);
   process.stdout.write(JSON.stringify({ id: request.id, type: 'result', ok: true, result: {
     ok: true, workspaceKey: "products.demo",
-    workspace: { workspaceKey: "products.demo", sourceMode: "svn", root: "/private/root", checkoutPath: "/private/checkout" }
+    workspace: { workspaceKey: "products.demo", sourceMode: "api", root: "/private/root", checkoutPath: "/private/checkout" }
   } }) + '\\n');
 });
 `,
@@ -433,7 +287,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     });
     const data = await response.json();
     assert.equal(response.status, 200, data.message);
-    assert.equal(data.workspace.sourceMode, "svn");
+    assert.equal(data.workspace.sourceMode, "api");
     assert.equal(data.workspace.root, undefined);
     assert.equal(data.workspace.checkoutPath, undefined);
   } finally {
@@ -441,331 +295,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   }
 });
 
-test("exportTableSchema delegates data source and table filters to script", async () => {
-  const port = 17463;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-schema-command-"));
-  const schemaScript = path.join(tmp, "fake-schema.js");
-  const logPath = path.join(tmp, "pull-log.ndjson");
-  fs.writeFileSync(
-    schemaScript,
-    `
-const args = process.argv.slice(2);
-if (!args.includes("--data-source-ids") || !args.includes("0015") || !args.includes("--table-ids") || !args.includes("RM_TEST")) {
-  process.stderr.write("bad args: " + args.join(" "));
-  process.exit(2);
-}
-process.stdout.write(JSON.stringify({ ok: true, exported_table_count: 1, outputDir: "/tmp/schema" }));
-`,
-    "utf8",
-  );
-  const server = spawn(process.execPath, ["bridge/server.js"], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      GUTHON_BRIDGE_PORT: String(port),
-      TEST_EXECUTABLE: process.execPath,
-      TEST_SCHEMA_SCRIPT: schemaScript,
-      GUTHON_PULL_LOG_PATH: logPath
-    },
-    stdio: "ignore"
-  });
-
-  try {
-    await waitForHealth(port);
-    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportTableSchema`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        workspaceKey: "products.demo-product",
-        dataSourceId: "0015",
-        tableIds: ["RM_TEST"]
-      })
-    });
-    const data = await response.json();
-
-    assert.equal(response.status, 200, data.message);
-    assert.equal(data.ok, true);
-    assert.equal(data.exported_table_count, 1);
-    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
-    assert.equal(log.pullType, "database");
-    assert.equal(log.trigger, "manual");
-    assert.equal(log.ok, true);
-    assert.deepEqual(log.summary, {
-      dataSourceId: "0015",
-      tableIds: ["RM_TEST"],
-      exported_table_count: 1,
-      outputDir: "/tmp/schema"
-    });
-  } finally {
-    server.kill();
-  }
-});
-
-test("database connection failures return a friendly message", async () => {
-  const port = 17469;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-database-error-"));
-  const schemaScript = path.join(tmp, "fake-schema.js");
-  fs.writeFileSync(
-    schemaScript,
-    'process.stderr.write("Traceback (most recent call last):\\npymysql.err.OperationalError: (2013, \\\"Lost connection to MySQL server during query\\\")"); process.exit(1);',
-    "utf8",
-  );
-  const server = spawn(process.execPath, ["bridge/server.js"], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      GUTHON_BRIDGE_PORT: String(port),
-      TEST_EXECUTABLE: process.execPath,
-      TEST_SCHEMA_SCRIPT: schemaScript,
-    },
-    stdio: "ignore",
-  });
-
-  try {
-    await waitForHealth(port);
-    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportTableSchema`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceKey: "products.demo-product", dataSourceId: "0015" }),
-    });
-    const data = await response.json();
-
-    assert.equal(response.status, 500);
-    assert.equal(data.message, "无法连接源码数据库，请确认已连接公司内网或 VPN 后重试");
-    assert.equal(data.message.includes("Traceback"), false);
-  } finally {
-    server.kill();
-  }
-});
-
-test("PostgreSQL connection failures return the same friendly message", async () => {
-  const port = 17470;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-postgresql-error-"));
-  const schemaScript = path.join(tmp, "fake-schema.js");
-  fs.writeFileSync(
-    schemaScript,
-    'process.stderr.write("psycopg.OperationalError: connection failed: Connection refused"); process.exit(1);',
-    "utf8",
-  );
-  const server = spawn(process.execPath, ["bridge/server.js"], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      GUTHON_BRIDGE_PORT: String(port),
-      TEST_EXECUTABLE: process.execPath,
-      TEST_SCHEMA_SCRIPT: schemaScript,
-    },
-    stdio: "ignore",
-  });
-
-  try {
-    await waitForHealth(port);
-    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportTableSchema`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceKey: "products.demo-product", dataSourceId: "0015" }),
-    });
-    const data = await response.json();
-    assert.equal(response.status, 500);
-    assert.equal(data.message, "无法连接源码数据库，请确认已连接公司内网或 VPN 后重试");
-  } finally {
-    server.kill();
-    fs.rmSync(tmp, { recursive: true });
-  }
-});
-
-test("exportBillType delegates to script and writes pull log", async () => {
-  const port = 17464;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-billtype-command-"));
-  const billTypeScript = path.join(tmp, "fake-billtype.js");
-  const logPath = path.join(tmp, "pull-log.ndjson");
-  fs.writeFileSync(
-    billTypeScript,
-    `
-const args = process.argv.slice(2);
-if (!args.includes("--data-source-ids") || !args.includes("0015,0008")) {
-  process.stderr.write("bad args: " + args.join(" "));
-  process.exit(2);
-}
-if (!args.includes("--bill-type-codes") || !args.includes("BT_A,BT_B")) {
-  process.stderr.write("bad bill type args: " + args.join(" "));
-  process.exit(2);
-}
-process.stdout.write(JSON.stringify({ ok: true, exported_bill_type_count: 3, outputDir: "/tmp/billtype" }));
-`,
-    "utf8",
-  );
-  const server = spawn(process.execPath, ["bridge/server.js"], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      GUTHON_BRIDGE_PORT: String(port),
-      TEST_EXECUTABLE: process.execPath,
-      TEST_BILL_TYPE_SCRIPT: billTypeScript,
-      GUTHON_PULL_LOG_PATH: logPath
-    },
-    stdio: "ignore"
-  });
-
-  try {
-    await waitForHealth(port);
-    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportBillType`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        workspaceKey: "products.demo-product",
-        dataSourceIds: ["0015", "0008"],
-        billTypeCodes: ["BT_A", "BT_B"]
-      })
-    });
-    const data = await response.json();
-
-    assert.equal(response.status, 200, data.message);
-    assert.equal(data.ok, true);
-    assert.equal(data.exported_bill_type_count, 3);
-    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
-    assert.equal(log.pullType, "billtype");
-    assert.equal(log.trigger, "manual");
-    assert.equal(log.ok, true);
-    assert.deepEqual(log.summary, {
-      dataSourceIds: ["0015", "0008"],
-      billTypeCodes: ["BT_A", "BT_B"],
-      exported_bill_type_count: 3,
-      outputDir: "/tmp/billtype"
-    });
-  } finally {
-    server.kill();
-  }
-});
-
-test("exportViewSql delegates view filters to script", async () => {
-  const port = 17467;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-view-command-"));
-  const viewScript = path.join(tmp, "fake-views.js");
-  const logPath = path.join(tmp, "pull-log.ndjson");
-  fs.writeFileSync(
-    viewScript,
-    `
-const args = process.argv.slice(2);
-if (!args.includes("--data-source-ids") || !args.includes("0015")) {
-  process.stderr.write("bad data source args: " + args.join(" "));
-  process.exit(2);
-}
-if (!args.includes("--view-ids") || !args.includes("V_RM_TEST")) {
-  process.stderr.write("bad view args: " + args.join(" "));
-  process.exit(2);
-}
-process.stdout.write(JSON.stringify({ ok: true, exported_view_count: 1, outputDir: "/tmp/views" }));
-`,
-    "utf8",
-  );
-  const server = spawn(process.execPath, ["bridge/server.js"], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      GUTHON_BRIDGE_PORT: String(port),
-      TEST_EXECUTABLE: process.execPath,
-      TEST_VIEW_SCRIPT: viewScript,
-      GUTHON_PULL_LOG_PATH: logPath
-    },
-    stdio: "ignore"
-  });
-
-  try {
-    await waitForHealth(port);
-    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportViewSql`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workspaceKey: "products.demo-product",
-        dataSourceIds: ["0015"],
-        viewIds: ["V_RM_TEST"]
-      })
-    });
-    const data = await response.json();
-    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
-
-    assert.equal(response.status, 200, data.message);
-    assert.equal(data.exported_view_count, 1);
-    assert.equal(log.pullType, "views");
-    assert.deepEqual(log.summary, {
-      dataSourceIds: ["0015"],
-      viewIds: ["V_RM_TEST"],
-      exported_view_count: 1,
-      outputDir: "/tmp/views"
-    });
-  } finally {
-    server.kill();
-  }
-});
-
-test("exportSystemScripts delegates selected system and script types", async () => {
-  const port = 17468;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-system-script-command-"));
-  const exportScript = path.join(tmp, "fake-system-scripts.js");
-  const logPath = path.join(tmp, "pull-log.ndjson");
-  fs.writeFileSync(
-    exportScript,
-    `
-const args = process.argv.slice(2);
-if (!args.includes("--system-ids") || !args.includes("SYS-DD01-06B1-6B6C4E52")) {
-  process.stderr.write("bad system args: " + args.join(" "));
-  process.exit(2);
-}
-if (!args.includes("--script-types") || !args.includes("20") || !args.includes("--workcopy")) {
-  process.stderr.write("bad script type args: " + args.join(" "));
-  process.exit(2);
-}
-process.stdout.write(JSON.stringify({ ok: true, exported_system_script_count: 1, work_copy_paths: ["/tmp/workcopy"], outputDir: "/tmp/system-scripts" }));
-`,
-    "utf8",
-  );
-  const server = spawn(process.execPath, ["bridge/server.js"], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      GUTHON_BRIDGE_PORT: String(port),
-      TEST_EXECUTABLE: process.execPath,
-      TEST_SYSTEM_SCRIPT: exportScript,
-      GUTHON_PULL_LOG_PATH: logPath
-    },
-    stdio: "ignore"
-  });
-
-  try {
-    await waitForHealth(port);
-    const response = await bridgeFetch(`http://127.0.0.1:${port}/exportSystemScripts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workspaceKey: "products.demo-product",
-        systemIds: ["SYS-DD01-06B1-6B6C4E52"],
-        scriptTypes: [20]
-      })
-    });
-    const data = await response.json();
-    const log = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
-
-    assert.equal(response.status, 200, data.message);
-    assert.equal(data.exported_system_script_count, 1);
-    assert.equal(log.pullType, "system-scripts");
-    assert.deepEqual(log.summary, {
-      systemIds: ["SYS-DD01-06B1-6B6C4E52"],
-      scriptTypes: [20],
-      exported_system_script_count: 1,
-      workCopyPaths: ["/tmp/workcopy"],
-      outputDir: "/tmp/system-scripts"
-    });
-  } finally {
-    server.kill();
-  }
-});
-
-test("queryProcedureCallers delegates target identity to hub query", async () => {
+test("queryProcedureCallers sends identity to the API caller index", async () => {
   const port = 17466;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "guthon-callers-query-"));
   const queryScript = path.join(tmp, "fake-query.js");
@@ -773,14 +303,12 @@ test("queryProcedureCallers delegates target identity to hub query", async () =>
     queryScript,
     `
 const args = process.argv.slice(2);
-if (!args.includes("callers") || !args.includes("--alias") || !args.includes("demo.target") || !args.includes("--fun") || !args.includes("run")) {
-  process.stderr.write("bad args: " + args.join(" "));
-  process.exit(2);
-}
-process.stdout.write(JSON.stringify({
-  target: { alias: "demo.target", funId: "run" },
-  callers: [{ source_table: "procedure", source_id: "PROC-1", source_alias_id: "demo.caller", fun_id: "start" }]
-}));
+if (JSON.stringify(args) !== JSON.stringify(['callers','--stdin'])) process.exit(2);
+let input=''; process.stdin.on('data',chunk=>input+=chunk);process.stdin.on('end',()=>{
+ const payload=JSON.parse(input);
+ if(payload.alias!=='demo.target' || payload.funId!=='run' || payload.limit!==100)process.exit(2);
+ process.stdout.write(JSON.stringify({ok:true,callers:[{sourceType:'procedure',sourceId:'PROC-1',alias:'demo.caller',funId:'start'}]}));
+});
 `,
     "utf8",
   );
@@ -847,64 +375,18 @@ test("user-facing messages use concise Chinese", () => {
   assert.equal(manifest.action.default_title, "Guthon Bridge");
 });
 
-test("popup exposes separate page and hub pull actions without hub target input", () => {
+test("popup and toolbar use API refresh while retaining browser actions", () => {
   const html = fs.readFileSync(POPUP_HTML_PATH, "utf8");
-  const script = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
-  const background = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
+  const popup = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
   const content = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
-  const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
-  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
-  const runHubPullScript = script.slice(script.indexOf("async function runHubPull"), script.indexOf("pullPageBtn.addEventListener"));
-  const callersScript = content.slice(content.indexOf("async function showProcedureCallers"), content.indexOf("function renderTableCell"));
-
-  assert.equal(html.includes("pullPageBtn"), true);
-  assert.equal(html.includes("pullHubBtn"), true);
-  assert.equal(html.includes("hubTarget"), false);
-  assert.equal(script.includes("pull-hub-source"), true);
-  assert.equal(script.includes("parseHubTarget"), false);
-  assert.equal(script.includes("inspect-hub-source"), true);
-  assert.equal(script.includes('type: "run-page-command"'), true);
-  assert.equal(content.includes('message?.type === "run-page-command"'), true);
-  assert.equal(background.includes('"query-procedure-callers": "/queryProcedureCallers"'), true);
-  assert.equal(content.includes('"procedure-callers-request"'), true);
-  assert.equal(content.includes('"open-procedure-caller"'), true);
-  assert.equal(content.includes('"open-module-caller"'), true);
-  assert.equal(css.includes("place-items: start center"), true);
-  assert.equal(callersScript.includes('overlay.addEventListener("click"'), false);
-  assert.equal(pageBridge.includes("function inspectCurrentHubSource"), true);
-  assert.equal(pageBridge.includes("function inspectTableSchemaTarget"), true);
-  assert.equal(pageBridge.includes("function inspectViewTarget"), true);
-  assert.equal(pageBridge.includes("function getDataSourceName"), true);
-  assert.equal(pageBridge.includes("function getLabeledSelectValue"), true);
-  assert.equal(pageBridge.includes("[A-Z][A-Z0-9]+_[A-Z0-9_]"), true);
-  assert.equal(script.includes('mode === "table-schema"'), true);
-  assert.equal(script.includes('mode === "billtype"'), true);
-  assert.equal(script.includes('"export-table-schema"'), true);
-  assert.equal(script.includes('"export-bill-type"'), true);
-  assert.equal(script.includes('"export-view-sql"'), true);
-  assert.equal(script.includes('type: "log-pull-failure"'), true);
-  assert.equal(background.includes('"log-pull-failure": "/logPullFailure"'), true);
-  assert.equal(background.includes('chrome.runtime.onInstalled.addListener'), true);
-  assert.equal(background.includes('files: ["bridge.css"]'), true);
-  assert.equal(background.includes('files: ["host-settings.js", "host-config.js", "fields-mover-core.js", "page-bridge.js"]'), true);
-  assert.equal(background.includes('files: ["host-settings.js", "host-config.js", "nexus-locator.js", "workspace-selection.js", "task-client.js", "platform-layout.js", "tab-sorter.js", "content.js"]'), true);
-  assert.equal(background.includes('world: "MAIN"'), true);
-  assert.equal(script.includes("拉取单据类型"), true);
-  assert.equal(script.includes("workspaceSelectionRequired"), true);
-  assert.equal(script.includes("GuthonBridgeWorkspace.select"), true);
-  assert.equal(content.includes("workspaceSelectionRequired"), true);
-  assert.equal(content.includes("GuthonBridgeWorkspace.select"), true);
-  assert.equal(css.includes(".guthon-bridge-workspace-dialog"), true);
-  assert.equal(html.includes('src="workspace-selection.js"'), true);
-  assert.equal(html.includes('href="bridge.css"'), true);
-  assert.equal(runHubPullScript.includes("resolveCurrentTarget"), false);
-  assert.equal(runHubPullScript.includes('const pageSource = target.mode === "page-source";'), true);
-  assert.equal(script.includes('mode: result.data.mode || "procedure"'), true);
-  assert.equal(pageBridge.includes('getActivePageTabCode()'), true);
-  assert.equal(html.includes('id="locateNexusBtn"'), true);
-  assert.equal(script.includes('chrome.tabs.create({ url: locator.uri })'), true);
-  assert.equal(html.includes("closeBtn"), true);
-  assert.equal(script.includes("window.close()"), true);
+  const background = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
+  assert.ok(html.includes('src="refresh-target.js"'));
+  assert.ok(popup.includes('"refresh-api-source"'));
+  assert.ok(content.includes('"refresh-api-source"'));
+  assert.ok(popup.includes('type: "save-pull-result"'));
+  assert.ok(content.includes('showFieldsMoverOverlay'));
+  assert.ok(background.includes('"query-procedure-callers"'));
+  assert.ok(!html.includes('forceRefreshBtn'));
 });
 
 test("Nexus links carry only the current PAGE or procedure identity", () => {
@@ -1125,87 +607,11 @@ test("configured IP ranges and domain suffixes control Guthon URLs", () => {
   assert.equal(contentScript.includes("GuthonBridgeHost?.isAllowed"), true);
 });
 
-test("floating procedure button pulls hub source", () => {
-  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
-  const pullScript = contentScript.slice(
-    contentScript.indexOf("async function pullCurrentProcedure"),
-    contentScript.indexOf("function removeNode")
-  );
-
-  assert.equal(contentScript.includes('makeNativeButton("源码拉取"'), true);
-  assert.equal(contentScript.includes("拉取到本地</button>"), false);
-  assert.equal(contentScript.includes('button.textContent = "成功";'), true);
-  assert.equal(contentScript.includes('button.textContent = "失败";'), true);
-  assert.equal(pullScript.includes('"pull-hub-source"'), true);
-  assert.equal(pullScript.includes('type: "save-pull-result"'), false);
-  assert.equal(pullScript.includes('runPageCommand("pullProcedure"'), true);
-});
-
-test("data table page exposes table schema export action", () => {
-  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
-  const css = fs.readFileSync(BRIDGE_CSS_PATH, "utf8");
-  const backgroundScript = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
-  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
-
-  assert.equal(contentScript.includes("拉取表结构"), true);
-  assert.equal(contentScript.includes("inspectTableSchemaTarget"), true);
-  assert.equal(contentScript.includes('sendWorkspaceRequest("export-table-schema"'), true);
-  assert.equal(contentScript.includes("isDataTableRoute"), true);
-  assert.equal(contentScript.includes("positionFloatingRoot"), false);
-  assert.equal(css.includes("left: 20px"), true);
-  assert.equal(css.includes("bottom: 150px"), true);
-  assert.equal(backgroundScript.includes("/exportTableSchema"), true);
-  assert.equal(pageBridge.includes("inspectTableSchemaTarget"), true);
-  assert.equal(pageBridge.includes("getLabeledSelectValue"), true);
-  assert.equal(pageBridge.includes("getSelectedTableIds"), true);
-});
-
-test("bill type tab exposes bill type export action", () => {
-  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
-  const backgroundScript = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
-
-  assert.equal(contentScript.includes("拉取单据类型"), true);
-  assert.equal(contentScript.includes("isBillTypeRoute"), true);
-  assert.equal(contentScript.includes("inspectBillTypeTarget"), true);
-  assert.equal(contentScript.includes('"export-bill-type"'), true);
-  assert.equal(contentScript.includes("billTypeCodes"), true);
-  assert.equal(backgroundScript.includes("/exportBillType"), true);
-});
-
-test("view management page exposes view source export action", () => {
-  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
-  const backgroundScript = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
-  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
-  const refreshScript = contentScript.slice(
-    contentScript.indexOf("async function refreshToolbarButtons"),
-    contentScript.indexOf("function onExtensionMessage")
-  );
-
-  assert.equal(contentScript.includes("拉取视图源码"), true);
-  assert.equal(contentScript.includes("isViewRoute"), true);
-  assert.equal(refreshScript.includes("isViewRoute()"), true);
-  assert.equal(contentScript.includes("inspectViewTarget"), true);
-  assert.equal(contentScript.includes('"export-view-sql"'), true);
-  assert.equal(backgroundScript.includes("/exportViewSql"), true);
-  assert.equal(pageBridge.includes("getSelectedViewIds"), true);
-  assert.equal(pageBridge.includes('mode: "views"'), true);
-});
-
-test("system script page exposes selected and all export actions", () => {
-  const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
-  const backgroundScript = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
-  const pageBridge = fs.readFileSync(path.join(ROOT, "extension", "page-bridge.js"), "utf8");
-
-  assert.equal(contentScript.includes("isSystemScriptRoute"), true);
-  assert.equal(contentScript.includes("installSystemScriptSelection"), true);
-  assert.equal(contentScript.includes("选中拉取"), true);
-  assert.equal(contentScript.includes("全部拉取"), true);
-  assert.equal(contentScript.includes("inspectSystemScriptTarget"), true);
-  assert.equal(contentScript.includes('"export-system-scripts"'), true);
-  assert.equal(backgroundScript.includes("/exportSystemScripts"), true);
-  assert.equal(pageBridge.includes("getCurrentSystemScriptTarget"), true);
-  assert.equal(pageBridge.includes("getSelectedSystemScriptTypes"), true);
-  assert.equal(pageBridge.includes('mode: "system-scripts"'), true);
+test("all current source routes use explicit target selection", () => {
+  const content = fs.readFileSync(CONTENT_SCRIPT_PATH, "utf8");
+  for (const route of ['isProcedureRoute()', 'isModuleRoute()', 'isDataTableRoute()', 'isViewRoute()', 'isSystemScriptRoute()']) assert.ok(content.includes(route));
+  assert.ok(content.includes('GuthonBridgeRefreshTarget.build(inspected.data)'));
+  assert.ok(!content.includes('全部拉取'));
 });
 
 test("pull button floats over the current Guthon toolbar without changing toolbar layout", () => {
@@ -1237,7 +643,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("复制局部上下文"), true);
   assert.equal(contentScript.includes("navigator.clipboard.writeText"), true);
   assert.equal(contentScript.includes("pullCurrentProcedure(root, refreshButton, true)"), false);
-  const pullScript = contentScript.slice(contentScript.indexOf("async function pullCurrentProcedure"), contentScript.indexOf("function removeNode"));
+  const pullScript = contentScript.slice(contentScript.indexOf("async function refreshCurrentSource"), contentScript.indexOf("function removeNode"));
   assert.equal(pullScript.includes("module_page_sql"), false);
   assert.equal(contentScript.includes("字段平移"), true);
   assert.equal(contentScript.includes("复制字段"), true);
@@ -1265,23 +671,15 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(css.includes("width: 140px"), true);
   assert.equal(css.includes("word-break: break-all"), true);
   assert.equal(contentScript.includes("installFloatingDrag"), false);
-  assert.equal(contentScript.includes("pullCurrentProcedure(root, sourceButton)"), true);
-  assert.equal(contentScript.includes('isModuleRoute() ? "inspect-hub-source" : "inspectCurrentProcedure"'), true);
-  assert.equal(contentScript.includes('const pageSource = isModuleRoute() || target.mode === "page-source";'), true);
-  assert.equal(contentScript.includes('root.dataset.workspaceMode !== "database"'), false);
-  assert.equal(contentScript.includes('sourceButton.hidden = true'), false);
-  assert.equal(contentScript.includes('root.querySelector(".guthon-bridge-source-button").hidden'), false);
-  assert.equal(contentScript.includes('svnMode && previousMode !== "svn"'), true);
+  assert.equal(contentScript.includes("refreshCurrentSource(root, sourceButton)"), true);
+  assert.equal(contentScript.includes('runPageCommand("inspect-hub-source")'), true);
   assert.equal(contentScript.includes('allowWorkspaceSelection = true'), true);
   assert.equal(contentScript.includes('allowWorkspaceSelection: false'), true);
-  assert.equal(contentScript.includes('const candidateModes = new Set'), true);
   assert.equal(contentScript.includes('location.pathname}${location.hash}#${root.dataset.mode'), true);
   assert.equal(contentScript.includes('window.addEventListener("hashchange", refreshToolbarButtonsSafely)'), true);
   assert.equal(contentScript.includes('window.addEventListener("popstate", refreshToolbarButtonsSafely)'), true);
   assert.equal(contentScript.includes('const PAGE_CONTEXT_HEARTBEAT_MS = 60000'), true);
   assert.equal(contentScript.includes('setInterval(() => {void publishPageContext().catch(() => {});}, PAGE_CONTEXT_HEARTBEAT_MS)'), true);
-  assert.equal(contentScript.includes('if (!pageSource && !target.procedureId)'), true);
-  assert.equal(contentScript.includes('sourceType: pageSource ? "page" : "procedure"'), true);
   assert.equal(css.includes('.guthon-bridge-inline [hidden]'), true);
   assert.equal(css.includes('display: none !important'), true);
   assert.equal(contentScript.includes('runPageCommand("collectModuleCopyText")'), true);
@@ -1346,8 +744,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(css.includes('.guthon-bridge-inline:not([data-mode="module"]) .guthon-bridge-module-only {\n  display: none;'), true);
   assert.equal(contentScript.includes("root.dataset.positioned"), false);
   assert.equal(contentScript.includes('root.dataset.sharedButtons = "true"'), true);
-  assert.equal(contentScript.includes("exportCurrentTableSchema(root, sourceButton)"), true);
-  assert.equal(contentScript.includes("exportCurrentBillType(root, sourceButton)"), true);
+  assert.equal(contentScript.includes("refreshCurrentSource(root, sourceButton)"), true);
   assert.equal(contentScript.includes("stopExtensionLoops();"), true);
 
   assert.equal(pageBridge.includes("function inspectCurrentPageSource"), true);
@@ -1797,7 +1194,7 @@ test("page bridge does not mix stale fullName package with current function id",
   assert.equal(pageBridge.includes("selectedTab?.panel"), true);
   assert.equal(popupScript.includes("function inspectCurrentProcedureContext"), false);
   assert.equal(popupScript.includes('type: "run-page-command"'), true);
-  assert.equal(popupScript.includes("(!payload.sourceId && !payload.alias)"), true);
+  assert.equal(popupScript.includes("GuthonBridgeRefreshTarget.build(target)"), true);
   assert.equal(pageBridge.includes('document.addEventListener("click", onProcedureTitleClick, true)'), true);
 });
 
@@ -1835,7 +1232,7 @@ test("floating pull shows a visible diagnostic message", () => {
   assert.equal(contentScript.includes("guthon-bridge-message"), true);
   assert.equal(contentScript.includes("setMessage(root,"), true);
   assert.equal(contentScript.includes("}, 10000);"), true);
-  assert.equal(contentScript.includes("console.error(\"谷神桥接：源码拉取失败\""), true);
+  assert.equal(contentScript.includes("pageActionError(error)"), true);
 });
 
 test("Bridge pairing blocks web origins and unpaired writes and confines file mappings", async () => {
@@ -1874,29 +1271,6 @@ test("Bridge pairing blocks web origins and unpaired writes and confines file ma
   }
 });
 
-test("force refresh dispatches only after typing the routed workspace key", async () => {
-  const source = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
-  const body = source.slice(source.indexOf("async function runHubPull("), source.indexOf('pullPageBtn.addEventListener("click"'));
-  const calls = [];
-  const context = {
-    resolveHubSourceTarget: async () => ({mode:"procedure",procedureId:"PR-1",procedureKeyword:"demo.pkg",funId:"save",dataSourceId:"DS1"}),
-    getActiveTab: async () => ({id:1}),
-    resolveWorkspaceSummary: async () => ({workspaceKey:"products.demo"}),
-    sendWorkspaceRequest: async (type, payload) => { calls.push({type,payload}); return {ok:true}; },
-    window: {prompt:()=>null}
-  };
-  vm.runInNewContext(`${body}\nglobalThis.pull = runHubPull;`,context);
-  await assert.rejects(context.pull(true), /已取消强制刷新/);
-  assert.equal(calls.length,0);
-  context.window.prompt = () => "products.demo";
-  await context.pull(true);
-  assert.equal(calls[0].payload.confirmation,"products.demo");
-  assert.equal(calls[0].payload.workspaceKey,"products.demo");
-  context.window.prompt = () => { throw new Error("ordinary pull must not prompt"); };
-  await context.pull(false);
-  assert.equal(calls[1].payload.force,false);
-});
-
 test("source Bridge and packaged Nexus use the same generated ToolHost command metadata", () => {
   const source = fs.readFileSync(path.join(ROOT, "bridge/server.js"), "utf8");
   assert.ok(source.includes('const TOOL_CLIENT_MODULE = "../../GuthonNexus/gushen-vscode-completion/src/tool-process-client";'));
@@ -1905,8 +1279,8 @@ test("source Bridge and packaged Nexus use the same generated ToolHost command m
   const bundled = fs.readFileSync(path.resolve(ROOT, '../GuthonNexus/gushen-vscode-completion/data/tool-command-metadata.json'));
   assert.ok(authority.equals(bundled), "Run Nexus npm run build:bridge to refresh metadata");
   const client = require('../../GuthonNexus/gushen-vscode-completion/src/tool-process-client');
-  assert.equal(client.requestTimeoutMs('svn',['sync-from-script']),1800000);
-  assert.equal(client.requestKind('svn',['auth-cache']),'write');
+  assert.equal(client.requestTimeoutMs('api',['refresh']),1800000);
+  assert.equal(client.requestKind('api',['login']),'write');
 });
 
 
@@ -1947,7 +1321,7 @@ test("platform page feedback never exposes local paths or raw exception details"
 
 test('durable Bridge jobs acknowledge promptly, enforce identity, deduplicate and never replay after restart', async()=>{
   const port=17476;const home=fs.mkdtempSync(path.join(os.tmpdir(),'bridge-jobs-'));const tool=path.join(home,'tool.js');const count=path.join(home,'executions');const pidPath=path.join(home,'host-pid');
-  fs.writeFileSync(tool,`const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(pidPath)},String(process.pid));process.stdout.write(JSON.stringify({type:'ready',protocolVersion:1})+'\\n');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.command==='route'){process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.input.workspaceKey}})+'\\n');return;}fs.appendFileSync(${JSON.stringify(count)},'execute\\n');setTimeout(()=>process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.workspaceKey,message:'finished'}})+'\\n'),r.input.alias==='slow'?10000:200);});`);
+  fs.writeFileSync(tool,`const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(pidPath)},String(process.pid));process.stdout.write(JSON.stringify({type:'ready',protocolVersion:1})+'\\n');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.command==='route'){process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.input.workspaceKey,workspace:{capabilities:{'api.pull':true}}}})+'\\n');return;}fs.appendFileSync(${JSON.stringify(count)},'execute\\n');setTimeout(()=>process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.workspaceKey,message:'finished'}})+'\\n'),r.input.alias==='slow'?10000:200);});`);
   const start=()=>spawn(process.execPath,['bridge/server.js'],{cwd:ROOT,env:{...process.env,GUTHON_TOOL_HOME:home,GUTHON_BRIDGE_PORT:String(port),GUTHON_TOOL_PATH:process.execPath,GUTHON_TOOL_ENTRY:tool},stdio:'ignore'});
   let server=start();
   const stop=async(signal)=>{if(server.exitCode===null)await new Promise(resolve=>{server.once('exit',resolve);server.kill(signal);});};
@@ -1955,7 +1329,7 @@ test('durable Bridge jobs acknowledge promptly, enforce identity, deduplicate an
     await waitForHealth(port);
     const token=fs.readFileSync(path.join(home,'var/nexus/bridge/token'),'utf8');
     const post=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});return {status:response.status,...await response.json()};};
-    const body={requestId:`${Date.now()}_${require('node:crypto').randomUUID()}`,workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',operation:'pull-hub-source',payload:{sourceType:'procedure',alias:'demo',funId:'save'}};
+    const body={requestId:`${Date.now()}_${require('node:crypto').randomUUID()}`,workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',operation:'refresh-api-source',payload:{sourceType:'procedure',alias:'demo',funId:'save'}};
     const first=await post('/submitJob',body);assert.equal(first.status,202);assert.equal(first.state,'QUEUED');
     const duplicate=await post('/submitJob',body);assert.equal(duplicate.jobId,first.jobId);
     assert.equal((await post('/submitJob',{...body,payload:{...body.payload,funId:'other'}})).status,400);
@@ -1983,7 +1357,7 @@ test('explicit workspaces execute concurrently in separate hosts while each work
  const tool=path.join(home,'tool.js');const events=path.join(home,'events.ndjson');
  fs.writeFileSync(tool,`const fs=require('node:fs');process.stdout.write(JSON.stringify({type:'ready',protocolVersion:1})+'\\n');
  require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);
- if(r.command==='route'){process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.input.workspaceKey}})+'\\n');return;}
+ if(r.command==='route'){process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.input.workspaceKey,workspace:{capabilities:{'api.pull':true}}}})+'\\n');return;}
  fs.appendFileSync(${JSON.stringify(events)},JSON.stringify({phase:'start',key:r.workspaceKey,alias:r.input.alias,pid:process.pid})+'\\n');
  setTimeout(()=>{fs.appendFileSync(${JSON.stringify(events)},JSON.stringify({phase:'end',key:r.workspaceKey,alias:r.input.alias,pid:process.pid})+'\\n');
  process.stdout.write(JSON.stringify({id:r.id,type:'result',ok:true,result:{ok:true,workspaceKey:r.workspaceKey}})+'\\n');},r.input.alias==='first'?300:20);});`);
@@ -1991,7 +1365,7 @@ test('explicit workspaces execute concurrently in separate hosts while each work
  try {
   await waitForHealth(port);const token=fs.readFileSync(path.join(home,'var/nexus/bridge/token'),'utf8');
   const post=async(route,body)=>await(await fetch(`http://127.0.0.1:${port}${route}`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-  const job=(key,alias)=>({requestId:`${Date.now()}_${require('node:crypto').randomUUID()}`,workspaceKey:key,pageOrigin:'https://gusen.steel56.com.cn',operation:'pull-hub-source',payload:{sourceType:'procedure',alias,funId:'save'}});
+  const job=(key,alias)=>({requestId:`${Date.now()}_${require('node:crypto').randomUUID()}`,workspaceKey:key,pageOrigin:'https://gusen.steel56.com.cn',operation:'refresh-api-source',payload:{sourceType:'procedure',alias,funId:'save'}});
   const requests=[job('products.first','first'),job('products.first','second'),job('projects.other','other')];
   await Promise.all(requests.map(request=>post('/submitJob',request)));
   for(let attempt=0;attempt<60;attempt++) {

@@ -241,7 +241,7 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
           if (choice !== '继续使用核心功能') return;
         }
         if (identity !== configurationIdentity()) throw new Error('运行配置已改变，请重新检查更新');
-        if (isBusy()) throw new Error('当前工具或 SVN 操作正在执行，附件已缓存，请完成后再更新');
+        if (isBusy()) throw new Error('当前工具或源码操作正在执行，附件已缓存，请完成后再更新');
         setBusy(true); busyClaimed = true;
         wasRunning = bridge.isRunning();
         if (wasRunning) {

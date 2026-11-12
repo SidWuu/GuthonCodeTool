@@ -42,7 +42,7 @@ function ownerIdentity(data, pointer, arrays) {
 
 function mergePageDraft(baseline, previous, current, choices = {}) {
   const blocked = (reason, paths = []) => ({draft: null, conflicts: [], blockedReason: reason, paths});
-  for (const key of ['workspaceKey', 'sourceNamespace', 'sourceId', 'workingCopyId', 'sourcePath', 'funId']) {
+  for (const key of ['workspaceKey', 'sourcePath']) {
     if ((baseline[key] || '') !== (current[key] || '')) return blocked('页面来源身份已变化，请导出草稿后重新载入');
   }
   let beforeData, currentData;
@@ -54,7 +54,7 @@ function mergePageDraft(baseline, previous, current, choices = {}) {
 
   const operations = previous.operations(), draft = new PageDraft(current.model);
   if (!operations.length) return {draft, conflicts: [], blockedReason: '', paths: [], appliedCount: 0, absorbedCount: 0};
-  if (!current.editable) return blocked('当前页面不可编辑，请导出草稿后核对来源和 SVN 状态');
+  if (!current.editable) return blocked('当前页面不可编辑，请导出草稿后核对来源和 API 状态');
   const oldTopology = topology(previous.baseline), freshTopology = topology(current.model);
   const changed = [...new Set([...oldTopology.keys(), ...freshTopology.keys()])]
     .filter(pointer => !same(oldTopology.get(pointer), freshTopology.get(pointer)));

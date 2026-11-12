@@ -219,14 +219,6 @@ function setButtonTitle(root, message) {
   root.querySelector("button").title = message;
 }
 
-function setButtonText(root, text) {
-  root.querySelector("button").textContent = text;
-}
-
-function setButtonTextNode(button, text) {
-  button.textContent = text;
-}
-
 function setMessage(root, message, tone = "idle") {
   const messageEl = root.querySelector(".guthon-bridge-message");
   if (!messageEl) {
@@ -248,6 +240,10 @@ function toErrorMessage(stage, error) {
 
 function pageActionError(error) {
   const message = String(error?.message || "");
+  if (/选择一个具体对象/.test(message)) return "请先选择一个具体对象；不会自动拉取全部。";
+  if (/不支持 API 源码刷新/.test(message)) return "当前对象暂不支持 API 源码刷新。";
+  if (/未识别到|缺少应用系统或数据源身份/.test(message)) return "未识别到完整对象身份，请选择对象后重试。";
+  if (/冲突/.test(message)) return "刷新存在冲突，本地修改已保留；请在 Nexus 检查结果。";
   if (/配对令牌/.test(message)) return "请在 Guthon Bridge 扩展弹窗配置配对令牌。";
   if (/端口|无法连接|fetch/i.test(message)) return "Bridge 连接失败，请检查 Nexus 服务与配对端口。";
   if (/工作区|workspace/i.test(message)) return "请在 Guthon Bridge 扩展弹窗核对工作区与页面身份。";
@@ -317,263 +313,18 @@ function makeNativeButton(text, className) {
   return button;
 }
 
-async function pullCurrentProcedure(root, button = root.querySelector("button"), force = false) {
+async function refreshCurrentSource(root, button) {
+  button.disabled = true;
   try {
-    button.disabled = true;
-    setButtonTextNode(button, "源码拉取");
-    button.title = "正在从源码表拉取...";
-    setMessage(root, "正在从源码表拉取...", "busy");
-
-    let bridgeHealth;
-    try {
-      bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
-    } catch (error) {
-      throw new Error(toErrorMessage("连接本地服务失败", error));
-    }
-    if (!bridgeHealth?.ok) {
-      throw new Error(`本地桥接服务不可用：${bridgeHealth?.message || "未知错误"}`);
-    }
-
-    const inspected = await runPageCommand(isModuleRoute() ? "inspect-hub-source" : "inspectCurrentProcedure");
-    if (!inspected?.ok) {
-      throw new Error(`${isModuleRoute() ? "识别当前页面失败" : "识别当前函数失败"}: ${inspected?.message || (isModuleRoute() ? "未识别到当前页面" : "未识别到当前过程函数")}`);
-    }
-
-    let target = inspected.data;
-    const pageSource = isModuleRoute() || target.mode === "page-source";
-    if (!pageSource && !target.procedureId) {
-      const resolved = await runPageCommand("pullProcedure", {
-        procedureKeyword: target.procedureKeyword || target.procedureName || "",
-        funId: target.funId || ""
-      });
-      if (resolved?.ok && resolved.data?.procedureId) {
-        target = {
-          ...target,
-          procedureId: resolved.data.procedureId,
-          procedureName: resolved.data.procedureName || target.procedureName,
-          procedureKeyword: resolved.data.procedureName || target.procedureKeyword
-        };
-      }
-    }
-    let pullResult;
-    try {
-      pullResult = await sendWorkspaceRequest(
-        "pull-hub-source",
-        {
-          sourceType: pageSource ? "page" : "procedure",
-          sourceId: pageSource ? target.pageId || target.procedureId || "" : target.procedureId || "",
-          alias: target.procedureKeyword || target.procedureName || "",
-          funId: pageSource ? "" : target.funId || "",
-          dataSourceId: target.dataSourceId || "",
-          systemId: target.systemId || "",
-          force
-        }
-      );
-    } catch (error) {
-      throw new Error(toErrorMessage("源码表拉取失败", error));
-    }
-    if (!pullResult?.ok) {
-      throw new Error(`源码表拉取失败: ${pullResult?.message || "拉取失败"}`);
-    }
-
-    button.textContent = "成功";
-    const successMessage = "源码拉取完成，请在 Nexus 查看工作副本。";
-    button.title = successMessage;
-    setMessage(root, successMessage, "success");
-    setTimeout(() => setButtonTextNode(button, "源码拉取"), 1600);
+    setMessage(root, "正在刷新选中的源码对象...", "busy");
+    const inspected = await runPageCommand("inspect-hub-source");
+    if (!inspected?.ok) throw new Error(inspected?.message || "未识别到当前对象");
+    const target = GuthonBridgeRefreshTarget.build(inspected.data);
+    const result = await sendWorkspaceRequest("refresh-api-source", target);
+    if (!result?.ok) throw new Error(result?.message || "源码刷新失败");
+    setMessage(root, result.message || "刷新请求已完成，请在 Nexus 查看结果和本地修改状态。", "success");
   } catch (error) {
-    console.error("谷神桥接：源码拉取失败");
-    button.textContent = "失败";
-    const message = pageActionError(error);
-    button.title = message;
-    setMessage(root, message, "error");
-    setTimeout(() => setButtonTextNode(button, "源码拉取"), 2200);
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function exportCurrentTableSchema(root, button = root.querySelector("button")) {
-  try {
-    button.disabled = true;
-    setButtonText(root, "源码拉取");
-    setButtonTitle(root, "正在拉取表结构...");
-    setMessage(root, "正在拉取表结构...", "busy");
-
-    const bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
-    if (!bridgeHealth?.ok) {
-      throw new Error(`本地桥接服务不可用：${bridgeHealth?.message || "未知错误"}`);
-    }
-
-    const inspected = await runPageCommand("inspectTableSchemaTarget");
-    if (!inspected?.ok) {
-      throw new Error(`识别数据表失败: ${inspected?.message || "未识别到数据源"}`);
-    }
-
-    const result = await sendWorkspaceRequest("export-table-schema", inspected.data);
-    if (!result?.ok) {
-      throw new Error(result?.message || "表结构拉取失败");
-    }
-
-    button.textContent = "成功";
-    const selected = Array.isArray(inspected.data.tableIds) && inspected.data.tableIds.length > 0;
-    const detail = selected ? `已拉取选中表: ${inspected.data.tableIds.join(", ")}` : `已拉取数据源 ${inspected.data.dataSourceId} 全部表`;
-    setButtonTitle(root, detail);
-    setMessage(root, `${detail}: ${result.exported_table_count}`, "success");
-    setTimeout(() => setButtonText(root, "源码拉取"), 1600);
-  } catch (error) {
-    console.error("谷神桥接：表结构拉取失败");
-    button.textContent = "失败";
-    const message = pageActionError(error);
-    setButtonTitle(root, message);
-    setMessage(root, message, "error");
-    setTimeout(() => setButtonText(root, "源码拉取"), 2200);
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function exportCurrentBillType(root, button = root.querySelector("button")) {
-  try {
-    button.disabled = true;
-    setButtonText(root, "源码拉取");
-    setButtonTitle(root, "正在拉取单据类型...");
-    setMessage(root, "正在拉取单据类型...", "busy");
-
-    const bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
-    if (!bridgeHealth?.ok) {
-      throw new Error(`本地桥接服务不可用：${bridgeHealth?.message || "未知错误"}`);
-    }
-
-    const inspected = await runPageCommand("inspectBillTypeTarget");
-    if (!inspected?.ok) {
-      throw new Error(`识别单据类型失败: ${inspected?.message || "未识别到数据源"}`);
-    }
-
-    const result = await sendWorkspaceRequest(
-      "export-bill-type",
-      {
-        dataSourceIds: [inspected.data.dataSourceId],
-        billTypeCodes: inspected.data.billTypeCodes || []
-      }
-    );
-    if (!result?.ok) {
-      throw new Error(result?.message || "单据类型拉取失败");
-    }
-
-    button.textContent = "成功";
-    const selected = Array.isArray(inspected.data.billTypeCodes) && inspected.data.billTypeCodes.length > 0;
-    const source = [inspected.data.dataSourceId, inspected.data.dataSourceName].filter(Boolean).join(" ");
-    const detail = selected ? `已拉取选中单据类型: ${inspected.data.billTypeCodes.join(", ")}` : `已拉取数据源 ${source} 全部单据类型`;
-    setButtonTitle(root, detail);
-    setMessage(root, `${detail}: ${result.exported_bill_type_count}`, "success");
-    setTimeout(() => setButtonText(root, "源码拉取"), 1600);
-  } catch (error) {
-    console.error("谷神桥接：单据类型拉取失败");
-    button.textContent = "失败";
-    const message = pageActionError(error);
-    setButtonTitle(root, message);
-    setMessage(root, message, "error");
-    setTimeout(() => setButtonText(root, "源码拉取"), 2200);
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function exportCurrentViewSql(root, button = root.querySelector("button")) {
-  try {
-    button.disabled = true;
-    setButtonText(root, "源码拉取");
-    setButtonTitle(root, "正在拉取视图源码...");
-    setMessage(root, "正在拉取视图源码...", "busy");
-
-    const bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
-    if (!bridgeHealth?.ok) {
-      throw new Error(`本地桥接服务不可用：${bridgeHealth?.message || "未知错误"}`);
-    }
-
-    const inspected = await runPageCommand("inspectViewTarget");
-    if (!inspected?.ok) {
-      throw new Error(`识别视图失败: ${inspected?.message || "未识别到数据源"}`);
-    }
-
-    const result = await sendWorkspaceRequest(
-      "export-view-sql",
-      {
-        dataSourceIds: [inspected.data.dataSourceId],
-        viewIds: inspected.data.viewIds || []
-      }
-    );
-    if (!result?.ok) {
-      throw new Error(result?.message || "视图源码拉取失败");
-    }
-
-    button.textContent = "成功";
-    const selected = Array.isArray(inspected.data.viewIds) && inspected.data.viewIds.length > 0;
-    const source = [inspected.data.dataSourceId, inspected.data.dataSourceName].filter(Boolean).join(" ");
-    const detail = selected ? `已拉取选中视图: ${inspected.data.viewIds.join(", ")}` : `已拉取数据源 ${source} 全部视图`;
-    setButtonTitle(root, detail);
-    setMessage(root, `${detail}: ${result.exported_view_count}`, "success");
-    setTimeout(() => setButtonText(root, "源码拉取"), 1600);
-  } catch (error) {
-    console.error("谷神桥接：视图源码拉取失败");
-    button.textContent = "失败";
-    const message = pageActionError(error);
-    setButtonTitle(root, message);
-    setMessage(root, message, "error");
-    setTimeout(() => setButtonText(root, "源码拉取"), 2200);
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function exportCurrentSystemScripts(root, button, pullAll = false) {
-  const idleText = pullAll ? "全部拉取" : "选中拉取";
-  try {
-    button.disabled = true;
-    setButtonTextNode(button, "拉取中");
-    button.title = "正在拉取系统脚本...";
-    setMessage(root, "正在拉取系统脚本...", "busy");
-
-    const bridgeHealth = await sendRuntimeMessage({ type: "bridge-health" });
-    if (!bridgeHealth?.ok) {
-      throw new Error(`本地桥接服务不可用：${bridgeHealth?.message || "未知错误"}`);
-    }
-
-    const inspected = await runPageCommand("inspectSystemScriptTarget");
-    if (!inspected?.ok) {
-      throw new Error(`识别系统脚本失败: ${inspected?.message || "未识别到应用系统"}`);
-    }
-    const scriptTypes = pullAll ? [] : inspected.data.scriptTypes || [];
-    if (!pullAll && scriptTypes.length === 0) {
-      throw new Error("请先点击脚本行进行选中，或使用“全部拉取”");
-    }
-
-    const result = await sendWorkspaceRequest(
-      "export-system-scripts",
-      {
-        dataSourceId: inspected.data.dataSourceId || "",
-        systemIds: [inspected.data.systemId],
-        scriptTypes
-      }
-    );
-    if (!result?.ok) {
-      throw new Error(result?.message || "系统脚本拉取失败");
-    }
-
-    button.textContent = "成功";
-    const target = [inspected.data.systemName, inspected.data.systemId].filter(Boolean).join(" ");
-    const detail = pullAll ? `已拉取 ${target} 全部系统脚本` : `已拉取脚本类型 ${scriptTypes.join(", ")}`;
-    button.title = detail;
-    setMessage(root, detail, "success");
-    setTimeout(() => setButtonTextNode(button, idleText), 1600);
-  } catch (error) {
-    console.error("谷神桥接：系统脚本拉取失败");
-    button.textContent = "失败";
-    const message = pageActionError(error);
-    button.title = message;
-    setMessage(root, message, "error");
-    setTimeout(() => setButtonTextNode(button, idleText), 2200);
+    setMessage(root, pageActionError(error), "error");
   } finally {
     button.disabled = false;
   }
@@ -590,7 +341,7 @@ async function locateCurrentInNexus(root, button) {
     if (!inspected?.ok) throw new Error(inspected?.message || "未识别到当前谷神对象");
     const result = await sendRuntimeMessage({ type: "open-nexus", target: inspected.data });
     if (!result?.ok) throw new Error(result?.message || "未能打开 Nexus");
-    setMessage(root, `已发送 ${result.description}，请在 Nexus 选择 SVN 工作区`, "success");
+    setMessage(root, `已发送 ${result.description}，请在 Nexus 选择工作区`, "success");
   } catch (error) {
     setMessage(root, `Nexus 定位失败：${error?.message || String(error)}`, "error");
   } finally {
@@ -619,9 +370,6 @@ function installSourcePullButton() {
     root.dataset.sharedButtons = "true";
     const sourceButton = makeNativeButton("源码拉取", "guthon-bridge-inline-button guthon-bridge-source-button");
     root.appendChild(sourceButton);
-    const systemAllButton = makeNativeButton("全部拉取", "guthon-bridge-system-script-all guthon-bridge-system-script-only");
-    systemAllButton.addEventListener("click", () => exportCurrentSystemScripts(root, systemAllButton, true));
-    root.appendChild(systemAllButton);
     const copyButton = makeNativeButton("复制模式", "guthon-bridge-copy-button guthon-bridge-module-only");
     copyButton.addEventListener("click", async () => {
       try {
@@ -662,13 +410,7 @@ function installSourcePullButton() {
     message.dataset.tone = "idle";
     root.appendChild(message);
 
-    sourceButton.addEventListener("click", () => {
-      if (isDataTableRoute()) exportCurrentTableSchema(root, sourceButton);
-      else if (isBillTypeRoute()) exportCurrentBillType(root, sourceButton);
-      else if (isViewRoute()) exportCurrentViewSql(root, sourceButton);
-      else if (isSystemScriptRoute()) exportCurrentSystemScripts(root, sourceButton, false);
-      else pullCurrentProcedure(root, sourceButton);
-    });
+    sourceButton.addEventListener("click", () => refreshCurrentSource(root, sourceButton));
     document.body.appendChild(root);
   }
   if (root.dataset.mode !== mode) {
@@ -677,7 +419,7 @@ function installSourcePullButton() {
     delete root.dataset.workspaceModeCheckedAt;
   }
   root.dataset.mode = mode;
-  root.querySelector(".guthon-bridge-source-button").textContent = mode === "system-scripts" ? "选中拉取" : "源码拉取";
+  root.querySelector(".guthon-bridge-source-button").textContent = "刷新当前对象";
 }
 
 async function applyInlineWorkspaceMode() {
@@ -698,26 +440,10 @@ async function applyInlineWorkspaceMode() {
       inspected.data || {},
       { allowWorkspaceSelection: false }
     );
-    const candidateModes = new Set(
-      (route?.candidates || [])
-        .map((candidate) => String(candidate?.sourceMode || "").trim().toLowerCase())
-        .filter(Boolean)
-    );
-    const sourceMode = route?.workspace?.sourceMode || (candidateModes.size === 1 ? [...candidateModes][0] : "");
-    // Background matching is best-effort; only user actions surface failures.
-    if (!sourceMode) return;
-    const previousMode = root.dataset.workspaceMode;
+    if (!route?.ok || !route.workspaceKey) return;
     root.dataset.workspaceModeKey = cacheKey;
     root.dataset.workspaceModeCheckedAt = String(Date.now());
-    root.dataset.workspaceMode = sourceMode;
-    if (route.ok && route.workspaceKey) await publishPageContext(route.workspaceKey).catch(() => {});
-    const svnMode = sourceMode === "svn";
-    root.querySelector(".guthon-bridge-system-script-all").hidden = svnMode;
-    if (svnMode && previousMode !== "svn") {
-      setMessage(root, "当前工作区使用 SVN 源码模式；请在 Guthon Nexus 打开对象 Workcopy", "idle");
-    } else if (previousMode === "svn") {
-      setMessage(root, "", "idle");
-    }
+    await publishPageContext(route.workspaceKey).catch(() => {});
   } finally {
     delete root.dataset.workspaceModeChecking;
   }

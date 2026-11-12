@@ -14,13 +14,6 @@
       "sha256": "REPLACE_WITH_APPROVED_SHA256",
       "args": [],
       "elevate": false
-    },
-    {
-      "id": "svn",
-      "file": "TortoiseSVN-verified-installer.msi",
-      "sha256": "REPLACE_WITH_APPROVED_SHA256",
-      "args": [],
-      "elevate": true
     }
   ]
 }

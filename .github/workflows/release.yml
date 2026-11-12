@@ -173,6 +173,7 @@ jobs:
         run: |
           release_version=$(tr -d '[:space:]' < ../../../VERSION)
           printf '{\n  "version": "%s"\n}\n' "$release_version" > tool-version.json
+          npm install --omit=dev --ignore-scripts --no-audit --no-fund
           npm test
           npm run check
           npm run build:bridge
@@ -388,7 +389,7 @@ jobs:
             echo "- macOS M1 及后续型号应用：\`GuthonCodeTool-macos-arm64.zip\`"
             echo "- Python 调试脚本：\`GuthonCodeTool-python.pyz\`（需自备符合要求的 Python 环境）"
             echo "- Python 调试依赖：\`GuthonCodeTool-python-requirements.txt\`"
-            echo "- Guthon Nexus（DATABASE/SVN 双模式）：\`guthon-nexus-vscode.vsix\`"
+            echo "- Guthon Nexus（API 源码同步）：\`guthon-nexus-vscode.vsix\`"
             echo "- Guthon Bridge：\`GuthonCodeTool-chrome.zip\`"
             echo "- Guthon Testing Skill：\`guthon-testing.zip\`（解压到 Codex Skills 目录）"
             echo "- 应用自动更新校验：\`GuthonCodeTool-checksums.txt\`"

@@ -30,14 +30,11 @@ function installedToolEnvironment(home, base = process.env) {
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 65536) return {};
     const report = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (report.state !== 'environment-ready') return {};
-    const directories = [];
-    for (const name of ['git', 'svn']) {
-      const executable = report.programs?.[name];
-      if (!path.isAbsolute(executable || '') || path.basename(executable).toLowerCase() !== name + '.exe' || !isFile(executable)) continue;
-      directories.push(path.dirname(executable));
-      const ssh = path.join(path.dirname(executable), '..', 'usr', 'bin');
-      if (name === 'git' && isDirectory(ssh)) directories.push(ssh);
-    }
+    const executable = report.programs?.git;
+    if (!path.isAbsolute(executable || '') || path.basename(executable).toLowerCase() !== 'git.exe' || !isFile(executable)) return {};
+    const directories = [path.dirname(executable)];
+    const ssh = path.join(path.dirname(executable), '..', 'usr', 'bin');
+    if (isDirectory(ssh)) directories.push(ssh);
     return directories.length ? { PATH: [...directories, base.PATH || base.Path || ''].join(path.delimiter) } : {};
   } catch { return {}; }
 }

@@ -8,16 +8,16 @@ const {PageRecoveryStore} = require('./recovery-store');
 const {nativeHtml} = require('./platform-assets');
 const {projectNative, nativeChanges} = require('./native-model');
 const {DesignerResources} = require('./resource-manager');
-const {SCHEME: SVN_SCHEME, decodeIdentity, fragmentIdentity, pageDisplayName} = require('../svn/virtual-fs');
+const {SCHEME, decodeIdentity, fragmentIdentity, pageDisplayName, scriptType} = require('../source/virtual-fs');
 
 const escape = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-const pageKey = identity => JSON.stringify([identity.workspaceKey, identity.sourceNamespace, identity.sourceId, identity.funId || '']);
+const pageKey = identity => JSON.stringify([identity.workspaceKey, identity.sourcePath || identity.path]);
 
 class PageEditorController {
   constructor({vscode, context, backend, virtualFs, getTool, resources = new DesignerResources({getTool}),
     recoveryStore = new PageRecoveryStore(context), maxClosedPages = 4, maxClosedBytes = 16 * 1024 * 1024,
-    onSaved = async () => {}, onResourceOutput = () => {}}) {
-    Object.assign(this, {vscode, context, backend, virtualFs, onSaved, onResourceOutput});
+    onSaved = async () => {}, onResourceOutput = () => {}, ownsDocument = () => false, onDraftChanged = async () => {}, editorToken = async () => undefined, assertCanSave = () => {}}) {
+    Object.assign(this, {vscode, context, backend, virtualFs, onSaved, onResourceOutput, ownsDocument, onDraftChanged, editorToken, assertCanSave});
     this.resources = resources;
     Object.assign(this, {recoveryStore, maxClosedPages, maxClosedBytes});
     this.pages = new Map(); this.opening = new Map(); this.resourceJobs = new Map();
@@ -27,8 +27,9 @@ class PageEditorController {
       vscode.workspace.onDidCloseTextDocument?.(document=>this.documentChanged(document))].filter(Boolean);
   }
   async snapshot(identity) {
-    const result = await this.backend.run(identity.workspaceKey, ['page-editor'], {action:'open',
-      sourceNamespace:identity.sourceNamespace, sourceId:identity.sourceId, funId:identity.funId || ''});
+    const result = await this.backend.run(identity.workspaceKey, 'page', {action:'open',
+      path:identity.sourcePath || identity.path});
+    if (result.sourcePath !== (identity.sourcePath || identity.path)) throw new Error('PAGE 来源与请求不一致');
     const page = JSON.parse(result.sourceText);
     result.model.pageName = pageDisplayName(identity)
       || pageDisplayName({...result,pageName:result.model.pageName}) || pageDisplayName(page);
@@ -43,15 +44,15 @@ class PageEditorController {
     session.comparisonRequest = request;
     request.promise = Promise.resolve().then(async () => {
       try {
-        const result = await this.backend.run(session.identity.workspaceKey, ['page-editor'], {action:'comparison',
-          sourceNamespace:session.identity.sourceNamespace, sourceId:session.identity.sourceId,
-          funId:session.identity.funId || '', sourceHash:snapshot.sourceHash});
+        const result = await this.backend.run(session.identity.workspaceKey, 'page', {action:'comparison',
+          path:session.snapshot.sourcePath, sourceHash:snapshot.sourceHash});
         if (this.disposed || session.snapshot!==snapshot) return;
         if (result.sourceHash !== snapshot.sourceHash) throw new Error('比较基线与当前页面不一致，请重新载入');
-        session.svnComparison = result;
+        const {baseRevision, ...comparison}=result;
+        session.baselineComparison = {...comparison,apiVersion:baseRevision};
       } catch (error) {
         if (this.disposed || session.snapshot!==snapshot) return;
-        session.svnComparison = {available:false,message:error.message};
+        session.baselineComparison = {available:false,message:error.message};
       }
       this.publish(session);
     }).finally(() => { if (session.comparisonRequest === request) delete session.comparisonRequest; });
@@ -79,7 +80,7 @@ class PageEditorController {
       if (this.disposed || session.sourceReadGeneration !== generation || session.snapshot !== baseline
         || (expectedMerge && session.sourceMerge !== expectedMerge)) return;
       if (session.busy || session.pending) { session.sourceStale = true; this.publish(session); return; }
-      const sameIdentity = ['workspaceKey', 'sourceNamespace', 'sourceId', 'workingCopyId', 'sourcePath', 'funId']
+      const sameIdentity = ['workspaceKey', 'sourcePath']
         .every(key => (baseline[key] || '') === (fresh[key] || ''));
       if (origin === 'external' && fresh.sourceHash === baseline.sourceHash && sameIdentity && fresh.editable === baseline.editable) {
         if (session.sourceMerge) this.archiveDraft(session);
@@ -103,7 +104,7 @@ class PageEditorController {
         session.sourceStale = true;
         session.sourceMerge = {snapshot: fresh, draft: previous, evidence};
         session.status = result.blockedReason || `${result.conflicts.filter(conflict => !conflict.choice).length} 项外部修改冲突，请查看并逐项选择`;
-        session.svnComparison = {available: false, message: '本地文件已外部更新，请先处理外部修改冲突'};
+        session.baselineComparison = {available: false, message: '本地文件已外部更新，请先处理外部修改冲突'};
         await this.persist(session); this.publish(session); return;
       }
       if (Object.keys(choices).length) this.archiveDraft(session);
@@ -116,7 +117,7 @@ class PageEditorController {
     } catch (error) {
       if (this.disposed || session.sourceReadGeneration !== generation || session.snapshot !== ownedSnapshot) return;
       session.sourceStale = true; session.status = '页面更新核对失败：' + error.message;
-      session.svnComparison = {available: false, message: session.status};
+      session.baselineComparison = {available: false, message: session.status};
       if (session.sourceMerge) session.sourceMerge.evidence.blockedReason = session.status;
       await this.persist(session); this.publish(session);
     } finally {
@@ -136,7 +137,7 @@ class PageEditorController {
         if (this.disposed) break;
         for (const session of this.pages.values()) {
           if (session.identity.workspaceKey!==workspaceKey || session.closed || session.busy || session.sourceStale) continue;
-          // A commit can change BASE during an earlier read without changing the working file.
+          // A pull or upload can change the API baseline without changing the working file.
           await session.comparisonRequest?.promise;
           if (!this.disposed && !session.closed && !session.busy && !session.sourceStale) await this.refreshComparison(session);
         }
@@ -148,14 +149,9 @@ class PageEditorController {
     return refresh.promise;
   }
   owns(identity, document) {
-    if (document.uri.scheme !== SVN_SCHEME) return false;
-    try {
-      const other = decodeIdentity(document.uri);
-      if (other.workspaceKey !== identity.workspaceKey || other.sourceType !== 'page'
-        || other.sourceId !== identity.sourceId || (other.funId || '') !== (identity.funId || '')) return false;
-      if (other.sourcePath && identity.sourcePath) return other.sourcePath.replace(/\\/g, '/') === identity.sourcePath.replace(/\\/g, '/');
-      return !other.workingCopyId || other.workingCopyId === identity.workingCopyId;
-    } catch { return false; }
+    if (document.uri.scheme !== SCHEME) return this.ownsDocument(identity, document);
+    const other = decodeIdentity(document.uri);
+    return other.workspaceKey === identity.workspaceKey && other.sourcePath === identity.sourcePath;
   }
   documentChanged(document) {
     for (const session of this.pages.values()) if (this.owns(session.identity, document)) this.publish(session);
@@ -209,6 +205,12 @@ class PageEditorController {
     }
   }
   publish(session) {
+    const dirty = !!(session.draft.operations().length || session.pending || session.nativeRecovery || session.native?.unconfirmed);
+    const draftSignature=JSON.stringify([dirty,session.draft.version]);
+    if(session.draftSignature!==draftSignature) {
+      session.draftSignature=draftSignature;
+      session.draftRegistration=Promise.resolve(this.onDraftChanged(session.identity,dirty,session.draft.version)).catch(error=>{session.draftRegistrationError=error;void this.vscode.window.showErrorMessage(`PAGE 编辑状态登记失败：${error.message}`);});
+    }
     const merge = session.sourceMerge;
     const sourceMerge = merge ? {...merge.evidence, choices: {...merge.evidence.choices}, applying: !!merge.applying,
       conflicts: merge.evidence.conflicts.map(conflict => {
@@ -230,14 +232,14 @@ class PageEditorController {
       resourceBusy: this.resourceJobs.has(session.identity.workspaceKey),
       codeDirty: this.vscode.workspace.textDocuments.some(doc=>doc.isDirty && this.owns(session.identity,doc)),
       status: session.status || '', sourceHash: session.snapshot.sourceHash,
-      baseRevision: session.snapshot.baseRevision, pending: session.pending ? {operationId: session.pending.operationId || '', awaitingVerification: true} : null,
-      comparison: {...(full || previous.svn !== session.svnComparison ? {svn:session.svnComparison || {available:false,message:'正在读取 SVN BASE…'}} : {}),
+      apiVersion: session.baselineComparison?.apiVersion, pending: session.pending ? {operationId: session.pending.operationId || '', awaitingVerification: true} : null,
+      comparison: {...(full || previous.baseline !== session.baselineComparison ? {baseline:session.baselineComparison || {available:false,message:'正在读取 API 基线…'}} : {}),
         ...(full || previous.signature !== signature ? {local:draftChanges(session.draft)} : {}),
         savedAt:session.snapshot.loadedAt, sourceStale:!!session.sourceStale},
       designer: session.resourceInfo ? {app:session.resourceInfo.app,digest:session.resourceInfo.digest,
         platformUrl:session.resourceInfo.platformUrl,build:session.resourceInfo.build,message:session.resourceInfo.message,
         state:session.resourceInfo.state,updateAvailable:session.resourceInfo.updateAvailable} : null};
-      session.published = {draft: session.draft, snapshot: session.snapshot, sequence, signature, svn: session.svnComparison};
+      session.published = {draft: session.draft, snapshot: session.snapshot, sequence, signature, baseline: session.baselineComparison};
       void Promise.resolve(session.panel.webview.postMessage(message)).then(delivered => {
         if (delivered === false && session.published?.sequence === sequence) session.published = null;
       }).catch(() => { if (session.published?.sequence === sequence) session.published = null; });
@@ -258,17 +260,15 @@ class PageEditorController {
         data: projected.data, systemId: 'offline', before: !!session.native.before,
         pageName: session.draft.model.pageName,
         editable: session.snapshot.editable && !session.blocked && !session.sourceStale && !session.native.before,
-        sourceHash: session.snapshot.sourceHash, baseRevision: session.snapshot.baseRevision,
+        sourceHash: session.snapshot.sourceHash, apiVersion: session.baselineComparison?.apiVersion,
         resourceApp: session.native.assets.app, resourceDigest: session.native.assets.digest,
         resourceStatus: session.sourceStale ? '本地文件已外部更新，草稿基线已过期' : session.resourceInfo?.message || '', platformUrl:session.resourceInfo?.platformUrl || ''});
     }
   }
   error(session, error) { session.status = error.message; this.publish(session); }
   async openCode(session, node) {
-    const result = await this.backend.fragments(session.identity.workspaceKey, session.identity);
-    if (result.sourcePath && session.snapshot.sourcePath && result.sourcePath !== session.snapshot.sourcePath)
-      throw new Error('代码片段与当前 PAGE 来源不一致，请重新载入');
-    const fragment = result.fragments.find(item => item.jsonPointer === node.pointer);
+    const item = session.snapshot.model.nodes.find(item => item.pointer === node.pointer);
+    const fragment = item && {...item,jsonPointer:item.pointer,scriptType:scriptType(item)};
     if (!fragment) throw new Error('此事件未出现在源码分块中，请刷新页面和索引');
     const identity = fragmentIdentity(session.identity.workspaceKey, {...session.identity,
       sourcePath:session.snapshot.sourcePath, sourceName:session.draft.model.pageName}, fragment);
@@ -300,6 +300,7 @@ class PageEditorController {
     const operations = session.draft.operations();
     if (!operations.length) { session.status = '当前草稿已保存'; this.publish(session); return; }
     if (!session.snapshot.editable) throw new Error('当前页面只读');
+    this.assertCanSave(session.identity);
     if (this.vscode.workspace.textDocuments.some(doc => doc.isDirty && this.owns(session.identity, doc)))
       throw new Error('此 PAGE 的代码有未保存输入，请先保存代码，再保存页面草稿');
     session.busy = true; this.publish(session);
@@ -308,11 +309,11 @@ class PageEditorController {
       if (session.snapshot.expiresAt && session.snapshot.expiresAt * 1000 < Date.now() + 120000) {
         const renewed = await this.snapshot(session.identity);
         if (!renewed.editable || renewed.sourceHash !== session.snapshot.sourceHash
-          || renewed.workingCopyId !== session.snapshot.workingCopyId) throw new Error('PAGE 基线已变化；草稿保留，请导出比较');
+          || renewed.sourcePath !== session.snapshot.sourcePath) throw new Error('PAGE 基线已变化；草稿保留，请导出比较');
         session.snapshot = renewed;
       }
-      const preview = await this.backend.run(session.identity.workspaceKey, ['page-editor'], {
-        action: 'preview', editToken: session.snapshot.editToken, operations});
+      const preview = await this.backend.run(session.identity.workspaceKey, 'page', {
+        action: 'preview', path:session.snapshot.sourcePath, editToken: session.snapshot.editToken, operations});
       if (session.draft.version !== version) throw new Error('预检期间草稿变化，请重新保存');
       if (operations.some(op=>op.kind==='order')) {
         // Positional script URIs cannot survive a saved collection reorder.
@@ -323,17 +324,26 @@ class PageEditorController {
         if (!tabs && this.vscode.workspace.textDocuments.some(doc=>this.owns(session.identity,doc)))
           throw new Error('请关闭此 PAGE 的代码标签后保存排序；页面草稿已保留');
       }
+      if (!preview.candidateSourceHash) throw new Error('页面预览未返回候选哈希，不能安全保存');
+      const editorToken = await this.editorToken(session.identity.workspaceKey);
+      if (session.draft.version !== version) throw new Error('编辑状态登记期间草稿变化，请重新保存');
       session.pending = {idempotencyKey: 'page-editor-' + crypto.randomUUID(), operations,
-        editToken: session.snapshot.editToken, candidateSourceHash: preview.candidateSourceHash};
+        editToken: session.snapshot.editToken, sourceHash:session.snapshot.sourceHash, candidateSourceHash: preview.candidateSourceHash};
       await this.persist(session);
-      const result = await this.backend.run(session.identity.workspaceKey, ['page-editor'], {
-        action: 'save', editToken: session.pending.editToken, operations,
+      try {
+        this.assertCanSave(session.identity);
+        if (this.vscode.workspace.textDocuments.some(doc=>doc.isDirty && this.owns(session.identity,doc))) throw new Error('此 PAGE 的代码有未保存输入，请先保存代码');
+        if (session.draft.version !== version) throw new Error('草稿已变化，请重新保存');
+      } catch(error) {session.pending=null;await this.persist(session);throw error;}
+      const result = await this.backend.run(session.identity.workspaceKey, 'page', {
+        action: 'save', path:session.snapshot.sourcePath, editToken: session.pending.editToken, operations, editorToken,
         idempotencyKey: session.pending.idempotencyKey});
       session.pending.operationId = result.operationId;
       await this.persist(session);
-      if (!result.localVerificationComplete || !result.currentSourceMatches || !result.currentIndexMatches || !result.currentDiffMatches) {
-        session.blocked = '本地写入已记录，索引或差异验证待恢复';
-        session.status = JSON.stringify(result); return;
+      const written=await this.snapshot(session.identity);
+      if (written.sourceHash !== session.pending.candidateSourceHash || (result.sourceHash && result.sourceHash !== written.sourceHash)) {
+        session.blocked = '本地保存回读不一致，请核对源码';
+        return;
       }
       if (session.draft.version !== version) {
         session.blocked = '保存期间有新输入，已保留；请比较后重开'; return;
@@ -354,7 +364,7 @@ class PageEditorController {
     session.sourceStale=false;
     session.sourceMerge=null;
     await this.refreshComparison(session);
-    session.status = '本地已保存 · 索引与差异已验证 · 平台结果待验收';
+    session.status = '本地已保存并回读 · 尚未上传谷神';
     await this.persist(session);
     try { await this.onSaved(session.identity.workspaceKey, session.snapshot.sourcePath); }
     catch (error) { session.status += ' · SCM 界面刷新失败：' + error.message; }
@@ -391,17 +401,17 @@ class PageEditorController {
     }
     if (message.type === 'resume' && session.pending && !session.busy) {
       const pending = session.pending;
-      const result = await this.backend.run(session.identity.workspaceKey, ['page-editor'], pending.operationId
-        ? {action: 'resume', operationId: pending.operationId}
-        : {action: 'save', editToken: pending.editToken, idempotencyKey: pending.idempotencyKey, operations: pending.operations});
-      if (result.localVerificationComplete && result.currentSourceMatches && result.currentIndexMatches && result.currentDiffMatches) {
+      const current=await this.snapshot(session.identity);
+      if (current.sourceHash === pending.candidateSourceHash) {
         const preserved = session.recovery?.operations || session.draft.operations();
         if (JSON.stringify(preserved) !== JSON.stringify(pending.operations)) {
           session.blocked = '已确认先前保存；另有新输入保留在草稿中，请先导出再重新载入';
           session.pending = null; await this.persist(session);
         } else await this.reloadSaved(session);
+      } else {
+        session.status = current.sourceHash === pending.sourceHash
+          ? '保存结果尚未出现，请保留草稿并核对操作记录' : '源码已变化，请导出草稿并核对';
       }
-      else session.status = JSON.stringify(result);
       this.publish(session); return;
     }
     if (message.version !== session.draft.version) { this.publish(session); throw new Error('界面版本已变化，请重试'); }
@@ -425,11 +435,19 @@ class PageEditorController {
       if (session.sourceStale) throw new Error('请先处理外部修改冲突，再打开原版设计视图');
       await this.openNative(session); this.publish(session); return;
     }
+    if(message.type==='openFields') {
+      if(session.sourceStale) throw new Error('本地文件已外部更新，请先核对页面草稿');
+      const collection=session.draft.model.collections.find(item=>item.pointer===message.collectionPointer);
+      if(!collection) throw new Error('字段集合已变化，请重新载入');
+      await this.virtualFs.open({workspaceKey:session.identity.workspaceKey,sourceType:'page',sourcePath:session.snapshot.sourcePath,
+        sourceId:session.identity.sourceId,jsonPointer:collection.pointer,fragmentType:'fields',documentName:collection.label}, {viewColumn:this.vscode.ViewColumn.Beside});
+      this.publish(session);return;
+    }
     if (message.type === 'openCode' || message.type === 'diff') {
       if (session.sourceStale) throw new Error('本地文件已外部更新，请保留草稿后重新载入再打开代码');
       const node = session.draft.model.nodes.find(item => item.key === message.key);
       if (!node) throw new Error('节点已变化');
-      if (message.type === 'diff') await this.vscode.commands.executeCommand('gushenCompletion.showSvnDiff',
+      if (message.type === 'diff') await this.vscode.commands.executeCommand('gushenCompletion.showApiDiff',
         session.identity.workspaceKey, session.snapshot.sourcePath);
       else await this.openCode(session, node);
       this.publish(session);
@@ -442,7 +460,7 @@ class PageEditorController {
     else if (message.type === 'redo') session.draft.redo();
     else if (message.type === 'save') { await this.save(session); return; }
     else return;
-    await this.persist(session); this.publish(session);
+    this.publish(session); await this.persist(session);
   }
   async open(identity) {
     const key = pageKey(identity || {});
@@ -465,7 +483,8 @@ class PageEditorController {
     panel.webview.html = this.html(panel.webview);
   }
   async openPage(identity) {
-    if (!identity?.workspaceKey || !identity.sourceNamespace || identity.sourceType !== 'page') throw new Error('请在 SVN 源码树中选择身份完整的 PAGE');
+    if (!identity?.workspaceKey || !(identity.sourcePath || identity.path) || identity.sourceType !== 'page') throw new Error('请在 API 源码树中选择身份完整的 PAGE');
+    identity = {...identity,sourcePath:identity.sourcePath || identity.path};
     const key = pageKey(identity), existing = this.pages.get(key);
     if (existing) {
       const name=pageDisplayName(identity);
@@ -486,8 +505,8 @@ class PageEditorController {
     if (this.vscode.workspace.textDocuments.some(doc => doc.isDirty && this.owns(identity, doc)))
       throw new Error('此 PAGE 的虚拟文档存在未保存输入，请先保存或保留后再打开本地页面');
     const snapshot = await this.snapshot(identity);
-    const session = {identity: {...identity, workingCopyId: snapshot.workingCopyId,
-      sourcePath:snapshot.sourcePath || identity.sourcePath}, snapshot,
+    const session = {identity: {...identity, sourceId:identity.sourceId || snapshot.model.pageId,
+      sourcePath:snapshot.sourcePath}, snapshot,
       draft: new PageDraft(snapshot.model), busy: false, blocked: '', status: '',
       storageKey: 'guthon.pageDraft.' + crypto.createHash('sha256').update(key).digest('hex')};
     const recovered = this.context.workspaceState.get(session.storageKey);
@@ -631,8 +650,8 @@ class PageEditorController {
         session.panel.reveal(this.vscode.ViewColumn.Beside); this.publish(session); return;
       }
       if (message?.type === 'nativePlatform') {
-        await this.vscode.commands.executeCommand('gushenCompletion.openSvnSourceInBrowser', {
-          workspaceKey: session.identity.workspaceKey, object: session.identity});
+        await this.vscode.commands.executeCommand('gushenCompletion.openApiSourceInBrowser', {
+          workspaceKey: session.identity.workspaceKey, path:session.identity.sourcePath});
         return;
       }
       if (message?.version !== session.draft.version) throw new Error('页面草稿已变化，请关闭并重开原版视图');
@@ -647,7 +666,7 @@ class PageEditorController {
       if (message.type === 'nativeCandidate') {
         if (!native.baseline) throw new Error('原版设计器尚未建立基线');
         session.nativeRecovery = message.candidate;
-        await this.persist(session);
+        this.publish(session); await this.persist(session);
         const changes = nativeChanges(native.baseline, message.candidate, native.projection.model);
         session.draft.batch(() => {
           for (const op of changes) {
@@ -659,7 +678,7 @@ class PageEditorController {
         // Force a new baseline even for normalization-only confirmations.
         native.version = -1;
         session.nativeRecovery = null;
-        await this.persist(session); this.publish(session);
+        this.publish(session); await this.persist(session);
         if (message.save) await this.save(session);
       } else if (message.type === 'nativeSave') await this.save(session);
     })().catch(error => {
@@ -676,8 +695,8 @@ class PageEditorController {
       <link rel="stylesheet" href="${uri('editor.css')}"><title>本地页面</title></head><body>
       <header><div class="heading"><div><span class="eyebrow">GUTHON NEXUS · PAGE WORKSPACE</span><h1 id="title">本地页面</h1></div><span id="status" role="status"></span></div><p id="baseline"></p>
       <div class="toolbar"><div class="action-group" role="group" aria-label="谷神平台与设计器"><span class="group-label">谷神</span><button id="native" class="primary">原版设计视图</button><button id="manageResources">平台资源</button></div>
-      <div class="action-group" role="group" aria-label="本地编辑"><span class="group-label">本地</span><button id="save">保存到本地</button><button id="undo">撤销</button><button id="redo">重做</button><button id="compare" aria-expanded="false" aria-controls="compare-menu">比较改动</button><div id="compare-menu" hidden><button id="compare-svn">与 SVN 基线比较</button><button id="compare-local">与本地保存版本比较</button></div><button id="source-merge" hidden>外部修改冲突</button><button id="exit-compare" hidden>返回当前草稿</button><button id="export">导出草稿</button><button id="reload">重新载入</button><button id="resume">恢复保存检查</button></div><input id="search" type="search" placeholder="筛选字段名称或编码" aria-label="筛选字段"></div>
-      <p class="diff-legend"><span class="diff-svn">M · SVN 本地未提交</span><span class="diff-local">● · 窗口未保存</span><span id="comparison-status"></span></p>
+      <div class="action-group" role="group" aria-label="本地编辑"><span class="group-label">本地</span><button id="save">保存到本地</button><button id="undo">撤销</button><button id="redo">重做</button><button id="compare" aria-expanded="false" aria-controls="compare-menu">比较改动</button><div id="compare-menu" hidden><button id="compare-baseline">与 API 基线比较</button><button id="compare-local">与本地保存版本比较</button></div><button id="source-merge" hidden>外部修改冲突</button><button id="exit-compare" hidden>返回当前草稿</button><button id="export">导出草稿</button><button id="reload">重新载入</button><button id="resume">恢复保存检查</button></div><input id="search" type="search" placeholder="筛选字段名称或编码" aria-label="筛选字段"></div>
+      <p class="diff-legend"><span class="diff-baseline">M · 相对 API 基线的本地修改</span><span class="diff-local">● · 窗口未保存</span><span id="comparison-status"></span></p>
       <p id="resources" class="resource-note"></p></header>
       <main><nav id="tree" aria-label="页面结构"></nav><section id="canvas" aria-label="字段与代码管理"></section><aside id="properties"></aside></main>
       <details id="changes"><summary>上次本地保存 → 当前草稿 · 修改明细</summary><pre id="delta"></pre></details>
@@ -691,6 +710,7 @@ class PageEditorController {
     }
   }
   dispose() {
+    if(this.disposed) return;
     this.disposed = true;
     for (const refresh of this.comparisonRefreshes.values()) {
       clearTimeout(refresh.timer); refresh.wake?.();

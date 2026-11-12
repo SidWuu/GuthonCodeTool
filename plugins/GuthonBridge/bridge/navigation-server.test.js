@@ -14,7 +14,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
  const r=JSON.parse(line), p=r.input;
  if(r.command!=='route' || JSON.stringify(p).includes('PRIVATE'))process.exit(3);
  const valid=p.workspaceKey==='products.demo' && p.pageOrigin==='https://platform.test' && ['DS-1','DS-2'].includes(p.dataSourceId);
- process.stdout.write(JSON.stringify({type:'result',id:r.id,ok:valid,...(valid?{result:{ok:true,workspaceKey:p.workspaceKey,workspace:{capabilities:{'svn.edit':p.dataSourceId==='DS-1'}}}}:{error:{message:'Page identity does not match workspace'}})})+'\\n');
+ process.stdout.write(JSON.stringify({type:'result',id:r.id,ok:valid,...(valid?{result:{ok:true,workspaceKey:p.workspaceKey,workspace:{capabilities:{'api.edit':p.dataSourceId==='DS-1'}}}}:{error:{message:'Page identity does not match workspace'}})})+'\\n');
 });`);
   const port = 17548;
   const child = spawn(process.execPath, ['server.js'], {cwd: __dirname,

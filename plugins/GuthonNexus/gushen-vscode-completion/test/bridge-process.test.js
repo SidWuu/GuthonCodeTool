@@ -98,10 +98,10 @@ test('bundled Bridge stays identical to its source after import relocation', () 
 
 test('Bridge locators round-trip through the Nexus URI contract', () => {
   const bridge = require('../../../GuthonBridge/extension/nexus-locator');
-  const { sourceLocatorFromUri } = require('../src/svn/page-locator');
+  const { parseSourceLink } = require('../src/api/navigation');
   for (const target of [ {mode:'page-source',pageId:'PG-Demo-01'}, {mode:'procedure',procedureKeyword:'demo.pkg_$',funId:'save_$'} ]) {
     const uri = new URL(bridge.build(target).uri);
-    const resolved = sourceLocatorFromUri({ authority: uri.host, path: uri.pathname, query: uri.search.slice(1) });
-    assert.deepEqual(resolved, target.mode === 'page-source' ? {type:'page',pageId:target.pageId} : {type:'procedure',alias:target.procedureKeyword,funId:target.funId});
+    const resolved = parseSourceLink({ authority: uri.host, path: uri.pathname, query: uri.search.slice(1) });
+    assert.deepEqual(resolved, target.mode === 'page-source' ? {type:'locate-page',pageId:target.pageId} : {type:'locate-procedure',alias:target.procedureKeyword,funId:target.funId});
   }
 });

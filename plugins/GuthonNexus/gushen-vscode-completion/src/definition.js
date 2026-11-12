@@ -1,7 +1,3 @@
-const path = require('node:path');
-
-const PROCEDURE_PATH = /\/workspace\/((PRD|PRJ) [^/]+)\/source\/(workcopy|readonly)\/([^/]+)\//;
-
 function serviceComponentTargetAt(source, offset) {
   const calls = /\$vs\.(?:proc|thread)\.runServiceComp\s*\(\s*(['"])([A-Za-z0-9_.-]{1,100})\1(?=\s*[,\)])/g;
   for (const match of source.matchAll(calls)) {
@@ -55,43 +51,4 @@ function localFunctionDefinitionAt(source, offset) {
   return null;
 }
 
-function procedureDefinitionIdentity(workspaceKey, definition) {
-  return {
-    workspaceKey,
-    sourceType: definition.sourceType,
-    sourceId: definition.sourceId,
-    funId: definition.funId || '',
-    sourcePath: definition.sourcePath || '',
-    workingCopyId: definition.workingCopyId || definition.scopeEntryId || '',
-    jsonPointer: '',
-  };
-}
-
-function sourceInfo(filePath) {
-  const match = path.normalize(filePath).replaceAll('\\', '/').match(PROCEDURE_PATH);
-  return match && { owner: match[1], kind: match[2], layer: match[3], business: match[4] };
-}
-
-function selectDefinitionPaths(paths, currentPath) {
-  const current = sourceInfo(currentPath);
-  const preferredLayer = current?.layer === 'readonly' ? 'readonly' : 'workcopy';
-  const score = (filePath) => {
-    const candidate = sourceInfo(filePath);
-    if (!candidate) return [5, 2];
-    let scope = 4;
-    if (current) {
-      if (candidate.kind === current.kind && candidate.owner === current.owner && candidate.business === current.business) scope = 0;
-      else if (candidate.kind === current.kind && candidate.business === current.business) scope = 1;
-      else if (candidate.business === current.business) scope = 2;
-      else if (candidate.kind === current.kind) scope = 3;
-    }
-    return [scope, candidate.layer === preferredLayer ? 0 : 1];
-  };
-  const ranked = paths.map((filePath) => ({ filePath, score: score(filePath) }))
-    .sort((a, b) => a.score[0] - b.score[0] || a.score[1] - b.score[1] || a.filePath.localeCompare(b.filePath));
-  if (!ranked.length) return [];
-  return ranked.filter((item) => item.score[0] === ranked[0].score[0] && item.score[1] === ranked[0].score[1])
-    .map((item) => item.filePath);
-}
-
-module.exports = { serviceComponentTargetAt, localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt, selectDefinitionPaths };
+module.exports = { serviceComponentTargetAt, localFunctionDefinitionAt, procedureTargetAt };

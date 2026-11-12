@@ -1,43 +1,11 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { SvnInheritanceView } = require('../src/svn/inheritance-view');
-
-test('inheritance view renders project and product origins from a bounded read', async () => {
-  const vscode = {
-    EventEmitter: class { dispose() {} fire() {} },
-    Uri: {
-      from: (parts) => ({ ...parts, toString: () => JSON.stringify(parts) }),
-      parse: (value) => ({ toString: () => value }),
-    },
-    workspace: { openTextDocument: async (uri) => ({ uri }) },
-    window: { showTextDocument: async () => {} },
-  };
-  const calls = [];
-  const backend = {
-    pageQuery: async (_workspaceKey, name, args) => {
-      calls.push({ name, args });
-      return {
-        project: { sourcePath: 'procedures/pkg/save.gss', sourceHash: 'a' },
-        product: { sourcePath: 'procedures/pkg/save.inherit.gss', sourceHash: 'b' },
-        indexGeneration: 'gen', inheritanceStatus: 'ACTIVE', segments: [
-          { layer: 'product', start: 0, end: 10, sourceLine: 5, effectiveLine: 1 },
-          { layer: 'project', start: 10, end: 20, sourceLine: 7, effectiveLine: 2 },
-        ],
-        effective: { content: 'product();\nproject();', complete: true },
-        projectOriginal: { content: '@inherit();\nproject();', complete: true },
-        productOriginal: { content: 'product();', complete: true },
-        complete: true,
-      };
-    },
-  };
-  const view = new SvnInheritanceView({ vscode, backend });
-  const uri = await view.open({ workspaceKey: 'projects.demo', sourceType: 'procedure',
-    sourceNamespace: 'datasources/1', sourceId: 'pkg#save', funId: 'save', workingCopyId: 'root' });
-  const content = await view.provideTextDocumentContent(uri);
-  assert.match(content, /产品继承源码/);
-  assert.match(content, /项目源码/);
-  assert.match(content, /原文第 5 行/);
-  assert.equal(calls[0].name, 'read_inherited_source');
-  assert.equal(calls[0].args.workingCopyId, 'root');
-  view.dispose();
+const test=require('node:test');const assert=require('node:assert/strict');const {readInheritance}=require('../src/source/inheritance');
+test('inheritance reads all bounded pages with stable Unicode offsets and deduplicates concurrent requests',async()=>{
+  const calls=[];const run=async(_key,_action,input)=>{calls.push(input.offset);return {path:'page.json',sourceHash:'hash',parentPointer:'/super',status:'ACTIVE',segments:[],effective:input.offset===0?'🧪甲':'乙',totalChars:3,truncated:input.offset===0,nextOffset:input.offset===0?2:null};};
+  const options={run,workspaceKey:'projects.a',path:'page.json',jsonPointer:'/event',maxChars:2};
+  const [one,two]=await Promise.all([readInheritance(options),readInheritance(options)]);assert.equal(one.effective,'🧪甲乙');assert.deepEqual(one,two);assert.deepEqual(calls,[0,2]);
+});
+test('inheritance rejects changed identities and stalled pagination',async()=>{
+  const options={workspaceKey:'projects.a',path:'page.json'};
+  await assert.rejects(readInheritance({...options,run:async()=>({path:'page.json',sourceHash:'a',status:'ACTIVE',segments:[],effective:'x',totalChars:3,truncated:true,nextOffset:0})}),/分页/);
+  await assert.rejects(readInheritance({...options,run:async(_k,_a,p)=>({path:'page.json',sourceHash:p.offset?'b':'a',status:'ACTIVE',segments:[],effective:'x',totalChars:2,truncated:!p.offset,nextOffset:p.offset?null:1})}),/发生变化/);
 });

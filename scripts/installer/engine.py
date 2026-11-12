@@ -88,7 +88,7 @@ def validate_download(item):
     from urllib.parse import urlsplit
 
     if (set(item) != {"id", "type", "elevate", "url", "sha256", "args"}
-            or item["id"] not in {"codebuddy", "git", "svn"}
+            or item["id"] not in {"codebuddy", "git"}
             or item["type"] not in {"exe", "msi"}
             or not isinstance(item["elevate"], bool)
             or not isinstance(item["args"], list) or not item["args"]
@@ -195,7 +195,7 @@ def install_package(command, label, elevate):
 
 
 def program_candidates(name):
-    folders = {"git": ("Git/cmd/git.exe",), "svn": ("TortoiseSVN/bin/svn.exe", "SlikSvn/bin/svn.exe")}
+    folders = {"git": ("Git/cmd/git.exe",)}
     candidates = []
     found = shutil.which(name)
     if found:
@@ -275,7 +275,7 @@ class Installer:
                          "gushenCompletion.toolPath": str(self.payload / "tool/GuthonCodeTool.exe"),
                          "gushenCompletion.toolHome": str(self.home),
                          "gushenCompletion.onboarding": True,
-                         "gushenCompletion.autoStartBridge": True},
+                         "gushenCompletion.autoStartBridge": False},
         }
         settings = {
             "extraKnownMarketplaces": {"guthon-team": {"source": {"source": "git", "url": marketplace_url(self.marketplace or manifest["marketplaceUrl"])}}},
@@ -283,12 +283,7 @@ class Installer:
             "env": {"GUTHON_PYTHON": str(Path(os.environ['LOCALAPPDATA']) / 'Guthon/runtimes' / manifest['bundleId'] / 'python.exe'),
                     "PATH": os.pathsep.join(dict.fromkeys(self.env.get('PATH', '').split(os.pathsep)))},
         }
-        desired = {"Guthon.code-workspace": workspace, "var/.codebuddy/settings.json": settings,
-                   "var/.mcp.json": {"mcpServers": {"guthon-svn": {
-                       "command": str(self.payload / "tool/GuthonCodeTool.exe"),
-                       "args": ["mcp", "--stdio", "--home", str(self.home)],
-                       "env": {"PATH": settings['env']['PATH']},
-                   }}}}
+        desired = {"Guthon.code-workspace": workspace, "var/.codebuddy/settings.json": settings}
         previous = read_json(self.lock_path) if self.lock_path.exists() else {}
         plans = {}
         for relative, value in desired.items():
@@ -322,7 +317,7 @@ class Installer:
                 self.execute([python, "-c", "import sys; assert sys.version_info >= (3, 12)"], "Python 自检")
                 self.env["GUTHON_PYTHON"] = str(python)
                 self.complete()
-                for name in ("codebuddy", "git", "svn"):
+                for name in ("codebuddy", "git"):
                     self.step("准备 " + name)
                     detected = find_ide(self.ide_root) if name == "codebuddy" else find_program(name)
                     if not detected:
@@ -386,7 +381,7 @@ class Installer:
                     "在 CodeBuddy 登录并信任 Guthon 工作区，按向导检查内网仓库访问，安装市场中的 guthon-guard，然后重新加载插件。",
                     "完成工具和插件的一次性安装确认后，后续在 CodeBuddy 中使用 GuthonNexus。",
                     "安装确认检查插件与 Bridge 的实际运行，不要求创建项目、连接业务库或建立源码索引。",
-                    "双击桌面入口，在一次性安装助手完成团队插件和现有 Chrome 的 Bridge 配对。",
+                    "双击桌面入口，在一次性安装助手完成团队插件；需要网页增强时再配对 Chrome 的 Bridge。",
                 ]
                 write_json(self.report_path, self.report)
                 self.write_result_page()
@@ -438,8 +433,7 @@ class Installer:
         tutorial = '''<h2>需要手动安装时</h2><ol>
 <li>CodeBuddy：从 <a href="https://www.codebuddy.cn/downloads/">官网</a>下载 Windows x64 版本，运行安装程序并登录个人账号。</li>
 <li>Git：从 <a href="https://gitforwindows.org/">Git for Windows 官网</a>安装，保留命令行工具选项。</li>
-<li>SVN：从 <a href="https://tortoisesvn.net/downloads.html">TortoiseSVN 官网</a>安装 x64 版本，务必勾选 Command Line Client Tools；需要系统授权时按提示确认，重启后继续。</li>
-<li>安装包内也保留已校验的上述安装文件，可从安装目录的 prerequisites 子目录双击安装。</li>
+<li>若使用离线依赖安装包，可从安装目录的 prerequisites 子目录找到已校验的安装文件。</li>
 <li>完成后重新运行 GuthonCodeSetup.exe。安装成功后双击桌面入口，在 Nexus 向导继续完成 Git 仓库权限、插件信任和 Chrome 首次扩展加载。</li></ol>'''
         page = f'<!doctype html><meta charset="utf-8"><title>Guthon 安装结果</title><style>body{{font:18px sans-serif;max-width:800px;margin:60px auto;line-height:1.8}}li{{margin:12px 0}}</style><h1>{title}</h1><p>{error}</p><ul>{body}</ul>{tutorial}<p>重新运行同一安装包会复查已安装组件；保留已有数据和人工修改。不会自动提交或发布源码。</p>'
         atomic_text(self.report_path.with_suffix(".html"), page)
@@ -450,11 +444,10 @@ class Installer:
         ide = find_ide(self.ide_root)
         if not ide:
             raise SetupError("没有找到 CodeBuddy，请重新运行安装器")
-        for name in ("git", "svn"):
-            if program := find_program(name):
-                self.env["PATH"] = str(program.parent) + os.pathsep + self.env.get("PATH", "")
-                if name == "git" and (program.parent.parent / "usr/bin").is_dir():
-                    self.env["PATH"] = str(program.parent.parent / "usr/bin") + os.pathsep + self.env["PATH"]
+        if program := find_program("git"):
+            self.env["PATH"] = str(program.parent) + os.pathsep + self.env.get("PATH", "")
+            if (program.parent.parent / "usr/bin").is_dir():
+                self.env["PATH"] = str(program.parent.parent / "usr/bin") + os.pathsep + self.env["PATH"]
         self.env["GUTHON_PYTHON"] = str(self.payload / "runtime/python.exe")
         subprocess.Popen([str(ide[0]), str(self.home / "Guthon.code-workspace")], env=self.env)
 

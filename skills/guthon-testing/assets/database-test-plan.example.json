@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "taskId": "TASK-DEMO",
   "workspaceKey": "projects.demo",
-  "sourceMode": "svn",
+  "sourceMode": "api",
   "sourceDigest": "sha256:demo-source-v1",
   "cases": [
     {

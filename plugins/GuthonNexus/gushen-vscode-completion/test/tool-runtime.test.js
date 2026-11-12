@@ -27,7 +27,7 @@ test('suite dependencies remain available to a pre-existing IDE without changing
     fs.writeFileSync(path.join(home, 'var', 'nexus', 'setup-result.json'), JSON.stringify({ state: 'environment-ready', programs: { git, svn } }));
     const environment = installedToolEnvironment(home, { PATH: '/old/parent' });
     assert.ok(environment.PATH.includes(path.dirname(git)));
-    assert.ok(environment.PATH.includes(path.dirname(svn)));
+    assert.equal(environment.PATH.includes(path.dirname(svn)),false);
     assert.ok(environment.PATH.endsWith('/old/parent'));
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
@@ -180,14 +180,15 @@ test('Nexus lists every configured workspace and binds commands to workspaceKey'
   assert.equal(extension.includes("workspaceRegistry.get(tool)"), true);
   assert.equal(extension.includes("item.displayName"), true);
   assert.equal(extension.includes("[item.workspaceKey]"), true);
-  assert.equal(extension.includes("gushenCompletion.selectWorkspaceSourceMode"), true);
+  assert.equal(extension.includes("gushenCompletion.selectWorkspaceSourceMode"), false);
   assert.equal(extension.includes("sourceModeView"), false);
   assert.equal(extension.includes("syncActive"), false);
   assert.deepEqual(
     manifest.contributes.views.guthon.map(({ id, name }) => ({ id, name })),
     [
+      { id: 'gushenCompletion.projectDetails', name: '项目详情' },
       { id: 'gushenCompletion.toolView', name: '谷神工作区' },
-      { id: 'gushenCompletion.svnSourceView', name: '谷神源码' },
+      { id: 'gushenCompletion.sourceView', name: '谷神源码' },
     ]
   );
   assert.equal((extension.match(/toolItem\(\s*'添加产品或项目'/g) || []).length, 1);

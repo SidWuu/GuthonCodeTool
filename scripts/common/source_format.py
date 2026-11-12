@@ -1,4 +1,4 @@
-"""Lossless text-format handling for SVN source projections."""
+"""Lossless text-format handling for source projections."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def decode_source(data: bytes) -> tuple[str, dict]:
             except UnicodeDecodeError:
                 continue
         else:
-            raise UnicodeDecodeError("utf-8/gb18030", data, 0, len(data), "unsupported SVN source encoding")
+            raise UnicodeDecodeError("utf-8/gb18030", data, 0, len(data), "unsupported source encoding")
     newline = "\r\n" if "\r\n" in text else "\r" if "\r" in text else "\n"
     return text, {
         "encoding": encoding,

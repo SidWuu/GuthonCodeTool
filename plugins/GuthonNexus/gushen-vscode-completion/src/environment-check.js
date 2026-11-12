@@ -1,6 +1,6 @@
 const {isWorkspaceKey} = require('./workspace-identity');
 
-const configFiles = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'source-tables.yaml', 'sync.yaml', 'database-testing.yaml'];
+const configFiles = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'sync.yaml', 'database-testing.yaml'];
 const labels = {python: 'Python 运行环境', config: '工作区配置', 'database-config': '数据库能力配置',
   'database-readonly': '本地数据库依赖', 'vscode-data': '补全与帮助资源', bridge: 'Guthon Bridge'};
 const statuses = {PASS: '通过', WARN: '需留意', FAIL: '需处理', SKIP: '本次未使用'};

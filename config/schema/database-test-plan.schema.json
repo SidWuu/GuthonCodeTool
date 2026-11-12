@@ -9,7 +9,7 @@
     "schemaVersion": {"const": 1},
     "taskId": {"type": "string", "minLength": 1},
     "workspaceKey": {"type": "string", "pattern": "^(products|projects)\\.[A-Za-z0-9._-]+$"},
-    "sourceMode": {"enum": ["database", "svn"]},
+    "sourceMode": {"enum": ["api"]},
     "sourceDigest": {"type": "string", "minLength": 1},
     "cases": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/case"}}
   },

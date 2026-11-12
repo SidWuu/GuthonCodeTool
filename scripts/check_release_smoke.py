@@ -37,7 +37,7 @@ def mcp_tools(command: list[str], home: str, *, read_only: bool) -> list[dict]:
     if initialized.get("protocolVersion") != "2025-11-25":
         raise RuntimeError("MCP protocol negotiation did not return 2025-11-25")
     tools = by_id.get(2, {}).get("result", {}).get("tools")
-    from providers.svn.nexus.mcp_server import TOOLS, WRITE_TOOLS
+    from providers.api.mcp_server import TOOLS, WRITE_TOOLS
     registered = TOOLS + WRITE_TOOLS
     expected = sum(bool(tool["annotations"]["readOnlyHint"]) for tool in registered) if read_only else len(registered)
     if not isinstance(tools, list) or len(tools) != expected:

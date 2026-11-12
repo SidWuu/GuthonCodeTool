@@ -1,5 +1,5 @@
 (function initializeBridgeTasks(root) {
-  const operations = new Set(['pull-hub-source', 'export-table-schema', 'export-bill-type', 'export-view-sql', 'export-system-scripts', 'query-procedure-callers']);
+  const operations = new Set(['refresh-api-source', 'query-procedure-callers']);
   const waits = new Map();
   const running = new Map();
   const sendDefault = (message) => root.chrome.runtime.sendMessage(message);

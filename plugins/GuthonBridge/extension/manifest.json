@@ -49,6 +49,7 @@
         "nexus-locator.js",
         "workspace-selection.js",
         "task-client.js",
+        "refresh-target.js",
         "platform-layout.js",
         "tab-sorter.js",
         "content.js"

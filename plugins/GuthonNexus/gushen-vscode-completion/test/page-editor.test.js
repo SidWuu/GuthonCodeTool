@@ -8,13 +8,13 @@ const {PageDraft} = require('../src/page-editor/model');
 const {nativeChanges, projectNative} = require('../src/page-editor/native-model');
 const {verifyAssets, instrument, nativeHtml} = require('../src/page-editor/platform-assets');
 const {PageEditorController} = require('../src/page-editor/controller');
-const {SvnVirtualFileSystem, fragmentIdentity, documentFilename} = require('../src/svn/virtual-fs');
+const {fragmentIdentity, documentFilename} = require('../src/source/virtual-fs');
 const source = {pageId:'PG-1', views:[{id:'view',type:'input-box', fields:[
   {fieldId:'A',type:'text',label:'A',width:1,pageEvents:{onChangeScript:'old();'}},
   {fieldId:'B',type:'text',label:'B',width:2}],datasource:{sql:'select 1'}}],opaque:'keep'};
 function model() {return {pageId:'PG-1', collections:[{pointer:'/views/0/fields',label:'form',region:'FORM',reorderable:true,fields:source.views[0].fields.map((f,i)=>
   ({key:'fieldId:'+f.fieldId,pointer:'/views/0/fields/'+i,label:f.label,type:f.type,editable:true,properties:[{name:'label',value:f.label},{name:'width',value:f.width}]}))}],
-  nodes:[{key:'A-event',pointer:'/views/0/fields/0/pageEvents/onChangeScript',content:'old();',type:'SCRIPT',editable:true},
+  nodes:[{key:'A-event',label:'form / A / onChangeScript',pointer:'/views/0/fields/0/pageEvents/onChangeScript',content:'old();',type:'SCRIPT',editable:true},
     {key:'sql',pointer:'/views/0/datasource/sql',content:'select 1',type:'SQL',editable:true}]};}
 const clone = value => JSON.parse(JSON.stringify(value));
 const recoveryRoot = require('node:fs').mkdtempSync(path.join(os.tmpdir(),'page-recovery-tests-'));
@@ -104,8 +104,9 @@ function hostFixture() {
         panel.latest=message.type==='state' ? receiver.receive(clone(message))?.state : message;
       },onDidReceiveMessage(fn){panel.receive=fn;}},reveal(){},onDidDispose(fn){panel.closed=fn;},dispose(){panel.closed?.();}};panels.push(panel);return panel;}}};
   const identity={workspaceKey:'products.demo',sourceNamespace:'pages-A',sourceId:'PG-1',sourceType:'page'};
-  const snapshot={...identity,workingCopyId:'wc',sourceHash:'a'.repeat(64),editToken:'token',editable:true,model:model(),sourceText:JSON.stringify(source)};
-  const backend={async run(key,args,payload){calls.push({key,args,payload});if(payload.action==='open')return clone(snapshot);
+  const snapshot={...identity,sourcePath:'pages/PG-1.json',sourceHash:'a'.repeat(64),editToken:'token',editable:true,model:model(),sourceText:JSON.stringify(source)};
+  Object.defineProperty(identity,'sourcePath',{enumerable:true,get:()=>snapshot.sourcePath});
+  const backend={async run(key,args,payload){calls.push({key,args,payload});if(payload.action==='open')return {...clone(snapshot),sourcePath:payload.path};
     if(payload.action==='comparison') return {available:true,sourceHash:snapshot.sourceHash,baseRevision:'1',changes:{rows:[],paths:[],total:0}};
     if(payload.action==='preview')return {candidateSourceHash:'b'.repeat(64)};
     if(payload.action==='save') {
@@ -136,7 +137,7 @@ test('PAGE ID placeholders cannot hide the authoritative catalog name in preview
   assert.equal(session.panel.title,'目录中的页面名称 · PG-1 · 本地页面');
   assert.equal(session.draft.model.pageName,'目录中的页面名称');
   const opened=[];f.backend.fragments=async()=>({fragments:[{jsonPointer:model().nodes[0].pointer,scriptType:'js',label:'form / A / onChangeScript'}]});
-  host.virtualFs={async open(identity){opened.push(identity);return f.vscode.Uri.from({scheme:'guthon-svn-edit',authority:'products.demo',path:'/event.js'});}};
+  host.virtualFs={async open(identity){opened.push(identity);return f.vscode.Uri.from({scheme:'guthon-api-edit',authority:'products.demo',path:'/event.js'});}};
   await host.message(session,{type:'openCode',version:session.draft.version,key:'A-event'});
   assert.equal(documentFilename(opened[0]),'目录中的页面名称 · form · A · onChangeScript.js');
   assert.equal(opened[0].documentName,fragmentIdentity('products.demo',f.identity,
@@ -165,57 +166,18 @@ test('refreshing a catalog name changes native titles without reloading an uncon
   assert.equal(session.native.panel.title,'目录中的名称 · PG-1 · 原版设计视图');
 });
 
-test('preview and source tree share the same readable URI, inheritance expansion and save path',async()=>{
-  const f=hostFixture(),prefix='before();\n',marker='inherit();',suffix='\nafter();',product='product();';
-  const physical=prefix+marker+suffix,effective=prefix+product+suffix;
-  f.identity.workspaceKey=f.snapshot.workspaceKey='projects.demo';
-  f.identity.sourceName='测试页面';f.snapshot.sourcePath='pages/PG-1.json';
-  f.snapshot.model.nodes[0].content=physical;f.snapshot.model.nodes[0].editable=false;
-  const data=clone(source);data.views[0].fields[0].pageEvents.onChangeScript=physical;f.snapshot.sourceText=JSON.stringify(data);
-  const fragment={jsonPointer:model().nodes[0].pointer,scriptType:'js',label:'form / A / onChangeScript'},writes=[],shown=[];
-  f.backend.fragments=async()=>({sourcePath:f.snapshot.sourcePath,fragments:[fragment]});
-  f.backend.read=async()=>({editable:true,sessionId:'common-session',documentId:'common-document',sourcePath:f.snapshot.sourcePath,
-    sourceNamespace:f.identity.sourceNamespace,content:f.snapshot.model.nodes[0].content});
-  f.backend.pageQuery=async(_key,name)=>{
-    assert.equal(name,'read_inherited_source');return {inheritanceStatus:'ACTIVE',indexGeneration:'gen',
-      project:{sourceHash:'project-hash'},product:{sourceHash:'product-hash'},segments:[
-        {layer:'project',start:0,end:prefix.length,sourceStart:0,sourceEnd:prefix.length},
-        {layer:'product',start:prefix.length,end:prefix.length+product.length,sourceStart:0,sourceEnd:product.length},
-        {layer:'project',start:prefix.length+product.length,end:effective.length,sourceStart:prefix.length+marker.length,sourceEnd:physical.length}],
-      effective:{content:effective},projectOriginal:{content:physical},productOriginal:{content:product},complete:true};};
-  f.backend.write=async(...args)=>{
-    writes.push(args);f.snapshot.model.nodes[0].content=args[3];
-    const data=JSON.parse(f.snapshot.sourceText);data.views[0].fields[0].pageEvents.onChangeScript=args[3];
-    f.snapshot.sourceText=JSON.stringify(data);f.snapshot.sourceHash='c'.repeat(64);
-    return {written:true,sourceHash:f.snapshot.sourceHash};};
-  f.vscode.workspace.openTextDocument=async uri=>{
-    const existing=f.documents.find(doc=>doc.uri.toString()===uri.toString());if(existing)return existing;
-    const content=(await f.virtualFs.readFile(uri)).toString();const doc={uri,isDirty:false,getText:()=>content};f.documents.push(doc);return doc;};
-  f.vscode.window.showTextDocument=async(doc,options)=>{shown.push({doc,options});return {document:doc};};
-  f.virtualFs=new SvnVirtualFileSystem({...f,onSaved:async(_key,_result,uri)=>host.codeSaved(uri)});
-  const host=new PageEditorController(f),session=await host.open(f.identity);
-  session.draft.property('/views/0/fields','fieldId:A','label','未保存的字段名称');
-  await host.message(session,{type:'openCode',version:session.draft.version,key:'A-event'});
-  assert.equal(shown[0].doc.getText(),effective);
-  assert.equal(shown[0].doc.uri.scheme,'guthon-svn-edit');
-  assert.equal(shown[0].options.viewColumn,f.vscode.ViewColumn.Beside);
-  assert.equal(shown[0].doc.uri.path.split('/').at(-1),'测试页面 · form · A · onChangeScript.js');
-  const treeIdentity=fragmentIdentity(f.identity.workspaceKey,{...f.identity,sourcePath:f.snapshot.sourcePath,workingCopyId:'wc'},fragment);
-  assert.equal(f.virtualFs.uriFor(treeIdentity).toString(),shown[0].doc.uri.toString());
-  assert.equal(documentFilename(treeIdentity),'测试页面 · form · A · onChangeScript.js');
-  await f.virtualFs.writeFile(shown[0].doc.uri,Buffer.from(effective+'\ncustom();'),{});
-  assert.equal(writes[0][1],'common-session');assert.equal(writes[0][3],physical+'\ncustom();');
-  assert.equal(session.blocked,'');assert.equal(session.snapshot.sourceHash,'c'.repeat(64));
-  assert.equal(session.draft.operations().length,1);
-  assert.equal(session.draft.operations()[0].value,'未保存的字段名称');
-  f.virtualFs.dispose();host.dispose();
+test('source fragments preserve the exact workspace, path and pointer identity',()=>{
+  const fragment={jsonPointer:'/views/0/fields/0/pageEvents/onChangeScript',scriptType:'js',label:'form / A / onChangeScript'};
+  const target=fragmentIdentity('projects.demo',{sourceType:'page',sourceId:'PG-1',sourcePath:'pages/PG-1.json',sourceName:'测试页面'},fragment);
+  assert.equal(target.workspaceKey,'projects.demo');assert.equal(target.sourcePath,'pages/PG-1.json');
+  assert.equal(target.jsonPointer,fragment.jsonPointer);assert.equal(documentFilename(target),'测试页面 · form · A · onChangeScript.js');
 });
 
 test('code save rebases matching native code drafts and preserves conflicts for comparison',async()=>{
   const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
   session.draft.text('A-event','local();');
-  const uri=f.vscode.Uri.from({scheme:'guthon-svn-edit',authority:'products.demo',path:'/event.js',
-    query:new URLSearchParams({sourceType:'page',sourceId:'PG-1',workingCopyId:'wc'}).toString()});
+  const uri=f.vscode.Uri.from({scheme:'guthon-api-edit',authority:'products.demo',path:'/event.js',
+    query:new URLSearchParams({path:f.identity.sourcePath,pointer:'/views/0/fields/0/pageEvents/onChangeScript'}).toString()});
   f.snapshot.model.nodes[0].content='local();';await host.codeSaved(uri);
   assert.equal(session.draft.operations().length,0);
   session.draft.text('A-event','native();');f.snapshot.model.nodes[0].content='editor();';
@@ -225,8 +187,8 @@ test('code save rebases matching native code drafts and preserves conflicts for 
 
 test('saving a layout order closes only this PAGE clean positional code tabs and never overwrites dirty code',async()=>{
   const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity),closed=[];
-  const uri=f.vscode.Uri.from({scheme:'guthon-svn-edit',authority:'products.demo',path:'/event.js',
-    query:new URLSearchParams({sourceType:'page',sourceId:'PG-1',workingCopyId:'wc'}).toString()});
+  const uri=f.vscode.Uri.from({scheme:'guthon-api-edit',authority:'products.demo',path:'/event.js',
+    query:new URLSearchParams({path:f.identity.sourcePath,pointer:'/views/0/fields/0/pageEvents/onChangeScript'}).toString()});
   const tab={input:{uri}},other={input:{uri:{...uri,authority:'projects.other'}}};
   f.vscode.window.tabGroups={all:[{tabs:[tab,other]}],async close(tabs){closed.push(...tabs);return true;}};
   const doc={uri,isDirty:true};f.documents.push(doc);
@@ -241,8 +203,8 @@ test('controller owns one PAGE and saves a mixed draft through preflight and exi
   await host.open(f.identity);assert.equal(f.panels.length,1);
   session.draft.text('sql','select 2');session.draft.order('/views/0/fields',['fieldId:B','fieldId:A']);
   await host.save(session);
-  assert.deepEqual(f.calls.map(call=>call.payload.action),['open','comparison','preview','save','open','comparison']);
-  assert.ok(f.calls.every(call=>call.args[0]==='page-editor'));assert.equal(session.pending,null);
+  assert.deepEqual(f.calls.map(call=>call.payload.action),['open','comparison','preview','save','open','open','comparison']);
+  assert.ok(f.calls.every(call=>call.args==='page'));assert.equal(session.pending,null);
   assert.equal(session.draft.model.nodes.find(n=>n.key==='sql').content,'select 2');
   assert.equal(session.draft.model.collections[0].fields[0].key,'fieldId:B');
 });
@@ -393,7 +355,7 @@ test('resource prompts and native view clicks share one workspace task through c
   const first=host.message(session,{type:'manageResources'});await entered;
   assert.equal(session.panel.latest.resourceBusy,true);
   const duplicate=host.message(session,{type:'manageResources'}),native=host.message(session,{type:'native',version:session.draft.version});
-  const sibling=await host.open({...f.identity,sourceId:'PG-2'});
+  const sibling=await host.open({...f.identity,sourceId:'PG-2',sourcePath:'pages/PG-2.json'});
   const otherPage=host.message(sibling,{type:'manageResources'});
   assert.equal(inputs,1);assert.equal(picks,1);assert.equal(connects,1);
   release();await Promise.all([first,duplicate,native,otherPage]);
@@ -440,12 +402,12 @@ test('SVN comparison is refreshed independently of the preserved window draft',a
   await host.message(session,{type:'compare',version:session.draft.version});
   assert.deepEqual(session.draft.operations(),oldOperations);
   assert.equal(session.panel.latest.comparison.local.total,1);
-  assert.equal(session.panel.latest.comparison.svn.sourceHash,f.snapshot.sourceHash);
+  assert.equal(session.panel.latest.comparison.baseline.sourceHash,f.snapshot.sourceHash);
   const savedVersion=session.draft.version;
   f.backend.run=async()=>{throw new Error('SVN BASE unavailable');};
   await host.message(session,{type:'compare',version:savedVersion});
-  assert.equal(session.panel.latest.comparison.svn.available,false);
-  assert.match(session.panel.latest.comparison.svn.message,/unavailable/);
+  assert.equal(session.panel.latest.comparison.baseline.available,false);
+  assert.match(session.panel.latest.comparison.baseline.message,/unavailable/);
   assert.equal(session.draft.version,savedVersion);
 });
 
@@ -474,9 +436,9 @@ test('external source refresh loads a clean page and preserves a dirty page as a
 test('SCM status refresh updates a committed SVN baseline without clearing local draft differences',async()=>{
   const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
   session.draft.property('/views/0/fields','fieldId:A','label','草稿');
-  session.svnComparison={available:true,sourceHash:f.snapshot.sourceHash,baseRevision:'1',changes:{rows:[{}],paths:['/views/0/fields/0/label'],total:1}};
+  session.baselineComparison={available:true,sourceHash:f.snapshot.sourceHash,baseRevision:'1',changes:{rows:[{}],paths:['/views/0/fields/0/label'],total:1}};
   await host.statusChanged(f.identity.workspaceKey);
-  assert.equal(session.panel.latest.comparison.svn.changes.total,0);
+  assert.equal(session.panel.latest.comparison.baseline.changes.total,0);
   assert.equal(session.panel.latest.comparison.local.total,1);
   assert.equal(session.draft.operations()[0].value,'草稿');
 });
@@ -490,7 +452,7 @@ test('concurrent comparison reads share one request for the same page snapshot',
   assert.equal(reads,1);
   release({available:true,sourceHash:session.snapshot.sourceHash,baseRevision:'2',changes:{total:0}});
   await Promise.all(pending);
-  assert.equal(session.svnComparison.baseRevision,'2');
+  assert.equal(session.baselineComparison.apiVersion,'2');
   assert.equal(session.comparisonRequest,undefined);
 });
 
@@ -516,7 +478,7 @@ test('a commit during a comparison read schedules a trailing read of the new BAS
   const second=host.statusChanged(f.identity.workspaceKey);
   release();await Promise.all([first,second]);
   assert.equal(reads,2);
-  assert.equal(session.svnComparison.baseRevision,'2');
+  assert.equal(session.baselineComparison.apiVersion,'2');
 });
 
 test('closed pages defer status comparisons until reopened while preserving their drafts',async()=>{
@@ -547,7 +509,7 @@ test('a late comparison cannot overwrite a newer page snapshot',async()=>{
   const current=host.refreshComparison(session);
   await new Promise(resolve=>setImmediate(resolve));
   releases[1]();await current;releases[0]();await old;
-  assert.equal(session.svnComparison.sourceHash,'c'.repeat(64));
+  assert.equal(session.baselineComparison.sourceHash,'c'.repeat(64));
 });
 
 test('external changes migrate independent window edits without writing the file',async()=>{
@@ -610,8 +572,8 @@ test('dirty code and unconfirmed native dialogs preserve the old draft without r
     session.draft.property('/views/0/fields','fieldId:A','label','窗口');
     const messages=[];
     if(native)session.native={unconfirmed:true,version:session.draft.version,panel:{webview:{postMessage:message=>messages.push(message)}}};
-    else f.documents.push({isDirty:true,uri:f.vscode.Uri.from({scheme:'guthon-svn-edit',authority:'products.demo',path:'/event.js',
-      query:new URLSearchParams({sourceType:'page',sourceId:'PG-1',workingCopyId:'wc'}).toString()})});
+    else f.documents.push({isDirty:true,uri:f.vscode.Uri.from({scheme:'guthon-api-edit',authority:'products.demo',path:'/event.js',
+      query:new URLSearchParams({path:f.identity.sourcePath,pointer:'/views/0/fields/0/pageEvents/onChangeScript'}).toString()})});
     f.snapshot.sourceHash='c'.repeat(64);
     await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
     assert.equal(session.sourceStale,true);assert.equal(session.draft.operations()[0].value,'窗口');
@@ -680,13 +642,12 @@ test('reverting an external conflict preserves its report and keeps the original
   session.draft.undo();assert.equal(session.draft.operations().length,0);
 });
 
-test('a changed checkout identity is rejected even when the new file hash is identical',async()=>{
-  const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
-  const host=new PageEditorController(f),session=await host.open(f.identity);
-  session.draft.property('/views/0/fields','fieldId:A','label','窗口');f.snapshot.workingCopyId='different';
-  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
-  assert.equal(session.sourceStale,true);assert.match(session.sourceMerge.evidence.blockedReason,/身份/);
-  assert.equal(session.snapshot.workingCopyId,'wc');assert.equal(session.draft.operations()[0].value,'窗口');
+test('a changed PAGE path is rejected even when the new file hash is identical',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity),run=f.backend.run;
+  session.draft.property('/views/0/fields','fieldId:A','label','窗口');
+  f.backend.run=async(...args)=>{const result=await run(...args);if(args[2].action==='open')result.sourcePath='other.json';return result;};
+  await host.sourceChanged(f.identity.workspaceKey,[f.identity.sourcePath]);
+  assert.equal(session.sourceStale,true);assert.match(session.status,/来源与请求不一致/);assert.equal(session.draft.operations()[0].value,'窗口');
 });
 
 test('restart retains an earlier conflict report when the file has returned to the draft baseline',async()=>{
@@ -731,7 +692,7 @@ test('page publications send one baseline then small patches and resynchronize o
   assert.equal(wire.operations[0].value,'changed');assert.ok(JSON.stringify(wire).length<5000);
   assert.equal(session.panel.latest.model.collections[0].fields[0].properties[0].value,'changed');
   const sequence=wire.sequence;host.publish(session);assert.equal(session.panel.wire.operations,undefined);
-  assert.equal(session.panel.wire.comparison.svn,undefined);assert.equal(session.panel.wire.comparison.local,undefined);
+  assert.equal(session.panel.wire.comparison.baseline,undefined);assert.equal(session.panel.wire.comparison.local,undefined);
   await host.message(session,{type:'ready'});assert.equal(session.panel.wire.update,'full');
   assert.ok(session.panel.wire.sequence>sequence);assert.equal(session.panel.latest.operations[0].value,'changed');
 });
@@ -792,8 +753,8 @@ test('closed pages with stale sources or unsaved code remain pinned even without
   for(const reason of ['stale','dirtyCode']){
     const f=hostFixture(),host=new PageEditorController({...f,maxClosedPages:0}),session=await host.open(f.identity);
     if(reason==='stale')session.sourceStale=true;
-    else f.documents.push({isDirty:true,uri:f.vscode.Uri.from({scheme:'guthon-svn-edit',authority:'products.demo',path:'/event.js',
-      query:new URLSearchParams({sourceType:'page',sourceId:'PG-1',workingCopyId:'wc'}).toString()})});
+    else f.documents.push({isDirty:true,uri:f.vscode.Uri.from({scheme:'guthon-api-edit',authority:'products.demo',path:'/event.js',
+      query:new URLSearchParams({path:f.identity.sourcePath,pointer:'/views/0/fields/0/pageEvents/onChangeScript'}).toString()})});
     f.panels[0].dispose();await session.persistence;await new Promise(resolve=>setImmediate(resolve));
     assert.equal(host.pages.size,1);assert.equal(session.draft.operations().length,0);
     session.sourceStale=false;f.documents.length=0;await host.persist(session);assert.equal(host.pages.size,0);

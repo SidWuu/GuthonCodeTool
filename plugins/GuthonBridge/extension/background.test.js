@@ -27,7 +27,7 @@ function fixture() {
 
 test('background rejects foreign extension and untrusted page senders', async () => {
   const f = fixture();
-  const message = { type: 'pull-hub-source', payload: {} };
+  const message = { type: 'route-workspace', payload: {} };
   assert.equal((await f.send(message, {id:'b'.repeat(32),tab:{url:'https://gusen.steel56.com.cn/guthon/'}})).ok, false);
   assert.equal((await f.send(message, {id:f.id,tab:{url:'https://malicious.example/guthon/'}})).ok, false);
   assert.equal(f.calls.length, 0);
@@ -71,9 +71,9 @@ test('reverse event rechecks current platform identity before navigation and rep
 
 test('background owns origin and pairs every backend request at the configured port', async () => {
   const f = fixture();
-  const result = await f.send({type:'pull-hub-source',payload:{workspaceKey:'products.demo',pageOrigin:'https://forged.example'}},{id:f.id,tab:{id:1,url:'https://gusen.steel56.com.cn/guthon/'}});
+  const result = await f.send({type:'route-workspace',payload:{workspaceKey:'products.demo',pageOrigin:'https://forged.example'}},{id:f.id,tab:{id:1,url:'https://gusen.steel56.com.cn/guthon/'}});
   assert.equal(result.ok, true);
-  assert.equal(f.calls[0].url,'http://127.0.0.1:17499/pullHubSource');
+  assert.equal(f.calls[0].url,'http://127.0.0.1:17499/routeWorkspace');
   assert.equal(f.calls[0].options.headers.Authorization, `Bearer ${'f'.repeat(64)}`);
   assert.equal(JSON.parse(f.calls[0].options.body).pageOrigin,'https://gusen.steel56.com.cn');
 });
@@ -90,7 +90,7 @@ test('PAGE lifecycle writes are injected only after exact workspace and edit cap
     workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',target:{type:'page-lifecycle',action:'create'}};
   await f.context.handleBridgeEvent('page-lifecycle',command);
   assert.equal(injected,0);
-  f.context.fetch=async(url,options)=>{f.calls.push({url,options});return {ok:true,json:async()=>({ok:true,workspaceKey:'products.demo',workspace:{capabilities:{'svn.edit':true}}})};};
+  f.context.fetch=async(url,options)=>{f.calls.push({url,options});return {ok:true,json:async()=>({ok:true,workspaceKey:'products.demo',workspace:{capabilities:{'api.edit':true}}})};};
   await f.context.handleBridgeEvent('page-lifecycle',command);
   assert.equal(injected,1);
   const receipt=JSON.parse(f.calls.filter(call=>call.url.endsWith('/navigationResult')).at(-1).options.body);

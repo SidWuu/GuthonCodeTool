@@ -16,8 +16,7 @@ test('tool and plugin runtime checks are required; configuration files alone do 
   assert.equal(readiness(readyEvidence()).complete, true);
   for (const mutation of [
     x => x.hook = {}, x => x.hook.ready = false, x => x.hook.observedAt = '2026-10-07T00:00:00Z',
-    x => x.hook.pluginVersion = '0.2.9', x => x.clients = [],
-    x => x.clients[0].installId = 'old-install',
+    x => x.hook.pluginVersion = '0.2.9',
     x => x.toolVersion = '0.3.0', x => x.nexusVersion = '2.4.0',
   ]) {
     const evidence = readyEvidence(); mutation(evidence);
@@ -28,8 +27,15 @@ test('tool and plugin runtime checks are required; configuration files alone do 
 test('installation steps only check tools, plugins and browser environment', () => {
   assert.equal(nextAction({}), 'refresh');
   assert.equal(nextAction({ tool: true }), 'team');
-  assert.equal(nextAction({ tool: true, team: true }), 'chrome');
+  assert.equal(nextAction({ tool: true, team: true }), 'finish');
   assert.equal(nextAction({ tool: true, team: true, bridge: true }), 'finish');
+});
+
+test('API-only installation completes while optional browser pairing stays independently unverified',()=>{
+  const evidence=readyEvidence();evidence.clients=[];
+  assert.deepEqual(readiness(evidence),{tool:true,team:true,bridge:false,complete:true});
+  evidence.clients=[{installId:'other',version:evidence.chrome.version,protocolVersion:2}];
+  assert.equal(readiness(evidence).bridge,false);assert.equal(readiness(evidence).complete,true);
 });
 
 test('HTML escapes errors and never emits pairing tokens', () => {

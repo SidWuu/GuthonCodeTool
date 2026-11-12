@@ -36,8 +36,8 @@ test('reuses one ToolHost for consecutive requests and stops it on dispose', asy
   const tool = { toolPath: '/unused', toolHome: '/unused-home' };
   const results = await Promise.all([
     client.request(tool, 'workspaces'),
-    client.request(tool, 'svn', ['catalog'], 'products.a'),
-    client.request(tool, 'svn', ['write'], 'products.a'),
+    client.request(tool, 'api', ['catalog'], 'products.a'),
+    client.request(tool, 'api', ['write'], 'products.a'),
   ]);
   assert.deepEqual(results.map((result) => result.kind), ['read', 'read', 'write']);
   assert.equal(starts, 1);
@@ -56,10 +56,10 @@ test('runtime switches cannot kill in-flight writes and workspace changes keep t
     starts++;return spawn(process.execPath,['-e',host],{stdio:['pipe','pipe','pipe']});
   }});
   const tool={toolPath:'/tool',toolHome:'/first'};
-  const first=client.request(tool,'svn',['write'],'products.first');
+  const first=client.request(tool,'api',['write'],'products.first');
   await ready;
-  await assert.rejects(client.request({...tool,toolHome:'/other'},'svn',['write'],'products.other'),/原写入未被中断/);
-  const second=client.request(tool,'svn',['write'],'products.second');
+  await assert.rejects(client.request({...tool,toolHome:'/other'},'api',['write'],'products.other'),/原写入未被中断/);
+  const second=client.request(tool,'api',['write'],'products.second');
   assert.equal((await first).workspaceKey,'products.first');
   assert.equal((await second).workspaceKey,'products.second');
   assert.equal(starts,1);
@@ -71,8 +71,8 @@ test('switching runtime during startup cannot strand the original request', asyn
   let starts=0;
   const client=new ToolProcessClient({spawnProcess:()=>{starts++;return spawn(process.execPath,['-e',delayed],{stdio:['pipe','pipe','pipe']});}});
   const tool={toolPath:'/tool',toolHome:'/original'};
-  const original=client.request(tool,'svn',['write'],'products.first');
-  await assert.rejects(client.request({...tool,toolHome:'/other'},'svn',['write'],'products.other'),/正在启动或写入/);
+  const original=client.request(tool,'api',['write'],'products.first');
+  await assert.rejects(client.request({...tool,toolHome:'/other'},'api',['write'],'products.other'),/正在启动或写入/);
   assert.equal((await original).kind,'write');
   assert.equal(starts,1);
   await client.stop();
@@ -93,21 +93,19 @@ test('active cancellation on an older host waits for the real result without sen
   await client.stop();
 });
 
-test('classifies SVN mutations as writes so they cannot be replayed as reads', () => {
-  assert.equal(requestKind('svn', ['auth-cache']), 'write');
-  assert.equal(requestKind('svn', ['refresh']), 'write');
-  assert.equal(requestKind('svn', ['scm-status']), 'read');
-  assert.equal(requestKind('svn', ['page-query']), 'read');
+test('classifies API mutations as writes so they cannot be replayed as reads', () => {
+  assert.equal(requestKind('api', ['login']), 'write');
+  assert.equal(requestKind('api', ['refresh']), 'write');
+  assert.equal(requestKind('api', ['status']), 'read');
+  assert.equal(requestKind('api', ['search']), 'read');
 });
 
-test('allows full SVN checkout and indexing to exceed the normal ToolHost wait', () => {
-  assert.equal(requestTimeoutMs('svn', ['sync-from-config']), 30 * 60 * 1000);
-  assert.equal(requestTimeoutMs('svn', ['sync-from-script']), 30 * 60 * 1000);
-  assert.equal(requestTimeoutMs('svn', ['sync-from-bat']), 30 * 60 * 1000);
-  assert.equal(requestTimeoutMs('svn', ['init']), 30 * 60 * 1000);
-  assert.equal(requestTimeoutMs('svn', ['refresh']), 30 * 60 * 1000);
+test('allows API synchronization to exceed the normal ToolHost wait', () => {
+  assert.equal(requestTimeoutMs('api', ['pull']), 30 * 60 * 1000);
+  assert.equal(requestTimeoutMs('api', ['refresh']), 30 * 60 * 1000);
+  assert.equal(requestTimeoutMs('api', ['upload']), 30 * 60 * 1000);
   assert.equal(requestTimeoutMs('reindex'), 30 * 60 * 1000);
-  assert.equal(requestTimeoutMs('svn', ['write']), 120000);
+  assert.equal(requestTimeoutMs('api', ['write']), 120000);
 });
 
 test('restarts a crashed read once and never replays an uncertain write', async () => {
@@ -134,7 +132,7 @@ readline.createInterface({input:process.stdin}).on('line', () => process.exit(7)
       return spawn(process.execPath, ['-e', crashHost], { stdio: ['pipe', 'pipe', 'pipe'] });
     },
   });
-  await assert.rejects(writeClient.request(tool, 'svn', ['write']), /写入结果未知/);
+  await assert.rejects(writeClient.request(tool, 'api', ['write']), /写入结果未知/);
   assert.equal(writeStarts, 1);
 });
 
@@ -182,16 +180,17 @@ test('Node command classification and timeouts derive from the Python authority 
   assert.ok(authority.equals(bundled), 'Run npm run build:bridge after editing command_metadata.json');
   const metadata = JSON.parse(authority.toString('utf8'));
   for (const [command, entry] of Object.entries(metadata.commands)) {
+    if(command==='api') continue; // API dispatch uses the required action's metadata.
     assert.equal(requestKind(command), entry.kind, command);
     assert.equal(requestTimeoutMs(command), entry.timeoutMs, command);
   }
-  for (const [action, entry] of Object.entries(metadata.svnActions)) {
-    assert.equal(requestKind('svn', [action]), entry.kind, action);
-    assert.equal(requestTimeoutMs('svn', [action]), entry.timeoutMs, action);
+  for (const [action, entry] of Object.entries(metadata.apiActions)) {
+    assert.equal(requestKind('api', [action]), entry.kind, action);
+    assert.equal(requestTimeoutMs('api', [action]), entry.timeoutMs, action);
   }
   assert.equal(requestKind('unknown-command'), 'write');
-  assert.equal(requestKind('svn', ['unknown-action']), 'write');
-  assert.equal(requestKind('svn', ['toString']), 'write');
+  assert.equal(requestKind('api', ['unknown-action']), 'write');
+  assert.equal(requestKind('api', ['toString']), 'write');
   assert.equal(requestTimeoutMs('unknown-command'), metadata.defaultTimeoutMs);
 });
 
@@ -229,9 +228,9 @@ test('interactive reads use the read lane during a normal-duration background in
  console.log(JSON.stringify({type:'ready',protocolVersion:1}));
  const done=r=>console.log(JSON.stringify({id:r.id,type:'result',ok:true,result:{command:r.command,workspaceKey:r.workspaceKey}}));
  readline.createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);
- if(r.release){done(held);held=null;}else if(r.command==='svn')held=r;else done(r);});`;
+ if(r.release){done(held);held=null;}else if(r.command==='api')held=r;else done(r);});`;
  let starts=0;const client=new ToolProcessClient({spawnProcess:()=>{starts++;return spawn(process.execPath,['-e',host],{stdio:['pipe','pipe','pipe']});}});
- const tool={toolPath:'/fixture',toolHome:'/home'};const writing=client.request(tool,'svn',['reindex-files'],'products.demo',{paths:['one.json']});
+ const tool={toolPath:'/fixture',toolHome:'/home'};const writing=client.request(tool,'api',['index'],'products.demo',{paths:['one.json']});
  writing.catch(()=>{});
  try {
    while(!client.active)await new Promise(resolve=>setTimeout(resolve,2));
@@ -264,13 +263,13 @@ test('queue timeout rejects unsent work without killing or replaying the active 
   const tool={toolPath:'/fixture',toolHome:'/fixture'};
   const logs=[];
   try {
-    const active=client.request(tool,'svn',['refresh'],'projects.demo');
+    const active=client.request(tool,'api',['refresh'],'projects.demo');
     while (!client.active) await new Promise(resolve=>setTimeout(resolve,5));
-    await assert.rejects(client.request(tool,'svn',['platform-save-preview'],'projects.demo',undefined,
+    await assert.rejects(client.request(tool,'api',['write'],'projects.demo',undefined,
       {queueTimeoutMs:20,onOutput:value=>logs.push(value)}),error=>error.code==='TOOLHOST_QUEUE_TIMEOUT' && /尚未发送/.test(error.message));
     assert.ok(client.child);
     assert.equal(client.jobs.length,0);
-    assert.equal((await active).command,'svn');
+    assert.equal((await active).command,'api');
     assert.equal((await client.request(tool,'workspaces')).command,'workspaces');
     assert.equal(starts,1);
     assert.match(logs.join(''),/请求排队/);

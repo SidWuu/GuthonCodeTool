@@ -99,7 +99,7 @@ if (!qaScript) {
     }
     if (!item.steps?.length) errors.push(`QA ${item.id}: missing actionable answer`);
     if (!categories.includes(item.category)) errors.push(`QA ${item.id}: unknown category`);
-    if (!['all', 'database', 'svn'].includes(item.mode)) errors.push(`QA ${item.id}: unknown mode`);
+    if (!['all', 'database', 'api'].includes(item.mode)) errors.push(`QA ${item.id}: unknown mode`);
     if (!item.os?.length || item.os.some((os) => !['mac', 'windows'].includes(os))) {
       errors.push(`QA ${item.id}: unknown OS`);
     }
@@ -114,6 +114,27 @@ if (!qaScript) {
         }
       }
     }
+  }
+}
+
+// Exercise the page's own search and topic filtering without opening a browser.
+if (qaScript) {
+  const html = pages.get('GuthonCodeTool_QA.html').html;
+  const start = html.indexOf('const qaItems=');
+  const end = html.indexOf('function renderFilters()', start);
+  if (start < 0 || end < 0) {
+    errors.push('QA: search implementation not found');
+  } else {
+    try {
+      const context = {document: {getElementById: () => ({})}};
+      vm.runInNewContext(html.slice(start, end) + `\nglobalThis.findQA = (query, mode) => {
+        state.query = query; state.mode = mode; return filterItems().map(item => item.id);
+      };`, context);
+      for (const [query, mode] of [['API 登录', 'api'], ['验证码', 'api'], ['冲突', 'api'],
+        ['上传', 'api'], ['PAGE 草稿', 'api'], ['数据库 只读', 'database'], ['标签 排序', 'all']]) {
+        if (!context.findQA(query, mode).length) errors.push(`QA: search has no results for ${query} (${mode})`);
+      }
+    } catch (error) { errors.push(`QA: search check failed: ${error.message}`); }
   }
 }
 

@@ -1,0 +1,275 @@
+{
+  "schemaVersion": 1,
+  "branch": "api-sync",
+  "baselineCommit": "fac137c",
+  "status": "implemented-and-verified-with-stated-boundaries",
+  "requirements": [
+    {
+      "id": "R01",
+      "requirement": "除数据库直读源码同步和SVN同步机制外，其他既有功能继续保持并完善可用",
+      "acceptance": "逐项建立现有功能基线和新分支验收映射；不能因实现放在svn目录或存在旧缺陷就删除该功能。"
+    },
+    {
+      "id": "R02",
+      "requirement": "API拉取的当前源码仍放在checkout下",
+      "acceptance": "默认沿用显式toolHome下的var/checkout/<workspaceId>及已配置checkout根值；不迁至source/api，不生成readonly/workcopy双副本。"
+    },
+    {
+      "id": "R03",
+      "requirement": "保留按子系统配置只拉取部分源码",
+      "acceptance": "选择、下载、索引、查询和上传使用同一当前项目范围；未选择子系统源码不写入checkout，局部更新不删除其他范围文件。"
+    },
+    {
+      "id": "R04",
+      "requirement": "补全提示参照官方，保留Nexus的便捷输入",
+      "acceptance": "方法签名、模块/函数图标、完整路径、参数/返回文档与重载清晰；既支持$vs逐级输入，也支持现有关键词/方法名/缩写匹配。"
+    },
+    {
+      "id": "R05",
+      "requirement": "继续使用Nexus，不安装官方谷神VSIX",
+      "acceptance": "API登录、同步合并、原生设计器、编辑/上传/回读由Nexus和共用后端完成；不通过官方扩展命令ID形成运行依赖。"
+    },
+    {
+      "id": "R06",
+      "requirement": "持续吸收官方优秀新功能，并在Nexus提供更新说明",
+      "acceptance": "从Open VSX发现版本；临时编辑器展示官方变化、Nexus影响、兼容结果与实际生效/回退状态。"
+    }
+  ],
+  "features": [
+    {
+      "name": "项目配置、运行模式与环境自检",
+      "requiredBehavior": "保留 Nexus 项目配置、packaged/源码/pyz 运行入口、显式 toolHome、自检与错误提示。",
+      "apiMigration": "API单一源码来源；保留独立数据库诊断和三种工具运行入口。",
+      "status": "implemented",
+      "sources": [
+        "scripts/common/workspace_registry.py",
+        "scripts/common/workspace_config.py",
+        "scripts/common/doctor.py"
+      ]
+    },
+    {
+      "name": "源码树、搜索、定位与快速打开",
+      "requiredBehavior": "保留当前项目对象/正文/字段检索、精确定位、路径复制与上下文导出。",
+      "apiMigration": "当前项目的API目录、正文/字段搜索、精确定位、快速打开与上下文导出。",
+      "status": "implemented",
+      "sources": [
+        "scripts/providers/api/index.py",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/api/navigation.js"
+      ]
+    },
+    {
+      "name": "状态、差异、还原、合并和冲突处理",
+      "requiredBehavior": "保留SCM/Quick Diff、修改选择、远端对比、还原和冲突完成。",
+      "apiMigration": "API基线、SCM、Quick Diff、显式还原、三方冲突与远端只读内容恢复。上传应答规范源码与独立回读核对，以提交正文为祖先保留期间本地修改。",
+      "status": "implemented",
+      "sources": [
+        "scripts/providers/api/store.py",
+        "scripts/providers/api/sync.py",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/source/quick-diff.js"
+      ]
+    },
+    {
+      "name": "页面结构编辑与预览",
+      "requiredBehavior": "保留字段/按钮/事件/SQL/属性/布局编辑、顺序调整、原文保留、草稿、撤销与恢复。",
+      "apiMigration": "XML/JSON PAGE共享模型；字段、按钮、属性、事件、SQL、集合JSON、排序、布局、草稿和恢复。",
+      "status": "implemented",
+      "sources": [
+        "scripts/providers/api/native_page.py",
+        "scripts/providers/api/page.py",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/controller.js"
+      ]
+    },
+    {
+      "name": "代码补全、悬停、定义与诊断",
+      "requiredBehavior": "保留GSS、JavaScript、SQL等现有场景，保留快捷匹配、方言路由、函数/字段提示及必要诊断。",
+      "apiMigration": "官方签名/文档展示与Nexus快捷匹配并存；保留语言路由、本地函数/字段提示、跳转和诊断。视图默认进入 SQL 虚拟文档，保存只修改原定义的 SQL 节点。",
+      "status": "implemented",
+      "sources": [
+        "plugins/GuthonNexus/gushen-vscode-completion/src/api-completion.js",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/source/editor-assistance.js",
+        "scripts/providers/api/view_editor.py"
+      ]
+    },
+    {
+      "name": "继承查看与编辑约束",
+      "requiredBehavior": "保留产品/项目原文、展开内容与来源定位，父层只读和版本核验。",
+      "apiMigration": "父层来源/哈希与展开内容可核对；项目片段和过程函数支持标记保留或受控物化，父文件只读。",
+      "status": "implemented",
+      "sources": [
+        "scripts/providers/api/inheritance_edit.py",
+        "scripts/providers/api/content.py",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/source/virtual-fs.js"
+      ]
+    },
+    {
+      "name": "调用关系、表字段与影响分析",
+      "requiredBehavior": "保留调用方、调用链、动态线索、PAGE字段/事件及表读写事实。",
+      "apiMigration": "API文件/节点驱动调用关系、表访问与PAGE字段事实；未解析、范围和截断单独报告。",
+      "status": "implemented",
+      "sources": [
+        "scripts/providers/api/index.py",
+        "scripts/common/source_facts.py"
+      ]
+    },
+    {
+      "name": "MCP、CLI和AI受控修改",
+      "requiredBehavior": "保留有界读取、精确节点查询、租约/预览、幂等记录、回读与恢复。",
+      "apiMigration": "API MCP与CLI共用有界查询、编辑租约、预览、幂等记录和写后核验；与Nexus未保存输入协调。",
+      "status": "implemented",
+      "sources": [
+        "scripts/providers/api/mcp_server.py",
+        "scripts/providers/api/documents.py",
+        "scripts/providers/api/editor_state.py"
+      ]
+    },
+    {
+      "name": "数据库只读诊断与验证",
+      "requiredBehavior": "保留目标配置、身份核验、只读查询、计划/结果、历史、比较及结果导出。",
+      "apiMigration": "数据库目标、身份、只读查询、计划/结果、历史、比较、XLSX导出独立于源码同步。",
+      "status": "implemented",
+      "sources": [
+        "scripts/common/database_cli.py",
+        "scripts/common/database_test_artifacts.py",
+        "scripts/common/query_xlsx.py"
+      ]
+    },
+    {
+      "name": "结构、视图、单据类型及文档等导出",
+      "requiredBehavior": "保留现有用户可用的导出结果与必要选项。",
+      "apiMigration": "表/视图/脚本从当前checkout导出为非上传资料；单据类型保留独立只读导出与路由索引。",
+      "status": "implemented",
+      "sources": [
+        "scripts/providers/api/exports.py",
+        "scripts/common/database_exports/export_bill_type_sql.py"
+      ]
+    },
+    {
+      "name": "浏览器Bridge增强",
+      "requiredBehavior": "保留已有字段复制、平台/本地定位、列表滚动、页签排序及关联功能。",
+      "apiMigration": "保留字段复制、双向定位、列表滚动、页签排序与API精确刷新；浏览器增强可选。",
+      "status": "implemented",
+      "sources": [
+        "plugins/GuthonBridge/bridge/server.js",
+        "plugins/GuthonBridge/extension/content.js",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/source/browser-navigation.js"
+      ]
+    },
+    {
+      "name": "历史、交付记录与恢复",
+      "requiredBehavior": "保留拉取/操作/诊断历史、交付核验和恢复能力。",
+      "apiMigration": "拉取/操作/诊断历史可读；上传部分结果、已应答未回读和未知状态可回读恢复，不重发POST。",
+      "status": "implemented",
+      "sources": [
+        "scripts/common/pull_history.py",
+        "scripts/providers/api/sync.py",
+        "scripts/providers/api/change_bundle.py"
+      ]
+    },
+    {
+      "name": "安装、更新与回退",
+      "requiredBehavior": "保留后端/Nexus/Bridge的有效安装更新入口，新增官方来源包/兼容能力更新。",
+      "apiMigration": "保留Nexus/后端/Bridge更新；Open VSX来源校验、兼容补全资源更新/回退和临时编辑器说明。",
+      "status": "implemented",
+      "sources": [
+        "plugins/GuthonNexus/gushen-vscode-completion/src/official-update.js",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/update-center.js",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/onboarding.js"
+      ]
+    },
+    {
+      "name": "性能和稳定性能力",
+      "requiredBehavior": "保留增量索引、事件合并、串行写、缓存边界、取消、安全发布及外部修改恢复。",
+      "apiMigration": "保留增量索引、原子发布/取消、事件合并、有界缓存、串行写、外部变化和未保存内容保护。",
+      "status": "implemented",
+      "sources": [
+        "scripts/providers/api/index.py",
+        "scripts/common/operation_control.py",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/api/source-watcher.js"
+      ]
+    }
+  ],
+  "implemented": [
+    "API-only CLI/ToolHost/Nexus/Bridge; retired source providers and installers removed",
+    "one checkout per workspace with explicit subsystem/shared-datasource scope and platform binding",
+    "login/captcha/system-keyring sessions and compact inline-login/current-project cards",
+    "paginated five-kind download plus inherited/project configuration and skills",
+    "baseline/merge/conflicts/SCM/QuickDiff/local history and transport-neutral reviewed change bundles",
+    "five official upload routes with canonical response/readback verification, normalization merge and GET-only unknown-result recovery",
+    "native XML/JSON PAGE structure, collection JSON and inline project inheritance editing",
+    "native view SQL virtual documents with hash-bound QuickDiff and source-preserving writes",
+    "current-project index/MCP/CLI/definition/navigation and retained database diagnostics/exports",
+    "official completion presentation with Nexus quick input and compatible upstream resource updates"
+  ],
+  "remaining": [],
+  "upstream": {
+    "version": "1.0.10",
+    "sha256": "6bf0a052aed9dfb3063f7efaea8cc257913fcc6d1251dfd69e990a3e215c3518",
+    "registryUrl": "https://open-vsx.org/api/guthon/guthon-language-support",
+    "metadataTimestamp": "2026-11-12T05:31:21.776202Z",
+    "referenceStatus": "latest registry version rechecked; VSIX SHA256 matched; static contracts integrated without activating official executable code",
+    "registryRecheckedAt": "2026-11-12T10:24:04.213439+00:00"
+  },
+  "releaseState": "not-published",
+  "validationBoundaries": {
+    "livePlatform": "read-only only, as authorized; no source upload, creation or DDL was executed",
+    "writePaths": "validated with isolated synthetic stores, stateful mock APIs and installed Nexus VSIX plus packaged backend in VSCode; no live platform writes",
+    "designer": "protocol/source and isolated tests; live native designer saving was not exercised",
+    "windows": "installer source/tests checked; Windows installation and Inno compilation require Windows",
+    "publicDocs": "syntax, links, QA search checked; card rendering checked independently; full documentation browser display was not checked",
+    "sourceEvidence": "download/index/preview are static source evidence and do not prove business runtime acceptance"
+  },
+  "readonlyPlatformEvidence": {
+    "objects": 855,
+    "nativeXmlPages": 273,
+    "indexDiagnostics": 0,
+    "pageFields": 12919,
+    "staticCalls": 1036,
+    "callsResolvingWithinSelectedScope": 789,
+    "pagePreviewSourceHashUnchanged": true,
+    "viewsExported": 18,
+    "tablesExported": 131,
+    "systemScriptsExported": 1,
+    "sourceScope": "one selected subsystem and its related data source",
+    "allSourceHashesUnchanged": true,
+    "formalCliPullAndFullSyncRecord": "passed",
+    "viewSqlProjectionParsedWithoutSourceChanges": 18
+  },
+  "validation": {
+    "checkedAt": "2026-11-12T12:09:25.851738+00:00",
+    "apiTests": 135,
+    "retainedSharedPythonTests": 182,
+    "buildAndInstallerTests": 34,
+    "nexusTests": 432,
+    "bridgeTests": 111,
+    "sourceAndPyzAndMacApplicationSmoke": "passed",
+    "mcpTools": {
+      "default": 32,
+      "readOnly": 23
+    },
+    "installedVsixWithPackagedBackend": "passed synthetic VSCode Extension Host workflows",
+    "runtimeChecks": [
+      "official hierarchy and Nexus quick completion",
+      "all contributed commands registered",
+      "real field collection JSON save",
+      "view SQL language and save preserve the native checkout file",
+      "inline inherited script save retains parent hash and marker",
+      "project card webview resolves",
+      "independent post-save index health"
+    ],
+    "cardRendering": {
+      "widths": [
+        220,
+        320,
+        460
+      ],
+      "horizontalOverflow": false,
+      "loginAndAuthenticatedStates": "passed"
+    },
+    "publicDocs": {
+      "pages": 4,
+      "qaItems": 75,
+      "syntaxLinksAndSearch": "passed"
+    },
+    "vsixSha256": "88ada67322638694427a3b834959bf03a51e34e2da91e1b6400594e8de1aa191"
+  }
+}

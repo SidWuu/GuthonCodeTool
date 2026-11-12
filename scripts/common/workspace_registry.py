@@ -1,782 +1,375 @@
-"""Workspace identity, provider routing metadata and synchronization state.
+"""Explicit API-only project identities, checkout roots and runtime summaries."""
 
-The public gusen_hub facade owns runtime path overrides and shared provider APIs;
-this module keeps the workspace lifecycle in one place without copying it into
-CLI, Bridge or Nexus.
-"""
 from __future__ import annotations
-import datetime as dt
 import hashlib
 import json
 import os
-import re
-import sqlite3
-import uuid
 from pathlib import Path
-from common import gusen_hub as hub
+from urllib.parse import urlsplit
+from common.runtime_paths import RuntimePath
 
-def workspace_steps(workspace):
-    return ("source",) if workspace.get("sourceMode") == "svn" else hub.WORKSPACE_STEPS
-
-
-def _database_capabilities():
-    return {
-        "database.sourceSync": True,
-        "database.schemaExport": True,
-        "database.billTypeExport": True,
-        "database.systemScriptExport": True,
-        "database.viewExport": True,
-        "database.diagnose": True,
-        "source.reindex": True,
-        "workcopy.open": True,
-    }
+CONFIG_DIR = RuntimePath("config")
+VAR_DIR = RuntimePath("var")
+from common.persistence import atomic_text
+from common.workspace_identity import validate_config_id, validate_workspace_key
 
 
-def _svn_capabilities(settings):
-    return {f"svn.{name}": bool(value) for name, value in settings["capabilities"].items()}
+def resolve_workspace_storage_root(kind, config_id, item):
+    from common import gusen_hub as hub
 
-
-def workspace_key(value=None):
-    key = str(os.environ.get(hub.WORKSPACE_ENV) or "").strip() if value is None else str(value).strip()
-    if not key:
-        raise SystemExit("Missing --workspace. Use products.<id> or projects.<id>.")
-    try:
-        hub.validate_workspace_key(key)
-    except ValueError as error:
-        raise SystemExit(str(error)) from error
-    return key
-
-
-def set_workspace(value):
-    os.environ[hub.WORKSPACE_ENV] = hub.workspace_key(value)
-
-
-def workspace_source_mode_path(workspace_root: Path) -> Path:
-    return workspace_root / "context" / hub.SOURCE_MODE_FILE
-
-
-def read_workspace_source_mode(workspace_root: Path, key: str, item: dict) -> tuple[str, str]:
-    """Read the workspace-local provider choice without coupling it to project YAML."""
-
-    path = hub.workspace_source_mode_path(workspace_root)
-    if path.is_file():
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise SystemExit(f"Invalid source mode file for {key}: {path}: {error}") from error
-        if not isinstance(payload, dict) or payload.get("version") != hub.SOURCE_MODE_VERSION:
-            raise SystemExit(f"Invalid source mode version for {key}: {path}")
-        if payload.get("workspaceKey") != key:
-            raise SystemExit(f"source mode workspaceKey mismatch for {key}: {path}")
-        mode = str(payload.get("sourceMode") or "").strip().lower()
-        if mode not in hub.SOURCE_MODES:
-            raise SystemExit(f"sourceMode must be database or svn for {key}: {path}")
-        return mode, "workspace-context"
-
-    # Temporary read compatibility for existing installations. Nexus writes the
-    # project-local context file and all distributed YAML templates omit this key.
-    legacy_mode = str(item.get("source_mode") or "").strip().lower()
-    if legacy_mode:
-        if legacy_mode not in hub.SOURCE_MODES:
-            raise SystemExit(f"source_mode must be database or svn for {key}")
-        return legacy_mode, "legacy-config"
-    return "database", "default"
-
-
-def write_workspace_source_mode(workspace: dict, source_mode: str) -> dict:
-    mode = str(source_mode or "").strip().lower()
-    if mode not in hub.SOURCE_MODES:
-        raise SystemExit("source mode must be database or svn")
-    path = hub.workspace_source_mode_path(workspace["root"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "version": hub.SOURCE_MODE_VERSION,
-        "workspaceKey": workspace["workspaceKey"],
-        "sourceMode": mode,
-    }
-    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temp_path.replace(path)
-    finally:
-        try:
-            temp_path.unlink()
-        except FileNotFoundError:
-            pass
-    return {
-        "ok": True,
-        "workspaceKey": workspace["workspaceKey"],
-        "sourceMode": mode,
-        "sourceModeSource": "workspace-context",
-        "sourceModePath": str(path),
-    }
-
-
-def change_workspace_source_mode(config: dict, workspace: dict, source_mode: str) -> tuple[dict, dict]:
-    """Persist a provider choice and roll it back if the target provider is invalid."""
-
-    path = hub.workspace_source_mode_path(workspace["root"])
-    with hub.file_lock(path.with_suffix('.lock')):
-        previous = path.read_bytes() if path.is_file() else None
-        result = hub.write_workspace_source_mode(workspace, source_mode)
-        try:
-            updated = hub.resolve_workspace(config, workspace["workspaceKey"])
-        except BaseException:
-            if previous is None:
-                path.unlink(missing_ok=True)
-            else:
-                temp_path = path.with_name(f".{path.name}.{os.getpid()}.rollback.tmp")
-                try:
-                    temp_path.write_bytes(previous)
-                    temp_path.replace(path)
-                finally:
-                    temp_path.unlink(missing_ok=True)
-            raise
-        return result, updated
-
-
-def resolve_workspace_storage_root(kind: str, config_id: str, item: dict) -> Path:
-    """Resolve one product/project's private root from its persisted identity."""
-
-    prefixes = {"products": "PRD", "projects": "PRJ"}
-    if kind not in prefixes:
-        raise SystemExit(f"Unknown workspace kind: {kind}")
-    configured_workspace_root = item.get("workspace_root")
-    workspace_root_value = (
-        hub.svn_checkout.expand_config_value(configured_workspace_root, f"workspace_root for {kind}.{config_id}")
-        if configured_workspace_root not in (None, "")
-        else ""
+    configured = item.get("workspace_root")
+    if configured and not Path(configured).expanduser().is_absolute():
+        raise ValueError("workspace_root must be an explicit absolute directory")
+    base = (
+        Path(configured).expanduser().resolve()
+        if configured
+        else (Path(VAR_DIR) / "workspace").resolve()
     )
-    workspace_root = Path(workspace_root_value or hub.VAR_DIR / "workspace").expanduser().absolute()
-    resolved_workspace_root = workspace_root.resolve()
-    if resolved_workspace_root in {Path("/").resolve(), Path.home().resolve()}:
-        raise SystemExit(f"Unsafe workspace_root for {kind}.{config_id}: {workspace_root}")
-    name = str(item.get("name") or "").strip()
-    return workspace_root / hub.path_part(f"{prefixes[kind]} {name}")
-
-
-def _list_workspaces_strict(config):
-    workspaces = []
-    seen_names = {"products": set(), "projects": set()}
-    seen_ids = set()
-    for kind, config_key, prefix, layer in (
-        ("products", "products", "PRD", "PRODUCT"),
-        ("projects", "projects", "PRJ", "PROJECT"),
-    ):
-        for item_id, item in (config.get(config_key, {}).get(config_key) or {}).items():
-            hub.svn_checkout.validate_config_id(item_id)
-            if str(item_id) in seen_ids:
-                raise SystemExit(f"Duplicate workspace config id across products/projects: {item_id}")
-            seen_ids.add(str(item_id))
-            name = str(item.get("name") or "").strip()
-            if not name:
-                raise SystemExit(f"Missing name for {kind}.{item_id}")
-            aliases = item.get("aliases", [])
-            if not isinstance(aliases, list) or any(not isinstance(alias, str) or not alias.strip() for alias in aliases):
-                raise SystemExit(f"aliases must be an array of nonempty names for {kind}.{item_id}")
-            workspace_aliases = list(dict.fromkeys(alias.strip() for alias in aliases))
-            if name in seen_names[kind]:
-                raise SystemExit(f"Duplicate {kind} display name: {name}")
-            seen_names[kind].add(name)
-            key = f"{kind}.{item_id}"
-            root = hub.resolve_workspace_storage_root(kind, item_id, item)
-            resolved_workspace_root = root.parent.resolve()
-            source_mode, source_mode_source = hub.read_workspace_source_mode(root, key, item)
-            svn = hub.svn_checkout.svn_settings(
-                item_id,
-                item,
-                hub.VAR_DIR,
-                root,
-                (config.get("sync", {}).get("svn") or {}),
-            ) if source_mode == "svn" else None
-            if svn and svn.get("scopeConfigPath") is None:
-                svn["scopeConfigPath"] = (
-                    hub.CONFIG_DIR / ("products.yaml" if kind == "products" else "projects.yaml")
-                ).resolve()
-            datasource_name = str(item.get("datasource") or "").strip()
-            datasource = (config.get("datasource", {}).get("datasource") or {}).get(datasource_name)
-            manifest_layout = bool(svn and svn.get("checkoutLayout") == "manifest-working-copies")
-            if datasource_name and not datasource:
-                raise SystemExit(f"Unknown datasource for {key}: {datasource_name}")
-            datasource = datasource or {}
-            resolved_checkout_root = svn["checkoutRoot"].resolve() if svn else None
-            if svn and (
-                resolved_checkout_root == resolved_workspace_root
-                or resolved_checkout_root in resolved_workspace_root.parents
-                or resolved_workspace_root in resolved_checkout_root.parents
-            ):
-                raise SystemExit(f"checkout_root and workspace_root must be separate for {key}")
-            capabilities = hub._svn_capabilities(svn) if svn else hub._database_capabilities()
-            system_mappings = ((item.get("systems") or {}).get("include") or {}).get("mappings") or {}
-            if not isinstance(system_mappings, dict):
-                raise SystemExit(f"systems.include.mappings must be a mapping: {key}")
-            aliases = [str(alias).strip() for alias in system_mappings if str(alias).strip()]
-            if source_mode == "svn" and not aliases and not manifest_layout:
-                raise SystemExit(f"SVN workspace requires systems.include.mappings: {key}")
-            workspaces.append(
-                {
-                    "workspaceKey": key,
-                    "kind": kind,
-                    "type": "product" if kind == "products" else "project",
-                    "id": str(item_id),
-                    "name": name,
-                    "aliases": workspace_aliases,
-                    "displayName": f"{prefix} {name}",
-                    "layer": layer,
-                    "scopeId": str(item_id),
-                    "projectId": "" if kind == "products" else str(item_id),
-                    "datasourceName": datasource_name,
-                    "datasource": datasource,
-                    "sourceMode": source_mode,
-                    "sourceModeSource": source_mode_source,
-                    "sourceModePath": hub.workspace_source_mode_path(root),
-                    "capabilities": capabilities,
-                    "svn": svn,
-                    "checkoutPath": svn["checkoutPath"] if svn else None,
-                    "providerSourceRoot": svn["checkoutPath"] if svn else root / "source" / "readonly",
-                    "systemAliases": aliases,
-                    "systemMappings": system_mappings,
-                    "systems": item.get("systems") or {},
-                    "sourceScope": {
-                        "include": item.get("include") or {},
-                        "exclude": item.get("exclude") or {},
-                        "extraWhere": item.get("extra_where") or {},
-                    },
-                    "pageOrigins": [str(value).rstrip("/") for value in item.get("page_origins") or [] if str(value).strip()],
-                    "config": item,
-                    "configDir": hub.CONFIG_DIR,
-                    "root": root,
-                    "docsDir": root / "docs",
-                    "sourceDir": root / "source",
-                    "readonlyDir": root / "source" / "readonly",
-                    "workcopyDir": root / "source" / "workcopy",
-                    "databaseDir": root / "database",
-                    "contextDir": root / "context",
-                    "indexPath": root / "context" / "index.db",
-                    "statePath": root / "context" / "state.json",
-                    "logsDir": root / "context" / "logs",
-                }
-            )
-    _validate_workspace_storage_boundaries(workspaces)
-    hub._validate_svn_workspace_boundaries(workspaces)
-    return workspaces
+    if not base.is_absolute() or base in {Path("/"), Path.home()}:
+        raise SystemExit("Unsafe workspace_root")
+    return base / (
+        ("PRD " if kind == "products" else "PRJ ") + hub.path_part(item["name"])
+    )
 
 
 def list_workspaces(config, *, errors=None, strict=False):
-    """Keep unrelated valid workspaces usable; reject ambiguous identities on both sides."""
-    if strict:
-        return hub._list_workspaces_strict(config)
+    result = []
     diagnostics = errors if errors is not None else []
-    candidates = []
+    seen = set()
     for kind in ("products", "projects"):
-        section = config.get(kind, {})
-        entries = section.get(kind) if isinstance(section, dict) else None
-        if entries is not None and not isinstance(entries, dict):
-            diagnostics.append({"workspaceKey": kind, "code": "CONFIG_INVALID", "message": "registry must be a mapping"})
-            continue
-        for item_id, item in (entries or {}).items():
-            key = f"{kind}.{item_id}"
-            isolated = {**config, "products": {"products": {}}, "projects": {"projects": {}}}
-            isolated[kind] = {kind: {item_id: item}}
+        entries = (config.get(kind, {}) or {}).get(kind) or {}
+        if not isinstance(entries, dict):
+            raise SystemExit(kind + " must be a mapping")
+        for identifier, item in entries.items():
             try:
-                if not isinstance(item, dict):
-                    raise SystemExit("workspace entry must be a mapping")
-                candidates.extend(hub._list_workspaces_strict(isolated))
-            except (SystemExit, ValueError, TypeError, KeyError, OSError) as error:
-                diagnostics.append({"workspaceKey": key, "code": "CONFIG_INVALID", "message": str(error)})
-    invalid = set()
-    for index, left in enumerate(candidates):
-        for right in candidates[index + 1:]:
-            problem = ""
-            if left["id"] == right["id"]:
-                problem = "Duplicate workspace config id across products/projects"
-            elif left["kind"] == right["kind"] and left["name"] == right["name"]:
-                problem = "Duplicate workspace display name"
-            else:
-                try:
-                    _validate_workspace_storage_boundaries([left,right])
-                    hub._validate_svn_workspace_boundaries([left, right])
-                except SystemExit as error:
-                    problem = str(error)
-            if problem:
-                for workspace in (left, right):
-                    key = workspace["workspaceKey"]
-                    if key not in invalid:
-                        diagnostics.append({"workspaceKey": key, "code": "CONFIG_AMBIGUOUS", "message": problem})
-                        invalid.add(key)
-    return [workspace for workspace in candidates if workspace["workspaceKey"] not in invalid]
-
-
-def _validate_workspace_storage_boundaries(workspaces):
-    for index,left in enumerate(workspaces):
-        left_root=left['root'].resolve()
-        for right in workspaces[index+1:]:
-            right_root=right['root'].resolve()
-            if left_root==right_root or left_root in right_root.parents or right_root in left_root.parents:
-                raise SystemExit('Workspace storage roots overlap: '+left['workspaceKey']+' and '+right['workspaceKey'])
-
-
-def _validate_svn_workspace_boundaries(workspaces):
-    managed_paths = []
-    for workspace in workspaces:
-        if workspace.get("sourceMode") != "svn":
-            continue
-        if workspace["svn"].get("checkoutLayout") == "manifest-working-copies":
-            from providers.svn.nexus.manifest import load_authorized_scope
-
-            manifest_path = workspace["svn"].get("scopeManifestPath")
-            if not manifest_path or not manifest_path.is_file():
-                continue
-            paths = [(entry.root.resolve(), entry.id) for entry in load_authorized_scope(workspace).entries]
-        else:
-            paths = [(workspace["checkoutPath"].resolve(), "legacy-sparse")]
-        for path, entry_id in paths:
-            for other_path, other_workspace_key, other_entry_id in managed_paths:
-                if path == other_path or path in other_path.parents or other_path in path.parents:
-                    raise SystemExit(
-                        "SVN working-copy paths overlap across workspaces: "
-                        f"{workspace['workspaceKey']}/{entry_id} and {other_workspace_key}/{other_entry_id}"
+                identifier = validate_config_id(identifier)
+                key = validate_workspace_key(kind + "." + identifier)
+                if identifier in seen:
+                    raise ValueError("Duplicate project config ID")
+                seen.add(identifier)
+                if (
+                    not isinstance(item, dict)
+                    or not isinstance(item.get("name"), str)
+                    or not item["name"].strip()
+                ):
+                    raise ValueError("Missing workspace name")
+                root = resolve_workspace_storage_root(kind, identifier, item)
+                old = root / "context/source-mode.json"
+                if (
+                    old.is_file()
+                    and json.loads(old.read_text(encoding="utf-8")).get("sourceMode")
+                    != "api"
+                ):
+                    raise ValueError(
+                        "API_MIGRATION_REQUIRED: 原工作区需显式迁移；不会接管旧同步数据"
                     )
-            managed_paths.append((path, workspace["workspaceKey"], entry_id))
+                settings = item.get("api") or {}
+                if not isinstance(settings, dict):
+                    raise ValueError("api must be an object")
+                checkout_root = Path(
+                    settings.get("checkout_root") or Path(VAR_DIR) / "checkout"
+                ).expanduser()
+                if not checkout_root.is_absolute() or checkout_root.resolve() in {
+                    Path("/"),
+                    Path.home(),
+                }:
+                    raise ValueError(
+                        "api.checkout_root must be a safe absolute directory"
+                    )
+                checkout = (checkout_root / identifier).resolve()
+                if (
+                    root == checkout
+                    or root in checkout.parents
+                    or checkout in root.parents
+                ):
+                    raise ValueError("checkout and metadata roots overlap")
+                aliases = item.get("aliases", [])
+                if not isinstance(aliases, list) or any(
+                    not isinstance(x, str) or not x.strip() for x in aliases
+                ):
+                    raise ValueError("aliases must contain names")
+                result.append(
+                    {
+                        "workspaceKey": key,
+                        "kind": kind,
+                        "type": "product" if kind == "products" else "project",
+                        "id": identifier,
+                        "name": item["name"],
+                        "displayName": ("PRD " if kind == "products" else "PRJ ")
+                        + item["name"],
+                        "aliases": aliases,
+                        "layer": "PRODUCT" if kind == "products" else "PROJECT",
+                        "scopeId": key,
+                        "projectId": "" if kind == "products" else identifier,
+                        "sourceMode": "api",
+                        "root": root,
+                        "providerSourceRoot": checkout,
+                        "checkoutPath": checkout,
+                        "contextDir": root / "context",
+                        "docsDir": root / "docs",
+                        "logsDir": root / "context/logs",
+                        "indexPath": root / "context/index.db",
+                        "statePath": root / "context/state.json",
+                        "sourceModePath": root / "context/source-mode.json",
+                        "sourceModeSource": "api-only",
+                        "config": item,
+                        "configDir": CONFIG_DIR,
+                        "datasourceName": item.get("datasource", "")
+                        if isinstance(item.get("datasource", ""), str)
+                        else "",
+                        "datasource": {},
+                        "systemMappings": (
+                            (item.get("systems") or {}).get("include") or {}
+                        ).get("mappings")
+                        or {},
+                        "pageOrigins": item.get("page_origins") or [],
+                        "capabilities": {
+                            "api.configure": True,
+                            "api.pull": True,
+                            "api.status": True,
+                            "api.edit": True,
+                            "api.upload": True,
+                            "source.read": True,
+                            "source.index": True,
+                            "source.reindex": True,
+                            "source.edit": True,
+                            "database.diagnose": True,
+                        },
+                    }
+                )
+            except (ValueError, TypeError, KeyError, OSError) as error:
+                if strict:
+                    raise SystemExit(str(error)) from error
+                diagnostics.append(
+                    {
+                        "workspaceKey": str(kind) + "." + str(identifier),
+                        "code": "CONFIG_INVALID",
+                        "message": str(error),
+                    }
+                )
+    for i, left in enumerate(result):
+        for right in result[i + 1 :]:
+            for a in (left["root"], left["checkoutPath"]):
+                for b in (right["root"], right["checkoutPath"]):
+                    if a == b or a in b.parents or b in a.parents:
+                        raise SystemExit(
+                            "Project data roots overlap: "
+                            + left["workspaceKey"]
+                            + " / "
+                            + right["workspaceKey"]
+                        )
+    return result
 
 
 def resolve_workspace(config, value=None):
-    key = hub.workspace_key(value)
+    from common import gusen_hub as hub
+
+    key = value or hub._CURRENT_WORKSPACE.get() or os.environ.get(hub.WORKSPACE_ENV, "")
+    validate_workspace_key(key)
     errors = []
-    for workspace in hub.list_workspaces(config, errors=errors):
-        if workspace["workspaceKey"] == key:
-            return workspace
-    invalid = next((item for item in errors if item["workspaceKey"] == key), None)
-    if invalid:
-        raise SystemExit(f"{invalid['code']}: {key}: {invalid['message']}")
-    raise SystemExit(f"Unknown workspace: {key}")
-
-
-def resolve_workspace_for_path(config: dict, value: str | Path | None = None) -> dict:
-    """Resolve exactly one configured workspace containing a cwd or child path."""
-
-    candidate = Path(value or Path.cwd()).expanduser().resolve()
-    matches = []
-    for workspace in hub.list_workspaces(config):
-        root = workspace["root"].expanduser().resolve()
-        if candidate == root or root in candidate.parents:
-            matches.append((len(root.parts), workspace))
-    if not matches:
-        raise SystemExit(f"Path is not inside a configured workspace: {candidate}")
-    matches.sort(key=lambda item: item[0], reverse=True)
-    if len(matches) > 1 and matches[0][0] == matches[1][0]:
-        keys = ", ".join(item[1]["workspaceKey"] for item in matches if item[0] == matches[0][0])
-        raise SystemExit(f"Path matches multiple configured workspaces: {candidate}: {keys}")
-    return matches[0][1]
-
-
-def workspace_index_state(workspace: dict) -> dict:
-    """Return local index readiness without triggering synchronization or remote access."""
-
-    index_path = workspace["indexPath"]
-    index_size = index_path.stat().st_size if index_path.is_file() else 0
-    index_ready = False
-    if index_size:
-        try:
-            connection = sqlite3.connect(f"{index_path.resolve().as_uri()}?mode=ro", uri=True)
-            try:
-                columns = {
-                    row[1]
-                    for row in connection.execute("PRAGMA table_info(gusen_source_record)")
-                }
-                if {"scope_id", "source_namespace"}.issubset(columns):
-                    index_ready = connection.execute(
-                        "SELECT 1 FROM gusen_source_record WHERE scope_id=? LIMIT 1",
-                        (workspace["scopeId"],),
-                    ).fetchone() is not None
-                elif {"product_id", "project_id"}.issubset(columns):
-                    index_ready = connection.execute(
-                        "SELECT 1 FROM gusen_source_record WHERE product_id=? OR project_id=? LIMIT 1",
-                        (workspace["scopeId"], workspace["scopeId"]),
-                    ).fetchone() is not None
-            finally:
-                connection.close()
-        except sqlite3.Error:
-            index_ready = False
-    return {
-        "path": str(index_path),
-        "ready": index_ready,
-        "sizeBytes": index_size,
-        "requiredAction": "" if index_ready else "init-or-reindex",
-    }
-
-
-def index_first_examples(command: str, workspace_key: str) -> list[dict]:
-    """Return copy-ready bounded-query commands for one workspace and source mode."""
-
-    prefix = [command, "--home", str(hub.CONFIG_DIR.parent), "--workspace", workspace_key, "--"]
-    return [
-        {"intent": intent, "argv": [*prefix, *arguments]}
-        for intent, arguments in hub.INDEX_FIRST_EXAMPLE_ARGUMENTS.get(command, ())
+    matches = [
+        x for x in list_workspaces(config, errors=errors) if x["workspaceKey"] == key
     ]
+    if len(matches) != 1:
+        problem = next((x for x in errors if x["workspaceKey"] == key), None)
+        raise SystemExit(
+            problem["message"] if problem else "Unknown explicit API workspace: " + key
+        )
+    return matches[0]
 
 
-def workspace_agent_context(config: dict, workspace: dict) -> dict:
-    """Return the small, machine-readable context an agent needs before source lookup."""
+def resolve_workspace_for_path(config, path):
+    target = Path(path).expanduser().resolve()
+    matches = []
+    for item in list_workspaces(config):
+        if any(
+            target == base or base in target.parents
+            for base in (item["root"], item["providerSourceRoot"])
+        ):
+            matches.append(item)
+    if len(matches) != 1:
+        raise SystemExit("请选择唯一 API workspaceKey 或项目目录")
+    return matches[0]
 
-    query_command = "svn" if workspace["sourceMode"] == "svn" else "query"
+
+def workspace_index_state(workspace):
+    from providers.api.index import health
+
+    path = workspace["indexPath"]
+    state = health(workspace)
     return {
-        "workspaceKey": workspace["workspaceKey"],
-        "root": str(workspace["root"]),
-        "sourceMode": workspace["sourceMode"],
-        "sourceModeSource": workspace["sourceModeSource"],
-        "sourceModePath": str(workspace["sourceModePath"]),
-        "index": hub.workspace_index_state(workspace),
-        "indexFirst": {
-            "command": query_command,
-            "unknownObject": "find",
-            "knownLocalFact": "facts",
-            "tableOrBillWriteReason": "explain",
-            "sharedCallChain": "context",
-            "callersOfSharedFunction": "callers",
-            "examples": hub.index_first_examples(query_command, workspace["workspaceKey"]),
-            "note": (
-                "索引 ready 时首次源码定位必须执行上述有界查询；仅在索引未初始化、明确漏项或证据不足时"
-                "才改用定向文件检索，并在交付说明中写明原因。"
-            ),
-        },
-    }
-
-
-def _workspace_cockpit(summary: dict) -> dict:
-    index_ready = bool(summary["index"]["ready"])
-    status_failed = summary.get("status") == "FAILED"
-    working_copies = summary.get("workingCopies") or []
-    skipped_working_copies = summary.get("skippedWorkingCopies") or []
-    dirty_count = sum(not item.get("clean") for item in working_copies)
-    messages = []
-    if status_failed:
-        failure = summary.get("lastFailure") or {}
-        message = failure.get("message") if isinstance(failure, dict) else str(failure)
-        messages.append(message or "最近一次工作区操作失败")
-    if not index_ready:
-        messages.append("本地事实索引尚未就绪")
-    if summary.get("sourceMode") == "database" and not summary.get("datasourceReady"):
-        messages.append("DATABASE 数据源尚未配置")
-    if summary.get("status") == "PARTIAL":
-        messages.append("工作区资料尚未达到完整一致状态")
-    elif summary.get("status") == "UNINITIALIZED" and index_ready:
-        messages.append("工作区尚未完成初始化")
-    if skipped_working_copies:
-        messages.append(f"{len(skipped_working_copies)} 个 SVN scope 无权限或不存在，已跳过")
-    return {
-        "health": "FAILED" if status_failed else "ACTION_REQUIRED" if messages else "READY",
-        "issueCount": len(messages),
-        "indexReady": index_ready,
-        "workingCopyCount": len(working_copies),
-        "skippedWorkingCopyCount": len(skipped_working_copies),
-        "dirtyWorkingCopies": dirty_count,
-        "messages": messages,
+        "path": str(path),
+        **state,
+        "sizeBytes": path.stat().st_size if path.is_file() else 0,
+        "requiredAction": ""
+        if state.get("ready") and state.get("complete")
+        else "api-index",
     }
 
 
 def workspace_config_digest(config, workspace):
-    workspace_config = dict(workspace["config"])
-    workspace_config.pop("source_mode", None)
-    workspace_config.pop("aliases", None)  # Task navigation does not change source synchronization.
-    payload = {
-        "workspace": workspace_config,
-        "sourceMode": workspace["sourceMode"],
-        "datasource": workspace["datasource"],
-        "rules": config.get("sync", {}).get("rules") or {},
-        "sourceTables": config.get("source_tables") or {},
-    }
     return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
-
-
-def legacy_workspace_config_digest(config, workspace):
-    """Recognize state written before provider selection moved out of YAML."""
-
-    workspace_config = dict(workspace["config"])
-    workspace_config.pop("aliases", None)
-    workspace_config["source_mode"] = workspace["sourceMode"]
-    payload = {
-        "workspace": workspace_config,
-        "datasource": workspace["datasource"],
-        "rules": config.get("sync", {}).get("rules") or {},
-        "sourceTables": config.get("source_tables") or {},
-    }
-    return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        json.dumps(
+            {"key": workspace["workspaceKey"], "config": workspace["config"]},
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode()
     ).hexdigest()
 
 
 def load_workspace_state(config, workspace):
-    path = workspace["statePath"]
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        state = {}
-    digest = hub.workspace_config_digest(config, workspace)
-    digest_matches = state.get("configDigest") in {
-        digest,
-        hub.legacy_workspace_config_digest(config, workspace),
-    }
-    steps = state.get("steps") if isinstance(state.get("steps"), dict) else {}
-    all_synced = digest_matches and all(
-        (steps.get(step) or {}).get("status") == "SUCCESS" for step in hub.workspace_steps(workspace)
-    )
-    if not state:
-        status = "UNINITIALIZED"
-    elif all_synced:
-        status = "SYNCED"
-    elif digest_matches and any((steps.get(step) or {}).get("status") == "PARTIAL" for step in hub.workspace_steps(workspace)):
-        status = "PARTIAL"
-    elif digest_matches and state.get("lastFailure"):
-        status = "FAILED"
-    else:
-        status = "PARTIAL"
-    return {
-        "workspaceKey": workspace["workspaceKey"],
-        "configDigest": digest,
-        "status": status,
-        "lastFullSyncAt": state.get("lastFullSyncAt") or "",
-        "steps": steps,
-        "lastFailure": state.get("lastFailure"),
-    }
-
-
-def update_workspace_state(config, workspace, step=None, status=None, error="", full_sync=False):
-    with hub.file_lock(workspace["contextDir"] / ".state.lock"):
-        hub.ensure_workspace_structure(workspace)
-        state = hub.load_workspace_state(config, workspace)
-        state["configDigest"] = hub.workspace_config_digest(config, workspace)
-        state.pop("status", None)
-        now = hub._now()
-        if step:
-            state.setdefault("steps", {})[step] = {"status": status, "updatedAt": now}
-        if error:
-            state["lastFailure"] = {"step": step or "", "message": str(error)[:1000], "time": now}
-        elif status == "SUCCESS" and (state.get("lastFailure") or {}).get("step") == step:
-            state["lastFailure"] = None
-        if full_sync:
-            state["lastFullSyncAt"] = now
-            state["lastFailure"] = None
-        state_path = workspace["statePath"]
-        hub.svn_checkout.atomic_json(state_path, state)
-        return hub.load_workspace_state(config, workspace)
-
-
-def _svn_source_control_groups(workspace, working_copies):
-    mappings = workspace.get("systemMappings") or {}
-    root_copy = next(
-        (item for item in working_copies if isinstance(item, dict) and item.get("category") == "root"),
-        None,
-    )
-    if root_copy:
-        system_ids = sorted({
-            str(mapping.get("system_id") or "").strip()
-            for mapping in mappings.values()
-            if isinstance(mapping, dict) and str(mapping.get("system_id") or "").strip()
-        })
-        return [{
-            "id": "repository-root",
-            "label": workspace.get("name") or workspace.get("workspaceKey") or "SVN 仓库",
-            "dataSourceId": "",
-            "systemIds": system_ids,
-            "systemNames": [],
-            "workingCopyIds": [str(root_copy.get("id") or "repository-root")],
-            "inferred": False,
-        }]
-
-    def checkout_name(local_subdir):
-        return hub.group_inference.checkout_name(workspace["checkoutPath"] / local_subdir)
-
-    inferred = None
-    effective_mappings = mappings
-    if not mappings:
-        inferred = hub.group_inference.infer_groups(workspace["checkoutPath"], working_copies)
-        effective_mappings = {
-            f"inferred.{system_id}": {
-                "system_id": system_id,
-                "data_source_id": match["dataSourceId"],
-                "inference": match,
-            }
-            for system_id, match in inferred["matches"].items()
+        return json.loads(workspace["statePath"].read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {
+            "status": "UNINITIALIZED",
+            "steps": {},
+            "lastFullSyncAt": None,
+            "lastFailure": None,
         }
 
-    systems_by_data_source = {}
-    for mapping in effective_mappings.values():
-        if not isinstance(mapping, dict):
-            continue
-        data_source_id = str(mapping.get("data_source_id") or "").strip()
-        system_id = str(mapping.get("system_id") or "").strip()
-        if not data_source_id or not system_id:
-            continue
-        group = systems_by_data_source.setdefault(data_source_id, {"systemIds": [], "systemNames": []})
-        if system_id not in group["systemIds"]:
-            group["systemIds"].append(system_id)
-        system_name = checkout_name(f"systems/{system_id}")
-        if system_name and system_name not in group["systemNames"]:
-            group["systemNames"].append(system_name)
 
-    copy_ids_by_subdir = {
-        str(item.get("localSubdir") or "").strip().replace("\\", "/"): str(item.get("id") or "").strip()
-        for item in working_copies
-        if isinstance(item, dict) and str(item.get("id") or "").strip()
-    }
-    assigned = set()
-    groups = []
-    for data_source_id, system_group in systems_by_data_source.items():
-        subdirs = [f"datasources/{data_source_id}"] + [
-            f"systems/{system_id}" for system_id in system_group["systemIds"]
-        ]
-        working_copy_ids = [copy_ids_by_subdir[subdir] for subdir in subdirs if subdir in copy_ids_by_subdir]
-        assigned.update(working_copy_ids)
-        system_names = system_group["systemNames"]
-        datasource_name = checkout_name(f"datasources/{data_source_id}")
-        display_name = (
-            datasource_name
-            if datasource_name
-            else system_names[0]
-            if len(system_names) == 1
-            else " / ".join(system_names)
-            if system_names
-            else f"{data_source_id} 子系统"
-        )
-        groups.append({
-            "id": f"{'subsystem' if mappings else 'inferred-subsystem'}-flat-{data_source_id}",
-            "label": display_name,
-            "dataSourceId": data_source_id,
-            "systemIds": system_group["systemIds"],
-            "systemNames": system_group["systemNames"],
-            "workingCopyIds": working_copy_ids,
-            "inferred": not bool(mappings),
-        })
+def update_workspace_state(
+    config, workspace, step=None, status=None, error="", full_sync=False
+):
+    from common import gusen_hub as hub
 
-    remaining = {
-        str(item.get("localSubdir") or "").strip().replace("\\", "/"):
-            str(item.get("id") or "").strip()
-        for item in working_copies
-        if isinstance(item, dict)
-        and str(item.get("id") or "").strip()
-        and str(item.get("id") or "").strip() not in assigned
+    value = load_workspace_state(config, workspace)
+    if step:
+        value.setdefault("steps", {})[step] = {
+            "status": status,
+            "updatedAt": hub._now(),
+        }
+    value["status"] = status or value.get("status", "UNINITIALIZED")
+    if error:
+        value["lastFailure"] = {"step": step, "message": str(error), "at": hub._now()}
+    elif status == "SUCCESS":
+        value["lastFailure"] = None
+    if full_sync and status == "SUCCESS":
+        value["lastFullSyncAt"] = hub._now()
+    atomic_text(
+        workspace["statePath"], json.dumps(value, ensure_ascii=False, indent=2) + "\n"
+    )
+    return value
+
+
+def workspace_agent_context(config, workspace):
+    return {
+        "ok": True,
+        "workspaceKey": workspace["workspaceKey"],
+        "root": str(workspace["root"]),
+        "checkoutPath": str(workspace["checkoutPath"]),
+        "sourceMode": "api",
+        "sourceModeSource": "api-only",
+        "index": workspace_index_state(workspace),
+        "indexFirst": {
+            "command": "api",
+            "unknownObject": "search",
+            "knownLocalFact": "context",
+            "callersOfSharedFunction": "callers",
+            "examples": [
+                {
+                    "intent": "unknownObject",
+                    "argv": [
+                        "api",
+                        "--home",
+                        str(CONFIG_DIR.parent),
+                        "--workspace",
+                        workspace["workspaceKey"],
+                        "--",
+                        "search",
+                        "--stdin",
+                    ],
+                }
+            ],
+        },
     }
-    if inferred:
-        for item in inferred["unmatchedSystems"]:
-            system_id = item["systemId"]
-            working_copy_id = remaining.pop(f"systems/{system_id}", "")
-            if working_copy_id:
-                groups.append({
-                    "id": f"unmatched-system-flat-{system_id}",
-                    "label": item["systemName"] or f"{system_id} 业务系统",
-                    "dataSourceId": "",
-                    "systemIds": [system_id],
-                    "systemNames": [item["systemName"]] if item["systemName"] else [],
-                    "workingCopyIds": [working_copy_id],
-                    "inferred": True,
-                    "unmatched": True,
-                })
-        for item in inferred["unmatchedDatasources"]:
-            data_source_id = item["dataSourceId"]
-            working_copy_id = remaining.pop(f"datasources/{data_source_id}", "")
-            if working_copy_id:
-                groups.append({
-                    "id": f"unmatched-datasource-flat-{data_source_id}",
-                    "label": item["dataSourceName"] or f"{data_source_id} 数据源",
-                    "dataSourceId": data_source_id,
-                    "systemIds": [],
-                    "systemNames": [],
-                    "workingCopyIds": [working_copy_id],
-                    "inferred": True,
-                    "unmatched": True,
-                })
-    remaining_ids = [working_copy_id for working_copy_id in remaining.values() if working_copy_id]
-    if remaining_ids:
-        groups.append({
-            "id": "shared-flat",
-            "label": "公共源码",
-            "dataSourceId": "",
-            "systemIds": [],
-            "systemNames": [],
-            "workingCopyIds": remaining_ids,
-        })
-    return groups
 
 
 def workspace_summary(config, workspace):
-    state = hub.load_workspace_state(config, workspace)
-    summary = {
-        "workspaceKey": workspace["workspaceKey"],
-        "type": workspace["type"],
-        "id": workspace["id"],
-        "name": workspace["name"],
-        "aliases": workspace.get("aliases", []),
-        "displayName": workspace["displayName"],
-        "root": str(workspace["root"]),
-        "sourceMode": workspace["sourceMode"],
-        "sourceModeSource": workspace["sourceModeSource"],
-        "sourceModePath": str(workspace["sourceModePath"]),
-        "providerSourceRoot": str(workspace["providerSourceRoot"]),
-        "checkoutPath": str(workspace["checkoutPath"]) if workspace.get("checkoutPath") else "",
-        "datasourceName": workspace.get("datasourceName") or "",
-        "datasourceReady": bool(workspace.get("datasourceName") and workspace.get("datasource")),
-        "capabilities": workspace["capabilities"],
-        "status": state["status"],
-        "lastFullSyncAt": state["lastFullSyncAt"],
-        "steps": state["steps"],
-        "lastFailure": state["lastFailure"],
+    state = load_workspace_state(config, workspace)
+    index = workspace_index_state(workspace)
+    result = {
+        k: workspace[k]
+        for k in (
+            "workspaceKey",
+            "type",
+            "id",
+            "name",
+            "displayName",
+            "aliases",
+            "sourceMode",
+            "capabilities",
+            "sourceModeSource",
+        )
     }
-    if workspace.get("sourceMode") == "svn" and workspace["svn"].get("checkoutLayout") == "manifest-working-copies":
-        from providers.svn.nexus.workspace import load_state
+    result.update(
+        root=str(workspace["root"]),
+        checkoutPath=str(workspace["checkoutPath"]),
+        providerSourceRoot=str(workspace["providerSourceRoot"]),
+        datasourceName=workspace["datasourceName"],
+        datasourceReady=False,
+        index=index,
+        status=state.get("status", "UNINITIALIZED"),
+        lastFullSyncAt=state.get("lastFullSyncAt"),
+        lastFailure=state.get("lastFailure"),
+        steps=state.get("steps", {}),
+    )
+    result["cockpit"] = {
+        "health": "READY"
+        if index["ready"] and index.get("complete")
+        else "ACTION_REQUIRED",
+        "indexReady": index["ready"],
+        "issueCount": index.get("partialSourceCount", 0) if index["ready"] else 1,
+        "messages": (
+            ["当前项目索引存在未解析对象"] if index.get("partialSourceCount") else []
+        )
+        if index["ready"]
+        else ["当前项目索引待建立或范围已变化"],
+    }
+    return result
 
-        checkout_state = load_state(workspace, required=False)
-        summary["checkoutLayout"] = "manifest-working-copies"
-        manifest_path = workspace["svn"].get("scopeManifestPath")
-        checkout_script_path = workspace["svn"].get("checkoutScriptPath")
-        scope_config_path = workspace["svn"].get("scopeConfigPath")
-        scope_entries = workspace["svn"].get("scopeEntries")
-        summary["scopeManifestPath"] = str(manifest_path) if manifest_path else ""
-        summary["scopeManifestReady"] = bool(manifest_path and manifest_path.is_file())
-        summary["scopeConfigPath"] = str(scope_config_path) if scope_config_path else ""
-        summary["scopeConfigReady"] = bool(
-            workspace["svn"].get("scopeRootUrl")
-            or scope_entries is not None
-            or (workspace["svn"].get("scopeConfigExplicit") and scope_config_path and scope_config_path.is_file())
-        )
-        summary["scopeRootUrl"] = workspace["svn"].get("scopeRootUrl") or ""
-        summary["checkoutScriptPath"] = str(checkout_script_path) if checkout_script_path else ""
-        summary["checkoutScriptReady"] = bool(checkout_script_path and checkout_script_path.is_file())
-        # Compatibility for clients released before checkout scripts became platform-neutral.
-        summary["checkoutBatPath"] = summary["checkoutScriptPath"]
-        summary["checkoutBatReady"] = summary["checkoutScriptReady"]
-        summary["svnLoginRequired"] = True
-        summary["svnUsernameSource"] = "sync.yaml"
-        summary["svnUsername"] = workspace["svn"].get("username") or ""
-        summary["workingCopies"] = [
-            {
-                "id": item.get("id") or "",
-                "root": item.get("root") or "",
-                "localSubdir": item.get("localSubdir") or "",
-                "category": item.get("category") or "",
-                "scopeEntryId": item.get("id") or "",
-                "revision": item.get("revision") or "",
-                "clean": bool(item.get("clean")),
-            }
-            for item in checkout_state.get("workingCopies") or []
-        ]
-        summary["skippedWorkingCopies"] = [
-            {
-                "id": item.get("id") or "",
-                "localSubdir": item.get("localSubdir") or "",
-                "category": item.get("category") or "",
-                "reason": item.get("reason") or "",
-            }
-            for item in checkout_state.get("skipped") or []
-            if isinstance(item, dict)
-        ]
-        summary["sourceControlGroups"] = hub._svn_source_control_groups(
-            workspace,
-            summary["workingCopies"],
-        )
-        summary["delivery"] = hub._svn_delivery_state(workspace)
-    summary["index"] = hub.workspace_index_state(workspace)
-    summary["cockpit"] = hub._workspace_cockpit(summary)
-    return summary
+
+def workspace_matches_request(workspace, request):
+    from providers.api.workspace import settings, active_scope
+
+    requested = request.get("workspaceKey")
+    if requested and requested != workspace["workspaceKey"]:
+        return False
+    origin = request.get("pageOrigin") or request.get("origin")
+    config = settings(workspace)
+    if origin:
+        if not isinstance(origin, str):
+            return False
+        parsed = urlsplit(config.get("serverUrl") or "")
+        if origin.rstrip("/") != (parsed.scheme + "://" + parsed.netloc).rstrip("/"):
+            return False
+    if not requested and not origin:
+        return False
+    scope = active_scope(workspace)
+    system = request.get("systemId")
+    data_source = request.get("dataSourceId")
+    if system and str(system) not in scope["systemIds"]:
+        return False
+    if data_source and str(data_source) not in scope["dataSourceIds"]:
+        return False
+    return True
+
+
+def route_workspace_request(config, request):
+    matches = [
+        x for x in list_workspaces(config) if workspace_matches_request(x, request)
+    ]
+    if len(matches) != 1:
+        return {
+            "ok": False,
+            "code": "WORKSPACE_AMBIGUOUS" if matches else "WORKSPACE_NOT_FOUND",
+            "candidates": [workspace_summary(config, x) for x in matches],
+        }
+    selected = matches[0]
+    return {
+        "ok": True,
+        "workspaceKey": selected["workspaceKey"],
+        "workspace": workspace_summary(config, selected),
+        **workspace_summary(config, selected),
+    }

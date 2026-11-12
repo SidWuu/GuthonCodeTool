@@ -49,43 +49,30 @@ async function prepareWorkspaceSetup(config, window) {
   return { mode: 'setup', toolHome: selectedHome };
 }
 
-function workspaceActions(item) {
-  const capability = (name) => Boolean(item.capabilities?.[name]);
-  if (item.sourceMode === 'svn') {
-    return {
-      source: [
-        ['搜索工作区完整索引', 'gushenCompletion.searchWorkspace', 'search'],
-        capability('svn.initialize') && ['检出/更新完整 SVN 仓库', 'gushenCompletion.initializeSvn', 'repo-clone'],
-        capability('svn.reindex') && ['扫描/重建本地 SVN 索引', 'gushenCompletion.reindexCalls', 'refresh'],
-        capability('svn.browse') && ['查看谷神同步源码', 'gushenCompletion.focusSvnSource', 'list-tree'],
-        capability('svn.status') && ['管理本地源码变更', 'gushenCompletion.manageSvnChanges', 'source-control'],
-        ['导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book'],
-      ].filter(Boolean),
-      workcopy: [],
-      metadata: [['配置数据库只读目标', 'gushenCompletion.configureDatabaseDiagnosis', 'database']],
-      diagnose: false,
-      syncAll: undefined,
-    };
-  }
-  return {
-    source: [
-      ['搜索工作区完整索引', 'gushenCompletion.searchWorkspace', 'search'],
-      ['拉取源码重建索引', 'gushenCompletion.initSourceIndex', 'database'],
-      ['拉取源码', 'gushenCompletion.syncWorkspaceSource', 'sync'],
-      ['重建索引', 'gushenCompletion.reindexCalls', 'refresh'],
-      ['导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book'],
-    ],
-    workcopy: [['检查或打包 Workcopy', 'gushenCompletion.inspectWorkcopy', 'package']],
-    metadata: [
-      ['配置数据库只读目标', 'gushenCompletion.configureDatabaseDiagnosis', 'database'],
-      ['导出表结构', 'gushenCompletion.exportSchema', 'table'],
-      ['导出单据类型', 'gushenCompletion.exportBillTypes', 'list-tree'],
-      ['导出系统脚本', 'gushenCompletion.exportSystemScripts', 'file-code'],
-      ['导出视图源码', 'gushenCompletion.exportViews', 'eye'],
-    ],
-    diagnose: true,
-    syncAll: ['同步工作区全部资料', 'gushenCompletion.syncWorkspaceAll', 'cloud-download'],
-  };
+function workspaceActions() {
+  return {source:[
+    ['配置 API 项目地址','gushenCompletion.configureApiSource','settings-gear'],
+    ['登录 API 项目','gushenCompletion.loginApiSource','key'],
+    ['选择拉取的子系统','gushenCompletion.selectApiSystems','list-selection'],
+    ['通过 API 拉取源码','gushenCompletion.pullApiSource','cloud-download'],
+    ['搜索当前项目源码','gushenCompletion.searchWorkspace','search'],
+    ['查看源码树','gushenCompletion.focusApiSource','list-tree'],
+    ['重建源码索引','gushenCompletion.reindexCalls','refresh'],
+    ['重试待更新索引','gushenCompletion.retryApiIndexFailures','refresh'],
+    ['在独立窗口打开项目','gushenCompletion.openApiCheckout','folder-opened'],
+    ['查看 API 源码状态','gushenCompletion.showApiStatus','info'],
+    ['查看 API 操作历史','gushenCompletion.showApiHistory','history'],
+    ['导出本地修改包','gushenCompletion.exportApiChanges','export'],
+    ['预览并导入本地修改包','gushenCompletion.importApiChanges','import'],
+    ['查看系统菜单','gushenCompletion.showApiSystemMenu','list-tree'],
+  ],metadata:[
+    ['配置数据库只读目标','gushenCompletion.configureDatabaseDiagnosis','database'],
+    ['导出表结构','gushenCompletion.exportSchema','table'],
+    ['导出单据类型','gushenCompletion.exportBillTypes','list-tree'],
+    ['导出系统脚本','gushenCompletion.exportSystemScripts','file-code'],
+    ['导出视图源码','gushenCompletion.exportViews','eye'],
+    ['导出源码索引文档','gushenCompletion.exportMarkdown','book'],
+  ],diagnose:true,syncAll:undefined};
 }
 
 function suggestedWorkspaceId(name, kind, now = new Date()) {
@@ -130,17 +117,12 @@ async function promptWorkspaceCreation(window, workspaces, _toolHome, now = new 
     },
   });
   if (id === undefined) return undefined;
-  const source = await window.showQuickPick([
-    { label: 'SVN', description: '先创建 Nexus，再在项目节点中设置登录和导入范围', value: 'svn' },
-    { label: 'DATABASE', description: '先创建 Nexus，后续再补充数据源配置', value: 'database' },
-  ], { title: '选择源码来源' });
-  if (!source) return undefined;
 
   return {
     kind: kindChoice.value,
     id: id.trim(),
     name: name.trim(),
-    sourceMode: source.value,
+    sourceMode: 'api',
   };
 }
 

@@ -143,12 +143,12 @@ def select_workspace(config, *, workspace_key="", name="", kind="", path=None,
         if path:
             candidate = Path(path).expanduser().resolve()
             conflicting = [item for item in pool if item["workspaceKey"] != current_workspace
-                           and (candidate == item["root"].resolve() or item["root"].resolve() in candidate.parents)]
+                           and (any(candidate == base.resolve() or base.resolve() in candidate.parents for base in (item['root'],item['providerSourceRoot'])))]
             if conflicting:
                 return failure("WORKSPACE_CONFLICT", "cwd differs from the conversation target; select explicitly", conflicting)
     if selected is None and path:
         candidate = Path(path).expanduser().resolve()
-        matches = [item for item in pool if candidate == item["root"].resolve() or item["root"].resolve() in candidate.parents]
+        matches = [item for item in pool if any(candidate == base.resolve() or base.resolve() in candidate.parents for base in (item['root'],item['providerSourceRoot']))]
         if matches:
             matches.sort(key=lambda item: len(item["root"].parts), reverse=True)
             selected, source = matches[0], "path"

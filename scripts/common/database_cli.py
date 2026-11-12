@@ -145,7 +145,7 @@ def run(command, parsed, hub, tool_config, workspace=None):
     history_sql = ''
     try:
         if command=='diagnosis-template' and getattr(parsed,'case_out',''):
-            from providers.database.run_source_diagnosis import validate_datasource
+            from common.source_diagnosis import validate_datasource
             name,datasource=hub.resolve_datasource(tool_config,parsed.datasource)
             validate_datasource(name,datasource)
             if datasource.get('object') and datasource['object']!=resolved['workspaceKey']:
