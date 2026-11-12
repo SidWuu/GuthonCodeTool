@@ -65,7 +65,7 @@ async function promptDatabaseDiagnosis(window, workspaceKey, { listTargets } = {
   }
   const scope = await window.showQuickPick([
     { label: '快速只读排查', value: 'diagnosis-only', description: '用于有界排查，不可运行正式验证计划' },
-    { label: '正式只读验证', value: 'full', description: '需明确系统、数据源、表范围、租户字段及身份核验证据' },
+    { label: '正式只读验证', value: 'full', description: '需明确系统、数据源、租户字段及范围/身份核验证据' },
   ], { title: `选择验证范围 · ${targetId}` });
   if (!scope) return undefined;
   if (existing) {
@@ -147,17 +147,13 @@ async function promptFormalScope(window) {
   const fields = [
     ['systemId', '准确业务系统 ID', '使用已核验的业务系统 ID'],
     ['dataSourceId', '准确数据源 ID', '使用已核验的数据源 ID'],
-    ['allowedTables', '允许查询的表', '明确表名，以英文逗号分隔'],
     ['tenantField', '租户/组织范围字段', '填写已核验的普通字段名'],
-    ['tenantEvidence', '租户字段核验证据引用', '填写实际证据引用，例如核验记录文件路径或记录 ID'],
+    ['tenantEvidence', '租户字段核验证据引用', '填写已核验机构/租户及业务键范围的证据引用'],
     ['evidenceRef', '数据库身份核验证据引用', '已核验 engine、endpoint、database、schema 的实际证据引用'],
   ];
   const values = {};
   for (const [field, title, prompt] of fields) {
     const validateInput = (text) => {
-      if (field === 'allowedTables') {
-        try { parseAllowedTables(text); return undefined; } catch (error) { return error.message; }
-      }
       if (field === 'tenantField') return identifier.test(text) ? undefined : '请输入有效字段名';
       return actualEvidence(text) ? undefined : '必须填写实际值，不允许占位内容';
     };
@@ -169,7 +165,6 @@ async function promptFormalScope(window) {
   }
   return {
     systemId: values.systemId, dataSourceId: values.dataSourceId,
-    allowedTables: parseAllowedTables(values.allowedTables),
     tenantScope: { field: values.tenantField, evidenceRef: values.tenantEvidence },
     evidenceRef: values.evidenceRef,
   };

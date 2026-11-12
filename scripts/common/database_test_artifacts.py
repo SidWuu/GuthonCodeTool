@@ -41,7 +41,7 @@ TARGET_FIELDS = {"id", "systemId", "dataSourceId", "connectionId", "connectionRe
 IDENTITY_REQUIRED = {"engine", "endpoint", "database", "evidenceRef"}
 CONNECTION_REQUIRED = {"engine", "host", "port", "database", "username"}
 TARGET_REQUIRED = {"id", "database", "environment", "access", "expectedIdentityRef"}
-FULL_TARGET_REQUIRED = {"systemId", "dataSourceId", "allowedTables", "tenantScope"}
+FULL_TARGET_REQUIRED = {"systemId", "dataSourceId", "tenantScope"}
 
 
 class ArtifactError(ValueError):
@@ -257,8 +257,6 @@ def validate_target(target: Any, workspace_key: str, identities: dict, connectio
     if target.get("schema") and not IDENTIFIER.fullmatch(str(target["schema"])):
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的 schema 无效")
     tables = target.get("allowedTables", [])
-    if validation_scope == "full" and (not isinstance(tables, list) or not tables or "*" in tables):
-        raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 必须配置非通配 allowedTables")
     if not isinstance(tables, list) or any(not isinstance(table, str) or not IDENTIFIER.fullmatch(table) for table in tables):
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 包含无效表名")
     if len(set(tables)) != len(tables):
@@ -292,9 +290,11 @@ def validate_target(target: Any, workspace_key: str, identities: dict, connectio
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的 tenantScope 必须是对象")
     _reject_unknown(tenant_scope, {"field", "evidenceRef"}, f"target {target['id']} tenantScope")
     _require_keys(tenant_scope, {"field", "evidenceRef"}, f"target {target['id']} tenantScope")
-    if not IDENTIFIER.fullmatch(str(tenant_scope["field"])):
+    if not isinstance(tenant_scope["field"], str) or not IDENTIFIER.fullmatch(tenant_scope["field"]):
         raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的租户字段无效")
-    if _is_placeholder(str(tenant_scope["evidenceRef"])):
+    if not isinstance(tenant_scope["evidenceRef"], str):
+        raise ArtifactError("CONFIG_INVALID", f"target {target['id']} 的租户证据必须是字符串")
+    if _is_placeholder(tenant_scope["evidenceRef"]):
         raise ArtifactError("ENVIRONMENT_UNVERIFIED", f"target {target['id']} 的租户证据仍是占位值")
 
 
@@ -501,14 +501,11 @@ def validate_sql_scope(sql: str, target: dict, case_id: str, step_id: str) -> No
         raise ArtifactError("QUERY_UNSUPPORTED", f"用例 {case_id} 步骤 {step_id}: {error}") from error
     if not found:
         raise ArtifactError("QUERY_UNSUPPORTED", f"用例 {case_id} 步骤 {step_id} 无法识别数据表")
-    allowed = {str(table).lower() for table in target["allowedTables"]}
     expected = str(target.get("schema") or target["database"]).lower()
     for reference in found:
         parts = reference.split(".")
         if len(parts) > 2 or (len(parts) == 2 and parts[0].lower() != expected):
             raise ArtifactError("CROSS_DATABASE_DENIED", f"用例 {case_id} 步骤 {step_id} 引用了未授权数据库或 schema")
-        if parts[-1].lower() not in allowed:
-            raise ArtifactError("TABLE_DENIED", f"用例 {case_id} 步骤 {step_id} 引用了未授权表: {parts[-1]}")
 
 
 def validate_assertion(assertion: dict) -> None:
@@ -960,7 +957,7 @@ def build_plan_template(config: dict, workspace_key: str, *, system_id: str, dat
     qualifier = str(target.get("schema") or target["database"])
     checks = [
         {"id": f"check-{index}", "sql": f"SELECT COUNT(*) AS row_count FROM {qualifier}.{table}", "assert": {"type": "scalar_equals", "column": "row_count", "valueType": "integer", "expected": "<expected-row-count>"}}
-        for index, table in enumerate(target["allowedTables"], 1)
+        for index, table in enumerate(target.get("allowedTables") or ["<source-table>"], 1)
     ]
     return {
         "schemaVersion": SCHEMA_VERSION,

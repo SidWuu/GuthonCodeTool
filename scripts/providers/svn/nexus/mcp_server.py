@@ -76,14 +76,9 @@ TOOLS = [
            "path": STRING, "prompt": {"type": "string", "maxLength": 16000}, "currentWorkspaceKey": STRING}, []),
     _tool("get_index_status", "Read PAGE node index readiness without changing the index.",
           {"workspaceKey": STRING}, ["workspaceKey"]),
-    _tool("get_source_index_status", "Read shared SVN object catalog readiness independently of PAGE projections.",
-          {"workspaceKey": STRING}, ["workspaceKey"]),
     _tool("search_sources", "Search indexed source identities with deterministic pagination.",
           {"workspaceKey": STRING, "keyword": STRING, "sourceType": STRING,
            "limit": INTEGER, "cursor": STRING}, ["workspaceKey", "keyword"]),
-    _tool("read_procedure", "Read a bounded current SVN procedure without opening an edit lease.",
-          {**PAGE, "workingCopyId": STRING, "offset": INTEGER, "maxChars": INTEGER},
-          ["workspaceKey", "sourceNamespace", "sourceId", "funId"]),
     _tool("list_procedure_callers", "Read bounded indexed caller evidence for an exact SVN procedure.",
           {**PAGE, "workingCopyId": STRING, "limit": INTEGER, "cursor": STRING},
           ["workspaceKey", "sourceNamespace", "sourceId", "funId"]),
@@ -146,13 +141,13 @@ TOOLS += [
           {"workspaceKey": STRING, "tableName": STRING, "billTypeCode": STRING, "dataSourceId": STRING,
            "operation": STRING, "limit": INTEGER, "factLimit": INTEGER, "callerDepth": INTEGER,
            "continuation": INTEGER, "includeDetails": BOOLEAN}, ["workspaceKey"]),
-    _tool("read_source_document", "Read a current exact SVN object or JSON subtree without creating an edit lease. Use offset and nextOffset for bounded windows.",
+    _tool("read_source_document", "Read a current exact SVN object or JSON subtree without creating an edit lease. For procedure source, set sourceType to procedure and pass sourceNamespace, sourceId, funId and the exact workingCopyId when ambiguous. Use offset and nextOffset for bounded windows.",
           {**LOCATOR, "maxChars": INTEGER}, ["workspaceKey", "sourceType", "sourceNamespace", "sourceId"]),
     _tool("read_objects_batch", "Read up to 20 exact source objects within one total character budget; inspect per-object errors and nextOffset.",
           {"workspaceKey": STRING, "objects": {"type": "array", "minItems": 1, "maxItems": 20,
             "items": {"type": "object", "properties": {key: value for key, value in LOCATOR.items() if key != "workspaceKey"},
                       "required": ["sourceType", "sourceNamespace", "sourceId"], "additionalProperties": False}}, "maxChars": INTEGER}, ["workspaceKey", "objects"]),
-    _tool("get_index_health", "Read index readiness, partial errors, stale identities and PAGE projection gaps; no SVN or source-file scan.",
+    _tool("get_index_health", "Read shared SVN source catalog readiness independently of PAGE projections, plus partial errors, stale identities and PAGE projection gaps; no SVN or source-file scan.",
           {"workspaceKey": STRING, "limit": INTEGER}, ["workspaceKey"]),
     _tool("list_sources", "Page through source identities and compact indexed semantic counts in one namespace.",
           {"workspaceKey": STRING, "sourceNamespace": STRING, "sourceType": STRING, "limit": INTEGER, "cursor": STRING}, ["workspaceKey"]),
@@ -168,8 +163,6 @@ TOOLS += [
           {"workspaceKey": STRING, "tableName": STRING, "columnName": STRING, "limit": INTEGER, "cursor": STRING, "graph": BOOLEAN}, ["workspaceKey", "tableName"]),
     _tool("inspect_operations", "Inspect paged PAGE/procedure operation journals and report incomplete or damaged records without changing files.",
           {"workspaceKey": STRING, "limit": INTEGER, "cursor": STRING}, ["workspaceKey"]),
-    _tool("check_operation_gc", "Preview completed inactive operation journals older than before (ISO date); return an exact plan confirmation hash, pending/corrupt journals block GC.",
-          {"workspaceKey": STRING, "before": STRING}, ["workspaceKey", "before"]),
     _tool("list_changed_sources", "Read source ADDED/MODIFIED/DELETED events since a known index generation; unavailable history requires a new bounded source listing.",
           {"workspaceKey": STRING, "sinceGeneration": STRING, "limit": INTEGER, "cursor": STRING}, ["workspaceKey", "sinceGeneration"]),
 ]
@@ -300,8 +293,6 @@ WRITE_TOOLS += [
           {"workspaceKey": STRING, "editToken": STRING}, ["workspaceKey", "editToken"], read_only=False),
     _tool("release_edit_lease", "Release one exact document and its edit tokens; preserve source files and other editors. Pending operations must be recovered first.",
           {"workspaceKey": STRING, "sessionId": STRING, "documentId": STRING}, ["workspaceKey", "sessionId", "documentId"], read_only=False),
-    _tool("gc_operations", "Archive completed inactive journals only after confirming the unchanged check_operation_gc plan hash; never discard pending/corrupt records or source files.",
-          {"workspaceKey": STRING, "before": STRING, "confirmation": STRING}, ["workspaceKey", "before", "confirmation"], read_only=False),
 ]
 
 for _platform_tool in TOOLS + WRITE_TOOLS:
@@ -541,14 +532,11 @@ class PageMcpServer:
                 return edit_leases.renew_edit_token(workspace, edit_token=_require_string(arguments, "editToken"))
             return edit_leases.release_edit_lease(workspace, session_id=_require_string(arguments, "sessionId"),
                                                   document_id=_require_string(arguments, "documentId"))
-        if name in {"inspect_operations", "check_operation_gc", "gc_operations"}:
+        if name == "inspect_operations":
             from . import operation_maintenance
 
-            if name == "inspect_operations":
-                return operation_maintenance.inspect_operations(workspace, limit=_optional_int(arguments, "limit", 20),
-                                                                 cursor=_require_string(arguments, "cursor", optional=True))
-            return operation_maintenance.gc_operations(workspace, before=_require_string(arguments, "before"),
-                check=name == "check_operation_gc", confirmation=_require_string(arguments, "confirmation", optional=True))
+            return operation_maintenance.inspect_operations(workspace, limit=_optional_int(arguments, "limit", 20),
+                                                             cursor=_require_string(arguments, "cursor", optional=True))
         if name == "svn_blame":
             from . import scm
 
@@ -625,10 +613,6 @@ class PageMcpServer:
             return scm.diff(workspace, logical_path=logical_path)
         if name == "get_index_status":
             return page_nodes.index_status(workspace)
-        if name == "get_source_index_status":
-            from . import procedure_sources
-
-            return procedure_sources.source_index_status(workspace)
         if name == "search_sources":
             return page_nodes.search_sources(
                 workspace, keyword=_require_string(arguments, "keyword"),
@@ -636,7 +620,7 @@ class PageMcpServer:
                 limit=_optional_int(arguments, "limit", 20),
                 cursor=_require_string(arguments, "cursor", optional=True),
             )
-        if name in {"read_procedure", "list_procedure_callers"}:
+        if name == "list_procedure_callers":
             from . import procedure_sources
 
             locator = {
@@ -645,12 +629,6 @@ class PageMcpServer:
                 "fun_id": _require_string(arguments, "funId"),
                 "working_copy_id": _require_string(arguments, "workingCopyId", optional=True),
             }
-            if name == "read_procedure":
-                return procedure_sources.read_procedure(
-                    workspace, **locator,
-                    offset=_optional_int(arguments, "offset", 0),
-                    max_chars=_optional_int(arguments, "maxChars", 12_000),
-                )
             return procedure_sources.procedure_callers(
                 workspace, **locator, limit=_optional_int(arguments, "limit", 20),
                 cursor=_require_string(arguments, "cursor", optional=True),

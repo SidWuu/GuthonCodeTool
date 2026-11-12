@@ -40,7 +40,7 @@ legacy `diagnose <case.json>` 只用于已有 source-diagnosis 案例，其数�
 
 读取 [数据库执行流程](references/database-workflow.md) 的快速排查部分。先简短告知本次选择的工作区、开发/测试环境和实际适配器，再从本地索引定位相关源码、表、租户字段和业务主键。陌生表或字段先读取结构，再执行有业务主键或租户范围的只读查询。
 
-正式计划的 `allowedTables` 不限制快速排查；快速排查可查询本地索引已关联的表，或用户明确点名且已在目标 database/schema 中完成结构核验的表。不得跨目标 database/schema 扩张查询。
+查询范围以已核验的开发/测试目标、实际可见元数据和业务键为准，不以 `allowedTables` 作为表授权名单。陌生表先核验结构，不得跨目标 database/schema 或扩大业务用户权限。
 
 输出区分源码、数据库、平台版本和运行证据。连接成功、查无数据或静态源码结论都不能单独证明根因；结果受 100 行上限影响时优先改用 COUNT、聚合或精确主键查询。
 
@@ -59,7 +59,7 @@ legacy `diagnose <case.json>` 只用于已有 source-diagnosis 案例，其数�
 
 真实连接由 DBX 或 GuthonCodeTool 内置只读适配器管理。映射只保存在 `<descriptor.home>/config/database-testing.yaml`；内置密码只保存在操作系统凭据库。不要询问用户在对话中粘贴密码，也不要读取、复制或输出密码。
 
-正式计划继续使用工作区、实际 `systemId` 和 `dataSourceId` 解析唯一 target，并严格限制在声明的 `allowedTables`。没有匹配返回 `BINDING_MISSING`，多个匹配返回 `BINDING_AMBIGUOUS`。
+正式计划使用工作区、实际 `systemId` 和 `dataSourceId` 解析唯一 target，保留身份、schema、租户字段与证据；没有匹配返回 `BINDING_MISSING`，多个匹配返回 `BINDING_AMBIGUOUS`。`allowedTables` 仅兼容旧配置并提供计划草案的表名提示，不必填写，也不授予或限制查询权限。计划 SQL 仍须有机构/租户及业务键范围，来源、权限与实际数据需分别核验。
 
 ## 执行和反馈
 

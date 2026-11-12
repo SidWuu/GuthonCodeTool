@@ -298,6 +298,7 @@
           "minLength": 1
         },
         "allowedTables": {
+          "description": "兼容旧配置的表名提示，用于生成计划草案，不作为查询授权名单。",
           "type": "array",
           "uniqueItems": true,
           "items": {
@@ -359,14 +360,8 @@
             "required": [
               "systemId",
               "dataSourceId",
-              "allowedTables",
               "tenantScope"
-            ],
-            "properties": {
-              "allowedTables": {
-                "minItems": 1
-              }
-            }
+            ]
           }
         }
       ]

@@ -459,14 +459,12 @@ def verify_query_scope(cursor, connection: dict, target: dict, sql: str) -> str:
             raise DatabaseReadonlyError("CROSS_DATABASE_DENIED", "不支持多段数据库限定表名")
         elif len(parts) == 2 and parts[0].lower() != expected:
             raise DatabaseReadonlyError("CROSS_DATABASE_DENIED", f"引用了未授权数据库或 schema: {parts[0]}")
-    allowed = {str(name).upper() for name in target.get("allowedTables") or []}
     required = {reference.split(".")[-1].upper() for reference in references}
-    missing = required - allowed
+    existing = _metadata_table_names(cursor, connection, references)
+    missing = required - existing
     if missing:
-        existing = _metadata_table_names(cursor, connection, references)
-        if not missing <= existing:
-            denied = ", ".join(sorted(missing - existing))
-            raise DatabaseReadonlyError("TABLE_DENIED", f"目标 schema 中不存在或不可见的表: {denied}")
+        denied = ", ".join(sorted(missing))
+        raise DatabaseReadonlyError("TABLE_DENIED", f"目标 schema 中不存在或不可见的表: {denied}")
     return candidate
 
 

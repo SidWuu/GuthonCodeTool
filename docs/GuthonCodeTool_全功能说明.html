@@ -334,7 +334,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 </ul>
 <p><code>diagnose</code> 还提供配置驱动的源码逻辑排查：它只允许显式标记为测试、启用只读诊断并声明数据库白名单的数据源，按模板逐步执行绑定参数的单条 SELECT，在首个不满足条件的位置停止并生成本地排查报告。该能力适合重复执行的固定检查链；临时问题则使用目标解析、结构描述和有界查询逐步取证。</p>
 <p>数据库快速排查从当前工作区和开发/测试环境解析明确目标；未指定环境时使用配置中的诊断默认目标，而“测试一下”只是连接探测，不代表已切换到测试库。功能验收、回归和交付应使用正式测试目标与测试计划/结果证据，不能把一次只读查询当作完整验证。可选的 Guthon Testing Skill 提供该工作流指导，其安装与数据库连接配置是两个独立步骤。</p>
-<p>Nexus 的“配置数据库只读目标”区分快速排查与正式只读验证。正式目标还需声明系统、数据源、表范围、租户字段和证据。Oracle 登录 schema 与业务 schema 分别核验；生成 DBX 交接文件只说明交接信息已准备，不能作为查询已执行的证据。</p>
+<p>Nexus 的“配置数据库只读目标”区分快速排查与正式只读验证。正式目标向导收集系统、数据源、租户字段及范围/身份核验证据，不要求表名单；更新已有目标时不重写旧表名提示字段。Oracle 登录 schema 与业务 schema 分别核验；生成 DBX 交接文件只说明交接信息已准备，不能作为查询已执行的证据。</p>
 <p>“查看最近诊断历史”读取已有记录，不重新执行查询。查询可导出 CSV 或带证据页的 XLSX，结果与目标、SQL、执行时点一并保存到当前私有工作区。</p>
 <p>这些限制使数据库能力适合诊断和验证，而不会把开发工具变成任意 SQL 执行器。查询命中只证明数据库证据，不等同于页面结果或已部署版本验证。</p>
 <h4 id="database-target-reference">目标、凭据与适配器</h4>
@@ -343,11 +343,11 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <p>密码默认保存在 keyring；维护者可显式配置 <code>passwordEnv</code> 环境变量或 <code>passwordFile</code> 绝对路径密码文件。更换来源不会自动删除旧 keyring 记录。<code>database-credentials-export/import</code> 要求明确工作区、已注册凭据引用和确认，使用 AES-GCM 加密迁移，不把解密明文落盘；加密文件也应保存在私有位置。</p>
 <h4 id="database-query-reference">查询、输出与诊断历史</h4>
 <p><code>database-diagnose</code> 默认只探测身份；提供 <code>--sql</code>、<code>--sql-file</code> 或 <code>--stdin</code> 才执行查询。快速排查使用 <code>database-*</code>，固定源码诊断案例使用 <code>diagnose</code>。内置查询只接受经验证的单条 SELECT，最多返回 100 行，并回滚只读事务。</p>
-<p>SQL 校验支持普通字符串中的邮箱、分号和井号、SELECT CTE 及对应引擎的允许函数/类型；拒绝跨库、未知副作用函数、注释、引用标识符和不支持的转义。Oracle 替代引号、PostgreSQL dollar-quote、嵌套 WITH 与反斜线字面量仍不支持，复杂值应使用绑定参数。MySQL/PostgreSQL 可用 <code>--explain</code> 读取有界估计计划，不执行 ANALYZE，返回 <code>queryExecuted=false</code>；Oracle 因需计划表写入而拒绝该操作。</p>
+<p>SQL 校验支持普通字符串中的邮箱、分号和井号、SELECT CTE 及对应引擎的允许函数/类型，包括 Oracle/MySQL 的 INSTR 字符串定位；拒绝跨库、未知副作用函数、注释、引用标识符和不支持的转义。Oracle 替代引号、PostgreSQL dollar-quote、嵌套 WITH 与反斜线字面量仍不支持，复杂值应使用绑定参数。MySQL/PostgreSQL 可用 <code>--explain</code> 读取有界估计计划，不执行 ANALYZE，返回 <code>queryExecuted=false</code>；Oracle 因需计划表写入而拒绝该操作。估计计划返回完整 JSON，不按普通业务单元格长度截断；行上限仍保留，普通查询的单元格与行数截断规则不变。</p>
 <p>查询结果保留行列截断位置；CSV/表格输出还在 stderr 提示截断。<code>--format xlsx --output &lt;私有文件.xlsx&gt;</code> 生成“结果”和“证据”两页，字符串按文本保存、长整数保留精度；空列名或重复列名明确拒绝。连接探测和 DBX 交接不生成伪空结果。导出摘要最多保留最近 100 条。</p>
 <p><code>database-history-list/show</code> 提供脱敏查询历史，<code>database-compare</code> 提供目标间计数对比，<code>diagnosis-template</code> 生成查询模板；计数不同不直接代表功能错误。描述缓存绑定完整目标摘要、TTL 及 probe 失效 epoch。<code>diagnosis-list/show</code> 供 Nexus 查看最近最多 100 条诊断摘要或精确详情，不读取 SQL、参数或结果行，也不重新运行查询。固定案例报告默认隐藏绑定参数，只有明确 <code>--include-params</code> 才写入原文；报告位于私有 <code>var/docs/业务排查文档/</code>，模板见公开的 <a href="https://github.com/SidWuu/GuthonCodeTool/blob/main/config/example/source-diagnosis.example.json">source-diagnosis 示例</a>。</p>
 <h4 id="database-plan-reference">正式只读验证计划</h4>
-<p><code>database-test-artifacts</code> 提供 <code>validate-config</code>、<code>init-plan</code>、<code>run-readonly</code>、<code>export-dbx-plan</code> 和 <code>import-dbx-results</code> 等子命令。正式目标和计划需声明系统、数据源、表范围与租户证据，当前计划校验器以 <code>allowedTables</code> 核对计划 SQL 的表引用；快速诊断则核对目标 schema 的实际可见性，不把该列表当作库内排查禁区。执行器先核身份，前置条件失败或结果截断时停止相应用例；平台结果用例还需与源码和目标绑定的版本及触发证据。内置连接可执行只读计划，DBX-only 目标通过交接、结果导入和本地 evaluate 完成证据处理。</p>
+<p><code>database-test-artifacts</code> 提供 <code>validate-config</code>、<code>init-plan</code>、<code>run-readonly</code>、<code>export-dbx-plan</code> 和 <code>import-dbx-results</code> 等子命令。正式目标和计划需声明系统、数据源与租户证据，计划 SQL 按实际源码和业务键限定范围。<code>allowedTables</code> 是兼容旧配置的可选表名提示，用于生成计划草案，不作为查询授权名单。配置与 SQL 仍须满足已核验目标的 database/schema，内置查询对每个物理表核验实际可见元数据；DBX 交接由调用方先核验身份和表结构。静态工件校验不能代替真实身份、业务用户行权限或 WHERE 业务语义核验。执行器先核身份，前置条件失败或结果截断时停止相应用例；平台结果用例还需与源码和目标绑定的版本及触发证据。内置连接可执行只读计划，DBX-only 目标通过交接、结果导入和本地 evaluate 完成证据处理。</p>
 <div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>.venv/bin/python scripts/guthon_tool.py database-test-artifacts -- \
   run-readonly /absolute/private/plan.json \
   --config /absolute/toolHome/config/database-testing.yaml \
@@ -620,9 +620,9 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <tr><td><code>get_runtime_status</code></td><td>查看本地服务版本、协议和工作区数量。</td></tr>
 <tr><td><code>resolve_workspace</code></td><td>核对显式工作区键；不根据唯一候选静默选择写入工作区。</td></tr>
 <tr><td><code>get_index_status</code></td><td>检查 PAGE 节点、字段和关系投影状态；<code>projectionGapCount</code> 标记有片段却缺少语义节点的 JSON PAGE，不将其误报为 <code>READY</code>。</td></tr>
-<tr><td><code>get_source_index_status</code></td><td>独立检查 SVN 对象目录，不依赖 PAGE 投影就绪。</td></tr>
+<tr><td><code>get_index_health</code></td><td>检查 SVN 对象目录就绪度、过期源码、扫描错误及 PAGE 投影缺口；对象目录可独立于 PAGE 投影就绪。</td></tr>
 <tr><td><code>search_sources</code></td><td>分页检索 PAGE、过程函数等索引对象及精确身份。</td></tr>
-<tr><td><code>read_procedure</code></td><td>按偏移有界读取当前过程函数源码，不创建编辑租约。</td></tr>
+<tr><td><code>read_source_document</code></td><td>按精确身份和偏移有界读取当前源码或 JSON 子树，不创建编辑租约；读取过程函数时传入 <code>sourceType=procedure</code>。</td></tr>
 <tr><td><code>list_procedure_callers</code></td><td>读取精确过程函数的有界调用方索引证据。</td></tr>
 <tr><td><code>list_page_nodes</code></td><td>分页列出 PAGE 脚本、SQL 与字段集合节点，不返回整页 JSON。</td></tr>
 <tr><td><code>read_page_nodes</code></td><td>从授权源码定点读取所选 PAGE 节点正文。</td></tr>
@@ -668,14 +668,15 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <li>字段关系仅确认显式 <code>selectCodefieldId</code> 等有证据的子集，并保留未解析 <code>otherSetFields</code> 诊断。动态、继承与反射组引用尚未形成完整闭包，<code>check_page_field_references</code> 不能批准字段删除。</li>
 <li>MCP 不自动安装到客户端，不修改既有 MCP 配置，也不决定 AI 何时调用。工具是否可见及是否主动调用取决于客户端连接和 guthon-team 的工具路由规则。</li>
 </ul>
-<p>MCP 风险注解按副作用区分：查询和预览为只读；租约创建、续期、释放、写后核验恢复与可恢复日志归档为非只读、非破坏性；源码写入保留破坏性标记。工具声明不访问开放世界，注解不替代客户端审批和服务端授权。<code>--read-only</code> 隐藏所有非只读工具。</p>
+<p>MCP 风险注解按副作用区分：查询和预览为只读；租约创建、续期、释放、写后核验恢复为非只读、非破坏性；源码写入保留破坏性标记。工具声明不访问开放世界，注解不替代客户端审批和服务端授权。<code>--read-only</code> 隐藏所有非只读工具。</p>
+<p>已完成且无活动租约的操作记录通过 CLI <code>svn operation-gc --before &lt;ISO日期&gt;</code> 预检，核对计划后追加 <code>--apply --confirmation &lt;planHash&gt;</code> 归档；待恢复、损坏或仍有关联活动租约的记录不会归档。MCP 保留 <code>inspect_operations</code> 巡检及原操作状态查询和恢复入口。</p>
 <h3 id="9-3-开发状态与验证">9.3 写入范围与验证</h3>
 <p>PAGE 提供 <code>open_page_node_edit</code>、<code>preview_page_nodes</code>、<code>update_page_nodes</code>、<code>get_page_operation</code>、<code>resume_page_operation</code> 五个工具，限定稳定的同页脚本/SQL 字符串节点；另支持已有字段 <code>label</code> / <code>disName</code> 的受控显示文本修改；提供 <code>open_page_field_insert</code>、<code>preview_page_field_insert</code>、<code>insert_page_field</code>，只允许同一已识别 UI 字段集合内的单字段新增或拷贝，并共用 PAGE operation 查询/恢复。过程函数提供 <code>open_procedure_edit</code>、<code>preview_procedure</code>、<code>update_procedure</code>、<code>get_procedure_operation</code>、<code>resume_procedure_operation</code> 五个工具，限定完整身份匹配的一份授权物理文件。工具可见不等于目标可写：编辑令牌绑定授权、会话和源码快照；预览不落盘，正式写入重新校验 <code>edit</code> 能力、当前源码、索引及 SVN 状态，再以 <code>idempotencyKey</code> 记录操作。只改本地 SVN working copy，后续记录索引与 diff 核验，不执行 SVN commit。受控结构接口支持字段/按钮增改删、同页同类型复制与区域移动、事件、数据源及原生行列/TAB 布局。整页新建、复制和删除通过已配对 Bridge 使用平台原生接口；平台提交发布、菜单管理及任意根元数据修改仍不提供。</p>
 <p>具体安装版本应在客户端核对握手、工具清单、目标索引和实际源码差异。一个工作区索引就绪不能代表其他工作区也就绪；<code>PARTIAL</code>、<code>REBUILD_REQUIRED</code> 与 <code>INDEX_STALE</code> 应按目标身份重新取证。字段删除和移动不会自动修正脚本引用；完整字段关系闭包不在当前能力范围内；复杂映射需逐项核验，预览保留未解析证据；使用默认写入能力时应人工核对 SVN diff，不把工具响应当作平台运行证明。具体配置和调用顺序见<a href="GuthonCodeTool_使用手册.html#5-mcp">使用手册第 5 章</a>。</p>
 <h3 id="9-4-调用流程">9.4 调用流程与参数约束</h3>
 <h4>定位与有界读取</h4>
 <ol>
-<li>重启或重载 MCP 客户端，确认发现 <code>guthon-svn</code> 及包含结构编辑入口的工具清单。先调用 <code>get_runtime_status</code>，再以明确 <code>workspaceKey</code> 调用 PAGE 的 <code>get_index_status</code> 或过程函数的 <code>get_source_index_status</code>。</li>
+<li>重启或重载 MCP 客户端，确认发现 <code>guthon-svn</code> 及包含结构编辑入口的工具清单。先调用 <code>get_runtime_status</code>，再以明确 <code>workspaceKey</code> 调用 PAGE 的 <code>get_index_status</code> 或过程函数的 <code>get_index_health</code>。</li>
 <li>用 <code>search_sources</code> 搜索 PAGE 名称或 ID，并设 <code>sourceType=page</code>、较小的 <code>limit</code>。从结果复制真实 <code>sourceNamespace</code>、<code>sourceId</code> 和 <code>funId</code>；同名对象不猜第一个。</li>
 <li>以完整身份调用 <code>list_page_nodes</code> 或 <code>list_page_fields</code>；从目录选择稳定的 <code>semanticNodeId</code>/<code>semanticFieldId</code>，再用 <code>read_page_nodes</code>/<code>get_page_field</code> 定点读取。若改用 <code>jsonPointer</code>，同时传目录返回的 <code>indexedSourceHash</code>。</li>
 <li>需要局部证据时调用 <code>get_source_context</code> 或 <code>list_page_field_relations</code>；<code>check_page_field_references</code> 只提示显式和未解析引用风险，不能证明字段可安全删除。</li>
@@ -683,7 +684,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <div class="code-wrap"><span class="code-lang">json</span><button class="copy-btn" type="button" onclick="copyCode(this)">复制</button><pre><code>{"name":"get_index_status","arguments":{"workspaceKey":"products.&lt;id&gt;"}}
 {"name":"search_sources","arguments":{"workspaceKey":"products.&lt;id&gt;","sourceType":"page","keyword":"页面名或 PAGE ID","limit":20}}
 {"name":"list_page_nodes","arguments":{"workspaceKey":"products.&lt;id&gt;","sourceNamespace":"从搜索结果复制","sourceId":"从搜索结果复制","funId":"从搜索结果复制","limit":20}}</code></pre></div>
-<p>过程函数先以 <code>sourceType=procedure</code> 调用 <code>search_sources</code>，复制结果中的完整 <code>sourceNamespace</code>、<code>sourceId</code>、<code>funId</code> 和 <code>workingCopyId</code>，再用 <code>read_procedure</code> 按 <code>offset</code>/<code>maxChars</code> 有界读取；如需调用方证据，用 <code>list_procedure_callers</code>。同名或多 working copy 不猜第一个；调用方索引无法区分同别名目标时会拒绝归因。</p>
+<p>过程函数先以 <code>sourceType=procedure</code> 调用 <code>search_sources</code>，复制结果中的完整 <code>sourceNamespace</code>、<code>sourceId</code>、<code>funId</code> 和 <code>workingCopyId</code>，再以 <code>sourceType=procedure</code> 调用 <code>read_source_document</code>，按 <code>offset</code>/<code>maxChars</code> 有界读取；如需调用方证据，用 <code>list_procedure_callers</code>。同名或多 working copy 不猜第一个；调用方索引无法区分同别名目标时会拒绝归因。</p>
 <h4>PAGE 脚本与 SQL</h4>
 <p>默认 MCP 允许 AI 对<strong>已授权 SVN working copy 中的稳定脚本/SQL 字符串节点</strong>发起本地修改；已有字段显示文本可用专用更新工具；同一集合的单字段新增/拷贝见下文。这些节点接口不创建缺失结构；字段、按钮及事件新增使用下文的结构入口，任意 JSON 元数据和字段集合整体替换仍不开放。操作前应确认目标 <code>workspaceKey</code>、PAGE 身份、当前文件差异和工作区 <code>edit</code> 能力；仅仅发现写入工具不代表某个对象已获写入许可。</p>
 <ol>
@@ -695,7 +696,7 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 </ol>
 <h4>过程函数</h4>
 <p>过程函数写入只针对完整身份确定且获授权的 SVN working copy 物理文件。调用 <code>open_procedure_edit</code> 获取短期 <code>editToken</code>，以 <code>preview_procedure</code> 提交完整 <code>content</code> 或精确 <code>replacements</code> 检查候选 hash（预览不落盘），再以同一 token、候选和唯一 <code>idempotencyKey</code> 调用 <code>update_procedure</code>。响应丢失时用 <code>get_procedure_operation</code> 按原 key 查询；后置索引或 SVN diff 核验未完成时，用返回的 <code>operationId</code> 调用 <code>resume_procedure_operation</code>。最后人工审阅目标文件 diff；不可将本地写入等同平台运行成功，也不可通过 MCP 提交 SVN。</p>
-<p>SVN MCP 风险标记按副作用区分：查询和预览为只读；编辑租约创建、续期、释放、写入后的索引与差异验证恢复及已完成日志的可恢复归档为非只读、非破坏性；源码写入保留破坏性标记。平台上下文查询、整页生命周期租约和派发标记访问外部平台，其余操作限定本地授权工作区。客户端仍可根据实际请求和授权策略要求审批；风险标记不替代服务端校验，--read-only 仍隐藏所有非只读工具。</p>
+<p>SVN MCP 风险标记按副作用区分：查询和预览为只读；编辑租约创建、续期、释放、写入后的索引与差异验证恢复为非只读、非破坏性；源码写入保留破坏性标记。平台上下文查询、整页生命周期租约和派发标记访问外部平台，其余操作限定本地授权工作区。客户端仍可根据实际请求和授权策略要求审批；风险标记不替代服务端校验，--read-only 仍隐藏所有非只读工具。</p>
 <p>Bridge 的 web_accessible_resources 按 Chrome 要求使用 http://*/* 和 https://*/* 来源匹配；该字段不能用 /guthon/* 限制路径。内容脚本仍仅自动注入 /guthon/*，页面脚本继续校验允许的地址。若出现 Invalid match pattern，请更新扩展目录后重新加载。</p>
 <aside class="notice"><div class="notice-icon">!</div><div><p>写入依赖编辑租约、源码/索引 hash、授权范围和 SVN 状态的再次核对。实际使用时核对客户端工具清单、版本与目标工作区状态；出现未完成或外部改动时先查看 operation 状态和实际 diff，不强行覆盖。删除、移动或改绑定前核对显式关联和未解析映射；工具不自动改写业务脚本引用。</p></div></aside>
 <h4>同集合字段新增与拷贝</h4>
