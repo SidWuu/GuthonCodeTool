@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "officialReference": {
+    "version": "1.0.10",
+    "bundleSha256": "53d4fc71d0b84c3b4b730083eac15f92c0202ae574a459bf8267277391d5ab28",
+    "registry": "https://open-vsx.org/api/guthon/guthon-language-support"
+  },
+  "scope": "current project window",
+  "diagnosticReview": {
+    "objectsCompared": 183,
+    "byteIdenticalToOfficialCache": 183,
+    "metadataOnlyPage": 177,
+    "viewWithoutSqlNode": 5,
+    "nonemptyPageIdConflict": 1,
+    "interpretation": "182 objects use official minimal source representations; one body identity differs from its API metadata. No source was rewritten to resolve either category.",
+    "metadataOnlyBehavior": "Recognize API-bound original bytes; default to original-content display. Explicit raw editing remains available under existing file permissions and candidate identity checks. Do not invent missing SQL or page structure.",
+    "identityConflictBehavior": "Keep a distinct diagnostic and readonly view. Platform-side correction is outside this change."
+  },
+  "issues": [
+    {
+      "id": "login",
+      "cause": "Standalone Python lacked a usable HTTPS CA trust bundle for the official login service.",
+      "change": "Bundle pinned certifi CA resources, preserve system trust and TLS verification, distinguish login-service certificate errors.",
+      "verification": "Packaged backend live login, same-process session and authenticated system-list query passed using an existing authorized credential."
+    },
+    {
+      "id": "virtual-document-open",
+      "cause": "Editor URI authority normalization lowercased mixed-case workspace IDs.",
+      "change": "Preserve exact workspace identity in URI query fields across virtual documents, changes, readonly views and QuickDiff.",
+      "verification": "Actual CodeBuddy Extension Host with a mixed-case synthetic project opened and saved native PAGE script, SQL view, raw view and PAGE manager."
+    },
+    {
+      "id": "source-open-latency",
+      "cause": "Opening a source repeatedly requested the full workspace status scan.",
+      "change": "Reuse registered checkout metadata and keep status scanning off the source request queue."
+    },
+    {
+      "id": "catalog-labels",
+      "cause": "Source tree exposed physical paths without using system, datasource and menu metadata.",
+      "change": "Use project-scoped cached labels and menu hierarchy; retain physical paths."
+    },
+    {
+      "id": "login-status-latency",
+      "cause": "Login display waited for repeated full-project status scans that reloaded baseline bodies and scope settings.",
+      "change": "Read registered baseline hashes without baseline bodies, resolve scope once per scan and coalesce concurrent same-project status requests.",
+      "verification": "State and hash transitions plus concurrent refresh tests; installed full-project timing recorded separately."
+    }
+  ],
+  "boundaries": {
+    "realSourceWrites": 0,
+    "realConfigurationChanges": 0,
+    "platformSourceUploads": 0,
+    "platformBusinessWrites": 0,
+    "sourceIdentityConflictStillRequiresReview": true
+  }
+}

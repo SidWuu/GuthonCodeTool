@@ -37,7 +37,7 @@ class ApiQuickDiff {
     if(typeof content!=='string') return;
     if(uri.scheme===SCHEME && /@?inherit\s*\(/.test(content)) {content=this.projectBase?.(uri,content);if(typeof content!=='string') return;}
     const hash=crypto.createHash('sha256').update(JSON.stringify([key,sourcePath,pointer])).update('\0').update(content).digest('hex');
-    const original=this.vscode.Uri.from({scheme:DIFF_SCHEME,authority:key,path:`/baseline/${hash}`,query:new URLSearchParams({path:sourcePath,pointer}).toString()});
+    const original=this.vscode.Uri.from({scheme:DIFF_SCHEME,authority:'workspace',path:`/baseline/${hash}`,query:new URLSearchParams({workspaceKey:key,path:sourcePath,pointer}).toString()});
     const name=original.toString();
     if(Buffer.byteLength(content)>this.contents.maxBytes) throw new Error('差异快照超过编辑器缓存上限');
     this.contents.set(name,content);if(!this.contents.has(name)) throw new Error('差异快照已满，请关闭部分差异编辑器');return original;

@@ -12,6 +12,7 @@ from .workspace import (
     configure,
     client_for,
     save_project,
+    project_metadata,
     remember_login,
     save_session,
     last_login,
@@ -135,7 +136,24 @@ def execute(workspace, action, payload):
     if action in {"read", "diff", "write", "revert"}:
         path = payload.get("path")
         if action == "read":
-            return store.read(path)
+            item = store.read(path)
+            kind = item["metadata"].get("sourceType")
+            if kind == "page":
+                from .native_page import is_metadata_only
+                if is_metadata_only(item["content"], item["metadata"], item["path"]):
+                    return {**item, "storeReadonly": item["readonly"], "projectionReadonly": True, "sourceFormat": "native-page-minimal", "contentState": "METADATA_ONLY", "identitySource": "API_METADATA", "diagnostic": "API_PAGE_MINIMAL_SOURCE"}
+                from .index import page_format, PageIdentityMismatch
+                try:
+                    page_format(item)
+                except PageIdentityMismatch:
+                    return {**item, "storeReadonly": item["readonly"], "readonly": True, "projectionReadonly": True, "sourceFormat": "unsupported", "contentState": "IDENTITY_MISMATCH", "identitySource": "API_METADATA", "diagnostic": "API_PAGE_IDENTITY_MISMATCH"}
+                except (ValueError, TypeError):
+                    pass  # Preserve the raw-source entry for other unsupported page formats.
+            elif kind == "view":
+                from .view_editor import is_metadata_only
+                if is_metadata_only(item["content"], item["metadata"], item["path"]):
+                    return {**item, "storeReadonly": item["readonly"], "projectionReadonly": True, "sourceFormat": "view-no-sql", "contentState": "SQL_ABSENT", "identitySource": "SOURCE_AND_API_METADATA", "diagnostic": "API_VIEW_SQL_ABSENT"}
+            return item
         if action == "diff":
             return store.diff(path)
         if action == "write":
@@ -212,7 +230,9 @@ def execute(workspace, action, payload):
             )
         if action == "catalog":
             result = index.catalog(workspace, limit, offset)
-            return {**result, "objects": result.get("items", result.get("objects", []))}
+            project = project_metadata(workspace, include_menu=True) if offset == 0 else None
+            return {**result, "objects": result.get("items", result.get("objects", [])),
+                    **({"project": {k: project[k] for k in ("systems", "dataSources", "menuTree") if k in project}} if project is not None else {})}
         if action == "search":
             return index.search(workspace, payload.get("query"), limit, offset)
         if action == "context":
@@ -291,9 +311,26 @@ def execute(workspace, action, payload):
     if action == "designer-context":
         return client.designer_context()
     if action == "system-menu":
-        return {
-            "menu": client.request("/develop/vscode/source/download/getModuleTree.htm")
-        }
+        def menu_node(node):
+            if not isinstance(node, dict) or node.get("id") is None:
+                raise ApiError("API_RESPONSE_INVALID", "菜单缺少身份")
+            result = {k: node[k] for k in ("id", "name", "isDir") if k in node}
+            for field in ("childs", "pages"):
+                if field in node:
+                    if not isinstance(node[field], list):
+                        raise ApiError("API_RESPONSE_INVALID", "菜单层级无效")
+                    result[field] = ([menu_node(child) for child in node[field]] if field == "childs" else
+                                     [{k: page[k] for k in ("pageId", "pageSubId") if k in page} for page in node[field] if isinstance(page, dict)])
+            return result
+        response = client.request("/develop/vscode/source/download/getModuleTree.htm")
+        rows = records(response)
+        menu = []
+        for row in rows:
+            if row.get("systemId") is None or not isinstance(row.get("menus"), list):
+                raise ApiError("API_RESPONSE_INVALID", "系统菜单身份无效")
+            menu.append({"systemId": str(row["systemId"]), "menus": [menu_node(node) for node in row["menus"]]})
+        save_project(workspace, menu_tree=menu)
+        return {"menu": response}
     if action in {"systems", "data-sources"}:
         systems = action == "systems"
         key = "systems" if systems else "dataSources"

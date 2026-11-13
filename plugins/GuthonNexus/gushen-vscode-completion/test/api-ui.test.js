@@ -2,15 +2,16 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {activateApi}=require('../src/api/activate');
 const {ToolProcessClient,requestKind}=require('../src/tool-process-client');
-function mockStateClient(t,record=()=>{}) {
+function mockStateClient(t,record=()=>{},statusRequest) {
   t.mock.method(ToolProcessClient.prototype,'request',async function(tool,command,args,key,input) {
+    if(args[0]==='status' && statusRequest) return statusRequest(tool,command,args,key,input);
     assert.deepEqual(args,['editor-state','--stdin']);assert.equal(command,'api');
     record({client:this,tool,command,args,key,input});return {ok:true,editorToken:'token'};
   });
 }
 function fixture(t,dirty=false) {
   const calls=[],handlers=new Map(),errors=[];
-  mockStateClient(t,({command,args})=>calls.push([command,args]));
+  mockStateClient(t,({command,args})=>calls.push([command,args]),(...args)=>processClient.request(...args));
   const vscode={workspace:{textDocuments:dirty ? [{isDirty:true,uri:{scheme:'file',fsPath:'/checkout/project/a.gss'}}]:[]},
     commands:{registerCommand:(name,handler)=>{handlers.set(name,handler);return {dispose(){}};}},
     window:{showErrorMessage:async m=>errors.push(m)}};
@@ -60,7 +61,7 @@ test('manifest exposes API source navigation, PAGE management and SCM actions',(
   assert.equal(manifest.contributes.commands.some(x=>/Svn|selectWorkspaceSourceMode/.test(x.command)),false);
 });
 test('expired API session refreshes the project card after a failed pull',async t=>{
-  mockStateClient(t);
+  mockStateClient(t,undefined,(...args)=>processClient.request(...args));
   const handlers=new Map(),errors=[];let updates=0;
   const vscode={ProgressLocation:{Notification:1},workspace:{textDocuments:[]},commands:{registerCommand:(n,h)=>(handlers.set(n,h),{dispose(){}})},
     window:{withProgress:async(_options,action)=>action(),showErrorMessage:async message=>errors.push(message)}};
@@ -74,7 +75,7 @@ test('expired API session refreshes the project card after a failed pull',async 
   assert.equal(updates,1);assert.match(errors[0],/登录已过期/);
 });
 test('explicit field collection command opens exact JSON fragment without a picker',async t=>{
-  mockStateClient(t);
+  mockStateClient(t,undefined,(...args)=>processClient.request(...args));
   const handlers=new Map(),calls=[],documents=[];let provider;
   class Emitter {constructor(){this.event=()=>({dispose(){}});}fire(){}dispose(){}}
   const vscode={EventEmitter:Emitter,ViewColumn:{Beside:2},FileType:{File:1},FilePermission:{Readonly:1},
@@ -119,4 +120,37 @@ test('editor state uses a separate write client while primary pull is pending an
   releasePull();await pull;await api.dispose();
   assert.equal(states.at(-1).input.close,true);assert.equal(states.at(-1).input.editorToken,'token');
   assert.equal(stateProcess.disposed,true);
+});
+test('virtual source URI retains case-sensitive workspace identity after authority normalization',async()=>{
+  const {uriFor,decodeIdentity}=require('../src/source/virtual-fs'),{ApiEditorState}=require('../src/api/editor-state');
+  const vscode={Uri:{from:o=>({...o,authority:o.authority.toLowerCase(),toString(){return JSON.stringify(this);}})},workspace:{textDocuments:[]}};
+  const uri=uriFor(vscode,{workspaceKey:'products.GuthonOfficial',sourcePath:'page.xml',sourceType:'page',jsonPointer:'/pageEvents/onOpenScript',fragmentType:'js'});
+  assert.equal(uri.authority,'products.guthonofficial');assert.equal(decodeIdentity(uri).workspaceKey,'products.GuthonOfficial');
+  const calls=[],state=new ApiEditorState({vscode,run:async(key,_action,payload)=>(calls.push({key,payload}),{editorToken:'owner'})});
+  await state.add('products.GuthonOfficial','/checkout');vscode.workspace.textDocuments.push({uri,isDirty:true,version:7});await state.flush('products.GuthonOfficial');
+  assert.deepEqual(calls.at(-1).payload.documents,[{path:'page.xml',dirty:true,version:7}]);await state.close();
+});
+test('a long status scan does not block source reads on the primary client',async t=>{
+  let finishStatus,statusProcess;const primaryCalls=[];
+  t.mock.method(ToolProcessClient.prototype,'request',function(_tool,command,args){
+    assert.equal(command,'api');assert.equal(args[0],'status');statusProcess=this;
+    return new Promise(resolve=>{finishStatus=()=>resolve({ok:true,checkoutPath:'/checkout'});});
+  });
+  const primary={request:async(_tool,_command,args)=>{primaryCalls.push(args[0]);return {ok:true,content:'source'};}};
+  const vscode={workspace:{textDocuments:[]},commands:{registerCommand:()=>({dispose(){}})},window:{showErrorMessage:async()=>{}}};
+  const api=activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/fake',toolHome:'/data'}),processClient:primary});
+  const pending=api.run('projects.demo','status');await new Promise(resolve=>setImmediate(resolve));assert.ok(finishStatus);
+  const read=await api.run('projects.demo','read',{path:'a.gss'});assert.equal(read.content,'source');assert.deepEqual(primaryCalls,['read']);
+  finishStatus();await pending;await api.dispose();assert.equal(statusProcess.disposed,true);
+});
+
+test('simultaneous current-project status refreshes share one scan and later calls rescan',async t=>{
+  let reads=0,finish;
+  mockStateClient(t,()=>{},async()=>{reads++;return await new Promise(resolve=>{finish=resolve;});});
+  const vscode={workspace:{textDocuments:[]},commands:{registerCommand:()=>({dispose(){}})},window:{showErrorMessage:async()=>{}}};
+  const api=activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/fake',toolHome:'/data'}),processClient:{request:()=>assert.fail('status must use its own lane')}});
+  const one=api.run('projects.A','status'),two=api.run('projects.A','status');
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,1);
+  finish({ok:true,summary:{sourceCount:16000}});assert.deepEqual(await one,await two);
+  const three=api.run('projects.A','status');await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,2);finish({ok:true,summary:{sourceCount:16001}});assert.equal((await three).summary.sourceCount,16001);
 });

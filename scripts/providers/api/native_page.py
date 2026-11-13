@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import copy
+import hashlib
 import json
 import re
+from pathlib import PurePosixPath
 from xml.sax.saxutils import escape, quoteattr
 
 from common import page_editor, page_structure
@@ -213,6 +215,38 @@ def _snapshot(text):
 def decode(text):
     """Return the native PAGE model without changing the original XML."""
     return _snapshot(text)[1].value
+
+
+def is_metadata_only(text, metadata, path):
+    """Recognize only an unchanged, metadata-bound minimal native PAGE source."""
+    if not isinstance(text, str) or metadata.get("sourceType") != "page":
+        return False
+    keys = ("systemId", "pageSubId", "pageId", "fileName")
+    if any(not isinstance(metadata.get(key), str) or not metadata[key].strip() for key in keys):
+        return False
+    if str(metadata.get("pageType", "")) in {"", "0"} or metadata.get("isInhert") not in (None, "", 0, "0"):
+        return False
+    expected = PurePosixPath("systems", metadata["systemId"], "pages", metadata["pageSubId"], metadata["pageId"], metadata["fileName"]).as_posix()
+    if path != expected or hashlib.sha256(text.encode("utf-8")).hexdigest() != metadata.get("remoteHash"):
+        return False
+    try:
+        _, root = xml_source.parse(text)
+        if root.tag != "page" or root.attrs or "".join(root.text).strip():
+            return False
+        children = {child.tag: child for child in root.children}
+        if len(children) != len(root.children) or set(children) not in ({"isProduct"}, {"isProduct", "pageAliasId"}):
+            return False
+        if any(child.attrs for child in children.values()):
+            return False
+        if xml_source.leaf_text(children["isProduct"]).strip() != "0":
+            return False
+        if "pageAliasId" in children:
+            alias = xml_source.leaf_text(children["pageAliasId"]).strip()
+            if alias and alias != metadata.get("pageAliasId"):
+                return False
+    except (ValueError, TypeError):
+        return False
+    return True
 
 
 def is_native(text):

@@ -66,6 +66,7 @@ HIDDEN_IMPORTS = (
     "psycopg",
     "psycopg.pq",
     "keyring",
+    "certifi",
     "keyring.backends.macOS",
     "keyring.backends.Windows",
 )
@@ -86,6 +87,12 @@ def main() -> int:
     if find_spec("PyInstaller") is None:
         print("PyInstaller 未安装。请在构建机执行：python -m pip install pyinstaller", file=sys.stderr)
         return 2
+    if find_spec("certifi") is None:
+        print(
+            "缺少登录 HTTPS 证书资源。请执行：python -m pip install -r scripts/python-requirements.txt",
+            file=sys.stderr,
+        )
+        return 2
     build_root = Path(os.environ.get("GUTHON_BUILD_OUTPUT_ROOT") or ROOT).expanduser().resolve()
     dist_path = build_root / "dist"
     work_path = build_root / "build"
@@ -105,6 +112,8 @@ def main() -> int:
         str(build_root),
         "--paths",
         str(ROOT / "scripts"),
+        "--copy-metadata",
+        "certifi",
         "--add-data",
         f"{ROOT / 'config' / 'example'}{SEP}config/example",
         "--add-data",

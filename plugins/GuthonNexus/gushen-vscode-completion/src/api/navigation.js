@@ -118,7 +118,11 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
   async function locatePage(key,pageId) {
     const workspace=await selectWorkspace(key);if(!workspace) return;
     const id=pageId || await vscode.window.showInputBox({title:'输入 PAGE 编码'});if(!id) return;
-    const item=await exact(workspace,'page',id,x=>String(x.sourceId).toUpperCase()===id.toUpperCase());if(item) return open(workspace.workspaceKey,item);
+    const item=await exact(workspace,'page',id,x=>String(x.sourceId).toUpperCase()===id.toUpperCase());
+    if(item) {
+      if(/\.(?:xml|json)$/i.test(item.path)) return vscode.commands.executeCommand('gushenCompletion.openApiPageEditor',{workspaceKey:workspace.workspaceKey,path:item.path});
+      return open(workspace.workspaceKey,{...item,jsonPointer:'',line:undefined});
+    }
   }
   async function locateProcedure(key,alias,funId) {
     const workspace=await selectWorkspace(key);if(!workspace) return;

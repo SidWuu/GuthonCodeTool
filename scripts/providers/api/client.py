@@ -5,9 +5,11 @@ import base64
 import hashlib
 import http.cookiejar
 import json
+import ssl
+import sys
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import HTTPCookieProcessor, Request, build_opener
+from urllib.request import HTTPCookieProcessor, HTTPSHandler, Request, build_opener
 
 
 class ApiError(RuntimeError):
@@ -37,13 +39,38 @@ def server_url(value):
 class ApiClient:
     def __init__(self, root_url, *, opener=None, timeout=120):
         self.root_url = server_url(root_url)
-        self.opener = opener or build_opener(
-            HTTPCookieProcessor(http.cookiejar.CookieJar())
-        )
+        if opener is None:
+            context = ssl.create_default_context()
+            if getattr(sys, "frozen", False):
+                import certifi
+
+                context.load_verify_locations(cafile=certifi.where())
+            self.opener = build_opener(
+                HTTPCookieProcessor(http.cookiejar.CookieJar()),
+                HTTPSHandler(context=context),
+            )
+        else:
+            self.opener = opener
         self.timeout = timeout
         self.session = None
         self.access_token = None
         self.user = None
+
+    def _connection_error(self, error, url):
+        reason = error.reason if isinstance(error, URLError) else error
+        target = (
+            "当前项目平台"
+            if urlsplit(url).netloc == urlsplit(self.root_url).netloc
+            else "谷神登录服务"
+        )
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            return ApiError(
+                "API_TLS_CERTIFICATE_ERROR",
+                target + "的证书校验失败，请更新后端或检查系统受信任证书",
+            )
+        return ApiError(
+            "API_CONNECTION_FAILED", "无法连接" + target + "，请核对地址和网络"
+        )
 
     def request(self, path, params=None, *, form=None, root=None):
         url = (root or self.root_url) + path
@@ -71,9 +98,7 @@ class ApiClient:
                 "API_HTTP_ERROR", f"平台请求失败，HTTP {error.code}"
             ) from error
         except (URLError, TimeoutError, OSError) as error:
-            raise ApiError(
-                "API_CONNECTION_FAILED", "无法连接当前项目平台，请核对地址和网络"
-            ) from error
+            raise self._connection_error(error, url) from error
         except (ValueError, UnicodeError) as error:
             raise ApiError("API_RESPONSE_INVALID", "平台未返回有效 JSON") from error
         if not isinstance(result, dict) or type(result.get("code")) is not int:
@@ -171,7 +196,7 @@ class ApiClient:
                 if len(data) > 512 * 1024:
                     raise ApiError("API_CAPTCHA_INVALID", "验证码图像过大")
         except (HTTPError, URLError, TimeoutError, OSError) as error:
-            raise ApiError("API_CONNECTION_FAILED", "验证码加载失败") from error
+            raise self._connection_error(error, request.full_url) from error
         return {"image": "data:" + kind + ";base64," + base64.b64encode(data).decode()}
 
     def designer_context(self):

@@ -11,6 +11,18 @@ test('locator links keep exact project and path identity and reject malformed li
   assert.throws(()=>sourceLink('projects.demo','../other'),/路径/);
   assert.throws(()=>parseSourceLink({authority:parsed.host,path:parsed.pathname,query:'workspaceKey=projects.demo&path=a&path=b'}),/字段/);
 });
+test('PAGE ID locator opens the page manager instead of an arbitrary indexed script fragment',async()=>{
+  const {createApiNavigation}=require('../src/api/navigation'),commands=new Map(),calls=[],disposable={dispose(){}};
+  const vscode={commands:{registerCommand:(name,handler)=>(commands.set(name,handler),disposable),executeCommand:async(...args)=>calls.push(args)},
+    window:{showErrorMessage:async message=>assert.fail(message)},workspace:{textDocuments:[],onDidOpenTextDocument:()=>disposable,onDidChangeTextDocument:()=>disposable,onDidCloseTextDocument:()=>disposable},
+    languages:{createDiagnosticCollection:()=>({set(){},delete(){},dispose(){}}),registerCompletionItemProvider:()=>disposable}};
+  const key='products.GuthonOfficial',path='systems/S/pages/X/PG-123/page.xml';
+  const api={editorState:{workspaces:new Map()},sourceTree:{open:()=>assert.fail('should open PAGE manager')},run:async(workspace,action)=>{
+    assert.equal(workspace,key);assert.equal(action,'search');return {hits:[{sourceType:'page',sourceId:'PG-123',path,jsonPointer:'/events/onOpenScript'}]};}};
+  const nav=createApiNavigation({vscode,context:{subscriptions:[]},api,selectWorkspace:async()=>({workspaceKey:key}),getTool:()=>{},bridge:{}});
+  await commands.get('gushenCompletion.locateApiPageById')(key,'PG-123');
+  assert.deepEqual(calls,[['gushenCompletion.openApiPageEditor',{workspaceKey:key,path}]]);nav.dispose();
+});
 test('procedure names copy only after exact source and index hash verification',async()=>{
   const {createApiNavigation}=require('../src/api/navigation'),commands=new Map(),copied=[],errors=[],disposable={dispose(){}};
   const vscode={commands:{registerCommand:(name,handler)=>(commands.set(name,handler),disposable)},env:{clipboard:{writeText:async value=>copied.push(value)}},

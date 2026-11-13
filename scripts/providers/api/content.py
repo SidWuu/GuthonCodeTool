@@ -21,8 +21,13 @@ def parent_layers(data, path=""):
 
 def validate_candidate(path, metadata, baseline, candidate):
     if metadata.get("sourceType") == "view":
-        from .view_editor import extract_sql
+        from .view_editor import extract_sql, is_metadata_only
 
+        minimal = is_metadata_only(baseline, metadata, path)
+        if minimal and candidate == baseline:
+            return
+        if not minimal:
+            extract_sql(baseline, metadata)
         extract_sql(candidate, metadata)
         return
     if metadata.get("sourceType") == "table":
@@ -50,11 +55,16 @@ def validate_candidate(path, metadata, baseline, candidate):
         or path.lower().endswith(".gss")
     ):
         return
+    from .native_page import is_metadata_only
+
+    minimal = is_metadata_only(baseline, metadata, path)
+    if minimal and candidate == baseline:
+        return
     try:
         if baseline.lstrip("\ufeff \t\r\n").startswith("<"):
             from .native_page import decode
 
-            before, after = decode(baseline), decode(candidate)
+            before, after = ({} if minimal else decode(baseline)), decode(candidate)
         else:
             before, _ = page_editor._data(baseline)
             after, _ = page_editor._data(candidate)
@@ -62,6 +72,8 @@ def validate_candidate(path, metadata, baseline, candidate):
         raise ApiError(
             "API_PAGE_FORMAT_UNSUPPORTED", "PAGE必须保留有效的原生JSON结构"
         ) from error
+    if not minimal and str(before.get("pageId")) != str(metadata.get("pageId")):
+        raise ApiError("API_PAGE_IDENTITY_MISMATCH", "PAGE 原文编码与平台元数据不一致，不能覆盖")
     if str(after.get("pageId")) != str(metadata.get("pageId")):
         raise ApiError("API_IDENTITY_MISMATCH", "PAGE编码与平台对象身份不一致")
     if parent_layers(before) != parent_layers(after):

@@ -29,6 +29,58 @@ test('source catalog builds tree for the selected API workspace',async()=>{
   assert.equal(systems[0].children[0].children[0].label,'b.gss');
   assert.throws(()=>identity({resourceUri:{scheme:'file'}}),/请选择/);
 });
+test('catalog shows system, datasource and nested menu names with exact page identities',async()=>{
+  const f=fixture();f.vscode.TreeItem=class{constructor(label,state){this.label=label;this.collapsibleState=state;}};f.vscode.TreeItemCollapsibleState={Collapsed:1,None:0};
+  const objects=[{path:'systems/S1/pages/SUB/P1/page.xml',sourceType:'page',name:'页面甲'},
+    {path:'systems/S1/pages/SUB/P2/page.xml',sourceType:'page',name:'页面乙'},
+    {path:'datasources/D1/procedures/fee/f.gss',sourceType:'procedure',name:'datasources/D1/procedures/fee/f.gss'}];
+  const project={systems:[{systemId:'S1',systemName:'风险管理'}],dataSources:[{dataSourceId:'D1',dataSourceName:'公共数据'}],menuTree:[{systemId:'S1',menus:[
+    {id:'folder',name:'交易管理',isDir:1,childs:[{id:'m1',name:'同名菜单',isDir:0,pages:[{pageId:'P1',pageSubId:'SUB'}]},{id:'m2',name:'同名菜单',isDir:0,pages:[{pageId:'P2',pageSubId:'SUB'}]}]}]}]};
+  f.ui.run=async(_key,action)=>{assert.equal(action,'catalog');return {objects,project};};f.ui.syncWorkspaces(['projects.a']);
+  const root=(await f.ui.getChildren())[0],nodes=await f.ui.getChildren(root),systems=nodes.find(x=>x.label==='系统'),data=nodes.find(x=>x.label==='数据源');
+  const system=systems.children[0];assert.equal(system.label,'风险管理');assert.equal(f.ui.getTreeItem(system).description,'S1');
+  const menus=system.children[0].children[0].children;assert.equal(menus.length,2);assert.deepEqual(menus.map(x=>x.label),['同名菜单','同名菜单']);
+  assert.deepEqual(menus.map(x=>x.children[0].object.path).sort(),objects.slice(0,2).map(x=>x.path).sort());
+  assert.equal(data.children[0].label,'公共数据');assert.equal(data.children[0].children[0].children[0].children[0].label,'f.gss');
+  for(const item of [root,systems,system,...menus,...menus.map(x=>x.children[0])]) assert.doesNotThrow(()=>f.ui.getTreeItem(item));
+  assert.equal(f.ui.getTreeItem(menus[0].children[0]).command.command,'gushenCompletion.openApiPageEditor');
+});
+test('opening a registered checkout uses exact backend read without rescanning all status',async()=>{
+  const f=fixture(),calls=[];f.ui.syncWorkspaces([{workspaceKey:'projects.a',checkoutPath:'/checkout',sourceMode:'api'}]);
+  f.ui.run=async(key,action,input)=>{calls.push({key,action,input});assert.equal(action,'read');return {path:input.path,metadata:{sourceType:'procedure'},readonly:false,content:'procedure()'};};
+  await f.ui.open('projects.a','procedures/demo.gss');assert.deepEqual(calls,[{key:'projects.a',action:'read',input:{path:'procedures/demo.gss'}}]);
+});
+test('workspace status caches its authoritative checkout for later source opens',async()=>{
+  const f=fixture(),calls=[];f.ui.run=async(_key,action,input)=>{calls.push(action);return action==='status'?{checkoutPath:'/checkout'}:{path:input.path,metadata:{sourceType:'procedure'},readonly:false,content:'body'};};
+  await f.ui.status('projects.a');await f.ui.open('projects.a','demo.gss');assert.deepEqual(calls,['status','read']);
+});
+test('readonly preview keeps case-sensitive workspace identity after URI normalization',async()=>{
+  const f=fixture(),shown=[];f.ui.syncWorkspaces([{workspaceKey:'products.MixedCase',checkoutPath:'/checkout'}]);
+  f.vscode.Uri.from=o=>({...o,authority:o.authority.toLowerCase(),toString(){return JSON.stringify(this);}});
+  f.vscode.workspace.openTextDocument=async uri=>({uri});f.vscode.window.showTextDocument=async doc=>shown.push(doc.uri);
+  f.ui.run=async()=>({metadata:{sourceType:'procedure'},readonly:true,content:'read-only source'});
+  await f.ui.open('products.MixedCase','readonly.gss');const uri=shown[0];assert.equal(new URLSearchParams(uri.query).get('workspaceKey'),'products.MixedCase');
+  assert.equal(f.ui.provideTextDocumentContent({...uri,authority:uri.authority.toLowerCase()}),'read-only source');
+});
+test('explicit original source does not bypass inherited or identity-conflict read-only state',async()=>{
+  const f=fixture(),shown=[];f.ui.syncWorkspaces([{workspaceKey:'projects.a',checkoutPath:'/checkout'}]);
+  f.vscode.Uri.from=o=>({...o,toString(){return JSON.stringify(o);}});f.vscode.workspace.openTextDocument=async uri=>({uri});f.vscode.window.showTextDocument=async doc=>shown.push(doc.uri);
+  for(const source of [
+    {readonly:true,metadata:{sourceType:'procedure-inherit'},content:'parent'},
+    {readonly:true,storeReadonly:false,projectionReadonly:true,contentState:'IDENTITY_MISMATCH',metadata:{sourceType:'page'},content:'conflicting page'},
+    {readonly:true,storeReadonly:true,projectionReadonly:true,contentState:'METADATA_ONLY',metadata:{sourceType:'page'},content:'readonly page'}
+  ]) {
+    f.ui.run=async()=>source;await f.ui.open('projects.a','source.xml',false,{raw:true});
+    assert.equal(shown.at(-1).scheme,'guthon-api-readonly');assert.equal(f.ui.provideTextDocumentContent(shown.at(-1)),source.content);
+  }
+});
+test('menu fetch augments an already displayed catalog and reports failed requests',async()=>{
+  const f=fixture();let resolveMenu;f.vscode.EventEmitter=class{constructor(){this.event=()=>{};}fire(){}dispose(){}};
+  f.ui.run=async(_key,action)=>action==='catalog'?{objects:[{path:'systems/S/pages/X/P/p.xml',sourceType:'page'}],project:{systems:[{systemId:'S',systemName:'系统甲'}]}}:new Promise(resolve=>{resolveMenu=resolve;});
+  f.ui.syncWorkspaces(['projects.a']);const root=(await f.ui.getChildren())[0];await f.ui.getChildren(root);
+  resolveMenu({menu:[{systemId:'S',menus:[{id:'m',name:'菜单甲',isDir:0,pages:[{pageId:'P',pageSubId:'X'}]}]}]});await new Promise(resolve=>setImmediate(resolve));
+  const tree=await f.ui.getChildren(root);assert.equal(tree[0].children[0].children[0].children[0].label,'菜单甲');
+});
 test('designer rejects modified buffers and foreign target; save is local only',async()=>{
   const f=fixture();await openDesigner({vscode:f.vscode,run:f.run,ui:f.ui,key:'projects.a',sourcePath:'page.gss',editorState:{assertNoConflictingDrafts(){},assertNoDirtyDocumentsExcept(){},setDraft:async()=>{},flush:async()=> 'editor-token'}});
   await f.events.message({type:'save',path:'other.gss',version:1,text:JSON.stringify({fileName:'page.gss',xml:'{"pageId":"PG-1","name":"new"}'})});
@@ -125,6 +177,13 @@ test('PAGE JSON tree opens the page manager and script PAGE opens its original f
   const page=f.ui.getTreeItem({key:'projects.a',label:'页面',object:{path:'page.json',sourceType:'page',sourceFormat:'json'}});
   const script=f.ui.getTreeItem({key:'projects.a',label:'组件',object:{path:'component.gss',sourceType:'page',sourceFormat:'script'}});
   assert.equal(page.command.command,'gushenCompletion.openApiPageEditor');assert.equal(script.command.command,'gushenCompletion.openApiSource');
+});
+test('metadata-only and mismatched PAGE tree entries open raw source instead of empty structure',async()=>{
+  const f=fixture();f.vscode.TreeItem=class{constructor(label,state){this.label=label;this.collapsibleState=state;}};f.vscode.TreeItemCollapsibleState={Collapsed:1,None:0};
+  for(const sourceFormat of ['native-page-minimal','unsupported']) {
+    const item={key:'projects.a',label:'页面',object:{path:'page.xml',sourceType:'page',sourceFormat,readonly:true}};
+    const tree=f.ui.getTreeItem(item);assert.equal(tree.collapsibleState,0);assert.equal(tree.command.command,'gushenCompletion.openApiSource');assert.deepEqual(await f.ui.getChildren(item),[]);
+  }
 });
 test('native XML designer validates backend identity then writes and reads back exact XML bytes',async()=>{
   const f=fixture(),calls=[],messages=[];let raw='<page id="PG-1"><rows/></page>';

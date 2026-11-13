@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from common.persistence import atomic_text
+from common.persistence import atomic_text, file_lock
 from .client import ApiClient, ApiError, server_url
 
 _CLIENTS = {}
@@ -185,41 +185,46 @@ def load_login(workspace):
         return None
 
 
-def save_project(workspace, systems=None, data_sources=None):
+def project_metadata(workspace, *, include_menu=False):
     directory, _ = api_paths(workspace)
     path = directory / "project.json"
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         value = {}
-    if systems is not None:
-        value["systems"] = [
-            {
-                k: str(row[k])
-                for k in ("systemId", "systemName", "dataSourceId")
-                if row.get(k) is not None
-            }
-            for row in systems
-        ]
-    if data_sources is not None:
-        value["dataSources"] = [
-            {
-                k: str(row[k])
-                for k in ("dataSourceId", "dataSourceName")
-                if row.get(k) is not None
-            }
-            for row in data_sources
-        ]
-    atomic_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    if not isinstance(value, dict):
+        raise ApiError("API_PROJECT_METADATA_INVALID", "项目目录元数据无效")
+    if include_menu:
+        try:
+            value["menuTree"] = json.loads((directory / "menu-tree.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            pass
+    return value
+
+
+def save_project(workspace, systems=None, data_sources=None, menu_tree=None):
+    directory, _ = api_paths(workspace)
+    with file_lock(directory / "project.lock"):
+        value = project_metadata(workspace)
+        if systems is not None:
+            value["systems"] = [
+                {k: str(row[k]) for k in ("systemId", "systemName", "dataSourceId") if row.get(k) is not None}
+                for row in systems
+            ]
+        if data_sources is not None:
+            value["dataSources"] = [
+                {k: str(row[k]) for k in ("dataSourceId", "dataSourceName") if row.get(k) is not None}
+                for row in data_sources
+            ]
+        if systems is not None or data_sources is not None:
+            atomic_text(directory / "project.json", json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+        if menu_tree is not None:
+            atomic_text(directory / "menu-tree.json", json.dumps(menu_tree, ensure_ascii=False) + "\n")
 
 
 def active_scope(workspace):
     config = settings(workspace)
-    directory, _ = api_paths(workspace)
-    try:
-        project = json.loads((directory / "project.json").read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        project = {}
+    project = project_metadata(workspace)
     systems = project.get("systems", [])
     selected = (
         {str(x["systemId"]) for x in systems}
@@ -240,8 +245,8 @@ def active_scope(workspace):
     }
 
 
-def in_scope(workspace, path, metadata):
-    scope = active_scope(workspace)
+def in_scope(workspace, path, metadata, *, scope=None):
+    scope = active_scope(workspace) if scope is None else scope
     parts = path.split("/")
     if len(parts) > 1 and parts[0] == "systems":
         return parts[1] in scope["systemIds"]

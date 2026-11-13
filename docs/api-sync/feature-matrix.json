@@ -235,11 +235,11 @@
     "viewSqlProjectionParsedWithoutSourceChanges": 18
   },
   "validation": {
-    "checkedAt": "2026-11-12T14:10:23.652859+00:00",
-    "apiTests": 137,
+    "checkedAt": "2026-11-13T00:05:11.044631+00:00",
+    "apiTests": 146,
     "retainedSharedPythonTests": 182,
     "buildAndInstallerTests": 34,
-    "nexusTests": 434,
+    "nexusTests": 451,
     "bridgeTests": 111,
     "sourceAndPyzAndMacApplicationSmoke": "passed",
     "mcpTools": {
@@ -270,9 +270,19 @@
       "qaItems": 76,
       "syntaxLinksAndSearch": "passed"
     },
-    "vsixSha256": "a1498a1927eecd9a5ea1e3a2c9d42925148d16734fb6e83cca32fae7d1a16f33",
+    "vsixSha256": "50866922bf04e0fb5d170050eae6bd06d996a262a4921a24fc4db1c15beac005",
     "largeWorkspaceStatus": "16000 clean fixture objects plus changed/out-of-scope objects; full counts retained and compact response bounded",
-    "codeBuddy": "installed Nexus and packaged backend: compact status, full-project catalog paging, source hash context, search and persisted diagnostic display passed; existing source and unrelated configuration preserved",
-    "fullProjectIndex": "completed across the selected project; missing native identities or SQL are reported per object, without generating source facts for those objects"
+    "codeBuddy": "daily installed Nexus and packaged backend loaded; real login confirmed, system/menu names and native PAGE manager/field editor and procedure opens passed; existing source/configuration byte hashes preserved",
+    "fullProjectIndex": "official metadata-only source forms are recognized; one existing nonempty PAGE identity conflict remains explicit",
+    "compatibilityReview": {
+      "reviewedObjects": 183,
+      "metadataOnlyPages": 177,
+      "viewsWithoutSqlNode": 5,
+      "remainingIdentityConflicts": 1,
+      "sourceAndConfigurationChanges": 0,
+      "mixedCaseCodeBuddyRuntime": "passed isolated installed-package tests",
+      "dailyCodeBuddyRuntime": "passed actual project login and local-source UI without source writes"
+    },
+    "loginStatusPerformance": "installed full-project status scan reduced from about 19 seconds to about 8 seconds; concurrent refresh requests share one scan"
   }
 }

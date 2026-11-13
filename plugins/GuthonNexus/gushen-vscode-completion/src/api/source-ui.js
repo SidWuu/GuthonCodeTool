@@ -27,9 +27,51 @@ function identity(value, sourcePath) {
   const uri = value?.resourceUri || value;
   if (uri?.scheme === 'guthon-api-change') {
     const query = new URLSearchParams(uri.query);
-    return {key:uri.authority, path:query.get('path')};
+    return {key:query.get('workspaceKey') || uri.authority, path:query.get('path')};
   }
   throw new Error('请选择 API 源码');
+}
+
+function buildCatalogTree(key, workspace, objects, project={}) {
+  const root={children:[],parent:workspace}, systemNames=new Map((project.systems || []).map(x=>[String(x.systemId),x.systemName])),
+    sourceNames=new Map((project.dataSources || []).map(x=>[String(x.dataSourceId),x.dataSourceName])), menuPaths=new Map();
+  const menus=(system,nodes,ancestors=[])=>{for(const node of nodes || []) {
+    const branch=[...ancestors,{id:String(node.id),name:node.name || String(node.id)}];
+    if(Number(node.isDir)===1) menus(system,node.childs,branch);
+    else for(const page of node.pages || []) {
+      const identity=JSON.stringify([system,String(page.pageSubId),String(page.pageId)]);
+      if(!menuPaths.has(identity)) menuPaths.set(identity,[]);
+      menuPaths.get(identity).push(branch);
+    }
+  }};
+  for(const system of project.menuTree || []) menus(String(system.systemId),system.menus);
+  const labels={systems:'系统',datasources:'数据源',pages:'页面',procedures:'过程函数',tables:'表',views:'视图','system-script':'系统脚本'};
+  const add=(object,dirs)=>{
+    let parent=root;
+    for(const dir of dirs) {
+      parent.childIndex ||= new Map();let child=parent.childIndex.get(dir.key);
+      if(!child) {child={label:dir.label,key,children:[],sourcePrefix:dir.sourcePrefix,description:dir.description,parent:parent===root?workspace:parent};parent.children.push(child);parent.childIndex.set(dir.key,child);}
+      parent=child;
+    }
+    const filename=object.path.split('/').at(-1),candidate=object.label || object.name || filename;
+    const label=typeof candidate==='string' && (candidate===object.path || candidate.endsWith('/'+filename)) ? filename : candidate;
+    parent.children.push({label,key,object,parent:parent===root?workspace:parent});
+  };
+  for(const object of objects) {
+    filePath('/api-root',object.path);
+    const parts=object.path.split('/'), physical=parts.slice(0,-1).map((part,i)=>{
+      let label=part,description;
+      if(i===1 && parts[0]==='systems' && systemNames.get(part)) {label=systemNames.get(part);description=part;}
+      else if(i===1 && parts[0]==='datasources' && sourceNames.get(part)) {label=sourceNames.get(part);description=part;}
+      else if((project.systems || project.dataSources) && labels[part] && (i===0 || i===2)) label=labels[part];
+      return {key:'path:'+part,label,description,sourcePrefix:parts.slice(0,i+1).join('/')};
+    });
+    const routes=parts[0]==='systems' && parts[2]==='pages' && parts.length>=6 ? menuPaths.get(JSON.stringify([parts[1],parts[3],parts[4]])) : undefined;
+    if(routes?.length) for(const route of routes) add(object,[...physical.slice(0,3),...route.map(x=>({key:'menu:'+x.id,label:x.name}))]);
+    else add(object,physical);
+  }
+  const sort=node=>{node.children.sort((a,b)=>Boolean(b.children)-Boolean(a.children) || a.label.localeCompare(b.label));for(const child of node.children) if(Array.isArray(child.children)) sort(child);};
+  sort(root);return root.children;
 }
 
 function sourceSyncLines(key,result) {
@@ -58,30 +100,31 @@ class ApiSourceUI {
     this.vscode=vscode; this.run=run; this.onUpdated=onUpdated; this.editorState=editorState; this.onSourceChanged=onSourceChanged; this.onWorkspace=onWorkspace; this.onOpenVirtual=onOpenVirtual; this.indexRecovery=indexRecovery; this.watchers=new Map(); this.workspaces=new Map(); this.controls=new Map();this.scmGenerations=new Map();this.sourceChanges=new Map();
     this.emitter = vscode.EventEmitter ? new vscode.EventEmitter() : undefined;
     this.onDidChangeTreeData = this.emitter?.event;
-    this.readonlyDocuments=new Map();this.rootItems=null;this.treeCache=new Map();this.indexDiagnostics=new Map();
+    this.readonlyDocuments=new Map();this.rootItems=null;this.treeCache=new Map();this.indexDiagnostics=new Map();this.menuAttempts=new Set();this.treeVersion=0;
   }
   syncWorkspaces(workspaces) {
     const keys=new Set();
     for (const workspace of workspaces) {
       const key=typeof workspace === 'string' ? workspace : workspace.workspaceKey;
       if (!key || (workspace.sourceMode && workspace.sourceMode !== 'api')) continue;
-      keys.add(key); this.workspaces.set(key, typeof workspace === 'string' ? {workspaceKey:key} : workspace);
+      keys.add(key); this.workspaces.set(key, typeof workspace === 'string' ? (this.workspaces.get(key) || {workspaceKey:key}) : workspace);
     }
-    for (const key of this.workspaces.keys()) if (!keys.has(key)) {this.workspaces.delete(key);this.scmGenerations.set(key,(this.scmGenerations.get(key)||0)+1);this.controls.get(key)?.control.dispose();this.controls.delete(key);this.sourceChanges.delete(key);this.watchers.get(key)?.dispose();this.watchers.delete(key);}
-    this.rootItems=null;this.treeCache.clear();this.emitter?.fire();
+    for (const key of this.workspaces.keys()) if (!keys.has(key)) {this.workspaces.delete(key);this.menuAttempts.delete(key);this.scmGenerations.set(key,(this.scmGenerations.get(key)||0)+1);this.controls.get(key)?.control.dispose();this.controls.delete(key);this.sourceChanges.delete(key);this.watchers.get(key)?.dispose();this.watchers.delete(key);}
+    this.rootItems=null;this.treeCache.clear();this.treeVersion++;this.emitter?.fire();
   }
   track(key) {if (!this.workspaces.has(key)) {this.workspaces.set(key,{workspaceKey:key});this.rootItems=null;}}
-  refresh() {this.rootItems=null;this.treeCache.clear();this.emitter?.fire();}
+  refresh() {this.rootItems=null;this.treeCache.clear();this.treeVersion++;this.emitter?.fire();}
   getTreeItem(item) {
     const v=this.vscode;
-    const isPage=item.object?.sourceType==='page' && (['json','xml','native-xml'].includes(item.object.sourceFormat) || /\.(?:json|xml)$/i.test(item.object.path));
+    const isPage=item.object?.sourceType==='page' && !['native-page-minimal','unsupported'].includes(item.object.sourceFormat) && (['json','xml','native-xml'].includes(item.object.sourceFormat) || /\.(?:json|xml)$/i.test(item.object.path));
     const tree=new v.TreeItem(item.label, item.children || isPage ? v.TreeItemCollapsibleState.Collapsed : v.TreeItemCollapsibleState.None);
     if(item.kind==='message') {tree.tooltip=item.label;if(item.command) tree.command={command:item.command,title:item.label,arguments:[item.key]};return tree;}
     if(item.kind==='fragment') {
       tree.contextValue=item.target.fragmentType==='fields' ? 'guthonApi.fragment.fields' : 'guthonApi.fragment.script';tree.tooltip=item.target.jsonPointer;
       tree.command={command:'gushenCompletion.openApiFragment',title:'打开源码分块',arguments:[item.target]};return tree;
     }
-    tree.contextValue=item.children ? 'guthonApi.directory' : item.object.readonly ? 'guthonApi.readonly' : ['page','procedure','table','view'].includes(item.object.sourceType) ? `guthonApi.${item.object.sourceType}` : 'guthonApi.source';
+    tree.contextValue=item.children ? 'guthonApi.directory' : item.object?.readonly ? 'guthonApi.readonly' : ['page','procedure','table','view'].includes(item.object?.sourceType) ? `guthonApi.${item.object.sourceType}` : 'guthonApi.source';
+    tree.description=item.description;
     tree.tooltip=item.object ? [item.object.path,item.object.diagnostic].filter(Boolean).join(' · ') : item.label;
     const state=this.sourceChanges.get(item.key)?.get(item.object?.path || item.sourcePrefix);
     if(state) {tree.description=({CONFLICT:'冲突',REMOTE_DELETED:'远端已删除',MISSING:'本地缺失',MODIFIED:'有本地修改'})[state] || state;if(v.ThemeIcon) tree.iconPath=new v.ThemeIcon(state==='MODIFIED'?'diff-modified':'warning');}
@@ -92,38 +135,43 @@ class ApiSourceUI {
     if (!item) return this.rootItems ||= [...this.workspaces].map(([key,w])=>({label:w.displayName || key,key,workspace:true,children:true}));
     if (item.workspace) {
       if(this.treeCache.has(item.key)) return this.treeCache.get(item.key);
-      const objects=[];let offset=0,generation,partial=0;
+      const objects=[];let offset=0,generation,partial=0,project;
       for(;;) {
         let result;
         try {result=await this.run(item.key,'catalog',{limit:100,offset});}
         catch(error) {if(['API_INDEX_REQUIRED','API_INDEX_SCOPE_STALE'].includes(error.code)) return [{kind:'message',label:error.message,key:item.key,parent:item,command:'gushenCompletion.reindexCalls'}];throw error;}
         if(generation && result.indexGeneration && generation!==result.indexGeneration) throw new Error('目录读取期间索引已变化，请刷新');
-        generation ||= result.indexGeneration;partial=Math.max(partial,result.partialSourceCount || 0);
+        generation ||= result.indexGeneration;partial=Math.max(partial,result.partialSourceCount || 0);project ||= result.project;
         objects.push(...result.objects);
         if(result.nextOffset == null) break;
         if(!Number.isInteger(result.nextOffset) || result.nextOffset<=offset) throw new Error('目录分页无效');
         offset=result.nextOffset;
       }
-      const root={children:[],parent:item};
-      for (const object of objects) {
-        filePath('/api-root',object.path);
-        let parent=root; const parts=object.path.split('/');
-        for (const part of parts.slice(0,-1)) {
-          let child=parent.children.find(x=>x.children && x.label===part);
-          if (!child) {child={label:part,key:item.key,children:[],sourcePrefix:parent===root ? part : `${parent.sourcePrefix}/${part}`,parent:parent===root ? item : parent};parent.children.push(child);} parent=child;
-        }
-        parent.children.push({label:object.label || object.name || parts.at(-1),key:item.key,object,parent:parent===root ? item : parent});
-      }
+      const root={children:buildCatalogTree(item.key,item,objects,project)};
       if(partial && !this.indexDiagnostics.has(item.key)) {
         const diagnostics=objects.filter(object=>object.diagnostic).map(object=>({path:object.path,code:object.diagnostic}));
         this.indexDiagnostics.set(item.key,{complete:false,diagnosticCount:partial,diagnostics:diagnostics.slice(0,100),truncated:diagnostics.length>100});
       }
-      const sort = node => {node.children.sort((a,b)=>Boolean(b.children)-Boolean(a.children) || a.label.localeCompare(b.label));node.children.filter(x=>Array.isArray(x.children)).forEach(sort);}; sort(root);const diagnostic=this.indexDiagnostics.get(item.key);const count=Math.max(partial,diagnostic?.diagnosticCount || 0);
+      const diagnostic=this.indexDiagnostics.get(item.key);const count=Math.max(partial,diagnostic?.diagnosticCount || 0);
       if(count || diagnostic?.complete===false) root.children.push({kind:'message',label:`索引不完整${count ? `：${count} 个诊断` : ''}，点击查看`,key:item.key,parent:item,command:diagnostic ? 'gushenCompletion.showApiIndexDiagnostics' : 'gushenCompletion.reindexCalls'});
       const recovery=this.indexRecovery?.(item.key);if(recovery?.paths.length) root.children.push({kind:'message',label:`${recovery.paths.length} 个源码文件等待索引更新，点击重试`,key:item.key,parent:item,command:'gushenCompletion.retryApiIndexFailures'});
-      this.treeCache.set(item.key,root.children);return root.children;
+      this.treeCache.set(item.key,root.children);
+      if(project?.systems?.length && !Array.isArray(project.menuTree) && !this.menuAttempts.has(item.key)) {
+        this.menuAttempts.add(item.key);const version=this.treeVersion;
+        void this.run(item.key,'system-menu').then(result=>{
+          const menu=Array.isArray(result.menu) ? result.menu : result.menu?.list;
+          if(this.disposed || version!==this.treeVersion || !Array.isArray(menu)) return;
+          const messages=root.children.filter(child=>child.kind==='message');
+          this.treeCache.set(item.key,[...buildCatalogTree(item.key,item,objects,{...project,menuTree:menu}),...messages]);this.emitter?.fire();
+        }).catch(error=>{
+          if(this.disposed || version!==this.treeVersion) return;
+          const items=this.treeCache.get(item.key);if(!items)return;
+          items.push({kind:'message',label:`菜单加载失败：${error.message}；点击刷新重试`,key:item.key,parent:item,command:'gushenCompletion.refreshApiSourceView'});this.emitter?.fire();
+        });
+      }
+      return root.children;
     }
-    if(item.object?.sourceType==='page' && (['json','xml','native-xml'].includes(item.object.sourceFormat) || /\.(?:json|xml)$/i.test(item.object.path))) {
+    if(item.object?.sourceType==='page' && !['native-page-minimal','unsupported'].includes(item.object.sourceFormat) && (['json','xml','native-xml'].includes(item.object.sourceFormat) || /\.(?:json|xml)$/i.test(item.object.path))) {
       if(item.fragments) return item.fragments;
       if(!item.fragmentPromise) item.fragmentPromise=(async()=>{
         const snapshot=await this.run(item.key,'page',{action:'open',path:item.object.path});
@@ -155,32 +203,48 @@ class ApiSourceUI {
     const index=this.indexDiagnostics.get(key);if(!index) return this.vscode.window.showInformationMessage('当前没有本次操作保留的索引诊断，请检查或重建索引');
     await showReport(this.vscode,'API 索引诊断',sourceSyncLines(key,{index}));
   }
-  async status(key) {
-    this.track(key); const result=await this.run(key,'status');
-    if(this.editorState && !this.editorState.workspaces.has(key)) await this.editorState.add(key,result.checkoutPath);
-    this.onWorkspace?.(key,result.checkoutPath);
+  async registerWorkspace(key,checkoutPath) {
+    if(this.editorState && !this.editorState.workspaces.has(key)) await this.editorState.add(key,checkoutPath);
+    this.onWorkspace?.(key,checkoutPath);
     if(this.editorState && !this.watchers.has(key) && this.vscode.workspace.createFileSystemWatcher && this.vscode.RelativePattern) {
-        const watcher=this.vscode.workspace.createFileSystemWatcher(new this.vscode.RelativePattern(result.checkoutPath,'**/*'));
-        const changed=uri=>{const relative=path.relative(result.checkoutPath,uri.fsPath).split(path.sep).join('/');
+        const watcher=this.vscode.workspace.createFileSystemWatcher(new this.vscode.RelativePattern(checkoutPath,'**/*'));
+        const changed=uri=>{const relative=path.relative(checkoutPath,uri.fsPath).split(path.sep).join('/');
           if(relative && relative!=='..' && !relative.startsWith('../')) void this.onSourceChanged?.(key,[relative]);};
       watcher.onDidChange(changed);watcher.onDidCreate(changed);watcher.onDidDelete(changed);this.watchers.set(key,watcher);
     }
+  }
+  async status(key) {
+    this.track(key); const result=await this.run(key,'status');
+    if(!this.workspaces.has(key)) return result;
+    this.workspaces.set(key,{...this.workspaces.get(key),checkoutPath:result.checkoutPath});
+    await this.registerWorkspace(key,result.checkoutPath);
     return result;
   }
+  async ensureWorkspace(key) {
+    const checkoutPath=this.workspaces.get(key)?.checkoutPath;
+    if(!checkoutPath || !path.isAbsolute(checkoutPath)) return this.status(key);
+    await this.registerWorkspace(key,checkoutPath);return {checkoutPath};
+  }
   async open(key, sourcePath, preview=false, {raw=false}={}) {
-    const status=await this.status(key); const file=filePath(status.checkoutPath,sourcePath);
+    const status=await this.ensureWorkspace(key); const file=filePath(status.checkoutPath,sourcePath);
     // The backend remains authoritative about object identity and readonly state.
     const source=await this.run(key,'read',{path:sourcePath});
-    if(!raw && source.metadata?.sourceType==='view' && this.onOpenVirtual) return this.onOpenVirtual({workspaceKey:key,sourcePath,sourceType:'view',jsonPointer:'/viewSql',fragmentType:'sql'});
+    if(!raw && source.contentState!=='SQL_ABSENT' && source.metadata?.sourceType==='view' && this.onOpenVirtual) return this.onOpenVirtual({workspaceKey:key,sourcePath,sourceType:'view',jsonPointer:'/viewSql',fragmentType:'sql'});
     if(!raw && this.onOpenVirtual && isInlineInherited(key,sourcePath,source)) return this.onOpenVirtual({workspaceKey:key,sourcePath,sourceType:source.metadata.sourceType,fragmentType:source.metadata.sourceType==='system-script' ? 'js' : 'gss'});
     let uri=this.vscode.Uri.file(file);
-    if(source.readonly) {
-      uri=this.vscode.Uri.from({scheme:'guthon-api-readonly',authority:key,path:'/'+sourcePath});
-      this.readonlyDocuments.set(uri.toString(),source.content);
+    if(source.readonly || (!raw && source.projectionReadonly)) {
+      uri=this.readonlyUri(key,sourcePath,source.content);
     }
     return this.vscode.window.showTextDocument(await this.vscode.workspace.openTextDocument(uri),{preview});
   }
-  provideTextDocumentContent(uri) {return this.readonlyDocuments.get(uri.toString()) || ''; }
+  readonlyUri(key,sourcePath,content) {
+    const uri=this.vscode.Uri.from({scheme:'guthon-api-readonly',authority:'workspace',path:'/'+sourcePath,query:new URLSearchParams({workspaceKey:key,path:sourcePath}).toString()});
+    this.readonlyDocuments.set(JSON.stringify([key,sourcePath]),content);return uri;
+  }
+  async openReadonly(key,sourcePath,content) {
+    return this.vscode.window.showTextDocument(await this.vscode.workspace.openTextDocument(this.readonlyUri(key,sourcePath,content)),{preview:true});
+  }
+  provideTextDocumentContent(uri) {const query=new URLSearchParams(uri.query || '');return this.readonlyDocuments.get(JSON.stringify([query.get('workspaceKey') || uri.authority,query.get('path') || uri.path.slice(1)])) || ''; }
   async updateScm(key) {
     const generation=(this.scmGenerations.get(key)||0)+1;this.scmGenerations.set(key,generation);
     const state=await this.status(key); const vscode=this.vscode;
@@ -200,7 +264,7 @@ class ApiSourceUI {
     for(const change of changes) {const parts=change.path.split('/');for(let i=1;i<=parts.length;i++){const p=parts.slice(0,i).join('/');if(!sourceChanges.has(p) || (priority[change.state] || 0)>(priority[sourceChanges.get(p)] || 0)) sourceChanges.set(p,change.state);}}
     this.sourceChanges.set(key,sourceChanges);
     record.group.resourceStates=changes.map(change=>{
-      const uri=vscode.Uri.from({scheme:'guthon-api-change',authority:key,path:'/'+path.posix.basename(change.path),query:new URLSearchParams({path:change.path}).toString()});
+      const uri=vscode.Uri.from({scheme:'guthon-api-change',authority:key,path:'/'+path.posix.basename(change.path),query:new URLSearchParams({workspaceKey:key,path:change.path}).toString()});
       return {resourceUri:uri,contextValue:change.state==='CONFLICT' ? 'guthonApi.conflict' : change.readonly ? 'guthonApi.readonlyChange' : change.state==='MODIFIED' ? 'guthonApi.change' : 'guthonApi.unavailable',
         command:{command:'gushenCompletion.showApiDiff',title:'查看差异',arguments:[{workspaceKey:key,path:change.path}]},
         decorations:{tooltip:`${change.path} · ${change.state}`}};
@@ -355,7 +419,7 @@ class ApiSourceUI {
     await showReport(this.vscode,'API 冲突处理结果',[`对象：${sourcePath}`,`本地源码 SHA-256：${result.sourceHash || '未返回'}`,`操作编号：${result.operationId || '未返回'}`,'','此操作未上传谷神。']);
     await this.updateScm(key);this.onUpdated?.();return result;
   }
-  clear(){for(const {control,refreshTimer} of this.controls.values()) {clearTimeout(refreshTimer);control.dispose();}this.controls.clear();this.sourceChanges.clear();for(const watcher of this.watchers.values()) watcher.dispose();this.watchers.clear();this.readonlyDocuments.clear();this.indexDiagnostics.clear();this.workspaces.clear();this.refresh();}
+  clear(){for(const {control,refreshTimer} of this.controls.values()) {clearTimeout(refreshTimer);control.dispose();}this.controls.clear();this.sourceChanges.clear();for(const watcher of this.watchers.values()) watcher.dispose();this.watchers.clear();this.readonlyDocuments.clear();this.indexDiagnostics.clear();this.menuAttempts.clear();this.workspaces.clear();this.refresh();}
   dispose(){if(this.disposed)return;this.disposed=true;this.clear();this.emitter?.dispose();}
 }
 module.exports={ApiSourceUI,assertClean,dirtyDocuments,filePath,identity,showReport,sourceSyncLines};

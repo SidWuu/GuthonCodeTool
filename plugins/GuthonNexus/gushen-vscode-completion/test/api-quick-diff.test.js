@@ -14,6 +14,13 @@ test('quick diff discards an older response after SCM status changes',async()=>{
   const pending=provider.provideOriginalResource({scheme:'file',fsPath:'/checkout/a.gss'});ui.scmGenerations.set('projects.a',2);release({before:'old'});
   assert.equal(await pending,undefined);provider.dispose();
 });
+test('virtual quick diff queries the case-sensitive workspace stored in the URI',async()=>{
+  const {uriFor}=require('../src/source/virtual-fs');let requested;
+  const vscode={workspace:{textDocuments:[]},Uri:{from:o=>({...o,authority:o.authority.toLowerCase(),toString(){return JSON.stringify(this);}})}};
+  const provider=new ApiQuickDiff({vscode,ui:{scmGenerations:new Map()},editorState:{workspaces:new Map()},run:async(key)=>{requested=key;return {before:'{"sql":"select 1"}'};}});
+  const uri=uriFor(vscode,{workspaceKey:'products.MixedCase',sourcePath:'page.json',jsonPointer:'/sql',fragmentType:'sql'});
+  const original=await provider.provideOriginalResource(uri);assert.equal(requested,'products.MixedCase');assert.equal(new URLSearchParams(original.query).get('workspaceKey'),'products.MixedCase');assert.equal(provider.provideTextDocumentContent(original),'select 1');provider.dispose();
+});
 test('reverting one difference retains all other edited blocks',()=>{
   class Range{constructor(a,b,c,d){this.start={line:a,character:b};this.end={line:c,character:d};}}
   function doc(text){const lines=text.split('\n'),offsets=[];let offset=0;for(const line of lines){offsets.push(offset);offset+=line.length+1;}

@@ -16,16 +16,25 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   // Editor coordination must remain responsive while the primary write lane is pulling or indexing.
   const stateProcessClient = new ToolProcessClient();
   const stateClient = new ToolJsonClient({getTool,processClient:stateProcessClient,outputLabel:'谷神 API 编辑状态'});
+  // A large checkout status scan must not block opening source on the main lane.
+  const statusProcessClient = new ToolProcessClient();
+  const statusClient = new ToolJsonClient({getTool,processClient:statusProcessClient,outputLabel:'谷神 API 状态'});
+  const statusRequests = new Map();
   const run = async (key,action,input) => {
-    if(action==='status') input={...input,changesOnly:true};
-    try {return await client.run(key,'api',[action,...(input === undefined ? []:['--stdin'])],input);}
+    if(action==='status') {
+      const pending=statusRequests.get(key);if(pending) return pending;
+      const request=statusClient.run(key,'api',['status','--stdin'],{...input,changesOnly:true})
+        .finally(()=>{if(statusRequests.get(key)===request) statusRequests.delete(key);});
+      statusRequests.set(key,request);return request;
+    }
+    try {const result=await client.run(key,'api',[action,...(input === undefined ? []:['--stdin'])],input);if(action==='login') ui.menuAttempts.delete(key);return result;}
     catch(error) {if(error.code==='API_LOGIN_REQUIRED' && !['session','status'].includes(action)) onUpdated?.();throw error;}
   };
   const editorState = new ApiEditorState({vscode,run:(key,_action,input)=>stateClient.run(key,'api',['editor-state','--stdin'],input),onError:error=>vscode.window.showErrorMessage(`编辑状态登记失败：${error.message}`)});
   let closingEditorState;
   const closeEditorState=()=>closingEditorState ||= editorState.close().finally(()=>stateProcessClient.dispose());
   let pageEditor,virtualFs,virtualRegistration,sourceWatcher,selectWorkspace,inheritanceDecorations;
-  const ui = new ApiSourceUI({vscode,run,onUpdated,editorState,onWorkspace:(key,root)=>sourceWatcher.register(key,root),indexRecovery:key=>sourceWatcher.recovery(key),onOpenVirtual:async identity=>{getPageEditor();return virtualFs.open(identity);},onSourceChanged:async(key,paths)=>{
+  const ui = new ApiSourceUI({vscode,run,onUpdated,editorState,onWorkspace:(key,root)=>sourceWatcher.register(key,root),indexRecovery:key=>sourceWatcher.recovery(key),onOpenVirtual:async identity=>{getPageEditor();return virtualFs.openEditor(identity);},onSourceChanged:async(key,paths)=>{
     try {virtualFs?.invalidate(key,paths);for(const p of paths) sourceWatcher.enqueue(key,p);await pageEditor?.sourceChanged(key,paths);} catch(error) {await vscode.window.showErrorMessage(`PAGE 更新核对失败：${error.message}`);}
   }});
   const quickDiff=new ApiQuickDiff({vscode,run,editorState,ui,projectBase:(uri,text)=>virtualFs?.projectBase(uri,text),viewBase:(uri,diff)=>virtualFs?.viewBase(uri,diff)});ui.quickDiff=quickDiff;
@@ -38,7 +47,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
     inheritanceDecorations=new InheritanceDecorations(vscode,virtualFs);
     virtualRegistration=vscode.workspace.registerFileSystemProvider(SCHEME,virtualFs,{isCaseSensitive:true});
     context.subscriptions.push(virtualRegistration,virtualFs,inheritanceDecorations);
-    pageEditor=new PageEditorController({vscode,context,getTool,virtualFs,
+    pageEditor=new PageEditorController({vscode,context,getTool,virtualFs,openReadonly:(identity,snapshot)=>ui.openReadonly(identity.workspaceKey,identity.sourcePath,snapshot.sourceText),
       backend:{run},
       ownsDocument:(identity,doc)=>{const state=editorState.workspaces.get(identity.workspaceKey);return !!state && editorState.documentPath(identity.workspaceKey,state,doc)===identity.sourcePath;},
       onDraftChanged:(identity,dirty,version)=>editorState.setDraft(`page:${identity.workspaceKey}:${identity.sourcePath}`,identity.workspaceKey,identity.sourcePath,dirty,version),
@@ -117,7 +126,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
     },
   };
   Object.assign(handlers, {
-    refreshApiSourceView: async key => {await ui.updateScm(key);onUpdated?.();},
+    refreshApiSourceView: async key => {ui.menuAttempts.delete(key);await ui.updateScm(key);onUpdated?.();},
     refreshApiScm: async key => ui.updateScm(key),
     refreshApiObject: async (key,p) => {
       const state=await ui.status(key);assertClean(vscode,state.checkoutPath,[p]);await editorState.flush(key);
@@ -132,12 +141,13 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
     revertApiSource: async (key,p) => ui.revert(key,p),
     uploadApiSource: async (key,p) => ui.upload(key,Array.isArray(p) ? p : p ? [p] : undefined),
     openApiDesigner: async (key,p) => openDesigner({vscode,run,ui,key,sourcePath:p,onUpdated,editorState}),
-    openApiFieldCollection: async (key,p,value) => {const target=value.target || value;if(typeof target.jsonPointer!=='string' || !target.jsonPointer.startsWith('/')) throw new Error('请选择明确的字段集合');await ui.status(key);getPageEditor();return virtualFs.open({workspaceKey:key,sourceType:'page',sourcePath:p,jsonPointer:target.jsonPointer,fragmentType:'fields'},{viewColumn:vscode.ViewColumn.Beside});},
-    openApiFragment: async (key,p,value) => {const target=value.target || value;if(!target.jsonPointer || !target.jsonPointer.startsWith('/')) throw new Error('请选择明确的源码分块');await ui.status(key);getPageEditor();return virtualFs.open({...target,workspaceKey:key,sourcePath:p},{viewColumn:vscode.ViewColumn.Beside});},
+    openApiFieldCollection: async (key,p,value) => {const target=value.target || value;if(typeof target.jsonPointer!=='string' || !target.jsonPointer.startsWith('/')) throw new Error('请选择明确的字段集合');await ui.ensureWorkspace(key);getPageEditor();return virtualFs.open({workspaceKey:key,sourceType:'page',sourcePath:p,jsonPointer:target.jsonPointer,fragmentType:'fields'},{viewColumn:vscode.ViewColumn.Beside});},
+    openApiFragment: async (key,p,value) => {const target=value.target || value;if(!target.jsonPointer || !target.jsonPointer.startsWith('/')) throw new Error('请选择明确的源码分块');await ui.ensureWorkspace(key);getPageEditor();return virtualFs.open({...target,workspaceKey:key,sourcePath:p},{viewColumn:vscode.ViewColumn.Beside});},
     openApiPageEditor: async (key,p) => {
-      await ui.status(key);
+      await ui.ensureWorkspace(key);
       const source=await run(key,'read',{path:p});
       if(source.metadata?.sourceType && source.metadata.sourceType!=='page') throw new Error('请选择 PAGE 源码');
+      if(['METADATA_ONLY','IDENTITY_MISMATCH'].includes(source.contentState)) return ui.openReadonly(key,p,source.content);
       return getPageEditor().open({workspaceKey:key,sourcePath:p,sourceType:'page',sourceId:source.metadata?.pageId,sourceName:source.metadata?.pageName});
     },
     resolveApiConflict: async (key,p) => ui.resolveConflict(key,p),
@@ -217,7 +227,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   }));
   if(vscode.workspace.onDidChangeTextDocument) registrations.push(vscode.workspace.onDidChangeTextDocument(event=>{if(event.document.uri.scheme===SCHEME) {virtualFs?.trackDocumentChange(event);inheritanceDecorations?.refresh(event.document);}}));
   if(vscode.workspace.onDidCloseTextDocument) registrations.push(vscode.workspace.onDidCloseTextDocument(doc=>{if(doc.uri.scheme===SCHEME) virtualFs?.close(doc.uri);}));
-  context.subscriptions.push(...registrations,ui,{dispose:()=>{void closeEditorState().catch(error=>vscode.window.showErrorMessage(`编辑状态关闭失败：${error.message}`));}},sourceWatcher,quickDiff);
-  return {run,sourceTree:ui,editorState,sourceUri:async(key,p)=>{const state=await ui.status(key),source=await run(key,'read',{path:p});if(source.metadata?.sourceType==='view' || isInlineInherited(key,p,source)){getPageEditor();const uri=uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:source.metadata.sourceType,jsonPointer:source.metadata.sourceType==='view'?'/viewSql':'',fragmentType:source.metadata.sourceType==='view'?'sql':source.metadata.sourceType==='system-script'?'js':'gss'});editorState.assertNoDirtyDocumentsExcept(key,p,uri);return uri;}return vscode.Uri.file(filePath(state.checkoutPath,p));},setSelectWorkspace:selector=>{selectWorkspace=selector;},openFragment:async target=>{await ui.status(target.workspaceKey);getPageEditor();return virtualFs.open(target,{viewColumn:vscode.ViewColumn.Beside});},syncWorkspaces:workspaces=>{ui.syncWorkspaces(workspaces);return Promise.all(workspaces.filter(w=>!w.sourceMode || w.sourceMode==='api').map(w=>ui.updateScm(typeof w==='string'?w:w.workspaceKey)));},refreshWorkspace:key=>ui.updateScm(key),retryIndex:key=>sourceWatcher.retry(key),markIndexed:key=>sourceWatcher.markIndexed(key),reset:async()=>{await sourceWatcher.reset();await editorState.reset();pageEditor?.dispose();if(pageEditor) await Promise.all([...pageEditor.pages.values()].map(session=>session.persistence).filter(Boolean));virtualRegistration?.dispose();inheritanceDecorations?.dispose();virtualFs?.dispose();pageEditor=virtualFs=virtualRegistration=inheritanceDecorations=undefined;ui.clear();},dispose:async()=>{pageEditor?.dispose();await sourceWatcher.close();ui.dispose();await closeEditorState();}};
+  context.subscriptions.push(...registrations,ui,{dispose:()=>{void closeEditorState().catch(error=>vscode.window.showErrorMessage(`编辑状态关闭失败：${error.message}`));}},statusProcessClient,sourceWatcher,quickDiff);
+  return {run,sourceTree:ui,editorState,sourceUri:async(key,p)=>{const state=await ui.ensureWorkspace(key),source=await run(key,'read',{path:p});if(['METADATA_ONLY','IDENTITY_MISMATCH','SQL_ABSENT'].includes(source.contentState)) return ui.readonlyUri(key,p,source.content);if(source.metadata?.sourceType==='view' || isInlineInherited(key,p,source)){getPageEditor();const uri=uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:source.metadata.sourceType,jsonPointer:source.metadata.sourceType==='view'?'/viewSql':'',fragmentType:source.metadata.sourceType==='view'?'sql':source.metadata.sourceType==='system-script'?'js':'gss'});editorState.assertNoDirtyDocumentsExcept(key,p,uri);return uri;}return vscode.Uri.file(filePath(state.checkoutPath,p));},setSelectWorkspace:selector=>{selectWorkspace=selector;},openFragment:async target=>{await ui.ensureWorkspace(target.workspaceKey);getPageEditor();return virtualFs.open(target,{viewColumn:vscode.ViewColumn.Beside});},syncWorkspaces:workspaces=>{ui.syncWorkspaces(workspaces);return Promise.all(workspaces.filter(w=>!w.sourceMode || w.sourceMode==='api').map(w=>ui.updateScm(typeof w==='string'?w:w.workspaceKey)));},refreshWorkspace:key=>ui.updateScm(key),retryIndex:key=>sourceWatcher.retry(key),markIndexed:key=>sourceWatcher.markIndexed(key),reset:async()=>{await sourceWatcher.reset();await editorState.reset();pageEditor?.dispose();if(pageEditor) await Promise.all([...pageEditor.pages.values()].map(session=>session.persistence).filter(Boolean));virtualRegistration?.dispose();inheritanceDecorations?.dispose();virtualFs?.dispose();pageEditor=virtualFs=virtualRegistration=inheritanceDecorations=undefined;ui.clear();},dispose:async()=>{pageEditor?.dispose();await sourceWatcher.close();ui.dispose();try {await closeEditorState();} finally {statusProcessClient.dispose();}}};
 }
 module.exports={activateApi};

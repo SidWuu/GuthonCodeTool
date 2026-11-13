@@ -14,10 +14,10 @@ const escape = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<
 const pageKey = identity => JSON.stringify([identity.workspaceKey, identity.sourcePath || identity.path]);
 
 class PageEditorController {
-  constructor({vscode, context, backend, virtualFs, getTool, resources = new DesignerResources({getTool}),
+  constructor({vscode, context, backend, virtualFs, getTool, openReadonly, resources = new DesignerResources({getTool}),
     recoveryStore = new PageRecoveryStore(context), maxClosedPages = 4, maxClosedBytes = 16 * 1024 * 1024,
     onSaved = async () => {}, onResourceOutput = () => {}, ownsDocument = () => false, onDraftChanged = async () => {}, editorToken = async () => undefined, assertCanSave = () => {}}) {
-    Object.assign(this, {vscode, context, backend, virtualFs, onSaved, onResourceOutput, ownsDocument, onDraftChanged, editorToken, assertCanSave});
+    Object.assign(this, {vscode, context, backend, virtualFs, openReadonly, onSaved, onResourceOutput, ownsDocument, onDraftChanged, editorToken, assertCanSave});
     this.resources = resources;
     Object.assign(this, {recoveryStore, maxClosedPages, maxClosedBytes});
     this.pages = new Map(); this.opening = new Map(); this.resourceJobs = new Map();
@@ -30,6 +30,7 @@ class PageEditorController {
     const result = await this.backend.run(identity.workspaceKey, 'page', {action:'open',
       path:identity.sourcePath || identity.path});
     if (result.sourcePath !== (identity.sourcePath || identity.path)) throw new Error('PAGE 来源与请求不一致');
+    if (['METADATA_ONLY','IDENTITY_MISMATCH'].includes(result.contentState)) return result;
     const page = JSON.parse(result.sourceText);
     result.model.pageName = pageDisplayName(identity)
       || pageDisplayName({...result,pageName:result.model.pageName}) || pageDisplayName(page);
@@ -505,6 +506,10 @@ class PageEditorController {
     if (this.vscode.workspace.textDocuments.some(doc => doc.isDirty && this.owns(identity, doc)))
       throw new Error('此 PAGE 的虚拟文档存在未保存输入，请先保存或保留后再打开本地页面');
     const snapshot = await this.snapshot(identity);
+    if (['METADATA_ONLY','IDENTITY_MISMATCH'].includes(snapshot.contentState)) {
+      if(!this.openReadonly) throw new Error(snapshot.message || '页面不可编辑，请只读查看原文');
+      return this.openReadonly(identity,snapshot);
+    }
     const session = {identity: {...identity, sourceId:identity.sourceId || snapshot.model.pageId,
       sourcePath:snapshot.sourcePath}, snapshot,
       draft: new PageDraft(snapshot.model), busy: false, blocked: '', status: '',

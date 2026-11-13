@@ -10,7 +10,7 @@ import sqlite3
 import uuid
 from common.persistence import atomic_bytes, atomic_text, file_lock
 from .client import ApiError
-from .workspace import in_scope, settings
+from .workspace import in_scope, settings, active_scope
 from .editor_state import assert_writable
 
 
@@ -207,34 +207,42 @@ class ApiStore:
         }
 
     def status(self):
+        self._verify_binding()
+        if not self.path.is_file():
+            return []
+        with closing(sqlite3.connect(self.path)) as conn:
+            rows = conn.execute("SELECT path,metadata,readonly FROM source ORDER BY path").fetchall()
+        scope = active_scope(self.workspace)
         result = []
-        for item in self._rows():
-            target = self._path(item["path"])
+        for path, raw_meta, readonly in rows:
+            meta = json.loads(raw_meta)
+            target = self._path(path)
             current = target.read_bytes().decode("utf-8") if target.is_file() else None
-            active = in_scope(self.workspace, item["path"], item["metadata"])
-            meta = item["metadata"]
+            current_hash = digest(current) if current is not None else None
+            base_hash = meta.get("remoteHash") or digest(self.baseline(path))
+            active = in_scope(self.workspace, path, meta, scope=scope)
             state = (
                 "CONFLICT"
-                if self._conflict_path(item["path"]).is_file()
+                if self._conflict_path(path).is_file()
                 else "REMOTE_DELETED"
                 if meta.get("remoteDeleted")
                 else "MISSING"
                 if current is None
                 else "CLEAN"
-                if current == item["baseContent"]
+                if current_hash == base_hash
                 else "MODIFIED"
             )
             result.append(
                 {
-                    "path": item["path"],
+                    "path": path,
                     "metadata": meta,
-                    "readonly": item["readonly"],
+                    "readonly": bool(readonly),
                     "sourceType": meta["sourceType"],
                     "state": state,
                     "status": state,
                     "inScope": active,
-                    "sourceHash": digest(current) if current is not None else None,
-                    "baseHash": digest(item["baseContent"]),
+                    "sourceHash": current_hash,
+                    "baseHash": base_hash,
                 }
             )
         return result

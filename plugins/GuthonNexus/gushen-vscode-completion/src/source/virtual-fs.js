@@ -16,7 +16,7 @@ function fragmentIdentity(workspaceKey,source,fragment={}) {
 }
 function decodeIdentity(uri) {
   const p=new URLSearchParams(uri.query || '');
-  return {workspaceKey:uri.authority,sourceType:p.get('sourceType') || 'page',sourcePath:p.get('path') || '',sourceId:p.get('id') || '',jsonPointer:p.get('pointer') || '',fragmentType:p.get('type') || ''};
+  return {workspaceKey:p.get('workspaceKey') || uri.authority,sourceType:p.get('sourceType') || 'page',sourcePath:p.get('path') || '',sourceId:p.get('id') || '',jsonPointer:p.get('pointer') || '',fragmentType:p.get('type') || ''};
 }
 function scriptType(node) {
   if(node.type==='SQL') return 'sql';
@@ -33,7 +33,7 @@ function uriFor(vscode,id) {
   const base=path.posix.basename(id.sourcePath);
   const event=(id.jsonPointer || '').split('/').at(-1);
   const label=(event ? `${base} · ${event}` : base.replace(/\.[^.]+$/,'')).replace(/[<>:"/\\|?*\x00-\x1f]+/g,'_');
-  const params={path:id.sourcePath,pointer:id.jsonPointer || '',type:id.fragmentType || ''};
+  const params={workspaceKey:id.workspaceKey,path:id.sourcePath,pointer:id.jsonPointer || '',type:id.fragmentType || ''};
   if(id.sourceType && id.sourceType!=='page') params.sourceType=id.sourceType;
   return vscode.Uri.from({scheme:SCHEME,authority:id.workspaceKey,path:`/${label}.${extension}`,query:new URLSearchParams(params).toString()});
 }
@@ -57,10 +57,13 @@ class ApiPageVirtualFs {
     Object.assign(this,{vscode,run,editorState,onWillSave,onSaved,onOpened,onInvalidated});this.records=new Map();this.inFlight=new Map();this.generations=new Map();this.changed=new vscode.EventEmitter();this.onDidChangeFile=this.changed.event;
   }
   async open(identity,options={}) {
+    return (await this.openEditor(identity,options)).document.uri;
+  }
+  async openEditor(identity,options={}) {
     const uri=uriFor(this.vscode,identity);
     this.editorState.assertNoDirtyDocumentsExcept?.(identity.workspaceKey,identity.sourcePath,uri);
     const editor=await this.vscode.window.showTextDocument(await this.vscode.workspace.openTextDocument(uri),{...options,preview:false});
-    this.onOpened?.(editor);return uri;
+    this.onOpened?.(editor);return editor;
   }
   async readFile(uri) {
     const key=uri.toString(),cached=this.records.get(key);if(cached) return Buffer.from(cached.content);

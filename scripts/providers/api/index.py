@@ -233,6 +233,10 @@ def _index_calls(conn, record_id, script, fragment):
             )
 
 
+class PageIdentityMismatch(ValueError):
+    """The PAGE body identifies a different object from the API metadata."""
+
+
 def _page_data(text, expected_page_id=None):
     if text.lstrip("\ufeff \t\r\n").startswith("<"):
         from .native_page import decode
@@ -249,7 +253,7 @@ def _page_data(text, expected_page_id=None):
     ):
         raise ValueError("PAGE JSON must have a non-empty string pageId")
     if expected_page_id is not None and data["pageId"] != str(expected_page_id):
-        raise ValueError("PAGE JSON pageId does not match API metadata")
+        raise PageIdentityMismatch("PAGE pageId does not match API metadata")
     return data
 
 
@@ -269,11 +273,16 @@ def page_format(item):
     ].lower().endswith(".gss"):
         return "script"
     if item["content"].lstrip("\ufeff \t\r\n").startswith("<"):
-        from .native_page import is_native
+        from .native_page import is_metadata_only, is_native
 
         if not is_native(item["content"]):
             return "unsupported-xml"
-        _page_data(item["content"], page_id)
+        try:
+            _page_data(item["content"], page_id)
+        except ValueError:
+            if is_metadata_only(item["content"], item["metadata"], item["path"]):
+                return "unsupported-xml"
+            raise
         return "native-xml"
     _page_data(item["content"], page_id)
     return "json"
@@ -302,21 +311,39 @@ def _index_item(conn, workspace, item):
     name = str(
         meta.get("pageName") or meta.get("funName") or meta.get("title") or source_id
     )
+    metadata_only = False
     try:
         fmt = page_format(item)
         diagnostic = "API_PAGE_XML_UNSUPPORTED" if fmt == "unsupported-xml" else ""
+        if diagnostic:
+            from .native_page import is_metadata_only
+
+            if is_metadata_only(text, meta, path):
+                fmt, diagnostic, metadata_only = "native-page-minimal", "API_PAGE_MINIMAL_SOURCE", True
+    except PageIdentityMismatch:
+        if not text.lstrip("\ufeff \t\r\n").startswith("<"):
+            raise
+        fmt, diagnostic = "unsupported", "API_PAGE_IDENTITY_MISMATCH"
     except (ValueError, TypeError):
         if not text.lstrip("\ufeff \t\r\n").startswith("<"):
             raise
-        fmt, diagnostic = "unsupported", "API_PAGE_FORMAT_INVALID"
+        from .native_page import is_metadata_only
+
+        if is_metadata_only(text, meta, path):
+            fmt, diagnostic, metadata_only = "native-page-minimal", "API_PAGE_MINIMAL_SOURCE", True
+        else:
+            fmt, diagnostic = "unsupported", "API_PAGE_FORMAT_INVALID"
     view_sql = None
     if kind == "view":
-        from .view_editor import extract_sql
+        from .view_editor import extract_sql, is_metadata_only
 
         try:
             view_sql = extract_sql(text, meta)
         except ApiError as error:
-            diagnostic = error.code
+            if is_metadata_only(text, meta, path):
+                fmt, diagnostic, metadata_only = "view-no-sql", "API_VIEW_SQL_ABSENT", True
+            else:
+                diagnostic = error.code
     cur = conn.execute(
         """INSERT INTO gusen_source_record(scope_id,source_table,source_id,source_alias_id,fun_id,source_name,source_path,local_path,source_hash,provider,system_id,data_source_id,source_format,status,diagnostic,metadata_json,readonly)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -334,10 +361,10 @@ def _index_item(conn, workspace, item):
             str(meta.get("systemId") or ""),
             str(meta.get("dataSourceId") or ""),
             fmt,
-            "PARTIAL" if diagnostic else "OK",
+            "PARTIAL" if diagnostic and not metadata_only else "OK",
             diagnostic,
             json.dumps(meta, ensure_ascii=False),
-            int(item["readonly"] or bool(diagnostic)),
+            int(item["readonly"] or bool(diagnostic and not metadata_only)),
         ),
     )
     record_id = cur.lastrowid
@@ -406,6 +433,7 @@ def _diagnostics(conn):
             "message": {
                 "API_PAGE_XML_UNSUPPORTED": "未知 PAGE XML 格式仅可读取原文，未生成结构或源码事实",
                 "API_PAGE_FORMAT_INVALID": "PAGE 格式或编码与元数据不符，仅保留原文，未生成结构或源码事实",
+                "API_PAGE_IDENTITY_MISMATCH": "PAGE 原文编码与官方元数据不一致，仅保留只读原文",
                 "API_VIEW_FORMAT_UNSUPPORTED": "视图缺少可核验身份或 SQL，未生成源码事实",
                 "API_VIEW_IDENTITY_MISSING": "视图元数据缺少平台编码，未生成源码事实",
                 "API_IDENTITY_MISMATCH": "视图源码编码与平台对象不一致，未生成源码事实",
@@ -751,8 +779,39 @@ def search_body(
 def read_source(workspace, path, offset=0, max_chars=12000):
     _bound(max_chars, offset, 50000)
     item = ApiStore(workspace).read(path)
-    if page_format(item) == "unsupported-xml":
-        item = {**item, "readonly": True, "diagnostic": "API_PAGE_XML_UNSUPPORTED"}
+    if item["metadata"].get("sourceType") == "page":
+        try:
+            fmt = page_format(item)
+        except PageIdentityMismatch:
+            item = {**item, "readonly": True, "diagnostic": "API_PAGE_IDENTITY_MISMATCH"}
+        except (ValueError, TypeError):
+            from .native_page import is_metadata_only
+
+            minimal = is_metadata_only(item["content"], item["metadata"], item["path"])
+            item = {**item, "readonly": item["readonly"] if minimal else True,
+                    "diagnostic": "API_PAGE_MINIMAL_SOURCE" if minimal else "API_PAGE_FORMAT_INVALID"}
+            if minimal:
+                item.update(sourceFormat="native-page-minimal", contentState="METADATA_ONLY", identitySource="API_METADATA", projectionReadonly=True)
+        else:
+            if fmt == "unsupported-xml":
+                from .native_page import is_metadata_only
+
+                minimal = is_metadata_only(item["content"], item["metadata"], item["path"])
+                item = {**item, "readonly": item["readonly"] if minimal else True,
+                        "diagnostic": "API_PAGE_MINIMAL_SOURCE" if minimal else "API_PAGE_XML_UNSUPPORTED"}
+                if minimal:
+                    item.update(sourceFormat="native-page-minimal", contentState="METADATA_ONLY", identitySource="API_METADATA", projectionReadonly=True)
+    elif item["metadata"].get("sourceType") == "view":
+        from .view_editor import extract_sql, is_metadata_only
+
+        if is_metadata_only(item["content"], item["metadata"], item["path"]):
+            item = {**item, "readonly": item["readonly"], "projectionReadonly": True, "diagnostic": "API_VIEW_SQL_ABSENT",
+                    "sourceFormat": "view-no-sql", "contentState": "SQL_ABSENT", "identitySource": "SOURCE_AND_API_METADATA"}
+        else:
+            try:
+                extract_sql(item["content"], item["metadata"])
+            except ApiError as error:
+                item = {**item, "readonly": True, "diagnostic": error.code}
     text = item["content"]
     more = offset + max_chars < len(text)
     return {

@@ -5,6 +5,7 @@ const os=require('node:os');
 const path=require('node:path');
 const {parse}=require('jsonc-parser');
 const {activateApi}=require('../src/api/activate');
+const {ToolProcessClient}=require('../src/tool-process-client');
 
 async function fixture(t) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'nexus-project-window-'));
@@ -18,6 +19,7 @@ async function fixture(t) {
     commands:{registerCommand:(id,handler)=>(handlers.set(id,handler),{dispose(){}}),executeCommand:async(...args)=>calls.push(args)},
     window:{showErrorMessage:async message=>errors.push(message)}};
   const processClient={request:async(_tool,command,args,key)=>{assert.equal(command,'api');assert.equal(args[0],'status');assert.equal(key,'projects.a');return {ok:true,workspaceRoot,checkoutPath};}};
+  t.mock.method(ToolProcessClient.prototype,'request',(...args)=>processClient.request(...args));
   activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/test/tool',toolHome:'/test/home'}),processClient});
   return {workspaceRoot,checkoutPath,filename,handlers,calls,errors,settings,vscode};
 }

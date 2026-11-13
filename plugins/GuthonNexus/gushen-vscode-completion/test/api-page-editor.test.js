@@ -37,6 +37,15 @@ test('API PAGE manager retains structured draft, undo, redo, code and order and 
   assert.ok(f.calls.filter(c=>['preview','save'].includes(c.input.action)).every(c=>c.input.path===f.identity.sourcePath));
   assert.ok(f.registrations.some(x=>x.dirty));assert.ok(f.registrations.some(x=>!x.dirty));f.host.dispose();
 });
+test('PAGE manager falls back to immutable original when the backend identifies minimal or mismatched source',async()=>{
+  for(const contentState of ['METADATA_ONLY','IDENTITY_MISMATCH']) {
+    const f=fixture(),raw='<page><isProduct>0</isProduct></page>',opened=[];
+    f.host.backend.run=async()=>({sourcePath:f.identity.sourcePath,sourceText:raw,sourceHash:'hash',editable:false,model:null,contentState});
+    f.host.openReadonly=async(identity,snapshot)=>(opened.push({identity,snapshot}),{readonly:true});
+    assert.deepEqual(await f.host.open(f.identity),{readonly:true});assert.equal(opened[0].snapshot.sourceText,raw);
+    assert.equal(opened[0].snapshot.editable,false);assert.equal(f.host.pages.size,0);f.host.dispose();
+  }
+});
 test('API PAGE external changes merge independent draft and conflict choices remain explicit',async()=>{
   const f=fixture(),s=await f.host.open(f.identity);
   await f.host.message(s,{type:'property',version:0,collectionPointer:'/views/0/fields',fieldKey:'fieldId:A',name:'label',value:'草稿'});

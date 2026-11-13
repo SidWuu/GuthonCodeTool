@@ -10,7 +10,7 @@ from common.persistence import atomic_text, file_lock
 from .client import ApiError
 from .store import ApiStore, digest
 from .sync import target
-from .index import page_format
+from .index import PageIdentityMismatch, page_format
 
 
 def _directory(workspace):
@@ -42,7 +42,36 @@ def _load(workspace, token):
 
 def snapshot(workspace, payload):
     item = target(workspace, {**payload, "sourceType": "page"})
-    fmt = page_format(item)
+    from .native_page import is_metadata_only
+
+    minimal = is_metadata_only(item["content"], item["metadata"], item["path"])
+    identity_mismatch = False
+    if not minimal:
+        try:
+            fmt = page_format(item)
+        except PageIdentityMismatch:
+            identity_mismatch = True
+    if minimal or identity_mismatch:
+        return {
+            "workspaceKey": workspace["workspaceKey"],
+            "sourcePath": item["path"],
+            "sourceHash": item["sourceHash"],
+            "sourceId": item["metadata"]["pageId"],
+            "sessionId": None,
+            "documentId": None,
+            "editToken": None,
+            "editable": False,
+            "rawEditable": minimal and not item["readonly"],
+            "sourceText": item["content"],
+            "model": None,
+            "expiresAt": None,
+            "sourceFormat": "native-page-minimal" if minimal else "unsupported",
+            "contentState": "METADATA_ONLY" if minimal else "IDENTITY_MISMATCH",
+            "identitySource": "API_METADATA",
+            "diagnostic": "API_PAGE_MINIMAL_SOURCE" if minimal else "API_PAGE_IDENTITY_MISMATCH",
+            "message": "原始页面仅包含最小元数据，缺少页面编码；请使用原始文件进行显式编辑。"
+            if minimal else "页面源码中的编码与官方元数据不一致；可只读查看原文。",
+        }
     if fmt not in {"json", "native-xml"}:
         raise ApiError(
             "API_PAGE_FORMAT_UNSUPPORTED",
@@ -285,6 +314,8 @@ def run(workspace, payload):
         }
     if action in {"open", "structure-open", "inspect"}:
         result = snapshot(workspace, payload)
+        if result.get("contentState") in {"METADATA_ONLY", "IDENTITY_MISMATCH"} and action != "open":
+            raise ApiError("API_PAGE_STRUCTURE_UNAVAILABLE", "原始页面没有可编辑的页面结构")
         if action == "inspect":
             from common.page_structure import inspect
 
