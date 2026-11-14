@@ -53,7 +53,18 @@ class ArtifactError(ValueError):
 
 
 def load_yaml(path: Path) -> dict:
-    value = gusen_hub.load_yaml(path)
+    from common import config_store
+
+    path = Path(path)
+    if config_store.is_default_database_path(path):
+        def expand(value):
+            if isinstance(value, str): return gusen_hub._expand_env(value)
+            if isinstance(value, list): return [expand(item) for item in value]
+            if isinstance(value, dict): return {key: expand(item) for key, item in value.items()}
+            return value
+        value = expand(config_store.database_testing(path.parent.parent))
+    else:
+        value = gusen_hub.load_yaml(path)
     if not isinstance(value, dict):
         raise ArtifactError("CONFIG_INVALID", "数据库测试配置必须是 YAML 对象")
     return value

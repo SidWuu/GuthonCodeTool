@@ -52,6 +52,10 @@ def set_workspace(value):
 
 
 def load_config():
+    from common import config_store
+
+    if config_store.unified(tool_home()):
+        return config_store.runtime_config(tool_home())
     files = {
         "products": "products.yaml",
         "projects": "projects.yaml",

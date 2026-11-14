@@ -1,6 +1,10 @@
 # 本地配置参考
 
-真实运行配置和业务数据保存在显式指定的本地数据目录 <code>&lt;toolHome&gt;</code>；仓库中的 `config/example/` 仅提供公开示例。通过 `setup --home <toolHome>` 初始化，已有配置不会自动覆盖。
+真实运行配置和业务数据保存在显式指定的本地数据目录 <code>&lt;toolHome&gt;</code>；仓库中的 `config/example/` 仅提供公开示例。通过 `setup --home <toolHome>` 初始化。新目录只生成 `config/guthon.json`；已有配置保持原样，不自动合并。日常从 Nexus 的“项目设置”向导调整拉取范围、平台连接和数据库目标，不需要逐个编辑配置文件。
+
+`guthon.json` 是统一模式唯一有效配置源，包含 `products`、`projects`、`sync`、`datasource`、`databaseTesting`、`apiWorkspaces`。凭据仍通过原有系统凭据或环境引用处理。旧目录可在“项目设置 → 配置文件 → 合并为单一配置文件”先预览，再确认；原配置备份到 `config/archive/`，成功后不再作为活动配置读取。迁移失败或归档未完成时按返回结果检查当前文件和备份，不重复覆盖。
+
+公开空配置样例见 [guthon.example.json](example/guthon.example.json)。下文中的旧文件名称也是对应配置分区的参考；旧模式继续支持这些文件，统一模式通过同一向导和 CLI 读写 `guthon.json`。
 
 ## 产品与项目
 
@@ -53,7 +57,7 @@ cp config/example/source-diagnosis.example.json "$GUTHON_HOME/var/diagnosis/case
 
 ## 目标维护与凭据来源
 
-`setup` 同时创建空 `database-testing.yaml`，不绑定任何真实数据库。`database-target-list` 不读取密码，列出全部目标及选中依据；支持全局 `--workspace` 显式选择，未传时按 `--path` 解析。`database-target-configure` 的 JSON 可仅给已有 `targetId` 和新 `password`，其余连接字段沿用；目标顺序、引用及默认选择保持稳定。新增正式目标使用 `validationScope: full`，必须给出 `systemId/dataSourceId/allowedTables/tenantScope/evidenceRef`；已有正式目标更换连接身份也要提供新证据，不能复用旧探测结果。
+新目录的 `setup` 创建空 `databaseTesting` 分区，不绑定任何真实数据库；旧模式继续使用 `database-testing.yaml`。`database-target-list` 不读取密码，列出全部目标及选中依据；支持全局 `--workspace` 显式选择，未传时按 `--path` 解析。`database-target-configure` 的 JSON 可仅给已有 `targetId` 和新 `password`，其余连接字段沿用；目标顺序、引用及默认选择保持稳定。新增正式目标使用 `validationScope: full`，必须给出 `systemId/dataSourceId/tenantScope/evidenceRef`，`allowedTables` 为可选提示；已有正式目标更换连接身份也要提供新证据，不能复用旧探测结果。
 
 连接可声明 `credentialRef`、`passwordEnv`、`passwordFile`，后两项为显式本机来源，文件路径须为绝对路径。keyring 引用存在时优先使用；仅在配置了 fallback 时才允许回退。独立数据库诊断和只读单据类型导出按目标配置解析连接。不要把密码输入 shell 参数；configure JSON 从 stdin 输入。配置保存串行加锁且原子替换；无 PyYAML 的依赖最小运行模式保存 JSON（合法 YAML 子集），加载器明确支持该格式，不会误送迷你 YAML 解析器。
 

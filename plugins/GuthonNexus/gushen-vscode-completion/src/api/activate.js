@@ -10,6 +10,7 @@ const {InheritanceDecorations}=require('../source/inheritance-decoration');
 const {PageEditorController} = require('../page-editor/controller');
 const {DIFF_SCHEME,ApiQuickDiff,revertQuickDiffChange}=require('../source/quick-diff');
 const {checkOfficialUpdate,rollbackOfficialUpdate} = require('../official-update');
+const REMOTE_ACTIONS = new Set(['session','captcha','login','systems','data-sources','designer-context','system-menu','pull','refresh','upload','verify-upload','sync-database','platform-request','create-function']);
 
 function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   const client = new ToolJsonClient({getTool,processClient,outputLabel:'谷神 API'});
@@ -19,18 +20,45 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   // A large checkout status scan must not block opening source on the main lane.
   const statusProcessClient = new ToolProcessClient();
   const statusClient = new ToolJsonClient({getTool,processClient:statusProcessClient,outputLabel:'谷神 API 状态'});
+  // Platform calls share one session without occupying the local source lane.
+  const remoteProcessClient = new ToolProcessClient();
+  const remoteClient = new ToolJsonClient({getTool,processClient:remoteProcessClient,outputLabel:'谷神 API 平台'});
   const statusRequests = new Map();
+  const sessionRequests = new Map();
+  const lastStatus = new Map();
   const run = async (key,action,input) => {
     if(action==='status') {
-      const pending=statusRequests.get(key);if(pending) return pending;
+      const requestKey=JSON.stringify([key,input?.summaryOnly===true]);
+      const pending=statusRequests.get(requestKey);if(pending) return pending;
       const request=statusClient.run(key,'api',['status','--stdin'],{...input,changesOnly:true})
-        .finally(()=>{if(statusRequests.get(key)===request) statusRequests.delete(key);});
-      statusRequests.set(key,request);return request;
+        .then(result=>{if(!input?.summaryOnly){lastStatus.set(key,result);onUpdated?.();}return result;})
+        .finally(()=>{if(statusRequests.get(requestKey)===request) statusRequests.delete(requestKey);});
+      statusRequests.set(requestKey,request);return request;
     }
-    try {const result=await client.run(key,'api',[action,...(input === undefined ? []:['--stdin'])],input);if(action==='login') ui.menuAttempts.delete(key);return result;}
-    catch(error) {if(error.code==='API_LOGIN_REQUIRED' && !['session','status'].includes(action)) onUpdated?.();throw error;}
+    const invoke=async()=>{try {
+      const result=await (REMOTE_ACTIONS.has(action) ? remoteClient : client).run(key,'api',[action,...(input === undefined ? []:['--stdin'])],input);
+      if(action==='login'){ui.menuAttempts.delete(key);ui.invalidate(key);}
+      if(action==='configure' && result.index){
+        lastStatus.delete(key);ui.invalidate(key);ui.setIndexResult(key,result.index);
+        void ui.updateScm(key).catch(error=>vscode.window.showErrorMessage(`源码状态刷新失败：${error.message}`));
+      }
+      return result;
+    }
+    catch(error) {if(error.code==='API_LOGIN_REQUIRED' && !['session','status'].includes(action)) onUpdated?.();throw error;}};
+    if(action==='session') {
+      const pending=sessionRequests.get(key);if(pending) return pending;
+      const request=invoke().finally(()=>{if(sessionRequests.get(key)===request) sessionRequests.delete(key);});
+      sessionRequests.set(key,request);return request;
+    }
+    return invoke();
   };
   const editorState = new ApiEditorState({vscode,run:(key,_action,input)=>stateClient.run(key,'api',['editor-state','--stdin'],input),onError:error=>vscode.window.showErrorMessage(`编辑状态登记失败：${error.message}`)});
+  async function readProjectSummary(key) {
+    const value=await stateClient.run(key,'api',['status','--stdin'],{summaryOnly:true,changesOnly:true});
+    const scanned=lastStatus.get(key);
+    return scanned?.checkoutPath===value.checkoutPath && require('node:util').isDeepStrictEqual(scanned.settings,value.settings)
+      ? {...value,summary:scanned.summary,summaryComplete:true,statusKind:'last-scan'} : value;
+  }
   let closingEditorState;
   const closeEditorState=()=>closingEditorState ||= editorState.close().finally(()=>stateProcessClient.dispose());
   let pageEditor,virtualFs,virtualRegistration,sourceWatcher,selectWorkspace,inheritanceDecorations;
@@ -38,7 +66,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
     try {virtualFs?.invalidate(key,paths);for(const p of paths) sourceWatcher.enqueue(key,p);await pageEditor?.sourceChanged(key,paths);} catch(error) {await vscode.window.showErrorMessage(`PAGE 更新核对失败：${error.message}`);}
   }});
   const quickDiff=new ApiQuickDiff({vscode,run,editorState,ui,projectBase:(uri,text)=>virtualFs?.projectBase(uri,text),viewBase:(uri,diff)=>virtualFs?.viewBase(uri,diff)});ui.quickDiff=quickDiff;
-  sourceWatcher=new ApiSourceWatcher({run,workspaceState:context.workspaceState,onChanged:async (key,paths,result)=>{ui.setIndexResult(key,result);await ui.updateScm(key);await pageEditor?.statusChanged(key);onUpdated?.();},onError:(key,error)=>{ui.refresh();vscode.window.showErrorMessage(`源码索引更新失败（${key}）：${error.message}；可重试待更新文件`);}});
+  sourceWatcher=new ApiSourceWatcher({run,workspaceState:context.workspaceState,onChanged:async (key,paths,result)=>{const current=ui.indexGenerations.get(key);ui.setIndexResult(key,result);if(paths.length || current!==result.indexGeneration)await ui.updateScm(key);if(paths.length)await pageEditor?.statusChanged(key);onUpdated?.();},onError:(key,error)=>{ui.refresh();vscode.window.showErrorMessage(`源码索引更新失败（${key}）：${error.message}；可重试待更新文件`);}});
   function getPageEditor() {
     if (pageEditor) return pageEditor;
     virtualFs=new ApiPageVirtualFs({vscode,run,editorState,onWillSave:uri=>pageEditor.beforeCodeSave(uri),
@@ -58,16 +86,16 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   }
   const handlers = {
     configureApiSource: async key => {
-      const current = await run(key,'status');
-      const serverUrl = await vscode.window.showInputBox({title:'谷神 API 项目地址',value:current.settings.serverUrl,
+      const current = await readProjectSummary(key);
+      const serverUrl = await vscode.window.showInputBox({title:'开发平台地址',value:current.settings.serverUrl,
         prompt:'例如 https://project.example.com，不包含账号或密码'});
       if (serverUrl === undefined) return;
       await run(key,'configure',{serverUrl});onUpdated?.();
     },
     loginApiSource: async key => {
-      const userId = await vscode.window.showInputBox({title:'谷神平台登录账号'});
+      const userId = await vscode.window.showInputBox({title:'登录账号'});
       if (!userId) return;
-      const password = await vscode.window.showInputBox({title:'谷神平台密码',password:true});
+      const password = await vscode.window.showInputBox({title:'登录密码',password:true});
       if (password === undefined) return;
       const captcha=await run(key,'captcha');
       let randCode='';
@@ -86,10 +114,10 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
     },
     selectApiSystems: async key => {
       const result = await run(key,'systems');
-      const current = await run(key,'status');
+      const current = await readProjectSummary(key);
       const items = [{label:'全部子系统',description:'明确选择后才拉取全部',systemId:'*',picked:current.settings.allSystems},
         ...result.systems.map(s=>({label:s.systemName || s.systemId,description:s.systemId,systemId:s.systemId,picked:current.settings.systemIds.includes(s.systemId)}))];
-      const selected = await vscode.window.showQuickPick(items,{title:'选择当前项目需要拉取的子系统',canPickMany:true});
+      const selected = await vscode.window.showQuickPick(items,{title:'选择需要拉取的子系统',canPickMany:true});
       if (!selected) return;
       const all = selected.some(x=>x.systemId==='*');
       if (all && selected.length!==1) throw new Error('全部子系统不能与指定子系统同时选择');
@@ -116,7 +144,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
 
     },
     openApiCheckout: async key => {
-      const result = await run(key,'status');
+      const result = await readProjectSummary(key);
       await openProjectWorkspace(vscode,result);
     },
     showApiStatus: async key => {
@@ -126,7 +154,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
     },
   };
   Object.assign(handlers, {
-    refreshApiSourceView: async key => {ui.menuAttempts.delete(key);await ui.updateScm(key);onUpdated?.();},
+    refreshApiSourceView: async key => {ui.menuAttempts.delete(key);ui.invalidate(key);await ui.updateScm(key);onUpdated?.();},
     refreshApiScm: async key => ui.updateScm(key),
     refreshApiObject: async (key,p) => {
       const state=await ui.status(key);assertClean(vscode,state.checkoutPath,[p]);await editorState.flush(key);
@@ -227,7 +255,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   }));
   if(vscode.workspace.onDidChangeTextDocument) registrations.push(vscode.workspace.onDidChangeTextDocument(event=>{if(event.document.uri.scheme===SCHEME) {virtualFs?.trackDocumentChange(event);inheritanceDecorations?.refresh(event.document);}}));
   if(vscode.workspace.onDidCloseTextDocument) registrations.push(vscode.workspace.onDidCloseTextDocument(doc=>{if(doc.uri.scheme===SCHEME) virtualFs?.close(doc.uri);}));
-  context.subscriptions.push(...registrations,ui,{dispose:()=>{void closeEditorState().catch(error=>vscode.window.showErrorMessage(`编辑状态关闭失败：${error.message}`));}},statusProcessClient,sourceWatcher,quickDiff);
-  return {run,sourceTree:ui,editorState,sourceUri:async(key,p)=>{const state=await ui.ensureWorkspace(key),source=await run(key,'read',{path:p});if(['METADATA_ONLY','IDENTITY_MISMATCH','SQL_ABSENT'].includes(source.contentState)) return ui.readonlyUri(key,p,source.content);if(source.metadata?.sourceType==='view' || isInlineInherited(key,p,source)){getPageEditor();const uri=uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:source.metadata.sourceType,jsonPointer:source.metadata.sourceType==='view'?'/viewSql':'',fragmentType:source.metadata.sourceType==='view'?'sql':source.metadata.sourceType==='system-script'?'js':'gss'});editorState.assertNoDirtyDocumentsExcept(key,p,uri);return uri;}return vscode.Uri.file(filePath(state.checkoutPath,p));},setSelectWorkspace:selector=>{selectWorkspace=selector;},openFragment:async target=>{await ui.ensureWorkspace(target.workspaceKey);getPageEditor();return virtualFs.open(target,{viewColumn:vscode.ViewColumn.Beside});},syncWorkspaces:workspaces=>{ui.syncWorkspaces(workspaces);return Promise.all(workspaces.filter(w=>!w.sourceMode || w.sourceMode==='api').map(w=>ui.updateScm(typeof w==='string'?w:w.workspaceKey)));},refreshWorkspace:key=>ui.updateScm(key),retryIndex:key=>sourceWatcher.retry(key),markIndexed:key=>sourceWatcher.markIndexed(key),reset:async()=>{await sourceWatcher.reset();await editorState.reset();pageEditor?.dispose();if(pageEditor) await Promise.all([...pageEditor.pages.values()].map(session=>session.persistence).filter(Boolean));virtualRegistration?.dispose();inheritanceDecorations?.dispose();virtualFs?.dispose();pageEditor=virtualFs=virtualRegistration=inheritanceDecorations=undefined;ui.clear();},dispose:async()=>{pageEditor?.dispose();await sourceWatcher.close();ui.dispose();try {await closeEditorState();} finally {statusProcessClient.dispose();}}};
+  context.subscriptions.push(...registrations,ui,{dispose:()=>{void closeEditorState().catch(error=>vscode.window.showErrorMessage(`编辑状态关闭失败：${error.message}`));}},statusProcessClient,remoteProcessClient,sourceWatcher,quickDiff);
+  return {run,readProjectSummary,sourceTree:ui,editorState,sourceUri:async(key,p)=>{const state=await ui.ensureWorkspace(key),source=await run(key,'read',{path:p});if(['METADATA_ONLY','IDENTITY_MISMATCH','SQL_ABSENT'].includes(source.contentState)) return ui.readonlyUri(key,p,source.content);if(source.metadata?.sourceType==='view' || isInlineInherited(key,p,source)){getPageEditor();const uri=uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:source.metadata.sourceType,jsonPointer:source.metadata.sourceType==='view'?'/viewSql':'',fragmentType:source.metadata.sourceType==='view'?'sql':source.metadata.sourceType==='system-script'?'js':'gss'});editorState.assertNoDirtyDocumentsExcept(key,p,uri);return uri;}return vscode.Uri.file(filePath(state.checkoutPath,p));},setSelectWorkspace:selector=>{selectWorkspace=selector;},openFragment:async target=>{await ui.ensureWorkspace(target.workspaceKey);getPageEditor();return virtualFs.open(target,{viewColumn:vscode.ViewColumn.Beside});},syncWorkspaces:workspaces=>{ui.syncWorkspaces(workspaces);return Promise.all(workspaces.filter(w=>!w.sourceMode || w.sourceMode==='api').map(w=>ui.updateScm(typeof w==='string'?w:w.workspaceKey)));},refreshWorkspace:key=>ui.updateScm(key),retryIndex:key=>sourceWatcher.retry(key),markIndexed:key=>sourceWatcher.markIndexed(key),reset:async()=>{lastStatus.clear();await sourceWatcher.reset();await editorState.reset();pageEditor?.dispose();if(pageEditor) await Promise.all([...pageEditor.pages.values()].map(session=>session.persistence).filter(Boolean));virtualRegistration?.dispose();inheritanceDecorations?.dispose();virtualFs?.dispose();pageEditor=virtualFs=virtualRegistration=inheritanceDecorations=undefined;ui.clear();},dispose:async()=>{pageEditor?.dispose();await sourceWatcher.close();ui.dispose();try {await closeEditorState();} finally {statusProcessClient.dispose();try {await remoteProcessClient.stop();} finally {remoteProcessClient.dispose();}}}};
 }
 module.exports={activateApi};

@@ -32,7 +32,7 @@ test('project card binds actions to its resolved project, ignoring forged worksp
   assert.deepEqual(calls[0],['gushenCompletion.pullApiSource','projects.a']);
   await registrations[0]({action:'arbitrary-command'});assert.equal(calls.length,1);
   provider.getWorkspaces=async()=>[{workspaceKey:'projects.a'},{workspaceKey:'projects.b'}];await provider.refresh();
-  assert.equal(provider.currentKey,undefined);assert(view.webview.html.includes('添加项目并打开其源码目录'));
+  assert.equal(provider.currentKey,undefined);assert(view.webview.html.includes('更多操作'));
   provider.dispose();
 });
 
@@ -65,4 +65,65 @@ test('failed inline logins reset enabled form and do not carry fields to another
   assert(!html.includes('old-account'));assert(!html.includes('https://old.invalid'));
   const count=renders;await receive({action:'submitLogin',workspaceKey:'projects.a',password:'synthetic'});assert.equal(renders,count);
   provider.dispose();
+});
+
+test('login result is rendered without waiting for the background source scan',async()=>{
+  let receive,logged=false,renders=0;
+  const provider=new ProjectCardProvider({context:{extensionPath:require('node:path').resolve(__dirname,'..')},vscode:{commands:{},window:{showErrorMessage:async()=>{}}},getWorkspaces:async()=>[{workspaceKey:'products.A',name:'A'}],api:{
+    readProjectSummary:async()=>({settings:{serverUrl:'https://project.invalid',systemIds:['S'],allSystems:false},summaryComplete:false,summary:{sourceCount:16000,changedCount:null,uploadableCount:null}}),
+    run:async(_key,action)=>action==='session'?{authenticated:logged,session:{userName:'Test'}}:action==='login'?(logged=true,{}):{},
+    refreshWorkspace:()=>new Promise(()=>{}),
+  }});
+  const webview={onDidReceiveMessage:callback=>(receive=callback,{dispose(){}})};let html='';Object.defineProperty(webview,'html',{get:()=>html,set:value=>{html=value;renders++;}});
+  provider.resolveWebviewView({webview});await provider.refresh();
+  await receive({action:'submitLogin',workspaceKey:'products.A',serverUrl:'https://project.invalid',userId:'fixture',password:'synthetic',remember:false});
+  assert(html.includes('更新源码'));assert(html.includes('16000 源码'));assert(html.includes('修改待检查'));assert(!html.includes('0 修改'));assert(renders>=2);provider.dispose();
+});
+
+test('project metadata and settings render before slow saved-session restoration',async()=>{
+  let finish,html='';
+  const session=new Promise(resolve=>{finish=resolve;});
+  const provider=new ProjectCardProvider({context:{extensionPath:require('node:path').resolve(__dirname,'..')},vscode:{commands:{}},
+    getWorkspaces:async()=>[{workspaceKey:'projects.a',name:'A'}],api:{
+      readProjectSummary:async()=>({settings:{serverUrl:'https://project.invalid',systemIds:['S'],allSystems:false},summaryComplete:false,summary:{sourceCount:16000}}),
+      run:async()=>session,
+    }});
+  const webview={onDidReceiveMessage:()=>({dispose(){}})};
+  Object.defineProperty(webview,'html',{get:()=>html,set:value=>{html=value;}});
+  provider.resolveWebviewView({webview});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert(html.includes('16000 源码'));assert(html.includes('正在恢复登录'));
+  assert(html.includes('data-action="settings"'));assert(html.includes('data-action="search"'));
+  assert.match(html,/<button data-action="pull" disabled/);
+  finish({authenticated:false});await new Promise(resolve=>setImmediate(resolve));
+  assert(html.includes('id="login-form"'));provider.dispose();
+});
+
+test('session transport failure retains an actionable project login card',async()=>{
+  const provider=new ProjectCardProvider({context:{extensionPath:require('node:path').resolve(__dirname,'..')},vscode:{commands:{}},
+    getWorkspaces:async()=>[{workspaceKey:'projects.a',name:'A'}],api:{
+      readProjectSummary:async()=>({settings:{serverUrl:'https://project.invalid',systemIds:['S'],allSystems:false},files:[]}),
+      run:async()=>{throw Error('连接超时');},
+    }});
+  const webview={onDidReceiveMessage:()=>({dispose(){}})};
+  provider.resolveWebviewView({webview});await provider.refresh();
+  assert(webview.html.includes('id="login-form"'));assert(webview.html.includes('连接超时'));
+  assert.equal(provider.currentKey,'projects.a');provider.dispose();
+});
+
+test('a restored session clears earlier credential errors and login form data',async()=>{
+  let authentication={authenticated:false,error:{message:'系统凭据库读取超时，请手动登录'}};
+  const provider=new ProjectCardProvider({context:{extensionPath:require('node:path').resolve(__dirname,'..')},vscode:{commands:{}},
+    getWorkspaces:async()=>[{workspaceKey:'projects.a',name:'A'}],api:{
+      readProjectSummary:async()=>({settings:{serverUrl:'https://project.invalid',systemIds:['S'],allSystems:false},files:[]}),
+      run:async()=>authentication,
+    }});
+  const webview={onDidReceiveMessage:()=>({dispose(){}})};
+  provider.resolveWebviewView({webview});await provider.refresh();
+  assert(webview.html.includes('系统凭据库读取超时'));
+  provider.form.userId='earlier-account';provider.form.captcha='earlier-captcha';
+  authentication={authenticated:true,session:{userName:'Test',mainVersion:'3.0.0',dateVersion:'202611120000'}};
+  await provider.refresh();
+  assert(webview.html.includes('更新源码'));assert(!webview.html.includes('系统凭据库读取超时'));
+  assert(!webview.html.includes('earlier-account'));assert.deepEqual(provider.form,{});provider.dispose();
 });

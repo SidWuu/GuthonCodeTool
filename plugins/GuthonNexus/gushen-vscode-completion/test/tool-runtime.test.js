@@ -173,39 +173,16 @@ test('keeps the runtime descriptor untouched when its content is unchanged', () 
   fs.rmSync(home, { recursive: true });
 });
 
-test('Nexus lists every configured workspace and binds commands to workspaceKey', () => {
-  const extension = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.js'), 'utf8');
-  const manifest = require('../package.json');
-
-  assert.equal(extension.includes("workspaceRegistry.get(tool)"), true);
-  assert.equal(extension.includes("item.displayName"), true);
-  assert.equal(extension.includes("[item.workspaceKey]"), true);
-  assert.equal(extension.includes("gushenCompletion.selectWorkspaceSourceMode"), false);
-  assert.equal(extension.includes("sourceModeView"), false);
-  assert.equal(extension.includes("syncActive"), false);
-  assert.deepEqual(
-    manifest.contributes.views.guthon.map(({ id, name }) => ({ id, name })),
-    [
-      { id: 'gushenCompletion.projectDetails', name: '项目详情' },
-      { id: 'gushenCompletion.toolView', name: '谷神工作区' },
-      { id: 'gushenCompletion.sourceView', name: '谷神源码' },
-    ]
-  );
-  assert.equal((extension.match(/toolItem\(\s*'添加产品或项目'/g) || []).length, 1);
-  assert.equal(extension.includes("new vscode.TreeItem('运行模式', vscode.TreeItemCollapsibleState.Collapsed)"), true);
-  assert.equal(extension.includes('`切换模式：${modeLabel'), true);
-  assert.equal(extension.includes('`当前版本：${applicationVersion}`'), true);
-  assert.equal(extension.includes("executionMode === 'packaged'\n      ? await detectCurrentVersion"), true);
-  assert.equal(extension.includes(": '最新';"), false);
-  assert.equal(extension.includes("this.updates?.snapshot.current?.toolVersion"), true);
-  assert.equal(extension.includes('`更新源：${UPDATE_SOURCES[updateSource]'), true);
-  assert.equal(extension.includes("toolItem('检查更新'"), true);
-  assert.equal(extension.includes("new vscode.TreeItem('更新中心'"), false);
-  assert.equal(extension.includes("checkUpdate.children ="), true);
-  assert.equal(extension.includes("return [workspace, projects, bridge, maintenance]"), true);
-  assert.equal(extension.includes("'回退到上一版本'"), true);
-  assert.equal(manifest.contributes.configuration.properties['gushenCompletion.updateSource'].default, 'gitee');
-  assert.equal(manifest.contributes.commands.some(({ command }) => command === 'gushenCompletion.checkToolUpdate'), true);
+test('Nexus merges project details and workspace operations into one compact view', () => {
+  const extension=fs.readFileSync(path.join(__dirname,'../src/extension.js'),'utf8');
+  const manifest=require('../package.json');
+  assert.deepEqual(manifest.contributes.views.guthon.map(({id,name})=>({id,name})),[
+    {id:'gushenCompletion.projectDetails',name:'谷神项目'},
+    {id:'gushenCompletion.sourceView',name:'谷神源码'}]);
+  assert(!extension.includes('ToolTreeDataProvider'));assert(!extension.includes('gushenCompletion.toolView'));
+  assert(manifest.contributes.commands.some(x=>x.command==='gushenCompletion.showProjectActions'));
+  const commands=new Map(manifest.contributes.commands.map(x=>[x.command,x]));
+  for(const entry of manifest.contributes.menus['view/title'].filter(x=>x.group.startsWith('navigation')))assert(commands.get(entry.command).icon,entry.command+' must render as an icon');
 });
 
 test('packaged application picker selects files only on Windows and macOS', () => {

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 import argparse
+from contextlib import closing
 import json
 import sys
-from common.persistence import file_lock
 from .client import ApiError
 from .workspace import (
-    api_paths,
+    configuration_lock,
     settings,
     configure,
     client_for,
@@ -75,8 +75,7 @@ def execute(workspace, action, payload):
     if not isinstance(payload, dict):
         raise ApiError("API_INPUT_INVALID", "输入必须是JSON对象")
     if action == "configure":
-        directory, _ = api_paths(workspace)
-        with file_lock(directory / "configuration.lock"):
+        with configuration_lock(workspace):
             before = settings(workspace)
             configured = configure(workspace, payload)
             result = {"settings": configured}
@@ -108,8 +107,19 @@ def execute(workspace, action, payload):
         changes_only = payload.get("changesOnly", False)
         if type(changes_only) is not bool:
             raise ApiError("API_INPUT_INVALID", "changesOnly 必须是布尔值")
-        files = store.status()
+        summary_only = payload.get("summaryOnly", False)
+        if type(summary_only) is not bool:
+            raise ApiError("API_INPUT_INVALID", "summaryOnly 必须是布尔值")
+        files = [] if summary_only else store.status(use_cache=True)
         active = [item for item in files if item["inScope"]]
+        index_state = workspace_index_state(workspace)
+        if index_state["ready"]:
+            from .index import _connection
+
+            with closing(_connection(workspace)) as connection:
+                index_state["indexGeneration"] = connection.execute(
+                    "SELECT state_value FROM gusen_sync_state WHERE state_key='generation'"
+                ).fetchone()[0]
         return {
             "settings": settings(workspace),
             "checkoutPath": str(workspace["providerSourceRoot"]),
@@ -117,15 +127,17 @@ def execute(workspace, action, payload):
             "files": [item for item in files if item["state"] != "CLEAN"]
             if changes_only else files,
             "summary": {
-                "sourceCount": len(active),
-                "changedCount": sum(item["state"] != "CLEAN" for item in active),
-                "uploadableCount": sum(
+                "sourceCount": store.registered_count() if summary_only else len(active),
+                "changedCount": None if summary_only else sum(item["state"] != "CLEAN" for item in active),
+                "uploadableCount": None if summary_only else sum(
                     item["state"] == "MODIFIED" and not item["readonly"]
                     for item in active
                 ),
             },
             "changesOnly": changes_only,
-            "index": workspace_index_state(workspace),
+            "summaryComplete": not summary_only,
+            "statusKind": "metadata-only" if summary_only else "scanned",
+            "index": index_state,
             "sessionPersistence": "current-toolhost-or-system-keyring",
             "lastLogin": last_login(workspace),
         }
@@ -223,11 +235,28 @@ def execute(workspace, action, payload):
         limit = payload.get("limit", 100 if action in {"catalog", "callers"} else 20)
         offset = payload.get("offset", 0)
         if action == "index":
-            return (
-                index.update(workspace, payload["paths"])
-                if "paths" in payload
-                else index.rebuild(workspace)
-            )
+            check_only = payload.get("checkOnly", False)
+            if type(check_only) is not bool:
+                raise ApiError("API_INPUT_INVALID", "checkOnly 必须是布尔值")
+            if "paths" not in payload:
+                if check_only:
+                    raise ApiError("API_INPUT_INVALID", "checkOnly 需要 paths 数组")
+                return index.rebuild(workspace)
+            selected = store.registered_paths(payload["paths"])
+            ignored = len(payload["paths"]) - len(selected)
+            if check_only:
+                return {"workspaceKey": workspace["workspaceKey"], "updatedPaths": selected,
+                        "ignoredCount": ignored, "skipped": True, "checkOnly": True}
+            if not payload["paths"]:
+                return {**index.update(workspace, []), "ignoredCount": 0, "skipped": False}
+            if not selected:
+                status = index.health(workspace)
+                return {"workspaceKey": workspace["workspaceKey"], "updatedPaths": [],
+                        "ignoredCount": ignored, "skipped": True, "indexReady": status["ready"],
+                        "complete": status.get("complete", False),
+                        **({"errorCode": status["errorCode"]} if "errorCode" in status else {})}
+            result = index.update(workspace, selected)
+            return {**result, "ignoredCount": ignored, "skipped": False}
         if action == "catalog":
             result = index.catalog(workspace, limit, offset)
             project = project_metadata(workspace, include_menu=True) if offset == 0 else None

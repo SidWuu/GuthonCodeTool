@@ -40,7 +40,8 @@ def _database_requirements(workspaces):
     """Inspect configured capabilities without resolving passwords or opening connections."""
     engines, connections = set(), []
     testing_path = gusen_hub.CONFIG_DIR / "database-testing.yaml"
-    if testing_path.is_file():
+    from common import config_store
+    if testing_path.is_file() or config_store.unified(testing_path.parent.parent):
         from common import database_test_artifacts as artifacts
         try:
             testing = artifacts.load_yaml(testing_path)
@@ -75,7 +76,8 @@ def run_checks(bridge_port=17361, *, workspace_key=""):
     )
 
     workspaces = None
-    missing = [name for name in CONFIG_FILES if not (gusen_hub.CONFIG_DIR / name).is_file()]
+    from common import config_store
+    missing = [] if config_store.unified(gusen_hub.tool_home()) else [name for name in CONFIG_FILES if not (gusen_hub.CONFIG_DIR / name).is_file()]
     if missing:
         checks.append(result("config", "FAIL", f"missing: {', '.join(missing)}", code="CONFIG_MISSING", action="setup", required=True))
     else:

@@ -519,6 +519,77 @@ def _refresh_bill_routes(conn, workspace):
     return count, status
 
 
+def _bill_routes_fingerprint(workspace):
+    docs_dir = workspace.get("docsDir")
+    if docs_dir is None:
+        return "UNAVAILABLE"
+    root = Path(workspace["root"]).resolve()
+    directory = (Path(docs_dir) / "exports" / "billtype").resolve()
+    if not directory.is_relative_to(root):
+        raise ApiError("API_BILL_EXPORT_PATH_INVALID", "单据导出目录不属于当前工作区")
+    digest = hashlib.sha256()
+    for path in sorted(directory.glob("*.json")):
+        checkpoint()
+        if not path.resolve().is_relative_to(directory):
+            raise ApiError("API_BILL_EXPORT_PATH_INVALID", "单据导出文件超出当前工作区")
+        digest.update(path.name.encode("utf-8") + b"\0")
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _unchanged_update(workspace, store, conn, paths, scope_fingerprint, bill_fingerprint):
+    """Prove every input to a non-empty incremental update is unchanged."""
+    states = dict(conn.execute("SELECT state_key,state_value FROM gusen_sync_state"))
+    if (states.get("scopeFingerprint") != scope_fingerprint
+            or states.get("billRoutesFingerprint") != bill_fingerprint
+            or states.get("source_body_index_version") != source_text_search.VERSION
+            or not re.fullmatch(r"[0-9a-f]{32}", states.get("generation", ""))):
+        return None
+    active = set(store.paths())
+    rows = {row["source_path"]: row for row in conn.execute(
+        "SELECT source_path,source_table,source_hash,metadata_json,readonly,status,diagnostic FROM gusen_source_record"
+    )}
+    if set(rows) != active:
+        return None
+    for path in paths:
+        checkpoint()
+        row = rows.get(path)
+        try:
+            item = store.read(path)
+        except ApiError as error:
+            if error.code in {"API_SOURCE_NOT_FOUND", "API_SOURCE_OUT_OF_SCOPE"} and row is None:
+                continue
+            if error.code == "API_SOURCE_MISSING" and row is None and path not in active:
+                if store._record(path)["metadata"].get("remoteDeleted"):
+                    continue
+            if error.code != "API_SOURCE_MISSING" or row is None or row["diagnostic"] != "API_SOURCE_MISSING":
+                return None
+            item = store._record(path)
+            if bool(row["readonly"]) != bool(item["readonly"]):
+                return None
+        else:
+            if row is None and path not in active and item["metadata"].get("remoteDeleted"):
+                continue
+            if row is None or row["diagnostic"] == "API_SOURCE_MISSING" or row["source_hash"] != item["sourceHash"]:
+                return None
+            if bool(row["readonly"]) != bool(item["readonly"] or row["status"] == "PARTIAL"):
+                return None
+        if (row["source_table"] != item["metadata"].get("sourceType")
+                or json.loads(row["metadata_json"]) != item["metadata"]):
+            return None
+    if _scope_fingerprint(workspace) != scope_fingerprint or _bill_routes_fingerprint(workspace) != bill_fingerprint:
+        return None
+    diagnostics = _diagnostics(conn)
+    return {"workspaceKey": workspace["workspaceKey"], "indexGeneration": states["generation"],
+            "objects": len(rows), "updatedPaths": [], "unchanged": True,
+            "complete": not diagnostics, "diagnosticCount": len(diagnostics), "diagnostics": diagnostics[:100],
+            "billRouteCount": conn.execute("SELECT COUNT(*) FROM gusen_bill_route WHERE source_record_id=0").fetchone()[0],
+            "billRouteStatus": states.get("billRouteStatus", "UNAVAILABLE"), "truncated": len(diagnostics) > 100}
+
+
 def rebuild(workspace):
     """Build an atomic snapshot from authorized current checkout files."""
     dest = Path(workspace["indexPath"])
@@ -533,6 +604,7 @@ def rebuild(workspace):
         try:
             store = ApiStore(workspace)
             scope_fingerprint = _scope_fingerprint(workspace)
+            bill_fingerprint = _bill_routes_fingerprint(workspace)
             paths = store.paths()
             with closing(sqlite3.connect(tmp)) as conn:
                 _setup(conn)
@@ -543,6 +615,7 @@ def rebuild(workspace):
                         ("generation", generation),
                         ("scopeFingerprint", scope_fingerprint),
                         ("source_body_index_version", source_text_search.VERSION),
+                        ("billRoutesFingerprint", bill_fingerprint),
                     ],
                 )
                 for path in paths:
@@ -550,6 +623,8 @@ def rebuild(workspace):
                     item = store.read(path)
                     _index_item(conn, workspace, item)
                 bill_count, bill_status = _refresh_bill_routes(conn, workspace)
+                if _bill_routes_fingerprint(workspace) != bill_fingerprint:
+                    raise ApiError("API_BILL_EXPORT_STALE", "单据导出在索引构建期间变化，请重试")
                 if _scope_fingerprint(workspace) != scope_fingerprint:
                     raise ApiError(
                         "API_INDEX_SCOPE_STALE",
@@ -586,14 +661,20 @@ def update(workspace, paths):
         return rebuild(workspace)
     generation = uuid.uuid4().hex
     with file_lock(Path(workspace["contextDir"]) / "api" / "index.lock"):
+        store = ApiStore(workspace)
+        scope_fingerprint = _scope_fingerprint(workspace)
+        bill_fingerprint = _bill_routes_fingerprint(workspace)
+        if paths:
+            with closing(_connection(workspace, check_scope=False)) as original:
+                unchanged = _unchanged_update(workspace, store, original, paths, scope_fingerprint, bill_fingerprint)
+            if unchanged is not None:
+                return unchanged
         fd, tmp_name = tempfile.mkstemp(
             prefix=".api-index-", suffix=".db", dir=dest.parent
         )
         os.close(fd)
         tmp = Path(tmp_name)
         try:
-            store = ApiStore(workspace)
-            scope_fingerprint = _scope_fingerprint(workspace)
             active = set(store.paths())
             with (
                 closing(_connection(workspace, check_scope=False)) as original,
@@ -659,6 +740,9 @@ def update(workspace, paths):
                     (scope_fingerprint,),
                 )
                 bill_count, bill_status = _refresh_bill_routes(conn, workspace)
+                if _bill_routes_fingerprint(workspace) != bill_fingerprint:
+                    raise ApiError("API_BILL_EXPORT_STALE", "单据导出在索引更新期间变化，请重试")
+                conn.execute("INSERT OR REPLACE INTO gusen_sync_state VALUES('billRoutesFingerprint',?)", (bill_fingerprint,))
                 if _scope_fingerprint(workspace) != scope_fingerprint:
                     raise ApiError(
                         "API_INDEX_SCOPE_STALE",

@@ -3,14 +3,21 @@ const path = require('node:path');
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+function hasWorkspaceConfiguration(toolHome) {
+  return Boolean(toolHome && ['guthon.json','sync.yaml'].some(name=>{
+    try{return fs.statSync(path.join(toolHome,'config',name)).isFile();}catch{return false;}
+  }));
+}
+
 function existingWorkspaceConfig(toolHome) {
   const configDir = path.join(toolHome, 'config');
-  const required = ['sync.yaml', 'products.yaml', 'projects.yaml'];
+  const required = fs.existsSync(path.join(configDir,'guthon.json')) ? ['guthon.json'] : ['sync.yaml', 'products.yaml', 'projects.yaml'];
   const missing = required.filter((name) => {
     try { return !fs.statSync(path.join(configDir, name)).isFile(); }
     catch { return true; }
   });
   if (missing.length) throw new Error(`所选目录缺少已有工作空间配置：${missing.join('、')}。请选择包含 config 和 var 的本地数据目录`);
+  if(required[0]==='guthon.json')return;
   try {
     if (fs.statSync(path.join(toolHome, 'var')).isDirectory()) return;
   } catch { /* Report the same validation error below. */ }
@@ -19,7 +26,7 @@ function existingWorkspaceConfig(toolHome) {
 
 async function prepareWorkspaceSetup(config, window) {
   const toolHome = config.get('toolHome', '');
-  const initialized = Boolean(toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml')));
+  const initialized = hasWorkspaceConfiguration(toolHome);
   if (initialized) {
     const confirmed = await window.showWarningMessage(
       `当前工作空间已设置：${toolHome}\n请选择刷新当前状态或切换工作空间。`,
@@ -42,7 +49,7 @@ async function prepareWorkspaceSetup(config, window) {
   if (!selected?.length) return undefined;
 
   const selectedHome = selected[0].fsPath;
-  if (fs.existsSync(path.join(selectedHome, 'config', 'sync.yaml'))) {
+  if (hasWorkspaceConfiguration(selectedHome)) {
     existingWorkspaceConfig(selectedHome);
     return { mode: 'switch', toolHome: selectedHome };
   }
@@ -127,6 +134,7 @@ async function promptWorkspaceCreation(window, workspaces, _toolHome, now = new 
 }
 
 module.exports = {
+  hasWorkspaceConfiguration,
   existingWorkspaceConfig,
   prepareWorkspaceSetup,
   promptWorkspaceCreation,

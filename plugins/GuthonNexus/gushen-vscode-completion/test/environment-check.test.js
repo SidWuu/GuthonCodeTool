@@ -33,11 +33,11 @@ test('an actionable failure invokes only its owned command without automatically
   assert.deepEqual(f.calls[1].command, ['gushenCompletion.selectExecutionMode']);
 });
 
-test('configuration actions restrict files to the public configuration allowlist', async () => {
+test('configuration findings open the project wizard without exposing raw file names', async () => {
   const f = fixture(report([{name: 'database-config', status: 'FAIL', message: 'bad target', action: 'config', configFile: 'database-testing.yaml'}]), items => items[1]);
-  await showEnvironmentCheck(f.options); assert.deepEqual(f.calls[1].command, ['gushenCompletion.editConfig', 'database-testing.yaml']);
+  await showEnvironmentCheck(f.options); assert.deepEqual(f.calls[1].command, ['gushenCompletion.configureProject', '']);
   const bad = fixture(report([{name: 'config', status: 'FAIL', message: 'bad', action: 'config', configFile: '../private'}]), items => typeof items[0] === 'string' ? undefined : items[1]);
-  await showEnvironmentCheck(bad.options); assert.equal(bad.calls.some(call => call.command), false);
+  await showEnvironmentCheck(bad.options); assert.deepEqual(bad.calls[1].command,['gushenCompletion.configureProject','']);
 });
 
 test('unknown or prototype command names remain report text and cannot execute', async () => {
@@ -65,12 +65,8 @@ test('changing runtime while the picker is open requires a new check before acti
   assert.equal(f.calls.some(call => call.command || call.document), false);
 });
 
-test('changing runtime during configuration selection cannot open a file in another data directory',async()=>{
-  let current=true;
-  const f=fixture(report([{...failure,name:'config',action:'config'}]),items=>{
-    if(typeof items[0]==='string'){current=false;return 'datasource.yaml';}
-    return items[1];
-  });f.options.isCurrent=()=>current;
-  await assert.rejects(showEnvironmentCheck(f.options),/运行入口或数据目录已变化/);
-  assert.equal(f.calls.some(call=>call.command),false);
+test('a configuration repair preserves the explicit current project in its wizard',async()=>{
+  const f=fixture(report([{...failure,name:'config',action:'config'}],'products.MixedCase'),items=>items[1]);
+  await showEnvironmentCheck(f.options);
+  assert.deepEqual(f.calls[1].command,['gushenCompletion.configureProject','products.MixedCase']);
 });

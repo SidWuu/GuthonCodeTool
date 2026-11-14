@@ -23,7 +23,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | 需求 | 首选文件 | 常见联动 | 测试 |
 |---|---|---|---|
 | CLI 命令与参数 | `scripts/guthon_tool.py` | `scripts/common/gusen_hub.py` | `tests/test_guthon_tool.py` |
-| 工作区配置/创建 | `scripts/common/workspace_config.py` | `scripts/common/gusen_hub.py` | `tests/test_workspace_config.py` |
+| 工作区配置/创建 | `scripts/common/config_store.py`、`scripts/common/workspace_config.py` | `scripts/common/gusen_hub.py` | `tests/test_workspace_config.py` |
 | 工作区路由与解析 | `scripts/common/workspace_registry.py`、`scripts/common/workspace_selection.py` | `scripts/common/workspace_config.py`、`scripts/guthon_tool.py` | `tests/test_workspace_routing.py`、`tests/test_workspace_selection.py` |
 | API 增量索引与查询 | `scripts/providers/api/index.py` | `scripts/providers/api/store.py`、`scripts/providers/api/mcp_server.py` | `tests/test_api_source.py` |
 | API 项目导出与独立单据类型导出 | `scripts/providers/api/exports.py`、`scripts/common/database_exports/export_bill_type_sql.py` | `scripts/guthon_tool.py`、`scripts/common/database_readonly.py` | `tests/test_api_source.py` |
@@ -50,12 +50,13 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 
 | 模块 | 职责 |
 |---|---|
+| `scripts/common/config_store.py` | 单一配置源、保留旧目录读取，以及预览/确认/备份式配置迁移；不自动迁移真实目录。 |
 | `scripts/providers/api/client.py`、`workspace.py` | API 会话、验证码、HTTPS 信任、项目配置、范围、目录名称缓存与凭据。 |
 | `scripts/providers/api/download.py`、`store.py`、`sync.py` | 按范围下载、基线与冲突、上传前合并和平台回读。 |
 | `scripts/providers/api/cli.py`、`index.py`、`mcp_server.py` | CLI、索引、查询及受控 MCP 接口。 |
 | `scripts/providers/api/change_bundle.py` | 当前 API 工作区的本地变更包导出、预览和按计划摘要应用；旧侧材料生成属于待补齐迁移环节。 |
 | `scripts/providers/api/page.py`、`documents.py`、`editor_state.py` | PAGE 编辑、租约文档及编辑器状态协调。 |
-| `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`、`source-ui.js` | API 项目命令、系统/菜单源码树与 SCM；独立且合并同项目并发请求的状态通道，不阻塞源码打开。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`、`source-ui.js`、`project-card.js`、`project-actions.js` | 谷神项目卡片与设置向导、API 项目命令、按类型展示的源码树与 SCM；文件事件按登记范围处理，目录复用和重复索引短路；轻量卡片不等待全项目扫描。 |
 | `plugins/GuthonNexus/gushen-vscode-completion/src/official-update.js` | 官方语言资源检查、更新和回退。 |
 
 ## Python
@@ -64,7 +65,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 |---|---|
 | `scripts/guthon_tool.py` | 统一 CLI、`--home` 契约、命令编排、子命令 parser 构建器与帮助自省、`self-test`。 |
 | `scripts/common/gusen_hub.py` | 显式 toolHome、工作区解析、索引连接和共享工具。 |
-| `scripts/common/workspace_config.py` | 工作区创建/删除与 YAML 读写。 |
+| `scripts/common/workspace_config.py` | 工作区创建/删除，经配置存储入口读写统一配置或未迁移目录。 |
 | `scripts/common/workspace_assistant.py` | 工作区摘要、就绪状态与助手输出。 |
 | `scripts/common/index_bulk.py` | 在完整重建事务内暂停逐行检索索引触发器，批量构建并恢复；失败回滚数据和触发器。 |
 | `scripts/common/index_maintenance.py` | 显式预览或压实派生索引，紧凑保存字段集合正文并整理检索索引；保留源码、定位元数据和变更历史。 |
@@ -149,7 +150,7 @@ Bridge `plugins/GuthonBridge/extension/task-client.js`、`background.js` 和 `ta
 - `scripts/check_nexus_commands.mjs`：校验Nexus贡献、注册、激活、菜单与CLI元数据引用；CI重建后定向检查生成副本diff。
 - `scripts/check_release_smoke.py`：用临时 toolHome 检查源码、zipapp 或应用的版本、自检、初始化、doctor 必需资源与 MCP 工具发现（应用可直接传 macOS onedir 目录）；`scripts/check_public_docs.mjs` 校验四份公开 HTML 的脚本、链接、图片、章节目录、页脚内容位置及 QA 数据后再部署 Pages。
 - `GuthonCodeTool.spec`：打包配置。
-- `scripts/sync_guthon_api.mjs`：从 `<toolHome>/config/sync.yaml` 读取谷神版本，更新 `<toolHome>/var/docs/谷神方言API/` 与插件补全数据。
+- `scripts/sync_guthon_api.mjs`：从单一 `<toolHome>/config/guthon.json`（或未迁移目录的 `<toolHome>/config/sync.yaml`）读取谷神版本，更新 `<toolHome>/var/docs/谷神方言API/` 与插件补全数据。
 - `.github/workflows/release.yml`：按 `[build]` 发布；`.github/scripts/release_plan.py` 按最后发布源码选择全量构建或同版本组件替换，`release_metadata.py` 更新完整附件摘要和发布基线。组件更新保留应用/安装器，只替换受影响附件及签名元数据；不等待 Gitee 镜像。
 - 发行说明源文件保存在本机忽略的 `<sourceRoot>/docs/private/releases/`（本机私有资料，不随 Git worktree 分发），仅作为提交和发行正文来源；CI 使用提交说明或手动传入的 `release_notes`，不读取私有目录。开发生成的 `*.vsix` 不跟踪，正式包在 Release 分发；Windows 指南配图继续跟踪，额外原始截图仅保存在忽略的私有目录。
 - `scripts/sync_release_to_gitee.py`：维护者本机下载指定 GitHub 签名发行、使用系统钥匙串令牌补传 Gitee 附件、逐项下载核验哈希；`--verify-only` 为无令牌只读验收。`.github/workflows/sync-gitee-release.yml` 复用此入口作为手动备用同步；使用方式见 `docs/RELEASE_MIRROR.md`，本地测试见 `tests/test_sync_gitee_release.py`。

@@ -16,10 +16,9 @@ const {
   shouldProvideApiCompletions,
 } = require('./rules');
 const { createDocumentSelector } = require('./selector');
-const { prepareWorkspaceSetup, promptWorkspaceCreation, workspaceActions } = require('./tool-workspace');
+const { prepareWorkspaceSetup, promptWorkspaceCreation, hasWorkspaceConfiguration } = require('./tool-workspace');
 const { promptDatabaseDiagnosis } = require('./database-config');
 const { ToolJsonClient } = require('./tool-json-client');
-const { workspaceCockpit } = require('./workspace-assistant');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 const {
   normalizeExecutionMode, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime,
@@ -57,7 +56,6 @@ const TOOL_COMMANDS = {
   pullLog: 'pull-log',
   databaseTargetConfigure: 'database-target-configure',
 };
-const CONFIG_FILES = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'sync.yaml', 'database-testing.yaml'];
 const TOOL_LABELS = {
   setup: '设置工作空间',
   reindex: '重建索引',
@@ -433,7 +431,7 @@ async function runToolCommand(
 function configuredToolFromSettings() {
   const config = vscode.workspace.getConfiguration('gushenCompletion');
   const toolHome = config.get('toolHome', '');
-  if (!toolHome || !fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'))) return undefined;
+  if (!hasWorkspaceConfiguration(toolHome)) return undefined;
   try {
     const mode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
     const runtime = mode === 'source-development'
@@ -448,202 +446,6 @@ function configuredToolFromSettings() {
   }
 }
 
-function toolItem(label, command, icon, description, args = []) {
-  const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
-  item.command = { command, title: label, arguments: args };
-  item.iconPath = new vscode.ThemeIcon(icon);
-  item.description = description;
-  return item;
-}
-
-function staticItem(label, icon, description) {
-  const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
-  item.iconPath = new vscode.ThemeIcon(icon);
-  item.description = description;
-  return item;
-}
-
-class ToolTreeDataProvider {
-  constructor(bridge = { isRunning: () => false }, context, workspaceRegistry = new WorkspaceRegistry()) {
-    this.bridge = bridge;
-    this.context = context;
-    this.workspaceRegistry = workspaceRegistry;
-    this.changed = new vscode.EventEmitter();
-    this.onDidChangeTreeData = this.changed.event;
-  }
-
-  refresh() {
-    this.changed.fire();
-  }
-
-  getTreeItem(item) {
-    return item;
-  }
-
-  async getChildren(element) {
-    if (element) return element.children || [];
-    const config = vscode.workspace.getConfiguration('gushenCompletion');
-    const toolHome = config.get('toolHome', '');
-    const executionMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
-    const developmentRoot = config.get('developmentRoot', '');
-    const scriptToolPath = config.get('scriptToolPath', '');
-    const updateSource = config.get('updateSource', 'gitee');
-    const storageRoot = this.context.globalStorageUri.fsPath;
-    const configuredToolPath = resolvePackagedTool(config.get('toolPath', ''));
-    // Show the selected backend's actual version; source mode never overwrites the checkout.
-    const applicationVersion = executionMode === 'packaged'
-      ? await detectCurrentVersion(this.context.extensionPath, storageRoot, configuredToolPath).catch(() => '无法探测')
-      : this.updates?.snapshot.current?.toolVersion || '待探测';
-    const updateState = readUpdateState(storageRoot);
-    const ready = toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'));
-    const workspace = new vscode.TreeItem('工作区', vscode.TreeItemCollapsibleState.Expanded);
-    workspace.iconPath = new vscode.ThemeIcon(ready ? 'pass-filled' : 'warning');
-    workspace.description = ready ? '已配置' : '未配置';
-    const configFiles = new vscode.TreeItem('配置文件', vscode.TreeItemCollapsibleState.Collapsed);
-    configFiles.iconPath = new vscode.ThemeIcon('settings-gear');
-    configFiles.children = CONFIG_FILES
-      .filter((filename) => filename !== 'database-testing.yaml' || fs.existsSync(path.join(toolHome, 'config', filename)))
-      .map((filename) => toolItem(filename, 'gushenCompletion.editConfig', 'edit', undefined, [filename]));
-    const runtime = new vscode.TreeItem('运行模式', vscode.TreeItemCollapsibleState.Collapsed);
-    const modeLabel = {
-      'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
-    }[executionMode] || '发行模式';
-    const entryPath = executionMode === 'source-development'
-      ? (developmentRoot ? path.join(developmentRoot, 'scripts', 'guthon_tool.py') : '')
-      : executionMode === 'script' ? scriptToolPath : configuredToolPath;
-    const entryItem = staticItem('当前入口', 'file-code', entryPath ? path.basename(entryPath) : '未配置');
-    entryItem.tooltip = entryPath || '尚未选择工具入口';
-    entryItem.command = { command: 'gushenCompletion.selectExecutionMode', title: '切换工具入口', arguments: [true] };
-    const homeItem = staticItem('本地数据目录', 'folder', toolHome ? path.basename(toolHome) : '未配置');
-    homeItem.tooltip = toolHome || '尚未选择本地数据目录';
-    homeItem.command = { command: 'gushenCompletion.setupTool', title: '切换工作空间' };
-    runtime.iconPath = new vscode.ThemeIcon(executionMode === 'packaged' ? 'package' : 'beaker');
-    runtime.description = modeLabel;
-    const update = this.updates?.snapshot;
-    const checkUpdate = toolItem('检查更新', 'gushenCompletion.checkToolUpdate', 'sync',
-      update?.count ? update.count + '项可更新' : update?.pending ? '待生效' : update?.unavailable ? '更新源待新版发行' : '');
-    checkUpdate.tooltip = update?.error || update?.info || '检查后端、Nexus 与 Chrome Bridge 的版本';
-    checkUpdate.children = [
-      ...(update?.rows || []).map(item => staticItem(item.label, item.update ? 'cloud-download' : 'versions',
-        (item.current || '未确认/未托管') + (item.target ? ' → ' + item.target : '') + (item.status ? ' · ' + item.status : ''))),
-      ...(update?.error ? [staticItem('检查未完成', 'warning', update.error)] : []),
-      ...(update?.info ? [staticItem('发行信息', 'info', update.info)] : []),
-    ];
-    checkUpdate.collapsibleState = checkUpdate.children.length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None;
-    runtime.children = [
-      toolItem(
-        `切换模式：${modeLabel}`,
-        'gushenCompletion.selectExecutionMode',
-        executionMode === 'packaged' ? 'package' : 'beaker',
-        executionMode === 'source-development'
-          ? (path.basename(developmentRoot) || '源码仓库')
-          : executionMode === 'script'
-            ? (path.basename(scriptToolPath) || 'Release 脚本')
-            : '打包应用'
-      ),
-      staticItem(`当前版本：${applicationVersion}`, 'tag'),
-      entryItem,
-      homeItem,
-      executionMode === 'source-development' ? staticItem('更新源：本地源码', 'repo', path.basename(developmentRoot) || '未配置') : toolItem(
-        `更新源：${UPDATE_SOURCES[updateSource]?.label || 'Gitee'}`,
-        'gushenCompletion.selectUpdateSource',
-        'cloud'
-      ),
-      checkUpdate,
-      toolItem('检查谷神官方能力更新','gushenCompletion.checkOfficialUpdate','cloud-download'),
-      toolItem('回退官方补全资源','gushenCompletion.rollbackOfficialUpdate','history'),
-      toolItem(
-        '回退到上一版本',
-        'gushenCompletion.rollbackToolUpdate',
-        'history',
-        updateState.previousVersion ? `可回退到 ${updateState.previousVersion}` : '暂无可回退版本'
-      ),
-    ];
-    workspace.children = [
-      runtime,
-      toolItem(
-        ready ? '切换工作空间' : '设置工作空间',
-        'gushenCompletion.setupTool',
-        'folder-library',
-        ready ? (path.basename(toolHome) || '已配置') : '选择本地数据目录'
-      ),
-      configFiles,
-      toolItem('打开本地数据目录', 'gushenCompletion.openToolHome', 'folder-opened'),
-    ].filter(Boolean);
-    const projects = new vscode.TreeItem('项目', vscode.TreeItemCollapsibleState.Expanded);
-    projects.iconPath = new vscode.ThemeIcon('folder-library');
-    const tool = configuredToolFromSettings();
-    try {
-      const workspaces = tool ? await (this.listWorkspaces ? this.listWorkspaces() : this.workspaceRegistry.get(tool)) : [];
-      projects.children = [toolItem(
-        '添加产品或项目',
-        'gushenCompletion.addWorkspace',
-        'add',
-        '创建 API 项目'
-      ), ...workspaces.map((item) => {
-        const actions = workspaceActions(item);
-        const cockpit = workspaceCockpit(item);
-        const node = new vscode.TreeItem(item.displayName, vscode.TreeItemCollapsibleState.Collapsed);
-        node.command = {
-          command: 'gushenCompletion.expandProjectSource',
-          title: '展开源码与索引',
-        };
-        node.description = `${item.id} · API · ${cockpit.description}`;
-        node.iconPath = new vscode.ThemeIcon(cockpit.icon);
-        node.contextValue = 'guthonWorkspace';
-        node.guthonWorkspaceKey = item.workspaceKey;
-        node.guthonDisplayName = item.displayName;
-        const cockpitNode = new vscode.TreeItem(cockpit.label, vscode.TreeItemCollapsibleState.Expanded);
-        cockpitNode.description = cockpit.description;
-        cockpitNode.iconPath = new vscode.ThemeIcon(cockpit.icon);
-        cockpitNode.children = cockpit.rows.map((row) => row.command
-          ? toolItem(row.label, row.command, row.icon, row.description, [item.workspaceKey])
-          : staticItem(row.label, row.icon, row.description));
-        const source = new vscode.TreeItem('源码与索引', vscode.TreeItemCollapsibleState.Expanded);
-        source.iconPath = new vscode.ThemeIcon('code');
-        source.children = actions.source.map(([label, command, icon]) =>
-          toolItem(label, command, icon, undefined, [item.workspaceKey]));
-        const metadata = new vscode.TreeItem('配置资料', vscode.TreeItemCollapsibleState.Collapsed);
-        metadata.iconPath = new vscode.ThemeIcon('server');
-        metadata.children = actions.metadata.map(([label, command, icon]) =>
-          toolItem(label, command, icon, undefined, [item.workspaceKey]));
-        const syncItem = actions.syncAll
-          ? toolItem(...actions.syncAll, undefined, [item.workspaceKey])
-          : undefined;
-        node.children = [
-          cockpitNode,
-          toolItem('检查此工作区环境', 'gushenCompletion.runDoctor', 'pulse', undefined, [item.workspaceKey]),
-          syncItem,
-          toolItem('打开工作区目录', 'gushenCompletion.openWorkspace', 'folder-opened', undefined, [item.root]),
-          source,
-          actions.metadata.length && metadata,
-          actions.diagnose && toolItem('执行源码逻辑排查', 'gushenCompletion.runDiagnosis', 'search', undefined, [item.workspaceKey]),
-          toolItem('查看最近诊断历史', 'gushenCompletion.showDiagnosisHistory', 'history', '只读元数据', [item.workspaceKey]),
-        ].filter(Boolean);
-        return node;
-      })];
-    } catch (error) {
-      projects.children = [toolItem(`读取失败：${error.message}`, 'gushenCompletion.refreshToolView', 'error')];
-    }
-    const maintenance = new vscode.TreeItem('维护', vscode.TreeItemCollapsibleState.Expanded);
-    maintenance.iconPath = new vscode.ThemeIcon('tools');
-    maintenance.children = [
-      toolItem('检查本地环境', 'gushenCompletion.runDoctor', 'pulse'),
-    ];
-    const bridge = new vscode.TreeItem('Guthon Bridge', vscode.TreeItemCollapsibleState.Expanded);
-    const bridgeRunning = this.bridge.isRunning();
-    bridge.iconPath = new vscode.ThemeIcon(bridgeRunning ? 'vm-running' : 'vm-outline');
-    bridge.description = bridgeRunning ? '运行中 · 127.0.0.1:17361' : '未启动';
-    bridge.children = [
-      toolItem(
-        bridgeRunning ? '停止 Guthon Bridge' : '启动 Guthon Bridge',
-        bridgeRunning ? 'gushenCompletion.stopBridge' : 'gushenCompletion.startBridge',
-        bridgeRunning ? 'debug-stop' : 'play'
-      ),
-    ];
-    return [workspace, projects, bridge, maintenance];
-  }
-}
 
 function activate(context) {
   const nexusBuild = require('./extension-build').registerExtensionBuild(vscode,context);
@@ -678,7 +480,7 @@ function activate(context) {
     }
     return result.workspaces;
   });
-  let toolView;
+  let projectCard;
   const bridge = createBridgeProcess({
     scriptPath: resolveBridgeScript(context.extensionPath),
     getPort: () => vscode.workspace.getConfiguration('gushenCompletion').get('bridgePort', 17361),
@@ -687,14 +489,11 @@ function activate(context) {
     onExit: (code) => {
       if (code) vscode.window.showErrorMessage(`Guthon Bridge 已退出（退出码 ${code}），请查看输出面板`);
     },
-    onStateChange: () => toolView?.refresh(),
+    onStateChange: () => projectCard?.refresh(),
   });
-  toolView = new ToolTreeDataProvider(bridge, context, workspaceRegistry);
-  const toolViewDisposable = vscode.window.createTreeView('gushenCompletion.toolView', { treeDataProvider: toolView });
-  let projectCard;
-  const refreshToolData = () => {workspaceRegistry.invalidate();toolView.refresh();projectCard?.refresh();};
+  const refreshToolData = () => {workspaceRegistry.invalidate();projectCard?.refresh();};
   const apiServices = activeApiServices = require('./api/activate').activateApi({vscode,context,getTool:async()=>configuredToolFromSettings(),processClient,
-    onUpdated:()=>refreshToolData()});
+    onUpdated:()=>projectCard?.refresh()});
   const scopedWorkspaces = async () => {
     const tool=configuredToolFromSettings();if(!tool) return [];
     const all=(await workspaceRegistry.get(tool)).filter(item=>item.sourceMode==='api');
@@ -705,16 +504,15 @@ function activate(context) {
     })));
     return matched.length ? matched : all;
   };
-  toolView.listWorkspaces=scopedWorkspaces;
   projectCard=require('./api/project-card').registerProjectCard({vscode,context,api:apiServices,getWorkspaces:scopedWorkspaces});
   const refreshApiWorkspaces = async()=>apiServices.syncWorkspaces(await scopedWorkspaces());
   const updateCenter = createUpdateCenter({ vscode, context, bridge, processClient,
     getTool: configuredToolFromSettings, loadedVersion: nexusBuild.version, loadedBuildId: nexusBuild.buildId,
     isBusy: () => activeToolRuns.size > 0,
     setBusy: value => { applicationUpdateRunning = value; },
-    refresh: () => toolView.refresh(), treeView: toolViewDisposable,
+    refresh: () => projectCard?.refresh(),
     log: message => toolOutput().appendLine(message) });
-  toolView.updates = updateCenter;
+
   const refreshLocalWorkspaceViews = async () => {refreshToolData();apiServices.sourceTree.refresh();await refreshApiWorkspaces();projectCard.refresh();};
   const assistantClient = new ToolJsonClient({getTool:async()=>configuredToolFromSettings(),processClient});
   const selectWorkspace = async (workspaceKey = '') => {
@@ -731,6 +529,18 @@ function activate(context) {
   apiNavigation=require('./api/navigation').createApiNavigation({vscode,context,api:apiServices,selectWorkspace,getTool:configuredToolFromSettings,bridge});
   void refreshApiWorkspaces().catch(error=>vscode.window.showErrorMessage(`API 工作区初始化失败：${error.message}`));
   const toolCommands = [
+    vscode.commands.registerCommand('gushenCompletion.configureProject', async value => {
+      try {
+        const workspace=await selectWorkspace(typeof value==='string'?value:value?.workspaceKey || '');
+        if(!workspace)return;
+        const {showProjectSettings,showConfiguration}=require('./api/project-actions');
+        return await showProjectSettings({vscode,workspace,onConfiguration:()=>showConfiguration({vscode,client:assistantClient,workspace})});
+      } catch(error) {return vscode.window.showErrorMessage(`项目设置失败：${error.message}`);}
+    }),
+    vscode.commands.registerCommand('gushenCompletion.showProjectActions', async () => {
+      try {return await require('./api/project-actions').showProjectActions({vscode,getWorkspaces:scopedWorkspaces,bridge});}
+      catch(error) {return vscode.window.showErrorMessage(`项目操作失败：${error.message}`);}
+    }),
     vscode.commands.registerCommand('gushenCompletion.openOnboarding', () => onboarding.open()),
     vscode.commands.registerCommand('gushenCompletion.showDiagnosisHistory', async (workspaceValue = '') => {
       try {
@@ -1079,8 +889,7 @@ function activate(context) {
       if (selected) return runTool(TOOL_COMMANDS.diagnose, [selected[0].fsPath], true, workspaceKey);
     }),
     vscode.commands.registerCommand('gushenCompletion.expandProjectSource', async () => {
-      await vscode.commands.executeCommand('gushenCompletion.toolView.focus');
-      return vscode.commands.executeCommand('list.expand');
+      return vscode.commands.executeCommand('gushenCompletion.sourceView.focus');
     }),
     vscode.commands.registerCommand('gushenCompletion.openWorkspace', (workspaceRoot) =>
       vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(workspaceRoot))),
@@ -1122,12 +931,10 @@ function activate(context) {
     disposable,
     definitionDisposable,
     hoverDisposable,
-    toolViewDisposable,
     projectCard,
     updateCenter,
     onboarding,
     ...(onboardingTrust ? [onboardingTrust] : []),
-    toolView.changed,
     bridgeOutput,
     bridge,
     processClient,
@@ -1144,6 +951,5 @@ module.exports = {
   createDefinitionProvider,
   createHoverProvider,
   createProvider,
-  ToolTreeDataProvider,
   deactivate,
 };

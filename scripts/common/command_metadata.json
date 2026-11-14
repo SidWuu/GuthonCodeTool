@@ -2,6 +2,8 @@
   "schemaVersion": 1,
   "defaultTimeoutMs": 120000,
   "commands": {
+    "configuration-info": {"kind": "read", "timeoutMs": 120000},
+    "configuration-migrate": {"kind": "write", "timeoutMs": 120000},
     "workspace-summary": {
       "kind": "read",
       "timeoutMs": 120000

@@ -130,6 +130,8 @@ CLI_COMMANDS = tuple(
             "mcp",
             "api",
             "setup",
+            "configuration-info",
+            "configuration-migrate",
             "workspace-create",
             "workspace-delete",
             "workspaces",
@@ -161,6 +163,8 @@ CLI_COMMANDS = tuple(
 )
 GLOBAL_COMMANDS = {
     "setup",
+    "configuration-info",
+    "configuration-migrate",
     "workspace-create",
     "workspace-delete",
     "workspaces",
@@ -199,6 +203,13 @@ def build_workspace_resolve_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Read selectors as JSON; useful for lifecycle hooks",
     )
+    return parser
+
+
+def build_configuration_migrate_parser():
+    parser = argparse.ArgumentParser(prog="guthon_tool.py configuration-migrate")
+    parser.add_argument("--stdin", action="store_true", required=True,
+                        help="读取迁移预览或明确确认后的 apply JSON")
     return parser
 
 
@@ -352,6 +363,7 @@ def build_source_map_parser():
 from providers.api.cli import parser as build_api_parser
 
 COMMAND_PARSER_BUILDERS = {
+    "configuration-migrate": build_configuration_migrate_parser,
     "api": build_api_parser,
     "workspace-resolve": build_workspace_resolve_parser,
     "database-target-resolve": lambda: build_database_parser("database-target-resolve"),
@@ -486,6 +498,11 @@ def setup_config(home: Path) -> list[Path]:
 
 
 def _setup_config(home: Path) -> list[Path]:
+    from common import config_store
+
+    created = config_store.initialize(home)
+    if config_store.unified(home):
+        return created
     config_dir = home / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     created = []
@@ -556,6 +573,18 @@ def run(
                 {"ok": True, "created": [str(x) for x in created]}, ensure_ascii=False
             )
         )
+        return 0
+    if command in {"configuration-info", "configuration-migrate"}:
+        from common import config_store
+
+        if command == "configuration-info":
+            if extra_args:
+                raise SystemExit("configuration-info 不接受额外参数")
+            result = config_store.info(home)
+        else:
+            build_configuration_migrate_parser().parse_args(extra_args)
+            result = config_store.migrate(home, json.load(sys.stdin))
+        print(json.dumps(result, ensure_ascii=False))
         return 0
     if command in {"workspace-create", "workspace-delete"}:
         if extra_args:

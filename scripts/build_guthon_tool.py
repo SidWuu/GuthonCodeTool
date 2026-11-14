@@ -60,6 +60,7 @@ HIDDEN_IMPORTS = (
     "common.index_maintenance",
     "common.source_format",
     "common.workspace_config",
+    "common.config_store",
     "common.workspace_assistant",
     "pymysql",
     "oracledb",
@@ -67,6 +68,7 @@ HIDDEN_IMPORTS = (
     "psycopg.pq",
     "keyring",
     "certifi",
+    "yaml",
     "keyring.backends.macOS",
     "keyring.backends.Windows",
 )
@@ -93,6 +95,9 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    if find_spec("yaml") is None:
+        print("缺少旧配置迁移所需的 YAML 解析器。请执行：python -m pip install -r scripts/python-requirements.txt", file=sys.stderr)
+        return 2
     build_root = Path(os.environ.get("GUTHON_BUILD_OUTPUT_ROOT") or ROOT).expanduser().resolve()
     dist_path = build_root / "dist"
     work_path = build_root / "build"
@@ -114,6 +119,8 @@ def main() -> int:
         str(ROOT / "scripts"),
         "--copy-metadata",
         "certifi",
+        "--copy-metadata",
+        "PyYAML",
         "--add-data",
         f"{ROOT / 'config' / 'example'}{SEP}config/example",
         "--add-data",

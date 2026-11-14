@@ -35,3 +35,7 @@ button:disabled{opacity:.45;cursor:default}
 .captcha-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
 .captcha-row input{margin:0!important}
 .captcha-row img{max-width:100px;height:28px;object-fit:contain}
+
+.project-tools{display:flex;gap:5px;margin:3px 0 0;flex-wrap:wrap}
+.project-tools button{flex:1;min-width:65px;min-height:23px;padding:2px 4px;font-size:11px;color:var(--vscode-descriptionForeground);background:transparent;border-color:var(--vscode-widget-border,transparent)}
+.project-tools button:hover{background:var(--vscode-list-hoverBackground)}

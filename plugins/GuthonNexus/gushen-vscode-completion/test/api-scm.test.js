@@ -28,7 +28,12 @@ test('removing a workspace invalidates a pending SCM result',async()=>{
 test('source tree marks modified files and propagates conflicts to parent folders',async()=>{
  const f=fixture(async(_key,action)=>action==='status'?{checkoutPath:'/checkout',files:[{path:'systems/A/one.gss',state:'MODIFIED'},{path:'systems/A/two.gss',state:'CONFLICT'}]}:{objects:[{path:'systems/A/one.gss',sourceType:'procedure'},{path:'systems/A/two.gss',sourceType:'procedure'}]});
  f.ui.vscode.TreeItem=class{constructor(label,state){this.label=label;this.collapsibleState=state;}};f.ui.vscode.TreeItemCollapsibleState={Collapsed:1,None:0};f.ui.vscode.ThemeIcon=class{constructor(id){this.id=id;}};
- f.ui.syncWorkspaces(['projects.demo']);await f.ui.updateScm('projects.demo');const root=(await f.ui.getChildren())[0],systems=(await f.ui.getChildren(root))[0],group=systems.children[0];
+ f.ui.syncWorkspaces(['projects.demo']);await f.ui.updateScm('projects.demo');const root=(await f.ui.getChildren()).find(x=>x.label==='其他源码'),systems=root.children[0],group=systems.children[0];
  assert.equal(f.ui.getTreeItem(systems).description,'冲突');assert.equal(f.ui.getTreeItem(group).description,'冲突');
  assert.equal(f.ui.getTreeItem(group.children.find(x=>x.object.path.endsWith('one.gss'))).description,'有本地修改');f.ui.dispose();
+});
+test('unchanged SCM refresh does not emit another tree refresh',async()=>{
+ let events=0;const f=fixture(async()=>({checkoutPath:'/checkout',files:[{path:'a',state:'MODIFIED',sourceHash:'one',baseHash:'base'}]}));
+ f.ui.emitter={fire(){events++;},dispose(){}};f.ui.syncWorkspaces(['projects.demo']);await f.ui.updateScm('projects.demo');const afterFirst=events;
+ await f.ui.updateScm('projects.demo');assert.equal(events,afterFirst);f.ui.dispose();
 });

@@ -2,29 +2,30 @@ const crypto=require('node:crypto');
 const fs=require('node:fs');
 const path=require('node:path');
 
-const actions=Object.freeze({pull:'pullApiSource',upload:'uploadApiSource'});
+const actions=Object.freeze({pull:'pullApiSource',upload:'uploadApiSource',settings:'configureProject',search:'searchCurrentApiWorkspace'});
 function escapeHtml(value) {
   return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 }
 function cardModel(workspace,status,authentication={authenticated:true,session:status.lastLogin}) {
   const files=(status.files||[]).filter(file=>file.inScope!==false);
   const session=authentication.session||status.lastLogin;
-  return {authenticated:authentication.authenticated,key:workspace.workspaceKey,project:workspace.name||workspace.displayName||workspace.workspaceKey,
+  return {authenticated:authentication.authenticated,pending:authentication.pending===true,key:workspace.workspaceKey,project:workspace.name||workspace.displayName||workspace.workspaceKey,
     version:session?.mainVersion?`${session.mainVersion}@${session.dateVersion}`:'登录后显示',
     address:status.settings.serverUrl||'',user:session?.userName||'',
     scope:status.settings.allSystems?'全部子系统':`${status.settings.systemIds.length} 个子系统`,
-    sourceCount:status.summary?.sourceCount ?? files.length,changed:status.summary?.changedCount ?? files.filter(file=>file.state!=='CLEAN').length,
+    sourceCount:status.summary?.sourceCount ?? files.length,changed:status.summaryComplete===false ? null : status.summary?.changedCount ?? files.filter(file=>file.state!=='CLEAN').length,
     canPull:!!status.settings.serverUrl&&(status.settings.allSystems||status.settings.systemIds.length>0),
-    canUpload:status.summary ? status.summary.uploadableCount>0 : files.some(file=>file.state==='MODIFIED'&&!file.readonly)};
+    canUpload:status.summaryComplete===false || (status.summary ? status.summary.uploadableCount>0 : files.some(file=>file.state==='MODIFIED'&&!file.readonly))};
 }
 function projectCardHtml(model,{nonce=crypto.randomBytes(18).toString('base64'),css='',form={}}={}) {
   const e=escapeHtml;
   const row=(label,value)=>`<div class="metadata-row"><dt>${label}</dt><dd title="${e(value)}">${e(value)}</dd></div>`;
-  let content='<div class="empty">添加项目并打开其源码目录后，显示当前项目详情。</div>';
-  if(model?.authenticated) {
+  let content='<div class="empty">从右上角“更多操作”完成本地数据目录设置并添加项目，再打开项目目录。</div>';
+  if(model?.authenticated || model?.pending) {
     content=`<section aria-label="当前项目详情" class="project-card"><dl>${row('项目',model.project)}${row('版本',model.version)}${row('地址',model.address)}${row('用户',model.user)}</dl></section>
-<div class="primary-actions"><button data-action="pull" ${model.canPull?'':'disabled'} title="${model.canPull?'拉取当前范围源码':'请先从项目节点选择需要拉取的子系统'}">更新源码</button><button class="secondary" data-action="upload" ${model.canUpload?'':'disabled'}>上传代码</button></div>
-<div class="source-summary" aria-label="当前拉取范围"><span>${e(model.scope)}</span><span>${model.sourceCount} 源码</span><span class="${model.changed?'has-changes':''}">${model.changed} 修改</span></div>`;
+<div class="primary-actions"><button data-action="pull" ${model.canPull&&!model.pending?'':'disabled'} title="${model.pending?'正在恢复登录':model.canPull?'拉取当前范围源码':'请先在“项目设置”选择拉取范围'}">更新源码</button><button class="secondary" data-action="upload" ${model.canUpload&&!model.pending?'':'disabled'}>上传代码</button></div>
+<div class="source-summary" aria-label="当前拉取范围"><span>${e(model.scope)}</span><span>${model.sourceCount} 源码</span><span title="最近一次源码状态检查结果" class="${model.changed?'has-changes':''}">${model.changed==null?'修改待检查':model.changed+' 修改'}</span></div>
+<div class="project-tools"><button data-action="settings">项目设置</button><button data-action="search">搜索源码</button></div>`;
   } else if(model) {
     const captcha=typeof form.captcha==='string'&&/^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(form.captcha)?form.captcha:'';
     content=`<section class="project-card login-card"><h2>登录到项目 [${e(model.project)}]</h2><form id="login-form">
@@ -35,7 +36,7 @@ ${captcha?`<div class="captcha-row"><input id="captcha" placeholder="验证码" 
 <button class="login-submit" type="submit">登录</button></form></section>`;
   }
   return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; img-src data:; script-src 'nonce-${nonce}'"><style nonce="${nonce}">${css}</style></head><body>${content}
-<div id="status" class="status" role="status" aria-live="polite">${e(form.error||'')}</div><script nonce="${nonce}">
+<div id="status" class="status" role="status" aria-live="polite">${e(form.error||(model?.pending?'正在恢复登录…':''))}</div><script nonce="${nonce}">
 const vscode=acquireVsCodeApi(),workspaceKey=${JSON.stringify(model?.key||'').replace(/</g,'\\u003c')};
 for(const button of document.querySelectorAll('[data-action]'))button.addEventListener('click',()=>vscode.postMessage({action:button.dataset.action,workspaceKey}));
 document.getElementById('login-form')?.addEventListener('submit',event=>{
@@ -49,7 +50,7 @@ window.addEventListener('message',event=>{if(event.data?.type==='status')documen
 }
 class ProjectCardProvider {
   constructor({vscode,context,api,getWorkspaces}) {
-    Object.assign(this,{vscode,context,api,getWorkspaces});this.generation=0;this.disposables=[];this.form={};
+    Object.assign(this,{vscode,context,api,getWorkspaces});this.generation=0;this.disposables=[];this.form={};this.authentication=new Map();
     this.css=fs.readFileSync(path.join(context.extensionPath,'src/api/project-card.css'),'utf8');
   }
   resolveWebviewView(view) {
@@ -59,11 +60,13 @@ class ProjectCardProvider {
       const key=this.currentKey;
       if(message?.action==='submitLogin') {
         if(this.loginPending)return;
-        this.loginPending=true;this.form={serverUrl:message.serverUrl,userId:message.userId,remember:message.remember};
+        this.loginPending=true;this.generation++;this.form={serverUrl:message.serverUrl,userId:message.userId,remember:message.remember};
         try {
           await this.api.run(key,'configure',{serverUrl:message.serverUrl});
-          await this.api.run(key,'login',{userId:message.userId,password:message.password,randCode:message.randCode,remember:message.remember});
-          this.form={};await this.api.refreshWorkspace?.(key);
+          const result=await this.api.run(key,'login',{userId:message.userId,password:message.password,randCode:message.randCode,remember:message.remember});
+          this.authentication.set(key,{authenticated:true,session:result.session});
+          this.form={};
+          void this.api.refreshWorkspace?.(key).catch(error=>this.vscode.window.showErrorMessage?.(`源码状态刷新失败：${error.message}`));
         } catch(error) {
           this.form.error=error.message;
           if(/验证码|captcha|randCode/i.test(error.message)) {
@@ -83,27 +86,37 @@ class ProjectCardProvider {
   async refresh() {
     if(!this.view||this.loginPending)return;
     const generation=++this.generation;
+    let workspace,state;
     try {
       const workspaces=await this.getWorkspaces();
       if(generation!==this.generation)return;
-      const workspace=workspaces.length===1?workspaces[0]:undefined;
+      workspace=workspaces.length===1?workspaces[0]:undefined;
       if(workspace?.workspaceKey!==this.currentKey){this.form={};this.lastSignature=undefined;}
-      const state=workspace?await this.api.run(workspace.workspaceKey,'status'):undefined;
-      const authentication=workspace?await this.api.run(workspace.workspaceKey,'session'):undefined;
-      if(authentication?.error)this.form={...this.form,error:authentication.error.message};
+      state=workspace?await (this.api.readProjectSummary ? this.api.readProjectSummary(workspace.workspaceKey) : this.api.run(workspace.workspaceKey,'status')):undefined;
       if(generation!==this.generation||!this.view)return;
       this.currentKey=workspace?.workspaceKey;
-      const model=workspace?cardModel(workspace,state,authentication):undefined;
-      const signature=JSON.stringify({model:model?.authenticated?model:model?{authenticated:false,key:model.key,project:model.project,address:model.address}:null,form:this.form});
-      if(signature===this.lastSignature)return;
-      this.lastSignature=signature;
-      this.view.webview.html=projectCardHtml(model,{css:this.css,form:this.form});
+      this.render(workspace,state,workspace ? this.authentication.get(workspace.workspaceKey)||{authenticated:false,pending:true} : undefined);
+      const authentication=workspace?await this.api.run(workspace.workspaceKey,'session'):undefined;
+      if(generation!==this.generation||!this.view)return;
+      if(workspace)this.authentication.set(workspace.workspaceKey,authentication);
+      if(authentication?.authenticated)this.form={};
+      else if(authentication?.error)this.form={...this.form,error:authentication.error.message};
+      this.render(workspace,state,authentication);
     } catch(error) {
       if(generation!==this.generation||!this.view)return;
-      this.currentKey=undefined;this.view.webview.html=projectCardHtml(undefined,{css:this.css,form:{error:error.message}});
+      this.form={...this.form,error:error.message};
+      this.currentKey=state?workspace?.workspaceKey:undefined;
+      this.render(state?workspace:undefined,state,{authenticated:false});
     }
   }
-  dispose(){this.generation++;for(const disposable of this.disposables)disposable.dispose();this.disposables=[];this.view=null;this.form={};}
+  render(workspace,state,authentication) {
+    const model=workspace?cardModel(workspace,state,authentication):undefined;
+    const signature=JSON.stringify({model:model?.authenticated||model?.pending?model:model?{authenticated:false,key:model.key,project:model.project,address:model.address}:null,form:this.form});
+    if(signature===this.lastSignature)return;
+    this.lastSignature=signature;
+    this.view.webview.html=projectCardHtml(model,{css:this.css,form:this.form});
+  }
+  dispose(){this.generation++;for(const disposable of this.disposables)disposable.dispose();this.disposables=[];this.view=null;this.form={};this.authentication.clear();}
 }
 function registerProjectCard(options) {
   const provider=new ProjectCardProvider(options);

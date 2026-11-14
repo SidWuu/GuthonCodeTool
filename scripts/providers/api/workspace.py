@@ -1,9 +1,12 @@
 """Explicit project configuration, saved login and a single subsystem scope contract."""
 
 from __future__ import annotations
+from contextlib import contextmanager, nullcontext
+from concurrent.futures import Future, TimeoutError as FutureTimeout
 import hashlib
 import json
 from pathlib import Path
+import threading
 from common.persistence import atomic_text, file_lock
 from .client import ApiClient, ApiError, server_url
 
@@ -16,6 +19,9 @@ FIELDS = {
     "includeProjectFiles",
 }
 SERVICE = "GuthonCodeTool.api"
+_CREDENTIAL_READ_TIMEOUT = 5.0
+_CREDENTIAL_READS = {}
+_CREDENTIAL_READS_LOCK = threading.Lock()
 
 
 def api_paths(workspace):
@@ -52,11 +58,49 @@ def validate(value):
     return value
 
 
+def _configuration_home(workspace):
+    from common.runtime_paths import tool_home
+
+    config_dir = workspace.get("configDir")
+    if config_dir is not None:
+        home = Path(config_dir).parent
+    else:
+        try:
+            home = tool_home()
+        except SystemExit:
+            return None
+    return home
+
+
+def _unified_home(workspace):
+    from common import config_store
+
+    home = _configuration_home(workspace)
+    return home if home is not None and config_store.unified(home) else None
+
+
+@contextmanager
+def configuration_lock(workspace):
+    """Serialize configuration writes with migration, in the same lock order."""
+    directory, _ = api_paths(workspace)
+    home = _configuration_home(workspace)
+    global_lock = file_lock(home / 'config' / '.configuration.lock') if home is not None else nullcontext()
+    with global_lock, file_lock(directory / 'configuration.lock'):
+        yield
+
+
 def settings(workspace):
     directory, _ = api_paths(workspace)
-    try:
-        value = json.loads((directory / "config.json").read_text(encoding="utf-8"))
-    except FileNotFoundError:
+    home = _unified_home(workspace)
+    if home is not None:
+        from common.config_store import api_settings
+        value = api_settings(home, workspace["workspaceKey"])
+    else:
+        try:
+            value = json.loads((directory / "config.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            value = None
+    if value is None:
         return {
             "serverUrl": "",
             "systemIds": [],
@@ -75,6 +119,11 @@ def settings(workspace):
 
 
 def configure(workspace, payload):
+    with configuration_lock(workspace):
+        return _configure(workspace, payload)
+
+
+def _configure(workspace, payload):
     if not isinstance(payload, dict) or set(payload) - FIELDS:
         raise ApiError("API_CONFIG_INVALID", "API配置含未知字段")
     previous = settings(workspace)
@@ -101,10 +150,16 @@ def configure(workspace, payload):
         "root"
     ].resolve().is_relative_to(checkout.resolve()):
         raise ApiError("API_CONFIG_INVALID", "checkout和元数据目录必须分开")
-    atomic_text(
-        directory / "config.json",
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-    )
+    if value != previous:
+        home = _unified_home(workspace)
+        if home is not None:
+            from common.config_store import save_api_settings
+            save_api_settings(home, workspace["workspaceKey"], value)
+        else:
+            atomic_text(
+                directory / "config.json",
+                json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+            )
     if not (directory / "baseline.db").exists():
         atomic_text(
             directory / "identity.json",
@@ -135,7 +190,7 @@ def client_for(workspace, *, authenticated=False):
         _CLIENTS[key] = client
     if authenticated and client.session is None:
         saved = load_login(workspace)
-        if saved:
+        if saved and client.session is None:
             client.login(saved["userId"], saved["password"])
             save_session(workspace, client.session)
         client.ensure_login()
@@ -166,8 +221,14 @@ def remember_login(workspace, user_id, password, remember):
             keyring.set_password(
                 SERVICE, ref, json.dumps({"userId": user_id, "password": password})
             )
-        elif keyring.get_password(SERVICE, ref) is not None:
-            keyring.delete_password(SERVICE, ref)
+        else:
+            try:
+                keyring.delete_password(SERVICE, ref)
+            except keyring.errors.PasswordDeleteError as error:
+                cause = error.__cause__
+                if not (type(cause).__name__ == "NotFound" or str(error) == SERVICE
+                        or str(error).strip().lower() in {"password not found", "no password found"}):
+                    raise ApiError("API_CREDENTIAL_STORE_UNAVAILABLE", "无法删除系统凭据，请检查凭据库") from None
     except ImportError as error:
         if remember:
             raise ApiError(
@@ -178,11 +239,31 @@ def remember_login(workspace, user_id, password, remember):
 def load_login(workspace):
     try:
         import keyring
-
-        value = keyring.get_password(SERVICE, credential_ref(workspace))
-        return json.loads(value) if value else None
     except ImportError:
         return None
+    ref = credential_ref(workspace)
+    with _CREDENTIAL_READS_LOCK:
+        future = _CREDENTIAL_READS.get(ref)
+        if future is None:
+            future = Future()
+            _CREDENTIAL_READS[ref] = future
+            def read_credential():
+                try:
+                    future.set_result(keyring.get_password(SERVICE, ref))
+                except Exception as error:
+                    future.set_exception(error)
+                finally:
+                    with _CREDENTIAL_READS_LOCK:
+                        if _CREDENTIAL_READS.get(ref) is future:
+                            del _CREDENTIAL_READS[ref]
+            threading.Thread(target=read_credential, daemon=True, name="api-credential-read").start()
+    try:
+        value = future.result(timeout=_CREDENTIAL_READ_TIMEOUT)
+    except FutureTimeout:
+        raise ApiError("API_CREDENTIAL_STORE_UNAVAILABLE", "系统凭据库读取超时，请手动登录") from None
+    except Exception:
+        raise ApiError("API_CREDENTIAL_STORE_UNAVAILABLE", "无法读取系统凭据库，请手动登录") from None
+    return json.loads(value) if value else None
 
 
 def project_metadata(workspace, *, include_menu=False):

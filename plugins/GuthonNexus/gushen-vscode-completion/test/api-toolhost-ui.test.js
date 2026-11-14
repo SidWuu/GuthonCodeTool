@@ -55,7 +55,7 @@ test('CodeBuddy-style normalized URIs open tree items and PAGE fragments through
   const api=activateApi({vscode,context,getTool:async()=>tool,processClient});
   try {
     api.sourceTree.syncWorkspaces([{workspaceKey:key,checkoutPath:info.root,sourceMode:'api'}]);
-    const root=(await api.sourceTree.getChildren())[0],tree=await api.sourceTree.getChildren(root);
+    const tree=await api.sourceTree.getChildren();
     const find=(nodes,p)=>{for(const n of nodes){if(n.object?.path===p)return n;if(Array.isArray(n.children)){const found=find(n.children,p);if(found)return found;}}};
     const procedure=find(tree,info.proc),page=find(tree,info.page);assert.ok(procedure);assert.ok(page);
     const procedureCommand=api.sourceTree.getTreeItem(procedure).command;
@@ -134,4 +134,23 @@ print(json.dumps({'sameProject':before==p.read_bytes(),'responsePreserved':resul
   const result=spawnSync(python,['-c',verify,home],{encoding:'utf8',env:{...process.env,PYTHONPATH:scripts}});assert.equal(result.status,0,result.stderr);
   const parsed=JSON.parse(result.stdout);assert.equal(parsed.sameProject,true);assert.equal(parsed.responsePreserved,true);
   assert.deepEqual(parsed.catalog,[{systemId:'S',menus:[{id:'F',name:'一级',isDir:1,childs:[{id:'M',name:'菜单',isDir:0,pages:[{pageId:'PG-SYNTH',pageSubId:'main'}]}]}]}]);
+});
+
+test('real ToolHost indexes a clean source edit and missing registered file without status scans', {skip:!fs.existsSync(python) && 'repository Python environment unavailable'},async t=>{
+  const {ToolJsonClient}=require('../src/tool-json-client'),{ApiSourceWatcher}=require('../src/api/source-watcher');
+  const home=fs.mkdtempSync(path.join(os.tmpdir(),'nexus-watcher-toolhost-'));t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+  const setup=spawnSync(python,['-c',bootstrap,home],{encoding:'utf8',env:{...process.env,PYTHONPATH:scripts}});assert.equal(setup.status,0,setup.stderr);
+  const info=JSON.parse(setup.stdout),key='projects.MixedCase',tool={mode:'source-development',toolPath:python,toolEntry:path.join(scripts,'guthon_tool.py'),toolHome:home,env:{PYTHONPATH:scripts}};
+  const processClient=new ToolProcessClient(),client=new ToolJsonClient({getTool:async()=>tool,processClient}),calls=[],checks=[],changes=[];
+  const run=async(k,action,input)=>{calls.push(action);const result=await client.run(k,'api',[action,'--stdin'],input || {});if(input?.checkOnly)checks.push(result);return result;};
+  const watcher=new ApiSourceWatcher({run,delay:10000,onChanged:async(_key,paths,result)=>changes.push({paths,result}),onError:(_key,error)=>{throw error;}});
+  try {
+    watcher.register(key,info.root);fs.writeFileSync(path.join(info.root,info.proc),'uniqueWatcherNeedle();\n');
+    watcher.enqueue(key,info.proc);watcher.enqueue(key,'config/sync.yaml');watcher.enqueue(key,'datasources/D/procedures/unregistered.gss');await watcher.flush(key);
+    assert.deepEqual(changes[0].paths,[info.proc]);assert.equal(checks[0].ignoredCount,1);assert.equal(calls.includes('status'),false);
+    const found=await run(key,'search',{query:'uniqueWatcherNeedle',limit:20});assert.ok(found.hits.some(hit=>hit.path===info.proc));
+    watcher.enqueue(key,info.proc);await watcher.flush(key);assert.equal(changes.length,1);
+    fs.unlinkSync(path.join(info.root,info.proc));watcher.enqueue(key,info.proc);await watcher.flush(key);
+    assert.deepEqual(changes[1].paths,[info.proc]);assert.deepEqual(watcher.recovery(key).paths,[]);
+  } finally {await watcher.close();await processClient.stop();processClient.dispose();}
 });

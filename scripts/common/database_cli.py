@@ -18,6 +18,11 @@ from common.command_errors import CommandError, error_code
 
 
 def save_config(path, config):
+    from common import config_store
+    path = Path(path)
+    if config_store.is_default_database_path(path):
+        config_store.save_database_testing(path.parent.parent, config)
+        return
     try:
         import yaml
         text = yaml.safe_dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False)
@@ -31,7 +36,8 @@ def configure(path, workspace, payload):
     if not isinstance(payload, dict):
         raise readonly.DatabaseReadonlyError("CONFIG_INVALID", "数据库配置输入必须是 JSON 对象")
     with file_lock(path.parent / ".configuration.lock"):
-        current = artifacts.load_yaml(path) if path.is_file() else {}
+        from common import config_store
+        current = artifacts.load_yaml(path) if path.is_file() or config_store.is_default_database_path(path) else {}
         updated, ref = readonly.build_diagnosis_config(current, workspace["workspaceKey"], payload)
         previous = None
         if ref:
@@ -204,7 +210,8 @@ def run(command, parsed, hub, tool_config, workspace=None):
                 payload['environment'] = parsed.environment
             metadata = Path(parsed.metadata).expanduser().read_text(encoding='utf-8')
             with file_lock(path.parent / '.configuration.lock'):
-                current = artifacts.load_yaml(path) if path.is_file() else {}
+                from common import config_store
+                current = artifacts.load_yaml(path) if path.is_file() or config_store.is_default_database_path(path) else {}
                 updated = dbx.import_target(current, resolved['workspaceKey'], metadata, payload, source_ref=parsed.source_ref)
                 save_config(path, updated)
             result = {'ok': True, 'targetId': payload['targetId'], 'workspaceKey': resolved['workspaceKey'], 'connector': 'dbx', 'identityVerified': False, 'sourceRef': parsed.source_ref, 'nextAction': '执行 database-dbx-handoff 的身份查询，并核对身份后继续查询'}
@@ -220,7 +227,8 @@ def run(command, parsed, hub, tool_config, workspace=None):
                 payload["environment"] = parsed.environment
             result = configure(path, resolved, payload)
         else:
-            if command == 'database-target-list' and not path.exists():
+            from common import config_store
+            if command == 'database-target-list' and not path.exists() and not config_store.is_default_database_path(path):
                 emit({'ok':True,'workspaceKey':resolved['workspaceKey'],'targets':[], 'configured':False,
                       'selectionSource':'unconfigured','nextAction':'配置此工作区的数据库排查目标'},parsed)
                 return 0

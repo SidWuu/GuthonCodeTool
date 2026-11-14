@@ -155,3 +155,11 @@ test('creates an API project without a source selector',async()=>{
   const result=await promptWorkspaceCreation({showQuickPick:async()=>{picks++;return {label:'项目',value:'project'};},showInputBox:async()=>inputs.shift()},[], '/not/used');
   assert.deepEqual(result,{kind:'project',id:'risk-dev',name:'风险开发',sourceMode:'api'});assert.equal(picks,1);
 });
+
+test('a single-file initialized home can be selected before generated var data exists',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'nexus-one-config-'));
+  try {
+    fs.mkdirSync(path.join(root,'config'));fs.writeFileSync(path.join(root,'config','guthon.json'),'{}');
+    assert.doesNotThrow(()=>require('../src/tool-workspace').existingWorkspaceConfig(root));
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});

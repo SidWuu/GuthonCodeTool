@@ -1,5 +1,6 @@
 const path = require('node:path');
 const {isInlineInherited,scriptType}=require('../source/virtual-fs');
+const {sourcePathAllowed}=require('./source-watcher');
 
 function filePath(root, sourcePath) {
   if (typeof sourcePath !== 'string' || !sourcePath || sourcePath.includes('\\') || sourcePath.split('/').some(p => !p || p === '.' || p === '..')) throw new Error('无效的源码路径');
@@ -45,12 +46,17 @@ function buildCatalogTree(key, workspace, objects, project={}) {
     }
   }};
   for(const system of project.menuTree || []) menus(String(system.systemId),system.menus);
-  const labels={systems:'系统',datasources:'数据源',pages:'页面',procedures:'过程函数',tables:'表',views:'视图','system-script':'系统脚本'};
+  const labels={pages:'页面',procedures:'过程函数',tables:'表',views:'视图','system-script':'系统脚本'};
+  const icons={pages:'layout',procedures:'symbol-method',tables:'table',views:'symbol-structure','system-script':'code'};
+  root.childIndex=new Map();for(const [type,label] of Object.entries(labels)) {
+    const child={label,key,children:[],category:type,icon:icons[type],sourcePrefixes:new Set(),parent:workspace};root.children.push(child);root.childIndex.set('category:'+type,child);
+  }
   const add=(object,dirs)=>{
     let parent=root;
     for(const dir of dirs) {
       parent.childIndex ||= new Map();let child=parent.childIndex.get(dir.key);
       if(!child) {child={label:dir.label,key,children:[],sourcePrefix:dir.sourcePrefix,description:dir.description,parent:parent===root?workspace:parent};parent.children.push(child);parent.childIndex.set(dir.key,child);}
+      child.sourcePrefixes ||= new Set();if(dir.affectedPrefix)child.sourcePrefixes.add(dir.affectedPrefix);
       parent=child;
     }
     const filename=object.path.split('/').at(-1),candidate=object.label || object.name || filename;
@@ -59,18 +65,18 @@ function buildCatalogTree(key, workspace, objects, project={}) {
   };
   for(const object of objects) {
     filePath('/api-root',object.path);
-    const parts=object.path.split('/'), physical=parts.slice(0,-1).map((part,i)=>{
-      let label=part,description;
-      if(i===1 && parts[0]==='systems' && systemNames.get(part)) {label=systemNames.get(part);description=part;}
-      else if(i===1 && parts[0]==='datasources' && sourceNames.get(part)) {label=sourceNames.get(part);description=part;}
-      else if((project.systems || project.dataSources) && labels[part] && (i===0 || i===2)) label=labels[part];
-      return {key:'path:'+part,label,description,sourcePrefix:parts.slice(0,i+1).join('/')};
-    });
+    const parts=object.path.split('/'),category=labels[parts[2]], scoped=category && ['systems','datasources'].includes(parts[0]);
+    const physical=scoped ? [
+      {key:'category:'+parts[2],label:category,affectedPrefix:object.path},
+      {key:'scope:'+parts[1],label:(parts[0]==='systems'?systemNames:sourceNames).get(parts[1]) || parts[1],description:parts[1],sourcePrefix:parts.slice(0,3).join('/'),affectedPrefix:object.path},
+      ...parts.slice(3,-1).map((part,i)=>({key:'path:'+part,label:part,sourcePrefix:parts.slice(0,i+4).join('/'),affectedPrefix:object.path}))
+    ] : [{key:'other',label:'其他源码',affectedPrefix:object.path},...parts.slice(0,-1).map((part,i)=>({key:'path:'+part,label:part,sourcePrefix:parts.slice(0,i+1).join('/'),affectedPrefix:object.path}))];
     const routes=parts[0]==='systems' && parts[2]==='pages' && parts.length>=6 ? menuPaths.get(JSON.stringify([parts[1],parts[3],parts[4]])) : undefined;
-    if(routes?.length) for(const route of routes) add(object,[...physical.slice(0,3),...route.map(x=>({key:'menu:'+x.id,label:x.name}))]);
+    if(routes?.length) for(const route of routes) add(object,[...physical.slice(0,2),...route.map(x=>({key:'menu:'+x.id,label:x.name,affectedPrefix:object.path}))]);
     else add(object,physical);
   }
-  const sort=node=>{node.children.sort((a,b)=>Boolean(b.children)-Boolean(a.children) || a.label.localeCompare(b.label));for(const child of node.children) if(Array.isArray(child.children)) sort(child);};
+  const order=Object.keys(labels);
+  const sort=node=>{node.children.sort((a,b)=>node===root ? (a.category ? order.indexOf(a.category) : order.length)-(b.category ? order.indexOf(b.category) : order.length) || a.label.localeCompare(b.label) : Boolean(b.children)-Boolean(a.children) || a.label.localeCompare(b.label));for(const child of node.children) if(Array.isArray(child.children)) sort(child);};
   sort(root);return root.children;
 }
 
@@ -100,20 +106,23 @@ class ApiSourceUI {
     this.vscode=vscode; this.run=run; this.onUpdated=onUpdated; this.editorState=editorState; this.onSourceChanged=onSourceChanged; this.onWorkspace=onWorkspace; this.onOpenVirtual=onOpenVirtual; this.indexRecovery=indexRecovery; this.watchers=new Map(); this.workspaces=new Map(); this.controls=new Map();this.scmGenerations=new Map();this.sourceChanges=new Map();
     this.emitter = vscode.EventEmitter ? new vscode.EventEmitter() : undefined;
     this.onDidChangeTreeData = this.emitter?.event;
-    this.readonlyDocuments=new Map();this.rootItems=null;this.treeCache=new Map();this.indexDiagnostics=new Map();this.menuAttempts=new Set();this.treeVersion=0;
+    this.readonlyDocuments=new Map();this.rootItems=null;this.treeCache=new Map();this.treeLoads=new Map();this.treeEpoch=new Map();this.indexGenerations=new Map();this.indexDiagnostics=new Map();this.menuAttempts=new Set();this.treeVersion=0;
   }
   syncWorkspaces(workspaces) {
     const keys=new Set();
-    for (const workspace of workspaces) {
+    let changed=false;for (const workspace of workspaces) {
       const key=typeof workspace === 'string' ? workspace : workspace.workspaceKey;
       if (!key || (workspace.sourceMode && workspace.sourceMode !== 'api')) continue;
-      keys.add(key); this.workspaces.set(key, typeof workspace === 'string' ? (this.workspaces.get(key) || {workspaceKey:key}) : workspace);
+      keys.add(key);const previous=this.workspaces.get(key),next=typeof workspace === 'string' ? (previous || {workspaceKey:key}) : workspace;
+      if(!previous || previous.checkoutPath!==next.checkoutPath || previous.displayName!==next.displayName) changed=true;
+      this.workspaces.set(key,next);
     }
-    for (const key of this.workspaces.keys()) if (!keys.has(key)) {this.workspaces.delete(key);this.menuAttempts.delete(key);this.scmGenerations.set(key,(this.scmGenerations.get(key)||0)+1);this.controls.get(key)?.control.dispose();this.controls.delete(key);this.sourceChanges.delete(key);this.watchers.get(key)?.dispose();this.watchers.delete(key);}
-    this.rootItems=null;this.treeCache.clear();this.treeVersion++;this.emitter?.fire();
+    for (const key of this.workspaces.keys()) if (!keys.has(key)) {changed=true;this.workspaces.delete(key);this.invalidate(key);this.menuAttempts.delete(key);this.scmGenerations.set(key,(this.scmGenerations.get(key)||0)+1);this.controls.get(key)?.control.dispose();this.controls.delete(key);this.sourceChanges.delete(key);this.watchers.get(key)?.dispose();this.watchers.delete(key);}
+    if(changed) {this.invalidate();this.rootItems=null;this.emitter?.fire();}
   }
-  track(key) {if (!this.workspaces.has(key)) {this.workspaces.set(key,{workspaceKey:key});this.rootItems=null;}}
-  refresh() {this.rootItems=null;this.treeCache.clear();this.treeVersion++;this.emitter?.fire();}
+  track(key) {if (!this.workspaces.has(key)) {this.workspaces.set(key,{workspaceKey:key});this.invalidate();this.rootItems=null;}}
+  refresh() {this.emitter?.fire();}
+  invalidate(key) {if(key){this.treeCache.delete(key);this.treeEpoch.set(key,(this.treeEpoch.get(key)||0)+1);}else for(const k of this.workspaces.keys())this.invalidate(k);this.treeVersion++;}
   getTreeItem(item) {
     const v=this.vscode;
     const isPage=item.object?.sourceType==='page' && !['native-page-minimal','unsupported'].includes(item.object.sourceFormat) && (['json','xml','native-xml'].includes(item.object.sourceFormat) || /\.(?:json|xml)$/i.test(item.object.path));
@@ -125,51 +134,23 @@ class ApiSourceUI {
     }
     tree.contextValue=item.children ? 'guthonApi.directory' : item.object?.readonly ? 'guthonApi.readonly' : ['page','procedure','table','view'].includes(item.object?.sourceType) ? `guthonApi.${item.object.sourceType}` : 'guthonApi.source';
     tree.description=item.description;
+    if(item.icon && v.ThemeIcon) tree.iconPath=new v.ThemeIcon(item.icon);
     tree.tooltip=item.object ? [item.object.path,item.object.diagnostic].filter(Boolean).join(' · ') : item.label;
-    const state=this.sourceChanges.get(item.key)?.get(item.object?.path || item.sourcePrefix);
+    const changes=this.sourceChanges.get(item.key),priority={CONFLICT:3,REMOTE_DELETED:2,MISSING:2,MODIFIED:1};
+    let state=changes?.get(item.object?.path || item.sourcePrefix);
+    if(item.sourcePrefixes) for(const prefix of item.sourcePrefixes) {const value=changes?.get(prefix);if((priority[value]||0)>(priority[state]||0))state=value;}
     if(state) {tree.description=({CONFLICT:'冲突',REMOTE_DELETED:'远端已删除',MISSING:'本地缺失',MODIFIED:'有本地修改'})[state] || state;if(v.ThemeIcon) tree.iconPath=new v.ThemeIcon(state==='MODIFIED'?'diff-modified':'warning');}
     if(item.object) tree.command={command:isPage ? 'gushenCompletion.openApiPageEditor' : 'gushenCompletion.openApiSource',title:isPage ? '打开 PAGE 管理器' : '打开源码',arguments:[{workspaceKey:item.key,path:item.object.path}]};
     return tree;
   }
   async getChildren(item) {
-    if (!item) return this.rootItems ||= [...this.workspaces].map(([key,w])=>({label:w.displayName || key,key,workspace:true,children:true}));
+    if (!item) {const roots=this.rootItems ||= [...this.workspaces].map(([key,w])=>({label:w.displayName || key,key,workspace:true,children:true}));return roots.length===1 ? this.getChildren(roots[0]) : roots;}
     if (item.workspace) {
       if(this.treeCache.has(item.key)) return this.treeCache.get(item.key);
-      const objects=[];let offset=0,generation,partial=0,project;
-      for(;;) {
-        let result;
-        try {result=await this.run(item.key,'catalog',{limit:100,offset});}
-        catch(error) {if(['API_INDEX_REQUIRED','API_INDEX_SCOPE_STALE'].includes(error.code)) return [{kind:'message',label:error.message,key:item.key,parent:item,command:'gushenCompletion.reindexCalls'}];throw error;}
-        if(generation && result.indexGeneration && generation!==result.indexGeneration) throw new Error('目录读取期间索引已变化，请刷新');
-        generation ||= result.indexGeneration;partial=Math.max(partial,result.partialSourceCount || 0);project ||= result.project;
-        objects.push(...result.objects);
-        if(result.nextOffset == null) break;
-        if(!Number.isInteger(result.nextOffset) || result.nextOffset<=offset) throw new Error('目录分页无效');
-        offset=result.nextOffset;
-      }
-      const root={children:buildCatalogTree(item.key,item,objects,project)};
-      if(partial && !this.indexDiagnostics.has(item.key)) {
-        const diagnostics=objects.filter(object=>object.diagnostic).map(object=>({path:object.path,code:object.diagnostic}));
-        this.indexDiagnostics.set(item.key,{complete:false,diagnosticCount:partial,diagnostics:diagnostics.slice(0,100),truncated:diagnostics.length>100});
-      }
-      const diagnostic=this.indexDiagnostics.get(item.key);const count=Math.max(partial,diagnostic?.diagnosticCount || 0);
-      if(count || diagnostic?.complete===false) root.children.push({kind:'message',label:`索引不完整${count ? `：${count} 个诊断` : ''}，点击查看`,key:item.key,parent:item,command:diagnostic ? 'gushenCompletion.showApiIndexDiagnostics' : 'gushenCompletion.reindexCalls'});
-      const recovery=this.indexRecovery?.(item.key);if(recovery?.paths.length) root.children.push({kind:'message',label:`${recovery.paths.length} 个源码文件等待索引更新，点击重试`,key:item.key,parent:item,command:'gushenCompletion.retryApiIndexFailures'});
-      this.treeCache.set(item.key,root.children);
-      if(project?.systems?.length && !Array.isArray(project.menuTree) && !this.menuAttempts.has(item.key)) {
-        this.menuAttempts.add(item.key);const version=this.treeVersion;
-        void this.run(item.key,'system-menu').then(result=>{
-          const menu=Array.isArray(result.menu) ? result.menu : result.menu?.list;
-          if(this.disposed || version!==this.treeVersion || !Array.isArray(menu)) return;
-          const messages=root.children.filter(child=>child.kind==='message');
-          this.treeCache.set(item.key,[...buildCatalogTree(item.key,item,objects,{...project,menuTree:menu}),...messages]);this.emitter?.fire();
-        }).catch(error=>{
-          if(this.disposed || version!==this.treeVersion) return;
-          const items=this.treeCache.get(item.key);if(!items)return;
-          items.push({kind:'message',label:`菜单加载失败：${error.message}；点击刷新重试`,key:item.key,parent:item,command:'gushenCompletion.refreshApiSourceView'});this.emitter?.fire();
-        });
-      }
-      return root.children;
+      const epoch=this.treeEpoch.get(item.key)||0,existing=this.treeLoads.get(item.key);
+      if(existing?.epoch===epoch) return existing.promise;
+      const promise=this.loadCatalog(item,epoch).finally(()=>{if(this.treeLoads.get(item.key)?.promise===promise)this.treeLoads.delete(item.key);});
+      this.treeLoads.set(item.key,{epoch,promise});return promise;
     }
     if(item.object?.sourceType==='page' && !['native-page-minimal','unsupported'].includes(item.object.sourceFormat) && (['json','xml','native-xml'].includes(item.object.sourceFormat) || /\.(?:json|xml)$/i.test(item.object.path))) {
       if(item.fragments) return item.fragments;
@@ -186,17 +167,59 @@ class ApiSourceUI {
     }
     return item.children || [];
   }
-  getParent(item) {return item.parent;}
+  async loadCatalog(item,epoch) {
+      const objects=[];let offset=0,generation,partial=0,project;
+      for(;;) {
+        let result;
+        try {result=await this.run(item.key,'catalog',{limit:100,offset});}
+        catch(error) {if(['API_INDEX_REQUIRED','API_INDEX_SCOPE_STALE'].includes(error.code)) return [{kind:'message',label:error.message,key:item.key,parent:item,command:'gushenCompletion.reindexCalls'}];throw error;}
+        if(generation && result.indexGeneration && generation!==result.indexGeneration) throw new Error('目录读取期间索引已变化，请刷新');
+        generation ||= result.indexGeneration;partial=Math.max(partial,result.partialSourceCount || 0);project ||= result.project;
+        objects.push(...result.objects);
+        if(result.nextOffset == null) break;
+        if(!Number.isInteger(result.nextOffset) || result.nextOffset<=offset) throw new Error('目录分页无效');
+        offset=result.nextOffset;
+      }
+      const root={children:buildCatalogTree(item.key,item,objects,project)};
+      if(partial && !this.indexDiagnostics.has(item.key)) {
+        const diagnostics=objects.filter(object=>object.diagnostic && object.status!=='OK').map(object=>({path:object.path,code:object.diagnostic}));
+        this.indexDiagnostics.set(item.key,{complete:false,diagnosticCount:partial,diagnostics:diagnostics.slice(0,100),truncated:diagnostics.length>100});
+      }
+      const diagnostic=this.indexDiagnostics.get(item.key);const count=Math.max(partial,diagnostic?.diagnosticCount || 0);
+      if(count || diagnostic?.complete===false) root.children.push({kind:'message',label:`索引不完整${count ? `：${count} 个诊断` : ''}，点击查看`,key:item.key,parent:item,command:diagnostic ? 'gushenCompletion.showApiIndexDiagnostics' : 'gushenCompletion.reindexCalls'});
+      const recovery=this.indexRecovery?.(item.key);if(recovery?.paths.length) root.children.push({kind:'message',label:`${recovery.paths.length} 个源码文件等待索引更新，点击重试`,key:item.key,parent:item,command:'gushenCompletion.retryApiIndexFailures'});
+      if(!this.workspaces.has(item.key)) return [];
+      if((this.treeEpoch.get(item.key)||0)!==epoch) return this.getChildren(item);
+      this.indexGenerations.set(item.key,generation);this.treeCache.set(item.key,root.children);
+      if(project?.systems?.length && !Array.isArray(project.menuTree) && !this.menuAttempts.has(item.key)) {
+        this.menuAttempts.add(item.key);const version=this.treeVersion;
+        void this.run(item.key,'system-menu').then(result=>{
+          const menu=Array.isArray(result.menu) ? result.menu : result.menu?.list;
+          if(this.disposed || version!==this.treeVersion || !Array.isArray(menu)) return;
+          const messages=root.children.filter(child=>child.kind==='message');
+          this.treeCache.set(item.key,[...buildCatalogTree(item.key,item,objects,{...project,menuTree:menu}),...messages]);this.emitter?.fire();
+        }).catch(error=>{
+          if(this.disposed || version!==this.treeVersion) return;
+          const items=this.treeCache.get(item.key);if(!items)return;
+          items.push({kind:'message',label:`菜单加载失败：${error.message}；点击刷新重试`,key:item.key,parent:item,command:'gushenCompletion.refreshApiSourceView'});this.emitter?.fire();
+        });
+      }
+      return root.children;
+  }
+  getParent(item) {return item.parent?.workspace && this.workspaces.size===1 ? undefined : item.parent;}
   async revealSource(key,sourcePath) {
     if(!this.treeView) throw new Error('源码视图不可用');
-    const workspace=(await this.getChildren()).find(item=>item.key===key);if(!workspace) throw new Error('当前项目未显示在源码树');
+    const workspace=(this.rootItems ||= [...this.workspaces].map(([key,w])=>({label:w.displayName || key,key,workspace:true,children:true}))).find(item=>item.key===key);if(!workspace) throw new Error('当前项目未显示在源码树');
     const visit=items=>{for(const item of items) {if(item.object?.path===sourcePath)return item;if(Array.isArray(item.children)){const found=visit(item.children);if(found)return found;}}};
     const found=visit(await this.getChildren(workspace));if(!found) throw new Error('源码不在当前索引目录，请先重建索引');
     await this.treeView.reveal(found,{select:true,focus:true,expand:true});
   }
   setIndexResult(key,index) {
+    const previous=this.indexDiagnostics.get(key);
     if(index && (index.complete===false || index.diagnosticCount)) this.indexDiagnostics.set(key,index);
     else if(index?.complete===true) this.indexDiagnostics.delete(key);
+    const current=this.indexDiagnostics.get(key),signature=value=>JSON.stringify(value ? [value.complete,value.diagnosticCount,value.diagnostics,value.truncated] : null);
+    if((index?.indexGeneration && index.indexGeneration!==this.indexGenerations.get(key)) || signature(previous)!==signature(current)) this.invalidate(key);
     this.refresh();
   }
   async showIndexDiagnostics(key) {
@@ -209,13 +232,15 @@ class ApiSourceUI {
     if(this.editorState && !this.watchers.has(key) && this.vscode.workspace.createFileSystemWatcher && this.vscode.RelativePattern) {
         const watcher=this.vscode.workspace.createFileSystemWatcher(new this.vscode.RelativePattern(checkoutPath,'**/*'));
         const changed=uri=>{const relative=path.relative(checkoutPath,uri.fsPath).split(path.sep).join('/');
-          if(relative && relative!=='..' && !relative.startsWith('../')) void this.onSourceChanged?.(key,[relative]);};
+          if(sourcePathAllowed(relative)) void this.onSourceChanged?.(key,[relative]);};
       watcher.onDidChange(changed);watcher.onDidCreate(changed);watcher.onDidDelete(changed);this.watchers.set(key,watcher);
     }
   }
   async status(key) {
     this.track(key); const result=await this.run(key,'status');
     if(!this.workspaces.has(key)) return result;
+    const generation=result.index?.indexGeneration;
+    if(this.treeCache.has(key) && ((generation && this.indexGenerations.get(key)!==generation) || result.index?.ready===false)) {this.invalidate(key);this.refresh();}
     this.workspaces.set(key,{...this.workspaces.get(key),checkoutPath:result.checkoutPath});
     await this.registerWorkspace(key,result.checkoutPath);
     return result;
@@ -249,7 +274,7 @@ class ApiSourceUI {
     const generation=(this.scmGenerations.get(key)||0)+1;this.scmGenerations.set(key,generation);
     const state=await this.status(key); const vscode=this.vscode;
     if(this.disposed || this.scmGenerations.get(key)!==generation) return state;
-    if (!vscode.scm) {this.refresh();return state;}
+    if (!vscode.scm) return state;
     let record=this.controls.get(key);
     if (!record) {
       const control=vscode.scm.createSourceControl(`guthon-api-${key}`,`${key} · 谷神 API 源码`);
@@ -259,6 +284,9 @@ class ApiSourceUI {
       record={control,group};this.controls.set(key,record);
     }
     const changes=(state.files || []).filter(x=>x.inScope!==false && x.state !== 'CLEAN');
+    const signature=JSON.stringify(changes.map(x=>[x.path,x.state,!!x.readonly,x.sourceHash,x.baseHash]));
+    if(record.signature===signature) return state;
+    record.signature=signature;
     const sourceChanges=new Map();
     const priority={CONFLICT:3,REMOTE_DELETED:2,MISSING:2,MODIFIED:1};
     for(const change of changes) {const parts=change.path.split('/');for(let i=1;i<=parts.length;i++){const p=parts.slice(0,i).join('/');if(!sourceChanges.has(p) || (priority[change.state] || 0)>(priority[sourceChanges.get(p)] || 0)) sourceChanges.set(p,change.state);}}
@@ -364,6 +392,7 @@ class ApiSourceUI {
   }
   async systemMenu(key) {
     const result=await this.run(key,'system-menu');
+    this.invalidate(key);this.refresh();
     const doc=await this.vscode.workspace.openTextDocument({language:'json',content:JSON.stringify(result.menu,null,2)});
     await this.vscode.window.showTextDocument(doc,{preview:true});return result;
   }
@@ -419,7 +448,7 @@ class ApiSourceUI {
     await showReport(this.vscode,'API 冲突处理结果',[`对象：${sourcePath}`,`本地源码 SHA-256：${result.sourceHash || '未返回'}`,`操作编号：${result.operationId || '未返回'}`,'','此操作未上传谷神。']);
     await this.updateScm(key);this.onUpdated?.();return result;
   }
-  clear(){for(const {control,refreshTimer} of this.controls.values()) {clearTimeout(refreshTimer);control.dispose();}this.controls.clear();this.sourceChanges.clear();for(const watcher of this.watchers.values()) watcher.dispose();this.watchers.clear();this.readonlyDocuments.clear();this.indexDiagnostics.clear();this.menuAttempts.clear();this.workspaces.clear();this.refresh();}
+  clear(){this.invalidate();this.treeCache.clear();this.treeLoads.clear();this.indexGenerations.clear();this.rootItems=null;for(const {control,refreshTimer} of this.controls.values()) {clearTimeout(refreshTimer);control.dispose();}this.controls.clear();this.sourceChanges.clear();for(const watcher of this.watchers.values()) watcher.dispose();this.watchers.clear();this.readonlyDocuments.clear();this.indexDiagnostics.clear();this.menuAttempts.clear();this.workspaces.clear();this.refresh();}
   dispose(){if(this.disposed)return;this.disposed=true;this.clear();this.emitter?.dispose();}
 }
 module.exports={ApiSourceUI,assertClean,dirtyDocuments,filePath,identity,showReport,sourceSyncLines};

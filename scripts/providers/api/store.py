@@ -5,8 +5,10 @@ from contextlib import closing
 import difflib
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import sqlite3
+import stat
 import uuid
 from common.persistence import atomic_bytes, atomic_text, file_lock
 from .client import ApiError
@@ -144,12 +146,61 @@ class ApiStore:
             rows = conn.execute(
                 "SELECT path,metadata FROM source ORDER BY path"
             ).fetchall()
-        return [
-            path
-            for path, meta in rows
-            if not json.loads(meta).get("remoteDeleted")
-            and in_scope(self.workspace, path, json.loads(meta))
-        ]
+        scope = active_scope(self.workspace)
+        result = []
+        for path, raw in rows:
+            meta = json.loads(raw)
+            if not meta.get("remoteDeleted") and in_scope(self.workspace, path, meta, scope=scope):
+                result.append(path)
+        return result
+
+    def registered_paths(self, paths):
+        """Select exact registered paths in the current scope, including missing files."""
+        if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
+            raise ApiError("API_INPUT_INVALID", "paths 必须是源码路径数组")
+        valid = list(dict.fromkeys(path for path in paths if path and "\\" not in path
+            and ":" not in path and not any(ord(c) < 32 or ord(c) == 127 for c in path)
+            and all(part not in {"", ".", ".."} for part in path.split("/"))))
+        if not valid or not self.path.is_file():
+            return []
+        self._verify_binding()
+        scope = active_scope(self.workspace)
+        found = set()
+        with closing(sqlite3.connect(self.path)) as conn:
+            for start in range(0, len(valid), 500):
+                batch = valid[start:start + 500]
+                placeholders = ",".join("?" for _ in batch)
+                for path, raw in conn.execute(f"SELECT path,metadata FROM source WHERE path IN ({placeholders})", batch):
+                    if in_scope(self.workspace, path, json.loads(raw), scope=scope):
+                        try:
+                            self._path(path)
+                        except ApiError as error:
+                            if error.code != "API_SOURCE_PATH_INVALID":
+                                raise
+                        else:
+                            found.add(path)
+        return [path for path in valid if path in found]
+
+    def registered_count(self):
+        """Count registered sources from metadata without opening checkout files."""
+        self._verify_binding()
+        if not self.path.is_file():
+            return 0
+        scope = active_scope(self.workspace)
+        with closing(sqlite3.connect(self.path)) as conn:
+            rows = conn.execute("""SELECT path, CASE
+                WHEN substr(path,1,8)='systems/' OR substr(path,1,12)='datasources/'
+                THEN NULL ELSE metadata END FROM source""")
+            count = 0
+            for path, raw in rows:
+                kind, separator, tail = path.partition("/")
+                if separator and kind == "systems":
+                    count += tail.partition("/")[0] in scope["systemIds"]
+                elif separator and kind == "datasources":
+                    count += tail.partition("/")[0] in scope["dataSourceIds"]
+                elif scope["includeProjectFiles"]:
+                    count += json.loads(raw).get("sourceType") in {"skill", "public", "config"}
+            return count
 
     def related(self, kind, metadata, identity_keys):
         """Resolve an inherited companion from metadata without scanning source bodies."""
@@ -206,45 +257,117 @@ class ApiStore:
             "baseHash": digest(item["baseContent"]),
         }
 
-    def status(self):
+    def status(self, *, use_cache=False):
         self._verify_binding()
         if not self.path.is_file():
             return []
         with closing(sqlite3.connect(self.path)) as conn:
             rows = conn.execute("SELECT path,metadata,readonly FROM source ORDER BY path").fetchall()
         scope = active_scope(self.workspace)
+        # Cache only file fingerprints and hashes. Baseline metadata, scope and
+        # conflicts remain authoritative and are read afresh on every scan.
+        cache = None
+        cached = {}
+        if use_cache:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            cache = sqlite3.connect(self.directory / "status-hashes.db", timeout=30)
+            cache.execute("""CREATE TABLE IF NOT EXISTS hashes(
+                path TEXT PRIMARY KEY, device TEXT, inode TEXT, size INTEGER,
+                mtime_ns INTEGER, ctime_ns INTEGER, source_hash TEXT NOT NULL)""")
+            cached = {row[0]: tuple(row[1:]) for row in cache.execute(
+                "SELECT path,device,inode,size,mtime_ns,ctime_ns,source_hash FROM hashes")}
+        directory_cache = {"": str(self.root)}
+        root_path = str(self.root)
+
+        def directory_for(parts):
+            parent = ""
+            for part in parts:
+                relative = parent + "/" + part if parent else part
+                if relative not in directory_cache:
+                    previous = directory_cache[parent]
+                    if previous is None:
+                        directory_cache[relative] = None
+                    else:
+                        candidate = os.path.join(previous, part)
+                        try:
+                            info = os.lstat(candidate)
+                        except (FileNotFoundError, NotADirectoryError):
+                            directory_cache[relative] = None
+                        else:
+                            if stat.S_ISLNK(info.st_mode):
+                                candidate = os.path.realpath(candidate)
+                                if os.path.commonpath((root_path, candidate)) != root_path:
+                                    raise ApiError("API_SOURCE_PATH_INVALID", "checkout路径越界")
+                                if not os.path.isdir(candidate):
+                                    candidate = None
+                            elif not stat.S_ISDIR(info.st_mode):
+                                candidate = None
+                            directory_cache[relative] = candidate
+                parent = relative
+            return directory_cache[parent]
+
+        def fingerprint(info):
+            return (str(info.st_dev), str(info.st_ino), info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+        conflicts_dir = self.directory / "conflicts"
+        try:
+            with os.scandir(conflicts_dir) as entries:
+                conflicts = {entry.name for entry in entries if entry.is_file()}
+        except FileNotFoundError:
+            conflicts = set()
         result = []
-        for path, raw_meta, readonly in rows:
-            meta = json.loads(raw_meta)
-            target = self._path(path)
-            current = target.read_bytes().decode("utf-8") if target.is_file() else None
-            current_hash = digest(current) if current is not None else None
-            base_hash = meta.get("remoteHash") or digest(self.baseline(path))
-            active = in_scope(self.workspace, path, meta, scope=scope)
-            state = (
-                "CONFLICT"
-                if self._conflict_path(path).is_file()
-                else "REMOTE_DELETED"
-                if meta.get("remoteDeleted")
-                else "MISSING"
-                if current is None
-                else "CLEAN"
-                if current_hash == base_hash
-                else "MODIFIED"
-            )
-            result.append(
-                {
-                    "path": path,
-                    "metadata": meta,
-                    "readonly": bool(readonly),
-                    "sourceType": meta["sourceType"],
-                    "state": state,
-                    "status": state,
-                    "inScope": active,
-                    "sourceHash": current_hash,
-                    "baseHash": base_hash,
-                }
-            )
+        updates = []
+        try:
+            for path, raw_meta, readonly in rows:
+                meta = json.loads(raw_meta)
+                if (not isinstance(path, str) or "\\" in path or ":" in path
+                        or any(ord(c) < 32 for c in path)
+                        or any(part in {"", ".", ".."} for part in path.split("/"))):
+                    raise ApiError("API_SOURCE_PATH_INVALID", "无效的checkout相对路径")
+                parts = path.split("/")
+                parent = directory_for(parts[:-1])
+                target = os.path.join(parent, parts[-1]) if parent is not None else None
+                info = None
+                if target is not None:
+                    try:
+                        info = os.lstat(target)
+                        if stat.S_ISLNK(info.st_mode):
+                            target = os.path.realpath(target)
+                            if os.path.commonpath((root_path, target)) != root_path:
+                                raise ApiError("API_SOURCE_PATH_INVALID", "checkout路径越界")
+                            info = os.stat(target)
+                    except (FileNotFoundError, NotADirectoryError):
+                        info = None
+                current_hash = None
+                if info is not None and stat.S_ISREG(info.st_mode):
+                    marker = fingerprint(info)
+                    entry = cached.get(path)
+                    if entry is not None and entry[:5] == marker:
+                        current_hash = entry[5]
+                    else:
+                        with open(target, "rb") as handle:
+                            raw = handle.read()
+                            final = os.fstat(handle.fileno())
+                        if fingerprint(final) != marker:
+                            raise ApiError("API_SOURCE_STALE", "状态扫描期间源码已变化，请重试")
+                        raw.decode("utf-8")
+                        current_hash = hashlib.sha256(raw).hexdigest()
+                        updates.append((path, *marker, current_hash))
+                base_hash = meta.get("remoteHash") or digest(self.baseline(path))
+                active = in_scope(self.workspace, path, meta, scope=scope)
+                state = ("CONFLICT" if digest(path) + ".json" in conflicts else
+                         "REMOTE_DELETED" if meta.get("remoteDeleted") else
+                         "MISSING" if current_hash is None else
+                         "CLEAN" if current_hash == base_hash else "MODIFIED")
+                result.append({"path": path, "metadata": meta, "readonly": bool(readonly),
+                               "sourceType": meta["sourceType"], "state": state, "status": state,
+                               "inScope": active, "sourceHash": current_hash, "baseHash": base_hash})
+            if cache is not None:
+                cache.executemany("INSERT OR REPLACE INTO hashes VALUES(?,?,?,?,?,?,?)", updates)
+                cache.commit()
+        finally:
+            if cache is not None:
+                cache.close()
         return result
 
     def baseline(self, path):

@@ -14,6 +14,8 @@
     "Programming Languages"
   ],
   "activationEvents": [
+    "onCommand:gushenCompletion.showProjectActions",
+    "onCommand:gushenCompletion.configureProject",
     "onUri",
     "onStartupFinished",
     "onLanguage:java",
@@ -50,7 +52,6 @@
     "onCommand:gushenCompletion.runDoctor",
     "onCommand:gushenCompletion.runDiagnosis",
     "onCommand:gushenCompletion.refreshToolView",
-    "onView:gushenCompletion.toolView",
     "onView:gushenCompletion.projectDetails",
     "onView:gushenCompletion.sourceView",
     "onFileSystem:guthon-api-edit",
@@ -206,6 +207,8 @@
       }
     },
     "commands": [
+      {"command":"gushenCompletion.configureProject","title":"Guthon Nexus: 项目设置向导","icon":"$(gear)"},
+      {"command":"gushenCompletion.showProjectActions","title":"Guthon Nexus: 更多项目操作","icon":"$(ellipsis)"},
       {"command":"gushenCompletion.configureApiSource","title":"Guthon Nexus: 配置 API 项目地址"},
       {"command":"gushenCompletion.loginApiSource","title":"Guthon Nexus: 登录 API 项目"},
       {"command":"gushenCompletion.selectApiSystems","title":"Guthon Nexus: 选择 API 子系统"},
@@ -242,7 +245,7 @@
       {"command":"gushenCompletion.exportViews","title":"Guthon Nexus: 导出视图源码"},
       {"command":"gushenCompletion.runDoctor","title":"Guthon Nexus: 检查本地环境"},
       {"command":"gushenCompletion.runDiagnosis","title":"Guthon Nexus: 执行源码逻辑排查"},
-      {"command":"gushenCompletion.refreshToolView","title":"Guthon Nexus: 刷新已有工作空间状态","icon":"$(refresh)"},
+      {"command":"gushenCompletion.refreshToolView","title":"Guthon Nexus: 刷新项目状态","icon":"$(refresh)"},
       {"command":"gushenCompletion.refreshApiSourceView","title":"Guthon Nexus: 刷新指定 API 项目源码"},
       {"command":"gushenCompletion.refreshApiScm","title":"Guthon Nexus: 刷新 API 变更"},
       {"command":"gushenCompletion.openApiOriginalSource","title":"Guthon Nexus: 打开原始源码"},
@@ -270,7 +273,7 @@
       {"command":"gushenCompletion.verifyApiUpload","title":"Guthon Nexus: 回读核对未知上传"},
       {"command":"gushenCompletion.checkOfficialUpdate","title":"Guthon Nexus: 检查谷神官方能力更新"},
       {"command":"gushenCompletion.rollbackOfficialUpdate","title":"Guthon Nexus: 回退官方能力资源"},
-      {"command":"gushenCompletion.searchCurrentApiWorkspace","title":"Guthon Nexus: 搜索当前 API 项目"},
+      {"command":"gushenCompletion.searchCurrentApiWorkspace","title":"Guthon Nexus: 搜索当前源码","icon":"$(search)"},
       {"command":"gushenCompletion.quickOpenApiSource","title":"Guthon Nexus: 快速打开 API 源码"},
       {"command":"gushenCompletion.locateApiPageById","title":"Guthon Nexus: 按页面编码定位"},
       {"command":"gushenCompletion.locateApiProcedureByName","title":"Guthon Nexus: 按包名与函数名定位"},
@@ -281,11 +284,11 @@
       {"command":"gushenCompletion.browseApiImpactEvidence","title":"Guthon Nexus: 浏览影响证据"},
       {"command":"gushenCompletion.showApiImpact","title":"Guthon Nexus: 预览源码影响"},
       {"command":"gushenCompletion.searchApiPageFields","title":"Guthon Nexus: 查找 PAGE 字段"},
-      {"command":"gushenCompletion.locateActiveApiSource","title":"Guthon Nexus: 定位当前源码"},
-      {"command":"gushenCompletion.expandApiSelectedSource","title":"Guthon Nexus: 展开所选源码节点"},
-      {"command":"gushenCompletion.collapseApiSelectedSource","title":"Guthon Nexus: 收起所选源码节点"},
+      {"command":"gushenCompletion.locateActiveApiSource","title":"Guthon Nexus: 定位当前源码","icon":"$(target)"},
+      {"command":"gushenCompletion.expandApiSelectedSource","title":"Guthon Nexus: 展开所选源码节点","icon":"$(expand-all)"},
+      {"command":"gushenCompletion.collapseApiSelectedSource","title":"Guthon Nexus: 收起所选源码节点","icon":"$(collapse-all)"},
       {"command":"gushenCompletion.focusApiSource","title":"Guthon Nexus: 查看谷神源码"},
-      {"command":"gushenCompletion.refreshAllApiSources","title":"Guthon Nexus: 刷新当前源码视图"},
+      {"command":"gushenCompletion.refreshAllApiSources","title":"Guthon Nexus: 刷新当前源码视图","icon":"$(refresh)"},
       {"command":"gushenCompletion.copyApiLocatorLink","title":"Guthon Nexus: 复制源码定位链接"},
       {"command":"gushenCompletion.copyApiAiContext","title":"Guthon Nexus: 复制 AI 上下文"},
       {"command":"gushenCompletion.openApiSourceInBrowser","title":"Guthon Nexus: 在平台定位源码"},
@@ -298,27 +301,21 @@
     },
     "views": {
       "guthon": [
-        {"id":"gushenCompletion.projectDetails","name":"项目详情","type":"webview"},
-        {"id":"gushenCompletion.toolView","name":"谷神工作区"},
+        {"id":"gushenCompletion.projectDetails","name":"谷神项目","type":"webview"},
         {"id":"gushenCompletion.sourceView","name":"谷神源码"}
       ]
     },
     "menus": {
       "view/title": [
-        {"command":"gushenCompletion.searchWorkspace","when":"view == gushenCompletion.toolView","group":"navigation@1"},
-        {"command":"gushenCompletion.addWorkspace","when":"view == gushenCompletion.toolView","group":"navigation@2"},
-        {"command":"gushenCompletion.refreshToolView","when":"view == gushenCompletion.toolView","group":"navigation@3"},
+        {"command":"gushenCompletion.showProjectActions","when":"view == gushenCompletion.projectDetails","group":"navigation@1"},
+        {"command":"gushenCompletion.refreshToolView","when":"view == gushenCompletion.projectDetails","group":"view@1"},
         {"command":"gushenCompletion.locateActiveApiSource","when":"view == gushenCompletion.sourceView","group":"navigation@1"},
         {"command":"gushenCompletion.searchCurrentApiWorkspace","when":"view == gushenCompletion.sourceView","group":"navigation@2"},
-        {"command":"gushenCompletion.expandApiSelectedSource","when":"view == gushenCompletion.sourceView","group":"navigation@3"},
-        {"command":"gushenCompletion.collapseApiSelectedSource","when":"view == gushenCompletion.sourceView","group":"navigation@4"},
-        {"command":"gushenCompletion.refreshAllApiSources","when":"view == gushenCompletion.sourceView","group":"navigation@3"}
+        {"command":"gushenCompletion.refreshAllApiSources","when":"view == gushenCompletion.sourceView","group":"navigation@3"},
+        {"command":"gushenCompletion.expandApiSelectedSource","when":"view == gushenCompletion.sourceView","group":"view@2"},
+        {"command":"gushenCompletion.collapseApiSelectedSource","when":"view == gushenCompletion.sourceView","group":"view@3"}
       ],
       "view/item/context": [
-        {"command":"gushenCompletion.exportAiContext","when":"view == gushenCompletion.toolView && viewItem == guthonWorkspace","group":"navigation@8"},
-        {"command":"gushenCompletion.showApiHistory","when":"view == gushenCompletion.toolView && viewItem == guthonWorkspace","group":"navigation@7"},
-        {"command":"gushenCompletion.showDiagnosisHistory","when":"view == gushenCompletion.toolView && viewItem == guthonWorkspace","group":"navigation@8"},
-        {"command":"gushenCompletion.deleteWorkspace","when":"view == gushenCompletion.toolView && viewItem == guthonWorkspace","group":"danger@1"},
         {"command":"gushenCompletion.openApiSource","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view|readonly)$/","group":"navigation@1"},
         {"command":"gushenCompletion.openApiOriginalSource","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view|readonly)$/","group":"navigation@2"},
         {"command":"gushenCompletion.previewApiSource","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view|readonly)$/","group":"navigation@2"},

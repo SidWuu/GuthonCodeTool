@@ -302,7 +302,10 @@ def create_workspace(home, payload, gusen_hub):
         if any(x["name"] == name and x["kind"] == ROOT_KEYS[kind] for x in existing):
             raise SystemExit("Duplicate workspace name")
         rootkey = ROOT_KEYS[kind]
-        path = home / "config" / CONFIG_FILES[rootkey]
+        from common import config_store
+
+        unified = config_store.unified(home)
+        path = config_store.path(home) if unified else home / "config" / CONFIG_FILES[rootkey]
         before = path.read_text(encoding="utf-8")
         body = [
             f"name: {_yaml_string(name)}",
@@ -310,7 +313,12 @@ def create_workspace(home, payload, gusen_hub):
             "api: {}",
         ]
         try:
-            _append_root_entry(path, rootkey, identifier, body)
+            if unified:
+                def insert(document):
+                    document[rootkey][rootkey][identifier] = {"name": name, "aliases": aliases, "api": {}}
+                config_store.mutate(home, insert)
+            else:
+                _append_root_entry(path, rootkey, identifier, body)
             workspace = gusen_hub.resolve_workspace(
                 gusen_hub.load_config(), rootkey + "." + identifier
             )
@@ -341,9 +349,16 @@ def delete_workspace_config(home, payload, gusen_hub):
     if any(Path(p).exists() for p in paths):
         raise SystemExit("请先将已确认的项目目录移入废纸篓，再删除配置")
     with file_lock(home / "config/.configuration.lock"):
-        _remove_root_entries(
-            home / "config" / CONFIG_FILES[workspace["kind"]],
-            workspace["kind"],
-            [workspace["id"]],
-        )
+        from common import config_store
+        if config_store.unified(home):
+            def remove(document):
+                document[workspace["kind"]][workspace["kind"]].pop(workspace["id"], None)
+                document["apiWorkspaces"].pop(key, None)
+            config_store.mutate(home, remove)
+        else:
+            _remove_root_entries(
+                home / "config" / CONFIG_FILES[workspace["kind"]],
+                workspace["kind"],
+                [workspace["id"]],
+            )
     return {"ok": True, "workspaceKey": key, "removed": True}

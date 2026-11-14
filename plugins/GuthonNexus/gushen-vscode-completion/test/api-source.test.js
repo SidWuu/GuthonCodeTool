@@ -24,9 +24,8 @@ test('SCM upload binds paths and hashes, and blocks dirty documents',async()=>{
 test('source catalog builds tree for the selected API workspace',async()=>{
   const f=fixture();f.ui.run=async()=>({objects:[{path:'systems/1/a.gss',label:'页面',readonly:false},{path:'systems/1/b.gss',readonly:true}]});
   f.ui.syncWorkspaces([{workspaceKey:'projects.a',sourceMode:'api'},{workspaceKey:'projects.b',sourceMode:'database'}]);
-  const root=await f.ui.getChildren();assert.equal(root.length,1);
-  const systems=await f.ui.getChildren(root[0]);assert.equal(systems[0].label,'systems');
-  assert.equal(systems[0].children[0].children[0].label,'b.gss');
+  const root=await f.ui.getChildren();assert.deepEqual(root.slice(0,5).map(x=>x.label),['页面','过程函数','表','视图','系统脚本']);
+  assert.equal(root.find(x=>x.label==='其他源码').children[0].children[0].children[0].label,'b.gss');
   assert.throws(()=>identity({resourceUri:{scheme:'file'}}),/请选择/);
 });
 test('catalog shows system, datasource and nested menu names with exact page identities',async()=>{
@@ -37,12 +36,13 @@ test('catalog shows system, datasource and nested menu names with exact page ide
   const project={systems:[{systemId:'S1',systemName:'风险管理'}],dataSources:[{dataSourceId:'D1',dataSourceName:'公共数据'}],menuTree:[{systemId:'S1',menus:[
     {id:'folder',name:'交易管理',isDir:1,childs:[{id:'m1',name:'同名菜单',isDir:0,pages:[{pageId:'P1',pageSubId:'SUB'}]},{id:'m2',name:'同名菜单',isDir:0,pages:[{pageId:'P2',pageSubId:'SUB'}]}]}]}]};
   f.ui.run=async(_key,action)=>{assert.equal(action,'catalog');return {objects,project};};f.ui.syncWorkspaces(['projects.a']);
-  const root=(await f.ui.getChildren())[0],nodes=await f.ui.getChildren(root),systems=nodes.find(x=>x.label==='系统'),data=nodes.find(x=>x.label==='数据源');
-  const system=systems.children[0];assert.equal(system.label,'风险管理');assert.equal(f.ui.getTreeItem(system).description,'S1');
-  const menus=system.children[0].children[0].children;assert.equal(menus.length,2);assert.deepEqual(menus.map(x=>x.label),['同名菜单','同名菜单']);
+  const nodes=await f.ui.getChildren(),pages=nodes.find(x=>x.label==='页面'),procedures=nodes.find(x=>x.label==='过程函数');
+  const system=pages.children[0];assert.equal(system.label,'风险管理');assert.equal(f.ui.getTreeItem(system).description,'S1');
+  const menus=system.children[0].children;assert.equal(menus.length,2);assert.deepEqual(menus.map(x=>x.label),['同名菜单','同名菜单']);
   assert.deepEqual(menus.map(x=>x.children[0].object.path).sort(),objects.slice(0,2).map(x=>x.path).sort());
-  assert.equal(data.children[0].label,'公共数据');assert.equal(data.children[0].children[0].children[0].children[0].label,'f.gss');
-  for(const item of [root,systems,system,...menus,...menus.map(x=>x.children[0])]) assert.doesNotThrow(()=>f.ui.getTreeItem(item));
+  assert.equal(procedures.children[0].label,'公共数据');assert.equal(procedures.children[0].children[0].children[0].label,'f.gss');
+  for(const item of [pages,system,...menus,...menus.map(x=>x.children[0])]) assert.doesNotThrow(()=>f.ui.getTreeItem(item));
+  assert.equal(f.ui.getParent(pages),undefined);
   assert.equal(f.ui.getTreeItem(menus[0].children[0]).command.command,'gushenCompletion.openApiPageEditor');
 });
 test('opening a registered checkout uses exact backend read without rescanning all status',async()=>{
@@ -77,9 +77,9 @@ test('explicit original source does not bypass inherited or identity-conflict re
 test('menu fetch augments an already displayed catalog and reports failed requests',async()=>{
   const f=fixture();let resolveMenu;f.vscode.EventEmitter=class{constructor(){this.event=()=>{};}fire(){}dispose(){}};
   f.ui.run=async(_key,action)=>action==='catalog'?{objects:[{path:'systems/S/pages/X/P/p.xml',sourceType:'page'}],project:{systems:[{systemId:'S',systemName:'系统甲'}]}}:new Promise(resolve=>{resolveMenu=resolve;});
-  f.ui.syncWorkspaces(['projects.a']);const root=(await f.ui.getChildren())[0];await f.ui.getChildren(root);
+  f.ui.syncWorkspaces(['projects.a']);await f.ui.getChildren();
   resolveMenu({menu:[{systemId:'S',menus:[{id:'m',name:'菜单甲',isDir:0,pages:[{pageId:'P',pageSubId:'X'}]}]}]});await new Promise(resolve=>setImmediate(resolve));
-  const tree=await f.ui.getChildren(root);assert.equal(tree[0].children[0].children[0].children[0].label,'菜单甲');
+  const tree=await f.ui.getChildren();assert.equal(tree[0].children[0].children[0].label,'菜单甲');
 });
 test('designer rejects modified buffers and foreign target; save is local only',async()=>{
   const f=fixture();await openDesigner({vscode:f.vscode,run:f.run,ui:f.ui,key:'projects.a',sourcePath:'page.gss',editorState:{assertNoConflictingDrafts(){},assertNoDirtyDocumentsExcept(){},setDraft:async()=>{},flush:async()=> 'editor-token'}});
@@ -104,15 +104,46 @@ test('source tree context action retains workspace and exact path',()=>{
 test('catalog tree loads every page and rejects a changing index generation',async()=>{
   const f=fixture(),offsets=[];
   f.ui.run=async(_key,_action,input)=>{offsets.push(input.offset);return {indexGeneration:'gen',objects:[{path:`systems/${input.offset}.gss`}],nextOffset:input.offset<200 ? input.offset+100 : null};};
-  f.ui.syncWorkspaces([{workspaceKey:'projects.a',sourceMode:'api'}]);const root=(await f.ui.getChildren())[0];
-  assert.equal((await f.ui.getChildren(root))[0].children.length,3);assert.deepEqual(offsets,[0,100,200]);
-  f.ui.refresh();f.ui.run=async(_key,_action,input)=>({indexGeneration:String(input.offset),objects:[],nextOffset:input.offset===0?100:null});
-  await assert.rejects(f.ui.getChildren((await f.ui.getChildren())[0]),/索引已变化/);
+  f.ui.syncWorkspaces([{workspaceKey:'projects.a',sourceMode:'api'}]);await f.ui.getChildren();assert.deepEqual(offsets,[0,100,200]);
+  f.ui.invalidate('projects.a');f.ui.run=async(_key,_action,input)=>({indexGeneration:String(input.offset),objects:[],nextOffset:input.offset===0?100:null});
+  await assert.rejects(f.ui.getChildren(),/索引已变化/);
+});
+test('catalog requests are shared, status redraws reuse them, and a new index generation invalidates them',async()=>{
+  const f=fixture(),calls=[];let release,version='g1';const gate=new Promise(resolve=>{release=resolve;});
+  f.ui.run=async(_key,action,input)=>{assert.equal(action,'catalog');calls.push([version,input.offset]);if(calls.length===1)await gate;
+    return {indexGeneration:version,objects:[{path:`datasources/D/procedures/${input.offset}.gss`,sourceType:'procedure'}],nextOffset:input.offset===0?100:null};};
+  f.ui.syncWorkspaces([{workspaceKey:'projects.a',checkoutPath:'/checkout',displayName:'项目甲'}]);
+  const first=f.ui.getChildren(),second=f.ui.getChildren();release();const [a,b]=await Promise.all([first,second]);
+  assert.equal(a,b);assert.equal(calls.length,2);f.ui.refresh();f.ui.syncWorkspaces([{workspaceKey:'projects.a',checkoutPath:'/checkout',displayName:'项目甲'}]);
+  assert.equal(await f.ui.getChildren(),a);assert.equal(calls.length,2);
+  f.ui.setIndexResult('projects.a',{indexGeneration:'g1',complete:true});assert.equal(await f.ui.getChildren(),a);assert.equal(calls.length,2);
+  version='g2';f.ui.setIndexResult('projects.a',{indexGeneration:'g2',complete:true});const newer=await f.ui.getChildren();assert.notEqual(newer,a);assert.equal(calls.length,4);
+});
+test('status detects an index generation changed by another process',async()=>{
+  const f=fixture();let generation='g1',catalogCalls=0;
+  f.ui.run=async(_key,action)=>action==='catalog'?(catalogCalls++,{indexGeneration:generation,objects:[{path:'datasources/D/views/V.xml',sourceType:'view'}]}):{checkoutPath:'/checkout',files:[],index:{indexGeneration:generation}};
+  f.ui.syncWorkspaces([{workspaceKey:'projects.a',checkoutPath:'/checkout'}]);const first=await f.ui.getChildren();
+  await f.ui.status('projects.a');assert.equal(await f.ui.getChildren(),first);assert.equal(catalogCalls,1);
+  generation='g2';await f.ui.status('projects.a');assert.notEqual(await f.ui.getChildren(),first);assert.equal(catalogCalls,2);
+});
+test('a stale in-flight catalog cannot overwrite a newer index generation',async()=>{
+  const f=fixture();let release,calls=0;const gate=new Promise(resolve=>{release=resolve;});
+  f.ui.run=async()=>{const current=++calls;if(current===1)await gate;return {indexGeneration:current===1?'old':'new',objects:[{path:`datasources/D/views/${current}.xml`,sourceType:'view'}]};};
+  f.ui.syncWorkspaces(['projects.a']);const old=f.ui.getChildren();await new Promise(resolve=>setImmediate(resolve));
+  f.ui.invalidate('projects.a');const fresh=await f.ui.getChildren();release();assert.equal(await old,fresh);assert.equal(calls,2);
+  assert.equal(fresh.find(x=>x.label==='视图').children[0].children[0].object.path,'datasources/D/views/2.xml');
+});
+test('multiple workspaces retain distinct roots and parent chains while one workspace has direct categories',async()=>{
+  const f=fixture();f.ui.run=async(key)=>({indexGeneration:key,objects:[{path:'datasources/D/views/V.xml',sourceType:'view',name:key}]});
+  f.ui.syncWorkspaces([{workspaceKey:'projects.A',displayName:'甲'},{workspaceKey:'projects.B',displayName:'乙'}]);
+  const roots=await f.ui.getChildren();assert.deepEqual(roots.map(x=>x.label),['甲','乙']);
+  const category=(await f.ui.getChildren(roots[0])).find(x=>x.label==='视图');assert.equal(category.key,'projects.A');assert.equal(f.ui.getParent(category),roots[0]);
+  f.ui.syncWorkspaces([{workspaceKey:'projects.A',displayName:'甲'}]);const single=(await f.ui.getChildren()).find(x=>x.label==='视图');assert.equal(single.key,'projects.A');assert.equal(f.ui.getParent(single),undefined);
 });
 test('catalog displays the rebuild action when index scope is stale',async()=>{
   const f=fixture();f.ui.syncWorkspaces(['projects.a']);
   f.ui.run=async()=>{throw Object.assign(new Error('索引范围已过期'),{code:'API_INDEX_SCOPE_STALE'});};
-  const root=(await f.ui.getChildren())[0],items=await f.ui.getChildren(root);
+  const items=await f.ui.getChildren();
   assert.equal(items[0].label,'索引范围已过期');assert.equal(items[0].command,'gushenCompletion.reindexCalls');
 });
 
@@ -123,7 +154,7 @@ test('reopened source tree shows persisted diagnostics without rebuilding the in
     {path:'datasources/DS/views/V.xml',diagnostic:'API_VIEW_FORMAT_UNSUPPORTED'}]};};
   f.vscode.workspace.openTextDocument=async data=>{reports.push(data.content);return data;};
   f.ui.syncWorkspaces(['projects.a']);
-  const items=await f.ui.getChildren((await f.ui.getChildren())[0]);
+  const items=await f.ui.getChildren();
   const warning=items.find(item=>item.kind==='message');
   assert.equal(warning.command,'gushenCompletion.showApiIndexDiagnostics');
   await f.ui.showIndexDiagnostics('projects.a');
@@ -221,7 +252,7 @@ test('pull report distinguishes successful downloads from incomplete indexes and
 test('source view retains last partial-index diagnostic count after refresh',async()=>{
   const f=fixture();f.ui.run=async()=>({objects:[{path:'a.gss'}],indexGeneration:'g',partialSourceCount:2});
   f.ui.syncWorkspaces(['projects.a']);f.ui.setIndexResult('projects.a',{complete:false,diagnosticCount:273,diagnostics:[]});
-  const root=(await f.ui.getChildren())[0],items=await f.ui.getChildren(root),warning=items.find(x=>x.kind==='message');
+  const items=await f.ui.getChildren(),warning=items.find(x=>x.kind==='message');
   assert.match(warning.label,/273/);assert.equal(warning.command,'gushenCompletion.showApiIndexDiagnostics');
   f.ui.setIndexResult('projects.a',{complete:true,diagnosticCount:0});assert.equal(f.ui.indexDiagnostics.has('projects.a'),false);
 });
@@ -284,9 +315,20 @@ test('PAGE source tree expands into exact script and fields JSON fragments',asyn
   const f=fixture(),calls=[];f.vscode.TreeItem=class{constructor(label,state){this.label=label;this.collapsibleState=state;}};f.vscode.TreeItemCollapsibleState={Collapsed:1,None:0};
   f.ui.run=async(_key,action,input)=>{calls.push({action,input});if(action==='catalog')return {objects:[{path:'page.xml',sourceType:'page',sourceFormat:'native-xml'}]};
     if(action==='page')return {sourcePath:'page.xml',sourceId:'PG-A',model:{nodes:[{pointer:'/events/onOpenScript',label:'打开',type:'SCRIPT'}],collections:[{pointer:'/views/0/fields',label:'表单',kind:'FIELDS'}]}};throw Error(action);};
-  f.ui.syncWorkspaces(['projects.a']);const root=(await f.ui.getChildren())[0],page=(await f.ui.getChildren(root))[0];
+  f.ui.syncWorkspaces(['projects.a']);const root=(await f.ui.getChildren()).find(x=>x.label==='其他源码'),page=(await f.ui.getChildren(root))[0];
   assert.equal(f.ui.getTreeItem(page).collapsibleState,1);const [one,two]=await Promise.all([f.ui.getChildren(page),f.ui.getChildren(page)]);
   assert.equal(one,two);assert.equal(calls.filter(x=>x.action==='page').length,1);
   assert.deepEqual(one.map(x=>[x.target.jsonPointer,x.target.fragmentType]),[['/events/onOpenScript','js'],['/views/0/fields','fields']]);
   assert.equal(f.ui.getTreeItem(one[1]).command.command,'gushenCompletion.openApiFragment');assert.equal(f.ui.getParent(one[1]),page);
+});
+
+test('persisted error report excludes recognized metadata-only source notices',async()=>{
+  const f=fixture(),reports=[];
+  f.ui.run=async()=>({indexGeneration:'g',partialSourceCount:1,objects:[
+    {path:'systems/S/min.xml',sourceType:'page',status:'OK',diagnostic:'API_PAGE_MINIMAL_SOURCE'},
+    {path:'systems/S/conflict.xml',sourceType:'page',status:'PARTIAL',diagnostic:'API_PAGE_IDENTITY_MISMATCH'}]});
+  f.vscode.workspace.openTextDocument=async data=>(reports.push(data.content),data);
+  f.ui.syncWorkspaces([{workspaceKey:'products.A',checkoutPath:'/checkout'}]);
+  await f.ui.getChildren();await f.ui.showIndexDiagnostics('products.A');
+  assert.match(reports[0],/API_PAGE_IDENTITY_MISMATCH/);assert(!reports[0].includes('API_PAGE_MINIMAL_SOURCE'));
 });

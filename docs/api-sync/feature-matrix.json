@@ -39,9 +39,10 @@
     {
       "name": "项目配置、运行模式与环境自检",
       "requiredBehavior": "保留 Nexus 项目配置、packaged/源码/pyz 运行入口、显式 toolHome、自检与错误提示。",
-      "apiMigration": "API单一源码来源；保留独立数据库诊断和三种工具运行入口。",
+      "apiMigration": "API单一源码来源；新目录使用统一配置与项目设置向导，旧目录仅显式迁移；保留独立数据库诊断和三种工具运行入口。",
       "status": "implemented",
       "sources": [
+        "scripts/common/config_store.py",
         "scripts/common/workspace_registry.py",
         "scripts/common/workspace_config.py",
         "scripts/common/doctor.py"
@@ -235,11 +236,11 @@
     "viewSqlProjectionParsedWithoutSourceChanges": 18
   },
   "validation": {
-    "checkedAt": "2026-11-13T00:05:11.044631+00:00",
-    "apiTests": 146,
+    "checkedAt": "2026-11-14T00:55:08.969865+00:00",
+    "apiTests": 163,
     "retainedSharedPythonTests": 182,
     "buildAndInstallerTests": 34,
-    "nexusTests": 451,
+    "nexusTests": 476,
     "bridgeTests": 111,
     "sourceAndPyzAndMacApplicationSmoke": "passed",
     "mcpTools": {
@@ -267,12 +268,12 @@
     },
     "publicDocs": {
       "pages": 4,
-      "qaItems": 76,
+      "qaItems": 77,
       "syntaxLinksAndSearch": "passed"
     },
-    "vsixSha256": "50866922bf04e0fb5d170050eae6bd06d996a262a4921a24fc4db1c15beac005",
+    "vsixSha256": "2b3a572ed32ca0b9c265686326004d9044158ffc4b20daa03be3334b473fbd33",
     "largeWorkspaceStatus": "16000 clean fixture objects plus changed/out-of-scope objects; full counts retained and compact response bounded",
-    "codeBuddy": "daily installed Nexus and packaged backend loaded; real login confirmed, system/menu names and native PAGE manager/field editor and procedure opens passed; existing source/configuration byte hashes preserved",
+    "codeBuddy": "final daily Nexus and packaged backend loaded; actual login confirmed, guided settings and migration preview/cancel, system/menu names, PAGE manager, procedure and view SQL opens, search and source reveal passed; original source/configuration byte hashes preserved",
     "fullProjectIndex": "official metadata-only source forms are recognized; one existing nonempty PAGE identity conflict remains explicit",
     "compatibilityReview": {
       "reviewedObjects": 183,
@@ -283,6 +284,46 @@
       "mixedCaseCodeBuddyRuntime": "passed isolated installed-package tests",
       "dailyCodeBuddyRuntime": "passed actual project login and local-source UI without source writes"
     },
-    "loginStatusPerformance": "installed full-project status scan reduced from about 19 seconds to about 8 seconds; concurrent refresh requests share one scan"
+    "loginStatusPerformance": {
+      "currentScopeObjects": 15398,
+      "installedStatusSeconds": [
+        1.349,
+        0.677,
+        0.672
+      ],
+      "installedMetadataSummarySeconds": [
+        0.221,
+        0.22
+      ],
+      "duplicateRequests": "shared per project; unchanged index events do not copy the index database",
+      "savedCredentialRead": "bounded at 5 seconds if unavailable; actual saved-session restoration passed in 1.61 seconds after user login",
+      "authenticationBoundary": "platform login uses an independent ToolHost and does not block local source or settings"
+    },
+    "configurationTests": 18,
+    "databaseTests": 98,
+    "projectInterface": {
+      "views": [
+        "谷神项目",
+        "谷神源码"
+      ],
+      "sourceCategories": [
+        "页面",
+        "过程函数",
+        "表",
+        "视图",
+        "系统脚本"
+      ],
+      "nativeToolbarIcons": true,
+      "guidedSettings": true,
+      "configuration": "new homes use one config/guthon.json; legacy migration previews and requires explicit confirmation",
+      "dailyLegacyMigration": "previewed and cancelled; existing files preserved",
+      "protectedOriginalFiles": 15539,
+      "isolatedFinalCodeBuddyRuntime": "passed PAGE/script save, view SQL/raw-view, procedure opening and merged view checks",
+      "dailyFinalLogin": "passed manual login, independent packaged-backend session restoration and final extension-host session restoration",
+      "dailyFinalLocalSource": "passed actual PAGE manager, procedure tree opening, view SQL opening, current-project search and active-source reveal without saving source",
+      "authenticatedCard": "passed actual final loaded Nexus: saved session restored, prior credential error cleared, all seven pre-existing editor tabs retained using extension-host restart"
+    },
+    "backendBuildId": "sha256:15e8ec5e0199fce850440b97ac6d6fd14a94607ed306314c6cddd7f829ed63d8",
+    "nexusBuildId": "sha256:0bee04c41dbd4a6ad98070d491cbb7eea1bbe324d89f2765b6003e2b7ac13313"
   }
 }
