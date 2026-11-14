@@ -255,14 +255,14 @@
       {"command":"gushenCompletion.runDiagnosis","title":"Guthon Nexus: 执行源码逻辑排查","shortTitle":"执行源码排查"},
       {"command":"gushenCompletion.refreshToolView","title":"Guthon Nexus: 刷新项目状态","shortTitle":"刷新项目状态","icon":"$(refresh)"},
       {"command":"gushenCompletion.refreshApiSourceView","title":"Guthon Nexus: 刷新指定 API 项目源码"},
-      {"command":"gushenCompletion.refreshApiScm","title":"Guthon Nexus: 刷新 API 变更"},
+      {"command":"gushenCompletion.refreshApiScm","title":"Guthon Nexus: 更新源码状态","shortTitle":"更新","icon":"$(refresh)"},
       {"command":"gushenCompletion.openApiOriginalSource","title":"Guthon Nexus: 打开原始源码"},
       {"command":"gushenCompletion.openApiSource","title":"Guthon Nexus: 打开 API 源码"},
       {"command":"gushenCompletion.previewApiSource","title":"Guthon Nexus: 预览原始源码"},
       {"command":"gushenCompletion.showApiDiff","title":"Guthon Nexus: 查看 API 源码差异"},
       {"command":"gushenCompletion.revertApiQuickDiffChange","title":"Guthon Nexus: 还原当前差异块"},
       {"command":"gushenCompletion.revertApiSource","title":"Guthon Nexus: 还原 API 本地修改"},
-      {"command":"gushenCompletion.uploadApiSource","title":"Guthon Nexus: 上传 API 本地修改"},
+      {"command":"gushenCompletion.uploadApiSource","title":"Guthon Nexus: 上传本地修改","shortTitle":"上传","icon":"$(cloud-upload)"},
       {"command":"gushenCompletion.showApiIndexDiagnostics","title":"Guthon Nexus: 查看 API 索引诊断"},
       {"command":"gushenCompletion.refreshApiObject","title":"Guthon Nexus: 更新指定 API 源码"},
       {"command":"gushenCompletion.openApiDesigner","title":"Guthon Nexus: 打开在线页面设计器"},
@@ -309,8 +309,8 @@
     },
     "views": {
       "guthon": [
-        {"id":"gushenCompletion.projectDetails","name":"谷神项目","type":"webview"},
-        {"id":"gushenCompletion.sourceView","name":"谷神源码"}
+        {"id":"gushenCompletion.projectDetails","name":"谷神项目","type":"webview","initialSize":1},
+        {"id":"gushenCompletion.sourceView","name":"谷神源码","initialSize":3}
       ]
     },
     "submenus": [
