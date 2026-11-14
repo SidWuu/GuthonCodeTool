@@ -31,8 +31,14 @@ test('project card binds actions to its resolved project, ignoring forged worksp
   await registrations[0]({action:'pull',workspaceKey:'projects.a'});
   assert.deepEqual(calls[0],['gushenCompletion.pullApiSource','projects.a']);
   await registrations[0]({action:'arbitrary-command'});assert.equal(calls.length,1);
+  for(const [action,command] of Object.entries({search:'searchCurrentApiWorkspace',history:'showApiHistory',scope:'selectApiSystems',settings:'configureProject',doctor:'runDoctor'})) {
+    await registrations[0]({action,workspaceKey:'projects.a'});
+    assert.deepEqual(calls.at(-1),['gushenCompletion.'+command,'projects.a']);
+  }
+  await registrations[0]({action:'changes',workspaceKey:'projects.a'});
+  assert.deepEqual(calls.at(-1),['workbench.view.scm']);
   provider.getWorkspaces=async()=>[{workspaceKey:'projects.a'},{workspaceKey:'projects.b'}];await provider.refresh();
-  assert.equal(provider.currentKey,undefined);assert(view.webview.html.includes('更多操作'));
+  assert.equal(provider.currentKey,undefined);assert(view.webview.html.includes('右上角“…”菜单'));
   provider.dispose();
 });
 

@@ -56,7 +56,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `scripts/providers/api/cli.py`、`index.py`、`mcp_server.py` | CLI、索引、查询及受控 MCP 接口。 |
 | `scripts/providers/api/change_bundle.py` | 当前 API 工作区的本地变更包导出、预览和按计划摘要应用；旧侧材料生成属于待补齐迁移环节。 |
 | `scripts/providers/api/page.py`、`documents.py`、`editor_state.py` | PAGE 编辑、租约文档及编辑器状态协调。 |
-| `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`、`source-ui.js`、`project-card.js`、`project-actions.js` | 谷神项目卡片与设置向导、API 项目命令、按类型展示的源码树与 SCM；文件事件按登记范围处理，目录复用和重复索引短路；轻量卡片不等待全项目扫描。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`、`source-ui.js`、`project-card.js`、`project-actions.js` | 谷神项目卡片常用按钮与设置向导、原生项目菜单及命令面板操作列表、API 项目命令、按类型展示的源码树与 SCM；文件事件按登记范围处理，目录复用和重复索引短路；轻量卡片不等待全项目扫描。 |
 | `plugins/GuthonNexus/gushen-vscode-completion/src/official-update.js` | 官方语言资源检查、更新和回退。 |
 
 ## Python

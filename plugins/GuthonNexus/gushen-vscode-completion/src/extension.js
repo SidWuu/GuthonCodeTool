@@ -37,7 +37,6 @@ const {
   withUpdateLock,
 } = require('./tool-updater');
 const { WorkspaceRegistry } = require('./workspace-registry');
-const {isWorkspaceKey} = require('./workspace-identity');
 
 const SUPPORTED_LANGUAGES = ['java', 'guthon-gss', 'javascript', 'sql'];
 const SUPPORTED_SCHEMES = ['file', 'untitled', 'guthon-api-edit'];
@@ -489,8 +488,9 @@ function activate(context) {
     onExit: (code) => {
       if (code) vscode.window.showErrorMessage(`Guthon Bridge 已退出（退出码 ${code}），请查看输出面板`);
     },
-    onStateChange: () => projectCard?.refresh(),
+    onStateChange: () => {void vscode.commands.executeCommand('setContext','gushenCompletion.bridgeRunning',bridge.isRunning());projectCard?.refresh();},
   });
+  void vscode.commands.executeCommand('setContext','gushenCompletion.bridgeRunning',bridge.isRunning());
   const refreshToolData = () => {workspaceRegistry.invalidate();projectCard?.refresh();};
   const apiServices = activeApiServices = require('./api/activate').activateApi({vscode,context,getTool:async()=>configuredToolFromSettings(),processClient,
     onUpdated:()=>projectCard?.refresh()});
@@ -525,10 +525,21 @@ function activate(context) {
     if(workspaces.length===1) return workspaces[0];
     return (await vscode.window.showQuickPick(workspaces.map(item=>({label:item.displayName,description:item.workspaceKey,workspace:item})),{title:'选择当前项目'}))?.workspace;
   };
+  const {workspaceKeyFrom,projectMenuHandler,projectToolHandler,projectDiagnosisHandler}=require('./api/project-actions');
+  const selectedToolCommand = command => projectToolHandler({vscode,selectWorkspace,runTool,command});
+  const projectMenu = command => projectMenuHandler({vscode,selectWorkspace,command});
   apiServices.setSelectWorkspace(selectWorkspace);
   apiNavigation=require('./api/navigation').createApiNavigation({vscode,context,api:apiServices,selectWorkspace,getTool:configuredToolFromSettings,bridge});
   void refreshApiWorkspaces().catch(error=>vscode.window.showErrorMessage(`API 工作区初始化失败：${error.message}`));
   const toolCommands = [
+    vscode.commands.registerCommand('gushenCompletion.projectMenuIndexDiagnostics',projectMenu('showApiIndexDiagnostics')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuRetryIndex',projectMenu('retryApiIndexFailures')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuReindex',projectMenu('reindexCalls')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuVerifyUpload',projectMenu('verifyApiUpload')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuExportChanges',projectMenu('exportApiChanges')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuImportChanges',projectMenu('importApiChanges')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuOpenCheckout',projectMenu('openApiCheckout')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuExportContext',projectMenu('exportAiContext')),
     vscode.commands.registerCommand('gushenCompletion.configureProject', async value => {
       try {
         const workspace=await selectWorkspace(typeof value==='string'?value:value?.workspaceKey || '');
@@ -544,7 +555,7 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.openOnboarding', () => onboarding.open()),
     vscode.commands.registerCommand('gushenCompletion.showDiagnosisHistory', async (workspaceValue = '') => {
       try {
-        const key = typeof workspaceValue === 'string' ? workspaceValue : workspaceValue?.guthonWorkspaceKey || workspaceValue?.workspaceKey || '';
+        const key = workspaceKeyFrom(workspaceValue);
         const selected = await selectWorkspace(key);
         if (!selected) return;
         const {showDiagnosisHistory} = require('./diagnosis-history-view');
@@ -570,7 +581,8 @@ function activate(context) {
         } catch (error) {return vscode.window.showErrorMessage(`拉取历史维护失败：${error.message}`);}
       }
     )),
-    vscode.commands.registerCommand('gushenCompletion.selectExecutionMode', async (selectEntry = false) => {
+    vscode.commands.registerCommand('gushenCompletion.selectExecutionMode', async (value = false) => {
+      const selectEntry=value===true;
       const config = vscode.workspace.getConfiguration('gushenCompletion');
       const currentMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
       const modes = [
@@ -788,10 +800,11 @@ function activate(context) {
       return true;
     }),
     vscode.commands.registerCommand('gushenCompletion.deleteWorkspace', async (workspaceValue) => {
-      const workspaceKey = typeof workspaceValue === 'string'
-        ? workspaceValue
-        : workspaceValue?.guthonWorkspaceKey;
-      if (!isWorkspaceKey(workspaceKey)) return vscode.window.showErrorMessage('请在具体产品或项目节点上执行删除');
+      let workspace;
+      try {workspace=await selectWorkspace(workspaceKeyFrom(workspaceValue));}
+      catch(error) {return vscode.window.showErrorMessage(`无法选择项目：${error.message}`);}
+      if(!workspace)return;
+      const workspaceKey=workspace.workspaceKey;
       let plan;
       try {
         const state=await apiServices.sourceTree.status(workspaceKey);
@@ -859,11 +872,11 @@ function activate(context) {
       if (!await bridge.stop()) return vscode.window.showInformationMessage('Guthon Bridge 未运行');
       return vscode.window.showInformationMessage('Guthon Bridge 已停止');
     }),
-    vscode.commands.registerCommand('gushenCompletion.exportMarkdown', (workspaceKey) => runTool(TOOL_COMMANDS.exportMarkdown, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.exportSchema', (workspaceKey) => runTool(TOOL_COMMANDS.exportSchema, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.exportBillTypes', (workspaceKey) => runTool(TOOL_COMMANDS.exportBillTypes, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.exportSystemScripts', (workspaceKey) => runTool(TOOL_COMMANDS.exportSystemScripts, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.exportViews', (workspaceKey) => runTool(TOOL_COMMANDS.exportViews, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.exportMarkdown', selectedToolCommand(TOOL_COMMANDS.exportMarkdown)),
+    vscode.commands.registerCommand('gushenCompletion.exportSchema', selectedToolCommand(TOOL_COMMANDS.exportSchema)),
+    vscode.commands.registerCommand('gushenCompletion.exportBillTypes', selectedToolCommand(TOOL_COMMANDS.exportBillTypes)),
+    vscode.commands.registerCommand('gushenCompletion.exportSystemScripts', selectedToolCommand(TOOL_COMMANDS.exportSystemScripts)),
+    vscode.commands.registerCommand('gushenCompletion.exportViews', selectedToolCommand(TOOL_COMMANDS.exportViews)),
     vscode.commands.registerCommand('gushenCompletion.runDoctor', async (workspaceValue = '') => {
       const workspaceKey = typeof workspaceValue === 'string' ? workspaceValue : workspaceValue?.guthonWorkspaceKey || '';
       const release = claimToolRun(TOOL_COMMANDS.doctor, workspaceKey);
@@ -884,10 +897,7 @@ function activate(context) {
       } catch (error) { return vscode.window.showErrorMessage(`环境检查未完成：${error.message}`); }
       finally { release(); }
     }),
-    vscode.commands.registerCommand('gushenCompletion.runDiagnosis', async (workspaceKey) => {
-      const selected = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: false, canSelectMany: false, filters: { JSON: ['json'] }, title: '选择排查定义 JSON' });
-      if (selected) return runTool(TOOL_COMMANDS.diagnose, [selected[0].fsPath], true, workspaceKey);
-    }),
+    vscode.commands.registerCommand('gushenCompletion.runDiagnosis', projectDiagnosisHandler({vscode,selectWorkspace,runTool,command:TOOL_COMMANDS.diagnose})),
     vscode.commands.registerCommand('gushenCompletion.expandProjectSource', async () => {
       return vscode.commands.executeCommand('gushenCompletion.sourceView.focus');
     }),

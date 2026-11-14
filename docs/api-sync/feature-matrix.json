@@ -236,11 +236,11 @@
     "viewSqlProjectionParsedWithoutSourceChanges": 18
   },
   "validation": {
-    "checkedAt": "2026-11-14T00:55:08.969865+00:00",
+    "checkedAt": "2026-11-14T10:56:27.732366+00:00",
     "apiTests": 163,
     "retainedSharedPythonTests": 182,
     "buildAndInstallerTests": 34,
-    "nexusTests": 476,
+    "nexusTests": 480,
     "bridgeTests": 111,
     "sourceAndPyzAndMacApplicationSmoke": "passed",
     "mcpTools": {
@@ -264,14 +264,15 @@
         460
       ],
       "horizontalOverflow": false,
-      "loginAndAuthenticatedStates": "passed"
+      "buttonLabelOverflow": false,
+      "loginAndAuthenticatedStates": "login unchanged; authenticated common-action controls visually verified in isolated browser and installed CodeBuddy"
     },
     "publicDocs": {
       "pages": 4,
       "qaItems": 77,
       "syntaxLinksAndSearch": "passed"
     },
-    "vsixSha256": "2b3a572ed32ca0b9c265686326004d9044158ffc4b20daa03be3334b473fbd33",
+    "vsixSha256": "324262c17c0230aa07d6eb0505695c2c02e88adc81b0ff65c0ce38691f01748c",
     "largeWorkspaceStatus": "16000 clean fixture objects plus changed/out-of-scope objects; full counts retained and compact response bounded",
     "codeBuddy": "final daily Nexus and packaged backend loaded; actual login confirmed, guided settings and migration preview/cancel, system/menu names, PAGE manager, procedure and view SQL opens, search and source reveal passed; original source/configuration byte hashes preserved",
     "fullProjectIndex": "official metadata-only source forms are recognized; one existing nonempty PAGE identity conflict remains explicit",
@@ -317,13 +318,26 @@
       "guidedSettings": true,
       "configuration": "new homes use one config/guthon.json; legacy migration previews and requires explicit confirmation",
       "dailyLegacyMigration": "previewed and cancelled; existing files preserved",
-      "protectedOriginalFiles": 15539,
+      "protectedOriginalFiles": 15540,
       "isolatedFinalCodeBuddyRuntime": "passed PAGE/script save, view SQL/raw-view, procedure opening and merged view checks",
       "dailyFinalLogin": "passed manual login, independent packaged-backend session restoration and final extension-host session restoration",
       "dailyFinalLocalSource": "passed actual PAGE manager, procedure tree opening, view SQL opening, current-project search and active-source reveal without saving source",
-      "authenticatedCard": "passed actual final loaded Nexus: saved session restored, prior credential error cleared, all seven pre-existing editor tabs retained using extension-host restart"
+      "authenticatedCard": "passed actual final loaded Nexus: saved session restored, prior credential error cleared, all seven pre-existing editor tabs retained using extension-host restart",
+      "commonActions": [
+        "搜索源码",
+        "本地修改",
+        "操作记录",
+        "拉取范围",
+        "项目设置",
+        "环境检查"
+      ],
+      "overflow": "single native project menu; direct index/recovery commands and one submenu level for import/export, project management and tool updates",
+      "keyboardActions": "one searchable grouped picker; native menu adapters hidden from command palette",
+      "dailyCommonActions": "passed direct local-changes SCM, operation history, subsystem wizard/cancel, project settings/cancel and environment-check completion; search retains its existing current-project route",
+      "dailyNativeMenu": "passed one native overflow, index diagnostic dispatch bound to current project, and single-level import/export submenu; no parallel custom ellipsis",
+      "runtimeCache": "the ordinary tool-update check cache refreshed when the window reloaded; source and configuration hashes remained unchanged"
     },
     "backendBuildId": "sha256:15e8ec5e0199fce850440b97ac6d6fd14a94607ed306314c6cddd7f829ed63d8",
-    "nexusBuildId": "sha256:0bee04c41dbd4a6ad98070d491cbb7eea1bbe324d89f2765b6003e2b7ac13313"
+    "nexusBuildId": "sha256:3c16a6a9f493d0a1f2e39225b2f4fc8a5a8d552baf19ee3561b2d71bb3f06fd7"
   }
 }

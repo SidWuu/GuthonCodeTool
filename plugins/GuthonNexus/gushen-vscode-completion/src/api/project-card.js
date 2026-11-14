@@ -2,7 +2,9 @@ const crypto=require('node:crypto');
 const fs=require('node:fs');
 const path=require('node:path');
 
-const actions=Object.freeze({pull:'pullApiSource',upload:'uploadApiSource',settings:'configureProject',search:'searchCurrentApiWorkspace'});
+const actions=Object.freeze({pull:'gushenCompletion.pullApiSource',upload:'gushenCompletion.uploadApiSource',
+  search:'gushenCompletion.searchCurrentApiWorkspace',changes:'workbench.view.scm',history:'gushenCompletion.showApiHistory',
+  scope:'gushenCompletion.selectApiSystems',settings:'gushenCompletion.configureProject',doctor:'gushenCompletion.runDoctor'});
 function escapeHtml(value) {
   return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 }
@@ -20,12 +22,20 @@ function cardModel(workspace,status,authentication={authenticated:true,session:s
 function projectCardHtml(model,{nonce=crypto.randomBytes(18).toString('base64'),css='',form={}}={}) {
   const e=escapeHtml;
   const row=(label,value)=>`<div class="metadata-row"><dt>${label}</dt><dd title="${e(value)}">${e(value)}</dd></div>`;
-  let content='<div class="empty">从右上角“更多操作”完成本地数据目录设置并添加项目，再打开项目目录。</div>';
+  const tool=(action,label,icon)=>`<button data-action="${action}"><svg aria-hidden="true" focusable="false" viewBox="0 0 16 16">${icon}</svg><span>${label}</span></button>`;
+  let content='<div class="empty">从右上角“…”菜单设置本地数据目录并添加项目，再打开项目目录。</div>';
   if(model?.authenticated || model?.pending) {
     content=`<section aria-label="当前项目详情" class="project-card"><dl>${row('项目',model.project)}${row('版本',model.version)}${row('地址',model.address)}${row('用户',model.user)}</dl></section>
 <div class="primary-actions"><button data-action="pull" ${model.canPull&&!model.pending?'':'disabled'} title="${model.pending?'正在恢复登录':model.canPull?'拉取当前范围源码':'请先在“项目设置”选择拉取范围'}">更新源码</button><button class="secondary" data-action="upload" ${model.canUpload&&!model.pending?'':'disabled'}>上传代码</button></div>
 <div class="source-summary" aria-label="当前拉取范围"><span>${e(model.scope)}</span><span>${model.sourceCount} 源码</span><span title="最近一次源码状态检查结果" class="${model.changed?'has-changes':''}">${model.changed==null?'修改待检查':model.changed+' 修改'}</span></div>
-<div class="project-tools"><button data-action="settings">项目设置</button><button data-action="search">搜索源码</button></div>`;
+<nav class="project-tools" aria-label="项目常用操作">
+${tool('search','搜索源码','<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/>')}
+${tool('changes','本地修改','<path d="M9.5 1.5h-6v13h9v-10zM9.5 1.5v4h3M5.5 8h5m-5 3h5"/>')}
+${tool('history','操作记录','<path d="M2 3.5v4h4M2.2 7A6 6 0 1 1 3.5 12M8 4.5V8l2.5 1.5"/>')}
+${tool('scope','拉取范围','<path d="m1.5 3 1 1 2-2m-3 6 1 1 2-2m-3 6 1 1 2-2M7 3h7M7 8h7m-7 5h7"/>')}
+${tool('settings','项目设置','<path d="M2 4h12M2 12h12M6 1.5v5m4 3v5"/>')}
+${tool('doctor','环境检查','<path d="M1 8h3l2-5 4 10 2-5h3"/>')}
+</nav>`;
   } else if(model) {
     const captcha=typeof form.captcha==='string'&&/^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(form.captcha)?form.captcha:'';
     content=`<section class="project-card login-card"><h2>登录到项目 [${e(model.project)}]</h2><form id="login-form">
@@ -76,7 +86,8 @@ class ProjectCardProvider {
         return;
       }
       if(!Object.hasOwn(actions,message?.action))return;
-      try {await this.vscode.commands.executeCommand('gushenCompletion.'+actions[message.action],key);await this.refresh();}
+      const command=actions[message.action];
+      try {await this.vscode.commands.executeCommand(command,...(command.startsWith('gushenCompletion.')?[key]:[]));await this.refresh();}
       catch(error) {await view.webview.postMessage({type:'status',message:error.message});}
     }));
     if(view.onDidChangeVisibility)this.disposables.push(view.onDidChangeVisibility(()=>{if(view.visible)void this.refresh();}));

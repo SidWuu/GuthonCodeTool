@@ -39,18 +39,13 @@ async function showProjectActions({vscode,getWorkspaces,bridge}) {
       item(bridge.isRunning()?'停止浏览器增强':'启动浏览器增强',bridge.isRunning()?'stopBridge':'startBridge'),
     ],
   };
-  let choices=[
-    ...(project ? [item('项目设置','configureProject',{project:true}),
-      {label:'查看本地修改',command:'workbench.view.scm',builtin:true},
-      item('查看操作记录','showApiHistory',{project:true})] : [item('设置本地数据目录','setupTool'),item('添加项目','addWorkspace')]),
-    ...Object.keys(groups).map(label=>({label,group:true})),
-  ];
-  let selected=await vscode.window.showQuickPick(choices,{title:project ? `${project.name || project.displayName} · 更多操作` : '谷神项目 · 更多操作',placeHolder:'常用操作、检查、导入导出与设置'});
-  if(!selected)return;
-  if(selected.group) {
-    selected=await vscode.window.showQuickPick(groups[selected.label],{title:selected.label});
-    if(!selected)return;
-  }
+  const common=project ? [item('项目设置','configureProject',{project:true}),
+    {label:'查看本地修改',command:'workbench.view.scm',builtin:true},item('查看操作记录','showApiHistory',{project:true})]
+    : [item('设置本地数据目录','setupTool')];
+  const choices=[{label:'常用',kind:vscode.QuickPickItemKind.Separator},...common,
+    ...Object.entries(groups).flatMap(([label,items])=>[{label,kind:vscode.QuickPickItemKind.Separator},...items])];
+  const selected=await vscode.window.showQuickPick(choices,{title:project ? `${project.name || project.displayName} · 项目全部操作` : '项目全部操作',placeHolder:'搜索项目操作、检查、导入导出与设置',matchOnDescription:true});
+  if(!selected || selected.kind===vscode.QuickPickItemKind.Separator)return;
   let workspace=project;
   if(selected.project && !workspace) {
     workspace=(await vscode.window.showQuickPick(workspaces.map(value=>({label:value.displayName || value.name,description:value.workspaceKey,value})),{title:'选择当前操作的项目'}))?.value;
@@ -58,6 +53,37 @@ async function showProjectActions({vscode,getWorkspaces,bridge}) {
   }
   return vscode.commands.executeCommand(selected.builtin ? selected.command : 'gushenCompletion.'+selected.command,
     ...(selected.project ? [workspace.workspaceKey] : selected.args || []));
+}
+
+// View title actions may pass an opaque view context instead of a workspace key.
+function workspaceKeyFrom(value) {
+  return typeof value==='string' ? (value==='gushenCompletion.projectDetails' ? '' : value) : value?.workspaceKey || value?.guthonWorkspaceKey || '';
+}
+function projectMenuHandler({vscode,selectWorkspace,command}) {
+  return async value=>{
+    try {
+      const workspace=await selectWorkspace(workspaceKeyFrom(value));if(!workspace)return;
+      return await vscode.commands.executeCommand('gushenCompletion.'+command,workspace.workspaceKey);
+    } catch(error) {return vscode.window.showErrorMessage(`项目操作失败：${error.message}`);}
+  };
+}
+
+function projectToolHandler({vscode,selectWorkspace,runTool,command}) {
+  return async value=>{
+    try {const workspace=await selectWorkspace(workspaceKeyFrom(value));if(workspace)return await runTool(command,[],true,workspace.workspaceKey);}
+    catch(error) {return vscode.window.showErrorMessage(`项目操作失败：${error.message}`);}
+  };
+}
+
+function projectDiagnosisHandler({vscode,selectWorkspace,runTool,command}) {
+  return async value=>{
+    let workspace;
+    try {workspace=await selectWorkspace(workspaceKeyFrom(value));}
+    catch(error) {return vscode.window.showErrorMessage(`无法选择项目：${error.message}`);}
+    if(!workspace)return;
+    const selected=await vscode.window.showOpenDialog({canSelectFiles:true,canSelectFolders:false,canSelectMany:false,filters:{JSON:['json']},title:'选择排查定义 JSON'});
+    if(selected?.length)return runTool(command,[selected[0].fsPath],true,workspace.workspaceKey);
+  };
 }
 
 async function showProjectSettings({vscode,workspace,onConfiguration}) {
@@ -97,4 +123,4 @@ async function showConfiguration({vscode,client,workspace}) {
   return vscode.window.showInformationMessage(`已合并配置：${result.path}`);
 }
 
-module.exports={showProjectActions,showProjectSettings,showConfiguration};
+module.exports={showProjectActions,showProjectSettings,showConfiguration,workspaceKeyFrom,projectMenuHandler,projectToolHandler,projectDiagnosisHandler};
