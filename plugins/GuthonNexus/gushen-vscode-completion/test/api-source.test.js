@@ -133,6 +133,41 @@ test('a stale in-flight catalog cannot overwrite a newer index generation',async
   f.ui.invalidate('projects.a');const fresh=await f.ui.getChildren();release();assert.equal(await old,fresh);assert.equal(calls,2);
   assert.equal(fresh.find(x=>x.label==='视图').children[0].children[0].object.path,'datasources/D/views/2.xml');
 });
+test('a late stale-scope error waits for and returns the current catalog',async()=>{
+  const f=fixture();let rejectOld,resolveNew,calls=0;
+  f.ui.run=async()=>{calls++;return new Promise((resolve,reject)=>{if(calls===1)rejectOld=reject;else resolveNew=resolve;});};
+  f.ui.syncWorkspaces(['projects.a']);const old=f.ui.getChildren();await new Promise(resolve=>setImmediate(resolve));
+  f.ui.invalidate('projects.a');const current=f.ui.getChildren();await new Promise(resolve=>setImmediate(resolve));
+  rejectOld(Object.assign(new Error('旧范围索引过期'),{code:'API_INDEX_SCOPE_STALE'}));
+  resolveNew({indexGeneration:'new',objects:[{path:'datasources/D/views/current.xml',sourceType:'view'}]});
+  const [oldResult,newResult]=await Promise.all([old,current]);assert.equal(oldResult,newResult);assert.equal(calls,2);
+  assert.equal(newResult.some(item=>item.kind==='message'),false);assert.equal(f.ui.indexGenerations.get('projects.a'),'new');
+});
+test('a late old diagnostic cannot contaminate the current scope',async()=>{
+  const f=fixture();let resolveOld,calls=0;
+  f.ui.run=async()=>{calls++;if(calls===1)return new Promise(resolve=>{resolveOld=resolve;});return {indexGeneration:'new',partialSourceCount:0,objects:[]};};
+  f.ui.syncWorkspaces(['projects.a']);const old=f.ui.getChildren();await new Promise(resolve=>setImmediate(resolve));
+  f.ui.setIndexResult('projects.a',{indexGeneration:'new',complete:true});const current=await f.ui.getChildren();
+  resolveOld({indexGeneration:'old',partialSourceCount:1,objects:[{path:'old.xml',status:'PARTIAL',diagnostic:'OLD_ERROR'}]});
+  assert.equal(await old,current);assert.equal(f.ui.indexDiagnostics.has('projects.a'),false);assert.equal(current.some(item=>item.kind==='message'),false);assert.equal(calls,2);
+});
+test('a later stale catalog page stops the old pagination before using its diagnostics',async()=>{
+  const f=fixture();let releasePage,calls=0;
+  f.ui.run=async(_key,_action,input)=>{calls++;if(calls===1)return {indexGeneration:'old',objects:[],nextOffset:100};
+    if(calls===2)return new Promise(resolve=>{releasePage=resolve;});assert.equal(input.offset,0);return {indexGeneration:'new',objects:[],partialSourceCount:0};};
+  f.ui.syncWorkspaces(['projects.a']);const old=f.ui.getChildren();while(!releasePage)await new Promise(resolve=>setImmediate(resolve));
+  f.ui.invalidate('projects.a');const current=await f.ui.getChildren();releasePage({indexGeneration:'old',objects:[],partialSourceCount:2,nextOffset:200});
+  assert.equal(await old,current);assert.equal(calls,3);assert.equal(f.ui.indexDiagnostics.has('projects.a'),false);
+});
+test('a late catalog after disposal or workspace removal cannot publish diagnostics',async()=>{
+  for(const remove of ['dispose','workspace']) {
+    const f=fixture();let release;f.ui.run=async()=>new Promise(resolve=>{release=resolve;});
+    f.ui.syncWorkspaces(['projects.a']);const pending=f.ui.getChildren();await new Promise(resolve=>setImmediate(resolve));
+    if(remove==='dispose')f.ui.dispose();else f.ui.syncWorkspaces([]);
+    release({indexGeneration:'old',partialSourceCount:1,objects:[{path:'old.xml',status:'PARTIAL',diagnostic:'OLD_ERROR'}]});
+    assert.deepEqual(await pending,[]);assert.equal(f.ui.indexDiagnostics.has('projects.a'),false);assert.equal(f.ui.treeCache.has('projects.a'),false);
+  }
+});
 test('multiple workspaces retain distinct roots and parent chains while one workspace has direct categories',async()=>{
   const f=fixture();f.ui.run=async(key)=>({indexGeneration:key,objects:[{path:'datasources/D/views/V.xml',sourceType:'view',name:key}]});
   f.ui.syncWorkspaces([{workspaceKey:'projects.A',displayName:'甲'},{workspaceKey:'projects.B',displayName:'乙'}]);

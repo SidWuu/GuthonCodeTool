@@ -52,7 +52,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 |---|---|
 | `scripts/common/config_store.py` | 单一配置源、保留旧目录读取，以及预览/确认/备份式配置迁移；不自动迁移真实目录。 |
 | `scripts/providers/api/client.py`、`workspace.py` | API 会话、验证码、HTTPS 信任、项目配置、范围、目录名称缓存与凭据。 |
-| `scripts/providers/api/download.py`、`store.py`、`sync.py` | 按范围下载、基线与冲突、上传前合并和平台回读。 |
+| `scripts/providers/api/download.py`、`store.py`、`sync.py` | 按范围下载、范围变更预检与备份清理编排、基线与冲突、上传前合并和平台回读。 |
 | `scripts/providers/api/cli.py`、`index.py`、`mcp_server.py` | CLI、索引、查询及受控 MCP 接口。 |
 | `scripts/providers/api/change_bundle.py` | 当前 API 工作区的本地变更包导出、预览和按计划摘要应用；旧侧材料生成属于待补齐迁移环节。 |
 | `scripts/providers/api/page.py`、`documents.py`、`editor_state.py` | PAGE 编辑、租约文档及编辑器状态协调。 |

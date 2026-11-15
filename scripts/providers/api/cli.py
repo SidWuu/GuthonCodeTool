@@ -28,6 +28,7 @@ ACTIONS = (
     "systems",
     "data-sources",
     "pull",
+    "scope-apply",
     "refresh",
     "status",
     "catalog",
@@ -336,6 +337,9 @@ def execute(workspace, action, payload):
                 workspace, payload["userId"], payload["password"], payload["remember"]
             )
         return {"session": session}
+    if action == "scope-apply":
+        from . import sync
+        return sync.scope_apply(workspace, None, payload)
     client = client_for(workspace, authenticated=True)
     if action == "designer-context":
         return client.designer_context()
@@ -406,7 +410,7 @@ def run(workspace, args):
     try:
         result = execute(workspace, parsed.action, payload)
     except Exception as error:
-        if parsed.action in {"pull", "refresh", "upload"}:
+        if parsed.action in {"pull", "scope-apply", "refresh", "upload"}:
             from common import gusen_hub
             from common.command_errors import error_code
 
@@ -424,22 +428,23 @@ def run(workspace, args):
                 gusen_hub.load_config(), workspace, "source", "FAILED", error
             )
         raise
-    if parsed.action in {"pull", "refresh", "upload"}:
+    if parsed.action in {"pull", "scope-apply", "refresh", "upload"}:
         from common import gusen_hub
 
         gusen_hub.append_pull_log(
             "source",
             "api-" + parsed.action,
             {
-                key: result[key]
-                for key in (
+                "status": "SUCCESS" if result.get("complete", True) else "PARTIAL",
+                **({"errorCode": result["error"]["code"]} if result.get("error") else {}),
+                **{key: result[key] for key in (
                     "operationId",
                     "complete",
                     "downloadedFiles",
                     "uploaded",
                     "checkoutPath",
                 )
-                if key in result
+                if key in result},
             },
             ok=result.get("complete", True),
         )
@@ -448,7 +453,7 @@ def run(workspace, args):
             workspace,
             "source",
             "SUCCESS" if result.get("complete", True) else "PARTIAL",
-            full_sync=parsed.action == "pull" and result.get("complete", False),
+            full_sync=parsed.action in {"pull", "scope-apply"} and result.get("complete", False),
         )
     print(
         json.dumps(

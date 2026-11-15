@@ -314,6 +314,10 @@
       "kind": "write",
       "timeoutMs": 1800000
     },
+    "scope-apply": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
     "refresh": {
       "kind": "write",
       "timeoutMs": 1800000

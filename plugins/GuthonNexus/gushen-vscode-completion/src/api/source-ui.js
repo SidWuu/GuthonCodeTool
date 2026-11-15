@@ -168,11 +168,19 @@ class ApiSourceUI {
     return item.children || [];
   }
   async loadCatalog(item,epoch) {
+      const replacement=()=>{
+        if(this.disposed || !this.workspaces.has(item.key)) return [];
+        if((this.treeEpoch.get(item.key)||0)===epoch) return undefined;
+        const roots=this.rootItems ||= [...this.workspaces].map(([key,w])=>({label:w.displayName || key,key,workspace:true,children:true}));
+        const current=roots.find(root=>root.key===item.key);
+        return current ? this.getChildren(current) : [];
+      };
       const objects=[];let offset=0,generation,partial=0,project;
       for(;;) {
         let result;
         try {result=await this.run(item.key,'catalog',{limit:100,offset});}
-        catch(error) {if(['API_INDEX_REQUIRED','API_INDEX_SCOPE_STALE'].includes(error.code)) return [{kind:'message',label:error.message,key:item.key,parent:item,command:'gushenCompletion.reindexCalls'}];throw error;}
+        catch(error) {const current=replacement();if(current!==undefined)return current;if(['API_INDEX_REQUIRED','API_INDEX_SCOPE_STALE'].includes(error.code)) return [{kind:'message',label:error.message,key:item.key,parent:item,command:'gushenCompletion.reindexCalls'}];throw error;}
+        const current=replacement();if(current!==undefined)return current;
         if(generation && result.indexGeneration && generation!==result.indexGeneration) throw new Error('目录读取期间索引已变化，请刷新');
         generation ||= result.indexGeneration;partial=Math.max(partial,result.partialSourceCount || 0);project ||= result.project;
         objects.push(...result.objects);
@@ -180,6 +188,7 @@ class ApiSourceUI {
         if(!Number.isInteger(result.nextOffset) || result.nextOffset<=offset) throw new Error('目录分页无效');
         offset=result.nextOffset;
       }
+      const current=replacement();if(current!==undefined)return current;
       const root={children:buildCatalogTree(item.key,item,objects,project)};
       if(partial && !this.indexDiagnostics.has(item.key)) {
         const diagnostics=objects.filter(object=>object.diagnostic && object.status!=='OK').map(object=>({path:object.path,code:object.diagnostic}));
@@ -188,8 +197,6 @@ class ApiSourceUI {
       const diagnostic=this.indexDiagnostics.get(item.key);const count=Math.max(partial,diagnostic?.diagnosticCount || 0);
       if(count || diagnostic?.complete===false) root.children.push({kind:'message',label:`索引不完整${count ? `：${count} 个诊断` : ''}，点击查看`,key:item.key,parent:item,command:diagnostic ? 'gushenCompletion.showApiIndexDiagnostics' : 'gushenCompletion.reindexCalls'});
       const recovery=this.indexRecovery?.(item.key);if(recovery?.paths.length) root.children.push({kind:'message',label:`${recovery.paths.length} 个源码文件等待索引更新，点击重试`,key:item.key,parent:item,command:'gushenCompletion.retryApiIndexFailures'});
-      if(!this.workspaces.has(item.key)) return [];
-      if((this.treeEpoch.get(item.key)||0)!==epoch) return this.getChildren(item);
       this.indexGenerations.set(item.key,generation);this.treeCache.set(item.key,root.children);
       if(project?.systems?.length && !Array.isArray(project.menuTree) && !this.menuAttempts.has(item.key)) {
         this.menuAttempts.add(item.key);const version=this.treeVersion;

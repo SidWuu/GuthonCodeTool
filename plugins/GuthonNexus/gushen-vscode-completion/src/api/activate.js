@@ -10,7 +10,36 @@ const {InheritanceDecorations}=require('../source/inheritance-decoration');
 const {PageEditorController} = require('../page-editor/controller');
 const {DIFF_SCHEME,ApiQuickDiff,revertQuickDiffChange}=require('../source/quick-diff');
 const {checkOfficialUpdate,rollbackOfficialUpdate} = require('../official-update');
-const REMOTE_ACTIONS = new Set(['session','captcha','login','systems','data-sources','designer-context','system-menu','pull','refresh','upload','verify-upload','sync-database','platform-request','create-function']);
+const REMOTE_ACTIONS = new Set(['session','captcha','login','systems','data-sources','designer-context','system-menu','pull','scope-apply','refresh','upload','verify-upload','sync-database','platform-request','create-function']);
+
+function scopeReportLines(key,result) {
+  const state=value=>value===true?'完成':value===false?'未完成':'未返回';
+  const saved=value=>value===true?'已保存':value===false?'未保存':'未返回';
+  const publication=result.publication,index=result.index || publication?.index;
+  const lines=[`工作区：${key}`,`操作编号：${result.operationId || '未返回'}`,`操作阶段：${result.stage || '未返回'}`,
+    `范围设置：${saved(result.settingsSaved)}`,`总体结果：${state(result.complete)}`,`平台源码读取：${state(result.remoteDownloadComplete)}`,
+    `本地发布与合并：${state(result.downloadComplete)}`];
+  if(result.failedStage) lines.push(`失败阶段：${result.failedStage}`);
+  if(result.error) lines.push(`错误：${result.error.code || '未返回错误码'} · ${result.error.message || '未返回详情'}`);
+  lines.push(`源码发布：${result.publicationState || (publication ? state(publication.complete) : '未返回')}`);
+  if(publication) {
+    const count=name=>Array.isArray(publication[name]) ? String(publication[name].length) : '未返回';
+    lines.push(`发布操作编号：${publication.operationId || result.publicationOperationId || '未返回'}`,
+      `更新 ${count('updated')} 个，保留 ${count('preserved')} 个，冲突 ${count('conflicts')} 个。`);
+    if(publication.conflicts?.length) lines.push('','## 文件冲突',...publication.conflicts.map(item=>`- ${item.path}：${item.reason}`));
+  }
+  if(result.cleanup) {
+    const cleanup=result.cleanup,removed=Number.isInteger(cleanup.removedCount)?cleanup.removedCount:'未返回';
+    lines.push('','## 退出范围清理',`已清理文件：${removed} 个`,`备份位置：${cleanup.backupPath || '未返回'}`);
+    if(cleanup.removedPaths?.length) lines.push(...cleanup.removedPaths.map(path=>`- ${JSON.stringify(path)}`));
+    if(cleanup.truncated) lines.push('- 文件列表已截断，完整清单请查看备份记录。');
+    if(cleanup.blocked?.length) lines.push('清理受阻：',...cleanup.blocked.map(item=>typeof item==='string'?`- ${item}`:`- ${item.code || '未知原因'}：${item.message || '未返回详情'}`));
+  }
+  lines.push(`索引结果：${state(index?.complete)}`,`索引诊断数量：${index?.diagnosticCount ?? '未返回'}`);
+  if(index?.diagnostics?.length) lines.push('','## 索引诊断',...index.diagnostics.map(item=>`- ${item.path || '未知文件'}：${item.code || ''} ${item.message || ''}`),...(index.truncated?['- 诊断列表已截断，请检查索引状态。']:[]));
+  if(result.complete!==true) lines.push('','请在操作记录中核对操作编号及当前源码和索引状态；索引未完成时可检查诊断并重建。');
+  lines.push('','本次未执行上传。');return lines;
+}
 
 function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   const client = new ToolJsonClient({getTool,processClient,outputLabel:'谷神 API'});
@@ -24,27 +53,28 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   const remoteProcessClient = new ToolProcessClient();
   const remoteClient = new ToolJsonClient({getTool,processClient:remoteProcessClient,outputLabel:'谷神 API 平台'});
   const statusRequests = new Map();
+  const statusEpochs = new Map();
   const sessionRequests = new Map();
   const lastStatus = new Map();
+  const invalidateStatus=key=>{lastStatus.delete(key);statusEpochs.set(key,(statusEpochs.get(key)||0)+1);};
   const run = async (key,action,input) => {
     if(action==='status') {
-      const requestKey=JSON.stringify([key,input?.summaryOnly===true]);
+      const epoch=statusEpochs.get(key)||0,requestKey=JSON.stringify([key,input?.summaryOnly===true,epoch]);
       const pending=statusRequests.get(requestKey);if(pending) return pending;
       const request=statusClient.run(key,'api',['status','--stdin'],{...input,changesOnly:true})
-        .then(result=>{if(!input?.summaryOnly){lastStatus.set(key,result);onUpdated?.();}return result;})
+        .then(result=>{if((statusEpochs.get(key)||0)!==epoch)return run(key,'status',input);if(!input?.summaryOnly){lastStatus.set(key,result);onUpdated?.();}return result;},
+          error=>{if((statusEpochs.get(key)||0)!==epoch)return run(key,'status',input);throw error;})
         .finally(()=>{if(statusRequests.get(requestKey)===request) statusRequests.delete(requestKey);});
       statusRequests.set(requestKey,request);return request;
     }
     const invoke=async()=>{try {
       const result=await (REMOTE_ACTIONS.has(action) ? remoteClient : client).run(key,'api',[action,...(input === undefined ? []:['--stdin'])],input);
       if(action==='login'){ui.menuAttempts.delete(key);ui.invalidate(key);}
-      if(action==='configure' && result.index){
-        lastStatus.delete(key);ui.invalidate(key);ui.setIndexResult(key,result.index);
-        void ui.updateScm(key).catch(error=>vscode.window.showErrorMessage(`源码状态刷新失败：${error.message}`));
-      }
+      if(action==='configure'){invalidateStatus(key);if(result.index){ui.invalidate(key);ui.setIndexResult(key,result.index);}}
       return result;
     }
-    catch(error) {if(error.code==='API_LOGIN_REQUIRED' && !['session','status'].includes(action)) onUpdated?.();throw error;}};
+    catch(error) {if(action==='configure' && error.code==='API_SCOPE_INDEX_REFRESH_REQUIRED')invalidateStatus(key);if(error.code==='API_LOGIN_REQUIRED' && !['session','status'].includes(action)) onUpdated?.();throw error;}
+    finally {if(action==='pull' || action==='scope-apply')invalidateStatus(key);}};
     if(action==='session') {
       const pending=sessionRequests.get(key);if(pending) return pending;
       const request=invoke().finally(()=>{if(sessionRequests.get(key)===request) sessionRequests.delete(key);});
@@ -62,8 +92,9 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   let closingEditorState;
   const closeEditorState=()=>closingEditorState ||= editorState.close().finally(()=>stateProcessClient.dispose());
   let pageEditor,virtualFs,virtualRegistration,sourceWatcher,selectWorkspace,inheritanceDecorations;
+  const deferredScopeEvents=new Map();
   const ui = new ApiSourceUI({vscode,run,onUpdated,editorState,onWorkspace:(key,root)=>sourceWatcher.register(key,root),indexRecovery:key=>sourceWatcher.recovery(key),onOpenVirtual:async identity=>{getPageEditor();return virtualFs.openEditor(identity);},onSourceChanged:async(key,paths)=>{
-    try {virtualFs?.invalidate(key,paths);for(const p of paths) sourceWatcher.enqueue(key,p);await pageEditor?.sourceChanged(key,paths);} catch(error) {await vscode.window.showErrorMessage(`PAGE 更新核对失败：${error.message}`);}
+    try {virtualFs?.invalidate(key,paths);const deferred=deferredScopeEvents.get(key);for(const p of paths) if(deferred) deferred.paths.add(p);else sourceWatcher.enqueue(key,p);await pageEditor?.sourceChanged(key,paths);} catch(error) {await vscode.window.showErrorMessage(`PAGE 更新核对失败：${error.message}`);}
   }});
   const quickDiff=new ApiQuickDiff({vscode,run,editorState,ui,projectBase:(uri,text)=>virtualFs?.projectBase(uri,text),viewBase:(uri,diff)=>virtualFs?.viewBase(uri,diff)});ui.quickDiff=quickDiff;
   sourceWatcher=new ApiSourceWatcher({run,workspaceState:context.workspaceState,onChanged:async (key,paths,result)=>{const current=ui.indexGenerations.get(key);ui.setIndexResult(key,result);if(paths.length || current!==result.indexGeneration)await ui.updateScm(key);if(paths.length)await pageEditor?.statusChanged(key);onUpdated?.();},onError:(key,error)=>{ui.refresh();vscode.window.showErrorMessage(`源码索引更新失败（${key}）：${error.message}；可重试待更新文件`);}});
@@ -90,7 +121,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
       const serverUrl = await vscode.window.showInputBox({title:'开发平台地址',value:current.settings.serverUrl,
         prompt:'例如 https://project.example.com，不包含账号或密码'});
       if (serverUrl === undefined) return;
-      await run(key,'configure',{serverUrl});onUpdated?.();
+      const result=await run(key,'configure',{serverUrl});if(result.index) await ui.updateScm(key);onUpdated?.();
     },
     loginApiSource: async key => {
       const userId = await vscode.window.showInputBox({title:'登录账号'});
@@ -132,7 +163,33 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
       const extra = extraItems.length ? await vscode.window.showQuickPick(extraItems,{title:related.size ? '选择额外共享数据源（系统关联源自动包含）' : '平台未提供关联，请明确选择数据源',canPickMany:true,
         placeHolder:'共享过程、表和视图按数据源粒度拉取；不默认选择未关联数据源'}) : [];
       if (!extra) return;
-      await run(key,'configure',{allSystems:all,systemIds:all ? []:selectedIds,dataSourceIds:extra.map(x=>x.dataSourceId)});onUpdated?.();
+      let pulled,refreshError,scopeError;
+      try {
+        await ui.ensureWorkspace(key);
+        let deferred=deferredScopeEvents.get(key);if(!deferred){deferred={active:0,paths:new Set()};deferredScopeEvents.set(key,deferred);}deferred.active++;
+        try {
+          await editorState.flush(key);
+          pulled=await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'更新所选范围的源码和索引',cancellable:false},()=>run(key,'scope-apply',{
+            settings:{allSystems:all,systemIds:all ? []:selectedIds,dataSourceIds:extra.map(x=>x.dataSourceId)}}));
+        } finally {
+          if(--deferred.active===0) {deferredScopeEvents.delete(key);for(const p of deferred.paths) sourceWatcher.enqueue(key,p);}
+        }
+      } catch(error) {scopeError=error;}
+      ui.invalidate(key);ui.setIndexResult(key,pulled?.index);
+      try {await ui.updateScm(key);} catch(error) {refreshError=error;}
+      onUpdated?.();
+      if(scopeError) {
+        if(scopeError.code==='API_SCOPE_LOCAL_CHANGES') {
+          const detail=`${scopeError.message}\n\n保存到磁盘后源码仍可能属于本地修改。请先保存未保存文档，处理冲突，并按需上传、撤销或导出并妥善处理本地修改；未登记文件请先移出退出范围并保留。处理完成后重新选择子系统。${refreshError ? `\n\n状态刷新失败：${refreshError.message}` : ''}`;
+          const action=await vscode.window.showWarningMessage('退出范围存在未处理的本地内容，原范围未更改。',{modal:true,detail},'查看本地修改');
+          if(action==='查看本地修改')await vscode.commands.executeCommand('workbench.view.scm');
+          return;
+        }
+        await vscode.window.showErrorMessage(`范围更新未完成${scopeError.code ? `（${scopeError.code}）` : ''}：${scopeError.message}；请核对当前范围和源码状态${refreshError ? `；状态刷新失败：${refreshError.message}` : ''}`);
+        return;
+      }
+      if(refreshError) await vscode.window.showErrorMessage(`${pulled.complete===true?'范围和源码已更新':'范围更新未完成'}，但状态刷新失败：${refreshError.message}`);
+      await showReport(vscode,'API 范围更新结果',scopeReportLines(key,pulled));return pulled;
     },
     pullApiSource: async key => {
       const state = await ui.status(key);

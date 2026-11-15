@@ -17,7 +17,7 @@
     {
       "id": "R03",
       "requirement": "保留按子系统配置只拉取部分源码",
-      "acceptance": "选择、下载、索引、查询和上传使用同一当前项目范围；未选择子系统源码不写入checkout，局部更新不删除其他范围文件。"
+      "acceptance": "选择、下载、索引、查询和上传使用同一当前项目范围；普通局部拉取保留范围外文件；明确范围切换先阻断未处理的本地内容，处理并重选后备份清理范围外已同步文件。"
     },
     {
       "id": "R04",
@@ -236,11 +236,11 @@
     "viewSqlProjectionParsedWithoutSourceChanges": 18
   },
   "validation": {
-    "checkedAt": "2026-11-14T13:43:18.210879+00:00",
-    "apiTests": 163,
+    "checkedAt": "2026-11-15T10:28:20.095169+00:00",
+    "apiTests": 189,
     "retainedSharedPythonTests": 182,
     "buildAndInstallerTests": 34,
-    "nexusTests": 480,
+    "nexusTests": 499,
     "bridgeTests": 111,
     "sourceAndPyzAndMacApplicationSmoke": "passed",
     "mcpTools": {
@@ -269,10 +269,10 @@
     },
     "publicDocs": {
       "pages": 4,
-      "qaItems": 78,
+      "qaItems": 79,
       "syntaxLinksAndSearch": "passed"
     },
-    "vsixSha256": "8c2e15cbe7d2e9e686947b95ad9293501586bddac3a4acc5bbad002228580fb1",
+    "vsixSha256": "9e177b4377bf1118ff77044bd0ade3f49d67b1bcdc5b1516f0690183d2861874",
     "largeWorkspaceStatus": "16000 clean fixture objects plus changed/out-of-scope objects; full counts retained and compact response bounded",
     "codeBuddy": "final daily Nexus and packaged backend loaded; actual login confirmed, guided settings and migration preview/cancel, system/menu names, PAGE manager, procedure and view SQL opens, search and source reveal passed; original source/configuration byte hashes preserved",
     "fullProjectIndex": "official metadata-only source forms are recognized; one existing nonempty PAGE identity conflict remains explicit",
@@ -337,10 +337,25 @@
       "dailyNativeMenu": "passed one native overflow, index diagnostic dispatch bound to current project, and single-level import/export submenu; no parallel custom ellipsis",
       "runtimeCache": "the ordinary tool-update check cache refreshed when the window reloaded; source and configuration hashes remained unchanged",
       "viewHeights": "new view weights favor source tree (1:3); daily persisted native divider adjusted to the complete project card; source tree follows the card and uses remaining height after window reload",
-      "scmActions": "refresh and cloud-upload icons with short labels and descriptive tooltips; no long inline command text"
+      "scmActions": "refresh and cloud-upload icons with short labels and descriptive tooltips; no long inline command text",
+      "scopeApplication": {
+        "flow": "preflight excluded registered and unregistered managed files; download selected range; recheck settings and source state; save settings; publish; rebuild once; verified backups and cleanup of excluded clean files",
+        "localChanges": "API_SCOPE_LOCAL_CHANGES before download/application; original scope and sources preserved; user handles local changes and reselects",
+        "retained": "shared data sources still selected, system-root notes, hidden files and unsafely changed candidates",
+        "failure": "phase-specific partial receipt with publication, index and cleanup results; old status/catalog requests cannot overwrite new scope",
+        "tests": "24 scope application and cleanup tests within 189 API tests; 499 Nexus tests",
+        "dailyCodeBuddy": "new Nexus/backend loaded; login confirmed and scope wizard cancellation verified; no live scope application or deletion executed",
+        "readOnlyCleanupPreview": {
+          "selectedSystems": 9,
+          "registeredCleanCandidates": 8649,
+          "seconds": 4.683,
+          "writes": 0
+        }
+      },
+      "menuReference": "all 27 native menu functions documented under project-more-actions"
     },
-    "backendBuildId": "sha256:15e8ec5e0199fce850440b97ac6d6fd14a94607ed306314c6cddd7f829ed63d8",
-    "nexusBuildId": "sha256:1f01ab83c1dd62f8e329a72830d08d45079d1bf1b0812ec6bfedf433ed0b1ec0",
-    "latestChangeTargetedNexusTests": 14
+    "backendBuildId": "sha256:aaf88366f62503ad15b8b02e05a3f36c6f4c1c5e176c94808c22d0627d46b5e0",
+    "nexusBuildId": "sha256:92299578864a6f066474cc61c05c33bf14fb622fc95f8860a48b27f4fef4d947",
+    "latestChangeTargetedNexusTests": 41
   }
 }

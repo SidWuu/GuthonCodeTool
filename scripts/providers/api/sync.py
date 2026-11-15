@@ -2,20 +2,199 @@
 
 from __future__ import annotations
 import base64
+from contextlib import closing
+import hashlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import stat
 import uuid
 from urllib.parse import quote
-from common.persistence import atomic_text, file_lock
+from common.persistence import atomic_bytes, atomic_text, file_lock
 from .client import ApiError
 from .download import download, fetch_object, files_from_item, records, BASE
-from .editor_state import assert_writable
+from .editor_state import assert_writable, _live
 from .store import ApiStore, digest
-from .workspace import settings, save_project, active_scope, api_paths
+from .workspace import settings, save_project, active_scope, api_paths, configure, configuration_lock, in_scope, validate, client_for, project_metadata
+
+
+def _dirty_paths(workspace):
+    path = workspace['contextDir'] / 'api' / 'editors.json'
+    try:
+        state = json.loads(path.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return set()
+    return {item['path'] for entry in state.values() if _live(entry['pid'])
+            for item in entry['documents'] if item['dirty']}
+
+
+def _has_symlink(root, path):
+    relative = path.relative_to(root)
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _file_identity(info):
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns, stat.S_IMODE(info.st_mode))
+
+
+def _scope_snapshot(workspace, store, proposed):
+    project = project_metadata(workspace)
+    systems = project.get('systems', [])
+    by_id = {str(row['systemId']): row for row in systems if row.get('systemId') is not None}
+    selected = set(by_id) if proposed['allSystems'] else set(proposed['systemIds'])
+    rows = []
+    if store.path.is_file():
+        with closing(sqlite3.connect(store.path)) as conn:
+            rows = conn.execute('SELECT path,metadata,readonly FROM source ORDER BY path').fetchall()
+    metadata_complete = not (selected - set(by_id)) and (not proposed['allSystems'] or bool(by_id))
+    current_settings = settings(workspace)
+    if not metadata_complete and (rows or current_settings['systemIds'] or current_settings['allSystems'] or current_settings['dataSourceIds']):
+        raise ApiError('API_SCOPE_METADATA_REQUIRED', '项目子系统目录未包含所选范围，请先刷新子系统列表后重新选择')
+    target = {'systemIds': selected, 'dataSourceIds': set(proposed['dataSourceIds']),
+              'includeProjectFiles': proposed['includeProjectFiles']}
+    target['dataSourceIds'].update(str(by_id[sid]['dataSourceId']) for sid in selected & set(by_id)
+                                   if by_id[sid].get('dataSourceId') is not None)
+    current = active_scope(workspace)
+    registered = {row[0] for row in rows}
+    dirty = _dirty_paths(workspace)
+    excluded = {}; blocked = []
+    roots = {('systems', sid) for sid in current['systemIds'] - target['systemIds']}
+    roots.update(('datasources', ds) for ds in current['dataSourceIds'] - target['dataSourceIds'])
+    for path, rawmeta, readonly in rows:
+        meta = json.loads(rawmeta)
+        if in_scope(workspace, path, meta, scope=target):
+            continue
+        parts = path.split('/')
+        if len(parts) > 1 and parts[0] in {'systems', 'datasources'}:
+            roots.add((parts[0], parts[1]))
+        target_path = store._path(path)
+        if _has_symlink(store.root, target_path):
+            blocked.append((path, 'SYMLINK')); continue
+        if target_path.exists() and not target_path.is_file():
+            blocked.append((path, 'PATH_NOT_FILE')); continue
+        identity = _file_identity(target_path.stat()) if target_path.is_file() else None
+        raw = target_path.read_bytes() if identity is not None else None
+        if identity is not None and _file_identity(target_path.stat()) != identity:
+            raise ApiError('API_SCOPE_STALE', f'检查期间源码已变化，请重新选择：{path}')
+        current_hash = hashlib.sha256(raw).hexdigest() if raw is not None else None
+        base_hash = meta.get('remoteHash')
+        if not base_hash:
+            with closing(sqlite3.connect(store.path)) as conn:
+                base_hash = digest(conn.execute('SELECT content FROM source WHERE path=?', (path,)).fetchone()[0])
+        reason = ('DIRTY' if path in dirty else 'CONFLICT' if store._conflict_path(path).is_file()
+                  else 'REMOTE_DELETED' if meta.get('remoteDeleted') else
+                  'MODIFIED' if current_hash is not None and current_hash != base_hash else None)
+        if reason:
+            blocked.append((path, reason))
+        excluded[path] = {'hash': current_hash, 'identity': identity, 'baseHash': base_hash, 'metadata': rawmeta,
+                          'readonly': readonly}
+    managed = {'systems': ('pages', 'system-script'), 'datasources': ('procedures', 'tables', 'views')}
+    for kind, identifier in sorted(roots):
+        for area in managed[kind]:
+            root = store.root / kind / identifier / area
+            relative_root = f'{kind}/{identifier}/{area}'
+            if _has_symlink(store.root, root):
+                blocked.append((relative_root, 'SYMLINK')); continue
+            for path in dirty - registered:
+                if path.startswith(relative_root + '/'):
+                    blocked.append((path, 'DIRTY'))
+            if not root.is_dir():
+                continue
+            def fail_scan(error):
+                raise error
+            for directory, subdirs, files in os.walk(root, followlinks=False, onerror=fail_scan):
+                for name in list(subdirs):
+                    if name.startswith('.'):
+                        subdirs.remove(name); continue
+                    candidate = Path(directory) / name
+                    if candidate.is_symlink():
+                        blocked.append((candidate.relative_to(store.root).as_posix(), 'SYMLINK'))
+                        subdirs.remove(name)
+                for name in files:
+                    if name.startswith('.'):
+                        continue
+                    candidate = Path(directory) / name
+                    relative = candidate.relative_to(store.root).as_posix()
+                    if relative not in registered and relative not in dirty:
+                        blocked.append((relative, 'UNREGISTERED'))
+    if blocked:
+        detail = ', '.join(f'{path} ({reason})' for path, reason in blocked[:100])
+        raise ApiError('API_SCOPE_LOCAL_CHANGES', f'退出范围存在 {len(blocked)} 项本地修改、草稿或未登记文件，请先处理并重新选择：{detail}')
+    return target, excluded, metadata_complete
+
+
+def _cleanup_excluded(workspace, store, operation, excluded):
+    backup = store.directory / 'operations' / operation['operationId'] / 'cleanup'
+    cleanup = operation['cleanup']
+    dirty_lock = store.directory / 'editors.lock'
+    with file_lock(store.directory / 'source.lock'):
+        with closing(sqlite3.connect(store.path)) as conn:
+            for path, expected in excluded.items():
+                if expected['hash'] is None:
+                    continue
+                with file_lock(dirty_lock):
+                    if path in _dirty_paths(workspace):
+                        raise ApiError('API_SCOPE_LOCAL_CHANGES', f'清理前出现未保存草稿，请处理并重新选择：{path}')
+                    row = conn.execute('SELECT metadata,readonly FROM source WHERE path=?', (path,)).fetchone()
+                    target = store._path(path)
+                    if not row or row[0] != expected['metadata'] or row[1] != expected['readonly'] or store._conflict_path(path).is_file():
+                        raise ApiError('API_SCOPE_STALE', f'清理前源码基线已变化：{path}')
+                    if not json.loads(row[0]).get('remoteHash'):
+                        baseline = conn.execute('SELECT content FROM source WHERE path=?', (path,)).fetchone()[0]
+                        if digest(baseline) != expected['baseHash']:
+                            raise ApiError('API_SCOPE_STALE', f'清理前源码基线已变化：{path}')
+                    if _has_symlink(store.root, target) or not target.is_file():
+                        raise ApiError('API_SCOPE_STALE', f'清理前源码路径已变化：{path}')
+                    if _file_identity(target.stat()) != expected['identity']:
+                        raise ApiError('API_SCOPE_LOCAL_CHANGES', f'清理前源码身份或状态已变化，请处理并重新选择：{path}')
+                    raw = target.read_bytes()
+                    if hashlib.sha256(raw).hexdigest() != expected['hash']:
+                        raise ApiError('API_SCOPE_LOCAL_CHANGES', f'清理前源码已修改，请处理并重新选择：{path}')
+                    mode = stat.S_IMODE(target.stat().st_mode)
+                    backup_file = hashlib.sha256(path.encode()).hexdigest() + '.bin'
+                    atomic_bytes(backup / backup_file, raw)
+                    cleanup['backupPath'] = str(backup)
+                    if hashlib.sha256((backup / backup_file).read_bytes()).hexdigest() != expected['hash']:
+                        raise ApiError('API_SCOPE_BACKUP_FAILED', f'源码备份核验失败：{path}')
+                    with open(backup / 'manifest.ndjson', 'a', encoding='utf-8',
+                              opener=lambda name, flags: os.open(name, flags, 0o600)) as manifest:
+                        manifest.write(json.dumps({'path': path, 'sha256': expected['hash'], 'mode': mode,
+                                                   'backupFile': backup_file}, ensure_ascii=False) + '\n')
+                        manifest.flush(); os.fsync(manifest.fileno())
+                    if _file_identity(target.stat()) != expected['identity']:
+                        raise ApiError('API_SCOPE_LOCAL_CHANGES', f'备份期间源码已变化，请处理并重新选择：{path}')
+                    target.unlink()
+                    cleanup['removedCount'] += 1
+                    if len(cleanup['removedPaths']) < 100:
+                        cleanup['removedPaths'].append(path)
+                    parent = target.parent
+                    while parent != store.root and parent.is_relative_to(store.root):
+                        try: parent.rmdir()
+                        except OSError: break
+                        parent = parent.parent
+
+
+def _publish_and_index(workspace, store, files, scope, *, authoritative, on_published=None):
+    result = store.publish(files, scope=scope, authoritative=authoritative)
+    if on_published is not None:
+        on_published(result)
+    from .index import rebuild
+
+    result["index"] = rebuild(workspace)
+    result["downloadComplete"] = result["complete"]
+    result["complete"] = result["complete"] and result["index"]["complete"]
+    return {**result, "downloadedFiles": len(files), "checkoutPath": str(workspace["providerSourceRoot"])}
 
 
 def pull(workspace, client):
     directory, _ = api_paths(workspace)
     with file_lock(directory / "sync.lock"):
-        assert_writable(workspace, None)
         files, scope = download(
             client,
             settings(workspace),
@@ -23,17 +202,111 @@ def pull(workspace, client):
                 workspace, systems, sources
             ),
         )
-        result = ApiStore(workspace).publish(files, scope=scope, authoritative=True)
-        from .index import rebuild
+        store = ApiStore(workspace)
+        assert_writable(workspace, sorted(set(store.paths()) | {item.path for item in files}))
+        return _publish_and_index(workspace, store, files, scope, authoritative=True)
 
-        result["index"] = rebuild(workspace)
-        result["downloadComplete"] = result["complete"]
-        result["complete"] = result["complete"] and result["index"]["complete"]
-        return {
-            **result,
-            "downloadedFiles": len(files),
-            "checkoutPath": str(workspace["providerSourceRoot"]),
-        }
+
+def scope_apply(workspace, client, payload):
+    if not isinstance(payload, dict) or set(payload) != {"settings"}:
+        raise ApiError("API_INPUT_INVALID", "范围同步需要 settings 对象")
+    selected = payload["settings"]
+    required = {"allSystems", "systemIds", "dataSourceIds"}
+    if not isinstance(selected, dict) or not required <= set(selected) or set(selected) - required - {"includeProjectFiles"}:
+        raise ApiError("API_INPUT_INVALID", "范围同步只接受子系统和数据源设置")
+    before = settings(workspace)
+    proposed = validate({**before, **selected})
+    store = ApiStore(workspace)
+    target_snapshot, excluded, metadata_complete = _scope_snapshot(workspace, store, proposed)
+    if client is None:
+        client = client_for(workspace, authenticated=True)
+    if client.root_url != before["serverUrl"]:
+        raise ApiError("API_SCOPE_STALE", "平台连接已变化，请重新选择范围")
+    project = {}
+    def capture(systems, sources):
+        project.update(systems=systems, sources=sources)
+    files, scope = download(client, proposed, on_project=capture)
+    directory, _ = api_paths(workspace)
+    with configuration_lock(workspace), file_lock(directory / "sync.lock"), file_lock(directory / "source.lock"):
+        if settings(workspace) != before:
+            raise ApiError("API_SCOPE_STALE", "下载期间项目设置已变化，请重新选择范围")
+        store = ApiStore(workspace)
+        target_current, excluded_current, metadata_now = _scope_snapshot(workspace, store, proposed)
+        if target_current != target_snapshot or excluded_current != excluded or metadata_now != metadata_complete:
+            raise ApiError('API_SCOPE_STALE', '下载期间退出范围的源码、基线或项目目录已变化，请重新选择')
+        target_scope = {**scope, "systemIds": set(scope["systemIds"]),
+                        "dataSourceIds": set(scope["dataSourceIds"]),
+                        "includeProjectFiles": proposed["includeProjectFiles"]}
+        if metadata_complete and any(target_scope[key] != target_snapshot[key] for key in ('systemIds', 'dataSourceIds', 'includeProjectFiles')):
+            raise ApiError('API_SCOPE_STALE', '平台子系统或数据源关联已变化，请刷新目录后重新选择')
+        active = set()
+        if store.path.is_file():
+            with closing(sqlite3.connect(store.path)) as conn:
+                for path, raw_meta in conn.execute("SELECT path,metadata FROM source"):
+                    meta = json.loads(raw_meta)
+                    if in_scope(workspace, path, meta, scope=target_scope):
+                        active.add(path)
+        assert_writable(workspace, sorted(active | {item.path for item in files}))
+        operation = {"operationId": uuid.uuid4().hex, "kind": "scope-apply", "stage": "PREPARED",
+                     "workspaceKey": workspace["workspaceKey"], "settingsSaved": False,
+                     "remoteDownloadComplete": True, "downloadComplete": False,
+                     "downloadedFiles": len(files), "complete": False, "index": None,
+                     "cleanup": {"removedCount": 0, "removedPaths": [], "backupPath": None, "blocked": []},
+                     "checkoutPath": str(workspace["providerSourceRoot"])}
+        store._receipt(operation)
+        try:
+            operation["stage"] = "CONFIGURING"
+            store._receipt(operation)
+            configured = configure(workspace, selected)
+            operation.update(settings=configured, settingsSaved=True, stage="SCOPE_SAVED")
+            store._receipt(operation)
+            save_project(workspace, project["systems"], project["sources"])
+            operation["stage"] = "PUBLISHING"
+            store._receipt(operation)
+            def published(result):
+                operation.update(stage="INDEXING", publication=result,
+                                 publicationOperationId=result["operationId"],
+                                 publicationState="COMPLETE" if result["complete"] else "PARTIAL",
+                                 downloadComplete=result["complete"],
+                                 applied=result["updated"] + result["preserved"],
+                                 updated=result["updated"], preserved=result["preserved"],
+                                 deleted=result["deleted"], conflicts=result["conflicts"])
+                store._receipt(operation)
+            publication = _publish_and_index(workspace, store, files, scope, authoritative=True, on_published=published)
+            operation.update(publication=publication, index=publication["index"],
+                             publicationOperationId=publication["operationId"],
+                             complete=publication["complete"],
+                             stage="COMPLETE" if publication["complete"] else "PARTIAL")
+            if publication['downloadComplete'] and publication['index'].get('indexGeneration'):
+                operation['stage'] = 'CLEANUP'
+                store._receipt(operation)
+                _cleanup_excluded(workspace, store, operation, excluded_current)
+                operation['stage'] = 'COMPLETE' if operation['complete'] else 'PARTIAL'
+            else:
+                operation['cleanup']['blocked'].append('PUBLICATION_OR_INDEX_INCOMPLETE')
+                operation.update(complete=False, stage='PARTIAL')
+            operation['removedPaths'] = operation['cleanup']['removedPaths']
+            operation['cleanup']['truncated'] = operation['cleanup']['removedCount'] > len(operation['cleanup']['removedPaths'])
+        except Exception as error:
+            from common.command_errors import error_code
+            failed_stage = operation["stage"]
+            if failed_stage == "CONFIGURING":
+                try:
+                    actual = settings(workspace)
+                    operation.update(settings=actual, settingsSaved=actual != before)
+                except Exception:
+                    operation["settingsSaved"] = None
+            operation.update(stage="FAILED" if operation["settingsSaved"] is False else "PARTIAL",
+                             failedStage=failed_stage,
+                             complete=False, error={"code": error_code(error), "message": str(error)})
+            if "publicationState" not in operation:
+                operation["publicationState"] = "PARTIAL_OR_UNKNOWN" if failed_stage == "PUBLISHING" else "NOT_STARTED"
+            if failed_stage == 'CLEANUP':
+                operation['cleanup']['blocked'].append({'code': error_code(error), 'message': str(error)})
+                operation['removedPaths'] = operation['cleanup']['removedPaths']
+                operation['cleanup']['truncated'] = operation['cleanup']['removedCount'] > len(operation['cleanup']['removedPaths'])
+        store._receipt(operation)
+        return operation
 
 
 def target(workspace, payload):
