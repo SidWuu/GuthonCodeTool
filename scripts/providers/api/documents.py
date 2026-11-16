@@ -91,6 +91,9 @@ def open_document(workspace, path, ttl_seconds=1800):
     directory = _directory(workspace)
     with file_lock(directory / "documents.lock"):
         item = ApiStore(workspace).read(path)
+        if item["metadata"].get("sourceType") == "module-parameter" and item["readonly"]:
+            from .module_parameter_editor import enable_editing
+            item = enable_editing(workspace, path)
         if item["readonly"] or str(item["metadata"].get("sourceType", "")).endswith(
             "-inherit"
         ):
@@ -203,6 +206,9 @@ def preview(workspace, lease_id, content=None, operations=None):
                 raise ApiError(
                     "API_PAGE_PARENT_READONLY", "PAGE 身份和继承父节点不可修改"
                 )
+        if item["metadata"].get("sourceType") == "module-parameter":
+            from .content import validate_candidate
+            validate_candidate(item["path"],item["metadata"],ApiStore(workspace).baseline(item["path"]),candidate)
         candidate_hash = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
         preview_id = uuid.uuid4().hex
         diff = "".join(

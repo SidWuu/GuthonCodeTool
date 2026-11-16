@@ -1,6 +1,23 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
 const {cardModel,projectCardHtml,ProjectCardProvider}=require('../src/api/project-card');
+
+test('card layout keeps content inside the sidebar view without clipping rows',()=>{
+  const css=fs.readFileSync(path.join(__dirname,'../src/api/project-card.css'),'utf8');
+  const views=require('../package.json').contributes.views.guthon;
+  const card=views.find(view=>view.id==='gushenCompletion.projectDetails');
+  const tree=views.find(view=>view.id==='gushenCompletion.sourceView');
+  // 侧栏变窄时按钮文字必须收缩，否则横向滚动条会盖住最后一行按钮。
+  assert.match(css,/html,body\{height:100%\}/);
+  assert.match(css,/body\{[^}]*overflow-x:hidden/);
+  assert.match(css,/\.project-tools button\{[^}]*overflow:hidden/);
+  assert.match(css,/\.project-tools span\{[^}]*text-overflow:ellipsis/);
+  // 卡片内容（元数据 + 操作 + 常用操作）比源码树的首屏需求高，初始份额不能是 1/4。
+  assert.ok(card.initialSize>=2,'project card must reserve more than one share');
+  assert.ok(tree.initialSize>=card.initialSize);
+});
 
 test('project card counts only current scope and escapes project data',()=>{
   const model=cardModel({workspaceKey:'projects.a',name:'<project>'},{settings:{serverUrl:'https://project.invalid',systemIds:['A'],allSystems:false},
@@ -31,7 +48,7 @@ test('project card binds actions to its resolved project, ignoring forged worksp
   await registrations[0]({action:'pull',workspaceKey:'projects.a'});
   assert.deepEqual(calls[0],['gushenCompletion.pullApiSource','projects.a']);
   await registrations[0]({action:'arbitrary-command'});assert.equal(calls.length,1);
-  for(const [action,command] of Object.entries({search:'searchCurrentApiWorkspace',history:'showApiHistory',scope:'selectApiSystems',settings:'configureProject',doctor:'runDoctor'})) {
+  for(const [action,command] of Object.entries({search:'searchCurrentApiWorkspace',history:'showProjectHistory',scope:'selectApiSystems',settings:'configureProject',doctor:'showProjectChecks'})) {
     await registrations[0]({action,workspaceKey:'projects.a'});
     assert.deepEqual(calls.at(-1),['gushenCompletion.'+command,'projects.a']);
   }

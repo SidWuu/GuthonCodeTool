@@ -208,6 +208,30 @@ def script_files(script):
     return files
 
 
+def project_files(client):
+    files = []
+    for kind, endpoint in [
+        ("config", "getOtherConfig.htm"),
+        ("skill", "getSkills.htm"),
+    ]:
+        data = client.request(BASE + endpoint)
+        if not isinstance(data, dict) or not isinstance(data.get("files"), list):
+            raise ApiError("API_RESPONSE_INVALID", "平台资料应答缺少files")
+        for item in data["files"]:
+            required(item, ("path",))
+            # The official package paths are kept below checkout and never executed.
+            files.append(
+                source_file(
+                    item["path"].replace("\\", "/").lstrip("/"),
+                    item.get("context"),
+                    kind,
+                    {"managedBy": "official-api"},
+                    True,
+                )
+            )
+    return files
+
+
 def download(client, config, *, on_project=None):
     client.ensure_login()
     systems = records(client.request("/develop/systems/apps/developSystemList.htm"))
@@ -252,26 +276,10 @@ def download(client, config, *, on_project=None):
         for kind, endpoint in [("table", "getTables.htm"), ("view", "getViews.htm")]:
             for obj in records(client.request(BASE + endpoint, {"dataSourceId": ds})):
                 files.extend(object_files(obj, kind, ds))
+    from .module_parameters import download_parameters
+    files.extend(download_parameters(client, [by_id[sid] for sid in selected]))
     if config.get("includeProjectFiles", True):
-        for kind, endpoint in [
-            ("config", "getOtherConfig.htm"),
-            ("skill", "getSkills.htm"),
-        ]:
-            data = client.request(BASE + endpoint)
-            if not isinstance(data, dict) or not isinstance(data.get("files"), list):
-                raise ApiError("API_RESPONSE_INVALID", "平台资料应答缺少files")
-            for item in data["files"]:
-                required(item, ("path",))
-                # The official package paths are kept below checkout and never executed.
-                files.append(
-                    source_file(
-                        item["path"].replace("\\", "/").lstrip("/"),
-                        item.get("context"),
-                        kind,
-                        {"managedBy": "official-api"},
-                        True,
-                    )
-                )
+        files.extend(project_files(client))
     paths = [x.path.casefold() for x in files]
     if len(paths) != len(set(paths)):
         raise ApiError("API_IDENTITY_AMBIGUOUS", "下载对象映射到重复文件")

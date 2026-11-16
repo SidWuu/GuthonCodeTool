@@ -3,8 +3,8 @@ const fs=require('node:fs');
 const path=require('node:path');
 
 const actions=Object.freeze({pull:'gushenCompletion.pullApiSource',upload:'gushenCompletion.uploadApiSource',
-  search:'gushenCompletion.searchCurrentApiWorkspace',changes:'workbench.view.scm',history:'gushenCompletion.showApiHistory',
-  scope:'gushenCompletion.selectApiSystems',settings:'gushenCompletion.configureProject',doctor:'gushenCompletion.runDoctor'});
+  search:'gushenCompletion.searchCurrentApiWorkspace',changes:'workbench.view.scm',history:'gushenCompletion.showProjectHistory',
+  scope:'gushenCompletion.selectApiSystems',settings:'gushenCompletion.configureProject',doctor:'gushenCompletion.showProjectChecks'});
 function escapeHtml(value) {
   return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 }

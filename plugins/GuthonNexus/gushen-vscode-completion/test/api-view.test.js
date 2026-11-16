@@ -47,7 +47,7 @@ test('unknown view save is not replayed',async()=>{
   assert.equal(f.calls.filter(x=>x.input.action==='save').length,1);f.virtualFs.dispose();
 });
 test('view quick diff uses only the matching hash-bound SQL baseline',async()=>{
-  const f=fixture();await f.virtualFs.readFile(f.uri);const provider=new ApiQuickDiff({vscode:f.vscode,run:f.run,editorState:f.editorState,ui:{scmGenerations:new Map()},viewBase:(uri,diff)=>f.virtualFs.viewBase(uri,diff)});
+  const f=fixture();await f.virtualFs.readFile(f.uri);const provider=new ApiQuickDiff({vscode:f.vscode,run:f.run,editorState:f.editorState,ui:{scmGenerations:new Map()},projectionBase:(uri,diff)=>f.virtualFs.projectionBase(uri,diff)});
   const original=await provider.provideOriginalResource(f.uri);assert.equal(provider.provideTextDocumentContent(original),'select 0');
   provider.run=async(...args)=>{const result=await f.run(...args);if(args[1]==='diff')result.baseHash='different';return result;};
   assert.equal(await provider.provideOriginalResource(f.uri),undefined);provider.dispose();f.virtualFs.dispose();

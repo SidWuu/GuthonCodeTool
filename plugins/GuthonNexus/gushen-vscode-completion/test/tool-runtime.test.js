@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  normalizeExecutionMode, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime,
+  normalizeExecutionMode, runtimeSelectionOptions, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime,
   toolArguments, writeRuntimeDescriptor,
 } = require('../src/tool-runtime');
 
@@ -124,6 +124,26 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
   });
 
   fs.rmSync(home, { recursive: true });
+});
+
+test('selecting development mode always asks for the source directory', () => {
+  assert.deepEqual(runtimeSelectionOptions('packaged'), {
+    probeScript: true, probePackaged: true,
+    selectScript: false, selectPackaged: false, selectDevelopment: false,
+  });
+  for (const mode of ['source-development', 'development']) {
+    assert.equal(runtimeSelectionOptions(mode).selectDevelopment, true, mode);
+  }
+  assert.equal(runtimeSelectionOptions('script').selectDevelopment, false);
+  assert.deepEqual(runtimeSelectionOptions('packaged', true), {
+    probeScript: true, probePackaged: true,
+    selectScript: true, selectPackaged: true, selectDevelopment: true,
+  });
+  // 命令必须复用该选项，否则仍会沿用旧的 developmentRoot 而不弹目录选择。
+  const extension = fs.readFileSync(path.join(__dirname, '../src/extension.js'), 'utf8');
+  const command = /registerCommand\('gushenCompletion\.selectExecutionMode'[\s\S]*?\n    \}\),/.exec(extension);
+  assert.ok(command, 'selectExecutionMode must stay registered');
+  assert.match(command[0], /runtimeSelectionOptions\(selected\.value, selectEntry\)/);
 });
 
 test('migrates the old development setting and keeps script paths separate', () => {

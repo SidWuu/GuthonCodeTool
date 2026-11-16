@@ -32,6 +32,11 @@ ACTIONS = (
     "refresh",
     "status",
     "catalog",
+    "reference",
+    "reference-sync",
+    "module-parameters-sync",
+    "module-parameter",
+    "module-upload",
     "read",
     "write",
     "diff",
@@ -135,6 +140,11 @@ def execute(workspace, action, payload):
                     for item in active
                 ),
             },
+            "unverifiedUploadCount": sum(operation.get("kind") in {"upload","module-upload"} and
+                (operation.get("stage") in {"UNKNOWN","REMOTE_REQUEST_STARTED","REMOTE_ACKNOWLEDGED","SAVE_REQUEST_STARTED","CHECKOUT_REQUEST_STARTED"} or
+                 any(item.get("stage") in {"UNKNOWN","REMOTE_REQUEST_STARTED","REMOTE_ACKNOWLEDGED","SAVE_REQUEST_STARTED","CHECKOUT_REQUEST_STARTED"} for item in operation.get("results",[])) or operation.get("kind")=="module-upload" and
+                 (operation.get("stage")=="PREPARED" or any(item.get("stage")=="PREPARED" for item in operation.get("results",[]))))
+                for operation in (store.history(50) if not summary_only else [])),
             "changesOnly": changes_only,
             "summaryComplete": not summary_only,
             "statusKind": "metadata-only" if summary_only else "scanned",
@@ -142,6 +152,13 @@ def execute(workspace, action, payload):
             "sessionPersistence": "current-toolhost-or-system-keyring",
             "lastLogin": last_login(workspace),
         }
+    if action == "module-parameter":
+        from .module_parameter_editor import run
+        return run(workspace,payload)
+    if action == "reference":
+        from .reference_assets import read_reference
+
+        return read_reference(workspace, payload)
     if action == "editor-state":
         from .editor_state import update
 
@@ -341,6 +358,15 @@ def execute(workspace, action, payload):
         from . import sync
         return sync.scope_apply(workspace, None, payload)
     client = client_for(workspace, authenticated=True)
+    if action == "module-parameters-sync":
+        from .module_parameters import sync_parameters
+        return sync_parameters(workspace, client)
+    if action == "module-upload":
+        from .module_parameter_upload import run
+        return run(workspace,client,payload)
+    if action == "reference-sync":
+        from .reference_assets import sync_references
+        return sync_references(workspace, client)
     if action == "designer-context":
         return client.designer_context()
     if action == "system-menu":

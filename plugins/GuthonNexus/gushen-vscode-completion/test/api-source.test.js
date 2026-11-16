@@ -25,7 +25,8 @@ test('source catalog builds tree for the selected API workspace',async()=>{
   const f=fixture();f.ui.run=async()=>({objects:[{path:'systems/1/a.gss',label:'页面',readonly:false},{path:'systems/1/b.gss',readonly:true}]});
   f.ui.syncWorkspaces([{workspaceKey:'projects.a',sourceMode:'api'},{workspaceKey:'projects.b',sourceMode:'database'}]);
   const root=await f.ui.getChildren();assert.deepEqual(root.slice(0,5).map(x=>x.label),['页面','过程函数','表','视图','系统脚本']);
-  assert.equal(root.find(x=>x.label==='其他源码').children[0].children[0].children[0].label,'b.gss');
+  // 默认按平台顺序：没有平台 ID 的源码回落到文件名顺序（a.gss 在 b.gss 之前）。
+  assert.deepEqual(root.find(x=>x.label==='其他源码').children[0].children[0].children.map(x=>x.label),['页面','b.gss']);
   assert.throws(()=>identity({resourceUri:{scheme:'file'}}),/请选择/);
 });
 test('catalog shows system, datasource and nested menu names with exact page identities',async()=>{

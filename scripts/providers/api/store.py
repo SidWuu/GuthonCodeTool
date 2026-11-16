@@ -527,7 +527,7 @@ class ApiStore:
             )
         )
 
-    def publish(self, files, *, scope=None, authoritative=False, uploaded_content=None):
+    def publish(self, files, *, scope=None, authoritative=False, uploaded_content=None, authoritative_source_types=None):
         self._verify_binding(create=True)
         self.directory.mkdir(parents=True, exist_ok=True)
         paths = [x.path for x in files]
@@ -691,6 +691,8 @@ class ApiStore:
                         "SELECT path,content,metadata,readonly FROM source"
                     ).fetchall():
                         meta = json.loads(rawmeta)
+                        if authoritative_source_types is not None and meta.get("sourceType") not in authoritative_source_types:
+                            continue
                         if path in incoming or not in_scope(self.workspace, path, meta):
                             continue
                         target = self._path(path)

@@ -82,7 +82,8 @@ def snapshot(workspace, payload):
     source_text = (
         display_text(item["content"]) if fmt == "native-xml" else item["content"]
     )
-    model = page_editor.describe(source_text)
+    from .reference_assets import enrich_page_model
+    model = enrich_page_model(workspace, page_editor.describe(source_text))
     token = uuid.uuid4().hex
     record = {
         "workspaceKey": workspace["workspaceKey"],

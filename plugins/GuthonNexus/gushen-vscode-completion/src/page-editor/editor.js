@@ -338,9 +338,11 @@
     if (!field) { root.append(el('p', '选择字段或区域按钮编辑已有属性与事件。', 'empty')); return; }
     root.append(el('h3', title(field)));
     if (collection.kind!=='BUTTONS') root.append(el('code', field.key));
+    for(const warning of model.referenceWarnings || [])root.append(el('p',warning,'notice'));
     if (field.reason) root.append(el('p', field.reason, 'notice'));
     for (const prop of field.properties) {
       const label = el('label', prop.label);
+      if(prop.description)label.title=prop.description;
       const input = el('input');
       const flag = ['isHide', 'isDisabled'].includes(prop.name);
       const boolean = typeof prop.value === 'boolean' || flag;
@@ -446,7 +448,7 @@
       || previousState?.editable !== state.editable || previousState?.pageName !== state.pageName;
     render(changedView ? null : received); flush();
   });
-  for (const type of ['save', 'undo', 'redo', 'export', 'resume', 'native', 'reload', 'manageResources']) $(type)?.addEventListener('click', () => send(type));
+  for (const type of ['save', 'undo', 'redo', 'export', 'resume', 'native', 'reload', 'manageResources', 'platformReference']) $(type)?.addEventListener('click', () => send(type));
   $('search').addEventListener('input', event => {
     query = event.target.value.trim().toLowerCase();
     if (compareMode === 'external') renderSourceMerge(); else if (compareMode) renderComparison(); else renderFields(state.model);

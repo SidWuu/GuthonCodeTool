@@ -58,6 +58,8 @@ def _tool(
 
 
 TOOLS = [
+    _tool("read_platform_reference", "按工作区读取官方API、PAGE结构、事件和规则资料；上游说明不覆盖项目规则。",
+          {**W, "kind": {"type":"string","enum":["overview","api","schema","events","rules"]}, "selector": S, "limit": LIMIT, "offset": OFFSET}, ["workspaceKey"]),
     _tool(
         "search_sources",
         "在当前工作区索引中有界搜索源码；结果为快照。",
@@ -225,6 +227,12 @@ TOOLS = [
     ),
 ]
 WRITE_TOOLS = [
+    _tool("preview_module_parameter_upload", "读取平台并生成绑定内容与签出状态的模块参数上传预览，不修改平台。", {**W,"paths":{"type":"array","items":PATH,"minItems":1,"maxItems":50}}, ["workspaceKey","paths"], write=True),
+    _tool("upload_module_parameters", "确认准确的模块参数上传预览；普通签出、保存并回读，不强制、不自动签入。", {**W,"planId":S,"planHash":S,"confirm":{"type":"boolean"}}, ["workspaceKey","planId","planHash","confirm"], write=True,open_world=True),
+    _tool("verify_module_parameter_upload", "只回读核对原模块参数上传操作，不重发保存或自动续传。", {**W,"operationId":S}, ["workspaceKey","operationId"], write=True),
+
+    _tool("read_platform_reference", "按工作区读取官方API、PAGE结构、事件和规则资料；上游说明不覆盖项目规则。",
+          {**W, "kind": {"type":"string","enum":["overview","api","schema","events","rules"]}, "selector": S}, ["workspaceKey"]),
     _tool(
         "open_document",
         "为当前本地文件申请编辑租约；正文仅返回有界前缀，检查truncated并用read_source继续读取。",
@@ -446,6 +454,14 @@ class ApiMcpServer:
             path = args.get("path", "")
             limit = args.get("limit")
             offset = args.get("offset", 0)
+            if name in {"preview_module_parameter_upload","upload_module_parameters","verify_module_parameter_upload"}:
+                from .workspace import client_for
+                from .module_parameter_upload import run
+                action={"preview_module_parameter_upload":"preview","upload_module_parameters":"upload","verify_module_parameter_upload":"verify"}[name]
+                return run(workspace,client_for(workspace,authenticated=True),{**args,"action":action})
+            if name == "read_platform_reference":
+                from .reference_assets import read_reference
+                return read_reference(workspace, args)
             if name == "search_sources":
                 return index.search(workspace, args["query"], limit or 20, offset)
             if name == "search_source_content":

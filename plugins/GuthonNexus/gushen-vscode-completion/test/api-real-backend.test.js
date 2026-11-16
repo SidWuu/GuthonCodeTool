@@ -87,7 +87,7 @@ test('native XML view SQL editor saves through real backend and retains SQL base
   f.docs.push({uri,isDirty:true,version:1});await f.editorState.flush(key);
   assert.equal((await f.virtualFs.readFile(uri)).toString(),'select 1\n');await f.virtualFs.writeFile(uri,Buffer.from('select 2\n'));
   const after=await f.run(key,'read',{path:f.viewPath});assert.match(after.content,/<!-- keep -->/);assert.match(after.content,/<other value="keep"\/>/);assert.match(after.content,/select 2/);
-  const diff=new ApiQuickDiff({vscode:f.vscode,run:f.run,editorState:f.editorState,ui:{scmGenerations:new Map()},viewBase:(uri,result)=>f.virtualFs.viewBase(uri,result)}),original=await diff.provideOriginalResource(uri);
+  const diff=new ApiQuickDiff({vscode:f.vscode,run:f.run,editorState:f.editorState,ui:{scmGenerations:new Map()},projectionBase:(uri,result)=>f.virtualFs.projectionBase(uri,result)}),original=await diff.provideOriginalResource(uri);
   assert.ok(original);assert.equal(diff.provideTextDocumentContent(original),'select 1\n');
   diff.dispose();f.virtualFs.dispose();await new Promise(resolve=>setImmediate(resolve));await f.editorState.close();
 });

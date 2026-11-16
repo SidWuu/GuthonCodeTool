@@ -161,6 +161,15 @@
           "default": "",
           "description": "Optional absolute path to a custom rules.json file. Empty means use the extension bundled rules.json."
         },
+        "gushenCompletion.sourceTreeOrder": {
+          "type": "string",
+          "enum": [
+            "platform",
+            "name"
+          ],
+          "default": "platform",
+          "description": "源码树同级排序：platform 按平台菜单顺序和对象 ID（页面 pageId、函数 funId）排序；name 按显示名称排序。"
+        },
         "gushenCompletion.toolPath": {
           "type": "string",
           "default": "",
@@ -207,16 +216,16 @@
       }
     },
     "commands": [
+      {"command":"gushenCompletion.editModuleParameter","title":"Guthon Nexus: 编辑模块参数 data"},
+      {"command":"gushenCompletion.previewModuleParameter","title":"Guthon Nexus: 预览模块参数差异"},
+      {"command":"gushenCompletion.uploadModuleParameters","title":"Guthon Nexus: 预览并上传模块参数"},
+      {"command":"gushenCompletion.syncModuleParameters","title":"Guthon Nexus: 同步模块参数"},
+      {"command": "gushenCompletion.syncPlatformReferences", "title": "Guthon Nexus: 同步官方参考资料"},
+      {"command": "gushenCompletion.configureReferenceAssets", "title": "Guthon Nexus: 配置官方参考资料"},
+      {"command": "gushenCompletion.showPlatformReference", "title": "Guthon Nexus: 当前项目开发参考"},
       {"command":"gushenCompletion.configureProject","title":"Guthon Nexus: 项目设置向导","icon":"$(gear)"},
       {"command":"gushenCompletion.showProjectActions","title":"Guthon Nexus: 项目全部操作","icon":"$(ellipsis)"},
-      {"command":"gushenCompletion.projectMenuIndexDiagnostics","title":"Guthon Nexus: 查看当前项目索引诊断","shortTitle":"索引诊断"},
-      {"command":"gushenCompletion.projectMenuRetryIndex","title":"Guthon Nexus: 重试当前项目待更新索引","shortTitle":"重试待更新文件"},
-      {"command":"gushenCompletion.projectMenuReindex","title":"Guthon Nexus: 重建当前项目索引","shortTitle":"重建索引"},
-      {"command":"gushenCompletion.projectMenuVerifyUpload","title":"Guthon Nexus: 核对当前项目未知上传","shortTitle":"核对未知上传"},
-      {"command":"gushenCompletion.projectMenuExportChanges","title":"Guthon Nexus: 导出当前项目本地修改","shortTitle":"导出本地修改"},
-      {"command":"gushenCompletion.projectMenuImportChanges","title":"Guthon Nexus: 导入当前项目本地修改","shortTitle":"导入本地修改"},
       {"command":"gushenCompletion.projectMenuOpenCheckout","title":"Guthon Nexus: 在独立窗口打开当前项目","shortTitle":"打开项目目录"},
-      {"command":"gushenCompletion.projectMenuExportContext","title":"Guthon Nexus: 导出当前项目 AI 上下文","shortTitle":"导出 AI 上下文"},
       {"command":"gushenCompletion.configureApiSource","title":"Guthon Nexus: 配置 API 项目地址"},
       {"command":"gushenCompletion.loginApiSource","title":"Guthon Nexus: 登录 API 项目"},
       {"command":"gushenCompletion.selectApiSystems","title":"Guthon Nexus: 选择 API 子系统"},
@@ -300,7 +309,9 @@
       {"command":"gushenCompletion.copyApiLocatorLink","title":"Guthon Nexus: 复制源码定位链接"},
       {"command":"gushenCompletion.copyApiAiContext","title":"Guthon Nexus: 复制 AI 上下文"},
       {"command":"gushenCompletion.openApiSourceInBrowser","title":"Guthon Nexus: 在平台定位源码"},
-      {"command":"gushenCompletion.showApiInheritance","title":"Guthon Nexus: 查看继承源码"}
+      {"command":"gushenCompletion.showApiInheritance","title":"Guthon Nexus: 查看继承源码"},
+      {"command": "gushenCompletion.showProjectChecks", "title": "Guthon Nexus: 项目环境与索引", "shortTitle": "项目环境与索引"},
+      {"command": "gushenCompletion.showProjectHistory", "title": "Guthon Nexus: 项目操作记录", "shortTitle": "项目操作记录"}
     ],
     "viewsContainers": {
       "activitybar": [
@@ -309,74 +320,55 @@
     },
     "views": {
       "guthon": [
-        {"id":"gushenCompletion.projectDetails","name":"谷神项目","type":"webview","initialSize":1},
+        {"id":"gushenCompletion.projectDetails","name":"谷神项目","type":"webview","initialSize":2},
         {"id":"gushenCompletion.sourceView","name":"谷神源码","initialSize":3}
       ]
     },
     "submenus": [
-      {"id":"gushenCompletion.projectImportExport","label":"导入与导出"},
-      {"id":"gushenCompletion.projectManagement","label":"项目管理"},
-      {"id":"gushenCompletion.projectTools","label":"工具与更新"}
+      {
+        "id": "gushenCompletion.projectManagement",
+        "label": "项目管理"
+      },
+      {
+        "id": "gushenCompletion.toolSettings",
+        "label": "工具设置"
+      },
+      {
+        "id": "gushenCompletion.updateOptions",
+        "label": "检查更新"
+      }
     ],
     "menus": {
       "commandPalette": [
-        {"command":"gushenCompletion.projectMenuIndexDiagnostics","when":"false"},
-        {"command":"gushenCompletion.projectMenuRetryIndex","when":"false"},
-        {"command":"gushenCompletion.projectMenuReindex","when":"false"},
-        {"command":"gushenCompletion.projectMenuVerifyUpload","when":"false"},
-        {"command":"gushenCompletion.projectMenuExportChanges","when":"false"},
-        {"command":"gushenCompletion.projectMenuImportChanges","when":"false"},
         {"command":"gushenCompletion.projectMenuOpenCheckout","when":"false"},
-        {"command":"gushenCompletion.projectMenuExportContext","when":"false"}
+        {"command":"gushenCompletion.exportApiChanges","when":"false"},
+        {"command":"gushenCompletion.importApiChanges","when":"false"}
       ],
       "view/title": [
-        {"command":"gushenCompletion.refreshToolView","when":"view == gushenCompletion.projectDetails","group":"view@1"},
-        {"command":"gushenCompletion.projectMenuIndexDiagnostics","when":"view == gushenCompletion.projectDetails","group":"view@2"},
-        {"command":"gushenCompletion.projectMenuRetryIndex","when":"view == gushenCompletion.projectDetails","group":"view@3"},
-        {"command":"gushenCompletion.projectMenuReindex","when":"view == gushenCompletion.projectDetails","group":"view@4"},
-        {"command":"gushenCompletion.projectMenuVerifyUpload","when":"view == gushenCompletion.projectDetails","group":"view@5"},
-        {"command":"gushenCompletion.runDiagnosis","when":"view == gushenCompletion.projectDetails","group":"view@6"},
-        {"command":"gushenCompletion.showDiagnosisHistory","when":"view == gushenCompletion.projectDetails","group":"view@7"},
-        {"submenu":"gushenCompletion.projectImportExport","when":"view == gushenCompletion.projectDetails","group":"view@8"},
-        {"submenu":"gushenCompletion.projectManagement","when":"view == gushenCompletion.projectDetails","group":"view@9"},
-        {"submenu":"gushenCompletion.projectTools","when":"view == gushenCompletion.projectDetails","group":"view@10"},
         {"command":"gushenCompletion.locateActiveApiSource","when":"view == gushenCompletion.sourceView","group":"navigation@1"},
         {"command":"gushenCompletion.searchCurrentApiWorkspace","when":"view == gushenCompletion.sourceView","group":"navigation@2"},
         {"command":"gushenCompletion.refreshAllApiSources","when":"view == gushenCompletion.sourceView","group":"navigation@3"},
         {"command":"gushenCompletion.expandApiSelectedSource","when":"view == gushenCompletion.sourceView","group":"view@2"},
-        {"command":"gushenCompletion.collapseApiSelectedSource","when":"view == gushenCompletion.sourceView","group":"view@3"}
-      ],
-      "gushenCompletion.projectImportExport": [
-        {"command":"gushenCompletion.projectMenuExportChanges","group":"1_changes@1"},
-        {"command":"gushenCompletion.projectMenuImportChanges","group":"1_changes@2"},
-        {"command":"gushenCompletion.exportMarkdown","group":"2_exports@1"},
-        {"command":"gushenCompletion.exportSchema","group":"2_exports@2"},
-        {"command":"gushenCompletion.exportViews","group":"2_exports@3"},
-        {"command":"gushenCompletion.exportSystemScripts","group":"2_exports@4"},
-        {"command":"gushenCompletion.exportBillTypes","group":"2_exports@5"},
-        {"command":"gushenCompletion.projectMenuExportContext","group":"2_exports@6"}
+        {"command":"gushenCompletion.collapseApiSelectedSource","when":"view == gushenCompletion.sourceView","group":"view@3"},
+        {"submenu":"gushenCompletion.projectManagement","when":"view == gushenCompletion.projectDetails","group":"view@1"},
+        {"when":"view == gushenCompletion.projectDetails","group":"view@2","submenu":"gushenCompletion.toolSettings"},
+        {"when":"view == gushenCompletion.projectDetails","group":"view@3","submenu":"gushenCompletion.updateOptions"},
+        {"command":"gushenCompletion.exportMarkdown","when":"view == gushenCompletion.sourceView","group":"exports@1"}
       ],
       "gushenCompletion.projectManagement": [
         {"command":"gushenCompletion.projectMenuOpenCheckout","group":"1_project@1"},
         {"command":"gushenCompletion.addWorkspace","group":"1_project@2"},
         {"command":"gushenCompletion.deleteWorkspace","group":"1_project@3"}
       ],
-      "gushenCompletion.projectTools": [
-        {"command":"gushenCompletion.checkToolUpdate","group":"1_updates@1"},
-        {"command":"gushenCompletion.checkOfficialUpdate","group":"1_updates@2"},
-        {"command":"gushenCompletion.rollbackOfficialUpdate","group":"1_updates@3"},
-        {"command":"gushenCompletion.rollbackToolUpdate","group":"1_updates@4"},
-        {"command":"gushenCompletion.selectExecutionMode","group":"2_settings@1"},
-        {"command":"gushenCompletion.selectUpdateSource","group":"2_settings@2"},
-        {"command":"gushenCompletion.setupTool","group":"2_settings@3"},
-        {"command":"gushenCompletion.openToolHome","group":"2_settings@4"},
-        {"command":"gushenCompletion.startBridge","when":"!gushenCompletion.bridgeRunning","group":"3_bridge@1"},
-        {"command":"gushenCompletion.stopBridge","when":"gushenCompletion.bridgeRunning","group":"3_bridge@1"}
-      ],
       "view/item/context": [
-        {"command":"gushenCompletion.openApiSource","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view|readonly)$/","group":"navigation@1"},
-        {"command":"gushenCompletion.openApiOriginalSource","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view|readonly)$/","group":"navigation@2"},
-        {"command":"gushenCompletion.previewApiSource","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view|readonly)$/","group":"navigation@2"},
+        {"command":"gushenCompletion.editModuleParameter","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.module-parameter","group":"navigation@1"},
+        {"command":"gushenCompletion.previewModuleParameter","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.module-parameter","group":"navigation@2"},
+        {"command":"gushenCompletion.uploadModuleParameters","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.module-parameter","group":"upload@1"},
+        {"command":"gushenCompletion.syncModuleParameters","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.category.module-parameters","group":"navigation@1"},
+        {"command":"gushenCompletion.showPlatformReference","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.category.skills","group":"navigation@1"},
+        {"command":"gushenCompletion.openApiSource","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|bill-type|dropdown|system-script|page|procedure|table|view|readonly)$/","group":"navigation@1"},
+        {"command":"gushenCompletion.openApiOriginalSource","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|module-parameter|bill-type|dropdown|system-script|page|procedure|table|view|readonly)$/","group":"navigation@2"},
+        {"command":"gushenCompletion.previewApiSource","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|module-parameter|bill-type|dropdown|system-script|page|procedure|table|view|readonly)$/","group":"navigation@2"},
         {"command":"gushenCompletion.openApiFragment","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.fragment\\.(fields|script)$/","group":"navigation@1"},
         {"command":"gushenCompletion.openApiPageEditor","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.page","group":"navigation@1"},
         {"command":"gushenCompletion.openApiDesigner","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.page","group":"navigation@2"},
@@ -390,16 +382,25 @@
         {"command":"gushenCompletion.showApiInheritance","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.fragment.script","group":"navigation@2"},
         {"command":"gushenCompletion.showApiInheritance","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(procedure|page)$/","group":"navigation@5"},
         {"command":"gushenCompletion.openApiSourceInBrowser","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(procedure|page)$/","group":"navigation@6"},
-        {"command":"gushenCompletion.copyApiLocatorLink","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view)$/","group":"navigation@7"},
-        {"command":"gushenCompletion.copyApiAiContext","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view)$/","group":"navigation@8"},
-        {"command":"gushenCompletion.browseApiImpactEvidence","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view)$/","group":"navigation@9"},
-        {"command":"gushenCompletion.showApiImpact","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view)$/","group":"navigation@9"},
-        {"command":"gushenCompletion.exportAiContext","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view)$/","group":"navigation@10"},
-        {"command":"gushenCompletion.refreshApiObject","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|page|procedure|table|view)$/","group":"navigation@11"}
+        {"command":"gushenCompletion.copyApiLocatorLink","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|system-script|page|procedure|table|view)$/","group":"navigation@7"},
+        {"command":"gushenCompletion.copyApiAiContext","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|system-script|page|procedure|table|view)$/","group":"navigation@8"},
+        {"command":"gushenCompletion.browseApiImpactEvidence","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|system-script|page|procedure|table|view)$/","group":"navigation@9"},
+        {"command":"gushenCompletion.showApiImpact","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|system-script|page|procedure|table|view)$/","group":"navigation@9"},
+        {"command":"gushenCompletion.exportAiContext","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|system-script|page|procedure|table|view)$/","group":"navigation@10"},
+        {"command":"gushenCompletion.refreshApiObject","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonApi\\.(source|system-script|page|procedure|table|view)$/","group":"navigation@11"},
+        {"command":"gushenCompletion.exportSchema","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.category.tables","group":"exports@1"},
+        {"command":"gushenCompletion.exportSchema","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.table","group":"exports@1"},
+        {"command":"gushenCompletion.exportViews","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.category.views","group":"exports@1"},
+        {"command":"gushenCompletion.exportViews","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.view","group":"exports@1"},
+        {"command":"gushenCompletion.exportSystemScripts","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.category.system-script","group":"exports@1"},
+        {"command":"gushenCompletion.exportBillTypes","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.category.bill-type","group":"exports@1"},
+        {"command":"gushenCompletion.exportSystemScripts","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.system-script","group":"exports@1"},
+        {"command":"gushenCompletion.exportBillTypes","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.bill-type","group":"exports@1"}
       ],
       "scm/title": [
         {"command":"gushenCompletion.refreshApiScm","when":"scmProvider =~ /^guthon-api-/","group":"navigation@1"},
-        {"command":"gushenCompletion.uploadApiSource","when":"scmProvider =~ /^guthon-api-/","group":"navigation@2"}
+        {"command":"gushenCompletion.uploadApiSource","when":"scmProvider =~ /^guthon-api-/","group":"navigation@2"},
+        {"command":"gushenCompletion.verifyApiUpload","when":"scmProvider =~ /^guthon-api-/ && gushenCompletion.hasUnknownUpload","group":"verify@1"}
       ],
       "scm/change/title": [
         {"command":"gushenCompletion.revertApiQuickDiffChange","when":"originalResourceScheme == guthon-api-diff","group":"navigation@1"}
@@ -410,6 +411,20 @@
         {"command":"gushenCompletion.revertApiSource","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.change","group":"inline@2"},
         {"command":"gushenCompletion.uploadApiSource","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.change","group":"inline@3"},
         {"command":"gushenCompletion.resolveApiConflict","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.conflict","group":"inline@2"}
+      ],
+      "gushenCompletion.toolSettings": [
+        {"command":"gushenCompletion.selectExecutionMode","group":"settings@1"},
+        {"command":"gushenCompletion.selectUpdateSource","group":"settings@2"},
+        {"command":"gushenCompletion.setupTool","group":"settings@3"},
+        {"command":"gushenCompletion.openToolHome","group":"settings@4"},
+        {"command":"gushenCompletion.startBridge","when":"!gushenCompletion.bridgeRunning","group":"bridge@1"},
+        {"command":"gushenCompletion.stopBridge","when":"gushenCompletion.bridgeRunning","group":"bridge@1"}
+      ],
+      "gushenCompletion.updateOptions": [
+        {"command":"gushenCompletion.checkToolUpdate","group":"updates@1"},
+        {"command":"gushenCompletion.checkOfficialUpdate","group":"updates@2"},
+        {"command":"gushenCompletion.rollbackOfficialUpdate","group":"updates@3"},
+        {"command":"gushenCompletion.rollbackToolUpdate","group":"updates@4"}
       ]
     }
   },

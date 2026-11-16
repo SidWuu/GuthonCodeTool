@@ -62,7 +62,7 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
       if(node) return api.openFragment({workspaceKey:key,sourceType:'page',sourcePath,sourceId:snapshot.sourceId,jsonPointer:node.pointer,
         fragmentType:scriptType(node),documentName:node.label});
     }
-    const editor=await ui.open(key,sourcePath,false);
+    const editor=await ui.open(key,sourcePath,false,{lineNumber:item.lineNumber});
     if(item.line>0 && editor?.document) {
       const line=Math.min(item.line-1,Math.max(0,editor.document.lineCount-1));
       editor.selection=new vscode.Selection(line,0,line,0);editor.revealRange(new vscode.Range(line,0,line,0));

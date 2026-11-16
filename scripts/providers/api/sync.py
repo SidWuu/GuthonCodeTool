@@ -414,6 +414,8 @@ def upload(workspace, client, payload):
     ):
         raise ApiError("API_INPUT_INVALID", "上传需要1至200个精确源码路径")
     paths = list(dict.fromkeys(paths))
+    if any(store.read(path)["metadata"].get("sourceType")=="module-parameter" for path in paths):
+        raise ApiError("API_MODULE_UPLOAD_PREVIEW_REQUIRED","模块参数需使用模块参数上传预览与确认流程")
     expected = payload.get("expectedHashes", {})
     if not isinstance(expected, dict) or any(
         not isinstance(k, str) or not isinstance(v, str) for k, v in expected.items()

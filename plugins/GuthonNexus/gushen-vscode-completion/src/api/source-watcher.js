@@ -3,7 +3,7 @@ const RECOVERY_KEY='guthon.api.indexRecovery';
 function sourcePathAllowed(p) {
   if(typeof p!=='string' || p.includes('\\')) return false;
   const parts=p.split('/');if(parts.some(part=>!part || part==='.' || part==='..' || part.startsWith('.')) || /^agents\.md$/i.test(parts.at(-1))) return false;
-  if(parts[0]==='systems') return (parts[2]==='pages' && parts.length>=6) || (parts[2]==='system-script' && parts.length===4);
+  if(parts[0]==='systems') return (parts[2]==='pages' && parts.length>=6) || (['system-script','module-parameters'].includes(parts[2]) && parts.length===4);
   if(parts[0]==='datasources') return ['procedures','tables','views'].includes(parts[2]) && parts.length>=4;
   return ['otherconfig','skills'].includes(parts[0]) && parts.length>=2;
 }

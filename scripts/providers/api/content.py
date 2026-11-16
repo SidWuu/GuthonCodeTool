@@ -20,6 +20,11 @@ def parent_layers(data, path=""):
 
 
 def validate_candidate(path, metadata, baseline, candidate):
+    if metadata.get("sourceType") == "module-parameter":
+        from .module_parameter_editor import validate_candidate as validate_module
+        validate_module(baseline, candidate, metadata)
+        return
+
     if metadata.get("sourceType") == "view":
         from .view_editor import extract_sql, is_metadata_only
 

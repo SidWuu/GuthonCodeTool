@@ -3,17 +3,17 @@ const {showProjectActions,showProjectSettings,projectMenuHandler,projectToolHand
 
 test('keyboard fallback presents searchable actions in one grouped picker',async()=>{
   const calls=[],menus=[],p={workspaceKey:'products.A',name:'A'};
-  const vscode={QuickPickItemKind:{Separator:-1},window:{showQuickPick:async(items,options)=>{menus.push({items,options});return items.find(x=>x.label==='导出本地修改');}},commands:{executeCommand:async(...args)=>calls.push(args)}};
+  const vscode={QuickPickItemKind:{Separator:-1},window:{showQuickPick:async(items,options)=>{menus.push({items,options});return items.find(x=>x.label==='选择运行方式');}},commands:{executeCommand:async(...args)=>calls.push(args)}};
   await showProjectActions({vscode,getWorkspaces:async()=>[p],bridge:{isRunning:()=>false}});
-  assert.equal(menus.length,1);assert.equal(menus[0].options.title,'A · 项目全部操作');assert.equal(menus[0].options.matchOnDescription,true);assert(menus[0].items.some(x=>x.label==='导入与导出'&&x.kind===-1));
-  assert(menus[0].items.some(x=>x.label==='启动浏览器增强'));assert(!menus[0].items.some(x=>x.label==='停止浏览器增强'));
-  assert.deepEqual(calls,[['gushenCompletion.exportApiChanges','products.A']]);
+  assert.equal(menus.length,1);assert.equal(menus[0].options.title,'A · 项目全部操作');assert.equal(menus[0].options.matchOnDescription,true);assert(!menus[0].items.some(x=>/导入|导出/.test(x.label)));
+  assert(menus[0].items.some(x=>x.label==='检查工具组件更新'));
+  assert.deepEqual(calls,[['gushenCompletion.selectExecutionMode']]);
 });
 test('keyboard fallback respects project selection and cancellation',async()=>{
   const calls=[],menus=[],items=[{workspaceKey:'products.A',displayName:'A'},{workspaceKey:'projects.B',displayName:'B'}];
   let cancel=false;const vscode={QuickPickItemKind:{Separator:-1},window:{showQuickPick:async choices=>{menus.push(choices);return menus.length%2===1 ? choices.find(x=>x.label==='重建全部索引') : cancel?undefined:choices[1];}},commands:{executeCommand:async(...args)=>calls.push(args)}};
   await showProjectActions({vscode,getWorkspaces:async()=>items,bridge:{isRunning:()=>true}});
-  assert.equal(menus.length,2);assert(menus[0].some(x=>x.label==='停止浏览器增强'));assert.deepEqual(calls,[['gushenCompletion.reindexCalls','projects.B']]);
+  assert.equal(menus.length,2);assert(menus[0].some(x=>x.label==='选择运行方式'));assert.deepEqual(calls,[['gushenCompletion.reindexCalls','projects.B']]);
   cancel=true;await showProjectActions({vscode,getWorkspaces:async()=>items,bridge:{isRunning:()=>false}});assert.equal(calls.length,1);
 });
 test('native project menu and export handlers resolve the current project and preserve explicit identities',async()=>{
@@ -39,15 +39,18 @@ test('diagnosis resolves native view context once and never falls back outside t
 test('project view uses one native overflow with a single submenu level and no card-action duplicates',()=>{
   const manifest=require('../package.json'),contributes=manifest.contributes,items=contributes.menus['view/title'].filter(x=>x.when==='view == gushenCompletion.projectDetails');
   assert(items.length>0);assert(items.every(x=>!x.group.startsWith('navigation')));assert(!items.some(x=>x.command==='gushenCompletion.showProjectActions'));
-  assert.deepEqual(items.filter(x=>x.submenu).map(x=>x.submenu),['gushenCompletion.projectImportExport','gushenCompletion.projectManagement','gushenCompletion.projectTools']);
+  assert.deepEqual(items.filter(x=>x.submenu).map(x=>x.submenu),['gushenCompletion.projectManagement','gushenCompletion.toolSettings','gushenCompletion.updateOptions']);
   const commands=new Map(contributes.commands.map(x=>[x.command,x]));
   for(const item of items.filter(x=>x.command))assert(commands.get(item.command).shortTitle,item.command);
   for(const item of items.filter(x=>x.submenu))for(const child of contributes.menus[item.submenu]) {assert(!child.submenu);assert(commands.get(child.command).shortTitle,child.command);}
   const listed=items.map(x=>x.command);for(const command of ['searchCurrentApiWorkspace','showApiHistory','selectApiSystems','configureProject','runDoctor'])assert(!listed.includes('gushenCompletion.'+command));
-  const bridge=contributes.menus['gushenCompletion.projectTools'].filter(x=>/Bridge$/.test(x.command));
-  assert.deepEqual(bridge.map(x=>x.when),['!gushenCompletion.bridgeRunning','gushenCompletion.bridgeRunning']);
+  assert(!contributes.menus['gushenCompletion.projectImportExport']);
+  assert(!contributes.menus['gushenCompletion.projectTools']);
+  assert(items.every(item=>item.submenu));
+  assert(contributes.menus['gushenCompletion.toolSettings'].every(item=>!item.submenu));
+  assert(contributes.menus['gushenCompletion.updateOptions'].every(item=>!item.submenu));
   const wrappers=[...commands.keys()].filter(command=>command.startsWith('gushenCompletion.projectMenu'));
-  assert.equal(wrappers.length,8);assert.deepEqual(contributes.menus.commandPalette.map(x=>x.command).sort(),wrappers.sort());
+  assert.deepEqual(wrappers,['gushenCompletion.projectMenuOpenCheckout']);assert.deepEqual(contributes.menus.commandPalette.map(x=>x.command).sort(),[...wrappers,'gushenCompletion.exportApiChanges','gushenCompletion.importApiChanges'].sort());
   assert(contributes.menus.commandPalette.every(x=>x.when==='false'));assert.equal(commands.get('gushenCompletion.showProjectActions').title,'Guthon Nexus: 项目全部操作');
 });
 

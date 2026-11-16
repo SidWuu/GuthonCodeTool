@@ -26,6 +26,7 @@ from common.persistence import file_lock
 from common.operation_control import checkpoint, publication_barrier
 from .client import ApiError
 from .store import ApiStore
+from .reference_assets import CONFIGS, config_objects, page_references
 from .workspace import active_scope, settings
 
 
@@ -107,6 +108,8 @@ def health(workspace):
                 "gusen_logic_fact",
                 "gusen_bill_route",
                 "source_body_content",
+                "api_reference_object",
+                "api_reference_use",
             }
             present = {
                 row[0]
@@ -160,6 +163,28 @@ def _setup(conn):
         s.source_table,s.source_id,s.source_alias_id,s.fun_id,s.source_name,c.script_type,c.json_path,
         c.line_no,c.target_alias_id,c.target_fun_id,c.invoke_type,'HIGH' AS confidence
       FROM gusen_invoke_call c JOIN gusen_source_record s ON s.record_id=c.source_record_id;
+    """)
+    conn.executescript("""
+    CREATE TABLE api_reference_object(
+      source_record_id INTEGER NOT NULL, source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+      name TEXT NOT NULL, data_source_id TEXT NOT NULL, line_number INTEGER NOT NULL,
+      reference_id TEXT NOT NULL, fields_json TEXT NOT NULL,
+      PRIMARY KEY(source_record_id,reference_id));
+    CREATE TABLE api_reference_use(source_record_id INTEGER NOT NULL,source_type TEXT NOT NULL,source_id TEXT NOT NULL,json_pointer TEXT NOT NULL);
+    CREATE INDEX api_reference_identity ON api_reference_object(source_type,source_id);
+    CREATE INDEX api_reference_caller ON api_reference_use(source_record_id);
+    CREATE VIEW api_source_catalog AS
+      SELECT source_path AS path,source_table AS sourceType,source_id AS sourceId,
+        source_alias_id AS alias,fun_id AS funId,source_name AS name,source_hash AS sourceHash,
+        system_id AS systemId,data_source_id AS dataSourceId,source_format AS sourceFormat,
+        status,diagnostic,readonly,0 AS lineNumber,'' AS referenceId,'' AS referenceFields
+      FROM gusen_source_record s WHERE NOT EXISTS
+        (SELECT 1 FROM api_reference_object r WHERE r.source_record_id=s.record_id)
+      UNION ALL
+      SELECT s.source_path,r.source_type,r.source_id,r.source_id,'',r.name,s.source_hash,
+        s.system_id,r.data_source_id,'reference',s.status,s.diagnostic,1,
+        r.line_number,r.reference_id,r.fields_json
+      FROM api_reference_object r JOIN gusen_source_record s ON s.record_id=r.source_record_id;
     """)
     source_facts.setup_schema(conn)
 
@@ -297,6 +322,7 @@ def _index_item(conn, workspace, item):
         or meta.get("tableId")
         or meta.get("viewId")
         or meta.get("scriptType")
+        or meta.get("configId")
         or path
     )
     procedure_alias = (
@@ -309,7 +335,7 @@ def _index_item(conn, workspace, item):
     )
     alias = str(meta.get("pageAliasId") or procedure_alias or source_id)
     name = str(
-        meta.get("pageName") or meta.get("funName") or meta.get("title") or source_id
+        meta.get("pageName") or meta.get("funName") or meta.get("configName") or meta.get("title") or source_id
     )
     metadata_only = False
     try:
@@ -368,12 +394,23 @@ def _index_item(conn, workspace, item):
         ),
     )
     record_id = cur.lastrowid
+    try:
+        references = config_objects(path, text, active_scope(workspace)["dataSourceIds"])
+    except ApiError as error:
+        conn.execute("UPDATE gusen_source_record SET status='PARTIAL',diagnostic=? WHERE record_id=?", (error.code, record_id))
+        return
+    for reference in references:
+        conn.execute("INSERT INTO api_reference_object VALUES(?,?,?,?,?,?,?,?)",
+                     (record_id, reference["sourceType"], reference["sourceId"], reference["name"],
+                      reference["dataSourceId"], reference["lineNumber"], reference["referenceId"],
+                      json.dumps(reference["fields"], ensure_ascii=False)))
     if diagnostic:
         return
     page_data = (
         _page_data(text, meta.get("pageId")) if fmt in {"json", "native-xml"} else None
     )
     if page_data is not None:
+        conn.executemany("INSERT INTO api_reference_use VALUES(?,?,?,?)", [(record_id,*reference) for reference in page_references(page_data)])
         scripts = [
             {
                 "script_type": x.script_type,
@@ -448,6 +485,8 @@ def _diagnostics(conn):
 def _clear_record(conn, row):
     record_id = row["record_id"]
     source_facts.clear_source_details(conn, record_id)
+    conn.execute("DELETE FROM api_reference_object WHERE source_record_id=?", (record_id,))
+    conn.execute("DELETE FROM api_reference_use WHERE source_record_id=?", (record_id,))
     conn.execute("DELETE FROM gusen_invoke_call WHERE source_record_id=?", (record_id,))
     conn.execute(
         "DELETE FROM gusen_dynamic_call WHERE source_record_id=?", (record_id,)
@@ -659,6 +698,10 @@ def update(workspace, paths):
     dest = Path(workspace["indexPath"])
     if not dest.is_file():
         return rebuild(workspace)
+    with closing(sqlite3.connect(dest.resolve().as_uri() + "?mode=ro", uri=True)) as previous:
+        upgrade = previous.execute("SELECT 1 FROM sqlite_master WHERE name='api_reference_object'").fetchone() is None
+    if upgrade:
+        return rebuild(workspace)
     generation = uuid.uuid4().hex
     with file_lock(Path(workspace["contextDir"]) / "api" / "index.lock"):
         store = ApiStore(workspace)
@@ -689,6 +732,9 @@ def update(workspace, paths):
                     )
                 }
                 targets = set(paths) | (set(old) - active) | (active - set(old))
+                previous_scope=conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='scopeFingerprint'").fetchone()
+                if previous_scope is None or previous_scope[0]!=scope_fingerprint:
+                    targets.update(set(CONFIGS)&active)
                 for path in sorted(targets):
                     checkpoint()
                     row = old.get(path)
@@ -705,6 +751,8 @@ def update(workspace, paths):
                             continue
                         if error.code == "API_SOURCE_MISSING":
                             source_facts.clear_source_details(conn, row["record_id"])
+                            conn.execute("DELETE FROM api_reference_object WHERE source_record_id=?",(row["record_id"],))
+                            conn.execute("DELETE FROM api_reference_use WHERE source_record_id=?",(row["record_id"],))
                             conn.execute(
                                 "DELETE FROM gusen_invoke_call WHERE source_record_id=?",
                                 (row["record_id"],),
@@ -778,6 +826,8 @@ def _result(workspace, conn, rows, limit, offset, key="items"):
     more = len(rows) > limit
     values = [dict(x) for x in rows[:limit]]
     for item in values:
+        if item.get("referenceFields"):
+            item["referenceFields"] = json.loads(item["referenceFields"])
         if "sourceId" in item and "path" in item:
             item["sourcePath"] = item["path"]
             item["sourceNamespace"] = source_facts.api_source_namespace(
@@ -811,7 +861,7 @@ def catalog(workspace, limit=100, offset=0):
     _bound(limit, offset)
     with closing(_connection(workspace)) as conn:
         rows = conn.execute(
-            "SELECT source_path AS path,source_table AS sourceType,source_id AS sourceId,source_alias_id AS alias,fun_id AS funId,source_name AS name,source_hash AS sourceHash,system_id AS systemId,data_source_id AS dataSourceId,source_format AS sourceFormat,status,diagnostic,readonly FROM gusen_source_record ORDER BY source_path LIMIT ? OFFSET ?",
+            "SELECT * FROM api_source_catalog ORDER BY path,dataSourceId,sourceId,lineNumber LIMIT ? OFFSET ?",
             (limit + 1, offset),
         ).fetchall()
         return _result(workspace, conn, rows, limit, offset, "objects")
@@ -822,11 +872,14 @@ def search(workspace, query, limit=20, offset=0):
     query = _query(query)
     with closing(_connection(workspace)) as conn:
         rows = conn.execute(
-            """SELECT s.source_path AS path,s.source_table AS sourceType,s.source_id AS sourceId,s.source_alias_id AS alias,s.fun_id AS funId,s.source_name AS name,s.system_id AS systemId,s.data_source_id AS dataSourceId,s.source_hash AS sourceHash,b.json_pointer AS jsonPointer,
-          substr(b.content,max(1,instr(lower(b.content),lower(?))-80),240) AS excerpt
-          FROM gusen_source_record s LEFT JOIN source_body_content b ON b.source_record_id=s.record_id
-          WHERE instr(lower(s.source_path || ' ' || s.source_name || ' ' || s.source_alias_id || ' ' || s.fun_id),lower(?))>0 OR instr(lower(coalesce(b.content,'')),lower(?))>0
-          ORDER BY s.source_path,b.json_pointer LIMIT ? OFFSET ?""",
+            """SELECT c.*,substr(coalesce(nullif(c.referenceFields,''),b.content,''),
+              max(1,instr(lower(coalesce(nullif(c.referenceFields,''),b.content,'')),lower(?))-80),240) AS excerpt,
+              coalesce(b.json_pointer,'') AS jsonPointer
+            FROM api_source_catalog c LEFT JOIN gusen_source_record s ON s.source_path=c.path
+            LEFT JOIN source_body_content b ON b.source_record_id=s.record_id
+            WHERE instr(lower(c.path || ' ' || c.name || ' ' || c.alias || ' ' || c.funId || ' ' || c.referenceFields),lower(?))>0
+               OR instr(lower(coalesce(b.content,'')),lower(?))>0 AND c.referenceId=''
+            ORDER BY c.path,c.dataSourceId,c.sourceId,c.lineNumber,b.json_pointer LIMIT ? OFFSET ?""",
             (query, query, query, limit + 1, offset),
         ).fetchall()
         result = _result(workspace, conn, rows, limit, offset, "hits")
@@ -986,6 +1039,17 @@ def context(workspace, path, limit=20, offset=0):
         result["incomingTruncated"] = len(incoming) > limit
         if result["incomingTruncated"]:
             result.update(complete=False, truncated=True)
+        from .workspace import project_metadata
+        source_id = row["data_source_id"] or next((str(system.get("dataSourceId", "")) for system in
+            project_metadata(workspace).get("systems", []) if str(system.get("systemId")) == row["system_id"]), "")
+        configurations=conn.execute(
+            """SELECT c.*,u.json_pointer AS jsonPointer FROM api_reference_use u
+            JOIN api_source_catalog c ON c.sourceType=u.source_type AND c.sourceId=u.source_id
+            WHERE u.source_record_id=? AND (u.source_type<>'bill-type' OR ?='' OR c.dataSourceId=?) ORDER BY u.json_pointer,c.dataSourceId LIMIT ?""",
+            (row["record_id"],source_id,source_id,limit+1)).fetchall()
+        result["configurationReferences"]=_result(workspace,conn,configurations,limit,0)["items"]
+        result["configurationReferencesTruncated"]=len(configurations)>limit
+        if result["configurationReferencesTruncated"]:result.update(complete=False,truncated=True)
         result["source"] = {
             "path": path,
             "sourcePath": path,

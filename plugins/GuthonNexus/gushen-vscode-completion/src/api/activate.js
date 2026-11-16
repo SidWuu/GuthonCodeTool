@@ -10,7 +10,7 @@ const {InheritanceDecorations}=require('../source/inheritance-decoration');
 const {PageEditorController} = require('../page-editor/controller');
 const {DIFF_SCHEME,ApiQuickDiff,revertQuickDiffChange}=require('../source/quick-diff');
 const {checkOfficialUpdate,rollbackOfficialUpdate} = require('../official-update');
-const REMOTE_ACTIONS = new Set(['session','captcha','login','systems','data-sources','designer-context','system-menu','pull','scope-apply','refresh','upload','verify-upload','sync-database','platform-request','create-function']);
+const REMOTE_ACTIONS = new Set(['session','captcha','login','systems','data-sources','designer-context','system-menu','pull','scope-apply','refresh','upload','verify-upload','sync-database','platform-request','create-function','reference-sync','module-parameters-sync','module-upload']);
 
 function scopeReportLines(key,result) {
   const state=value=>value===true?'完成':value===false?'未完成':'未返回';
@@ -74,7 +74,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
       return result;
     }
     catch(error) {if(action==='configure' && error.code==='API_SCOPE_INDEX_REFRESH_REQUIRED')invalidateStatus(key);if(error.code==='API_LOGIN_REQUIRED' && !['session','status'].includes(action)) onUpdated?.();throw error;}
-    finally {if(action==='pull' || action==='scope-apply')invalidateStatus(key);}};
+    finally {if(action==='pull' || action==='scope-apply' || action==='reference-sync' || action==='module-parameters-sync' || (action==='module-upload' && input?.action!=='preview') || (action==='module-parameter' && input?.action==='save'))invalidateStatus(key);}};
     if(action==='session') {
       const pending=sessionRequests.get(key);if(pending) return pending;
       const request=invoke().finally(()=>{if(sessionRequests.get(key)===request) sessionRequests.delete(key);});
@@ -91,12 +91,12 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   }
   let closingEditorState;
   const closeEditorState=()=>closingEditorState ||= editorState.close().finally(()=>stateProcessClient.dispose());
-  let pageEditor,virtualFs,virtualRegistration,sourceWatcher,selectWorkspace,inheritanceDecorations;
+  let pageEditor,virtualFs,virtualRegistration,sourceWatcher,selectWorkspace,inheritanceDecorations,moduleEditor;
   const deferredScopeEvents=new Map();
-  const ui = new ApiSourceUI({vscode,run,onUpdated,editorState,onWorkspace:(key,root)=>sourceWatcher.register(key,root),indexRecovery:key=>sourceWatcher.recovery(key),onOpenVirtual:async identity=>{getPageEditor();return virtualFs.openEditor(identity);},onSourceChanged:async(key,paths)=>{
+  const ui = new ApiSourceUI({vscode,run,onUpdated,editorState,onOpenModule:(key,path)=>getModuleEditor().open(key,path),onModuleUpload:(key,paths)=>getModuleEditor().upload(key,paths),onWorkspace:(key,root)=>sourceWatcher.register(key,root),indexRecovery:key=>sourceWatcher.recovery(key),onOpenVirtual:async identity=>{getPageEditor();return virtualFs.openEditor(identity);},onSourceChanged:async(key,paths)=>{
     try {virtualFs?.invalidate(key,paths);const deferred=deferredScopeEvents.get(key);for(const p of paths) if(deferred) deferred.paths.add(p);else sourceWatcher.enqueue(key,p);await pageEditor?.sourceChanged(key,paths);} catch(error) {await vscode.window.showErrorMessage(`PAGE 更新核对失败：${error.message}`);}
   }});
-  const quickDiff=new ApiQuickDiff({vscode,run,editorState,ui,projectBase:(uri,text)=>virtualFs?.projectBase(uri,text),viewBase:(uri,diff)=>virtualFs?.viewBase(uri,diff)});ui.quickDiff=quickDiff;
+  const quickDiff=new ApiQuickDiff({vscode,run,editorState,ui,projectBase:(uri,text)=>virtualFs?.projectBase(uri,text),projectionBase:(uri,diff)=>virtualFs?.projectionBase(uri,diff)});ui.quickDiff=quickDiff;
   sourceWatcher=new ApiSourceWatcher({run,workspaceState:context.workspaceState,onChanged:async (key,paths,result)=>{const current=ui.indexGenerations.get(key);ui.setIndexResult(key,result);if(paths.length || current!==result.indexGeneration)await ui.updateScm(key);if(paths.length)await pageEditor?.statusChanged(key);onUpdated?.();},onError:(key,error)=>{ui.refresh();vscode.window.showErrorMessage(`源码索引更新失败（${key}）：${error.message}；可重试待更新文件`);}});
   function getPageEditor() {
     if (pageEditor) return pageEditor;
@@ -114,6 +114,10 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
       assertCanSave:identity=>editorState.assertNoConflictingDrafts(identity.workspaceKey,identity.sourcePath,['page']),
       onSaved:async(key)=>{await ui.updateScm(key);onUpdated?.();}});
     context.subscriptions.push(pageEditor);return pageEditor;
+  }
+  function getModuleEditor() {
+    getPageEditor();
+    return moduleEditor ||= new (require('./module-parameter-editor').ModuleParameterEditor)({vscode,run,ui,virtualFs,editorState,onUpdated});
   }
   const handlers = {
     configureApiSource: async key => {
@@ -219,7 +223,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
       await showReport(vscode,'API 源码更新结果',sourceSyncLines(key,result));return result;
     },
     showApiIndexDiagnostics: async key => ui.showIndexDiagnostics(key),
-    openApiSource: async (key,p) => ui.open(key,p,false),
+    openApiSource: async (key,p,value) => ui.open(key,p,false,{lineNumber:value?.lineNumber}),
     previewApiSource: async (key,p) => ui.open(key,p,true,{raw:true}),
     openApiOriginalSource: async (key,p) => ui.open(key,p,false,{raw:true}),
     showApiDiff: async (key,p) => ui.diff(key,p),
@@ -242,11 +246,43 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
     exportApiChanges: async key => ui.exportChanges(key),
     importApiChanges: async key => ui.importChanges(key),
     showApiHistory: async key => ui.history(key),
+    showPlatformReference: async key => require('./platform-reference').showPlatformReference({vscode,run,ui,key}),
+    editModuleParameter: async (key,path)=>getModuleEditor().open(key,path),
+    previewModuleParameter: async (key,path)=>getModuleEditor().preview(key,path),
+    uploadModuleParameters: async (key,path)=>getModuleEditor().upload(key,Array.isArray(path)?path:path?[path]:undefined),
+    syncModuleParameters: async key => {
+      await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'同步模块参数',cancellable:false},async()=>{
+        const result=await run(key,'module-parameters-sync',{});ui.invalidate(key);ui.setIndexResult(key,result.index);await ui.updateScm(key);onUpdated?.();
+        await showReport(vscode,'模块参数同步',[
+          `读取 ${result.downloadedParameters} 个模块参数。`,
+          ...result.conflicts.map(item=>`- ${item.path}：${item.reason}`),
+          `索引诊断 ${result.index.diagnosticCount || 0} 项。`,
+          '按当前子系统范围读取列表和详情；完整原文保持只读，data 可本地编辑；本次同步未修改平台配置。']);
+      });
+    },
+    syncPlatformReferences: async key => {
+      await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'同步官方参考资料',cancellable:false},async()=>{
+        const result=await run(key,'reference-sync',{});ui.invalidate(key);ui.setIndexResult(key,result.index);await ui.updateScm(key);onUpdated?.();
+        await showReport(vscode,'官方参考资料同步',[
+          `登记 ${result.registeredReferences} 份资料。`,
+          ...(result.preservedLocalReferences.length ? ['以下本地文件与平台版本不同，已保留原文：',...result.preservedLocalReferences.map(path=>'- '+path)] : []),
+          '本次未拉取业务源码，未上传平台。',`索引${result.index.complete?'完成':'存在诊断，请从环境检查核对'}`]);
+      });
+    },
+    configureReferenceAssets: async key => {
+      const state=await run(key,'status',{summaryOnly:true});
+      const choice=await vscode.window.showQuickPick([{label:'启用官方参考资料',value:true,description:'纳入已同步的配置索引和 skills；更新源码时同步资料'},
+        {label:'关闭官方参考资料',value:false,description:'保留本地文件，不再纳入当前范围'}],{title:`官方参考资料 · 当前${state.settings.includeProjectFiles?'启用':'关闭'}`});
+      if(!choice || choice.value===state.settings.includeProjectFiles)return;
+      await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'更新官方参考资料索引',cancellable:false},async()=>{
+        const result=await run(key,'configure',{includeProjectFiles:choice.value});ui.invalidate(key);ui.setIndexResult(key,result.index || {});await ui.updateScm(key);onUpdated?.();
+      });
+    },
     verifyApiUpload: async key => ui.verifyUpload(key),
     searchApiSource: async key => vscode.commands.executeCommand('gushenCompletion.searchWorkspace',key),
     editApiPage: async (key,p) => handlers.openApiPageEditor(key,p),
   });
-  const pathCommands=new Set(['openApiSource','previewApiSource','openApiOriginalSource','showApiDiff','revertApiSource','uploadApiSource','openApiDesigner','openApiFragment','openApiFieldCollection','openApiPageEditor','editApiPage','refreshApiObject','resolveApiConflict','syncApiDatabase','createApiFunction']);
+  const pathCommands=new Set(['editModuleParameter','previewModuleParameter','openApiSource','previewApiSource','openApiOriginalSource','showApiDiff','revertApiSource','uploadApiSource','openApiDesigner','openApiFragment','openApiFieldCollection','openApiPageEditor','editApiPage','refreshApiObject','resolveApiConflict','syncApiDatabase','createApiFunction']);
   const execute = name => async (value,sourcePath)=>{
     try {
       if (!value && selectWorkspace) value=(await selectWorkspace(''))?.workspaceKey;
@@ -255,7 +291,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
       if (!key) throw new Error('请从具体 API 项目执行操作');
       if (pathCommands.has(name) && name!=='uploadApiSource' && !objectPath) throw new Error('请选择 API 源码');
       let selected=objectPath;
-      if(['uploadApiSource','revertApiSource'].includes(name) && Array.isArray(sourcePath) && sourcePath.length) {
+      if(['uploadApiSource','uploadModuleParameters','revertApiSource'].includes(name) && Array.isArray(sourcePath) && sourcePath.length) {
         const entries=sourcePath.map(item=>identity(item));
         if(entries.some(item=>item.key!==key || !item.path)) throw new Error('请选择同一项目内的源码');
         selected=[...new Set([objectPath,...entries.map(item=>item.path)].filter(Boolean))];
@@ -293,6 +329,13 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
     vscode.commands.registerCommand('gushenCompletion.exportApiChanges',execute('exportApiChanges')),
     vscode.commands.registerCommand('gushenCompletion.importApiChanges',execute('importApiChanges')),
     vscode.commands.registerCommand('gushenCompletion.showApiHistory',execute('showApiHistory')),
+    vscode.commands.registerCommand('gushenCompletion.showPlatformReference',execute('showPlatformReference')),
+    vscode.commands.registerCommand('gushenCompletion.configureReferenceAssets',execute('configureReferenceAssets')),
+    vscode.commands.registerCommand('gushenCompletion.syncPlatformReferences',execute('syncPlatformReferences')),
+    vscode.commands.registerCommand('gushenCompletion.syncModuleParameters',execute('syncModuleParameters')),
+    vscode.commands.registerCommand('gushenCompletion.editModuleParameter',execute('editModuleParameter')),
+    vscode.commands.registerCommand('gushenCompletion.previewModuleParameter',execute('previewModuleParameter')),
+    vscode.commands.registerCommand('gushenCompletion.uploadModuleParameters',execute('uploadModuleParameters')),
     vscode.commands.registerCommand('gushenCompletion.verifyApiUpload',execute('verifyApiUpload')),
     vscode.commands.registerCommand('gushenCompletion.editApiPage',execute('editApiPage')),
     vscode.commands.registerCommand('gushenCompletion.checkOfficialUpdate',official(checkOfficialUpdate)),
@@ -313,6 +356,6 @@ function activateApi({vscode, context, getTool, processClient, onUpdated}) {
   if(vscode.workspace.onDidChangeTextDocument) registrations.push(vscode.workspace.onDidChangeTextDocument(event=>{if(event.document.uri.scheme===SCHEME) {virtualFs?.trackDocumentChange(event);inheritanceDecorations?.refresh(event.document);}}));
   if(vscode.workspace.onDidCloseTextDocument) registrations.push(vscode.workspace.onDidCloseTextDocument(doc=>{if(doc.uri.scheme===SCHEME) virtualFs?.close(doc.uri);}));
   context.subscriptions.push(...registrations,ui,{dispose:()=>{void closeEditorState().catch(error=>vscode.window.showErrorMessage(`编辑状态关闭失败：${error.message}`));}},statusProcessClient,remoteProcessClient,sourceWatcher,quickDiff);
-  return {run,readProjectSummary,sourceTree:ui,editorState,sourceUri:async(key,p)=>{const state=await ui.ensureWorkspace(key),source=await run(key,'read',{path:p});if(['METADATA_ONLY','IDENTITY_MISMATCH','SQL_ABSENT'].includes(source.contentState)) return ui.readonlyUri(key,p,source.content);if(source.metadata?.sourceType==='view' || isInlineInherited(key,p,source)){getPageEditor();const uri=uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:source.metadata.sourceType,jsonPointer:source.metadata.sourceType==='view'?'/viewSql':'',fragmentType:source.metadata.sourceType==='view'?'sql':source.metadata.sourceType==='system-script'?'js':'gss'});editorState.assertNoDirtyDocumentsExcept(key,p,uri);return uri;}return vscode.Uri.file(filePath(state.checkoutPath,p));},setSelectWorkspace:selector=>{selectWorkspace=selector;},openFragment:async target=>{await ui.ensureWorkspace(target.workspaceKey);getPageEditor();return virtualFs.open(target,{viewColumn:vscode.ViewColumn.Beside});},syncWorkspaces:workspaces=>{ui.syncWorkspaces(workspaces);return Promise.all(workspaces.filter(w=>!w.sourceMode || w.sourceMode==='api').map(w=>ui.updateScm(typeof w==='string'?w:w.workspaceKey)));},refreshWorkspace:key=>ui.updateScm(key),retryIndex:key=>sourceWatcher.retry(key),markIndexed:key=>sourceWatcher.markIndexed(key),reset:async()=>{lastStatus.clear();await sourceWatcher.reset();await editorState.reset();pageEditor?.dispose();if(pageEditor) await Promise.all([...pageEditor.pages.values()].map(session=>session.persistence).filter(Boolean));virtualRegistration?.dispose();inheritanceDecorations?.dispose();virtualFs?.dispose();pageEditor=virtualFs=virtualRegistration=inheritanceDecorations=undefined;ui.clear();},dispose:async()=>{pageEditor?.dispose();await sourceWatcher.close();ui.dispose();try {await closeEditorState();} finally {statusProcessClient.dispose();try {await remoteProcessClient.stop();} finally {remoteProcessClient.dispose();}}}};
+  return {run,readProjectSummary,sourceTree:ui,editorState,sourceUri:async(key,p)=>{const state=await ui.ensureWorkspace(key),source=await run(key,'read',{path:p});if(['METADATA_ONLY','IDENTITY_MISMATCH','SQL_ABSENT'].includes(source.contentState)) return ui.readonlyUri(key,p,source.content);if(source.metadata?.sourceType==='module-parameter'){getPageEditor();return uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:'module-parameter',jsonPointer:'/data',fragmentType:'json'});}if(source.metadata?.sourceType==='view' || isInlineInherited(key,p,source)){getPageEditor();const uri=uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:source.metadata.sourceType,jsonPointer:source.metadata.sourceType==='view'?'/viewSql':'',fragmentType:source.metadata.sourceType==='view'?'sql':source.metadata.sourceType==='system-script'?'js':'gss'});editorState.assertNoDirtyDocumentsExcept(key,p,uri);return uri;}return vscode.Uri.file(filePath(state.checkoutPath,p));},setSelectWorkspace:selector=>{selectWorkspace=selector;},openFragment:async target=>{await ui.ensureWorkspace(target.workspaceKey);getPageEditor();return virtualFs.open(target,{viewColumn:vscode.ViewColumn.Beside});},syncWorkspaces:workspaces=>{ui.syncWorkspaces(workspaces);return Promise.all(workspaces.filter(w=>!w.sourceMode || w.sourceMode==='api').map(w=>ui.updateScm(typeof w==='string'?w:w.workspaceKey)));},refreshWorkspace:key=>ui.updateScm(key),retryIndex:key=>sourceWatcher.retry(key),markIndexed:key=>sourceWatcher.markIndexed(key),reset:async()=>{lastStatus.clear();await sourceWatcher.reset();await editorState.reset();pageEditor?.dispose();if(pageEditor) await Promise.all([...pageEditor.pages.values()].map(session=>session.persistence).filter(Boolean));virtualRegistration?.dispose();inheritanceDecorations?.dispose();virtualFs?.dispose();pageEditor=virtualFs=virtualRegistration=inheritanceDecorations=moduleEditor=undefined;ui.clear();},dispose:async()=>{pageEditor?.dispose();await sourceWatcher.close();ui.dispose();try {await closeEditorState();} finally {statusProcessClient.dispose();try {await remoteProcessClient.stop();} finally {remoteProcessClient.dispose();}}}};
 }
 module.exports={activateApi};

@@ -1,6 +1,21 @@
 const path = require('node:path');
+const crypto = require('node:crypto');
 const {isInlineInherited,scriptType}=require('../source/virtual-fs');
 const {sourcePathAllowed}=require('./source-watcher');
+
+const MODULE_STYLES={
+  pages:{icon:'layout',color:'charts.blue'},
+  procedures:{icon:'symbol-method',color:'charts.purple'},
+  tables:{icon:'table',color:'charts.green'},
+  views:{icon:'symbol-structure',color:'charts.yellow'},
+  'system-script':{icon:'code',color:'charts.orange'},
+  'module-parameters':{icon:'settings-gear',color:'charts.purple'},
+  'bill-type':{icon:'symbol-enum',color:'charts.yellow'},
+  dropdown:{icon:'list-selection',color:'charts.orange'},
+  skills:{icon:'book',color:'charts.blue'},
+};
+const SOURCE_CATEGORIES={page:'pages',procedure:'procedures',table:'tables',view:'views',
+  'system-script':'system-script','module-parameter':'module-parameters','bill-type':'bill-type',dropdown:'dropdown',skill:'skills'};
 
 function filePath(root, sourcePath) {
   if (typeof sourcePath !== 'string' || !sourcePath || sourcePath.includes('\\') || sourcePath.split('/').some(p => !p || p === '.' || p === '..')) throw new Error('无效的源码路径');
@@ -23,7 +38,7 @@ function assertClean(vscode, root, paths) {
 function identity(value, sourcePath) {
   if (typeof value === 'string') return {key:value, path:sourcePath};
   if (value?.target?.workspaceKey && value.target.sourcePath) return {key:value.target.workspaceKey,path:value.target.sourcePath};
-  if (value?.key && value.object?.path) return {key:value.key,path:value.object.path};
+  if (value?.key) return {key:value.key,path:value.object?.path || sourcePath};
   if (value?.workspaceKey || value?.guthonWorkspaceKey) return {key:value.workspaceKey || value.guthonWorkspaceKey, path:value.path};
   const uri = value?.resourceUri || value;
   if (uri?.scheme === 'guthon-api-change') {
@@ -33,50 +48,82 @@ function identity(value, sourcePath) {
   throw new Error('请选择 API 源码');
 }
 
-function buildCatalogTree(key, workspace, objects, project={}) {
-  const root={children:[],parent:workspace}, systemNames=new Map((project.systems || []).map(x=>[String(x.systemId),x.systemName])),
-    sourceNames=new Map((project.dataSources || []).map(x=>[String(x.dataSourceId),x.dataSourceName])), menuPaths=new Map();
-  const menus=(system,nodes,ancestors=[])=>{for(const node of nodes || []) {
-    const branch=[...ancestors,{id:String(node.id),name:node.name || String(node.id)}];
+function buildCatalogTree(key, workspace, objects, project={}, options={}) {
+  // platform：菜单层级按平台菜单顺序、同级对象按平台接口顺序（页面 pageId、函数 funId）；
+  // name：沿用按显示名排序。
+  const byPlatform=options.order!=='name';
+  const systems=project.systems || [], dataSources=project.dataSources || [];
+  const root={children:[],parent:workspace}, systemNames=new Map(systems.map(x=>[String(x.systemId),x.systemName])),
+    sourceNames=new Map(dataSources.map(x=>[String(x.dataSourceId),x.dataSourceName])),
+    systemOrder=new Map(systems.map((x,index)=>[String(x.systemId),index])),
+    sourceOrder=new Map(dataSources.map((x,index)=>[String(x.dataSourceId),index])), menuPaths=new Map();
+  const menus=(system,nodes,ancestors=[])=>{(nodes || []).forEach((node,index)=>{
+    const branch=[...ancestors,{id:String(node.id),name:node.name || String(node.id),order:index}];
     if(Number(node.isDir)===1) menus(system,node.childs,branch);
-    else for(const page of node.pages || []) {
+    else (node.pages || []).forEach((page,pageIndex)=>{
       const identity=JSON.stringify([system,String(page.pageSubId),String(page.pageId)]);
       if(!menuPaths.has(identity)) menuPaths.set(identity,[]);
-      menuPaths.get(identity).push(branch);
-    }
-  }};
+      menuPaths.get(identity).push({branch,pageIndex});
+    });
+  })};
   for(const system of project.menuTree || []) menus(String(system.systemId),system.menus);
-  const labels={pages:'页面',procedures:'过程函数',tables:'表',views:'视图','system-script':'系统脚本'};
-  const icons={pages:'layout',procedures:'symbol-method',tables:'table',views:'symbol-structure','system-script':'code'};
+  const labels={pages:'页面',procedures:'过程函数',tables:'表',views:'视图','system-script':'系统脚本','module-parameters':'模块参数','bill-type':'单据类型',dropdown:'下拉组件',skills:'开发参考'};
   root.childIndex=new Map();for(const [type,label] of Object.entries(labels)) {
-    const child={label,key,children:[],category:type,icon:icons[type],sourcePrefixes:new Set(),parent:workspace};root.children.push(child);root.childIndex.set('category:'+type,child);
+    const child={label,key,children:[],category:type,icon:MODULE_STYLES[type].icon,sourcePrefixes:new Set(),parent:workspace};root.children.push(child);root.childIndex.set('category:'+type,child);
   }
-  const add=(object,dirs)=>{
+  const add=(object,dirs,platformOrder)=>{
     let parent=root;
     for(const dir of dirs) {
       parent.childIndex ||= new Map();let child=parent.childIndex.get(dir.key);
-      if(!child) {child={label:dir.label,key,children:[],sourcePrefix:dir.sourcePrefix,description:dir.description,parent:parent===root?workspace:parent};parent.children.push(child);parent.childIndex.set(dir.key,child);}
+      if(!child) {child={label:dir.label,key,children:[],sourcePrefix:dir.sourcePrefix,description:dir.description,category:dir.category,dataSourceId:dir.dataSourceId,systemId:dir.systemId,order:dir.order,sortKey:dir.sortKey,parent:parent===root?workspace:parent};parent.children.push(child);parent.childIndex.set(dir.key,child);}
       child.sourcePrefixes ||= new Set();if(dir.affectedPrefix)child.sourcePrefixes.add(dir.affectedPrefix);
       parent=child;
     }
-    const filename=object.path.split('/').at(-1),candidate=object.label || object.name || filename;
+    const filename=object.path.split('/').at(-1),candidate=object.label || (object.sourceType==='module-parameter' ? `${object.sourceId} · ${object.name}` : object.name) || filename;
     const label=typeof candidate==='string' && (candidate===object.path || candidate.endsWith('/'+filename)) ? filename : candidate;
-    parent.children.push({label,key,object,parent:parent===root?workspace:parent});
+    parent.children.push({label,key,object,order:platformOrder,sortKey:String(object.funId || object.sourceId || filename).toLowerCase(),parent:parent===root?workspace:parent});
   };
   for(const object of objects) {
     filePath('/api-root',object.path);
-    const parts=object.path.split('/'),category=labels[parts[2]], scoped=category && ['systems','datasources'].includes(parts[0]);
+    const parts=object.path.split('/');
+    const referenceType=object.sourceType==='bill-type' || object.path==='otherconfig/bill-type.md' ? 'bill-type'
+      : object.sourceType==='dropdown' || object.path==='otherconfig/dropdown.md' ? 'dropdown' : parts[0]==='skills' ? 'skills' : '';
+    if(referenceType) {
+      const dirs=[{key:'category:'+referenceType,label:labels[referenceType],category:referenceType,affectedPrefix:object.path}];
+      if(referenceType==='bill-type' && object.dataSourceId) dirs.push({key:'source:'+object.dataSourceId,label:sourceNames.get(object.dataSourceId)||object.dataSourceId,dataSourceId:object.dataSourceId,category:referenceType,description:object.dataSourceId});
+      if(referenceType==='skills') dirs.push(...parts.slice(1,-1).map(part=>({key:'path:'+part,label:part})));
+      add({...object,label:object.referenceId ? `${object.sourceId} · ${object.name}` : object.name || parts.at(-1)},dirs);
+      continue;
+    }
+    const category=labels[parts[2]], scoped=category && ['systems','datasources'].includes(parts[0]);
     const physical=scoped ? [
-      {key:'category:'+parts[2],label:category,affectedPrefix:object.path},
-      {key:'scope:'+parts[1],label:(parts[0]==='systems'?systemNames:sourceNames).get(parts[1]) || parts[1],description:parts[1],sourcePrefix:parts.slice(0,3).join('/'),affectedPrefix:object.path},
-      ...parts.slice(3,-1).map((part,i)=>({key:'path:'+part,label:part,sourcePrefix:parts.slice(0,i+4).join('/'),affectedPrefix:object.path}))
-    ] : [{key:'other',label:'其他源码',affectedPrefix:object.path},...parts.slice(0,-1).map((part,i)=>({key:'path:'+part,label:part,sourcePrefix:parts.slice(0,i+1).join('/'),affectedPrefix:object.path}))];
+      {key:'category:'+parts[2],label:category,category:parts[2],affectedPrefix:object.path},
+      {key:'scope:'+parts[1],label:(parts[0]==='systems'?systemNames:sourceNames).get(parts[1]) || parts[1],description:parts[1],category:parts[2],systemId:parts[0]==='systems'?parts[1]:undefined,dataSourceId:parts[0]==='datasources'?parts[1]:undefined,sourcePrefix:parts.slice(0,3).join('/'),affectedPrefix:object.path,order:(parts[0]==='systems'?systemOrder:sourceOrder).get(parts[1]),sortKey:parts[1]},
+      ...parts.slice(3,-1).map((part,i)=>({key:'path:'+part,label:part,sourcePrefix:parts.slice(0,i+4).join('/'),affectedPrefix:object.path,sortKey:part}))
+    ] : [{key:'other',label:'其他源码',affectedPrefix:object.path,sortKey:''},...parts.slice(0,-1).map((part,i)=>({key:'path:'+part,label:part,sourcePrefix:parts.slice(0,i+1).join('/'),affectedPrefix:object.path,sortKey:part}))];
     const routes=parts[0]==='systems' && parts[2]==='pages' && parts.length>=6 ? menuPaths.get(JSON.stringify([parts[1],parts[3],parts[4]])) : undefined;
-    if(routes?.length) for(const route of routes) add(object,[...physical.slice(0,2),...route.map(x=>({key:'menu:'+x.id,label:x.name,affectedPrefix:object.path}))]);
+    if(routes?.length) for(const route of routes) add(object,[...physical.slice(0,2),...route.branch.map(x=>({key:'menu:'+x.id,label:x.name,affectedPrefix:object.path,order:x.order,sortKey:x.name}))],route.pageIndex);
     else add(object,physical);
   }
-  const order=Object.keys(labels);
-  const sort=node=>{node.children.sort((a,b)=>node===root ? (a.category ? order.indexOf(a.category) : order.length)-(b.category ? order.indexOf(b.category) : order.length) || a.label.localeCompare(b.label) : Boolean(b.children)-Boolean(a.children) || a.label.localeCompare(b.label));for(const child of node.children) if(Array.isArray(child.children)) sort(child);};
+  const categoryOrder=Object.keys(labels);
+  const rank=item=>item.category ? categoryOrder.indexOf(item.category) : categoryOrder.length;
+  const compare=(a,b,isRoot)=>{
+    if(isRoot) return rank(a)-rank(b) || a.label.localeCompare(b.label);
+    const folder=Boolean(b.children)-Boolean(a.children);
+    if(folder) return folder;
+    if(byPlatform) {
+      const ao=Number.isInteger(a.order) ? a.order : null, bo=Number.isInteger(b.order) ? b.order : null;
+      if(ao!==null && bo!==null && ao!==bo) return ao-bo;
+      if((ao===null)!==(bo===null)) return ao===null ? 1 : -1;
+      const ak=a.sortKey || '', bk=b.sortKey || '';
+      if(ak!==bk) return ak<bk ? -1 : 1;
+      const ap=a.object?.path || '', bp=b.object?.path || '';
+      if(ap!==bp) return ap<bp ? -1 : 1;
+    }
+    return a.label.localeCompare(b.label);
+  };
+  const sort=node=>{node.children.sort((a,b)=>compare(a,b,node===root));for(const child of node.children) if(Array.isArray(child.children)) sort(child);};
+  root.children=root.children.filter(child=>!['module-parameters','bill-type','dropdown','skills'].includes(child.category)||child.children.length);
   sort(root);return root.children;
 }
 
@@ -92,9 +139,9 @@ function sourceSyncLines(key,result) {
     ...(index.truncated ? ['- 诊断列表已截断，请检查索引状态。'] : []));
   lines.push('','本次未执行上传。');return lines;
 }
-const UPLOAD_UNVERIFIED_STAGES=new Set(['UNKNOWN','REMOTE_REQUEST_STARTED','REMOTE_ACKNOWLEDGED']);
+const UPLOAD_UNVERIFIED_STAGES=new Set(['UNKNOWN','REMOTE_REQUEST_STARTED','REMOTE_ACKNOWLEDGED','SAVE_REQUEST_STARTED','CHECKOUT_REQUEST_STARTED']);
 function needsUploadVerification(item) {
-  return item.kind==='upload' && (UPLOAD_UNVERIFIED_STAGES.has(item.stage) || (item.results || []).some(row=>UPLOAD_UNVERIFIED_STAGES.has(row.stage)));
+  return ['upload','module-upload'].includes(item.kind) && (UPLOAD_UNVERIFIED_STAGES.has(item.stage) || (item.results || []).some(row=>UPLOAD_UNVERIFIED_STAGES.has(row.stage)) || item.kind==='module-upload' && (item.stage==='PREPARED' || (item.results || []).some(row=>row.stage==='PREPARED')));
 }
 async function showReport(vscode,title,lines) {
   const doc=await vscode.workspace.openTextDocument({language:'markdown',content:`# ${title}\n\n${lines.join('\n')}\n`});
@@ -102,8 +149,8 @@ async function showReport(vscode,title,lines) {
 }
 
 class ApiSourceUI {
-  constructor({vscode, run, onUpdated, editorState, onSourceChanged, onWorkspace, onOpenVirtual, indexRecovery}) {
-    this.vscode=vscode; this.run=run; this.onUpdated=onUpdated; this.editorState=editorState; this.onSourceChanged=onSourceChanged; this.onWorkspace=onWorkspace; this.onOpenVirtual=onOpenVirtual; this.indexRecovery=indexRecovery; this.watchers=new Map(); this.workspaces=new Map(); this.controls=new Map();this.scmGenerations=new Map();this.sourceChanges=new Map();
+  constructor({vscode, run, onUpdated, editorState, onSourceChanged, onWorkspace, onOpenVirtual, onOpenModule, onModuleUpload, indexRecovery}) {
+    this.vscode=vscode; this.run=run; this.onUpdated=onUpdated; this.editorState=editorState; this.onSourceChanged=onSourceChanged; this.onWorkspace=onWorkspace; this.onOpenVirtual=onOpenVirtual; this.indexRecovery=indexRecovery;this.onOpenModule=onOpenModule;this.onModuleUpload=onModuleUpload; this.watchers=new Map(); this.workspaces=new Map(); this.controls=new Map();this.scmGenerations=new Map();this.sourceChanges=new Map();
     this.emitter = vscode.EventEmitter ? new vscode.EventEmitter() : undefined;
     this.onDidChangeTreeData = this.emitter?.event;
     this.readonlyDocuments=new Map();this.rootItems=null;this.treeCache=new Map();this.treeLoads=new Map();this.treeEpoch=new Map();this.indexGenerations=new Map();this.indexDiagnostics=new Map();this.menuAttempts=new Set();this.treeVersion=0;
@@ -129,18 +176,24 @@ class ApiSourceUI {
     const tree=new v.TreeItem(item.label, item.children || isPage ? v.TreeItemCollapsibleState.Collapsed : v.TreeItemCollapsibleState.None);
     if(item.kind==='message') {tree.tooltip=item.label;if(item.command) tree.command={command:item.command,title:item.label,arguments:[item.key]};return tree;}
     if(item.kind==='fragment') {
+      if(v.ThemeIcon)tree.iconPath=new v.ThemeIcon(item.target.fragmentType==='fields'?'symbol-field':'code',new v.ThemeColor('charts.blue'));
       tree.contextValue=item.target.fragmentType==='fields' ? 'guthonApi.fragment.fields' : 'guthonApi.fragment.script';tree.tooltip=item.target.jsonPointer;
       tree.command={command:'gushenCompletion.openApiFragment',title:'打开源码分块',arguments:[item.target]};return tree;
     }
-    tree.contextValue=item.children ? 'guthonApi.directory' : item.object?.readonly ? 'guthonApi.readonly' : ['page','procedure','table','view'].includes(item.object?.sourceType) ? `guthonApi.${item.object.sourceType}` : 'guthonApi.source';
+    tree.contextValue=item.children ? item.category ? `guthonApi.category.${item.category}` : 'guthonApi.directory' : item.object?.readonly ? 'guthonApi.readonly' : ['page','procedure','table','view'].includes(item.object?.sourceType) ? `guthonApi.${item.object.sourceType}` : 'guthonApi.source';
+    if(item.object && ['bill-type','dropdown','system-script','module-parameter'].includes(item.object.sourceType))tree.contextValue='guthonApi.'+item.object.sourceType;
+    tree.guthonWorkspaceKey=item.key;
     tree.description=item.description;
-    if(item.icon && v.ThemeIcon) tree.iconPath=new v.ThemeIcon(item.icon);
+    let owner=item;
+    while(owner && !owner.category)owner=owner.parent;
+    const style=MODULE_STYLES[owner?.category || SOURCE_CATEGORIES[item.object?.sourceType]];
+    if(v.ThemeIcon)tree.iconPath=new v.ThemeIcon(item.icon || (item.children?'folder':style?.icon || 'file'),style?new v.ThemeColor(style.color):undefined);
     tree.tooltip=item.object ? [item.object.path,item.object.diagnostic].filter(Boolean).join(' · ') : item.label;
     const changes=this.sourceChanges.get(item.key),priority={CONFLICT:3,REMOTE_DELETED:2,MISSING:2,MODIFIED:1};
     let state=changes?.get(item.object?.path || item.sourcePrefix);
     if(item.sourcePrefixes) for(const prefix of item.sourcePrefixes) {const value=changes?.get(prefix);if((priority[value]||0)>(priority[state]||0))state=value;}
-    if(state) {tree.description=({CONFLICT:'冲突',REMOTE_DELETED:'远端已删除',MISSING:'本地缺失',MODIFIED:'有本地修改'})[state] || state;if(v.ThemeIcon) tree.iconPath=new v.ThemeIcon(state==='MODIFIED'?'diff-modified':'warning');}
-    if(item.object) tree.command={command:isPage ? 'gushenCompletion.openApiPageEditor' : 'gushenCompletion.openApiSource',title:isPage ? '打开 PAGE 管理器' : '打开源码',arguments:[{workspaceKey:item.key,path:item.object.path}]};
+    if(state) {tree.description=({CONFLICT:'冲突',REMOTE_DELETED:'远端已删除',MISSING:'本地缺失',MODIFIED:'有本地修改'})[state] || state;if(v.ThemeIcon) tree.iconPath=new v.ThemeIcon(state==='MODIFIED'?'diff-modified':'warning',new v.ThemeColor(state==='MODIFIED'?'gitDecoration.modifiedResourceForeground':state==='CONFLICT'?'editorError.foreground':'editorWarning.foreground'));}
+    if(item.object) tree.command={command:isPage ? 'gushenCompletion.openApiPageEditor' : item.object.sourceType==='module-parameter'?'gushenCompletion.editModuleParameter':'gushenCompletion.openApiSource',title:isPage ? '打开 PAGE 管理器' : '打开源码',arguments:[{workspaceKey:item.key,path:item.object.path,lineNumber:item.object.lineNumber}]};
     return tree;
   }
   async getChildren(item) {
@@ -168,6 +221,7 @@ class ApiSourceUI {
     return item.children || [];
   }
   async loadCatalog(item,epoch) {
+      const treeOrder=this.vscode.workspace.getConfiguration?.('gushenCompletion')?.get?.('sourceTreeOrder','platform') || 'platform';
       const replacement=()=>{
         if(this.disposed || !this.workspaces.has(item.key)) return [];
         if((this.treeEpoch.get(item.key)||0)===epoch) return undefined;
@@ -189,7 +243,7 @@ class ApiSourceUI {
         offset=result.nextOffset;
       }
       const current=replacement();if(current!==undefined)return current;
-      const root={children:buildCatalogTree(item.key,item,objects,project)};
+      const root={children:buildCatalogTree(item.key,item,objects,project,{order:treeOrder})};
       if(partial && !this.indexDiagnostics.has(item.key)) {
         const diagnostics=objects.filter(object=>object.diagnostic && object.status!=='OK').map(object=>({path:object.path,code:object.diagnostic}));
         this.indexDiagnostics.set(item.key,{complete:false,diagnosticCount:partial,diagnostics:diagnostics.slice(0,100),truncated:diagnostics.length>100});
@@ -204,7 +258,7 @@ class ApiSourceUI {
           const menu=Array.isArray(result.menu) ? result.menu : result.menu?.list;
           if(this.disposed || version!==this.treeVersion || !Array.isArray(menu)) return;
           const messages=root.children.filter(child=>child.kind==='message');
-          this.treeCache.set(item.key,[...buildCatalogTree(item.key,item,objects,{...project,menuTree:menu}),...messages]);this.emitter?.fire();
+          this.treeCache.set(item.key,[...buildCatalogTree(item.key,item,objects,{...project,menuTree:menu},{order:treeOrder}),...messages]);this.emitter?.fire();
         }).catch(error=>{
           if(this.disposed || version!==this.treeVersion) return;
           const items=this.treeCache.get(item.key);if(!items)return;
@@ -257,30 +311,33 @@ class ApiSourceUI {
     if(!checkoutPath || !path.isAbsolute(checkoutPath)) return this.status(key);
     await this.registerWorkspace(key,checkoutPath);return {checkoutPath};
   }
-  async open(key, sourcePath, preview=false, {raw=false}={}) {
+  async open(key, sourcePath, preview=false, {raw=false,lineNumber=0}={}) {
     const status=await this.ensureWorkspace(key); const file=filePath(status.checkoutPath,sourcePath);
     // The backend remains authoritative about object identity and readonly state.
     const source=await this.run(key,'read',{path:sourcePath});
+    if(!raw && source.metadata?.sourceType==='module-parameter' && this.onOpenModule)return this.onOpenModule(key,sourcePath);
     if(!raw && source.contentState!=='SQL_ABSENT' && source.metadata?.sourceType==='view' && this.onOpenVirtual) return this.onOpenVirtual({workspaceKey:key,sourcePath,sourceType:'view',jsonPointer:'/viewSql',fragmentType:'sql'});
     if(!raw && this.onOpenVirtual && isInlineInherited(key,sourcePath,source)) return this.onOpenVirtual({workspaceKey:key,sourcePath,sourceType:source.metadata.sourceType,fragmentType:source.metadata.sourceType==='system-script' ? 'js' : 'gss'});
     let uri=this.vscode.Uri.file(file);
-    if(source.readonly || (!raw && source.projectionReadonly)) {
+    if(source.readonly || source.metadata?.sourceType==='module-parameter' || (!raw && source.projectionReadonly)) {
       uri=this.readonlyUri(key,sourcePath,source.content);
     }
-    return this.vscode.window.showTextDocument(await this.vscode.workspace.openTextDocument(uri),{preview});
+    return this.vscode.window.showTextDocument(await this.vscode.workspace.openTextDocument(uri),{preview,...(Number.isInteger(lineNumber)&&lineNumber>0 ? {selection:new this.vscode.Range(lineNumber-1,0,lineNumber-1,0)} : {})});
   }
   readonlyUri(key,sourcePath,content) {
-    const uri=this.vscode.Uri.from({scheme:'guthon-api-readonly',authority:'workspace',path:'/'+sourcePath,query:new URLSearchParams({workspaceKey:key,path:sourcePath}).toString()});
-    this.readonlyDocuments.set(JSON.stringify([key,sourcePath]),content);return uri;
+    const revision=crypto.createHash('sha256').update(content).digest('hex');
+    const uri=this.vscode.Uri.from({scheme:'guthon-api-readonly',authority:'workspace',path:'/'+sourcePath,query:new URLSearchParams({workspaceKey:key,path:sourcePath,revision}).toString()});
+    this.readonlyDocuments.set(JSON.stringify([key,sourcePath,revision]),content);return uri;
   }
   async openReadonly(key,sourcePath,content) {
     return this.vscode.window.showTextDocument(await this.vscode.workspace.openTextDocument(this.readonlyUri(key,sourcePath,content)),{preview:true});
   }
-  provideTextDocumentContent(uri) {const query=new URLSearchParams(uri.query || '');return this.readonlyDocuments.get(JSON.stringify([query.get('workspaceKey') || uri.authority,query.get('path') || uri.path.slice(1)])) || ''; }
+  provideTextDocumentContent(uri) {const query=new URLSearchParams(uri.query || '');return this.readonlyDocuments.get(JSON.stringify([query.get('workspaceKey') || uri.authority,query.get('path') || uri.path.slice(1),query.get('revision') || ''])) || ''; }
   async updateScm(key) {
     const generation=(this.scmGenerations.get(key)||0)+1;this.scmGenerations.set(key,generation);
     const state=await this.status(key); const vscode=this.vscode;
     if(this.disposed || this.scmGenerations.get(key)!==generation) return state;
+    await vscode.commands?.executeCommand?.('setContext','gushenCompletion.hasUnknownUpload',state.unverifiedUploadCount>0);
     if (!vscode.scm) return state;
     let record=this.controls.get(key);
     if (!record) {
@@ -336,6 +393,17 @@ class ApiSourceUI {
     const state=await this.status(key);
     const chosen=paths?.length ? paths : (state.files || []).filter(x=>x.inScope!==false && x.state === 'MODIFIED' && !x.readonly).map(x=>x.path);
     if (!chosen.length) {await this.vscode.window.showInformationMessage('没有可上传的源码修改');return;}
+    const modules=[];
+    for(const path of chosen)if((await this.run(key,'read',{path})).metadata?.sourceType==='module-parameter')modules.push(path);
+    if(modules.length) {
+      if(modules.length<chosen.length) {
+        const choice=await this.vscode.window.showQuickPick([{label:`模块参数 (${modules.length})`,module:true},{label:`其他源码 (${chosen.length-modules.length})`,module:false}],{title:'选择本次上传范围'});
+        if(!choice)return;
+        if(!choice.module)return this.upload(key,chosen.filter(path=>!modules.includes(path)));
+      }
+      if(!this.onModuleUpload)throw new Error('模块参数上传入口尚未就绪');
+      return this.onModuleUpload(key,modules);
+    }
     assertClean(this.vscode,state.checkoutPath,chosen);
     const expectedHashes={};
     for (const p of chosen) {const result=await this.run(key,'read',{path:p}); if(result.readonly) throw new Error(`只读源码不能上传：${p}`); expectedHashes[p]=result.sourceHash;}
@@ -371,7 +439,7 @@ class ApiSourceUI {
     if(!operations.length) return this.vscode.window.showInformationMessage('最近操作中没有需要核对的上传');
     const selected=await this.vscode.window.showQuickPick(operations.map(item=>({label:item.operationId,description:item.stage,detail:(item.paths || []).join('、'),operation:item})),{title:'选择要回读核对的上传'});
     if(!selected) return;
-    const result=await this.run(key,'verify-upload',{operationId:selected.operation.operationId});
+    const result=await this.run(key,selected.operation.kind==='module-upload'?'module-upload':'verify-upload',{...(selected.operation.kind==='module-upload'?{action:'verify'}:{}),operationId:selected.operation.operationId});
     await showReport(this.vscode,'上传回读核对',[`操作编号：${result.operationId || selected.operation.operationId}`,`状态：${result.stage || '未知'}`,`完成：${result.complete===true?'是':'否'}`,`重放上传：${result.mutationRetried===false?'否':'未确认'}`,'','```json',JSON.stringify(result.results || [],null,2),'```']);
     await this.updateScm(key);this.onUpdated?.();return result;
   }
@@ -458,4 +526,4 @@ class ApiSourceUI {
   clear(){this.invalidate();this.treeCache.clear();this.treeLoads.clear();this.indexGenerations.clear();this.rootItems=null;for(const {control,refreshTimer} of this.controls.values()) {clearTimeout(refreshTimer);control.dispose();}this.controls.clear();this.sourceChanges.clear();for(const watcher of this.watchers.values()) watcher.dispose();this.watchers.clear();this.readonlyDocuments.clear();this.indexDiagnostics.clear();this.menuAttempts.clear();this.workspaces.clear();this.refresh();}
   dispose(){if(this.disposed)return;this.disposed=true;this.clear();this.emitter?.dispose();}
 }
-module.exports={ApiSourceUI,assertClean,dirtyDocuments,filePath,identity,showReport,sourceSyncLines};
+module.exports={ApiSourceUI,assertClean,buildCatalogTree,dirtyDocuments,filePath,identity,showReport,sourceSyncLines};

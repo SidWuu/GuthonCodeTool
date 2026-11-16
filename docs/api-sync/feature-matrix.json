@@ -193,7 +193,7 @@
     "API-only CLI/ToolHost/Nexus/Bridge; retired source providers and installers removed",
     "one checkout per workspace with explicit subsystem/shared-datasource scope and platform binding",
     "login/captcha/system-keyring sessions and compact inline-login/current-project cards",
-    "paginated five-kind download plus inherited/project configuration and skills",
+    "paginated five-kind source download plus module parameter snapshots with data-only lease editing and preview-bound checkout/save/readback without check-in, inherited/project configuration and skills",
     "baseline/merge/conflicts/SCM/QuickDiff/local history and transport-neutral reviewed change bundles",
     "five official upload routes with canonical response/readback verification, normalization merge and GET-only unknown-result recovery",
     "native XML/JSON PAGE structure, collection JSON and inline project inheritance editing",

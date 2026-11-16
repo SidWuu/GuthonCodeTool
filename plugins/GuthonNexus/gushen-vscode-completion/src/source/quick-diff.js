@@ -7,7 +7,7 @@ function pointerValue(data,pointer) {
   return pointer.slice(1).split('/').reduce((value,key)=>value?.[key.replace(/~1/g,'/').replace(/~0/g,'~')],data);
 }
 class ApiQuickDiff {
-  constructor({vscode,run,editorState,ui,projectBase,viewBase}) {Object.assign(this,{vscode,run,editorState,ui,projectBase,viewBase});this.contents=new BoundedCache({maxEntries:128,maxBytes:32*1024*1024,sizeOf:Buffer.byteLength,isPinned:key=>(vscode.workspace.textDocuments || []).some(doc=>doc.uri.toString()===key)});this.label='API 源码基线';}
+  constructor({vscode,run,editorState,ui,projectBase,projectionBase}) {Object.assign(this,{vscode,run,editorState,ui,projectBase,projectionBase});this.contents=new BoundedCache({maxEntries:128,maxBytes:32*1024*1024,sizeOf:Buffer.byteLength,isPinned:key=>(vscode.workspace.textDocuments || []).some(doc=>doc.uri.toString()===key)});this.label='API 源码基线';}
   provideTextDocumentContent(uri){return this.contents.get(uri.toString()) || '';}
   async provideOriginalResource(uri,token) {
     if(token?.isCancellationRequested) return;
@@ -21,8 +21,8 @@ class ApiQuickDiff {
     const result=await this.run(key,'diff',{path:sourcePath});
     if(token?.isCancellationRequested || generation!==(this.ui.scmGenerations.get(key)||0)) return;
     let content=result.before;
-    if(sourceType==='view') {
-      content=this.viewBase?.(uri,result);
+    if(sourceType==='view' || sourceType==='module-parameter') {
+      content=this.projectionBase?.(uri,result);
     } else if(pointer) {
       try {content=pointerValue(JSON.parse(content),pointer);} catch {
         const snapshot=await this.run(key,'page',{action:'open',path:sourcePath});

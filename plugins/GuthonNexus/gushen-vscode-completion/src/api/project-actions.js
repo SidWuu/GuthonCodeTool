@@ -12,31 +12,19 @@ async function showProjectActions({vscode,getWorkspaces,bridge}) {
       item('执行源码排查','runDiagnosis',{project:true}),
       item('查看排查记录','showDiagnosisHistory',{project:true}),
     ],
-    '导入与导出':[
-      item('导出本地修改','exportApiChanges',{project:true}),
-      item('导入本地修改','importApiChanges',{project:true}),
-      item('导出源码说明','exportMarkdown',{project:true}),
-      item('导出表结构','exportSchema',{project:true}),
-      item('导出视图','exportViews',{project:true}),
-      item('导出系统脚本','exportSystemScripts',{project:true}),
-      item('导出单据类型','exportBillTypes',{project:true}),
-      item('导出 AI 上下文','exportAiContext',{project:true}),
-    ],
     '项目管理':[
       item('打开项目目录','openApiCheckout',{project:true}),
       item('添加项目','addWorkspace'),
       item('删除当前项目','deleteWorkspace',{project:true}),
     ],
-    '工具与更新':[
-      item('检查工具更新','checkToolUpdate'),
-      item('检查官方补全更新','checkOfficialUpdate'),
-      item('回退官方补全','rollbackOfficialUpdate'),
-      item('回退后端版本','rollbackToolUpdate'),
-      item('选择运行方式','selectExecutionMode'),
-      item('选择更新来源','selectUpdateSource'),
-      item('切换本地数据目录','setupTool'),
-      item('打开本地数据目录','openToolHome'),
+    '工具设置':[
+      item('选择运行方式','selectExecutionMode'),item('选择更新来源','selectUpdateSource'),
+      item('切换本地数据目录','setupTool'),item('打开本地数据目录','openToolHome'),
       item(bridge.isRunning()?'停止浏览器增强':'启动浏览器增强',bridge.isRunning()?'stopBridge':'startBridge'),
+    ],
+    '检查更新':[
+      item('检查工具组件更新','checkToolUpdate'),item('检查官方补全更新','checkOfficialUpdate'),
+      item('回退官方补全','rollbackOfficialUpdate'),item('回退后端版本','rollbackToolUpdate'),
     ],
   };
   const common=project ? [item('项目设置','configureProject',{project:true}),
@@ -44,7 +32,7 @@ async function showProjectActions({vscode,getWorkspaces,bridge}) {
     : [item('设置本地数据目录','setupTool')];
   const choices=[{label:'常用',kind:vscode.QuickPickItemKind.Separator},...common,
     ...Object.entries(groups).flatMap(([label,items])=>[{label,kind:vscode.QuickPickItemKind.Separator},...items])];
-  const selected=await vscode.window.showQuickPick(choices,{title:project ? `${project.name || project.displayName} · 项目全部操作` : '项目全部操作',placeHolder:'搜索项目操作、检查、导入导出与设置',matchOnDescription:true});
+  const selected=await vscode.window.showQuickPick(choices,{title:project ? `${project.name || project.displayName} · 项目全部操作` : '项目全部操作',placeHolder:'搜索项目操作、检查与设置',matchOnDescription:true});
   if(!selected || selected.kind===vscode.QuickPickItemKind.Separator)return;
   let workspace=project;
   if(selected.project && !workspace) {
@@ -57,7 +45,7 @@ async function showProjectActions({vscode,getWorkspaces,bridge}) {
 
 // View title actions may pass an opaque view context instead of a workspace key.
 function workspaceKeyFrom(value) {
-  return typeof value==='string' ? (value==='gushenCompletion.projectDetails' ? '' : value) : value?.workspaceKey || value?.guthonWorkspaceKey || '';
+  return typeof value==='string' ? (value==='gushenCompletion.projectDetails' ? '' : value) : value?.workspaceKey || value?.guthonWorkspaceKey || value?.key || '';
 }
 function projectMenuHandler({vscode,selectWorkspace,command}) {
   return async value=>{
@@ -68,9 +56,41 @@ function projectMenuHandler({vscode,selectWorkspace,command}) {
   };
 }
 
+function sourceExportArgs(command,value) {
+  if(!value || typeof value==='string' || (!value.object && !value.category))return [];
+  const object=value.object || {},category=value.category;
+  const expected={'export-schema':['tables','table'],'export-view':['views','view'],'export-system-script':['system-script','system-script'],'export-bill-type':['bill-type','bill-type']}[command];
+  if(!expected || (object.path ? object.sourceType!==expected[1] : category!==expected[0]))throw new Error('导出类型与所选源码不匹配');
+  const args=[];
+  const source=object.dataSourceId || value.dataSourceId,system=object.systemId || value.systemId;
+  if(source)args.push('--data-source-ids',source);
+  if(system)args.push('--system-ids',system);
+  if(object.path) {
+    const flag={'export-schema':'--table-ids','export-view':'--view-ids','export-system-script':'--script-types','export-bill-type':'--bill-type-codes'}[command];
+    if(!object.sourceId)throw new Error('所选源码缺少导出身份');
+    args.push(flag,object.sourceId);
+  }
+  return args;
+}
+
+async function showProjectChecks({vscode,workspace,api}) {
+  const state=await api.readProjectSummary(workspace.workspaceKey);
+  const entries=[{label:'检查运行环境',command:'runDoctor'},
+    {label:'查看索引问题',command:'showApiIndexDiagnostics',description:state.index?.ready ? '检查解析诊断和索引覆盖' : '索引尚未就绪'},
+    {label:'重试待更新文件',command:'retryApiIndexFailures'},
+    {label:'重建全部索引',command:'reindexCalls',description:'索引丢失或需要完整重建时使用'}];
+  const selected=await vscode.window.showQuickPick(entries,{title:'当前项目环境与索引'});
+  if(selected)return vscode.commands.executeCommand('gushenCompletion.'+selected.command,workspace.workspaceKey);
+}
+async function showProjectHistory({vscode,workspace}) {
+  const selected=await vscode.window.showQuickPick([{label:'源码同步与上传记录',command:'showApiHistory'},
+    {label:'数据库排查记录',command:'showDiagnosisHistory'}],{title:'当前项目操作记录'});
+  if(selected)return vscode.commands.executeCommand('gushenCompletion.'+selected.command,workspace.workspaceKey);
+}
+
 function projectToolHandler({vscode,selectWorkspace,runTool,command}) {
   return async value=>{
-    try {const workspace=await selectWorkspace(workspaceKeyFrom(value));if(workspace)return await runTool(command,[],true,workspace.workspaceKey);}
+    try {const workspace=await selectWorkspace(workspaceKeyFrom(value));if(workspace)return await runTool(command,sourceExportArgs(command,value),true,workspace.workspaceKey);}
     catch(error) {return vscode.window.showErrorMessage(`项目操作失败：${error.message}`);}
   };
 }
@@ -91,6 +111,9 @@ async function showProjectSettings({vscode,workspace,onConfiguration}) {
     {label:'拉取范围',description:'选择需要下载的子系统和共享数据源',command:'selectApiSystems'},
     {label:'平台连接',description:'查看或修改当前项目的开发平台地址',command:'configureApiSource'},
     {label:'数据库查询与验证',description:'按向导配置只读连接和验证目标',command:'configureDatabaseDiagnosis'},
+    {label:'官方参考资料',description:'控制单据类型、下拉组件和 skills 资料是否纳入同步与索引',command:'configureReferenceAssets'},
+    {label:'同步模块参数',description:'只读获取当前子系统的参数列表与完整 JSON 快照',command:'syncModuleParameters'},
+    {label:'同步官方参考资料',description:'仅同步配置索引与 skills，保留不同的本地内容',command:'syncPlatformReferences'},
     {label:'配置文件',description:'查看配置位置或迁移到单一配置文件',configuration:true},
   ];
   const selected=await vscode.window.showQuickPick(entries,{title:`${workspace.name || workspace.displayName} · 项目设置`,placeHolder:'选择需要调整的设置；取消不会保存'});
@@ -123,4 +146,4 @@ async function showConfiguration({vscode,client,workspace}) {
   return vscode.window.showInformationMessage(`已合并配置：${result.path}`);
 }
 
-module.exports={showProjectActions,showProjectSettings,showConfiguration,workspaceKeyFrom,projectMenuHandler,projectToolHandler,projectDiagnosisHandler};
+module.exports={showProjectActions,showProjectSettings,showConfiguration,sourceExportArgs,showProjectChecks,showProjectHistory,workspaceKeyFrom,projectMenuHandler,projectToolHandler,projectDiagnosisHandler};

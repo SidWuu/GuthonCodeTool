@@ -54,6 +54,11 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `scripts/providers/api/client.py`、`workspace.py` | API 会话、验证码、HTTPS 信任、项目配置、范围、目录名称缓存与凭据。 |
 | `scripts/providers/api/download.py`、`store.py`、`sync.py` | 按范围下载、范围变更预检与备份清理编排、基线与冲突、上传前合并和平台回读。 |
 | `scripts/providers/api/cli.py`、`index.py`、`mcp_server.py` | CLI、索引、查询及受控 MCP 接口。 |
+| `scripts/providers/api/module_parameters.py` | 按显式子系统读取模块参数列表与详情，保留完整 JSON 快照及复合身份，独立同步仅清理该类型旧快照；复用 API 基线、索引和原文查看。 |
+| `scripts/providers/api/module_parameter_editor.py`、`module_parameter_upload.py` | data JSON 投影、保护字段校验、旧只读描述符升级与文档租约；上传预览绑定、普通签出所有者核验、保存后回读、持久待核对门闩及只读恢复，不自动签入。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/module-parameter-editor.js` | 模块参数数据编辑、原生差异、本地保存与上传预览确认；共用源码虚拟文件系统的视图/模块参数投影。 |
+| `scripts/providers/api/reference_assets.py` | 官方单据类型/下拉组件 Markdown 的行级派生、配置引用、按工作区读取 API/结构/事件/规则及 PAGE 属性注解；原文件只读。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/platform-reference.js` | 按索引代次缓存的工作区 API 参考、补全/悬停与开发参考入口。 |
 | `scripts/providers/api/change_bundle.py` | 当前 API 工作区的本地变更包导出、预览和按计划摘要应用；旧侧材料生成属于待补齐迁移环节。 |
 | `scripts/providers/api/page.py`、`documents.py`、`editor_state.py` | PAGE 编辑、租约文档及编辑器状态协调。 |
 | `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`、`source-ui.js`、`project-card.js`、`project-actions.js` | 谷神项目卡片常用按钮与设置向导、原生项目菜单及命令面板操作列表、API 项目命令、按类型展示的源码树与 SCM；文件事件按登记范围处理，目录复用和重复索引短路；轻量卡片不等待全项目扫描。 |

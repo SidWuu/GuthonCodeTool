@@ -16,6 +16,17 @@ function normalizeExecutionMode(mode) {
   return mode === 'development' ? 'source-development' : mode;
 }
 
+// 开发模式每次都让用户明确选择源码目录，避免沿用已失效或非当前分支的 developmentRoot。
+function runtimeSelectionOptions(mode, reselectEntry = false) {
+  return {
+    probeScript: true,
+    probePackaged: true,
+    selectScript: reselectEntry,
+    selectPackaged: reselectEntry,
+    selectDevelopment: reselectEntry || normalizeExecutionMode(mode) === 'source-development',
+  };
+}
+
 function runtimeConfigurationTarget(config, key, targets) {
   const scope = config.inspect?.(key);
   if (scope?.workspaceFolderValue !== undefined) return targets.WorkspaceFolder;
@@ -103,6 +114,6 @@ function writeRuntimeDescriptor(tool) {
 module.exports = {
   installedToolEnvironment,
   runtimeConfigurationTarget,
-  normalizeExecutionMode, resolveDevelopmentRuntime, resolveScriptRuntime,
+  normalizeExecutionMode, runtimeSelectionOptions, resolveDevelopmentRuntime, resolveScriptRuntime,
   resolvePackagedTool, toolArguments, writeRuntimeDescriptor,
 };

@@ -373,6 +373,7 @@ class PageEditorController {
   async message(session, message) {
     if (!message || typeof message.type !== 'string') return;
     if (message.type === 'ready') { session.published = null; this.publish(session); return; }
+    if(message.type==='platformReference') {await this.vscode.commands.executeCommand('gushenCompletion.showPlatformReference',session.identity.workspaceKey);return;}
     if (message.type === 'compare') { await this.refreshComparison(session); return; }
     if (message.type === 'manageResources') {
       await this.manageResources(session); this.publish(session); return;
@@ -699,7 +700,7 @@ class PageEditorController {
       <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource}; img-src data:; connect-src 'none';">
       <link rel="stylesheet" href="${uri('editor.css')}"><title>本地页面</title></head><body>
       <header><div class="heading"><div><span class="eyebrow">GUTHON NEXUS · PAGE WORKSPACE</span><h1 id="title">本地页面</h1></div><span id="status" role="status"></span></div><p id="baseline"></p>
-      <div class="toolbar"><div class="action-group" role="group" aria-label="谷神平台与设计器"><span class="group-label">谷神</span><button id="native" class="primary">原版设计视图</button><button id="manageResources">平台资源</button></div>
+      <div class="toolbar"><div class="action-group" role="group" aria-label="谷神平台与设计器"><span class="group-label">谷神</span><button id="native" class="primary">原版设计视图</button><button id="manageResources">平台资源</button><button id="platformReference">开发参考</button></div>
       <div class="action-group" role="group" aria-label="本地编辑"><span class="group-label">本地</span><button id="save">保存到本地</button><button id="undo">撤销</button><button id="redo">重做</button><button id="compare" aria-expanded="false" aria-controls="compare-menu">比较改动</button><div id="compare-menu" hidden><button id="compare-baseline">与 API 基线比较</button><button id="compare-local">与本地保存版本比较</button></div><button id="source-merge" hidden>外部修改冲突</button><button id="exit-compare" hidden>返回当前草稿</button><button id="export">导出草稿</button><button id="reload">重新载入</button><button id="resume">恢复保存检查</button></div><input id="search" type="search" placeholder="筛选字段名称或编码" aria-label="筛选字段"></div>
       <p class="diff-legend"><span class="diff-baseline">M · 相对 API 基线的本地修改</span><span class="diff-local">● · 窗口未保存</span><span id="comparison-status"></span></p>
       <p id="resources" class="resource-note"></p></header>

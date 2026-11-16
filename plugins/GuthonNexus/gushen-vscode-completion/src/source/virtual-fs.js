@@ -25,11 +25,11 @@ function scriptType(node) {
 }
 function documentFilename(identity) {
   const label=String(identity.documentName || identity.sourceId || '页面代码').replace(/\s+\/\s+/g,' · ').replace(/[<>:"/\\|?*\x00-\x1f]+/g,'_');
-  const type=identity.fragmentType==='fields'?'json':identity.fragmentType==='sql'?'sql':['gss','vm'].includes(identity.fragmentType)?'gss':'js';
+  const type=['fields','json'].includes(identity.fragmentType)?'json':identity.fragmentType==='sql'?'sql':['gss','vm'].includes(identity.fragmentType)?'gss':'js';
   return label.toLowerCase().endsWith('.'+type) ? label : `${label}.${type}`;
 }
 function uriFor(vscode,id) {
-  const extension=id.fragmentType==='fields' ? 'json' : id.fragmentType==='sql' ? 'sql' : ['gss','vm'].includes(id.fragmentType) ? 'gss' : 'js';
+  const extension=['fields','json'].includes(id.fragmentType) ? 'json' : id.fragmentType==='sql' ? 'sql' : ['gss','vm'].includes(id.fragmentType) ? 'gss' : 'js';
   const base=path.posix.basename(id.sourcePath);
   const event=(id.jsonPointer || '').split('/').at(-1);
   const label=(event ? `${base} · ${event}` : base.replace(/\.[^.]+$/,'')).replace(/[<>:"/\\|?*\x00-\x1f]+/g,'_');
@@ -71,16 +71,16 @@ class ApiPageVirtualFs {
     if(existing?.generation===generation) return existing.promise;
     const request={id,generation};
     request.promise=this.loadFile(uri,id).then(({content,record})=>{
-      if(this.disposed || (this.generations.get(key)||0)!==generation) {this.releaseView(record);throw new Error('源码读取期间已变化，请重新打开');}
+      if(this.disposed || (this.generations.get(key)||0)!==generation) {this.releaseProjection(record);throw new Error('源码读取期间已变化，请重新打开');}
       this.records.set(key,record);return content;
     }).finally(()=>{if(this.inFlight.get(key)===request)this.inFlight.delete(key);});
     this.inFlight.set(key,request);return request.promise;
   }
   async loadFile(uri,id) {
-    const wholeFile=!id.jsonPointer,collection=id.fragmentType==='fields',view=id.sourceType==='view';
-    let source,sourceHash,editable,inherited,editToken,expiresAt,baseHash,baseContentSQL;
-    if(view) {
-      const item=await this.openView(id);({content:source,sourceHash,editable,editToken,expiresAt,baseHash,baseContentSQL}=item);
+    const wholeFile=!id.jsonPointer,collection=id.fragmentType==='fields',view=id.sourceType==='view',module=id.sourceType==='module-parameter';
+    let source,sourceHash,editable,inherited,editToken,expiresAt,baseHash,baseContentSQL,baseContentData;
+    if(view || module) {
+      const item=await this.openProjection(id);({content:source,sourceHash,editable,editToken,expiresAt,baseHash,baseContentSQL,baseContentData}=item);
     } else if(wholeFile) {
       const item=await this.run(id.workspaceKey,'read',{path:id.sourcePath});
       if(item.path!==id.sourcePath || !['procedure','page','system-script'].includes(item.metadata?.sourceType) || (id.sourceType==='procedure' && item.metadata.sourceType!=='procedure')) throw new Error('继承源码身份与当前文件不一致');
@@ -97,24 +97,24 @@ class ApiPageVirtualFs {
       source=node.content;sourceHash=snapshot.sourceHash;editable=snapshot.editable && node.editable;
       if(snapshot.editable && !node.editable && id.workspaceKey.startsWith('projects.') && /@?inherit\s*\(/.test(source)) editable=true;
     }
-    if(editable && !view && !collection && id.workspaceKey.startsWith('projects.') && /@?inherit\s*\(/.test(source)) {
+    if(editable && !view && !module && !collection && id.workspaceKey.startsWith('projects.') && /@?inherit\s*\(/.test(source)) {
       const projection=await readInheritance({run:this.run,workspaceKey:id.workspaceKey,path:id.sourcePath,jsonPointer:id.jsonPointer,expectedHash:sourceHash});
       if(projection.status==='ACTIVE') {inherited=inheritedProjection(source,projection,sourceHash,wholeFile);source=projection.effective;}
       else if(projection.status!=='INACTIVE') {editable=false;await this.vscode.window.showWarningMessage(`继承状态 ${projection.status}，暂以只读原文打开`);}
     }
-    const content=Buffer.from(source,'utf8');return {content,record:{id,uri,sourceHash,editable,collection,wholeFile,view,editToken,expiresAt,baseHash,baseContentSQL,inherited,size:content.length,content}};
+    const content=Buffer.from(source,'utf8');return {content,record:{id,uri,sourceHash,editable,collection,wholeFile,view,module,editToken,expiresAt,baseHash,baseContentSQL,baseContentData,inherited,size:content.length,content}};
   }
-  async openView(id) {
-    const item=await this.run(id.workspaceKey,'view',{action:'open',path:id.sourcePath});
+  async openProjection(id) {
+    const item=await this.run(id.workspaceKey,id.sourceType==='module-parameter'?'module-parameter':'view',{action:'open',path:id.sourcePath});
     if(item.sourcePath!==id.sourcePath || typeof item.content!=='string' || !item.sourceHash || typeof item.editable!=='boolean' || (item.editable && !item.editToken)) {
-      this.releaseView({id,editToken:item.editToken});throw new Error('视图 SQL 来源或编辑会话无效');
+      this.releaseProjection({id,editToken:item.editToken});throw new Error('源码编辑内容或会话无效');
     }
     return item;
   }
-  releaseView(record) {
+  releaseProjection(record) {
     if(!record?.editToken) return;
     const editToken=record.editToken;record.editToken=undefined;
-    void this.run(record.id.workspaceKey,'view',{action:'close',editToken}).catch(error=>this.vscode.window.showErrorMessage?.(`视图编辑会话关闭失败：${error.message}`));
+    void this.run(record.id.workspaceKey,record.id.sourceType==='module-parameter'?'module-parameter':'view',{action:'close',editToken}).catch(error=>this.vscode.window.showErrorMessage?.(`编辑会话关闭失败：${error.message}`));
   }
   async stat(uri) {
     const record=this.records.get(uri.toString());if(!record) await this.readFile(uri);
@@ -136,11 +136,11 @@ class ApiPageVirtualFs {
     for(const [name,record] of this.records) {
       if(record.id.workspaceKey!==key || (!paths.includes(record.id.sourcePath) && !paths.includes(record.inherited?.parentPath))) continue;
       if((this.vscode.workspace.textDocuments || []).some(doc=>doc.isDirty && doc.uri.toString()===name)) continue;
-      this.records.delete(name);this.releaseView(record);this.changed.fire([{type:this.vscode.FileChangeType.Changed,uri:record.uri}]);
+      this.records.delete(name);this.releaseProjection(record);this.changed.fire([{type:this.vscode.FileChangeType.Changed,uri:record.uri}]);
     }
     this.onInvalidated?.();
   }
-  close(uri){const key=uri.toString();this.generations.set(key,(this.generations.get(key)||0)+1);this.releaseView(this.records.get(key));this.records.delete(key);this.onInvalidated?.();}
+  close(uri){const key=uri.toString();this.generations.set(key,(this.generations.get(key)||0)+1);this.releaseProjection(this.records.get(key));this.records.delete(key);this.onInvalidated?.();}
   checkBuffers(record,uri) {
     this.onWillSave?.(uri);
     this.editorState.assertNoConflictingDrafts(record.id.workspaceKey,record.id.sourcePath,['page']);
@@ -150,7 +150,7 @@ class ApiPageVirtualFs {
   async writeFile(uri,content) {
     const record=this.records.get(uri.toString());if(!record || !record.editable) throw this.vscode.FileSystemError.NoPermissions(uri);
     if(record.uncertain) throw new Error('上次源码保存结果未知，请先核对源码并重新打开');
-    if(record.view) return this.writeView(uri,record,content);
+    if(record.view || record.module) return this.writeProjection(uri,record,content);
     this.checkBuffers(record,uri);const token=await this.editorState.flush(record.id.workspaceKey);
     const snapshot=record.wholeFile ? await this.run(record.id.workspaceKey,'read',{path:record.id.sourcePath}) : await this.run(record.id.workspaceKey,'page',{action:'open',path:record.id.sourcePath});
     if(snapshot.sourceHash!==record.sourceHash || (record.wholeFile ? snapshot.readonly : !snapshot.editable)) throw new Error('源码已变化，请先核对；编辑器输入已保留');
@@ -202,32 +202,38 @@ class ApiPageVirtualFs {
     } catch(error) {throw error;}
     await this.onSaved?.(uri);
   }
-  async writeView(uri,record,content) {
+  async writeProjection(uri,record,content) {
+    const label=record.module?'模块参数':'视图 SQL';
     this.checkBuffers(record,uri);
     const document=(this.vscode.workspace.textDocuments || []).find(doc=>doc.uri.toString()===uri.toString()),version=document?.version;
-    const checkVersion=()=>{if(document && document.version!==version) throw new Error('保存期间视图 SQL 已变化，请重新保存');};
+    const checkVersion=()=>{if(document && document.version!==version) throw new Error(`保存期间${label} 已变化，请重新保存`);};
     const token=await this.editorState.flush(record.id.workspaceKey);
     if(record.expiresAt && Date.now()>=record.expiresAt*1000) {
-      record.editToken=undefined;const fresh=await this.openView(record.id);
-      if(fresh.sourceHash!==record.sourceHash || !fresh.editable) {this.releaseView({id:record.id,editToken:fresh.editToken});throw new Error('视图源码已变化，请先核对；编辑器输入已保留');}
-      Object.assign(record,{editToken:fresh.editToken,expiresAt:fresh.expiresAt,baseHash:fresh.baseHash,baseContentSQL:fresh.baseContentSQL});
+      record.editToken=undefined;const fresh=await this.openProjection(record.id);
+      if(fresh.sourceHash!==record.sourceHash || !fresh.editable) {this.releaseProjection({id:record.id,editToken:fresh.editToken});throw new Error(`${label}源码已变化，请先核对；编辑器输入已保留`);}
+      Object.assign(record,{editToken:fresh.editToken,expiresAt:fresh.expiresAt,baseHash:fresh.baseHash,baseContentSQL:fresh.baseContentSQL,baseContentData:fresh.baseContentData});
     }
     const snapshot=await this.run(record.id.workspaceKey,'read',{path:record.id.sourcePath});
-    if(snapshot.path!==record.id.sourcePath || snapshot.sourceHash!==record.sourceHash || snapshot.readonly) throw new Error('视图源码已变化，请先核对；编辑器输入已保留');
+    if(snapshot.path!==record.id.sourcePath || snapshot.sourceHash!==record.sourceHash || snapshot.readonly) throw new Error(`${label}源码已变化，请先核对；编辑器输入已保留`);
     const text=Buffer.from(content).toString('utf8');
-    const preview=await this.run(record.id.workspaceKey,'view',{action:'preview',path:record.id.sourcePath,editToken:record.editToken,expectedHash:record.sourceHash,content:text});
-    if((preview.sourcePath && preview.sourcePath!==record.id.sourcePath) || preview.sourceHash!==record.sourceHash || !preview.previewId || !preview.candidateSourceHash) throw new Error('视图 SQL 预览身份无效');
+    const preview=await this.run(record.id.workspaceKey,record.module?'module-parameter':'view',{action:'preview',path:record.id.sourcePath,editToken:record.editToken,expectedHash:record.sourceHash,content:text});
+    if((preview.sourcePath && preview.sourcePath!==record.id.sourcePath) || preview.sourceHash!==record.sourceHash || !preview.previewId || !preview.candidateSourceHash) throw new Error(`${label} 预览身份无效`);
     this.checkBuffers(record,uri);checkVersion();const latest=await this.editorState.flush(record.id.workspaceKey);
     if(latest!==token) throw new Error('编辑会话已变化，请重新打开源码');this.checkBuffers(record,uri);checkVersion();
     record.uncertain=true;
-    const result=await this.run(record.id.workspaceKey,'view',{action:'save',editToken:record.editToken,previewId:preview.previewId,idempotencyKey:'view-sql-'+crypto.randomUUID(),editorToken:token});
+    const result=await this.run(record.id.workspaceKey,record.module?'module-parameter':'view',{action:'save',editToken:record.editToken,previewId:preview.previewId,idempotencyKey:(record.module?'module-data-':'view-sql-')+crypto.randomUUID(),editorToken:token});
     record.editToken=undefined;
-    if((result.sourcePath && result.sourcePath!==record.id.sourcePath) || result.operationComplete!==true || result.sourceHash!==preview.candidateSourceHash) throw new Error('视图 SQL 保存结果未确认，请核对源码');
-    const fresh=await this.openView(record.id);
-    if(fresh.sourceHash!==result.sourceHash || fresh.content!==text) {this.releaseView({id:record.id,editToken:fresh.editToken});throw new Error('视图 SQL 保存回读不一致');}
-    Object.assign(record,{editToken:fresh.editToken,expiresAt:fresh.expiresAt,baseHash:fresh.baseHash,baseContentSQL:fresh.baseContentSQL,sourceHash:fresh.sourceHash,editable:fresh.editable});
+    if((result.sourcePath && result.sourcePath!==record.id.sourcePath) || result.operationComplete!==true || result.sourceHash!==preview.candidateSourceHash) throw new Error(`${label} 保存结果未确认，请核对源码`);
+    const fresh=await this.openProjection(record.id);
+    if(fresh.sourceHash!==result.sourceHash || (record.module?fresh.content.trim()!==text.trim():fresh.content!==text)) {this.releaseProjection({id:record.id,editToken:fresh.editToken});throw new Error(`${label} 保存回读不一致`);}
+    Object.assign(record,{editToken:fresh.editToken,expiresAt:fresh.expiresAt,baseHash:fresh.baseHash,baseContentSQL:fresh.baseContentSQL,baseContentData:fresh.baseContentData,sourceHash:fresh.sourceHash,editable:fresh.editable});
     record.size=content.length;record.content=Buffer.from(content);record.uncertain=false;
     await this.onSaved?.(uri);
+  }
+  async previewProjection(uri,content) {
+    await this.readFile(uri);const record=this.records.get(uri.toString());
+    if(!record?.module || !record.editable || record.uncertain)throw new Error('请选择可编辑的模块参数');
+    return this.run(record.id.workspaceKey,'module-parameter',{action:'preview',path:record.id.sourcePath,editToken:record.editToken,expectedHash:record.sourceHash,content});
   }
   projectBase(uri,physicalBase) {
     const inherited=this.records.get(uri.toString())?.inherited;if(!inherited) return physicalBase;
@@ -235,14 +241,14 @@ class ApiPageVirtualFs {
     if(first<0 || physicalBase.indexOf(inherited.marker,first+1)>=0) return undefined;
     return physicalBase.slice(0,first)+inherited.productText+physicalBase.slice(first+inherited.marker.length);
   }
-  viewBase(uri,diff) {
+  projectionBase(uri,diff) {
     const record=this.records.get(uri.toString());
-    return record?.view && typeof diff.sourceHash==='string' && !!diff.sourceHash && typeof diff.baseHash==='string' && !!diff.baseHash && record.sourceHash===diff.sourceHash && record.baseHash===diff.baseHash && typeof record.baseContentSQL==='string' ? record.baseContentSQL : undefined;
+    return (record?.view || record?.module) && typeof diff.sourceHash==='string' && !!diff.sourceHash && typeof diff.baseHash==='string' && !!diff.baseHash && record.sourceHash===diff.sourceHash && record.baseHash===diff.baseHash && typeof (record.module?record.baseContentData:record.baseContentSQL)==='string' ? (record.module?record.baseContentData:record.baseContentSQL) : undefined;
   }
   readDirectory(){return [];}
   createDirectory(){throw this.vscode.FileSystemError.NoPermissions();}
   delete(){throw this.vscode.FileSystemError.NoPermissions();}
   rename(){throw this.vscode.FileSystemError.NoPermissions();}
-  dispose(){if(this.disposed)return;this.disposed=true;this.changed.dispose();for(const record of this.records.values())this.releaseView(record);this.records.clear();this.inFlight.clear();this.generations.clear();}
+  dispose(){if(this.disposed)return;this.disposed=true;this.changed.dispose();for(const record of this.records.values())this.releaseProjection(record);this.records.clear();this.inFlight.clear();this.generations.clear();}
 }
 module.exports={SCHEME,pageDisplayName,fragmentIdentity,documentFilename,scriptType,decodeIdentity,uriFor,isInlineInherited,ApiPageVirtualFs};
