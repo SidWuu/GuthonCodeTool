@@ -51,17 +51,18 @@
     {
       "name": "源码树、搜索、定位与快速打开",
       "requiredBehavior": "保留当前项目对象/正文/字段检索、精确定位、路径复制与上下文导出。",
-      "apiMigration": "当前项目的API目录、正文/字段搜索、精确定位、快速打开与上下文导出。",
+      "apiMigration": "当前项目的API目录、正文/字段搜索、精确定位、快速打开与上下文导出；过程函数源码树按已索引源码和元数据展示参数及已确认的返回表达式，搜索和定位保留英文与中文名称。",
       "status": "implemented",
       "sources": [
         "scripts/providers/api/index.py",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js",
         "plugins/GuthonNexus/gushen-vscode-completion/src/api/navigation.js"
       ]
     },
     {
       "name": "状态、差异、还原、合并和冲突处理",
       "requiredBehavior": "保留SCM/Quick Diff、修改选择、远端对比、还原和冲突完成。",
-      "apiMigration": "API基线、SCM、Quick Diff、显式还原、三方冲突与远端只读内容恢复。上传应答规范源码与独立回读核对，以提交正文为祖先保留期间本地修改。",
+      "apiMigration": "API基线、SCM、Quick Diff、显式还原、三方冲突与远端只读内容恢复。结构化PAGE使用原生JSON保存与原生模型独立回读，其他源码核对应答规范正文；以提交正文为祖先保留期间本地修改。",
       "status": "implemented",
       "sources": [
         "scripts/providers/api/store.py",
@@ -72,12 +73,13 @@
     {
       "name": "页面结构编辑与预览",
       "requiredBehavior": "保留字段/按钮/事件/SQL/属性/布局编辑、顺序调整、原文保留、草稿、撤销与恢复。",
-      "apiMigration": "XML/JSON PAGE共享模型；字段、按钮、属性、事件、SQL、集合JSON、排序、布局、草稿和恢复。",
+      "apiMigration": "Nexus 页面入口默认打开本地字段/代码编辑器，保留草稿、撤销、恢复和比较；在线编辑器使用官方 iframe，未保存草稿须先成功保存到本地。两种保存均只更新本地源码，上传独立执行。结构化 PAGE 使用原生编辑模型/版本和本地 XML 无损表示；无原生版本的元数据仅查看，下载 XML 不作保存输入。",
       "status": "implemented",
       "sources": [
         "scripts/providers/api/native_page.py",
         "scripts/providers/api/page.py",
-        "plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/controller.js"
+        "plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/controller.js",
+        "plugins/GuthonNexus/gushen-vscode-completion/src/api/designer.js"
       ]
     },
     {
@@ -192,7 +194,7 @@
   "implemented": [
     "API-only CLI/ToolHost/Nexus/Bridge; retired source providers and installers removed",
     "one checkout per workspace with explicit subsystem/shared-datasource scope and platform binding",
-    "login/captcha/system-keyring sessions and compact inline-login/current-project cards",
+    "login/captcha with Nexus encrypted local credential storage, session restoration and current-project logout",
     "paginated five-kind source download plus module parameter snapshots with data-only lease editing and preview-bound checkout/save/readback without check-in, inherited/project configuration and skills",
     "baseline/merge/conflicts/SCM/QuickDiff/local history and transport-neutral reviewed change bundles",
     "five official upload routes with canonical response/readback verification, normalization merge and GET-only unknown-result recovery",
@@ -275,7 +277,7 @@
     "vsixSha256": "9e177b4377bf1118ff77044bd0ade3f49d67b1bcdc5b1516f0690183d2861874",
     "largeWorkspaceStatus": "16000 clean fixture objects plus changed/out-of-scope objects; full counts retained and compact response bounded",
     "codeBuddy": "final daily Nexus and packaged backend loaded; actual login confirmed, guided settings and migration preview/cancel, system/menu names, PAGE manager, procedure and view SQL opens, search and source reveal passed; original source/configuration byte hashes preserved",
-    "fullProjectIndex": "official metadata-only source forms are recognized; one existing nonempty PAGE identity conflict remains explicit",
+    "fullProjectIndex": "native editor models/versions are authoritative for structured PAGE; export/original mismatches require diagnosis rather than changing platform identities",
     "compatibilityReview": {
       "reviewedObjects": 183,
       "metadataOnlyPages": 177,
@@ -357,5 +359,43 @@
     "backendBuildId": "sha256:aaf88366f62503ad15b8b02e05a3f36c6f4c1c5e176c94808c22d0627d46b5e0",
     "nexusBuildId": "sha256:92299578864a6f066474cc61c05c33bf14fb622fc95f8860a48b27f4fef4d947",
     "latestChangeTargetedNexusTests": 41
+  },
+  "officialAdoption": {
+    "featureBaseline": "1.0.11",
+    "releaseState": "not-published",
+    "batches": [
+      {
+        "batch": 1,
+        "items": [
+          "source-descriptions",
+          "upload-review",
+          "inherit-navigation",
+          "global-transaction-navigation",
+          "mcp-session"
+        ],
+        "implementation": "complete"
+      },
+      {
+        "batch": 2,
+        "items": [
+          "mcp-configuration",
+          "tree-filter",
+          "local-function-hover",
+          "explorer-decorations",
+          "physical-file-actions",
+          "page-custom-editor"
+        ],
+        "implementation": "complete"
+      },
+      {
+        "batch": 3,
+        "items": [
+          "official-version-assessment"
+        ],
+        "implementation": "complete"
+      }
+    ],
+    "validation": "in-progress; isolated checks and real platform acceptance recorded separately",
+    "plan": "docs/api-sync/official-adoption.md"
   }
 }

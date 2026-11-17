@@ -4,6 +4,7 @@ const crypto=require('node:crypto');
 const {request,downloadAsset,sha256,normalizeVersion,withUpdateLock}=require('./tool-updater');
 const {readArchive,archiveJson}=require('./update-archive');
 const {extractCatalog}=require('./api/official-catalog');
+const {contract,assessOfficial,assessmentMarkdown}=require('./official-assessment');
 const API='https://open-vsx.org/api/guthon/guthon-language-support';
 function sourceUrl(value) {
   const u=new URL(value);
@@ -18,10 +19,10 @@ function saveState(root,state) {
   const target=path.join(root,'official-state.json'), temp=path.join(root,`.state-${crypto.randomUUID()}.tmp`);
   fs.writeFileSync(temp,JSON.stringify(state,null,2),{flag:'wx',mode:0o600});fs.renameSync(temp,target);
 }
-function formatReport({before,after,downloaded,effectiveBefore,effectiveAfter,notes='',error='',catalogError='',bundled}) {
+function formatReport({before,after,downloaded,effectiveBefore,effectiveAfter,notes='',error='',catalogError='',bundled,assessment}) {
   const item=x=>x ? `${x.version}（SHA-256 ${x.sha256}）` : '无';
   const resource=x=>x===undefined ? '无法确认' : item(x || bundled);
-  return `# 谷神官方能力更新\n\n来源：[Open VSX](${API})\n\n## 更新前\n\n已选择来源包：${item(before)}\n\n补全与悬停数据：${resource(effectiveBefore)}\n\n## 官方说明\n\n${notes || '未取得说明。'}\n\n## Nexus 影响\n\n官方可执行代码未运行。兼容的静态 API 签名和文档用于 Nexus 补全与悬停；源码同步、在线设计器、命令和语法机制由当前 Nexus 版本提供，需要兼容实现后才能更新。语法 JSON 仅供适配。${catalogError ? `\n\n静态资源未切换：${catalogError}` : ''}\n\n## 实际结果\n\n本次校验来源包：${item(downloaded)}\n\n已选择来源包：${item(after)}\n\n当前补全与悬停数据：${resource(effectiveAfter)}\n\n${error ? `操作未完成：${error}\n\n` : ''}回退会切换至前一版补全与悬停资源；如果前一版使用内置数据，则恢复内置数据。同步和设计器协议仍由当前 Nexus 版本决定。SHA-256 来自同一 Open VSX 来源，仅验证下载完整性，不代表签名验证。\n`;
+  return `# 谷神官方能力更新\n\n来源：[Open VSX](${API})\n\n## 更新前\n\n已选择来源包：${item(before)}\n\n补全与悬停数据：${resource(effectiveBefore)}\n\n## 官方说明\n\n${notes || '未取得说明。'}\n\n${assessment ? assessmentMarkdown(assessment) : ''}\n## Nexus 影响\n\n官方可执行代码未运行。兼容的静态 API 签名和文档用于 Nexus 补全与悬停；源码同步、在线设计器、命令和语法机制由当前 Nexus 版本提供，需要兼容实现后才能更新。语法 JSON 仅供适配。${catalogError ? `\n\n静态资源未切换：${catalogError}` : ''}\n\n## 实际结果\n\n本次校验来源包：${item(downloaded)}\n\n已选择来源包：${item(after)}\n\n当前补全与悬停数据：${resource(effectiveAfter)}\n\n${error ? `操作未完成：${error}\n\n` : ''}回退会切换至前一版补全与悬停资源；如果前一版使用内置数据，则恢复内置数据。同步和设计器协议仍由当前 Nexus 版本决定。SHA-256 来自同一 Open VSX 来源，仅验证下载完整性，不代表签名验证。\n`;
 }
 function effective(state) {return Object.hasOwn(state,'effectiveCatalog') ? state.effectiveCatalog : (state.current?.catalog ? state.current : null);}
 function bundledInfo(context) {
@@ -32,7 +33,7 @@ async function showReport(vscode,report) {
   await vscode.window.showTextDocument(doc,{preview:true});
 }
 async function checkOfficialUpdate({vscode,context,io={request,downloadAsset}}) {
-  const root=path.join(context.globalStorageUri.fsPath,'official-updates');let before,after,downloaded,effectiveBefore,effectiveAfter,notes='',catalogError='',failure;
+  const root=path.join(context.globalStorageUri.fsPath,'official-updates');let before,after,downloaded,effectiveBefore,effectiveAfter,notes='',catalogError='',failure,assessment;
   try {
     await withUpdateLock(root,async()=>{
       const state=readState(root);before=state.current;after=before;effectiveBefore=effective(state);effectiveAfter=effectiveBefore;
@@ -72,6 +73,12 @@ async function checkOfficialUpdate({vscode,context,io={request,downloadAsset}}) 
         const bundle=entries.get('extension/dist/extension.js');
         if(!bundle || bundle.directory) throw new Error('来源包缺少静态数据');
         const catalog=extractCatalog(bundle.data().toString('utf8'),{extension:'guthon.guthon-language-support',version,registry:API,sha256:digest,license:manifest.license || ''});
+        const bundledContract=JSON.parse(fs.readFileSync(path.join(context.extensionPath,'data','official-compatibility.json'),'utf8'));
+        const previous=effectiveBefore?.catalog ? JSON.parse(fs.readFileSync(path.join(root,effectiveBefore.catalog),'utf8'))
+          : JSON.parse(fs.readFileSync(path.join(context.extensionPath,'data','official-api.json'),'utf8'));
+        const currentContract=contract(manifest,bundle.data().toString('utf8'));
+        assessment=assessOfficial(before?.upstreamContract || bundledContract,currentContract,previous,catalog);
+        next.upstreamContract=currentContract;next.assessment=assessment;
         const data=Buffer.from(JSON.stringify(catalog,null,2)+'\n');
         const catalogName=`${version}-${digest}.catalog.json`, catalogPath=path.join(root,catalogName);
         const temp=path.join(root,`.catalog-${crypto.randomUUID()}.tmp`);
@@ -86,7 +93,7 @@ async function checkOfficialUpdate({vscode,context,io={request,downloadAsset}}) 
   } catch(error) {failure=error;
     if(before===undefined) {try {const state=readState(root);before=after=state.current;effectiveBefore=effectiveAfter=effective(state);} catch {}}
   }
-  await showReport(vscode,formatReport({before,after,downloaded,effectiveBefore,effectiveAfter,notes,catalogError,bundled:bundledInfo(context),error:failure?.message}));
+  await showReport(vscode,formatReport({before,after,downloaded,effectiveBefore,effectiveAfter,notes,catalogError,assessment,bundled:bundledInfo(context),error:failure?.message}));
   if(failure) throw failure;
   return after;
 }

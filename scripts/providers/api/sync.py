@@ -13,7 +13,8 @@ import uuid
 from urllib.parse import quote
 from common.persistence import atomic_bytes, atomic_text, file_lock
 from .client import ApiError
-from .download import download, fetch_object, files_from_item, records, BASE
+from . import page_source
+from .download import download, download_prefixes, fetch_object, files_from_item, records, BASE
 from .editor_state import assert_writable, _live
 from .store import ApiStore, digest
 from .workspace import settings, save_project, active_scope, api_paths, configure, configuration_lock, in_scope, validate, client_for, project_metadata
@@ -195,14 +196,15 @@ def _publish_and_index(workspace, store, files, scope, *, authoritative, on_publ
 def pull(workspace, client):
     directory, _ = api_paths(workspace)
     with file_lock(directory / "sync.lock"):
+        store = ApiStore(workspace)
         files, scope = download(
             client,
             settings(workspace),
             on_project=lambda systems, sources: save_project(
                 workspace, systems, sources
             ),
+            page_store=store,
         )
-        store = ApiStore(workspace)
         assert_writable(workspace, sorted(set(store.paths()) | {item.path for item in files}))
         return _publish_and_index(workspace, store, files, scope, authoritative=True)
 
@@ -225,7 +227,7 @@ def scope_apply(workspace, client, payload):
     project = {}
     def capture(systems, sources):
         project.update(systems=systems, sources=sources)
-    files, scope = download(client, proposed, on_project=capture)
+    files, scope = download(client, proposed, on_project=capture, page_store=store)
     directory, _ = api_paths(workspace)
     with configuration_lock(workspace), file_lock(directory / "sync.lock"), file_lock(directory / "source.lock"):
         if settings(workspace) != before:
@@ -363,8 +365,47 @@ def target(workspace, payload):
 def refresh(workspace, client, payload):
     directory, _ = api_paths(workspace)
     with file_lock(directory / "sync.lock"):
+        if "prefix" in payload or "prefixes" in payload:
+            if "prefix" in payload and "prefixes" in payload or payload.get("path"):
+                raise ApiError("API_INPUT_INVALID", "请选择单一的路径或前缀输入")
+            prefixes = [payload["prefix"]] if "prefix" in payload else payload["prefixes"]
+            if not isinstance(prefixes, list) or not prefixes or len(prefixes) > 200:
+                raise ApiError("API_INPUT_INVALID", "需要1至200个源码目录前缀")
+            files = download_prefixes(client, prefixes, active_scope(workspace),
+                                      project_metadata(workspace).get("systems", []), page_store=ApiStore(workspace))
+            store = ApiStore(workspace)
+            identity_keys = {"page": ("systemId", "pageId"), "procedure": ("dataSourceId", "procedureId", "funId"),
+                             "table": ("dataSourceId", "tableId"), "view": ("dataSourceId", "viewId"),
+                             "system-script": ("systemId", "scriptType"), "module-parameter": ("systemId", "configId")}
+            incoming = {}
+            for item in files:
+                keys = identity_keys.get(item.kind)
+                if keys is None:
+                    continue
+                identity = (item.kind, *(str(item.metadata[key]) for key in keys))
+                if identity in incoming and incoming[identity] != item.path:
+                    raise ApiError("API_IDENTITY_AMBIGUOUS", "同一远端对象返回了多个路径，未发布源码")
+                incoming[identity] = item.path
+            if store.path.is_file():
+                with closing(sqlite3.connect(store.path)) as conn:
+                    for previous_path, raw_metadata in conn.execute("SELECT path,metadata FROM source"):
+                        metadata = json.loads(raw_metadata)
+                        kind = metadata.get("sourceType")
+                        if kind not in identity_keys:
+                            continue
+                        identity = (kind, *(str(metadata.get(key, "")) for key in identity_keys[kind]))
+                        if identity in incoming and incoming[identity] != previous_path:
+                            raise ApiError("API_REMOTE_PATH_CHANGED", "远端对象路径已变化，请更新当前范围并核对迁移；未创建重复源码")
+            result = store.publish(files, scope={"prefixes": prefixes})
+            from .index import update
+
+            result["index"] = update(workspace, [item.path for item in files])
+            result["downloadComplete"] = result["complete"]
+            result["complete"] = result["complete"] and result["index"]["complete"]
+            return {**result, "prefixes": prefixes, "downloadedFiles": len(files),
+                    "checkoutPath": str(workspace["providerSourceRoot"])}
         source = target(workspace, payload)
-        files = fetch_object(client, source["metadata"])
+        files = fetch_object(client, source["metadata"], page_store=ApiStore(workspace))
         main = [item for item in files if item.kind == source["metadata"]["sourceType"]]
         if len(main) != 1 or main[0].path != source["path"]:
             raise ApiError(
@@ -435,6 +476,7 @@ def upload(workspace, client, payload):
     store._receipt(operation)
     with file_lock(directory / "sync.lock"):
         assert_writable(workspace, paths)
+        native_pages = {}
         # Validate every selected object before the first platform mutation.
         for path in paths:
             current = store.read(path)
@@ -447,6 +489,8 @@ def upload(workspace, client, payload):
             validate_candidate(
                 path, current["metadata"], store.baseline(path), current["content"]
             )
+            if page_source.structured(current["metadata"], path):
+                native_pages[path] = page_source.check_before_upload(client, current, store.baseline(path))
             if current["metadata"].get("remoteDeleted"):
                 raise ApiError(
                     "API_REMOTE_DELETED", "远端已删除的对象不能作为现有对象上传"
@@ -460,6 +504,9 @@ def upload(workspace, client, payload):
                 kind = current["metadata"]["sourceType"]
                 if current["sourceHash"] == current["baseHash"]:
                     result["stage"] = "UNCHANGED"
+                    continue
+                if path in native_pages:
+                    page_source.finish_upload(store, client, current, result, operation, native_pages[path])
                     continue
                 remote = fetch_object(client, current["metadata"])
                 main = [item for item in remote if item.kind == kind]
@@ -682,6 +729,13 @@ def create_function(workspace, client, payload):
     if len(packages) != 1:
         raise ApiError("API_IDENTITY_AMBIGUOUS", "未找到唯一过程包")
     package = packages[0]
+    if str(package.get("dataSourceId", ds)) != ds:
+        raise ApiError("API_IDENTITY_MISMATCH", "过程包数据源不匹配")
+    from .download import function_files, required
+    required(package, ("subPath", "procedureId"))
+    prospective = function_files({"funId": payload["funId"], "funScript": ""}, ds,
+                                 package["subPath"], package["procedureId"])
+    assert_writable(workspace, [item.path for item in prospective])
     if any(
         str(x.get("funId")) == payload["funId"] for x in records(package.get("funs"))
     ):
@@ -749,6 +803,13 @@ def verify_upload(workspace, client, operation_id):
             }:
                 continue
             source = store.read(result["path"])
+            if result.get("pageProtocol") == "native-json":
+                try:
+                    page_source.finish_upload(store, client, source, result, operation)
+                except ApiError as error:
+                    result.update(stage="UNKNOWN", code=error.code, message=str(error))
+                store._receipt(operation)
+                continue
             files = fetch_object(client, source["metadata"])
             exact = [x for x in files if x.path == result["path"]]
             if len(exact) == 1 and digest(exact[0].content) == result.get(

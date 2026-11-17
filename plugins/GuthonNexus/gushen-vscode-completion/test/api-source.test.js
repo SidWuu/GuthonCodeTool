@@ -13,7 +13,7 @@ function fixture() {
   };
   let sourceContent='{"pageId":"PG-1"}', sourceHash='hash';
   const run=async(key,action,input)=>{calls.push({key,action,input});if(action==='status')return {checkoutPath:'/checkout',files:[{path:'page.gss',state:'MODIFIED'}]};if(action==='read') return {path:input.path,content:sourceContent,sourceHash,metadata:{sourceType:'page',pageId:'PG-1'},readonly:false};if(action==='designer-context')return {rootUrl:'https://example.invalid/project',accessToken:'secret',user:{id:'u'}};if(action==='upload')return {ok:true,complete:true,stage:'REMOTE_READBACK_VERIFIED',results:[{path:'page.gss',stage:'REMOTE_READBACK_VERIFIED'}]};if(action==='write'){sourceContent=input.content;sourceHash=require('node:crypto').createHash('sha256').update(sourceContent).digest('hex');return {sourceHash};}throw Error(action)};
-  const ui=new ApiSourceUI({vscode,run});return {ui,vscode,run,calls,document,events,changes,warnings};
+  const ui=new ApiSourceUI({vscode,run,reviewUpload:async(_v,entries)=>entries.map(x=>x.path)});return {ui,vscode,run,calls,document,events,changes,warnings};
 }
 test('SCM upload binds paths and hashes, and blocks dirty documents',async()=>{
   const f=fixture();f.document.isDirty=true;
@@ -264,7 +264,7 @@ test('native XML designer validates backend identity then writes and reads back 
     if(action==='page')return {valid:true,sourceHash:originalHash,pageId:'PG-1',inheritedUnchanged:true};
     if(action==='write'){assert.equal(input.expectedHash,originalHash);assert.equal(input.editorToken,'token');raw=input.content;return {sourceHash:hash(raw)};}throw Error(action);};
   const editorState={assertNoConflictingDrafts(){},assertNoDirtyDocumentsExcept(){},setDraft:async()=>{},flush:async()=> 'token'};
-  await openDesigner({vscode:f.vscode,run,ui:{status:async()=>({checkoutPath:'/checkout'}),updateScm:async()=>{}},key:'projects.a',sourcePath:'page.xml',editorState});
+  await openDesigner({vscode:f.vscode,run,ui:{ensureWorkspace:async()=>({checkoutPath:'/checkout'}),updateScm:async()=>{}},key:'projects.a',sourcePath:'page.xml',editorState});
   const text='<page id="PG-1"><rows><row/></rows></page>';
   await f.events.message({type:'save',path:'page.xml',version:1,text:JSON.stringify({fileName:'page.xml',xml:text})});
   assert.equal(raw,text);assert.deepEqual(calls.map(x=>x.action),['read','designer-context','page','read','write','read']);assert.deepEqual(messages,[]);
@@ -275,7 +275,7 @@ test('native XML designer refuses a backend identity or inherited-content mismat
   const run=async(_key,action,input)=>{calls.push(action);if(action==='read')return {content:raw,sourceHash:'hash',metadata:{sourceType:'page',pageId:'PG-1'}};
     if(action==='designer-context')return {rootUrl:'https://example.invalid',accessToken:'secret',user:{}};
     if(action==='page')return {valid:true,sourceHash:'hash',pageId:'PG-1',inheritedUnchanged:false};throw Error(action);};
-  await openDesigner({vscode:f.vscode,run,ui:{status:async()=>({checkoutPath:'/checkout'})},key:'projects.a',sourcePath:'page.xml',editorState:{assertNoConflictingDrafts(){},assertNoDirtyDocumentsExcept(){},setDraft:async()=>{},flush:async()=> 'token'}});
+  await openDesigner({vscode:f.vscode,run,ui:{ensureWorkspace:async()=>({checkoutPath:'/checkout'})},key:'projects.a',sourcePath:'page.xml',editorState:{assertNoConflictingDrafts(){},assertNoDirtyDocumentsExcept(){},setDraft:async()=>{},flush:async()=> 'token'}});
   await f.events.message({type:'save',path:'page.xml',version:1,text:JSON.stringify({fileName:'page.xml',xml:'<page id="PG-1"><changed/></page>'})});
   assert.equal(calls.includes('write'),false);assert.match(f.warnings.at(-1),/未确认/);
 });
@@ -367,4 +367,90 @@ test('persisted error report excludes recognized metadata-only source notices',a
   f.ui.syncWorkspaces([{workspaceKey:'products.A',checkoutPath:'/checkout'}]);
   await f.ui.getChildren();await f.ui.showIndexDiagnostics('products.A');
   assert.match(reports[0],/API_PAGE_IDENTITY_MISMATCH/);assert(!reports[0].includes('API_PAGE_MINIMAL_SOURCE'));
+});
+
+test('procedure layout retains package identity, signature and physical refresh scope',()=>{
+  const {buildCatalogTree}=require('../src/api/source-ui');
+  const objects=[{path:'datasources/D/procedures/com/demo/save.gss',sourceType:'procedure',dataSourceId:'D',sourceId:'PKG',funId:'save',name:'保存',procedureSignature:{parameters:['$id'],hasReturn:true,returnExpressions:['$result']}},
+    {path:'datasources/D/procedures/com/demo/load.gss',sourceType:'procedure',dataSourceId:'D',sourceId:'PKG',funId:'load',name:'读取',procedureSignature:{parameters:[],hasReturn:false}}];
+  const project={dataSources:[{dataSourceId:'D',dataSourceName:'公共数据'},{dataSourceId:'D2',dataSourceName:'其他'}]};
+  for(const layout of ['tree','flat']) {
+    const root=buildCatalogTree('projects.a',{},objects,project,{procedureLayout:layout});
+    const category=root.find(x=>x.category==='procedures'),scope=category.children[0];
+    const pkg=layout==='tree'?scope.children[0].children[0]:scope.children[0];
+    assert.equal(pkg.label,layout==='tree'?'demo':'com.demo');
+    assert.equal(pkg.packageIdentities.size,1);assert.equal(pkg.sourcePrefix,'datasources/D/procedures/com/demo');
+    assert.equal(pkg.children.find(x=>x.object.funId==='save').label,'save($id) 保存 [return $result]');
+    assert.equal(pkg.children.find(x=>x.object.funId==='load').label,'load() 读取');
+    assert.deepEqual([...category.refreshPrefixes].sort(),['datasources/D/procedures','datasources/D2/procedures']);
+  }
+});
+test('unresolved procedure parameters display 无 and layout menus belong only to the top module',()=>{
+  const {buildCatalogTree,sourceLabel}=require('../src/api/source-ui'),f=fixture();
+  const object={path:'datasources/D/procedures/com/demo/run.gss',sourceType:'procedure',dataSourceId:'D',sourceId:'PKG',funId:'run',name:'执行'};
+  assert.equal(sourceLabel(object,{signature:true}),'run(无) 执行');
+  assert.equal(sourceLabel({...object,procedureSignature:{parameters:null,hasReturn:null}},{signature:true}),'run(无) 执行');
+  f.vscode.TreeItem=class {constructor(label){this.label=label;}};f.vscode.TreeItemCollapsibleState={Collapsed:1,None:0};
+  const root=buildCatalogTree('projects.a',{},[object],{dataSources:[{dataSourceId:'D'}]}).find(x=>x.category==='procedures');
+  const scope=root.children[0],pkg=scope.children[0].children[0],leaf=pkg.children[0];
+  const contexts=[root,scope,pkg,leaf].map(item=>f.ui.getTreeItem(item).contextValue);
+  assert.deepEqual(contexts,['guthonApi.category.procedures','guthonApi.procedureScope','guthonApi.procedurePackage','guthonApi.procedure']);
+  const menus=require('../package.json').contributes.menus['view/item/context'].filter(item=>/showApiProcedure(?:Flat|Tree)$/.test(item.command));
+  for(const menu of menus){assert(menu.when.includes('viewItem == guthonApi.category.procedures'));assert(!/procedurePackage|procedureScope|\|procedure/.test(menu.when));}
+  const refresh=require('../package.json').contributes.menus['view/item/context'].find(item=>item.command==='gushenCompletion.refreshApiObject');
+  assert.match(refresh.when,/procedureScope/);
+});
+test('procedure labels preserve declared parameter order and show only an enabled return marker',()=>{
+  const {sourceLabel}=require('../src/api/source-ui');
+  const object={sourceType:'procedure',funId:'calculate',name:'计算结果',procedureSignature:{parameters:['$second','$first'],hasReturn:true,returnExpressions:['$result']}};
+  assert.equal(sourceLabel(object,{signature:true}),'calculate($second, $first) 计算结果 [return $result]');
+  assert.equal(sourceLabel({...object,procedureSignature:{parameters:[],hasReturn:true,returnExpressions:['$items']}},{signature:true}),'calculate() 计算结果 [return $items]');
+  assert.equal(sourceLabel({...object,procedureSignature:{parameters:['$id'],hasReturn:false}},{signature:true}),'calculate($id) 计算结果');
+  assert.equal(sourceLabel({...object,procedureSignature:{parameters:['$id'],hasReturn:null}},{signature:true}),'calculate($id) 计算结果');
+  assert.equal(sourceLabel({...object,procedureSignature:{parameters:['$id'],hasReturn:true,returnExpressions:['null','$result']}},{signature:true}),'calculate($id) 计算结果 [return null | $result]');
+  assert.equal(sourceLabel({...object,procedureSignature:{parameters:['$id'],hasReturn:true,returnExpressions:null}},{signature:true}),'calculate($id) 计算结果 [return 无]');
+  assert.equal(sourceLabel({...object,procedureSignature:{parameters:[],hasReturn:true,returnExpressions:['$vs.dbTools.list(\n $sql,\n $where\n)']}},{signature:true}),'calculate() 计算结果 [return $vs.dbTools.list( $sql, $where )]');
+  assert.equal(sourceLabel(object),'calculate · 计算结果');
+});
+test('menu refresh includes physical directories of not-yet-indexed platform pages',()=>{
+  const {buildCatalogTree}=require('../src/api/source-ui');
+  const project={systems:[{systemId:'S',systemName:'系统'}],menuTree:[{systemId:'S',menus:[{id:'m',name:'菜单',isDir:0,pages:[{pageSubId:'A',pageId:'P1'},{pageSubId:'B',pageId:'P2'}]}]}]};
+  const tree=buildCatalogTree('projects.a',{},[{path:'systems/S/pages/A/P1/page.xml',sourceType:'page',sourceId:'P1',name:'页面'}],project);
+  const menu=tree.find(x=>x.category==='pages').children[0].children[0];
+  assert.deepEqual([...menu.refreshPrefixes].sort(),['systems/S/pages/A/P1','systems/S/pages/B/P2']);
+});
+test('scoped refresh submits a physical prefix and blocks dirty buffers',async()=>{
+  const f=fixture();const calls=[];f.ui.workspaces.set('projects.a',{checkoutPath:'/checkout'});f.ui.updateScm=async()=>{};
+  f.vscode.workspace.openTextDocument=async value=>value;f.vscode.window.showTextDocument=async()=>{};
+  f.ui.run=async(key,action,input)=>(calls.push({key,action,input}),{complete:true,index:{complete:true}});
+  const folder={key:'projects.a',sourcePrefix:'datasources/D/procedures/com/demo',refreshPrefixes:new Set(['datasources/D/procedures/com/demo/save.gss'])};
+  f.document.uri.fsPath='/checkout/datasources/D/procedures/com/demo/save.gss';f.document.isDirty=true;await assert.rejects(f.ui.refreshScope(folder),/未保存/);assert.equal(calls.length,0);
+  f.document.isDirty=false;await f.ui.refreshScope(folder);assert.deepEqual(calls[0].input,{prefix:'datasources/D/procedures/com/demo'});
+  await f.ui.refreshScope({key:'projects.a',refreshPrefixes:new Set(['systems/S/pages/A/P1','systems/S/pages/B/P2'])});assert.deepEqual(calls[1].input,{prefixes:['systems/S/pages/A/P1','systems/S/pages/B/P2']});
+  await f.ui.refreshScope({key:'projects.a',object:{path:'systems/S/pages/A/P1/page.xml'}});assert.deepEqual(calls[2].input,{path:'systems/S/pages/A/P1/page.xml'});
+});
+test('create function requires an unambiguous package and verifies its sample identity',async()=>{
+  const f=fixture(),calls=[];f.ui.workspaces.set('projects.a',{checkoutPath:'/checkout'});f.ui.run=async(_key,action,input)=>{calls.push({action,input});if(action==='read')return {metadata:{sourceType:'procedure',dataSourceId:'D',procedureId:'PKG'}};return {stage:'REMOTE_READBACK_VERIFIED'};};
+  f.vscode.window.showInputBox=async({title})=>title.includes('编码')?'save':'保存';f.vscode.window.showQuickPick=async()=>[];f.vscode.window.showWarningMessage=async()=>'创建';
+  f.vscode.workspace.openTextDocument=async value=>value;f.vscode.window.showTextDocument=async()=>{};f.ui.updateScm=async()=>{};
+  await assert.rejects(f.ui.createFunction('projects.a',{}),/过程包/);assert.equal(calls.length,0);
+  const pkg={packageIdentities:new Map([['D/PKG',{dataSourceId:'D',procedureId:'PKG',samplePath:'datasources/D/procedures/pkg/other.gss'}]])};
+  await f.ui.createFunction('projects.a',pkg);assert.equal(calls[1].input.procedureId,'PKG');assert.equal(calls[1].input.dataSourceId,'D');
+  pkg.packageIdentities.get('D/PKG').procedureId='WRONG';await assert.rejects(f.ui.createFunction('projects.a',pkg),/身份与源码不一致/);assert.equal(calls.filter(x=>x.action==='create-function').length,1);
+});
+
+test('upload review submits only selected files and cancellation never writes',async()=>{
+  const f=fixture();f.ui.reviewUpload=async()=>undefined;
+  await f.ui.upload('projects.a');assert.equal(f.calls.some(x=>x.action==='upload'),false);
+  f.ui.reviewUpload=async()=>['b'];
+  await f.ui.upload('projects.a',['a','b']);
+  assert.deepEqual(f.calls.find(x=>x.action==='upload').input.paths,['b']);
+  assert.deepEqual(f.calls.find(x=>x.action==='upload').input.expectedHashes,{b:'hash'});
+});
+test('upload review requires a fresh review after the selected source changes',async()=>{
+  const f=fixture();let changed=false;const original=f.ui.run;
+  f.ui.run=async(key,action,input)=>action==='read'?{path:input.path,sourceHash:changed?'changed':'before',metadata:{sourceType:'procedure'},name:'保存'}:original(key,action,input);
+  f.ui.reviewUpload=async()=>{changed=true;return ['page.gss'];};
+  await assert.rejects(f.ui.upload('projects.a'),/源码已变化/);
+  assert.equal(f.calls.some(x=>x.action==='upload'),false);
 });

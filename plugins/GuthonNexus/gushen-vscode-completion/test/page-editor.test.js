@@ -156,16 +156,6 @@ test('missing names show the PAGE ID once and reopening with fresh catalog metad
   assert.equal(session.draft.operations()[0].value,'尚未保存');assert.match(session.panel.title,/目录已更新 · PG-1/);
 });
 
-test('refreshing a catalog name changes native titles without reloading an unconfirmed designer dialog',async()=>{
-  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity),messages=[];
-  const version=session.draft.version;
-  session.native={version,unconfirmed:true,panel:{reveal(){},webview:{postMessage(message){messages.push(message);}}}};
-  await host.open({...f.identity,treeLabel:'目录中的名称'});
-  assert.equal(session.native.version,version);assert.equal(session.native.unconfirmed,true);
-  assert.deepEqual(messages,[{type:'nativeTitle',pageName:'目录中的名称',pageId:'PG-1'}]);
-  assert.equal(session.native.panel.title,'目录中的名称 · PG-1 · 原版设计视图');
-});
-
 test('source fragments preserve the exact workspace, path and pointer identity',()=>{
   const fragment={jsonPointer:'/views/0/fields/0/pageEvents/onChangeScript',scriptType:'js',label:'form / A / onChangeScript'};
   const target=fragmentIdentity('projects.demo',{sourceType:'page',sourceId:'PG-1',sourcePath:'pages/PG-1.json',sourceName:'测试页面'},fragment);
@@ -195,8 +185,8 @@ test('saving a layout order closes only this PAGE clean positional code tabs and
   session.draft.order('/views/0/fields',['fieldId:B','fieldId:A']);
   await assert.rejects(host.save(session),/请先保存代码/);assert.equal(closed.length,0);
   doc.isDirty=false;await host.save(session);assert.deepEqual(closed,[tab]);
-  session.native={unconfirmed:true};assert.throws(()=>host.beforeCodeSave(uri),/对话框/);
-  delete session.native;session.busy=true;assert.throws(()=>host.beforeCodeSave(uri),/保存检查/);
+  session.busy=true;assert.throws(()=>host.beforeCodeSave(uri),/保存检查/);
+  session.busy=false;session.onlineOpening=true;assert.throws(()=>host.beforeCodeSave(uri),/在线编辑器/);
 });
 test('controller owns one PAGE and saves a mixed draft through preflight and existing backend without a platform commit',async()=>{
   const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
@@ -235,41 +225,107 @@ test('old-baseline recovery never applies to a newer source and stale UI message
   await assert.rejects(secondHost.message(session,{type:'property',version:77}),/版本/);
 });
 
-test('configured PAGE defaults to the local manager; explicit native view compares a read-only saved baseline', async t => {
-  const assets = await assetsFixture(t), f = hostFixture();
-  const verified=await verifyAssets(assets.root);
-  let resourceReads=0;
-  f.resources={cached:async()=>{resourceReads++;return {};},resolve:async()=>{resourceReads++;return {assets:verified,app:verified.app,digest:verified.digest,build:'a'.repeat(64),platformUrl:'http://example.invalid/guthon/index.html',message:'cached'};}};
-  const host = new PageEditorController(f), session = await host.open(f.identity);
-  assert.equal(f.panels.length,1);assert.equal(resourceReads,0);assert.equal(session.native,undefined);
-  await host.message(session,{type:'native',version:session.draft.version});
-  assert.equal(f.panels.length, 2);
-  assert.equal(session.native.panel, f.panels[1]);
-  assert.match(session.native.panel.webview.html, /native-stage/);
-  assert.equal(session.native.assets.app, 'guthon/js/app.abc123.js');
-  let revealedNative=0,revealedManager=0;
-  session.native.panel.reveal=()=>revealedNative++;session.panel.reveal=()=>revealedManager++;
-  assert.equal(await host.open(f.identity),session);
-  assert.equal(revealedManager,1);assert.equal(revealedNative,0);assert.equal(f.panels.length,2);
-  session.draft.property('/views/0/fields', 'fieldId:A', 'label', 'changed'); host.publish(session);
-  assert.equal(session.native.panel.latest.data.views[0].fields[0].label, 'changed');
-  const version = session.draft.version;
-  session.native.panel.receive({type: 'nativeCompare', version});
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(session.native.panel.latest.data.views[0].fields[0].label, 'A');
-  assert.equal(session.native.panel.latest.before, true);
-  assert.equal(session.native.panel.latest.editable, false);
-  assert.equal(session.draft.operations().length, 1);
-  session.native.panel.receive({type: 'nativeCompare', version});
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(session.native.panel.latest.data.views[0].fields[0].label, 'changed');
-  assert.equal(session.native.panel.latest.editable, true);
+test('local PAGE opens without resources and online editor receives the exact source identity', async () => {
+  const f=hostFixture(), opened=[];
+  f.resources=new Proxy({}, {get(){throw new Error('resources accessed');}});
+  f.openOnline=async identity=>opened.push({...identity});
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  assert.equal(f.panels.length,1);
+  assert.deepEqual(f.calls.map(call=>call.payload.action),['open','comparison']);
+  await host.message(session,{type:'online',version:session.draft.version});
+  assert.equal(opened.length,1);
+  assert.equal(opened[0].workspaceKey,f.identity.workspaceKey);
+  assert.equal(opened[0].sourcePath,f.identity.sourcePath);
+  assert.equal(opened[0].sourceId,f.identity.sourceId);
+});
+
+test('online editor waits for local preview, save, readback and clean registration', async () => {
+  const f=hostFixture(), registrations=[], opened=[];
+  let release,started;
+  const cleanStarted=new Promise(resolve=>started=resolve);
+  f.onDraftChanged=async (_identity,dirty)=>{
+    registrations.push(dirty);
+    if (!dirty && registrations.includes(true)) {started();await new Promise(resolve=>release=resolve);}
+  };
+  f.openOnline=async identity=>opened.push({identity,registrations:[...registrations],actions:f.calls.map(call=>call.payload.action)});
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  await host.message(session,{type:'property',version:session.draft.version,collectionPointer:'/views/0/fields',fieldKey:'fieldId:A',name:'label',value:'changed'});
+  const opening=host.message(session,{type:'online',version:session.draft.version});
+  await cleanStarted;
+  assert.equal(opened.length,0);
+  await assert.rejects(host.message(session,{type:'property',version:session.draft.version,collectionPointer:'/views/0/fields',fieldKey:'fieldId:A',name:'label',value:'later'}),/不可修改/);
+  release();await opening;
+  assert.equal(opened.length,1);assert.equal(registrations.at(-1),false);
+  assert.deepEqual(opened[0].actions,['open','comparison','preview','save','open','open','comparison']);
+  assert.equal(session.draft.operations().length,0);
+});
+
+test('online handoff clears the PAGE draft in the shared editor state before opening', async () => {
+  const {ApiEditorState}=require('../src/api/editor-state');
+  const f=hostFixture(), records=[];
+  const editorState=new ApiEditorState({vscode:f.vscode,run:async(_key,_action,payload)=>{
+    records.push(clone(payload.documents));return {editorToken:'token'};
+  }});
+  await editorState.add(f.identity.workspaceKey,'/checkout');
+  f.onDraftChanged=(identity,dirty,version)=>editorState.setDraft('page',identity.workspaceKey,identity.sourcePath,dirty,version);
+  f.openOnline=async identity=>{
+    editorState.assertNoConflictingDrafts(identity.workspaceKey,identity.sourcePath);
+    assert.equal(editorState.documents(identity.workspaceKey,editorState.workspaces.get(identity.workspaceKey)).some(item=>item.dirty),false);
+    assert.equal(records.at(-1).some(item=>item.dirty),false);
+  };
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  await host.message(session,{type:'property',version:session.draft.version,collectionPointer:'/views/0/fields',fieldKey:'fieldId:A',name:'label',value:'changed'});
+  await host.message(session,{type:'online',version:session.draft.version});
+  assert.equal(session.draft.operations().length,0);
+});
+
+test('online editor refuses failed, unverified, stale or dirty source states', async () => {
+  for (const reason of ['preview','unknown','readback','pending','stale','merge','reading','code','registration']) {
+    const f=hostFixture(), opened=[];f.openOnline=async()=>opened.push(true);
+    const original=f.backend.run;
+    f.backend.run=async(...args)=>{
+      const action=args[2].action;
+      if (reason==='preview' && action==='preview') throw new Error('preview failed');
+      if (reason==='unknown' && action==='save') throw new Error('save failed');
+      if (reason==='readback' && action==='save') {const result=await original(...args);f.snapshot.sourceHash='c'.repeat(64);return result;}
+      return original(...args);
+    };
+    let failRegistration=false;
+    f.onDraftChanged=async (_id,dirty)=>{if(failRegistration && !dirty) throw new Error('registration failed');};
+    const host=new PageEditorController(f),session=await host.open(f.identity);
+    if (['preview','unknown','readback','registration'].includes(reason)) {
+      await host.message(session,{type:'property',version:session.draft.version,collectionPointer:'/views/0/fields',fieldKey:'fieldId:A',name:'label',value:'changed'});
+      failRegistration=true;
+    }
+    if(reason==='pending') session.pending={idempotencyKey:'pending'};
+    if(reason==='stale') session.sourceStale=true;
+    if(reason==='merge') session.sourceMerge={};
+    if(reason==='reading') session.sourceReads=1;
+    if(reason==='code') {f.documents.push({isDirty:true});host.ownsDocument=()=>true;}
+    await assert.rejects(host.message(session,{type:'online',version:session.draft.version}),undefined,reason);
+    assert.equal(opened.length,0,reason);
+    if(reason==='unknown' || reason==='readback') assert.ok(session.pending,reason);
+  }
+});
+
+test('source changes or duplicate clicks while waiting for clean registration prevent unsafe handoff', async () => {
+  const f=hostFixture(), opened=[];let release,started;
+  const waiting=new Promise(resolve=>started=resolve);
+  f.onDraftChanged=async (_id,dirty)=>{if(!dirty && release===undefined){started();await new Promise(resolve=>release=resolve);}};
+  f.openOnline=async()=>opened.push(true);
+  const host=new PageEditorController(f),session=await host.open(f.identity);
+  const opening=host.message(session,{type:'online',version:session.draft.version});await waiting;
+  await assert.rejects(host.message(session,{type:'online',version:session.draft.version}),/请先处理/);
+  await host.sourceChanged(session.identity.workspaceKey,[session.identity.sourcePath]);
+  release();await assert.rejects(opening,/页面状态已变化/);assert.equal(opened.length,0);
 });
 
 test('manager groups platform and local actions without a duplicate designer card', () => {
   const f = hostFixture(), host = new PageEditorController(f);
   const html = host.html({cspSource:'local:',asWebviewUri:()=>({toString:()=> 'local:file'})});
   assert.match(html, /字段与代码管理/);
+  assert.match(html, /id="online"[^>]*>在线编辑器/);
+  assert.doesNotMatch(html, /平台资源|原版设计视图|manageResources/);
   assert.equal(html.includes('id="preview"'), false);
   const source = require('node:fs').readFileSync(path.join(__dirname, '../src/page-editor/editor.js'), 'utf8');
   assert.equal(source.includes('width * 170'), false);
@@ -280,14 +336,12 @@ test('manager groups platform and local actions without a duplicate designer car
   assert.equal(source.includes("['字段', '控件类型', '宽度', '显示']"),false);
 });
 
-test('manager and original designer tab titles include the PAGE name and ID',async()=>{
+test('manager tab title includes the PAGE name and ID',async()=>{
   const f=hostFixture(),run=f.backend.run;
   f.backend.run=async(...args)=>{const result=await run(...args);if(result.model)result.model.pageName='测试主页面';return result;};
   const host=new PageEditorController(f),session=await host.open(f.identity);
   await host.message(session,{type:'ready'});
   assert.equal(session.panel.title,'测试主页面 · PG-1 · 本地页面');
-  session.native={panel:{webview:{postMessage(){}}},version:session.draft.version};
-  host.publish(session);assert.equal(session.native.panel.title,'测试主页面 · PG-1 · 原版设计视图');
 });
 
 test('resource preparation downloads only explicit same-origin static assets, verifies and refuses overwrite', async t => {
@@ -316,66 +370,6 @@ test('resource preparation downloads only explicit same-origin static assets, ve
   assert.ok(requested.includes('/guthon/fonts/font.woff'));
   await assert.rejects(download(url, output), /exist/i);
   await assert.rejects(download('http://user:password@example.com/guthon/index.html', path.join(parent,'unsafe')), /凭据/);
-});
-
-test('resource UI connects only the selected workspace and preserves the current draft', async t => {
-  const f=hostFixture(),bundle=await assetsFixture(t),assets=await verifyAssets(bundle.root),actions=[];
-  f.resources={cached:async()=>null,resolve:async()=>null,async connect(key,url){actions.push({key,url});return {
-    assets,platformUrl:url,app:assets.app,digest:assets.digest,build:'a'.repeat(64),message:'ready'};}};
-  f.vscode.ProgressLocation={Notification:1};
-  f.vscode.window.withProgress=async(_,action)=>action();
-  f.vscode.window.showQuickPick=async choices=>choices.find(item=>item.action==='connect');
-  f.vscode.window.showInputBox=async()=> 'http://example.invalid/guthon/index.html';
-  f.vscode.workspace.getConfiguration=()=>{throw Error('Global directory must not be used');};
-  const controller=new PageEditorController(f),session=await controller.open(f.identity);
-  session.draft.text('sql','select 2');
-  await controller.message(session,{type:'manageResources'});
-  assert.deepEqual(actions,[{key:'products.demo',url:'http://example.invalid/guthon/index.html'}]);
-  assert.equal(session.draft.operations()[0].content,'select 2');
-  assert.ok(session.native);
-  session.native.unconfirmed=true;
-  await assert.rejects(controller.message(session,{type:'manageResources'}),/对话框/);
-  assert.equal(actions.length,1);
-});
-
-test('resource prompts and native view clicks share one workspace task through completion with progress output',async t=>{
-  const f=hostFixture(),bundle=await assetsFixture(t),assets=await verifyAssets(bundle.root),logs=[],reports=[],notices=[];
-  let release,started,connects=0,picks=0,inputs=0;
-  const entered=new Promise(resolve=>started=resolve),gate=new Promise(resolve=>release=resolve);
-  f.resources={cached:async()=>null,resolve:async()=>null,async connect(_key,url,{onProgress}){
-    connects++;onProgress('正在下载 guthon/js/app.abc123.js');started();await gate;
-    onProgress('资源已校验');return {assets,platformUrl:url,app:assets.app,digest:assets.digest,build:'a'.repeat(64)};
-  }};
-  f.onResourceOutput=(key,message)=>logs.push({key,message});f.vscode.ProgressLocation={Notification:1};
-  f.vscode.window.withProgress=async(_options,action)=>action({report:value=>reports.push(value.message)});
-  f.vscode.window.showQuickPick=async choices=>{picks++;return choices.find(item=>item.action==='connect');};
-  f.vscode.window.showInputBox=async options=>{inputs++;assert.match(options.prompt,/不读取浏览器登录态/);return 'http://example.invalid/guthon/index.html';};
-  f.vscode.window.showInformationMessage=message=>{notices.push(message);return new Promise(()=>{});};
-  const host=new PageEditorController(f),session=await host.open(f.identity);
-  const first=host.message(session,{type:'manageResources'});await entered;
-  assert.equal(session.panel.latest.resourceBusy,true);
-  const duplicate=host.message(session,{type:'manageResources'}),native=host.message(session,{type:'native',version:session.draft.version});
-  const sibling=await host.open({...f.identity,sourceId:'PG-2',sourcePath:'pages/PG-2.json'});
-  const otherPage=host.message(sibling,{type:'manageResources'});
-  assert.equal(inputs,1);assert.equal(picks,1);assert.equal(connects,1);
-  release();await Promise.all([first,duplicate,native,otherPage]);
-  assert.equal(session.panel.latest.resourceBusy,false);assert.equal(sibling.panel.latest.resourceBusy,false);
-  assert.equal(f.panels.length,3);assert.equal(notices.length,1);
-  assert.ok(logs.some(item=>/正在下载/.test(item.message)));assert.ok(reports.some(message=>/资源准备完成/.test(message)));
-  assert.match(session.panel.latest.status,/资源准备完成/);assert.equal(host.resourceJobs.size,0);
-});
-
-test('failed resource tasks release the UI guard and a retry prompts once again',async()=>{
-  const f=hostFixture(),logs=[];let inputs=0;
-  f.onResourceOutput=(_key,message)=>logs.push(message);f.vscode.ProgressLocation={Notification:1};
-  f.vscode.window.withProgress=async(_options,action)=>action({report(){}});
-  f.vscode.window.showQuickPick=async choices=>choices.find(item=>item.action==='connect');
-  f.vscode.window.showInputBox=async()=>{inputs++;return 'http://example.invalid/guthon/index.html';};
-  f.resources.connect=async()=>{throw new Error('网络不可达');};
-  const host=new PageEditorController(f),session=await host.open(f.identity);
-  for (let i=0;i<2;i++) await assert.rejects(host.message(session,{type:'manageResources'}),/网络不可达/);
-  assert.equal(inputs,2);assert.equal(session.panel.latest.resourceBusy,false);
-  assert.equal(host.resourceJobs.size,0);assert.equal(logs.filter(message=>/资源操作失败/.test(message)).length,2);
 });
 
 test('draft comparison excludes saved SVN changes and keeps labels, order and event pointers stable',()=>{
@@ -565,22 +559,15 @@ test('the final conflict choice is rechecked against the latest file and never c
   await assert.rejects(host.message(session,{type:'resolveSourceConflict',id:conflict.id,choice:'draft',sourceHash:'c'.repeat(64),version:session.draft.version}),/状态已变化/);
 });
 
-test('dirty code and unconfirmed native dialogs preserve the old draft without reloading the designer',async()=>{
-  for(const native of [false,true]){
-    const f=hostFixture();f.snapshot.sourcePath='pages/PG-1.json';
-    const host=new PageEditorController(f),session=await host.open(f.identity);
-    session.draft.property('/views/0/fields','fieldId:A','label','窗口');
-    const messages=[];
-    if(native)session.native={unconfirmed:true,version:session.draft.version,panel:{webview:{postMessage:message=>messages.push(message)}}};
-    else f.documents.push({isDirty:true,uri:f.vscode.Uri.from({scheme:'guthon-api-edit',authority:'products.demo',path:'/event.js',
-      query:new URLSearchParams({path:f.identity.sourcePath,pointer:'/views/0/fields/0/pageEvents/onChangeScript'}).toString()})});
-    f.snapshot.sourceHash='c'.repeat(64);
-    await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
-    assert.equal(session.sourceStale,true);assert.equal(session.draft.operations()[0].value,'窗口');
-    assert.match(session.sourceMerge.evidence.blockedReason,native?/尚未确认/:/未保存输入/);
-    assert.equal(messages.some(message=>message.type==='nativeDocument'),false);
-    if(native)await assert.rejects(host.message(session,{type:'reload'}),/对话框/);
-  }
+test('dirty code preserves the old draft when the source changes',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),session=await host.open(f.identity);
+  session.draft.property('/views/0/fields','fieldId:A','label','窗口');
+  f.documents.push({isDirty:true,uri:f.vscode.Uri.from({scheme:'guthon-api-edit',authority:'products.demo',path:'/event.js',
+    query:new URLSearchParams({path:f.identity.sourcePath,pointer:'/views/0/fields/0/pageEvents/onChangeScript'}).toString()})});
+  f.snapshot.sourceHash='c'.repeat(64);
+  await host.sourceChanged(f.identity.workspaceKey,['pages/PG-1.json']);
+  assert.equal(session.sourceStale,true);assert.equal(session.draft.operations()[0].value,'窗口');
+  assert.match(session.sourceMerge.evidence.blockedReason,/未保存输入/);
 });
 
 test('inputs arriving during an external read are included in the migrated draft',async()=>{
@@ -767,4 +754,15 @@ test('closed-page byte estimates include redo history rather than only the curre
   for(let i=0;i<12;i++)session.draft.undo();assert.equal(session.draft.operations().length,0);
   f.panels[0].dispose();await session.persistence;await new Promise(resolve=>setImmediate(resolve));
   assert.ok(session.closedBytes>100000);assert.equal(host.pages.size,0);
+});
+
+test('native custom PAGE panel shares the existing draft and does not create a second page session',async()=>{
+  const f=hostFixture(),host=new PageEditorController(f),create=f.vscode.window.createWebviewPanel;
+  const supplied=create();f.vscode.window.createWebviewPanel=()=>assert.fail('must use supplied native panel');
+  const session=await host.open(f.identity,supplied);assert.strictEqual(session.panel,supplied);
+  session.draft.text('sql','select 9');const draft=session.draft,replacement=create();
+  const reused=await host.open(f.identity,replacement);
+  assert.strictEqual(reused,session);assert.strictEqual(reused.draft,draft);assert.equal(host.pages.size,1);
+  assert.equal(reused.draft.model.nodes.find(x=>x.key==='sql').content,'select 9');
+  assert.strictEqual(reused.panel,replacement);host.dispose();await reused.persistence;
 });

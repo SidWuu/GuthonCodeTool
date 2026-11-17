@@ -56,10 +56,10 @@ test('platform order follows menu order, page tab order and system order', () =>
   const system = child(pages, 'ASys');
   assert.deepEqual(labels(system), ['菜单B', '菜单A', '0E'], '菜单按平台顺序，未挂菜单的目录在后');
   const tabGroup = child(child(system, '菜单B'), '页签组B');
-  assert.deepEqual(labels(tabGroup), ['Beta', 'Alpha'], '同一菜单内取平台 pages 数组顺序');
+  assert.deepEqual(labels(tabGroup), ['PG-1 · Beta', 'PG-3 · Alpha'], '同一菜单内取平台 pages 数组顺序');
   assert.deepEqual(labels(child(system, '0E')), ['PG-A', 'PG-B'], '未挂菜单的页面按 pageId 顺序');
-  assert.deepEqual(labels(child(child(system, '0E'), 'PG-A')), ['Zulu']);
-  assert.deepEqual(labels(child(child(system, '0E'), 'PG-B')), ['Alpha']);
+  assert.deepEqual(labels(child(child(system, '0E'), 'PG-A')), ['PG-A · Zulu']);
+  assert.deepEqual(labels(child(child(system, '0E'), 'PG-B')), ['PG-B · Alpha']);
 });
 
 test('platform order follows fun id order for procedures', () => {
@@ -67,7 +67,7 @@ test('platform order follows fun id order for procedures', () => {
   const procedures = category(tree, '过程函数');
   assert.deepEqual(labels(procedures), ['DS0']);
   const leafDir = child(child(child(child(procedures, 'DS0'), 'com'), 'golden'), 'x');
-  assert.deepEqual(labels(leafDir), ['Zeta', 'Alpha'], 'AFun 先于 bFun（忽略大小写的 funId 顺序）');
+  assert.deepEqual(labels(leafDir), ['AFun(无) Zeta', 'bFun(无) Alpha'], 'AFun 先于 bFun（忽略大小写的 funId 顺序）');
 });
 
 test('changing the order setting rebuilds the cached tree', () => {
@@ -83,8 +83,8 @@ test('name order keeps the previous display-name sorting', () => {
   const system = child(pages, 'ASys');
   assert.deepEqual(labels(system), ['0E', '菜单A', '菜单B']);
   const tabGroup = child(child(system, '菜单B'), '页签组B');
-  assert.deepEqual(labels(tabGroup), ['Alpha', 'Beta']);
+  assert.deepEqual(labels(tabGroup), ['PG-3 · Alpha', 'PG-1 · Beta']);
   const procedures = category(tree, '过程函数');
   const leafDir = child(child(child(child(procedures, 'DS0'), 'com'), 'golden'), 'x');
-  assert.deepEqual(labels(leafDir), ['Alpha', 'Zeta']);
+  assert.deepEqual(labels(leafDir), ['bFun(无) Alpha', 'AFun(无) Zeta']);
 });

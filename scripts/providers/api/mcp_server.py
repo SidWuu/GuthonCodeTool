@@ -439,6 +439,13 @@ class ApiMcpServer:
             raise ApiError("API_SOURCE_MODE_REQUIRED", "当前工作区不是 API 源码模式")
         return workspace
 
+    def _online(self, workspace, action, payload):
+        from . import cli, session_proxy
+        key = workspace["workspaceKey"]
+        if session_proxy.descriptor_path(self.home, key).is_file():
+            return session_proxy.execute(self.home, key, action, payload)
+        return cli.execute(workspace, action, payload)
+
     def _call(self, name, args):
         with self._lock, runtime_home_context(self.home):
             if name == "get_page_design_contract":
@@ -455,10 +462,8 @@ class ApiMcpServer:
             limit = args.get("limit")
             offset = args.get("offset", 0)
             if name in {"preview_module_parameter_upload","upload_module_parameters","verify_module_parameter_upload"}:
-                from .workspace import client_for
-                from .module_parameter_upload import run
                 action={"preview_module_parameter_upload":"preview","upload_module_parameters":"upload","verify_module_parameter_upload":"verify"}[name]
-                return run(workspace,client_for(workspace,authenticated=True),{**args,"action":action})
+                return self._online(workspace,"module-upload",{key:value for key,value in {**args,"action":action}.items() if key!="workspaceKey"})
             if name == "read_platform_reference":
                 from .reference_assets import read_reference
                 return read_reference(workspace, args)
@@ -568,7 +573,7 @@ class ApiMcpServer:
                 payload = {
                     key: value for key, value in args.items() if key != "workspaceKey"
                 }
-                result = execute(workspace, actions[name], payload)
+                result = self._online(workspace, actions[name], payload) if name.startswith(("get_platform_", "list_platform_")) or name in {"create_procedure_function", "sync_database_structure", "platform_request"} else execute(workspace, actions[name], payload)
                 if name in {
                     "get_api_status",
                     "list_platform_systems",

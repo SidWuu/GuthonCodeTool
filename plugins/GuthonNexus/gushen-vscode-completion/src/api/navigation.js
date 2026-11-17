@@ -1,12 +1,12 @@
 const path=require('node:path');
 const {showWorkspaceSearch}=require('../workspace-search');
-const {procedureTargetAt,serviceComponentTargetAt,localFunctionDefinitionAt}=require('../definition');
+const {procedureTargetAt,serviceComponentTargetAt,localFunctionDefinitionAt,localFunctionAt,inheritCallAt}=require('../definition');
 const {apiContext,exportAiContext}=require('../ai-context-export');
 const {registerEditorAssistance}=require('../source/editor-assistance');
 const {decodeIdentity,SCHEME,scriptType}=require('../source/virtual-fs');
 const {navigateInBrowser}=require('../source/browser-navigation');
 const {isWorkspaceKey}=require('../workspace-identity');
-const {filePath,identity:fromElement}=require('./source-ui');
+const {filePath,identity:fromElement,sourceLabel}=require('./source-ui');
 const {readInheritance}=require('../source/inheritance');
 
 async function allPages(run,key,action,payload,listName) {
@@ -75,7 +75,7 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
     const snapshot=await run(key,'page',{action:'open',path:sourcePath});
     if(snapshot.sourcePath!==sourcePath || snapshot.sourceHash!==source.sourceHash) throw new Error('PAGE 已变化，请重新选择继承脚本');
     const candidates=snapshot.model.nodes.filter(node=>/@?inherit\s*\(/.test(node.content));
-    if(!candidates.length) {await vscode.window.showInformationMessage('此 PAGE 没有可展开的继承脚本');return undefined;}
+    if(!candidates.length) {await vscode.window.showInformationMessage('无继承源码');return undefined;}
     if(candidates.length===1) return candidates[0].pointer;
     return (await vscode.window.showQuickPick(candidates.map(node=>({label:node.label || node.pointer,description:node.pointer,node})),{title:'选择要展开的继承脚本'}))?.node.pointer;
   }
@@ -97,7 +97,7 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
     const selected=await showWorkspaceSearch({vscode,title:`搜索当前项目 · ${workspace.displayName}`,
       defaultAction:exportOnly?'context-file':'open',search:async query=>{
         const result=await allPages(run,workspace.workspaceKey,'search',{query},'hits');
-        return {truncated:result.truncated,items:result.items.map(hit=>({kind:'source',label:hit.name || hit.sourceId || hit.path,
+        return {truncated:result.truncated,items:result.items.map(hit=>({kind:'source',label:sourceLabel(hit) || hit.path,
           description:hit.path,detail:hit.excerpt || hit.jsonPointer || '',identity:{...hit,sourcePath:hit.path}}))};
       }});
     if(!selected) return;
@@ -113,7 +113,7 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
     const values=result.items;
     if(!values.length) throw new Error(result.truncated?'未找到完整匹配；索引包含未解析对象，请先检查索引':'当前项目未找到匹配源码');
     if(values.length===1) return values[0];
-    return (await vscode.window.showQuickPick(values.map(item=>({label:item.name || item.sourceId,description:item.path,item})),{title:'选择精确源码对象'}))?.item;
+    return (await vscode.window.showQuickPick(values.map(item=>({label:sourceLabel(item) || item.path,description:item.path,item})),{title:'选择精确源码对象'}))?.item;
   }
   async function locatePage(key,pageId) {
     const workspace=await selectWorkspace(key);if(!workspace) return;
@@ -131,7 +131,7 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
   }
   async function selectedObject(value) {
     const {key,path:sourcePath}=fromElement(value);if(!key || !sourcePath) throw new Error('请选择当前项目中的源码文件');
-    await ui.status(key);const result=await run(key,'read',{path:sourcePath});return {key,path:sourcePath,result};
+    const result=await run(key,'read',{path:sourcePath});return {key,path:sourcePath,result};
   }
   async function showNodes(value) {
     const {key,path:p}=await selectedObject(value);const result=await run(key,'page',{action:'open',path:p});
@@ -152,8 +152,24 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
     const {key,path:p,result}=await selectedObject(value);const contextResult=await run(key,'context',{path:p,limit:100});
     const source=contextResult.source;if(source?.sourceHash!==result.sourceHash) throw new Error('索引与源码不一致，请先重建索引');
     const values=await allPages(run,key,'callers',{alias:source.alias,funId:source.funId},'callers');
-    const chosen=await vscode.window.showQuickPick(values.items.map(item=>({label:item.name || item.sourceId,description:`${item.path}:${item.line}`,item})),{title:`调用方${values.truncated?' · 部分索引待恢复':''}`});
+    const chosen=await vscode.window.showQuickPick(values.items.map(item=>({label:sourceLabel(item) || item.path,description:`${item.path}:${item.line}`,item})),{title:`调用方${values.truncated?' · 部分索引待恢复':''}`});
     if(chosen) return open(key,chosen.item);
+  }
+  async function showReferences(value) {
+    const {key,path:p,result}=await selectedObject(value);
+    const contextResult=await run(key,'context',{path:p,limit:1});
+    const source=contextResult.source;
+    if(source?.sourceHash!==result.sourceHash) throw new Error('索引与源码不一致，请先重建索引');
+    if(!['page','procedure'].includes(source.sourceType)) throw new Error('请选择页面或过程函数');
+    const values=await allPages(run,key,'callers',{path:p},'callers');
+    const chosen=await vscode.window.showQuickPick(values.items.map(item=>({label:sourceLabel(item) || item.path,description:`${item.path}:${item.line || 1}`,item})),{title:`静态索引引用（不保证包含运行时动态调用）${values.truncated?' · 索引不完整':''}`,placeHolder:'未列出的动态调用无法由静态索引确认'});
+    if(chosen) return open(key,chosen.item);
+  }
+  async function setProcedureLayout(layout) {
+    const config=vscode.workspace.getConfiguration('gushenCompletion');
+    const target=config.inspect?.('procedureTreeLayout')?.workspaceValue!==undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+    await config.update('procedureTreeLayout',layout,target);
+    ui.invalidate();ui.refresh();
   }
   async function showContext(value) {
     const {key,path:p}=await selectedObject(value);const result=await apiContext({run,workspaceKey:key,identity:{path:p},includeImpact:true});
@@ -177,8 +193,21 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
     const state=editorState.workspaces.get(workspace.workspaceKey),p=editorState.documentPath(workspace.workspaceKey,state,document);
     if(!p) throw new Error('当前文档不属于 API 源码');return ui.revealSource(workspace.workspaceKey,p);
   }
+  async function inheritanceDefinition(document) {
+    const workspace=await workspaceForDocument(document);if(!workspace)return;
+    const key=workspace.workspaceKey,state=editorState.workspaces.get(key);
+    const id=document.uri.scheme===SCHEME ? decodeIdentity(document.uri) : {sourcePath:editorState.documentPath(key,state,document),jsonPointer:''};
+    const source=await run(key,'read',{path:id.sourcePath});
+    const parent=await readInheritance({run,workspaceKey:key,path:id.sourcePath,jsonPointer:id.jsonPointer,expectedHash:source.sourceHash});
+    if(!parent.parentPath) {await vscode.window.showInformationMessage('未找到可定位的产品层源码，请查看继承源码诊断');return;}
+    const original=await run(key,'read',{path:parent.parentPath});
+    if(!original.readonly || original.sourceHash!==parent.parentHash) throw new Error('产品层源码已变化或未确认为只读，请重新同步');
+    return new vscode.Location(ui.readonlyUri(key,parent.parentPath,original.content),new vscode.Position(0,0));
+  }
   async function definition(document,position) {
-    const content=document.getText(),offset=document.offsetAt(position),local=localFunctionDefinitionAt(content,offset);
+    const content=document.getText(),offset=document.offsetAt(position);
+    if(inheritCallAt(content,offset))return inheritanceDefinition(document);
+    const local=localFunctionDefinitionAt(content,offset);
     if(local!=null) return new vscode.Location(document.uri,document.positionAt(local));
     const target=procedureTargetAt(content,offset),component=serviceComponentTargetAt(content,offset);if(!target && !component) return;
     const workspace=await workspaceForDocument(document);if(!workspace) return;
@@ -187,8 +216,18 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
     const unique=[...new Map(matches.map(x=>[x.path,x])).values()];const state=await ui.status(workspace.workspaceKey);
     return Promise.all(unique.map(async x=>new vscode.Location(api.sourceUri ? await api.sourceUri(workspace.workspaceKey,x.path) : vscode.Uri.file(filePath(state.checkoutPath,x.path)),new vscode.Position(0,0))));
   }
-  const commands={searchWorkspace:search,searchCurrentApiWorkspace:()=>search(),quickOpenApiSource:search,
-    locateApiPageById:locatePage,locateApiProcedureByName:locateProcedure,showApiPageNodes:showNodes,showApiProcedureCallers:showCallers,copyApiProcedureName:value=>copyProcedure(value,false),copyApiQualifiedProcedureName:value=>copyProcedure(value,true),
+  async function fileAction(value,action) {
+    const {key,path:sourcePath}=await selectedObject(value);
+    const workspace=await ui.ensureWorkspace(key),absolute=filePath(workspace.checkoutPath,sourcePath);
+    if(action==='reveal')return vscode.commands.executeCommand('revealFileInOS',vscode.Uri.file(absolute));
+    await vscode.env.clipboard.writeText(action==='name' ? path.basename(absolute) : action==='absolute' ? absolute : sourcePath);
+  }
+  const commands={
+    filterApiSources:async value=>{const workspace=await selectWorkspace(typeof value==='string'?value:value?.key || '');if(!workspace)return;const text=await vscode.window.showInputBox({title:'过滤当前源码树',prompt:'按名称、编码或相对路径过滤；留空清除，不改变拉取或上传范围',value:ui.filters.get(workspace.workspaceKey)||''});if(text!==undefined)ui.setFilter(workspace.workspaceKey,text);},
+    clearApiSourceFilter:async value=>{const workspace=await selectWorkspace(typeof value==='string'?value:value?.key || '');if(workspace)ui.setFilter(workspace.workspaceKey,'');},
+    copyApiFileName:value=>fileAction(value,'name'),copyApiAbsolutePath:value=>fileAction(value,'absolute'),copyApiRelativePath:value=>fileAction(value,'relative'),revealApiFileInOS:value=>fileAction(value,'reveal'),
+    searchWorkspace:search,searchCurrentApiWorkspace:()=>search(),quickOpenApiSource:search,
+    locateApiPageById:locatePage,locateApiProcedureByName:locateProcedure,showApiPageNodes:showNodes,showApiProcedureCallers:showCallers,showApiReferences:showReferences,showApiProcedureTree:()=>setProcedureLayout('tree'),showApiProcedureFlat:()=>setProcedureLayout('flat'),copyApiProcedureName:value=>copyProcedure(value,false),copyApiQualifiedProcedureName:value=>copyProcedure(value,true),
     showApiImpact:showContext,browseApiImpactEvidence:browseImpact,searchApiPageFields:fields,locateActiveApiSource:locateActive,
     focusApiSource:()=>vscode.commands.executeCommand('gushenCompletion.sourceView.focus'),
     expandApiSelectedSource:()=>sourceTreeAction(vscode,ui.treeView,'list.expand'),
@@ -198,8 +237,10 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
     reindexCalls:async value=>{const workspace=await selectWorkspace(typeof value==='string'?value:value?.guthonWorkspaceKey || '');if(!workspace)return;const result=await run(workspace.workspaceKey,'index',{});ui.setIndexResult(workspace.workspaceKey,result);if(result.complete===true) await api.markIndexed(workspace.workspaceKey);return vscode.window.showInformationMessage(`索引已更新：${result.objects ?? result.updatedPaths?.length ?? 0} 个对象${result.complete===false?'，存在待处理项':''}`);},
     showApiInheritance:async value=>{
       const {key,path:p,result:source}=await selectedObject(value);const target=value.target || value;
+      if(String(source.metadata?.isInhert)==='0' && !/@?inherit\s*\(/.test(source.content)) return vscode.window.showInformationMessage('无继承源码');
       const pointer=await inheritancePointer(key,p,source,target.jsonPointer || '');if(pointer===undefined) return;
       const result=await readInheritance({run,workspaceKey:key,path:p,jsonPointer:pointer,expectedHash:source.sourceHash});
+      if(result.status==='INACTIVE' && !result.parentPath && !result.parentPointer) return vscode.window.showInformationMessage('无继承源码');
       const body=result.effective || '',fence='`'.repeat(Math.max(3,...(body.match(/`+/g) || []).map(x=>x.length+1)));
       const doc=await vscode.workspace.openTextDocument({language:'markdown',content:`# 继承源码\n\n状态：${result.status}\n\n来源哈希：${result.sourceHash}\n\n父层：${result.parentPath || result.parentPointer || '未提供'}\n\n父层哈希：${result.parentHash || result.sourceHash}\n\n${fence}\n${body}\n${fence}\n`});
       return vscode.window.showTextDocument(doc,{preview:true});
@@ -211,6 +252,12 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
   };
   const execute=name=>async(...args)=>{try{return await commands[name](...args);}catch(error){return vscode.window.showErrorMessage(`API 源码：${error.message}`);}};
   const registrations=[
+    vscode.commands.registerCommand('gushenCompletion.openApiParentSource',async uri=>{
+      const document=await vscode.workspace.openTextDocument(uri),location=await inheritanceDefinition(document);
+      if(location)return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(location.uri),{preview:true});
+    }),
+    vscode.commands.registerCommand('gushenCompletion.generateMcpConfiguration',()=>require('./mcp-configuration').generateConfiguration({vscode,getTool,selectWorkspace}).catch(error=>vscode.window.showErrorMessage(error.message))),
+    ...['filterApiSources','clearApiSourceFilter','copyApiFileName','copyApiAbsolutePath','copyApiRelativePath','revealApiFileInOS'].map(name=>vscode.commands.registerCommand(`gushenCompletion.${name}`,execute(name))),
     vscode.commands.registerCommand('gushenCompletion.searchWorkspace',execute('searchWorkspace')),
     vscode.commands.registerCommand('gushenCompletion.searchCurrentApiWorkspace',execute('searchCurrentApiWorkspace')),
     vscode.commands.registerCommand('gushenCompletion.quickOpenApiSource',execute('quickOpenApiSource')),
@@ -218,6 +265,9 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
     vscode.commands.registerCommand('gushenCompletion.locateApiProcedureByName',execute('locateApiProcedureByName')),
     vscode.commands.registerCommand('gushenCompletion.showApiPageNodes',execute('showApiPageNodes')),
     vscode.commands.registerCommand('gushenCompletion.showApiProcedureCallers',execute('showApiProcedureCallers')),
+    vscode.commands.registerCommand('gushenCompletion.showApiReferences',execute('showApiReferences')),
+    vscode.commands.registerCommand('gushenCompletion.showApiProcedureTree',execute('showApiProcedureTree')),
+    vscode.commands.registerCommand('gushenCompletion.showApiProcedureFlat',execute('showApiProcedureFlat')),
     vscode.commands.registerCommand('gushenCompletion.copyApiProcedureName',execute('copyApiProcedureName')),
     vscode.commands.registerCommand('gushenCompletion.copyApiQualifiedProcedureName',execute('copyApiQualifiedProcedureName')),
     vscode.commands.registerCommand('gushenCompletion.showApiImpact',execute('showApiImpact')),
@@ -248,6 +298,23 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge}
     pageFieldCandidates:async(doc,prefix)=>{const workspace=await workspaceForDocument(doc);if(!workspace)return {fields:[]};const found=await allPages(run,workspace.workspaceKey,'facts',{keyword:prefix},'facts');return {truncated:found.truncated,fields:found.items.filter(x=>x.kind==='field').map(x=>({fieldId:x.subject,label:x.evidence,collectionPointer:x.jsonPointer}))};},
   });
   context.subscriptions.push(...registrations,assistance);
-  return {definition,workspaceForDocument,search,dispose(){for(const item of registrations)item.dispose();assistance.dispose();}};
+  function hover(document,position) {
+    const source=document.getText(),offset=document.offsetAt(position);
+    const info=localFunctionAt(source,offset);
+    if(!info && !inheritCallAt(source,offset))return;
+    const content=new vscode.MarkdownString();
+    content.appendCodeblock(info ? info.signature : '@inherit()','guthon-gss');
+    content.appendText(info ? info.comment : '调用产品层源码；Ctrl/Cmd 点击打开对应的只读产品文件');
+    return new vscode.Hover(content);
+  }
+  if(vscode.languages.registerCodeLensProvider)registrations.push(vscode.languages.registerCodeLensProvider(
+    [{scheme:SCHEME,language:'guthon-gss'}],{provideCodeLenses:document=>{
+      const inherited=api.inheritedRange?.(document);if(!inherited)return [];
+      const position=document.positionAt(inherited.start);
+      return [new vscode.CodeLens(new vscode.Range(position,position),{title:'打开只读产品源码',command:'gushenCompletion.openApiParentSource',arguments:[document.uri]})];
+    }}));
+  if(vscode.languages.registerHoverProvider)registrations.push(vscode.languages.registerHoverProvider(
+    ['guthon-gss','java'].flatMap(language=>['file',SCHEME].map(scheme=>({scheme,language}))),{provideHover:hover}));
+  return {definition,hover,workspaceForDocument,search,dispose(){for(const item of registrations)item.dispose();assistance.dispose();}};
 }
 module.exports={allPages,findExactCandidates,sourceLink,parseSourceLink,sourceTreeAction,createApiNavigation};

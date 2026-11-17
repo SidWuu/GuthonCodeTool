@@ -8,6 +8,10 @@
 
 首次使用：设置 GuthonCodeTool 运行入口与显式数据目录，创建产品或项目，在独立窗口登录并选择范围，再更新源码。浏览器增强按需启用；数据库诊断使用独立只读目标。
 
+上传前可按名称、类型及路径勾选文件并查看差异；源码树支持仅展示过滤、物理文件操作和资源管理器状态提示。继承标记及全局事务调用支持导航，本地函数支持注释悬停；物理 PAGE 的原生编辑器复用现有草稿。
+
+从工具设置生成 MCP 客户端配置，预览后合并并检查连接；独立 MCP 在线操作复用对应 Nexus 项目的登录会话。操作步骤见使用手册，功能批次及验证边界见 `docs/api-sync/official-adoption.md`。
+
 Nexus 可检查 Open VSX 官方来源包，校验并切换兼容的补全资源，用临时编辑器说明变化与回退结果。同步、设计器等执行协议的升级随经过适配验证的 Nexus 版本发布。
 
 `api-sync` 说明对应该分支代码及构建产物，正式发行包的功能以对应发行说明为准。源码、离线 HTML 手册和配置参考见 [GuthonCodeTool 仓库](https://github.com/SidWuu/GuthonCodeTool/tree/api-sync)；完整实现与验证边界见仓库的 `docs/api-sync/feature-matrix.json`。

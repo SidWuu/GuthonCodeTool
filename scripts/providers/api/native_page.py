@@ -1,8 +1,8 @@
 """Native PAGE XML projection and source-preserving structural edits.
 
-XML remains the authority. JSON is a transient projection for the shared PAGE
-editor; unchanged XML tokens, including comments, attributes and CDATA, are
-copied from the original document rather than serialized again.
+XML is the local editable representation of the native editor model. The provider
+reads bean/version and saves JSON through the native interface. Unchanged local
+XML tokens, including comments, attributes and CDATA, are preserved during edits.
 """
 
 from __future__ import annotations
@@ -12,12 +12,12 @@ import copy
 import hashlib
 import json
 import re
-from pathlib import PurePosixPath
 from xml.sax.saxutils import escape, quoteattr
 
 from common import page_editor, page_structure
 from common.page_projection import pointer_parts, pointer_value
 from . import xml_source
+from .download import page_source_path
 from .xml_source import XmlNode as _Xml, opening as _opening
 
 _ARRAY_ITEMS = {
@@ -111,7 +111,10 @@ def _scalar(node, key):
     if node.attrs.get("nil", "").lower() == "true":
         return None
     text = "".join(node.text)
-    kind = node.attrs.get("type", "") if node.tag in {"v", "item"} else ""
+    if node.attrs.get("r") == "1":
+        # The platform uses r=1 to restore CRLF after XML newline normalization.
+        text = text.replace("\r\n", "\n").replace("\n", "\r\n")
+    kind = node.attrs.get("type", "")
     if kind == "String":
         return text
     if kind == "Boolean":
@@ -137,7 +140,7 @@ def _project(node, key=None):
     key = key or node.tag
     if node.attrs.get("nil", "").lower() == "true":
         return _Value(node, "scalar", None)
-    if node.tag in {"v", "item"} and node.attrs.get("type") == "List":
+    if node.attrs.get("type") == "List":
         if any(child.tag != "item" for child in node.children):
             raise ValueError("Invalid native PAGE list item")
         children = [_project(child) for child in node.children]
@@ -184,13 +187,12 @@ def _project(node, key=None):
             entries,
         )
     if (
-        node.tag in {"v", "item"} and node.attrs.get("type") == "Map"
+        node.attrs.get("type") == "Map"
     ) or key in _MAP_TAGS:
         return _Value(
             node,
             "attrs"
-            if node.tag in {"v", "item"}
-            and node.attrs.get("type") == "Map"
+            if node.attrs.get("type") == "Map"
             or key in {"pageSetup", "params"}
             else "object",
             {},
@@ -226,7 +228,7 @@ def is_metadata_only(text, metadata, path):
         return False
     if str(metadata.get("pageType", "")) in {"", "0"} or metadata.get("isInhert") not in (None, "", 0, "0"):
         return False
-    expected = PurePosixPath("systems", metadata["systemId"], "pages", metadata["pageSubId"], metadata["pageId"], metadata["fileName"]).as_posix()
+    expected = page_source_path(metadata["systemId"], metadata["pageSubId"], metadata["pageId"], metadata["fileName"])
     if path != expected or hashlib.sha256(text.encode("utf-8")).hexdigest() != metadata.get("remoteHash"):
         return False
     try:
@@ -259,6 +261,15 @@ def display_text(text):
     return json.dumps(decode(text), ensure_ascii=False, indent=2, allow_nan=False)
 
 
+def encode(model):
+    """Represent an authoritative editor model locally; XML is never uploaded."""
+    raw = _new_element("page", model).decode("utf-8")
+    text = '<?xml version="1.0" encoding="UTF-8"?>\n' + raw + "\n"
+    if not _same(decode(text), model):
+        raise ValueError("Native PAGE model cannot be represented losslessly")
+    return text
+
+
 def _same(left, right):
     if type(left) in (int, float) and type(right) in (int, float):
         return left == right
@@ -281,6 +292,17 @@ def _value_text(value):
     raise ValueError("Unsupported native PAGE scalar")
 
 
+def _text_body(text, cdata):
+    """Keep native newlines, including mixed line endings and literal CR."""
+    if "\r" in text:
+        remaining = text.replace("\r\n", "")
+        if cdata and "\r" not in remaining and "\n" not in remaining:
+            text = text.replace("\r\n", "\n")
+            return True, "<![CDATA[" + text.replace("]]>", "]]]]><![CDATA[>") + "]]>"
+        return False, escape(text).replace("\r", "&#13;")
+    return False, ("<![CDATA[" + text.replace("]]>", "]]]]><![CDATA[>") + "]]>" if cdata else escape(text))
+
+
 def _xml_name(name):
     if not isinstance(name, str) or not _NAME.fullmatch(name):
         raise ValueError("Unsupported native PAGE element name")
@@ -296,7 +318,7 @@ def _new_map_entry(name, value):
     elif isinstance(value, dict):
         body = (
             '<v type="Map">'
-            + "".join(_new_map_entry(k, v) for k, v in value.items())
+            + b"".join(_new_map_entry(k, v) for k, v in value.items()).decode("utf-8")
             + "</v>"
         )
     elif isinstance(value, list):
@@ -309,11 +331,13 @@ def _new_map_entry(name, value):
         kind = (
             "Boolean"
             if isinstance(value, bool)
+            else "Long"
+            if isinstance(value, int)
             else "Double"
-            if isinstance(value, (int, float))
+            if isinstance(value, float)
             else "String"
         )
-        body = '<v type="' + kind + '">' + escape(_value_text(value)) + "</v>"
+        body = '<v type="' + kind + '">' + _text_body(_value_text(value), False)[1] + "</v>"
     return (opening + body + "</attrs>").encode("utf-8")
 
 
@@ -335,37 +359,40 @@ def _new_typed_item(value):
     kind = (
         "Boolean"
         if isinstance(value, bool)
+        else "Long"
+        if isinstance(value, int)
         else "Double"
-        if isinstance(value, (int, float))
+        if isinstance(value, float)
         else "String"
     )
     return (
-        '<item type="' + kind + '">' + escape(_value_text(value)) + "</item>"
+        '<item type="' + kind + '">' + _text_body(_value_text(value), False)[1] + "</item>"
     ).encode("utf-8")
 
 
 def _new_element(tag, value):
     tag = _xml_name(tag)
+    if value is None:
+        return ("<" + tag + ' nil="true"/>').encode()
     if isinstance(value, list):
         item_tag = _ARRAY_ITEMS.get(tag)
         if not item_tag:
-            raise ValueError("Unsupported new PAGE XML collection: " + tag)
+            return ("<" + tag + ' type="List">').encode() + b"".join(_new_typed_item(item) for item in value) + ("</" + tag + ">").encode()
         body = b"".join(_new_element(item_tag, item) for item in value)
     elif isinstance(value, dict):
-        if tag in {"pageSetup", "params"}:
+        if not value and tag not in _MAP_TAGS:
+            return ("<" + tag + ' type="Map"/>').encode()
+        if tag in {"pageSetup", "params"} or any(not _NAME.fullmatch(k) for k in value):
             body = b"".join(_new_map_entry(k, v) for k, v in value.items())
         else:
             body = b"".join(_new_element(k, v) for k, v in value.items())
-    elif value is None:
-        body = b""
     else:
         value_text = _value_text(value)
         if tag.endswith("Script") or tag in {"script", "sql", "compScript"}:
-            content = value_text.replace("]]>", "]]]]><![CDATA[>")
-            return (
-                "<" + tag + ' r="1"><![CDATA[' + content + "]]></" + tag + ">"
-            ).encode("utf-8")
-        body = escape(value_text).encode("utf-8")
+            crlf, content = _text_body(value_text, True)
+            return ("<" + tag + (' r="1"' if crlf else '') + ">" + content + "</" + tag + ">").encode("utf-8")
+        kind = "Boolean" if isinstance(value, bool) else "Integer" if isinstance(value, int) else "Double" if isinstance(value, float) else "String"
+        return ("<" + tag + ' type="' + kind + '">' + _text_body(value_text, False)[1] + "</" + tag + ">").encode("utf-8")
     return ("<" + tag + ">").encode() + body + ("</" + tag + ">").encode()
 
 
@@ -391,6 +418,15 @@ def _scalar_xml(raw, node, value):
         return opening[:-1] + b' nil="true"/>'
     if isinstance(value, (dict, list)):
         raise ValueError("Native scalar type cannot change to a container")
+    if isinstance(value, str):
+        inner = raw[node.open_end:node.close_start] if not node.self_closing else b""
+        if b"<!--" in inner or b"<?" in inner:
+            raise ValueError("Cannot replace XML scalar containing comments or processing instructions")
+        opening = re.sub(rb'\s+r\s*=\s*(["\']).*?\1', b"", opening, count=1)
+        crlf, body = _text_body(value, b"<![CDATA[" in inner)
+        if crlf:
+            opening = opening[:-1] + b' r="1">'
+        return opening + body.encode("utf-8") + ("</" + node.tag + ">").encode("utf-8")
     return xml_source.render_text_leaf(raw, node, _value_text(value), opening_token=opening)
 
 

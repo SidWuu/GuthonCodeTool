@@ -7,14 +7,10 @@
   },
   "scope": "current project window",
   "diagnosticReview": {
-    "objectsCompared": 183,
-    "byteIdenticalToOfficialCache": 183,
-    "metadataOnlyPage": 177,
-    "viewWithoutSqlNode": 5,
-    "nonemptyPageIdConflict": 1,
-    "interpretation": "182 objects use official minimal source representations; one body identity differs from its API metadata. No source was rewritten to resolve either category.",
-    "metadataOnlyBehavior": "Recognize API-bound original bytes; default to original-content display. Explicit raw editing remains available under existing file permissions and candidate identity checks. Do not invent missing SQL or page structure.",
-    "identityConflictBehavior": "Keep a distinct diagnostic and readonly view. Platform-side correction is outside this change."
+    "structuredPageAuthority": "Native editor bean/version; the checkout XML is a lossless local representation, not a download-XML save payload.",
+    "metadataOnlyBehavior": "Keep native metadata without a source version visible and readonly; do not invent layout, identity or a version.",
+    "identityConflictBehavior": "Diagnose export/native inconsistencies and preserve local changes; never modify platform identities merely to clear an index diagnostic.",
+    "existingBaselineBehavior": "Reuse version-matched, native-verified baselines; unverified legacy baselines require native-model comparison before upload."
   },
   "issues": [
     {
@@ -44,13 +40,17 @@
       "cause": "Login display waited for repeated full-project status scans that reloaded baseline bodies and scope settings.",
       "change": "Read registered baseline hashes without baseline bodies, resolve scope once per scan and coalesce concurrent same-project status requests.",
       "verification": "State and hash transitions plus concurrent refresh tests; installed full-project timing recorded separately."
+    },
+    {
+      "id": "native-page-source",
+      "cause": "The downloaded PAGE representation can differ from the original native editor model, including identity and expanded script content.",
+      "change": "Read authoritative editor models, retain one local XML file, save native JSON with version checks and verify through the native getter.",
+      "verification": "Isolated tests cover derived exports, native identity/version checks, default normalization, unexpected control changes and recovery without POST replay."
     }
   ],
   "boundaries": {
-    "realSourceWrites": 0,
-    "realConfigurationChanges": 0,
-    "platformSourceUploads": 0,
-    "platformBusinessWrites": 0,
-    "sourceIdentityConflictStillRequiresReview": true
+    "structuredPageSave": "Native JSON with the current pageVersion, no automatic compile or forced checkout/checkin.",
+    "readback": "An independent native model read verifies scripts, control identities and meaningful configuration; unknown results are not replayed.",
+    "businessAcceptance": "Source readback, platform compile/release and business acceptance remain separate."
   }
 }

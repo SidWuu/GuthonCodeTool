@@ -47,7 +47,7 @@ class ApiEditorState {
   }
   assertNoConflictingDrafts(key,sourcePath,allowedKinds=[]) {
     for(const draft of this.drafts.values()) if(draft.key===key && draft.path===sourcePath && draft.dirty && !allowedKinds.includes(draft.kind))
-      throw new Error('该源码的另一个设计器有未保存输入，请先保存或关闭');
+      throw new Error(draft.kind==='online' ? '该源码的页面编辑器仍打开，请确认保存完成且没有后续修改，关闭后再继续' : '该源码的另一个设计器有未保存输入，请先保存或关闭');
   }
   assertNoDirtyDocumentsExcept(key,sourcePath,uri) {
     const state=this.workspaces.get(key);

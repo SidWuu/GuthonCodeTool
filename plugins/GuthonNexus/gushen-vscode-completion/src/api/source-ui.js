@@ -2,6 +2,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const {isInlineInherited,scriptType}=require('../source/virtual-fs');
 const {sourcePathAllowed}=require('./source-watcher');
+const {selectUploadFiles}=require('./upload-review');
+const {filterChildren}=require('./tree-filter');
 
 const MODULE_STYLES={
   pages:{icon:'layout',color:'charts.blue'},
@@ -48,6 +50,17 @@ function identity(value, sourcePath) {
   throw new Error('请选择 API 源码');
 }
 
+function sourceLabel(object,{signature=false}={}) {
+  const id=object.sourceType==='procedure' ? object.funId : object.sourceId;
+  const name=object.name && object.name!==object.path ? object.name : '';
+  const label=[id,name && name!==id ? name : ''].filter(Boolean).join(' · ') || name;
+  if(!signature || object.sourceType!=='procedure' || !id) return label;
+  const declared=object.procedureSignature;
+  const parameters=declared?.parameters == null ? '无' : declared.parameters.join(', ');
+  const returned=declared?.returnExpressions?.length ? declared.returnExpressions.map(value=>value.replace(/\s*\r?\n\s*/g,' ')).join(' | ') : '无';
+  return `${id}(${parameters})${name && name!==id ? ' '+name : ''}${declared?.hasReturn===true ? ` [return ${returned}]` : ''}`;
+}
+
 function buildCatalogTree(key, workspace, objects, project={}, options={}) {
   // platform：菜单层级按平台菜单顺序、同级对象按平台接口顺序（页面 pageId、函数 funId）；
   // name：沿用按显示名排序。
@@ -71,16 +84,25 @@ function buildCatalogTree(key, workspace, objects, project={}, options={}) {
   root.childIndex=new Map();for(const [type,label] of Object.entries(labels)) {
     const child={label,key,children:[],category:type,icon:MODULE_STYLES[type].icon,sourcePrefixes:new Set(),parent:workspace};root.children.push(child);root.childIndex.set('category:'+type,child);
   }
+  for(const [type,kind,entries,id] of [['pages','systems',systems,'systemId'],['system-script','systems',systems,'systemId'],['procedures','datasources',dataSources,'dataSourceId'],['tables','datasources',dataSources,'dataSourceId'],['views','datasources',dataSources,'dataSourceId']]) {
+    const category=root.childIndex.get('category:'+type);
+    category.refreshPrefixes=new Set(entries.map(entry=>`${kind}/${entry[id]}/${type}`));
+  }
   const add=(object,dirs,platformOrder)=>{
     let parent=root;
     for(const dir of dirs) {
       parent.childIndex ||= new Map();let child=parent.childIndex.get(dir.key);
       if(!child) {child={label:dir.label,key,children:[],sourcePrefix:dir.sourcePrefix,description:dir.description,category:dir.category,dataSourceId:dir.dataSourceId,systemId:dir.systemId,order:dir.order,sortKey:dir.sortKey,parent:parent===root?workspace:parent};parent.children.push(child);parent.childIndex.set(dir.key,child);}
       child.sourcePrefixes ||= new Set();if(dir.affectedPrefix)child.sourcePrefixes.add(dir.affectedPrefix);
+      child.refreshPrefixes ||= new Set();if(dir.refreshPrefix)child.refreshPrefixes.add(dir.refreshPrefix);
       parent=child;
     }
-    const filename=object.path.split('/').at(-1),candidate=object.label || (object.sourceType==='module-parameter' ? `${object.sourceId} · ${object.name}` : object.name) || filename;
+    const filename=object.path.split('/').at(-1),candidate=object.label || sourceLabel(object,{signature:true}) || filename;
     const label=typeof candidate==='string' && (candidate===object.path || candidate.endsWith('/'+filename)) ? filename : candidate;
+    if(object.sourceType==='procedure' && object.path.split('/').length>4 && parent.sourcePrefix===object.path.split('/').slice(0,-1).join('/') && object.sourceId && object.dataSourceId) {
+      parent.packageIdentities ||= new Map();
+      parent.packageIdentities.set(JSON.stringify([object.dataSourceId,object.sourceId]),{dataSourceId:String(object.dataSourceId),procedureId:String(object.sourceId),samplePath:object.path});
+    }
     parent.children.push({label,key,object,order:platformOrder,sortKey:String(object.funId || object.sourceId || filename).toLowerCase(),parent:parent===root?workspace:parent});
   };
   for(const object of objects) {
@@ -97,13 +119,29 @@ function buildCatalogTree(key, workspace, objects, project={}, options={}) {
     }
     const category=labels[parts[2]], scoped=category && ['systems','datasources'].includes(parts[0]);
     const physical=scoped ? [
-      {key:'category:'+parts[2],label:category,category:parts[2],affectedPrefix:object.path},
-      {key:'scope:'+parts[1],label:(parts[0]==='systems'?systemNames:sourceNames).get(parts[1]) || parts[1],description:parts[1],category:parts[2],systemId:parts[0]==='systems'?parts[1]:undefined,dataSourceId:parts[0]==='datasources'?parts[1]:undefined,sourcePrefix:parts.slice(0,3).join('/'),affectedPrefix:object.path,order:(parts[0]==='systems'?systemOrder:sourceOrder).get(parts[1]),sortKey:parts[1]},
-      ...parts.slice(3,-1).map((part,i)=>({key:'path:'+part,label:part,sourcePrefix:parts.slice(0,i+4).join('/'),affectedPrefix:object.path,sortKey:part}))
+      {key:'category:'+parts[2],label:category,category:parts[2],affectedPrefix:object.path,refreshPrefix:parts.slice(0,3).join('/')},
+      {key:'scope:'+parts[1],label:(parts[0]==='systems'?systemNames:sourceNames).get(parts[1]) || parts[1],description:parts[1],category:parts[2],systemId:parts[0]==='systems'?parts[1]:undefined,dataSourceId:parts[0]==='datasources'?parts[1]:undefined,sourcePrefix:parts.slice(0,3).join('/'),affectedPrefix:object.path,refreshPrefix:parts.slice(0,3).join('/'),order:(parts[0]==='systems'?systemOrder:sourceOrder).get(parts[1]),sortKey:parts[1]},
+      ...(parts[2]==='procedures' && options.procedureLayout==='flat' && parts.length>4
+        ? [{key:'package:'+parts.slice(3,-1).join('/'),label:parts.slice(3,-1).join('.'),sourcePrefix:parts.slice(0,-1).join('/'),affectedPrefix:object.path,refreshPrefix:parts.slice(0,-1).join('/'),sortKey:parts.slice(3,-1).join('.')}]
+        : parts.slice(3,-1).map((part,i)=>({key:'path:'+part,label:part,sourcePrefix:parts.slice(0,i+4).join('/'),affectedPrefix:object.path,refreshPrefix:parts.slice(0,i+4).join('/'),sortKey:part})))
     ] : [{key:'other',label:'其他源码',affectedPrefix:object.path,sortKey:''},...parts.slice(0,-1).map((part,i)=>({key:'path:'+part,label:part,sourcePrefix:parts.slice(0,i+1).join('/'),affectedPrefix:object.path,sortKey:part}))];
     const routes=parts[0]==='systems' && parts[2]==='pages' && parts.length>=6 ? menuPaths.get(JSON.stringify([parts[1],parts[3],parts[4]])) : undefined;
-    if(routes?.length) for(const route of routes) add(object,[...physical.slice(0,2),...route.branch.map(x=>({key:'menu:'+x.id,label:x.name,affectedPrefix:object.path,order:x.order,sortKey:x.name}))],route.pageIndex);
+    if(routes?.length) for(const route of routes) add(object,[...physical.slice(0,2),...route.branch.map(x=>({key:'menu:'+x.id,label:x.name,affectedPrefix:object.path,refreshPrefix:parts.slice(0,5).join('/'),order:x.order,sortKey:x.name}))],route.pageIndex);
     else add(object,physical);
+  }
+  // A menu can contain indexed and not-yet-indexed pages. Use its platform
+  // identities to include their physical page directories in a scoped refresh.
+  for(const [identity,routes] of menuPaths) {
+    const [system,sub,page]=JSON.parse(identity),category=root.childIndex.get('category:pages');
+    const scope=category.childIndex?.get('scope:'+system);
+    for(const route of routes) {
+      let parent=scope;
+      for(const branch of route.branch) {
+        parent=parent?.childIndex?.get('menu:'+branch.id);
+        if(!parent) break;
+        parent.refreshPrefixes.add(`systems/${system}/pages/${sub}/${page}`);
+      }
+    }
   }
   const categoryOrder=Object.keys(labels);
   const rank=item=>item.category ? categoryOrder.indexOf(item.category) : categoryOrder.length;
@@ -120,7 +158,8 @@ function buildCatalogTree(key, workspace, objects, project={}, options={}) {
       const ap=a.object?.path || '', bp=b.object?.path || '';
       if(ap!==bp) return ap<bp ? -1 : 1;
     }
-    return a.label.localeCompare(b.label);
+    const name=item=>item.object?.name && item.object.name!==item.object.path ? item.object.name : item.label;
+    return name(a).localeCompare(name(b));
   };
   const sort=node=>{node.children.sort((a,b)=>compare(a,b,node===root));for(const child of node.children) if(Array.isArray(child.children)) sort(child);};
   root.children=root.children.filter(child=>!['module-parameters','bill-type','dropdown','skills'].includes(child.category)||child.children.length);
@@ -149,11 +188,17 @@ async function showReport(vscode,title,lines) {
 }
 
 class ApiSourceUI {
-  constructor({vscode, run, onUpdated, editorState, onSourceChanged, onWorkspace, onOpenVirtual, onOpenModule, onModuleUpload, indexRecovery}) {
-    this.vscode=vscode; this.run=run; this.onUpdated=onUpdated; this.editorState=editorState; this.onSourceChanged=onSourceChanged; this.onWorkspace=onWorkspace; this.onOpenVirtual=onOpenVirtual; this.indexRecovery=indexRecovery;this.onOpenModule=onOpenModule;this.onModuleUpload=onModuleUpload; this.watchers=new Map(); this.workspaces=new Map(); this.controls=new Map();this.scmGenerations=new Map();this.sourceChanges=new Map();
+  constructor({vscode, run, onUpdated, editorState, onSourceChanged, onWorkspace, onOpenVirtual, onOpenModule, onModuleUpload, indexRecovery, reviewUpload=selectUploadFiles}) {
+    this.vscode=vscode; this.run=run; this.reviewUpload=reviewUpload; this.onUpdated=onUpdated; this.editorState=editorState; this.onSourceChanged=onSourceChanged; this.onWorkspace=onWorkspace; this.onOpenVirtual=onOpenVirtual; this.indexRecovery=indexRecovery;this.onOpenModule=onOpenModule;this.onModuleUpload=onModuleUpload; this.watchers=new Map(); this.workspaces=new Map(); this.controls=new Map();this.scmGenerations=new Map();this.sourceChanges=new Map();
     this.emitter = vscode.EventEmitter ? new vscode.EventEmitter() : undefined;
     this.onDidChangeTreeData = this.emitter?.event;
+    this.filters=new Map();this.sourceNames=new Map();
+    this.decorationEmitter=vscode.EventEmitter ? new vscode.EventEmitter() : undefined;
+    this.onDidChangeFileDecorations=this.decorationEmitter?.event;
     this.readonlyDocuments=new Map();this.rootItems=null;this.treeCache=new Map();this.treeLoads=new Map();this.treeEpoch=new Map();this.indexGenerations=new Map();this.indexDiagnostics=new Map();this.menuAttempts=new Set();this.treeVersion=0;
+    this.configurationListener=vscode.workspace?.onDidChangeConfiguration?.(event=>{
+      if(event.affectsConfiguration('gushenCompletion.procedureTreeLayout')) {this.invalidate();this.refresh();}
+    });
   }
   syncWorkspaces(workspaces) {
     const keys=new Set();
@@ -180,7 +225,8 @@ class ApiSourceUI {
       tree.contextValue=item.target.fragmentType==='fields' ? 'guthonApi.fragment.fields' : 'guthonApi.fragment.script';tree.tooltip=item.target.jsonPointer;
       tree.command={command:'gushenCompletion.openApiFragment',title:'打开源码分块',arguments:[item.target]};return tree;
     }
-    tree.contextValue=item.children ? item.category ? `guthonApi.category.${item.category}` : 'guthonApi.directory' : item.object?.readonly ? 'guthonApi.readonly' : ['page','procedure','table','view'].includes(item.object?.sourceType) ? `guthonApi.${item.object.sourceType}` : 'guthonApi.source';
+    tree.contextValue=item.children ? item.packageIdentities?.size===1 ? 'guthonApi.procedurePackage' : item.category ? `guthonApi.category.${item.category}` : 'guthonApi.directory' : item.object?.readonly ? 'guthonApi.readonly' : ['page','procedure','table','view'].includes(item.object?.sourceType) ? `guthonApi.${item.object.sourceType}` : 'guthonApi.source';
+    if(item.children && item.category==='procedures' && item.sourcePrefix)tree.contextValue='guthonApi.procedureScope';
     if(item.object && ['bill-type','dropdown','system-script','module-parameter'].includes(item.object.sourceType))tree.contextValue='guthonApi.'+item.object.sourceType;
     tree.guthonWorkspaceKey=item.key;
     tree.description=item.description;
@@ -188,15 +234,28 @@ class ApiSourceUI {
     while(owner && !owner.category)owner=owner.parent;
     const style=MODULE_STYLES[owner?.category || SOURCE_CATEGORIES[item.object?.sourceType]];
     if(v.ThemeIcon)tree.iconPath=new v.ThemeIcon(item.icon || (item.children?'folder':style?.icon || 'file'),style?new v.ThemeColor(style.color):undefined);
-    tree.tooltip=item.object ? [item.object.path,item.object.diagnostic].filter(Boolean).join(' · ') : item.label;
+    const pageOrigin=item.object?.sourceType==='page' && item.object.sourceFormat!=='script'
+      ? (item.object.pageSource==='native-editor'?(item.object.nativeState==='METADATA_ONLY'?'原生元数据 · 尚无源码版本，仅可查看':'原生编辑模型 · 原生 JSON 保存'):'原文来源待核验 · 上传前核对原生模型') : '';
+    tree.tooltip=item.object ? [item.object.path,pageOrigin,item.object.diagnostic].filter(Boolean).join(' · ') : item.label;
     const changes=this.sourceChanges.get(item.key),priority={CONFLICT:3,REMOTE_DELETED:2,MISSING:2,MODIFIED:1};
     let state=changes?.get(item.object?.path || item.sourcePrefix);
     if(item.sourcePrefixes) for(const prefix of item.sourcePrefixes) {const value=changes?.get(prefix);if((priority[value]||0)>(priority[state]||0))state=value;}
     if(state) {tree.description=({CONFLICT:'冲突',REMOTE_DELETED:'远端已删除',MISSING:'本地缺失',MODIFIED:'有本地修改'})[state] || state;if(v.ThemeIcon) tree.iconPath=new v.ThemeIcon(state==='MODIFIED'?'diff-modified':'warning',new v.ThemeColor(state==='MODIFIED'?'gitDecoration.modifiedResourceForeground':state==='CONFLICT'?'editorError.foreground':'editorWarning.foreground'));}
-    if(item.object) tree.command={command:isPage ? 'gushenCompletion.openApiPageEditor' : item.object.sourceType==='module-parameter'?'gushenCompletion.editModuleParameter':'gushenCompletion.openApiSource',title:isPage ? '打开 PAGE 管理器' : '打开源码',arguments:[{workspaceKey:item.key,path:item.object.path,lineNumber:item.object.lineNumber}]};
+    if(item.object) tree.command={command:isPage ? 'gushenCompletion.openApiPageEditor' : item.object.sourceType==='module-parameter'?'gushenCompletion.editModuleParameter':'gushenCompletion.openApiSource',title:isPage ? '编辑页面' : '打开源码',arguments:[{workspaceKey:item.key,path:item.object.path,lineNumber:item.object.lineNumber,...(isPage && item.object.name ? {sourceName:item.object.name} : {})}]};
     return tree;
   }
+  setFilter(key,text) {
+    if(text.trim())this.filters.set(key,text.trim());else this.filters.delete(key);
+    if(this.treeView)this.treeView.message=text.trim() ? `过滤：${text.trim()}（仅影响显示）` : undefined;
+    void this.vscode.commands?.executeCommand?.('setContext','gushenCompletion.hasSourceFilter',this.filters.size>0);
+    this.refresh();
+  }
   async getChildren(item) {
+    const values=await this.unfilteredChildren(item);
+    if(!item && this.workspaces.size>1)return values;
+    return filterChildren(values,this.filters.get(item?.key || values[0]?.key) || '',item);
+  }
+  async unfilteredChildren(item) {
     if (!item) {const roots=this.rootItems ||= [...this.workspaces].map(([key,w])=>({label:w.displayName || key,key,workspace:true,children:true}));return roots.length===1 ? this.getChildren(roots[0]) : roots;}
     if (item.workspace) {
       if(this.treeCache.has(item.key)) return this.treeCache.get(item.key);
@@ -221,7 +280,8 @@ class ApiSourceUI {
     return item.children || [];
   }
   async loadCatalog(item,epoch) {
-      const treeOrder=this.vscode.workspace.getConfiguration?.('gushenCompletion')?.get?.('sourceTreeOrder','platform') || 'platform';
+      const config=this.vscode.workspace.getConfiguration?.('gushenCompletion');
+      const treeOrder=config?.get?.('sourceTreeOrder','platform') || 'platform',procedureLayout=config?.get?.('procedureTreeLayout','tree') || 'tree';
       const replacement=()=>{
         if(this.disposed || !this.workspaces.has(item.key)) return [];
         if((this.treeEpoch.get(item.key)||0)===epoch) return undefined;
@@ -243,7 +303,7 @@ class ApiSourceUI {
         offset=result.nextOffset;
       }
       const current=replacement();if(current!==undefined)return current;
-      const root={children:buildCatalogTree(item.key,item,objects,project,{order:treeOrder})};
+      const root={children:buildCatalogTree(item.key,item,objects,project,{order:treeOrder,procedureLayout})};
       if(partial && !this.indexDiagnostics.has(item.key)) {
         const diagnostics=objects.filter(object=>object.diagnostic && object.status!=='OK').map(object=>({path:object.path,code:object.diagnostic}));
         this.indexDiagnostics.set(item.key,{complete:false,diagnosticCount:partial,diagnostics:diagnostics.slice(0,100),truncated:diagnostics.length>100});
@@ -251,6 +311,8 @@ class ApiSourceUI {
       const diagnostic=this.indexDiagnostics.get(item.key);const count=Math.max(partial,diagnostic?.diagnosticCount || 0);
       if(count || diagnostic?.complete===false) root.children.push({kind:'message',label:`索引不完整${count ? `：${count} 个诊断` : ''}，点击查看`,key:item.key,parent:item,command:diagnostic ? 'gushenCompletion.showApiIndexDiagnostics' : 'gushenCompletion.reindexCalls'});
       const recovery=this.indexRecovery?.(item.key);if(recovery?.paths.length) root.children.push({kind:'message',label:`${recovery.paths.length} 个源码文件等待索引更新，点击重试`,key:item.key,parent:item,command:'gushenCompletion.retryApiIndexFailures'});
+      this.sourceNames.set(item.key,new Map(objects.map(object=>[object.path,sourceLabel(object)])));
+      this.decorationEmitter?.fire();
       this.indexGenerations.set(item.key,generation);this.treeCache.set(item.key,root.children);
       if(project?.systems?.length && !Array.isArray(project.menuTree) && !this.menuAttempts.has(item.key)) {
         this.menuAttempts.add(item.key);const version=this.treeVersion;
@@ -258,7 +320,7 @@ class ApiSourceUI {
           const menu=Array.isArray(result.menu) ? result.menu : result.menu?.list;
           if(this.disposed || version!==this.treeVersion || !Array.isArray(menu)) return;
           const messages=root.children.filter(child=>child.kind==='message');
-          this.treeCache.set(item.key,[...buildCatalogTree(item.key,item,objects,{...project,menuTree:menu},{order:treeOrder}),...messages]);this.emitter?.fire();
+          this.treeCache.set(item.key,[...buildCatalogTree(item.key,item,objects,{...project,menuTree:menu},{order:treeOrder,procedureLayout}),...messages]);this.emitter?.fire();
         }).catch(error=>{
           if(this.disposed || version!==this.treeVersion) return;
           const items=this.treeCache.get(item.key);if(!items)return;
@@ -272,7 +334,7 @@ class ApiSourceUI {
     if(!this.treeView) throw new Error('源码视图不可用');
     const workspace=(this.rootItems ||= [...this.workspaces].map(([key,w])=>({label:w.displayName || key,key,workspace:true,children:true}))).find(item=>item.key===key);if(!workspace) throw new Error('当前项目未显示在源码树');
     const visit=items=>{for(const item of items) {if(item.object?.path===sourcePath)return item;if(Array.isArray(item.children)){const found=visit(item.children);if(found)return found;}}};
-    const found=visit(await this.getChildren(workspace));if(!found) throw new Error('源码不在当前索引目录，请先重建索引');
+    const found=visit(await this.getChildren(workspace));if(!found) throw new Error(this.filters.has(key) ? '源码被当前过滤条件隐藏，请先清除过滤再定位' : '源码不在当前索引目录，请先重建索引');
     await this.treeView.reveal(found,{select:true,focus:true,expand:true});
   }
   setIndexResult(key,index) {
@@ -307,8 +369,12 @@ class ApiSourceUI {
     return result;
   }
   async ensureWorkspace(key) {
-    const checkoutPath=this.workspaces.get(key)?.checkoutPath;
-    if(!checkoutPath || !path.isAbsolute(checkoutPath)) return this.status(key);
+    let checkoutPath=this.workspaces.get(key)?.checkoutPath;
+    if(!checkoutPath || !path.isAbsolute(checkoutPath)) {
+      const summary=await this.run(key,'status',{summaryOnly:true});checkoutPath=summary.checkoutPath;
+      if(!checkoutPath || !path.isAbsolute(checkoutPath)) throw new Error('API 工作区路径无效');
+      this.workspaces.set(key,{...this.workspaces.get(key),checkoutPath});
+    }
     await this.registerWorkspace(key,checkoutPath);return {checkoutPath};
   }
   async open(key, sourcePath, preview=false, {raw=false,lineNumber=0}={}) {
@@ -354,7 +420,7 @@ class ApiSourceUI {
     const sourceChanges=new Map();
     const priority={CONFLICT:3,REMOTE_DELETED:2,MISSING:2,MODIFIED:1};
     for(const change of changes) {const parts=change.path.split('/');for(let i=1;i<=parts.length;i++){const p=parts.slice(0,i).join('/');if(!sourceChanges.has(p) || (priority[change.state] || 0)>(priority[sourceChanges.get(p)] || 0)) sourceChanges.set(p,change.state);}}
-    this.sourceChanges.set(key,sourceChanges);
+    this.sourceChanges.set(key,sourceChanges);this.decorationEmitter?.fire();
     record.group.resourceStates=changes.map(change=>{
       const uri=vscode.Uri.from({scheme:'guthon-api-change',authority:key,path:'/'+path.posix.basename(change.path),query:new URLSearchParams({workspaceKey:key,path:change.path}).toString()});
       return {resourceUri:uri,contextValue:change.state==='CONFLICT' ? 'guthonApi.conflict' : change.readonly ? 'guthonApi.readonlyChange' : change.state==='MODIFIED' ? 'guthonApi.change' : 'guthonApi.unavailable',
@@ -362,6 +428,19 @@ class ApiSourceUI {
         decorations:{tooltip:`${change.path} · ${change.state}`}};
     });
     record.control.count=changes.length; this.refresh();return state;
+  }
+  provideFileDecoration(uri) {
+    if(uri.scheme!=='file')return;
+    for(const [key,workspace] of this.workspaces) {
+      if(!workspace.checkoutPath)continue;
+      const relative=path.relative(workspace.checkoutPath,uri.fsPath).split(path.sep).join('/');
+      if(!relative || relative==='..' || relative.startsWith('../') || path.isAbsolute(relative))continue;
+      const state=this.sourceChanges.get(key)?.get(relative),name=this.sourceNames.get(key)?.get(relative);
+      if(!state && !name)return;
+      const states={MODIFIED:['M','本地修改','gitDecoration.modifiedResourceForeground'],CONFLICT:['C','冲突','gitDecoration.conflictingResourceForeground'],MISSING:['D','本地缺失','gitDecoration.deletedResourceForeground'],REMOTE_DELETED:['D','平台已删除','gitDecoration.deletedResourceForeground']};
+      const value=states[state];
+      return {tooltip:[name,value?.[1]].filter(Boolean).join(' · '),...(value ? {badge:value[0],color:new this.vscode.ThemeColor(value[2])} : {}),propagate:false};
+    }
   }
   async diff(key, sourcePath) {
     const value=await this.run(key,'diff',{path:sourcePath});
@@ -391,7 +470,7 @@ class ApiSourceUI {
   }
   async upload(key, paths) {
     const state=await this.status(key);
-    const chosen=paths?.length ? paths : (state.files || []).filter(x=>x.inScope!==false && x.state === 'MODIFIED' && !x.readonly).map(x=>x.path);
+    let chosen=paths?.length ? [...new Set(paths)] : (state.files || []).filter(x=>x.inScope!==false && x.state === 'MODIFIED' && !x.readonly).map(x=>x.path);
     if (!chosen.length) {await this.vscode.window.showInformationMessage('没有可上传的源码修改');return;}
     const modules=[];
     for(const path of chosen)if((await this.run(key,'read',{path})).metadata?.sourceType==='module-parameter')modules.push(path);
@@ -404,10 +483,22 @@ class ApiSourceUI {
       if(!this.onModuleUpload)throw new Error('模块参数上传入口尚未就绪');
       return this.onModuleUpload(key,modules);
     }
+    const snapshots=new Map(),entries=[];
+    const types={page:'页面',procedure:'过程函数',table:'表',view:'视图','system-script':'系统脚本'};
+    for (const p of chosen) {
+      const result=await this.run(key,'read',{path:p});
+      if(result.readonly) throw new Error(`只读源码不能上传：${p}`);
+      snapshots.set(p,result.sourceHash);
+      entries.push({path:p,name:result.name || p,type:types[result.metadata?.sourceType] || '源码',state:'本地修改'});
+    }
+    const reviewed=await this.reviewUpload(this.vscode,entries,p=>this.diff(key,p));
+    if(!reviewed?.length) return;
+    if(reviewed.some(p=>!snapshots.has(p))) throw new Error('上传选择不属于本次审阅清单');
+    chosen=[...new Set(reviewed)];
     assertClean(this.vscode,state.checkoutPath,chosen);
-    const expectedHashes={};
-    for (const p of chosen) {const result=await this.run(key,'read',{path:p}); if(result.readonly) throw new Error(`只读源码不能上传：${p}`); expectedHashes[p]=result.sourceHash;}
-    const answer=await this.vscode.window.showWarningMessage(`上传 ${chosen.length} 个本地源码文件到谷神？`,{modal:true},'上传');
+    for(const p of chosen) this.editorState?.assertNoConflictingDrafts(key,p);
+    const expectedHashes=Object.fromEntries(chosen.map(p=>[p,snapshots.get(p)]));
+    const answer=await this.vscode.window.showWarningMessage(`上传 ${chosen.length} 个已审阅的源码文件到谷神？`,{modal:true,detail:chosen.join('\n')},'上传');
     if (answer !== '上传') return;
     assertClean(this.vscode,state.checkoutPath,chosen);
     await this.editorState?.flush(key);
@@ -471,14 +562,34 @@ class ApiSourceUI {
     const doc=await this.vscode.workspace.openTextDocument({language:'json',content:JSON.stringify(result.menu,null,2)});
     await this.vscode.window.showTextDocument(doc,{preview:true});return result;
   }
-  async createFunction(key,sourcePath) {
-    const source=await this.run(key,'read',{path:sourcePath});const meta=source.metadata || {};
-    if(meta.sourceType!=='procedure' || !meta.procedureId || !meta.dataSourceId) throw new Error('请选择包含明确过程包和数据源的函数');
+  async refreshScope(value) {
+    const {key,path:sourcePath}=identity(value);
+    if(!key) throw new Error('请选择 API 项目');
+    const prefixes=value?.refreshPrefixes ? [...value.refreshPrefixes] : [];
+    const selector=sourcePath ? {path:sourcePath} : value?.sourcePrefix ? {prefix:value.sourcePrefix} : prefixes.length ? {prefixes} : undefined;
+    if(!selector) throw new Error('当前节点没有明确的物理源码范围');
+    const state=await this.ensureWorkspace(key);
+    const selectedPrefixes=selector.prefix ? [selector.prefix] : selector.prefixes || [];
+    const dirtyPaths=sourcePath ? [sourcePath] : dirtyDocuments(this.vscode,state.checkoutPath)
+      .map(doc=>path.relative(state.checkoutPath,doc.uri.fsPath).split(path.sep).join('/'))
+      .filter(p=>selectedPrefixes.some(prefix=>p.startsWith(prefix+'/')));
+    assertClean(this.vscode,state.checkoutPath,dirtyPaths);
+    await this.editorState?.flush(key);
+    const result=await this.run(key,'refresh',selector);this.invalidate(key);this.setIndexResult(key,result.index);await this.updateScm(key);this.onUpdated?.();
+    await showReport(this.vscode,'API 源码更新结果',sourceSyncLines(key,result));return result;
+  }
+  async createFunction(key,value) {
+    if(value?.packageIdentities?.size!==1) throw new Error('请选择身份明确的过程包');
+    await this.ensureWorkspace(key);
+    const target=[...value.packageIdentities.values()][0];
+    const source=await this.run(key,'read',{path:target.samplePath});const meta=source.metadata || {};
+    if(meta.sourceType!=='procedure' || String(meta.procedureId)!==target.procedureId || String(meta.dataSourceId)!==target.dataSourceId) throw new Error('过程包身份与源码不一致，请刷新索引');
     const funId=await this.vscode.window.showInputBox({title:'新过程函数编码'});if(!funId) return;
     const funName=await this.vscode.window.showInputBox({title:'新过程函数名称'});if(!funName) return;
     const flags=await this.vscode.window.showQuickPick([{label:'使用事务',id:'isTran'},{label:'有返回值',id:'isReturn'}],{title:'选择函数属性',canPickMany:true});if(!flags)return;
     if(await this.vscode.window.showWarningMessage(`在过程包 ${meta.procedureId} 创建函数 ${funId}？此操作会修改开发平台。`,{modal:true},'创建')!=='创建') return;
     let result;
+    await this.editorState?.flush(key);
     try {result=await this.run(key,'create-function',{procedureId:String(meta.procedureId),dataSourceId:String(meta.dataSourceId),funId,funName,
       isTran:flags.some(x=>x.id==='isTran'),isReturn:flags.some(x=>x.id==='isReturn'),confirm:true});}
     catch(error) {await showReport(this.vscode,'创建函数结果',['未取得完整回执，请先查看操作历史并核对平台状态，勿直接重试。','',`错误：${error.message}`]);throw error;}
@@ -523,7 +634,7 @@ class ApiSourceUI {
     await showReport(this.vscode,'API 冲突处理结果',[`对象：${sourcePath}`,`本地源码 SHA-256：${result.sourceHash || '未返回'}`,`操作编号：${result.operationId || '未返回'}`,'','此操作未上传谷神。']);
     await this.updateScm(key);this.onUpdated?.();return result;
   }
-  clear(){this.invalidate();this.treeCache.clear();this.treeLoads.clear();this.indexGenerations.clear();this.rootItems=null;for(const {control,refreshTimer} of this.controls.values()) {clearTimeout(refreshTimer);control.dispose();}this.controls.clear();this.sourceChanges.clear();for(const watcher of this.watchers.values()) watcher.dispose();this.watchers.clear();this.readonlyDocuments.clear();this.indexDiagnostics.clear();this.menuAttempts.clear();this.workspaces.clear();this.refresh();}
-  dispose(){if(this.disposed)return;this.disposed=true;this.clear();this.emitter?.dispose();}
+  clear(){this.invalidate();this.treeCache.clear();this.treeLoads.clear();this.indexGenerations.clear();this.rootItems=null;for(const {control,refreshTimer} of this.controls.values()) {clearTimeout(refreshTimer);control.dispose();}this.controls.clear();this.sourceChanges.clear();for(const watcher of this.watchers.values()) watcher.dispose();this.watchers.clear();this.readonlyDocuments.clear();this.indexDiagnostics.clear();this.menuAttempts.clear();this.workspaces.clear();this.sourceNames.clear();this.filters.clear();this.decorationEmitter?.fire();this.refresh();}
+  dispose(){if(this.disposed)return;this.disposed=true;this.clear();this.configurationListener?.dispose();this.emitter?.dispose();this.decorationEmitter?.dispose();}
 }
-module.exports={ApiSourceUI,assertClean,buildCatalogTree,dirtyDocuments,filePath,identity,showReport,sourceSyncLines};
+module.exports={ApiSourceUI,assertClean,buildCatalogTree,dirtyDocuments,filePath,identity,showReport,sourceLabel,sourceSyncLines};

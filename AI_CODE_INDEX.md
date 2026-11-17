@@ -33,16 +33,27 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | 数据库查询 XLSX 结果与证据导出 | `scripts/common/query_xlsx.py` | `scripts/common/database_cli.py`、`scripts/common/persistence.py` | `tests/test_audit_regressions.py` |
 | Nexus 最近诊断历史视图 | `plugins/GuthonNexus/gushen-vscode-completion/src/diagnosis-history-view.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`、`scripts/common/database_operations.py` | `plugins/GuthonNexus/gushen-vscode-completion/test/diagnosis-history-view.test.js` |
 | 数据库测试计划/结果 | `scripts/common/database_test_artifacts.py` | `config/schema/database-testing.schema.json` | `tests/test_database_test_artifacts.py` |
-| 本地原版设计器资源准备与适配 | `plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/resource-manager.js`（显式 toolHome 下的工作区绑定、平台/构建缓存、版本检查与回退）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/asset-snapshot.js`（共享构建探测、下载、导入） | `scripts/prepare_page_designer.mjs`（维护 CLI）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/platform-assets.js`（快照校验与启动注入）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/native.js`（原版视图与离线接口）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/native-model.js`（受限差分） | `plugins/GuthonNexus/gushen-vscode-completion/test/page-editor.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/page-resources.test.js` |
+| PAGE 本地编辑与官方在线编辑 | `plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/controller.js`（本地草稿、保存及在线入口）、`plugins/GuthonNexus/gushen-vscode-completion/src/api/designer.js`（官方 iframe、窗口复用和本地回读） | `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`（页面入口与接线） | `plugins/GuthonNexus/gushen-vscode-completion/test/api-designer.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/api-ui.test.js` |
 | Nexus 运行模式/toolHome | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-runtime.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-workspace.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/tool-runtime.test.js` |
 | ToolHost 与三运行模式 | `scripts/guthon_tool.py` | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-process-client.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/script-runtime.js`、`scripts/build_script_tool.py` | `tests/test_toolhost.py`、`tests/test_build_script_tool.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/tool-process-client.test.js` |
 | Nexus UI 命令 | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` | `plugins/GuthonNexus/gushen-vscode-completion/package.json` | `plugins/GuthonNexus/gushen-vscode-completion/test/rules.test.js` |
 | Bridge 服务端与持久异步任务 | `plugins/GuthonBridge/bridge/server.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/bridge-process.js` | `plugins/GuthonBridge/bridge/server.test.js` |
 | 发行构建 | `scripts/build_guthon_tool.py` | `GuthonCodeTool.spec` | `tests/test_build_guthon_tool.py` |
 | Windows 统一安装器与官方依赖下载 | `scripts/installer/engine.py` | `scripts/build_windows_installer.py`、`scripts/build_installer_components.py`、`scripts/fetch_installer_inputs.py`、`scripts/common/installer_downloads.py`（构建/运行时共享的固定 HTTPS 下载与校验）、`scripts/check_installer_runtime.py`、`scripts/check_windows_installer.py`、`installer/windows/GuthonCodeSetup.iss`、`.github/workflows/build-installer.yml` | `tests/test_windows_installer.py` |
+| Nexus API 补全合并与重载去重 | `plugins/GuthonNexus/gushen-vscode-completion/src/api-completion.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/api/platform-reference.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/api-completion.test.js` |
 | 谷神 API 补全数据 | `scripts/sync_guthon_api.mjs` | `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs` | 两个脚本的 `--self-test` |
 | 三组件更新 | `plugins/GuthonNexus/gushen-vscode-completion/src/update-center.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/component-update.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/release-catalog.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/update-archive.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/tool-updater.js`、`scripts/build_release_catalog.mjs` | `plugins/GuthonNexus/gushen-vscode-completion/test/component-update.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/update-center.test.js` |
 | 环境自检 | `scripts/common/doctor.py`（按工作区能力确定依赖，保留 legacy JSON/退出码并提供结构化报告） | `scripts/guthon_tool.py`（配置载入失败前仍可进入自检）、`plugins/GuthonNexus/gushen-vscode-completion/src/environment-check.js`（报告校验与固定操作入口）、`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` | `tests/test_doctor.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/environment-check.test.js` |
+
+## Official feature adoption
+
+- `plugins/GuthonNexus/gushen-vscode-completion/src/api/upload-review.js`：原生多选审阅、逐项差异和取消；上传仍由 `plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js` 核对快照并执行。
+- `plugins/GuthonNexus/gushen-vscode-completion/src/api/tree-filter.js`：仅展示过滤，保留原节点及父链；源码状态与资源管理器装饰共用 `plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js`。
+- `plugins/GuthonNexus/gushen-vscode-completion/src/api/mcp-session-host.js` 与 `scripts/providers/api/session_proxy.py`：独立 MCP 在线工具委派到明确项目的 Nexus 登录会话；不传递登录凭据、不重放请求。
+- `plugins/GuthonNexus/gushen-vscode-completion/src/api/mcp-configuration.js`：实际运行入口的 JSONC 配置预览合并、备份及工具发现/在线只读检查。
+- `plugins/GuthonNexus/gushen-vscode-completion/src/api/page-custom-editor.js`：原生 PAGE 编辑器入口，复用 `plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/controller.js` 的页面会话。
+- `plugins/GuthonNexus/gushen-vscode-completion/src/official-assessment.js` 与 `plugins/GuthonNexus/gushen-vscode-completion/data/official-compatibility.json`：官方命令、编辑器、API 和接口差异评估，供 `plugins/GuthonNexus/gushen-vscode-completion/src/official-update.js` 报告使用。
+- `docs/api-sync/official-adoption.md`：三批功能、验证及交付边界。
 
 ## API source development
 
@@ -51,9 +62,13 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | 模块 | 职责 |
 |---|---|
 | `scripts/common/config_store.py` | 单一配置源、保留旧目录读取，以及预览/确认/备份式配置迁移；不自动迁移真实目录。 |
-| `scripts/providers/api/client.py`、`workspace.py` | API 会话、验证码、HTTPS 信任、项目配置、范围、目录名称缓存与凭据。 |
+| `scripts/providers/api/client.py`、`workspace.py` | API 会话实时核验、只读请求登录恢复、验证码、HTTPS 信任、项目配置、范围及目录名称缓存；后端凭据摘要仅驻留内存。 |
 | `scripts/providers/api/download.py`、`store.py`、`sync.py` | 按范围下载、范围变更预检与备份清理编排、基线与冲突、上传前合并和平台回读。 |
-| `scripts/providers/api/cli.py`、`index.py`、`mcp_server.py` | CLI、索引、查询及受控 MCP 接口。 |
+| `scripts/providers/api/page_source.py` | 结构化 PAGE 的原生 bean/version 读取、版本绑定的基线复用、本地无损 XML 表示、原生 JSON 保存和独立回读；导出 XML 不作保存输入。 |
+| `scripts/providers/api/cli.py`、`index.py`、`mcp_server.py` | CLI、索引、按精确源码查询页面/函数使用位置、查询时从已索引源码头和元数据派生过程函数签名及受控 MCP 接口。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/login-store.js` | 按 toolHome、workspaceKey 和平台地址隔离的 API 登录信息本地加密存储；由 Nexus 负责保存和恢复。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/authentication.js` | 本地加密登录恢复、失败后停止自动尝试、手动登录与当前项目退出；远程平台操作复用单个 ToolHost 的内存会话。 |
+| `scripts/providers/api/progress.py` | 通过 stderr 将实际平台请求、应答和持久化阶段传至 Nexus 输出，不记录认证、请求或源码正文。 |
 | `scripts/providers/api/module_parameters.py` | 按显式子系统读取模块参数列表与详情，保留完整 JSON 快照及复合身份，独立同步仅清理该类型旧快照；复用 API 基线、索引和原文查看。 |
 | `scripts/providers/api/module_parameter_editor.py`、`module_parameter_upload.py` | data JSON 投影、保护字段校验、旧只读描述符升级与文档租约；上传预览绑定、普通签出所有者核验、保存后回读、持久待核对门闩及只读恢复，不自动签入。 |
 | `plugins/GuthonNexus/gushen-vscode-completion/src/api/module-parameter-editor.js` | 模块参数数据编辑、原生差异、本地保存与上传预览确认；共用源码虚拟文件系统的视图/模块参数投影。 |
@@ -61,7 +76,7 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `plugins/GuthonNexus/gushen-vscode-completion/src/api/platform-reference.js` | 按索引代次缓存的工作区 API 参考、补全/悬停与开发参考入口。 |
 | `scripts/providers/api/change_bundle.py` | 当前 API 工作区的本地变更包导出、预览和按计划摘要应用；旧侧材料生成属于待补齐迁移环节。 |
 | `scripts/providers/api/page.py`、`documents.py`、`editor_state.py` | PAGE 编辑、租约文档及编辑器状态协调。 |
-| `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`、`source-ui.js`、`project-card.js`、`project-actions.js` | 谷神项目卡片常用按钮与设置向导、原生项目菜单及命令面板操作列表、API 项目命令、按类型展示的源码树与 SCM；文件事件按登记范围处理，目录复用和重复索引短路；轻量卡片不等待全项目扫描。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`、`source-ui.js`、`project-card.js`、`project-actions.js` | 谷神项目卡片常用按钮与设置向导、原生项目菜单及命令面板操作列表、API 项目命令、按类型展示的源码树、过程函数树签名标签、顶层过程函数分类的树形/平铺布局与范围刷新、SCM；文件事件按登记范围处理，目录复用和重复索引短路；轻量卡片不等待全项目扫描。 |
 | `plugins/GuthonNexus/gushen-vscode-completion/src/official-update.js` | 官方语言资源检查、更新和回退。 |
 
 ## Python
@@ -111,9 +126,9 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 
 API：`scripts/providers/api/` 提供项目身份、下载、基线、同步、索引、PAGE 和 MCP；`scripts/common/database_exports/` 与 `scripts/common/source_diagnosis.py` 保留独立数据库导出与诊断。
 
-原生 PAGE XML 与 JSON 共用页面模型：`scripts/providers/api/native_page.py` 负责 XML 投影、原文保留与定向编辑，`scripts/providers/api/content.py` 负责保存和上传的对象身份及继承约束，`scripts/providers/api/page.py` 提供 Nexus 页面快照、字段集合 JSON、预览与受控保存；`scripts/providers/api/inheritance_edit.py` 负责项目脚本继承展开写回的父层核对与幂等记录。
+原生 PAGE XML 与 JSON 共用页面模型：`scripts/providers/api/native_page.py` 负责原生编辑模型的本地 XML 表示、投影、原文保留与定向编辑，`scripts/providers/api/content.py` 负责保存和上传的对象身份及继承约束，`scripts/providers/api/page.py` 提供 Nexus 页面快照、字段集合 JSON、预览与受控保存；`scripts/providers/api/inheritance_edit.py` 负责项目脚本继承展开写回的父层核对与幂等记录。
 
-`scripts/providers/api/xml_source.py` 提供 PAGE 与视图共用的 XML 字节位置解析、文本叶节点读取和原文保留；`scripts/providers/api/view_editor.py` 将当前视图的 `/viewSql` 映射为 SQL 虚拟文档，经租约、预览、幂等保存写回同一 checkout 文件。`scripts/providers/api/download.py` 共用解码下载与上传返回对象；`scripts/providers/api/sync.py` 核对上传应答的规范源码与独立回读结果，再以提交正文为祖先合并到当前文件。
+`scripts/providers/api/xml_source.py` 提供 PAGE 与视图共用的 XML 字节位置解析、文本叶节点读取和原文保留；`scripts/providers/api/view_editor.py` 将当前视图的 `/viewSql` 映射为 SQL 虚拟文档，经租约、预览、幂等保存写回同一 checkout 文件。`scripts/providers/api/download.py` 共用解码下载与上传返回对象，并提供 PAGE 站点文件名到本地身份目录的路径映射（原生 PAGE 元数据识别复用）；`scripts/providers/api/sync.py` 核对上传应答的规范源码与独立回读结果，再以提交正文为祖先合并到当前文件。
 
 ## Guthon Nexus
 

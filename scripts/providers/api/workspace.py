@@ -1,12 +1,9 @@
-"""Explicit project configuration, saved login and a single subsystem scope contract."""
+"""Explicit project configuration, in-memory login and a subsystem scope contract."""
 
 from __future__ import annotations
 from contextlib import contextmanager, nullcontext
-from concurrent.futures import Future, TimeoutError as FutureTimeout
-import hashlib
 import json
 from pathlib import Path
-import threading
 from common.persistence import atomic_text, file_lock
 from .client import ApiClient, ApiError, server_url
 
@@ -18,10 +15,6 @@ FIELDS = {
     "allSystems",
     "includeProjectFiles",
 }
-SERVICE = "GuthonCodeTool.api"
-_CREDENTIAL_READ_TIMEOUT = 5.0
-_CREDENTIAL_READS = {}
-_CREDENTIAL_READS_LOCK = threading.Lock()
 
 
 def api_paths(workspace):
@@ -188,82 +181,24 @@ def client_for(workspace, *, authenticated=False):
     if client is None or client.root_url != value["serverUrl"]:
         client = ApiClient(value["serverUrl"])
         _CLIENTS[key] = client
-    if authenticated and client.session is None:
-        saved = load_login(workspace)
-        if saved and client.session is None:
-            client.login(saved["userId"], saved["password"])
-            save_session(workspace, client.session)
+    if authenticated:
         client.ensure_login()
     return client
 
 
-def credential_ref(workspace):
+def logout(workspace):
     directory, _ = api_paths(workspace)
-    return hashlib.sha256(
-        (
-            str(directory.resolve())
-            + "|"
-            + workspace["workspaceKey"]
-            + "|"
-            + settings(workspace)["serverUrl"]
-        ).encode()
-    ).hexdigest()
-
-
-def remember_login(workspace, user_id, password, remember):
-    if type(remember) is not bool:
-        raise ApiError("API_INPUT_INVALID", "remember必须是布尔值")
+    key = (str(directory.resolve()), workspace["workspaceKey"])
+    client = _CLIENTS.pop(key, None)
+    if client is not None:
+        client.logout()
+    path = directory / "last-login.json"
     try:
-        import keyring
-
-        ref = credential_ref(workspace)
-        if remember:
-            keyring.set_password(
-                SERVICE, ref, json.dumps({"userId": user_id, "password": password})
-            )
-        else:
-            try:
-                keyring.delete_password(SERVICE, ref)
-            except keyring.errors.PasswordDeleteError as error:
-                cause = error.__cause__
-                if not (type(cause).__name__ == "NotFound" or str(error) == SERVICE
-                        or str(error).strip().lower() in {"password not found", "no password found"}):
-                    raise ApiError("API_CREDENTIAL_STORE_UNAVAILABLE", "无法删除系统凭据，请检查凭据库") from None
-    except ImportError as error:
-        if remember:
-            raise ApiError(
-                "API_CREDENTIAL_STORE_UNAVAILABLE", "记住登录需要系统安全凭据库"
-            ) from error
-
-
-def load_login(workspace):
-    try:
-        import keyring
-    except ImportError:
-        return None
-    ref = credential_ref(workspace)
-    with _CREDENTIAL_READS_LOCK:
-        future = _CREDENTIAL_READS.get(ref)
-        if future is None:
-            future = Future()
-            _CREDENTIAL_READS[ref] = future
-            def read_credential():
-                try:
-                    future.set_result(keyring.get_password(SERVICE, ref))
-                except Exception as error:
-                    future.set_exception(error)
-                finally:
-                    with _CREDENTIAL_READS_LOCK:
-                        if _CREDENTIAL_READS.get(ref) is future:
-                            del _CREDENTIAL_READS[ref]
-            threading.Thread(target=read_credential, daemon=True, name="api-credential-read").start()
-    try:
-        value = future.result(timeout=_CREDENTIAL_READ_TIMEOUT)
-    except FutureTimeout:
-        raise ApiError("API_CREDENTIAL_STORE_UNAVAILABLE", "系统凭据库读取超时，请手动登录") from None
-    except Exception:
-        raise ApiError("API_CREDENTIAL_STORE_UNAVAILABLE", "无法读取系统凭据库，请手动登录") from None
-    return json.loads(value) if value else None
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return
+    if value.get("workspaceKey") == workspace["workspaceKey"]:
+        path.unlink()
 
 
 def project_metadata(workspace, *, include_menu=False):

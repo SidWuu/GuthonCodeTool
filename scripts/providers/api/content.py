@@ -4,6 +4,20 @@ from common import page_editor
 from .client import ApiError
 
 
+def source_name(metadata):
+    """One display name for catalog, search and current-source review."""
+    fields = {"table": ("tableName",), "view": ("viewName",),
+              "system-script": ("useRemark",)}.get(metadata.get("sourceType"), ())
+    for key in (*fields, "pageName", "funName", "configName", "title", "funId",
+                "pageAliasId", "pageId", "tableId", "viewId", "scriptType", "configId", "procedureId"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if type(value) is int:
+            return str(value)
+    return ""
+
+
 def parent_layers(data, path=""):
     result = {}
     if isinstance(data, dict):

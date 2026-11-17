@@ -13,9 +13,10 @@ from .workspace import (
     client_for,
     save_project,
     project_metadata,
-    remember_login,
+    logout,
     save_session,
     last_login,
+    active_scope,
 )
 from .download import records
 from .store import ApiStore
@@ -23,6 +24,7 @@ from .store import ApiStore
 ACTIONS = (
     "configure",
     "login",
+    "logout",
     "session",
     "captcha",
     "systems",
@@ -106,6 +108,11 @@ def execute(workspace, action, payload):
                         + str(error),
                     ) from error
             return result
+    if action == "logout":
+        if payload:
+            raise ApiError("API_INPUT_INVALID", "退出登录输入含未知字段")
+        logout(workspace)
+        return {"authenticated": False, "session": None}
     store = ApiStore(workspace)
     if action == "status":
         from common.workspace_registry import workspace_index_state
@@ -149,7 +156,7 @@ def execute(workspace, action, payload):
             "summaryComplete": not summary_only,
             "statusKind": "metadata-only" if summary_only else "scanned",
             "index": index_state,
-            "sessionPersistence": "current-toolhost-or-system-keyring",
+            "sessionPersistence": "current-toolhost",
             "lastLogin": last_login(workspace),
         }
     if action == "module-parameter":
@@ -278,6 +285,13 @@ def execute(workspace, action, payload):
         if action == "catalog":
             result = index.catalog(workspace, limit, offset)
             project = project_metadata(workspace, include_menu=True) if offset == 0 else None
+            if project is not None:
+                scope = active_scope(workspace)
+                project = {**project,
+                           "systems": [row for row in project.get("systems", []) if row["systemId"] in scope["systemIds"]],
+                           "dataSources": [row for row in project.get("dataSources", []) if row["dataSourceId"] in scope["dataSourceIds"]]}
+                if "menuTree" in project:
+                    project["menuTree"] = [row for row in project["menuTree"] if row["systemId"] in scope["systemIds"]]
             return {**result, "objects": result.get("items", result.get("objects", [])),
                     **({"project": {k: project[k] for k in ("systems", "dataSources", "menuTree") if k in project}} if project is not None else {})}
         if action == "search":
@@ -286,7 +300,8 @@ def execute(workspace, action, payload):
             return index.context(workspace, payload.get("path"), limit, offset)
         if action == "callers":
             return index.callers(
-                workspace, payload.get("alias"), payload.get("funId", ""), limit, offset
+                workspace, payload.get("alias", ""), payload.get("funId", ""), limit, offset,
+                path=payload.get("path", ""),
             )
         if action == "facts":
             return index.facts(
@@ -309,10 +324,18 @@ def execute(workspace, action, payload):
             include_details=payload.get("includeDetails", False),
         )
     if action == "session":
+        local_only = payload.get("localOnly", False)
+        if type(local_only) is not bool:
+            raise ApiError("API_INPUT_INVALID", "localOnly 必须是布尔值")
         if not settings(workspace)["serverUrl"]:
             return {"authenticated": False, "session": None}
         try:
-            client = client_for(workspace, authenticated=True)
+            client = client_for(workspace, authenticated=not local_only)
+            if local_only:
+                if client.session is None:
+                    return {"authenticated": False, "session": None}
+            else:
+                client.validate_session()
         except ApiError as error:
             return {
                 "authenticated": False,
@@ -343,16 +366,12 @@ def execute(workspace, action, payload):
     if action == "captcha":
         return {"dataURL": client_for(workspace).captcha()["image"]}
     if action == "login":
-        if set(payload) - {"userId", "password", "randCode", "remember"}:
+        if set(payload) - {"userId", "password", "randCode"}:
             raise ApiError("API_INPUT_INVALID", "登录输入含未知字段")
         session = client_for(workspace).login(
             payload.get("userId"), payload.get("password"), payload.get("randCode", "")
         )
         save_session(workspace, session)
-        if "remember" in payload:
-            remember_login(
-                workspace, payload["userId"], payload["password"], payload["remember"]
-            )
         return {"session": session}
     if action == "scope-apply":
         from . import sync
@@ -414,6 +433,17 @@ def execute(workspace, action, payload):
     from . import sync
 
     if action == "pull":
+        check_only = payload.get("checkOnly", False)
+        if type(check_only) is not bool:
+            raise ApiError("API_INPUT_INVALID", "checkOnly 必须为布尔值")
+        if check_only:
+            from .download import download
+            files, scope = download(client, settings(workspace))
+            return {
+                "workspaceKey": workspace["workspaceKey"], "checkedFiles": len(files),
+                "scope": scope, "sourcePublished": False, "checkOnly": True,
+            }
+
         return sync.pull(workspace, client)
     if action == "refresh":
         return sync.refresh(workspace, client, payload)
@@ -433,10 +463,18 @@ def execute(workspace, action, payload):
 def run(workspace, args):
     parsed = parser().parse_args(args)
     payload = json.load(sys.stdin) if parsed.stdin else {}
+    publishes_source = parsed.action in {"pull", "scope-apply", "refresh", "upload"} and not (
+        parsed.action == "pull" and isinstance(payload, dict) and payload.get("checkOnly") is True
+    )
     try:
-        result = execute(workspace, parsed.action, payload)
+        from .progress import operation, emit
+
+        with operation(workspace["workspaceKey"], parsed.action):
+            result = execute(workspace, parsed.action, payload)
+            state = "部分完成，请核对结果" if result.get("complete") is False else "已返回处理结果"
+            emit(state)
     except Exception as error:
-        if parsed.action in {"pull", "scope-apply", "refresh", "upload"}:
+        if publishes_source:
             from common import gusen_hub
             from common.command_errors import error_code
 
@@ -454,7 +492,7 @@ def run(workspace, args):
                 gusen_hub.load_config(), workspace, "source", "FAILED", error
             )
         raise
-    if parsed.action in {"pull", "scope-apply", "refresh", "upload"}:
+    if publishes_source:
         from common import gusen_hub
 
         gusen_hub.append_pull_log(

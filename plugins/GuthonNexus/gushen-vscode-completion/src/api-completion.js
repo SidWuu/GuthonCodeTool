@@ -29,4 +29,43 @@ function enrichCompletionData(data, catalog) {
   return {...data, java:[...retained,...official]};
 }
 
-module.exports = {enrichCompletionData};
+// Keep syntax snippets intact. API identity includes the full owner and overload,
+// independently of whether a catalog displays a short or qualified method name.
+function mergeApiCompletionItems(...sources) {
+  const normalize = value => value.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\s+/g,
+    token => /^\s/.test(token) ? '' : token);
+  const entries = sources.flat().map(item => {
+    if (Array.isArray(item.body) || item.group === 'syntax') return {item};
+    const call = /^([\w$.]+)(\([\s\S]*\))$/.exec(String(item.body || ''));
+    if (!call) return {item};
+    const apiPath = item.apiPath || call[1];
+    const bodyKey = apiPath + normalize(call[2]);
+    const signature = item.signature?.match(/^[\w$.]+(\([\s\S]*)$/)?.[1];
+    return {item, bodyKey, signatureKey: signature ? apiPath + normalize(signature) : undefined};
+  });
+  const signatures = new Map();
+  for (const {bodyKey, signatureKey} of entries) {
+    if (!signatureKey) continue;
+    if (!signatures.has(bodyKey)) signatures.set(bodyKey, new Set());
+    signatures.get(bodyKey).add(signatureKey);
+  }
+  const merged = [], positions = new Map();
+  for (const {item, bodyKey, signatureKey} of entries) {
+    const known = signatures.get(bodyKey);
+    // An untyped legacy template can match a single known overload. If several
+    // typed overloads share its template, keep it rather than guessing a type.
+    const key = signatureKey || (known?.size === 1 ? [...known][0] : bodyKey);
+    if (!key || !positions.has(key)) {
+      if (key) positions.set(key, merged.length);
+      merged.push(item);
+      continue;
+    }
+    const index = positions.get(key), first = merged[index];
+    merged[index] = {...first, aliases: [...new Set([
+      first.prefix, ...(first.aliases || []), item.prefix, ...(item.aliases || []),
+    ].filter(Boolean))]};
+  }
+  return merged;
+}
+
+module.exports = {enrichCompletionData, mergeApiCompletionItems};

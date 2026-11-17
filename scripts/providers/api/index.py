@@ -5,6 +5,7 @@ Indexed data is a snapshot; use read_source for current bytes and hashes.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from contextlib import closing
 import hashlib
 import json
@@ -13,6 +14,7 @@ from pathlib import Path
 import re
 import sqlite3
 import tempfile
+from threading import Lock
 import uuid
 from urllib.parse import unquote
 
@@ -25,6 +27,7 @@ from common import (
 from common.persistence import file_lock
 from common.operation_control import checkpoint, publication_barrier
 from .client import ApiError
+from .content import source_name
 from .store import ApiStore
 from .reference_assets import CONFIGS, config_objects, page_references
 from .workspace import active_scope, settings
@@ -190,72 +193,53 @@ def _setup(conn):
 
 
 _CALLS = [
-    (
-        "proc_invoke",
-        re.compile(
-            r"""\$vs\.proc\.invoke\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]"""
-        ),
-    ),
     ("vm_open", re.compile(r"""\$vm\.open\(\s*['"]([^'"]+)['"]""")),
     ("vm_open_dialog", re.compile(r"""\$vm\.openDialog\(\s*['"]([^'"]+)['"]""")),
     ("gutil_request", re.compile(r"""gUtil\.request\(\s*['"]([^'"]+)['"]""")),
 ]
+_PROCEDURE_START = re.compile(
+    r"\$vs\.(proc\.(?:invoke|invokeWithGlobalTrans)|thread\.(?:run|runFutureTask|runFutureTaskWithGlobalTrans))\s*\("
+)
+_PROCEDURE_CALL = re.compile(
+    _PROCEDURE_START.pattern + r"""\s*(['"])([A-Za-z_][\w.]*)\2\s*,\s*(['"])([A-Za-z_]\w*)\4(?=\s*[,\)])"""
+)
 _FIND = re.compile(
     r"""#set\s*\(\s*\$(\w+)\s*=\s*\$vs\.proc\.find\(\s*['"]([^'"]+)['"]\s*\)"""
 )
 
 
 def _index_calls(conn, record_id, script, fragment):
+    text = script["content"]
+    static = {}
+    for match in _PROCEDURE_CALL.finditer(text):
+        kind = "proc_invoke" if match[1] == "proc.invoke" else match[1].replace(".", "_")
+        static[match.start()] = (text.count("\n", 0, match.start()) + 1, kind, match[3], match[5])
+    matches = list(static.values())
     bindings = {}
-    for line_no, line in enumerate(script["content"].splitlines(), 1):
+    for line_no, line in enumerate(text.splitlines(), 1):
         for assignment in re.finditer(r"#set\s*\(\s*\$(\w+)\s*=", line):
             bindings.pop(assignment.group(1), None)
         for found in _FIND.finditer(line):
             bindings[found.group(1)] = found.group(2)
-        matches = []
         for var, alias in bindings.items():
-            match = re.search(rf"\${re.escape(var)}\.([A-Za-z_][A-Za-z0-9_]*)\(", line)
-            if match:
-                matches.append(("proc_find_call", alias, match.group(1)))
+            for match in re.finditer(rf"\${re.escape(var)}\.([A-Za-z_][A-Za-z0-9_]*)\(", line):
+                matches.append((line_no, "proc_find_call", alias, match[1]))
         for kind, pattern in _CALLS:
-            match = pattern.search(line)
-            if match:
-                matches.append(
-                    (
-                        kind,
-                        match.group(1),
-                        match.group(2) if kind == "proc_invoke" else "",
-                    )
-                )
-        for kind, alias, fun in matches:
-            conn.execute(
-                "INSERT INTO gusen_invoke_call(source_record_id,source_fragment_id,script_type,json_path,line_no,target_alias_id,target_fun_id,invoke_type) VALUES(?,?,?,?,?,?,?,?)",
-                (
-                    record_id,
-                    fragment,
-                    script["script_type"],
-                    script["json_path"],
-                    line_no,
-                    alias,
-                    fun,
-                    kind,
-                ),
-            )
-        if "$vs.proc.invoke(" in line and not re.search(
-            r"""\$vs\.proc\.invoke\(\s*['"]""", line
-        ):
-            conn.execute(
-                "INSERT INTO gusen_dynamic_call(source_record_id,source_fragment_id,script_type,json_path,line_no,invoke_expr,reason) VALUES(?,?,?,?,?,?,?)",
-                (
-                    record_id,
-                    fragment,
-                    script["script_type"],
-                    script["json_path"],
-                    line_no,
-                    line.strip()[:2048],
-                    "目标过程别名或函数名来自变量",
-                ),
-            )
+            matches.extend((line_no, kind, match[1], "") for match in pattern.finditer(line))
+    for line_no, kind, alias, fun in matches:
+        conn.execute(
+            "INSERT INTO gusen_invoke_call(source_record_id,source_fragment_id,script_type,json_path,line_no,target_alias_id,target_fun_id,invoke_type) VALUES(?,?,?,?,?,?,?,?)",
+            (record_id, fragment, script["script_type"], script["json_path"], line_no, alias, fun, kind),
+        )
+    for match in _PROCEDURE_START.finditer(text):
+        if match.start() in static:
+            continue
+        end = text.find("\n", match.start())
+        conn.execute(
+            "INSERT INTO gusen_dynamic_call(source_record_id,source_fragment_id,script_type,json_path,line_no,invoke_expr,reason) VALUES(?,?,?,?,?,?,?)",
+            (record_id, fragment, script["script_type"], script["json_path"], text.count("\n", 0, match.start()) + 1,
+             text[match.start():end if end >= 0 else len(text)][:2048], "目标过程别名或函数名来自变量"),
+        )
 
 
 class PageIdentityMismatch(ValueError):
@@ -334,9 +318,7 @@ def _index_item(conn, workspace, item):
         else ""
     )
     alias = str(meta.get("pageAliasId") or procedure_alias or source_id)
-    name = str(
-        meta.get("pageName") or meta.get("funName") or meta.get("configName") or meta.get("title") or source_id
-    )
+    name = source_name(meta) or source_id
     metadata_only = False
     try:
         fmt = page_format(item)
@@ -470,7 +452,7 @@ def _diagnostics(conn):
             "message": {
                 "API_PAGE_XML_UNSUPPORTED": "未知 PAGE XML 格式仅可读取原文，未生成结构或源码事实",
                 "API_PAGE_FORMAT_INVALID": "PAGE 格式或编码与元数据不符，仅保留原文，未生成结构或源码事实",
-                "API_PAGE_IDENTITY_MISMATCH": "PAGE 原文编码与官方元数据不一致，仅保留只读原文",
+                "API_PAGE_IDENTITY_MISMATCH": "PAGE 表示编码与对象身份不一致；需核对原生编辑源码，不可修改平台编码来消除诊断",
                 "API_VIEW_FORMAT_UNSUPPORTED": "视图缺少可核验身份或 SQL，未生成源码事实",
                 "API_VIEW_IDENTITY_MISSING": "视图元数据缺少平台编码，未生成源码事实",
                 "API_IDENTITY_MISMATCH": "视图源码编码与平台对象不一致，未生成源码事实",
@@ -819,13 +801,291 @@ def update(workspace, paths):
     }
 
 
+def procedure_signature(text, metadata, *, truncated=False):
+    """Derive only explicit declarations and leading documentation from an index header."""
+    name = r"\$?[A-Za-z_][A-Za-z0-9_]*"
+    result = {"parameters": None, "hasReturn": None,
+              "parameterSource": "unknown", "returnSource": "unknown"}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    header = re.match(r"\ufeff?\s*/\*\*(.*?)\*/", text, re.S)
+    lines = [re.sub(r"^\s*\* ?", "", line).strip()
+             for line in header.group(1).splitlines()] if header else []
+    config = None
+    config_tags = [i for i, line in enumerate(lines) if re.match(r"^@config(?:\s|$)", line)]
+    config_invalid = len(config_tags) > 1
+    if len(config_tags) == 1:
+        i = config_tags[0]
+        inline = re.sub(r"^@config\b", "", lines[i], count=1).strip()
+        config_text = (inline + "\n" if inline.startswith("{") else "") + "\n".join(lines[i + 1:])
+        def unique_pairs(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("duplicate configuration key")
+                value[key] = item
+            return value
+        try:
+            config, _ = json.JSONDecoder(object_pairs_hook=unique_pairs).raw_decode(config_text.lstrip())
+            if not isinstance(config, dict):
+                config_invalid = True
+        except (ValueError, RecursionError):
+            config_invalid = True
+    if config_invalid:
+        config = None
+
+    declarations = []
+    # The usual generated header is followed immediately by its one declaration.
+    # Avoid masking the body in that case; any other marker requires the full scan.
+    start = header.end() if header else (1 if text.startswith("\ufeff") else 0)
+    leading = re.compile(r"\s*@DECLARE_PROCEDURE\s+(" + name + r")\s*\(([^()]*)\)(?=[ \t]*(?:\r?\n|$|\{))").match(text, start)
+    if leading and text.count("@DECLARE_PROCEDURE") == 1 and leading.group(1) == metadata.get("funId"):
+        raw = leading.group(2)
+        parts = [part.strip() for part in raw.split(",")] if raw.strip() else []
+        if all(re.fullmatch(name, part) for part in parts) and len(parts) == len(set(parts)):
+            declarations.append(parts)
+    if not declarations:
+        # Markers and arguments must be actual top-level code, never comments or literals.
+        masked = inheritance_algorithms.mask_noncode(text)
+        if masked.startswith("\ufeff"):
+            masked = " " + masked[1:]
+        depth = 0
+        position = 0
+        marker = re.compile(r"^[ \t]*@DECLARE_PROCEDURE\s+(" + name + r")\b", re.M)
+        for match in marker.finditer(masked):
+            for char in masked[position:match.start()]:
+                if char == "{":
+                    depth += 1
+                elif char == "}":
+                    depth = max(0, depth - 1)
+            position = match.start()
+            if depth == 0 and isinstance(metadata.get("funId"), str) and match.group(1) == metadata["funId"]:
+                tail = re.match(r"\s*\(([^()]*)\)(?=[ \t]*(?:\r?\n|$|\{))", masked[match.end():], re.S)
+                if tail:
+                    raw = text[match.end() + tail.start(1):match.end() + tail.end(1)]
+                    parts = [part.strip() for part in raw.split(",")] if raw.strip() else []
+                    declarations.append(parts if all(re.fullmatch(name, part) for part in parts)
+                                        and len(parts) == len(set(parts)) else None)
+                else:
+                    declarations.append(None)
+    if len(declarations) == 1 and declarations[0] is not None:
+        result.update(parameters=declarations[0], parameterSource="declaration")
+    elif not declarations and (header or not truncated) and not config_invalid:
+        if config is not None and "params" in config:
+            params = config["params"]
+            if (isinstance(params, list)
+                    and all(isinstance(item, dict) and isinstance(item.get("id"), str)
+                            and re.fullmatch(name, item["id"]) for item in params)):
+                names = [item["id"] for item in params]
+                if len(names) == len(set(names)):
+                    result.update(parameters=names, parameterSource="config")
+        else:
+            documented = []
+            documented_empty = False
+            in_params = False
+            awaiting_name = False
+            invalid = False
+            for line in lines:
+                tag = re.match(r"^@param(?:\s+(.*))?$", line)
+                if tag:
+                    in_params = True
+                    rest = (tag.group(1) or "").strip()
+                    awaiting_name = not rest
+                    if rest == "无":
+                        documented_empty = True
+                    elif rest:
+                        item = re.match(r"^(?:\{[^{}]+\}\s+)?(" + name + r")(?:\s|$|:|：)", rest)
+                        if item:
+                            documented.append(item.group(1))
+                        else:
+                            invalid = True
+                elif line.startswith("@"):
+                    in_params = False
+                    awaiting_name = False
+                elif in_params and line.startswith("-"):
+                    item = re.match(r"^-\s*(" + name + r")\s*[:：]", line)
+                    if item:
+                        documented.append(item.group(1))
+                        awaiting_name = False
+                    else:
+                        invalid = True
+                elif in_params and awaiting_name and line:
+                    if line == "无":
+                        documented_empty = True
+                        awaiting_name = False
+                    else:
+                        item = re.match(r"^(?:\{[^{}]+\}\s+(" + name + r")|(\$[A-Za-z_][A-Za-z0-9_]*))(?:\s|$|:|：)", line)
+                        if item:
+                            documented.append(item.group(1) or item.group(2))
+                            awaiting_name = False
+            if documented_empty and not documented and not invalid:
+                result.update(parameters=[], parameterSource="documentation")
+            elif documented and not documented_empty and not invalid and len(documented) == len(set(documented)):
+                result.update(parameters=documented, parameterSource="documentation")
+
+    def flag(value):
+        if type(value) is bool:
+            return value
+        if type(value) is int and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str) and value.lower() in ("0", "1", "false", "true"):
+            return value.lower() in ("1", "true")
+        return None
+
+    if not config_invalid and config is not None and "isReturn" in config:
+        value = flag(config["isReturn"])
+        if value is not None:
+            result.update(hasReturn=value, returnSource="config")
+    elif not config_invalid and (header or not truncated):
+        if "isReturn" in metadata:
+            value = flag(metadata["isReturn"])
+            if value is not None:
+                result.update(hasReturn=value, returnSource="metadata")
+        else:
+            documented_returns = set()
+            for line in lines:
+                tag = re.match(r"^@returns?(?:\s+(.*))?$", line)
+                if not tag or not (description := (tag.group(1) or "").strip()):
+                    continue
+                if re.match(r"^(?:\{void\}|void|无返回值)(?=$|[\s:：,，。;；])", description, re.I):
+                    documented_returns.add(False)
+                elif description.lower() not in {"无", "none", "null"} and re.search(r"\w", description):
+                    documented_returns.add(True)
+            if len(documented_returns) == 1:
+                result.update(hasReturn=documented_returns.pop(), returnSource="documentation")
+    return result
+
+
+_RETURN_TOKENS = re.compile(r"(?<![\w$])#([A-Za-z_][A-Za-z0-9_]*)\b|(?<![\w$.#])return\b")
+_RETURN_STRING = re.compile(r"'(?:\\[\s\S]|[^'\\])*'|\"(?:\\[\s\S]|[^\"\\])*\"|`(?:\\[\s\S]|[^`\\])*`")
+_RETURN_CACHE = OrderedDict()
+_RETURN_CACHE_LOCK = Lock()
+_RETURN_CACHE_MISS = object()
+
+
+def procedure_return_expressions(text):
+    """Find explicit procedure-level returns, excluding local GSS functions."""
+    masked = inheritance_algorithms.mask_noncode(text)
+    blocks = []
+    expressions = []
+    expression_end = 0
+    for token in _RETURN_TOKENS.finditer(masked):
+        if token.start() < expression_end:
+            continue
+        directive = token.group(1)
+        if directive in ("function", "if", "foreach"):
+            blocks.append(directive)
+            continue
+        if directive == "end":
+            if not blocks:
+                return None
+            blocks.pop()
+            continue
+        if directive:
+            if directive not in ("set", "else", "elseif", "break"):
+                return None
+            continue
+        if "function" in blocks:
+            continue
+
+        start = token.end()
+        while start < len(text) and text[start] in " \t":
+            start += 1
+        if start == len(text) or text[start] in "\r\n;":
+            return None
+        stack = []
+        last = start
+        pos = start
+        while pos < len(text):
+            char = text[pos]
+            code = masked[pos]
+            if char in "'\"`" and code == " ":
+                literal = _RETURN_STRING.match(text, pos)
+                if not literal:
+                    return None
+                pos = literal.end()
+                last = pos
+                continue
+            if code == " " and text[pos:pos + 2] in ("//", "##", "/*"):
+                if stack or text[pos:pos + 2] == "/*":
+                    return None
+                break
+            if not stack and code == "#" and _RETURN_TOKENS.match(masked, pos):
+                break
+            if code in "([{":
+                stack.append(code)
+            elif code in ")]}" and code != " ":
+                if not stack:
+                    break
+                if stack.pop() != {')': '(', ']': '[', '}': '{'}[code]:
+                    return None
+            elif not stack and (code == ";" or char in "\r\n"):
+                break
+            if not char.isspace():
+                last = pos + 1
+            pos += 1
+        if stack:
+            return None
+        expression = text[start:last].strip()
+        if not expression:
+            return None
+        if expression not in expressions:
+            expressions.append(expression)
+        expression_end = pos
+    return expressions if expressions and not blocks else None
+
+
 def _result(workspace, conn, rows, limit, offset, key="items"):
     generation = conn.execute(
         "SELECT state_value FROM gusen_sync_state WHERE state_key='generation'"
     ).fetchone()[0]
     more = len(rows) > limit
     values = [dict(x) for x in rows[:limit]]
+    procedure_paths = list({item["path"] for item in values if item.get("sourceType") == "procedure"})
+    signatures = {}
+    if procedure_paths:
+        placeholders = ",".join("?" for _ in procedure_paths)
+        for row in conn.execute(
+            "SELECT s.source_path,s.metadata_json,substr(coalesce(b.content,''),1,16384) AS header, "
+            "(coalesce(b.total_chars,0)>16384 OR coalesce(b.indexed_chars,0)<coalesce(b.total_chars,0)) AS header_truncated "
+            "FROM gusen_source_record s LEFT JOIN source_body_content b "
+            "ON b.source_record_id=s.record_id AND b.json_pointer='' "
+            f"WHERE s.source_path IN ({placeholders})", procedure_paths
+        ):
+            signatures[row["source_path"]] = procedure_signature(
+                row["header"], json.loads(row["metadata_json"]), truncated=bool(row["header_truncated"])
+            )
+        for signature in signatures.values():
+            signature["returnExpressions"] = [] if signature["hasReturn"] is False else None
+        return_paths = [path for path, signature in signatures.items() if signature["hasReturn"] is True]
+        if return_paths:
+            placeholders = ",".join("?" for _ in return_paths)
+            for row in conn.execute(
+                "SELECT s.source_path,b.content,b.source_hash,b.indexed_chars,b.total_chars "
+                "FROM gusen_source_record s JOIN source_body_content b "
+                "ON b.source_record_id=s.record_id AND b.json_pointer='' "
+                f"WHERE s.source_path IN ({placeholders})", return_paths
+            ):
+                if row["indexed_chars"] == row["total_chars"]:
+                    cache_key = (row["source_hash"], row["indexed_chars"], row["total_chars"])
+                    with _RETURN_CACHE_LOCK:
+                        expressions = _RETURN_CACHE.get(cache_key, _RETURN_CACHE_MISS) if cache_key[0] else _RETURN_CACHE_MISS
+                        if expressions is not _RETURN_CACHE_MISS:
+                            _RETURN_CACHE.move_to_end(cache_key)
+                    if expressions is _RETURN_CACHE_MISS:
+                        parsed = procedure_return_expressions(row["content"])
+                        expressions = tuple(parsed) if parsed is not None else None
+                        if cache_key[0] and (expressions is None or sum(map(len, expressions)) <= 8192):
+                            with _RETURN_CACHE_LOCK:
+                                _RETURN_CACHE[cache_key] = expressions
+                                _RETURN_CACHE.move_to_end(cache_key)
+                                if len(_RETURN_CACHE) > 4096:
+                                    _RETURN_CACHE.popitem(last=False)
+                    signatures[row["source_path"]]["returnExpressions"] = list(expressions) if expressions is not None else None
     for item in values:
+        if item.get("path") in signatures:
+            item["procedureSignature"] = signatures[item["path"]]
         if item.get("referenceFields"):
             item["referenceFields"] = json.loads(item["referenceFields"])
         if "sourceId" in item and "path" in item:
@@ -861,7 +1121,7 @@ def catalog(workspace, limit=100, offset=0):
     _bound(limit, offset)
     with closing(_connection(workspace)) as conn:
         rows = conn.execute(
-            "SELECT * FROM api_source_catalog ORDER BY path,dataSourceId,sourceId,lineNumber LIMIT ? OFFSET ?",
+            "SELECT c.*,json_extract(s.metadata_json,'$.pageSource') AS pageSource,json_extract(s.metadata_json,'$.nativeState') AS nativeState FROM api_source_catalog c LEFT JOIN gusen_source_record s ON s.source_path=c.path ORDER BY c.path,c.dataSourceId,c.sourceId,c.lineNumber LIMIT ? OFFSET ?",
             (limit + 1, offset),
         ).fetchall()
         return _result(workspace, conn, rows, limit, offset, "objects")
@@ -1067,15 +1327,27 @@ def context(workspace, path, limit=20, offset=0):
         return result
 
 
-def callers(workspace, alias, fun_id="", limit=100, offset=0):
+def callers(workspace, alias="", fun_id="", limit=100, offset=0, *, path=""):
     _bound(limit, offset)
-    alias = _query(alias)
+    alias = _query(alias, empty=bool(path))
     fun_id = _query(fun_id, empty=True)
     with closing(_connection(workspace)) as conn:
+        condition = "c.target_alias_id=? AND (?='' OR c.target_fun_id=?)"
+        parameters = (alias, fun_id, fun_id)
+        if path:
+            source = _record(conn, path)
+            if source["source_table"] == "page":
+                condition = "c.target_alias_id IN (?,?) AND c.invoke_type IN ('vm_open','vm_open_dialog','gutil_request')"
+                parameters = (source["source_alias_id"], source["source_id"])
+            elif source["source_table"] == "procedure":
+                condition = "c.target_alias_id=? AND c.target_fun_id=? AND c.invoke_type IN ('proc_invoke','proc_find_call')"
+                parameters = (source["source_alias_id"], source["fun_id"])
+            else:
+                raise ApiError("API_INPUT_INVALID", "使用位置查询仅支持页面和过程函数")
         rows = conn.execute(
             """SELECT s.source_path AS path,s.source_table AS sourceType,s.source_id AS sourceId,s.source_alias_id AS alias,s.fun_id AS funId,s.source_name AS name,s.system_id AS systemId,s.data_source_id AS dataSourceId,s.source_hash AS sourceHash,c.json_path AS jsonPointer,c.line_no AS line,c.target_alias_id AS targetAlias,c.target_fun_id AS targetFunId,c.invoke_type AS type
-          FROM gusen_invoke_call c JOIN gusen_source_record s ON s.record_id=c.source_record_id WHERE c.target_alias_id=? AND (?='' OR c.target_fun_id=?) ORDER BY s.source_path,c.json_path,c.line_no LIMIT ? OFFSET ?""",
-            (alias, fun_id, fun_id, limit + 1, offset),
+          FROM gusen_invoke_call c JOIN gusen_source_record s ON s.record_id=c.source_record_id WHERE """ + condition + " ORDER BY s.source_path,c.json_path,c.line_no,c.id LIMIT ? OFFSET ?",
+            (*parameters, limit + 1, offset),
         ).fetchall()
         return _result(workspace, conn, rows, limit, offset, "callers")
 

@@ -294,6 +294,10 @@
       "kind": "write",
       "timeoutMs": 120000
     },
+    "logout": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
     "session": {
       "kind": "write",
       "timeoutMs": 120000

@@ -12,6 +12,7 @@ import stat
 import uuid
 from common.persistence import atomic_bytes, atomic_text, file_lock
 from .client import ApiError
+from .content import source_name
 from .workspace import in_scope, settings, active_scope
 from .editor_state import assert_writable
 
@@ -250,6 +251,7 @@ class ApiStore:
         return {
             "path": path,
             "sourcePath": path,
+            "name": source_name(item["metadata"]),
             "content": content,
             "sourceHash": hashlib.sha256(raw).hexdigest(),
             "metadata": item["metadata"],
@@ -451,6 +453,10 @@ class ApiStore:
             json.dumps(record, ensure_ascii=False, indent=2) + "\n",
         )
 
+        from .progress import receipt
+
+        receipt(record)
+
     def write(self, path, content, expected_hash, *, editor_token=None):
         if not isinstance(content, str) or len(content.encode()) > 8 * 1024 * 1024:
             raise ApiError("API_INPUT_INVALID", "源码内容无效或超出编辑预算")
@@ -563,7 +569,7 @@ class ApiStore:
                             "API_SOURCE_OUT_OF_SCOPE", "远程响应含超出当前范围的对象"
                         )
                     row = conn.execute(
-                        "SELECT content,metadata FROM source WHERE path=?", (item.path,)
+                        "SELECT content,metadata,readonly FROM source WHERE path=?", (item.path,)
                     ).fetchone()
                     local = (
                         target.read_bytes().decode("utf-8")
@@ -668,6 +674,9 @@ class ApiStore:
                             target.chmod(0o400)
                         updated.append(item.path)
                     else:
+                        if row is not None and bool(row[2]) != item.readonly:
+                            mode = stat.S_IMODE(target.stat().st_mode)
+                            target.chmod(0o400 if item.readonly else mode | stat.S_IWUSR)
                         preserved.append(item.path)
                     conflict_path = self._conflict_path(item.path)
                     if conflict_path.is_file():

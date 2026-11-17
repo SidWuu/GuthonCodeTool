@@ -1,4 +1,4 @@
-/* Editing inspector only. Rendering belongs exclusively to the original designer. */
+/* Local PAGE fields, code and draft editor. */
 (() => {
   const api = acquireVsCodeApi(), $ = id => document.getElementById(id);
   let state, selection, selectedRow, selectedCode, compareMode = '', awaiting = false, query = '', revealOnUpdate = false;
@@ -13,9 +13,10 @@
     return item;
   };
   function send(type, data = {}) {
-    if (['native','manageResources'].includes(type)) {
-      if ($('native').disabled || $('manageResources').disabled) return;
-      $('native').disabled = $('manageResources').disabled = true;
+    if (type === 'online') {
+      if ($('online').disabled) return;
+      document.activeElement?.blur();
+      $('online').disabled = true;
     }
     queue.push({type, ...data}); flush();
   }
@@ -383,16 +384,12 @@
       || (state.operations.length ? `${state.operations.length} 项未保存修改` : '已保存到本地');
     $('baseline').textContent = `API 基线 ${state.apiVersion || '未知'} · ${state.sourceHash.slice(0, 12)} · ${model.remoteStatus} · ${compareMode ? '只读比较' : '当前草稿'}`;
     for (const id of ['save', 'undo', 'redo']) $(id).disabled = !state.editable || !!compareMode;
-    for (const id of ['native','manageResources']) $(id).disabled=!!state.resourceBusy;
-    $('native').disabled ||= !!state.comparison?.sourceStale;
+    $('online').disabled = !!(state.onlineOpening || state.busy || state.pending || state.comparison?.sourceStale);
     $('resume').hidden = !state.pending;
     $('source-merge').hidden = !state.sourceMerge;
     $('exit-compare').hidden = !compareMode;
     $('comparison-status').textContent = state.sourceMerge ? state.sourceMerge.blockedReason || '存在外部修改冲突，请逐项核对'
       : state.comparison?.sourceStale ? '本地文件已外部更新，请保留输入并重新核对' : state.comparison?.baseline?.available ? '' : state.comparison?.baseline?.message || '';
-    $('resources').textContent = state.designer
-      ? `${state.designer.platformUrl} · ${state.designer.message || '使用已校验缓存'} · 页面效果待验收`
-      : '原版设计器按需打开；点击“原版设计视图”使用已绑定资源，或通过“平台资源”连接与管理。';
     const structural = !update || update.full || update.changes.some(operation => operation.kind !== 'property') || !!query || !!compareMode;
     if (structural) renderTree(model);
     if (compareMode === 'external') {
@@ -448,7 +445,7 @@
       || previousState?.editable !== state.editable || previousState?.pageName !== state.pageName;
     render(changedView ? null : received); flush();
   });
-  for (const type of ['save', 'undo', 'redo', 'export', 'resume', 'native', 'reload', 'manageResources', 'platformReference']) $(type)?.addEventListener('click', () => send(type));
+  for (const type of ['save', 'undo', 'redo', 'export', 'resume', 'online', 'reload', 'platformReference']) $(type)?.addEventListener('click', () => send(type));
   $('search').addEventListener('input', event => {
     query = event.target.value.trim().toLowerCase();
     if (compareMode === 'external') renderSourceMerge(); else if (compareMode) renderComparison(); else renderFields(state.model);

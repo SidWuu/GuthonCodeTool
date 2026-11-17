@@ -115,7 +115,7 @@ test('project metadata and settings render before slow saved-session restoration
   Object.defineProperty(webview,'html',{get:()=>html,set:value=>{html=value;}});
   provider.resolveWebviewView({webview});
   await new Promise(resolve=>setImmediate(resolve));
-  assert(html.includes('16000 源码'));assert(html.includes('正在恢复登录'));
+  assert(html.includes('16000 源码'));assert(html.includes('正在核验登录状态'));
   assert(html.includes('data-action="settings"'));assert(html.includes('data-action="search"'));
   assert.match(html,/<button data-action="pull" disabled/);
   finish({authenticated:false});await new Promise(resolve=>setImmediate(resolve));
@@ -135,7 +135,7 @@ test('session transport failure retains an actionable project login card',async(
 });
 
 test('a restored session clears earlier credential errors and login form data',async()=>{
-  let authentication={authenticated:false,error:{message:'系统凭据库读取超时，请手动登录'}};
+  let authentication={authenticated:false,error:{message:'本地自动登录未完成，请手动登录'}};
   const provider=new ProjectCardProvider({context:{extensionPath:require('node:path').resolve(__dirname,'..')},vscode:{commands:{}},
     getWorkspaces:async()=>[{workspaceKey:'projects.a',name:'A'}],api:{
       readProjectSummary:async()=>({settings:{serverUrl:'https://project.invalid',systemIds:['S'],allSystems:false},files:[]}),
@@ -143,10 +143,22 @@ test('a restored session clears earlier credential errors and login form data',a
     }});
   const webview={onDidReceiveMessage:()=>({dispose(){}})};
   provider.resolveWebviewView({webview});await provider.refresh();
-  assert(webview.html.includes('系统凭据库读取超时'));
+  assert(webview.html.includes('本地自动登录未完成'));
   provider.form.userId='earlier-account';provider.form.captcha='earlier-captcha';
   authentication={authenticated:true,session:{userName:'Test',mainVersion:'3.0.0',dateVersion:'202611120000'}};
   await provider.refresh();
-  assert(webview.html.includes('更新源码'));assert(!webview.html.includes('系统凭据库读取超时'));
+  assert(webview.html.includes('更新源码'));assert(!webview.html.includes('本地自动登录未完成'));
   assert(!webview.html.includes('earlier-account'));assert.deepEqual(provider.form,{});provider.dispose();
+});
+
+test('transport uncertainty preserves the proven user card while disabling actions',async()=>{
+  let uncertain=false;const workspace={workspaceKey:'projects.A',name:'A'},state={settings:{serverUrl:'https://project.invalid',systemIds:['A'],allSystems:false},summary:{sourceCount:1,changedCount:0,uploadableCount:0}};
+  const provider=new ProjectCardProvider({context:{extensionPath:require('node:path').resolve(__dirname,'..')},vscode:{},getWorkspaces:async()=>[workspace],api:{readProjectSummary:async()=>state,run:async()=>uncertain?{authenticated:false,error:{code:'API_CONNECTION_FAILED',message:'network uncertain'}}:{authenticated:true,session:{userName:'proven'}}}});
+  provider.view={webview:{html:''}};await provider.refresh();assert(provider.view.webview.html.includes('proven'));
+  uncertain=true;await provider.refresh();assert(provider.view.webview.html.includes('proven'));assert(provider.view.webview.html.includes('network uncertain'));assert(!provider.view.webview.html.includes('id="login-form"'));assert.match(provider.view.webview.html,/data-action="pull" disabled/);
+});
+test('an explicit expired session removes the authenticated card instead of trusting lastLogin',async()=>{
+  let expired=false;const state={settings:{serverUrl:'https://project.invalid',systemIds:['A'],allSystems:false},lastLogin:{userName:'old'}};
+  const provider=new ProjectCardProvider({context:{extensionPath:require('node:path').resolve(__dirname,'..')},vscode:{},getWorkspaces:async()=>[{workspaceKey:'projects.A',name:'A'}],api:{readProjectSummary:async()=>state,run:async()=>expired?{authenticated:false}:{authenticated:true,session:{userName:'old'}}}});
+  provider.view={webview:{html:''}};await provider.refresh();expired=true;await provider.refresh();assert(provider.view.webview.html.includes('id="login-form"'));assert(!provider.view.webview.html.includes('data-action="pull"'));
 });

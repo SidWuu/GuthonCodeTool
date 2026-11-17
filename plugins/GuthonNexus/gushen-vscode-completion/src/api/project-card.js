@@ -26,7 +26,7 @@ function projectCardHtml(model,{nonce=crypto.randomBytes(18).toString('base64'),
   let content='<div class="empty">从右上角“…”菜单设置本地数据目录并添加项目，再打开项目目录。</div>';
   if(model?.authenticated || model?.pending) {
     content=`<section aria-label="当前项目详情" class="project-card"><dl>${row('项目',model.project)}${row('版本',model.version)}${row('地址',model.address)}${row('用户',model.user)}</dl></section>
-<div class="primary-actions"><button data-action="pull" ${model.canPull&&!model.pending?'':'disabled'} title="${model.pending?'正在恢复登录':model.canPull?'拉取当前范围源码':'请先在“项目设置”选择拉取范围'}">更新源码</button><button class="secondary" data-action="upload" ${model.canUpload&&!model.pending?'':'disabled'}>上传代码</button></div>
+<div class="primary-actions"><button data-action="pull" ${model.canPull&&!model.pending?'':'disabled'} title="${model.pending?'正在核验登录状态':model.canPull?'拉取当前范围源码':'请先在“项目设置”选择拉取范围'}">更新源码</button><button class="secondary" data-action="upload" ${model.canUpload&&!model.pending?'':'disabled'}>上传代码</button></div>
 <div class="source-summary" aria-label="当前拉取范围"><span>${e(model.scope)}</span><span>${model.sourceCount} 源码</span><span title="最近一次源码状态检查结果" class="${model.changed?'has-changes':''}">${model.changed==null?'修改待检查':model.changed+' 修改'}</span></div>
 <nav class="project-tools" aria-label="项目常用操作">
 ${tool('search','搜索源码','<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/>')}
@@ -46,7 +46,7 @@ ${captcha?`<div class="captcha-row"><input id="captcha" placeholder="验证码" 
 <button class="login-submit" type="submit">登录</button></form></section>`;
   }
   return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; img-src data:; script-src 'nonce-${nonce}'"><style nonce="${nonce}">${css}</style></head><body>${content}
-<div id="status" class="status" role="status" aria-live="polite">${e(form.error||(model?.pending?'正在恢复登录…':''))}</div><script nonce="${nonce}">
+<div id="status" class="status" role="status" aria-live="polite">${e(form.error||(model?.pending?'正在核验登录状态…':''))}</div><script nonce="${nonce}">
 const vscode=acquireVsCodeApi(),workspaceKey=${JSON.stringify(model?.key||'').replace(/</g,'\\u003c')};
 for(const button of document.querySelectorAll('[data-action]'))button.addEventListener('click',()=>vscode.postMessage({action:button.dataset.action,workspaceKey}));
 document.getElementById('login-form')?.addEventListener('submit',event=>{
@@ -107,17 +107,23 @@ class ProjectCardProvider {
       if(generation!==this.generation||!this.view)return;
       this.currentKey=workspace?.workspaceKey;
       this.render(workspace,state,workspace ? this.authentication.get(workspace.workspaceKey)||{authenticated:false,pending:true} : undefined);
-      const authentication=workspace?await this.api.run(workspace.workspaceKey,'session'):undefined;
+      let authentication=workspace?await this.api.run(workspace.workspaceKey,'session'):undefined;
       if(generation!==this.generation||!this.view)return;
+      const cached=workspace&&this.authentication.get(workspace.workspaceKey);
+      if(authentication?.error && cached?.authenticated && ['API_CONNECTION_FAILED','API_HTTP_ERROR','API_TLS_CERTIFICATE_ERROR'].includes(authentication.error.code)) {
+        this.form={...this.form,error:authentication.error.message};authentication={...cached,pending:true,error:authentication.error};
+      }
       if(workspace)this.authentication.set(workspace.workspaceKey,authentication);
-      if(authentication?.authenticated)this.form={};
+      if(authentication?.authenticated&&!authentication.pending)this.form={};
       else if(authentication?.error)this.form={...this.form,error:authentication.error.message};
       this.render(workspace,state,authentication);
     } catch(error) {
       if(generation!==this.generation||!this.view)return;
       this.form={...this.form,error:error.message};
       this.currentKey=state?workspace?.workspaceKey:undefined;
-      this.render(state?workspace:undefined,state,{authenticated:false});
+      const cached=workspace&&this.authentication.get(workspace.workspaceKey);
+      const pending=cached?.authenticated && ['TOOLHOST_QUEUE_TIMEOUT','API_CONNECTION_FAILED','TOOLHOST_TIMEOUT'].includes(error.code);
+      this.render(state?workspace:undefined,state,pending?{...cached,pending:true}:{authenticated:false});
     }
   }
   render(workspace,state,authentication) {

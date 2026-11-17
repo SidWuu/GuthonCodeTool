@@ -65,14 +65,14 @@ def source_file(path, content, kind, metadata, readonly=False):
         or any(ord(x) < 32 or ord(x) == 127 for x in path)
         or ":" in path
     ):
-        raise ApiError("API_SOURCE_PATH_INVALID", "平台返回无效源码路径")
+        raise ApiError("API_SOURCE_PATH_INVALID", f"平台返回无效源码路径：{path!r}")
     parts = path.split("/")
     if (
         not parts
         or any(x in {"", ".", ".."} for x in parts)
         or PurePosixPath(path).is_absolute()
     ):
-        raise ApiError("API_SOURCE_PATH_INVALID", "平台源码路径越界")
+        raise ApiError("API_SOURCE_PATH_INVALID", f"平台源码路径越界：{path!r}（{kind}）")
     return SourceFile(path, content, kind, metadata, readonly)
 
 
@@ -81,11 +81,17 @@ def required(obj, keys):
         raise ApiError("API_IDENTITY_MISSING", "源码对象缺少身份：" + ", ".join(keys))
 
 
+def page_source_path(system_id, page_sub_id, page_id, file_name):
+    """Map a platform web-root filename beneath its PAGE identity directory."""
+    if not isinstance(file_name, str):
+        raise ApiError("API_SOURCE_PATH_INVALID", "平台页面文件名必须是字符串")
+    return f"systems/{system_id}/pages/{page_sub_id}/{page_id}/{file_name.removeprefix('/')}"
+
+
 def page_files(page, sid):
     required(page, ("pageId", "pageSubId", "fileName"))
     if str(page.get("systemId", sid)) != sid:
         raise ApiError("API_IDENTITY_MISMATCH", "页面子系统不匹配")
-    parent = f"systems/{sid}/pages/{page['pageSubId']}/{page['pageId']}"
     meta = {
         k: page[k]
         for k in (
@@ -105,7 +111,7 @@ def page_files(page, sid):
     }
     meta["systemId"] = sid
     files = [
-        source_file(parent + "/" + page["fileName"], page.get("xml"), "page", meta)
+        source_file(page_source_path(sid, page["pageSubId"], page["pageId"], page["fileName"]), page.get("xml"), "page", meta)
     ]
     if (
         str(page.get("pageType")) == "0"
@@ -115,7 +121,7 @@ def page_files(page, sid):
     ):
         files.append(
             source_file(
-                parent + "/" + page["superFileName"],
+                page_source_path(sid, page["pageSubId"], page["pageId"], page["superFileName"]),
                 page["superScript"],
                 "page-inherit",
                 meta,
@@ -172,7 +178,7 @@ def object_files(obj, kind, ds):
     if str(obj.get("dataSourceId", ds)) != ds:
         raise ApiError("API_IDENTITY_MISMATCH", "数据源身份不匹配")
     meta = {
-        k: obj[k] for k in (key, "pkid", "versionMac", "checkOutUserId") if k in obj
+        k: obj[k] for k in (key, "pkid", "versionMac", "checkOutUserId", "tableName", "viewName") if k in obj
     }
     meta["dataSourceId"] = ds
     return [
@@ -188,7 +194,7 @@ def script_files(script):
         raise ApiError("API_IDENTITY_MISSING", "系统脚本缺少类型")
     meta = {
         k: script[k]
-        for k in ("systemId", "scriptType", "versionMac", "checkOutUserId")
+        for k in ("systemId", "scriptType", "versionMac", "checkOutUserId", "useRemark")
         if k in script
     }
     meta["systemId"] = str(meta["systemId"])
@@ -232,7 +238,7 @@ def project_files(client):
     return files
 
 
-def download(client, config, *, on_project=None):
+def download(client, config, *, on_project=None, page_store=None):
     client.ensure_login()
     systems = records(client.request("/develop/systems/apps/developSystemList.htm"))
     by_id = {str(x["systemId"]): x for x in systems if x.get("systemId") is not None}
@@ -260,7 +266,8 @@ def download(client, config, *, on_project=None):
     files = []
     for sid in selected:
         for page in paged(client, BASE + "getModulePages.htm", {"systemId": sid}):
-            files.extend(page_files(page, sid))
+            from .page_source import resolve
+            files.extend(resolve(client, file, store=page_store) for file in page_files(page, sid))
     for script in records(client.request(BASE + "getSystemScripts.htm")):
         if str(script.get("systemId")) in selected:
             files.extend(script_files(script))
@@ -290,7 +297,76 @@ def download(client, config, *, on_project=None):
     }
 
 
-def fetch_object(client, metadata):
+def download_prefixes(client, prefixes, scope, systems, *, page_store=None):
+    """Discover selected directories from official bounded lists, never the catalog."""
+    allowed = {
+        "datasources": {"procedures", "tables", "views"},
+        "systems": {"pages", "system-script", "module-parameters"},
+    }
+    groups = {}
+    for prefix in prefixes:
+        if not isinstance(prefix, str) or not prefix or prefix.endswith("/"):
+            raise ApiError("API_INPUT_INVALID", "前缀必须是非空目录路径")
+        # Apply the same path safety rules as source files.
+        source_file(prefix, "", "prefix", {})
+        parts = prefix.split("/")
+        if len(parts) < 2 or parts[0] not in allowed:
+            raise ApiError("API_INPUT_INVALID", "前缀必须指定子系统或数据源")
+        root, identity = parts[:2]
+        scope_key = "systemIds" if root == "systems" else "dataSourceIds"
+        if identity not in scope[scope_key]:
+            raise ApiError("API_SOURCE_OUT_OF_SCOPE", "前缀不在当前选定范围内")
+        if len(parts) > 2 and parts[2] not in allowed[root]:
+            raise ApiError("API_INPUT_INVALID", "不支持的源码分类前缀")
+        if len(parts) > 3 and parts[2] not in {"procedures", "pages"}:
+            raise ApiError("API_INPUT_INVALID", "该源码分类不支持子目录前缀")
+        for category in ([parts[2]] if len(parts) > 2 else allowed[root]):
+            groups.setdefault((root, identity, category), []).append(prefix)
+
+    client.ensure_login()
+    files = []
+    for (root, identity, category), selected in sorted(groups.items()):
+        objects = []
+        if category == "procedures":
+            for proc in paged(client, BASE + "getProcedures.htm", {"dataSourceId": identity}):
+                required(proc, ("subPath", "procedureId"))
+                if str(proc.get("dataSourceId", identity)) != identity:
+                    raise ApiError("API_IDENTITY_MISMATCH", "过程包数据源不匹配")
+                for fun in records(proc.get("funs")):
+                    if any(key in fun and str(fun[key]) != str(expected) for key, expected in (
+                        ("dataSourceId", identity), ("procedureId", proc["procedureId"]),
+                        ("subPath", proc["subPath"]),
+                    )):
+                        raise ApiError("API_IDENTITY_MISMATCH", "过程函数与所属包身份不匹配")
+                    objects.append(function_files(fun, identity, proc["subPath"], proc["procedureId"]))
+        elif category == "pages":
+            objects = [page_files(page, identity) for page in paged(
+                client, BASE + "getModulePages.htm", {"systemId": identity})]
+        elif category in {"tables", "views"}:
+            kind = "table" if category == "tables" else "view"
+            endpoint = "getTables.htm" if category == "tables" else "getViews.htm"
+            objects = [object_files(obj, kind, identity) for obj in records(
+                client.request(BASE + endpoint, {"dataSourceId": identity}))]
+        elif category == "system-script":
+            objects = [script_files(script) for script in records(client.request(BASE + "getSystemScripts.htm"))
+                       if str(script.get("systemId")) == identity]
+        else:
+            from .module_parameters import download_parameters
+            system = next((item for item in systems if str(item.get("systemId")) == identity), None)
+            if system is None:
+                raise ApiError("API_SCOPE_INVALID", "当前范围缺少子系统身份，请先刷新平台目录")
+            objects = [[item] for item in download_parameters(client, [system])]
+        for obj in objects:
+            if any(item.path.startswith(prefix + "/") for item in obj for prefix in selected):
+                from .page_source import resolve
+                files.extend(resolve(client, item, store=page_store) if item.kind == "page" else item for item in obj)
+    paths = [item.path.casefold() for item in files]
+    if len(paths) != len(set(paths)):
+        raise ApiError("API_IDENTITY_AMBIGUOUS", "下载对象映射到重复文件")
+    return files
+
+
+def fetch_object(client, metadata, *, page_store=None):
     """Fetch exactly one known object, including its inherited companion."""
     kind = metadata["sourceType"]
     m = metadata
@@ -317,7 +393,11 @@ def fetch_object(client, metadata):
     item = data.get("item") if isinstance(data, dict) else None
     if not isinstance(item, dict):
         raise ApiError("API_SOURCE_NOT_FOUND", "平台未返回此精确源码对象")
-    return files_from_item(metadata, item)
+    files = files_from_item(metadata, item)
+    if kind == "page":
+        from .page_source import resolve
+        files = [resolve(client, file, store=page_store) for file in files]
+    return files
 
 
 def files_from_item(metadata, item, *, expected_path=None):

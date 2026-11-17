@@ -4,6 +4,7 @@ async function showProjectActions({vscode,getWorkspaces,bridge}) {
   const item=(label,command,{project=false,description='',args=[]}={})=>({label,command,project,description,args});
   const groups={
     '检查与恢复':[
+      item('生成 MCP 客户端配置','generateMcpConfiguration',{project:true}),
       item('查看索引问题','showApiIndexDiagnostics',{project:true}),
       item('重试待更新文件','retryApiIndexFailures',{project:true}),
       item('重建全部索引','reindexCalls',{project:true,description:'仅在索引丢失或需要完整重建时使用'}),
@@ -21,6 +22,7 @@ async function showProjectActions({vscode,getWorkspaces,bridge}) {
       item('选择运行方式','selectExecutionMode'),item('选择更新来源','selectUpdateSource'),
       item('切换本地数据目录','setupTool'),item('打开本地数据目录','openToolHome'),
       item(bridge.isRunning()?'停止浏览器增强':'启动浏览器增强',bridge.isRunning()?'stopBridge':'startBridge'),
+      item('退出登录','logoutApiSource',{project:true}),
     ],
     '检查更新':[
       item('检查工具组件更新','checkToolUpdate'),item('检查官方补全更新','checkOfficialUpdate'),
@@ -108,7 +110,7 @@ function projectDiagnosisHandler({vscode,selectWorkspace,runTool,command}) {
 
 async function showProjectSettings({vscode,workspace,onConfiguration}) {
   const entries=[
-    {label:'拉取范围',description:'选择需要下载的子系统和共享数据源',command:'selectApiSystems'},
+    {label:'拉取范围',description:'选择子系统，自动包含关联数据源',command:'selectApiSystems'},
     {label:'平台连接',description:'查看或修改当前项目的开发平台地址',command:'configureApiSource'},
     {label:'数据库查询与验证',description:'按向导配置只读连接和验证目标',command:'configureDatabaseDiagnosis'},
     {label:'官方参考资料',description:'控制单据类型、下拉组件和 skills 资料是否纳入同步与索引',command:'configureReferenceAssets'},

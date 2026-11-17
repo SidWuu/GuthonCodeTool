@@ -16,6 +16,7 @@ const {
   shouldProvideApiCompletions,
 } = require('./rules');
 const { createDocumentSelector } = require('./selector');
+const { enrichCompletionData, mergeApiCompletionItems } = require('./api-completion');
 const { prepareWorkspaceSetup, promptWorkspaceCreation, hasWorkspaceConfiguration } = require('./tool-workspace');
 const { promptDatabaseDiagnosis } = require('./database-config');
 const { ToolJsonClient } = require('./tool-json-client');
@@ -148,7 +149,7 @@ function loadData(context) {
     .join('|');
   if (completionDataCache?.signature === signature) return completionDataCache.value;
   const manualData = fs.existsSync(manualDataPath) ? readJson(manualDataPath) : {};
-  const value = require('./api-completion').enrichCompletionData(mergeCompletionData(readJson(indexPath), manualData), readJson(officialDataPath));
+  const value = enrichCompletionData(mergeCompletionData(readJson(indexPath), manualData), readJson(officialDataPath));
   completionDataCache = { signature, value };
   return value;
 }
@@ -174,9 +175,9 @@ function toCompletionItem(item, range, route, currentWord) {
   return completion;
 }
 
-function createProvider(context) {
+function createProvider(context, loadReferences = async () => []) {
   return {
-    provideCompletionItems(document, position) {
+    async provideCompletionItems(document, position, token) {
       const lineText = document.lineAt(position.line).text;
       const currentWord = getCurrentWord(lineText, position.character);
       if (!shouldProvideApiCompletions(currentWord)) {
@@ -185,7 +186,18 @@ function createProvider(context) {
       const rules = loadRules(context);
       const languageId = document.languageId === 'guthon-gss' ? 'java' : document.languageId;
       const route = resolveRoute(rules, languageId, currentWord);
-      const items = filterItems(loadData(context), route, currentWord);
+      const version = document.version;
+      const base = loadData(context)[route.source] || [];
+      let references = [];
+      try {
+        references = await loadReferences(document);
+      } catch (error) {
+        toolOutput().appendLine(`项目 API 补全参考读取失败：${error.message}`);
+      }
+      if (token?.isCancellationRequested || document.version !== version) return [];
+      const data = {[route.source]: mergeApiCompletionItems(base,
+        references.filter(item => item.language === route.source))};
+      const items = filterItems(data, route, currentWord);
       const range = completionRange(document, position, currentWord);
 
       return items.map((item) => toCompletionItem(item, range, route, currentWord));
@@ -461,7 +473,8 @@ function activate(context) {
   if (initialConfig.get('executionMode', 'packaged') === 'development') {
     void initialConfig.update('executionMode', 'source-development', vscode.ConfigurationTarget.Global);
   }
-  const provider = createProvider(context);
+  let referenceCatalog;
+  const provider = createProvider(context, document => referenceCatalog?.data(document) || []);
   const selector = createDocumentSelector(SUPPORTED_LANGUAGES, SUPPORTED_SCHEMES);
   const disposable = vscode.languages.registerCompletionItemProvider(
     selector,
@@ -529,7 +542,7 @@ function activate(context) {
   void vscode.commands.executeCommand('setContext','gushenCompletion.bridgeRunning',bridge.isRunning());
   const refreshToolData = () => {workspaceRegistry.invalidate();projectCard?.refresh();};
   const apiServices = activeApiServices = require('./api/activate').activateApi({vscode,context,getTool:async()=>configuredToolFromSettings(),processClient,
-    onUpdated:()=>projectCard?.refresh()});
+    getOutput:toolOutput,onUpdated:()=>projectCard?.refresh()});
   const scopedWorkspaces = async () => {
     const tool=configuredToolFromSettings();if(!tool) return [];
     const all=(await workspaceRegistry.get(tool)).filter(item=>item.sourceMode==='api');
@@ -543,7 +556,7 @@ function activate(context) {
   projectCard=require('./api/project-card').registerProjectCard({vscode,context,api:apiServices,getWorkspaces:scopedWorkspaces});
   const refreshApiWorkspaces = async()=>{
     const workspaces=await scopedWorkspaces();
-    apiServices.syncWorkspaces(workspaces);
+    await apiServices.syncWorkspaces(workspaces);
     reportWorkspaceState(workspaces.length);
   };
   // 排序方式变化时重建源码树，避免继续使用按旧顺序缓存的目录。
@@ -580,19 +593,7 @@ function activate(context) {
       const workspace=await selectWorkspace(workspaceKeyFrom(value));if(workspace)return projectAction[command]({vscode,workspace,api:apiServices});
     }))
   );
-  const referenceCatalog=new (require('./api/platform-reference').PlatformReferences)(apiServices);
-  context.subscriptions.push(vscode.languages.registerCompletionItemProvider(selector,{
-    async provideCompletionItems(document,position,token) {
-      const word=getCurrentWord(document.lineAt(position.line).text,position.character);
-      if(!shouldProvideApiCompletions(word))return [];
-      const version=document.version,language=document.languageId==='guthon-gss'?'java':document.languageId;
-      const items=await referenceCatalog.data(document);
-      if(token?.isCancellationRequested || document.version!==version)return [];
-      const base=loadData(context),existing=new Set((base[language]||[]).map(item=>item.signature || item.body));
-      const route=resolveRoute(loadRules(context),language,word),data={[language]:items.filter(item=>item.language===language&&!existing.has(item.signature))};
-      return filterItems(data,route,word).map(item=>toCompletionItem(item,completionRange(document,position,word),route,word));
-    }
-  },'.'));
+  referenceCatalog=new (require('./api/platform-reference').PlatformReferences)(apiServices);
   context.subscriptions.push(vscode.languages.registerHoverProvider(selector,{
     async provideHover(document,position,token) {
       const range=document.getWordRangeAtPosition(position,/[$A-Za-z_][\w$]*(?:\.[A-Za-z_]\w*)+/);if(!range)return;
