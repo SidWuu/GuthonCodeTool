@@ -10,7 +10,7 @@ function query(home,key,action='systems') {
   const root=path.resolve(__dirname,'../../../..');
   const script='import json,sys\nfrom providers.api.session_proxy import execute\nfrom providers.api.client import ApiError\ntry: print(json.dumps(execute(sys.argv[1],sys.argv[2],sys.argv[3],{})))\nexcept ApiError as e: print(json.dumps({"error":e.code}))';
   return new Promise((resolve,reject)=>{
-    const child=spawn(path.join(root,'.venv','bin','python'),['-c',script,home,key,action],
+    const child=spawn(path.join(root,'.venv',process.platform==='win32'?'Scripts':'bin',process.platform==='win32'?'python.exe':'python'),['-c',script,home,key,action],
       {env:{...process.env,PYTHONPATH:path.join(root,'scripts'),PYTHONDONTWRITEBYTECODE:'1'}});
     let out='',err='';child.stdout.on('data',value=>out+=value);child.stderr.on('data',value=>err+=value);
     child.on('error',reject);child.on('exit',code=>code?reject(Error(err)):resolve(JSON.parse(out)));
@@ -35,7 +35,7 @@ test('session descriptor is private and old windows cannot delete a replacement 
   t.after(async()=>{await a.close();await b.close();fs.rmSync(home,{recursive:true,force:true});});
   await a.sync(home,['projects.A']);await b.sync(home,['projects.A']);await a.close();
   const file=path.join(home,'var','nexus','mcp',descriptorName('projects.A'));
-  assert.equal(fs.statSync(file).mode&0o777,0o600);
+  if(process.platform!=='win32')assert.equal(fs.statSync(file).mode&0o777,0o600); // POSIX mode; Windows ACL requires its own acceptance.
   assert.deepEqual(await query(home,'projects.A'),{owner:'new'});
   await b.sync(home,['projects.B']);assert.equal(fs.existsSync(file),false);
 });
@@ -54,4 +54,16 @@ test('generated stdio configuration discovers real backend tools and completes a
   const result=await probeMcp(server,'projects.probe');assert.ok(result.tools>10);assert.equal(result.online,true);
   assert.deepEqual(seen,[{key:'projects.probe',action:'system-menu'}]);
   await host.close();const after=await probeMcp(server,'projects.probe');assert.equal(after.online,false);
+});
+
+test('MCP host cleanup succeeds after a descriptor publication failure',async()=>{
+  const home=fs.mkdtempSync(path.join(os.tmpdir(),'guthon-session-failure-'));
+  fs.writeFileSync(path.join(home,'var'),'not a directory');
+  const host=new McpSessionHost({run:async()=>({})});
+  try {await assert.rejects(host.sync(home,['projects.A']));await host.close();assert.equal(host.server,undefined);}
+  finally {await host.close();fs.rmSync(home,{recursive:true,force:true});}
+});
+test('MCP probe reports a missing runtime without an unhandled stdin error',async()=>{
+  const {probeMcp}=require('../src/api/mcp-configuration');
+  await assert.rejects(probeMcp({command:path.join(os.tmpdir(),'guthon-missing-'+require('node:crypto').randomUUID()),args:[]}),/ENOENT|EPIPE/);
 });

@@ -24,6 +24,7 @@ function probeMcp(server,workspaceKey,spawnProcess=spawn) {
     child.stdout.on('data',data=>{stdout+=data;if(stdout.length>2097152){child.kill();reject(new Error('MCP 检查输出过大'));}});
     child.stderr.on('data',data=>{stderr+=data;});
     child.on('error',error=>{clearTimeout(timer);reject(error);});
+    child.stdin.on('error',error=>{clearTimeout(timer);reject(error);});
     child.on('exit',code=>{
       clearTimeout(timer);
       if(code)return reject(new Error('MCP 进程检查失败：'+stderr.slice(0,1000)));

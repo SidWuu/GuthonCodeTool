@@ -154,14 +154,18 @@ _DEFAULTS = {"ctName": "VARCHAR", "dataType": "VARCHAR", "colGroupType": 1, "for
 
 
 def saved_model_matches(candidate, received):
-    def clean(value):
-        if isinstance(value, list):return [clean(v) for v in value]
+    def clean(value, location=()):
+        if isinstance(value, list):return [clean(v, location + (str(index),)) for index, v in enumerate(value)]
         if not isinstance(value, dict):return value
         result = {}
         for key, item in value.items():
-            item = clean(item)
+            item = clean(item, location + (key,))
             if item is None or item == "" or item == {} or item == []:continue
             default = _DEFAULTS.get(key)
+            # Native save omits zero decimal precision on datasource fields/PKs.
+            # Report zoom also uses "scale", so it must retain its own semantics.
+            if key == "scale" and len(location) >= 3 and location[-3] == "datasource" and location[-2] in {"fields", "pks"}:
+                default = 0
             if default is not None and type(item) is not bool and type(item) in (str, int, float) and item == default:continue
             result[key] = item
         return result
@@ -246,3 +250,5 @@ def finish_upload(store, client, current, result, operation, snapshot=None):
     if publication["conflicts"]:raise ApiError("API_LOCAL_AFTER_UPLOAD_CONFLICT", "原生保存已回读，本地合并存在冲突，保留本地修改")
     result.update(stage="REMOTE_READBACK_VERIFIED", remoteHash=digest(accepted.content), nativeRemoteVersion=verified.version,
                   nativeReadbackHash=fingerprint(verified.model), sourceNormalized=not native_page._same(candidate, verified.model))
+    result.pop("code", None)
+    result.pop("message", None)

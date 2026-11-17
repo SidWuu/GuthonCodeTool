@@ -53,7 +53,7 @@ class McpSessionHost {
     catch(error){if(error.code!=='ENOENT')throw error;}
   }
   async close() {
-    this.closed=true;await this.tail;this.keys.clear();for(const file of this.files.values())this.remove(file);this.files.clear();
+    this.closed=true;await this.tail?.catch(()=>{});this.keys.clear();for(const file of this.files.values())this.remove(file);this.files.clear();
     if(this.server){const server=this.server;this.server=undefined;await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
   }
 }

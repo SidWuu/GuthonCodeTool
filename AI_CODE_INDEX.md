@@ -47,6 +47,8 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 
 ## Official feature adoption
 
+- `scripts/providers/api/content.py` 的名称派生由 `scripts/providers/api/store.py` 与索引共用，统一 CLI/MCP/源码树及上传审阅名称。
+
 - `plugins/GuthonNexus/gushen-vscode-completion/src/api/upload-review.js`：原生多选审阅、逐项差异和取消；上传仍由 `plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js` 核对快照并执行。
 - `plugins/GuthonNexus/gushen-vscode-completion/src/api/tree-filter.js`：仅展示过滤，保留原节点及父链；源码状态与资源管理器装饰共用 `plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js`。
 - `plugins/GuthonNexus/gushen-vscode-completion/src/api/mcp-session-host.js` 与 `scripts/providers/api/session_proxy.py`：独立 MCP 在线工具委派到明确项目的 Nexus 登录会话；不传递登录凭据、不重放请求。

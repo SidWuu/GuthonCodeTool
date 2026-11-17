@@ -46,11 +46,22 @@
       "cause": "The downloaded PAGE representation can differ from the original native editor model, including identity and expanded script content.",
       "change": "Read authoritative editor models, retain one local XML file, save native JSON with version checks and verify through the native getter.",
       "verification": "Isolated tests cover derived exports, native identity/version checks, default normalization, unexpected control changes and recovery without POST replay."
+    },
+    {
+      "id": "native-zero-decimal-scale",
+      "cause": "The native save omits zero decimal scale in datasource field and primary-key definitions, producing a false readback mismatch.",
+      "change": "Normalize only zero decimal precision in datasource fields/pks; preserve nonzero precision, booleans, page zoom, nonempty scripts and identities. Clear obsolete error fields after a verified recovery.",
+      "verification": "Scoped boundary regressions passed; the original acknowledged native PAGE operation was independently re-read and reconciled, without another save."
     }
   ],
   "boundaries": {
     "structuredPageSave": "Native JSON with the current pageVersion, no automatic compile or forced checkout/checkin.",
     "readback": "An independent native model read verifies scripts, control identities and meaningful configuration; unknown results are not replayed.",
     "businessAcceptance": "Source readback, platform compile/release and business acceptance remain separate."
+  },
+  "officialFeatureReference": {
+    "version": "1.0.11",
+    "registry": "https://open-vsx.org/api/guthon/guthon-language-support/1.0.11",
+    "sha256": "f001204d08bb55c28909ccd209d20b11be5c732d11bb0aa724a16db035049286"
   }
 }

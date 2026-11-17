@@ -205,20 +205,20 @@
   ],
   "remaining": [],
   "upstream": {
-    "version": "1.0.10",
-    "sha256": "6bf0a052aed9dfb3063f7efaea8cc257913fcc6d1251dfd69e990a3e215c3518",
+    "version": "1.0.11",
+    "sha256": "f001204d08bb55c28909ccd209d20b11be5c732d11bb0aa724a16db035049286",
     "registryUrl": "https://open-vsx.org/api/guthon/guthon-language-support",
-    "metadataTimestamp": "2026-11-12T05:31:21.776202Z",
-    "referenceStatus": "latest registry version rechecked; VSIX SHA256 matched; static contracts integrated without activating official executable code",
-    "registryRecheckedAt": "2026-11-12T10:24:04.213439+00:00"
+    "metadataTimestamp": "2026-11-13T04:11:53.301956Z",
+    "referenceStatus": "Official package statically verified; feature contracts adapted without activating official executable code. Bundled 1.0.10 API signatures/documents match 1.0.11.",
+    "registryRecheckedAt": "2026-11-17T09:07:05.333056+00:00"
   },
   "releaseState": "not-published",
   "validationBoundaries": {
-    "livePlatform": "read-only only, as authorized; no source upload, creation or DDL was executed",
-    "writePaths": "validated with isolated synthetic stores, stateful mock APIs and installed Nexus VSIX plus packaged backend in VSCode; no live platform writes",
-    "designer": "protocol/source and isolated tests; live native designer saving was not exercised",
+    "livePlatform": "Targeted, authorized development-source upload and independent readback verified for two objects in one subsystem; no final check-in, compile, release, DDL or business execution.",
+    "writePaths": "Isolated tests plus targeted real procedure and native PAGE source saves; the PAGE receipt was reconciled without repeating its save.",
+    "designer": "Native PAGE local save/upload/readback and isolated installed local editor verified; live online iframe saving remains unverified.",
     "windows": "installer source/tests checked; Windows installation and Inno compilation require Windows",
-    "publicDocs": "syntax, links, QA search checked; card rendering checked independently; full documentation browser display was not checked",
+    "publicDocs": "Syntax, links and QA keyword search passed; local HTML browser display was blocked by browser file-protocol policy.",
     "sourceEvidence": "download/index/preview are static source evidence and do not prove business runtime acceptance"
   },
   "readonlyPlatformEvidence": {
@@ -395,7 +395,41 @@
         "implementation": "complete"
       }
     ],
-    "validation": "in-progress; isolated checks and real platform acceptance recorded separately",
-    "plan": "docs/api-sync/official-adoption.md"
+    "validation": {
+      "checkedAt": "2026-11-17T08:58:19.791723+00:00",
+      "nexusTests": 583,
+      "apiRegressionTests": 274,
+      "adoptionRegressionTests": 5,
+      "nativePageRegressionTests": 18,
+      "cliSelfTest": "passed",
+      "installedIde": {
+        "app": "CodeBuddy CN",
+        "isolatedProfile": true,
+        "backend": "source-development",
+        "checks": [
+          "commands",
+          "global-transaction-definition",
+          "local-function-hover",
+          "physical-file-path",
+          "native-page-shared-draft"
+        ],
+        "status": "passed"
+      },
+      "liveSource": {
+        "scope": "one explicitly authorized subsystem and its datasource",
+        "objects": 2,
+        "saveUploadReadback": "passed",
+        "unknownResultRecoveredWithoutSaveReplay": true,
+        "finalCheckinCompileRelease": "not-performed",
+        "businessRuntime": "not-verified"
+      },
+      "publicDocs": {
+        "syntaxLinksAndQaSearch": "passed",
+        "browserDisplay": "not-verified; browser policy blocked local file protocol"
+      },
+      "windows": "not-verified"
+    },
+    "plan": "docs/api-sync/official-adoption.md",
+    "latestObservedOfficialVersion": "1.0.11"
   }
 }

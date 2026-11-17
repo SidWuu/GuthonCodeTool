@@ -102,3 +102,10 @@ test('inherit definition opens only the verified readonly parent from physical a
   }
   nav.dispose();
 });
+
+test('filtering one project keeps all workspace roots accessible',async()=>{
+  const {ApiSourceUI}=require('../src/api/source-ui');
+  const ui=new ApiSourceUI({vscode:{workspace:{textDocuments:[]}},run:async()=>({objects:[]})});
+  ui.syncWorkspaces(['projects.A','projects.B']);ui.setFilter('projects.A','采购');
+  assert.deepEqual((await ui.getChildren()).map(item=>item.key),['projects.A','projects.B']);ui.dispose();
+});
