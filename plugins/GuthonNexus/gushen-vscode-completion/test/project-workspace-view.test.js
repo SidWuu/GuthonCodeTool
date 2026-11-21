@@ -29,6 +29,7 @@ function fixture(t) {
     if(action==='status' && key===failedKey)throw new Error('当前项目状态无法读取');
     if(action==='editor-state')return {editorToken:'token-'+key};
     if(action==='session')return {authenticated:true,session:{userName:'Fixture'}};
+    if(action==='catalog')return {objects:[{path:'test.gss',sourceType:'procedure'}]};
     return {checkoutPath:`/home/var/${key}/checkout`,settings:{serverUrl:'https://fixture.invalid',systemIds:['A'],allSystems:false},
       summary:{sourceCount:1,changedCount:key==='a'?1:0,uploadableCount:key==='a'?1:0},files:[]};
   };
@@ -44,10 +45,15 @@ function fixture(t) {
     localWorkspaceFolders,windowToolHome,workspaceSetupCard,
     configuredToolFromSettings:()=>windowToolHome(vscode.workspace.getConfiguration(),localWorkspaceFolders())?tool:undefined,
     processClient:{request:async()=>{registryReads++;if(response instanceof Error)throw response;return response;}},
-    toolOutput:()=>({appendLine(){}}),bridgeOutput:{append(){}},resolveBridgeScript:()=>'',createBridgeProcess:()=>({isRunning:()=>false}),
-    require:name=>name==='./api/activate'?{activateApi:options=>{ui.onStatus=options.onStatus;return api;}}:requireFromExtension(name)});
+    runTool:()=>assert.fail('unexpected tool command'),toolOutput:()=>({appendLine(){}}),
+    bridgeOutput:{append(){}},resolveBridgeScript:()=>'',createBridgeProcess:()=>({isRunning:()=>false}),
+    require:name=>{
+      if(name==='./api/activate')return {activateApi:options=>{ui.onStatus=options.onStatus;return api;}};
+      if(name==='./legacy-project')return {registerLegacyProjects:()=>({sync:async()=>{},children:async()=>[{label:'旧项目源码'}]})};
+      return requireFromExtension(name);
+    }});
   const start=source.indexOf('  const workspaceRegistry ='),end=source.indexOf('  // 排序方式变化',start);
-  vm.runInContext(source.slice(start,end)+';globalThis.views={refresh:refreshApiWorkspaces,selection,projectOverview,projectCard,workspaceRegistry};',sandbox);
+  vm.runInContext(source.slice(start,end)+';globalThis.views={refresh:refreshApiWorkspaces,afterDelete:refreshDeletedWorkspace,selection,projectOverview,projectCard,workspaceRegistry};',sandbox);
   const views=sandbox.views;
   views.cardProvider=cardProvider;
   const cardView={webview:{onDidReceiveMessage:callback=>{cardView.receive=callback;return {dispose(){}};},postMessage:async()=>{}}};
@@ -55,7 +61,7 @@ function fixture(t) {
   t.after(async()=>{views.projectCard.dispose();views.projectOverview.dispose();ui.dispose();await editorState.close();});
   return {views,ui,api,requests,commands,state,document,editorState,cardView,
     setFolder(directory){vscode.workspace.workspaceFolders=[{uri:{scheme:'file',fsPath:directory}}];},
-    get registryReads(){return registryReads;},setResponse(value){response=value;views.workspaceRegistry.invalidate();},failStatus(key){failedKey=key;},get response(){return response;}};
+    get registryReads(){return registryReads;},setResponse(value,{invalidate=true}={}){response=value;if(invalidate)views.workspaceRegistry.invalidate();},failStatus(key){failedKey=key;},get response(){return response;}};
 }
 
 test('root view lists all projects, keeps one current source and retains dirty A documents when choosing B or SVN',async t=>{
@@ -73,6 +79,43 @@ test('root view lists all projects, keeps one current source and retains dirty A
   assert.equal(f.requests.filter(item=>item.key==='old').length,0);
   assert.equal(f.document.isDirty,true);assert.equal(f.ui.workspaces.size,2);
   assert.equal(f.commands.some(args=>args[0]==='vscode.openFolder'),false);
+});
+
+test('deleting the current project clears both panels immediately for every source mode',async t=>{
+  for(const sourceMode of ['api','svn','database']) {
+    const f=fixture(t);
+    const key=sourceMode==='api'?'a':'old';
+    f.setResponse({...f.response,workspaces:f.response.workspaces.map(workspace=>workspace.workspaceKey===key
+      ? {...workspace,sourceMode,executionReady:true}:workspace)});
+    await f.views.selection.select(key,{switchWindow:true});
+    await f.views.refresh();
+    assert.equal(f.views.cardProvider.currentKey,key);
+    assert.ok((await f.ui.getChildren()).length);
+    const scope=f.views.selection.syncScope();
+    f.setResponse({...f.response,workspaces:f.response.workspaces.filter(workspace=>workspace.workspaceKey!==key)},{invalidate:false});
+    const refreshing=f.views.afterDelete(key,scope);
+    assert.match(f.cardView.webview.html,/请从项目总览选择/);
+    assert.deepEqual(await f.ui.getChildren(),[]);
+    await refreshing;
+    assert.equal(f.views.cardProvider.currentKey,undefined);
+    assert.equal(f.views.selection.diagnosticKey,'');
+    assert.equal(f.views.projectOverview.provider.selectedKey,'');
+    assert.ok(!f.views.projectOverview.provider.getChildren().some(row=>row.key===key));
+    assert.equal(f.commands.filter(args=>args[1]==='gushenCompletion.hasCurrentProject').at(-1)[2],false);
+    await f.views.selection.select('b',{switchWindow:true});
+    await f.views.refresh();
+    assert.equal(f.views.cardProvider.currentKey,'b');
+  }
+});
+
+test('deleting a background project preserves the window selection',async t=>{
+  const f=fixture(t);
+  await f.views.selection.select('b',{switchWindow:true});
+  await f.views.refresh();
+  f.setResponse({...f.response,workspaces:f.response.workspaces.filter(workspace=>workspace.workspaceKey!=='a')},{invalidate:false});
+  await f.views.afterDelete('a',f.views.selection.syncScope());
+  assert.equal(f.views.cardProvider.currentKey,'b');
+  assert.equal(f.ui.selectedWorkspaceKey,'b');
 });
 
 test('an unrelated folder offers setup and never reads the inherited data directory',async t=>{

@@ -192,7 +192,8 @@ async function promptWorkspaceCreation(window, configuration) {
 class WindowWorkspaceSelection {
   constructor({getWorkspaces, getFolders, window, onChange, state, getScope=()=>''}) {
     Object.assign(this,{getWorkspaces,getFolders,window,onChange,state,getScope});
-    this.key='';this.diagnosticKey='';this.revision=0;this.scope=undefined;this.pendingState=Promise.resolve();
+    this.key='';this.diagnosticKey='';this.inferredKey='';this.skipFolderSelection=false;
+    this.revision=0;this.scope=undefined;this.pendingState=Promise.resolve();
   }
   syncScope() {
     const home=this.getScope();
@@ -201,6 +202,7 @@ class WindowWorkspaceSelection {
     if(scope!==this.scope) {
       this.scope=scope;this.revision++;
       this.diagnosticKey='';
+      this.inferredKey='';this.skipFolderSelection=false;
       this.key=scope && this.state ? this.state.get('guthon.windowWorkspace.'+Buffer.from(scope).toString('base64url'),'') : '';
     }
     return scope;
@@ -225,13 +227,15 @@ class WindowWorkspaceSelection {
       await this.save(scope,'',removed);
       if(scope!==this.syncScope() || revision!==this.revision)return this.current();
     }
-    if(this.diagnosticKey)return undefined;
+    if(this.diagnosticKey || this.skipFolderSelection)return undefined;
     const folders=this.getFolders().map(folder=>path.resolve(folder));
     const matched=workspaces.filter(item=>[item.root,item.checkoutPath].filter(Boolean).some(root=>folders.some(folder=>{
       const relative=path.relative(path.resolve(root),folder);
       return relative==='' || (relative!=='..' && !relative.startsWith('..'+path.sep) && !path.isAbsolute(relative));
     })));
-    return matched.length===1 ? matched[0] : undefined;
+    const selected=matched.length===1 ? matched[0] : undefined;
+    this.inferredKey=selected?.workspaceKey || '';
+    return selected;
   }
   async select(key='', {switchWindow=false}={}) {
     const scope=this.syncScope(),revision=++this.revision,workspaces=await this.getWorkspaces();
@@ -251,16 +255,24 @@ class WindowWorkspaceSelection {
       if(scope!==this.syncScope() || revision!==this.revision || !choice)return undefined;
       selected=choice.workspace;
     }
-    this.key=selected.workspaceKey;this.diagnosticKey='';
+    this.key=selected.workspaceKey;this.diagnosticKey='';this.inferredKey='';this.skipFolderSelection=false;
     this.onChange?.();
     await this.save(scope,this.key);
     return selected;
   }
   async inspectDiagnostic(key) {
-    const scope=this.syncScope();this.revision++;this.key='';this.diagnosticKey=key;
+    const scope=this.syncScope();this.revision++;this.key='';this.diagnosticKey=key;this.inferredKey='';
     this.onChange?.();await this.save(scope,'');
   }
-  clear() {this.revision++;this.key='';this.diagnosticKey='';this.scope=undefined;}
+  forgetDeleted(key) {
+    const scope=this.syncScope();
+    if(!key || key!==(this.key || this.diagnosticKey || this.inferredKey))return undefined;
+    this.revision++;
+    // Keep this window empty until the user selects another project.
+    this.key='';this.diagnosticKey='';this.inferredKey='';this.skipFolderSelection=true;
+    return this.save(scope,'',key);
+  }
+  clear() {this.revision++;this.key='';this.diagnosticKey='';this.inferredKey='';this.skipFolderSelection=false;this.scope=undefined;}
 }
 
 module.exports = {

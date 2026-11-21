@@ -670,10 +670,13 @@ function activate(context) {
           (selected?.sourceMode === 'database' && selected.executionReady === true)) loadLegacyProjects();
       const legacyUpdate = legacyProjects?.sync(selected, snapshot.workspaces);
       apiServices.sourceTree.setProjectPresentation(selected,projectOverview.provider.diagnostic(),legacyProjects);
-      await vscode.commands.executeCommand('setContext','gushenCompletion.needsWorkspaceSetup',!!setup);
-      await vscode.commands.executeCommand('setContext','gushenCompletion.hasCurrentProject',!!selected);
-      await setSourceMenuContexts(selected);
-      await Promise.all([legacyUpdate, apiServices.syncWorkspaces(apiWorkspaces,selectedApi?selected.workspaceKey:'')]);
+      await Promise.all([
+        legacyUpdate,
+        apiServices.syncWorkspaces(apiWorkspaces,selectedApi?selected.workspaceKey:''),
+        vscode.commands.executeCommand('setContext','gushenCompletion.needsWorkspaceSetup',!!setup),
+        vscode.commands.executeCommand('setContext','gushenCompletion.hasCurrentProject',!!selected),
+        setSourceMenuContexts(selected),
+      ]);
       if(generation!==refreshGeneration)return;
       await projectCard.refresh();
     } catch(error) {
@@ -681,14 +684,30 @@ function activate(context) {
       const key=error.workspaceKey || selected?.workspaceKey;
       if(snapshot && key)projectOverview.provider.setProjectError(key,error);
       else projectOverview.provider.setError(error, tool?.toolHome);
-      await legacyProjects?.sync(undefined, []);
       apiServices.sourceTree.setSelectedWorkspace('');
       apiServices.sourceTree.setProjectPresentation(undefined,projectOverview.provider.diagnostic());
-      await vscode.commands.executeCommand('setContext','gushenCompletion.needsWorkspaceSetup',false);
-      await vscode.commands.executeCommand('setContext','gushenCompletion.hasCurrentProject',false);
-      await setSourceMenuContexts(undefined);
+      await Promise.all([
+        legacyProjects?.sync(undefined, []),
+        vscode.commands.executeCommand('setContext','gushenCompletion.needsWorkspaceSetup',false),
+        vscode.commands.executeCommand('setContext','gushenCompletion.hasCurrentProject',false),
+        setSourceMenuContexts(undefined),
+      ]);
+      if(generation!==refreshGeneration)return;
       projectCard.invalidate();await projectCard.refresh();
     }
+  };
+  const refreshDeletedWorkspace = async (key,scope)=>{
+    if(selection.syncScope()!==scope)return;
+    refreshGeneration++;
+    workspaceRegistry.invalidate();
+    apiServices.editorState.workspaces.delete(key);
+    const saved=selection.forgetDeleted(key);
+    if(saved) {
+      projectCard.clearSelection();
+      apiServices.sourceTree.setSelectedWorkspace('');
+      apiServices.sourceTree.setProjectPresentation(undefined,undefined,legacyProjects);
+    }
+    await Promise.all([saved,refreshApiWorkspaces()]);
   };
   const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders?.(() => { void refreshApiWorkspaces(); });
   if (foldersChanged) context.subscriptions.push(foldersChanged);
@@ -1235,6 +1254,7 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.deleteWorkspace', async (workspaceValue) => {
       const tool=configuredToolFromSettings();
       if(!tool)return;
+      const scope=selection.syncScope();
       let workspace;
       try {workspace=await selectWorkspace(workspaceKeyFrom(workspaceValue));}
       catch(error) {return vscode.window.showErrorMessage(`无法选择项目：${error.message}`);}
@@ -1246,10 +1266,7 @@ function activate(context) {
         assertTool:()=>{
           if(configuredToolFromSettings()?.toolHome!==tool.toolHome)throw new Error('数据目录已切换，请重新预览删除范围');
         },
-        refresh:async()=>{
-          apiServices.editorState.workspaces.delete(workspace.workspaceKey);
-          await refreshLocalWorkspaceViews();
-        }});
+        refresh:()=>refreshDeletedWorkspace(workspace.workspaceKey,scope)});
     }),
     vscode.commands.registerCommand('gushenCompletion.configureDatabaseDiagnosis', async (workspaceKey) => {
       if (typeof workspaceKey !== 'string' || !workspaceKey) {

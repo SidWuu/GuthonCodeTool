@@ -226,12 +226,13 @@ class ProjectCardProvider {
     this.view.webview.html=projectCardHtml(model,{css:this.css,form:this.form});
   }
   invalidate(){this.generation++;this.currentKey=undefined;this.currentWorkspace=undefined;this.diagnostic=undefined;this.setup=undefined;this.form={};this.lastSignature=undefined;}
+  clearSelection(){this.invalidate();if(this.view)this.render();}
   dispose(){this.generation++;for(const disposable of this.disposables)disposable.dispose();this.disposables=[];this.view=null;this.form={};this.authentication.clear();this.legacyStatus.clear();}
 }
 function registerProjectCard(options) {
   const provider=new ProjectCardProvider(options);
   const registration=options.vscode.window.registerWebviewViewProvider('gushenCompletion.projectDetails',provider);
-  return {refresh:()=>provider.refresh(),invalidate:()=>provider.invalidate(),
+  return {refresh:()=>provider.refresh(),invalidate:()=>provider.invalidate(),clearSelection:()=>provider.clearSelection(),
     updateLegacyStatus:(workspace,status)=>provider.updateLegacyStatus(workspace,status),
     dispose:()=>{provider.dispose();registration.dispose();}};
 }

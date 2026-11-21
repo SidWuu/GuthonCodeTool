@@ -258,6 +258,22 @@ test('window selection is restored on restart only for a registered key',async()
   assert.equal(await new WindowWorkspaceSelection(options).current(),undefined);
 });
 
+test('deleting a folder-selected project leaves the window empty until the next selection',async()=>{
+  const removed={workspaceKey:'a',root:'/home/var/a'};
+  const remaining={workspaceKey:'b',root:'/home/var/b'};
+  let workspaces=[removed,remaining],folders=[removed.root];
+  const selection=new WindowWorkspaceSelection({getScope:()=>'/home',getWorkspaces:async()=>workspaces,getFolders:()=>folders});
+  assert.equal(await selection.current(),removed);
+  const saved=selection.forgetDeleted('a');
+  assert.ok(saved);
+  await saved;
+  workspaces=[remaining];
+  folders=[remaining.root];
+  assert.equal(await selection.current(),undefined);
+  await selection.select('b',{switchWindow:true});
+  assert.equal(await selection.current(),remaining);
+});
+
 test('toolHome scopes isolate identical ids and running windows retain their own selection',async()=>{
   const values=new Map(),state={get:(key,fallback)=>values.get(key) ?? fallback,update:async(key,value)=>value===undefined?values.delete(key):values.set(key,value)};
   let home='/a',choice=0;
