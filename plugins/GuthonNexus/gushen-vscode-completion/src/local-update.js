@@ -68,7 +68,7 @@ async function prepareLocalUpdate(local, plan, root, { pythonPath, importedHosts
       write(local.nexusFiles, directory);
       artifacts[ASSETS.nexus] = path.join(work, ASSETS.nexus);
       onProgress('从本地源码快照构建 Nexus VSIX');
-      await processRunner(process.execPath, [packager || findVsce(local.sourceRoot), 'package', '--no-dependencies', '--no-rewrite-relative-links',
+      await processRunner(process.execPath, [packager || findVsce(local.sourceRoot), 'package', '--no-rewrite-relative-links',
         '--readme-path', 'readme.md', '--allow-missing-repository', '--skip-license', '--out', artifacts[ASSETS.nexus]],
       { cwd: directory, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
     }

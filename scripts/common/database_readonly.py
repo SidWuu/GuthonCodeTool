@@ -44,31 +44,31 @@ def _keyring():
     return keyring
 
 
-def set_password(credential_ref: str, password: str) -> None:
+def set_password(credential_ref: str, password: str, *, service: str = CREDENTIAL_SERVICE) -> None:
     if not credential_ref or not password:
         raise DatabaseReadonlyError("CREDENTIAL_MISSING", "凭据标识和密码不能为空")
     try:
-        _keyring().set_password(CREDENTIAL_SERVICE, credential_ref, password)
+        _keyring().set_password(service, credential_ref, password)
     except Exception as error:
         raise DatabaseReadonlyError("CREDENTIAL_STORE_FAILED", "无法写入系统凭据存储", _redact_secret(str(error), password)) from error
 
 
-def delete_password(credential_ref: str) -> None:
+def delete_password(credential_ref: str, *, service: str = CREDENTIAL_SERVICE) -> None:
     try:
         keyring = _keyring()
-        if keyring.get_password(CREDENTIAL_SERVICE, credential_ref) is not None:
-            keyring.delete_password(CREDENTIAL_SERVICE, credential_ref)
+        if keyring.get_password(service, credential_ref) is not None:
+            keyring.delete_password(service, credential_ref)
     except Exception as error:
         raise DatabaseReadonlyError("CREDENTIAL_STORE_FAILED", "无法删除系统凭据，请重新清理该凭据") from error
 
 
-def get_password(credential_ref: str) -> str:
+def get_password(credential_ref: str, *, service: str = CREDENTIAL_SERVICE) -> str:
     try:
-        password = _keyring().get_password(CREDENTIAL_SERVICE, credential_ref)
+        password = _keyring().get_password(service, credential_ref)
     except Exception as error:
         raise DatabaseReadonlyError("CREDENTIAL_STORE_FAILED", f"无法读取系统凭据存储: {error}") from error
     if not password:
-        raise DatabaseReadonlyError("CREDENTIAL_MISSING", "系统凭据存储中没有该数据库密码，请在 Nexus 重新配置")
+        raise DatabaseReadonlyError("CREDENTIAL_MISSING", "系统凭据存储中没有已配置的密码，请在 Nexus 重新配置")
     return password
 
 

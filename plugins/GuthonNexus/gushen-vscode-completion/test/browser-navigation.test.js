@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {browserTarget, navigateInBrowser} = require('../src/svn/browser-navigation');
+const {browserTarget, navigateInBrowser} = require('../src/source/browser-navigation');
 const identity = {workspaceKey: 'products.demo', sourceType: 'procedure', sourceAliasId: 'demo.pkg', funId: 'save'};
 test('browser target accepts exact PAGE/procedure identity and rejects guessable or unsupported identities', () => {
   assert.deepEqual(browserTarget(identity), {type: 'procedure', alias: 'demo.pkg', funId: 'save'});

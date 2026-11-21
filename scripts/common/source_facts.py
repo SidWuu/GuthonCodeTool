@@ -7,6 +7,7 @@ import json
 import re
 from pathlib import Path
 from collections import Counter
+from urllib.parse import quote
 
 from common.inheritance import mask_noncode
 from common.page_projection import (
@@ -874,7 +875,7 @@ def _insert_bill_routes(conn, source_record_id: int, value) -> None:
 
 
 def replace_workspace_bill_routes(conn, values: list[object]) -> int:
-    """Replace DATABASE-exported bill routes that do not have a source record."""
+    """Replace current-workspace bill export routes without source records."""
 
     conn.execute("DELETE FROM gusen_bill_route WHERE source_record_id=0")
     for value in values:
@@ -991,10 +992,15 @@ def _compact_logic_fact(value) -> dict:
     }
 
 
+def api_source_namespace(system_id: str, data_source_id: str, source_path: str) -> str:
+    """Stable API source identity tied to its workspace-local physical path."""
+    return "api:" + ":".join(quote(str(value or ""), safe="") for value in (system_id, data_source_id, source_path))
+
+
 def _source_locator(conn, source_record_id: int, source_fragment_id: int | None = None, source_root=None) -> dict:
     row = conn.execute(
         """
-        SELECT record_id AS source_record_id, working_copy_id, source_namespace, source_table, source_id, source_alias_id, fun_id, source_name,
+        SELECT record_id AS source_record_id, source_table, source_id, source_alias_id, fun_id, source_name,
                source_path, local_path, provider, system_id, data_source_id, status
         FROM gusen_source_record WHERE record_id=?
         """,
@@ -1004,10 +1010,12 @@ def _source_locator(conn, source_record_id: int, source_fragment_id: int | None 
         key: row[key]
         for key in (
             "source_table", "source_id", "source_alias_id", "fun_id", "source_name",
-            "source_path", "system_id", "data_source_id", "source_namespace", "source_record_id", "working_copy_id",
+            "source_path", "system_id", "data_source_id", "source_record_id",
         )
         if row and row[key] not in (None, "")
     }
+    if row:
+        locator["source_namespace"] = api_source_namespace(row["system_id"], row["data_source_id"], row["source_path"])
     if row and row["local_path"]:
         path = Path(row["local_path"])
         locator["localPath"] = str(path)
@@ -1209,7 +1217,7 @@ def explain_table(
     offset = max(0, int(offset))
     fact_limit = max(1, min(int(fact_limit), 50))
     normalized_operation = str(operation or "WRITE").upper()
-    operation_sql = "d.operation IN ('INSERT','UPDATE','DELETE','MERGE','BATCH_WRITE')"
+    operation_sql = "1=1" if normalized_operation == "ANY" else "d.operation IN ('INSERT','UPDATE','DELETE','MERGE','BATCH_WRITE')"
     params: list[object] = [scope_id, table_name]
     if normalized_operation not in {"", "WRITE", "ANY"}:
         operation_sql = "d.operation=?"

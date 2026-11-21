@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  normalizeExecutionMode, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime,
+  normalizeExecutionMode, runtimeSelectionOptions, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime, packagedToolInDirectory,
   toolArguments, writeRuntimeDescriptor,
 } = require('../src/tool-runtime');
 
@@ -27,7 +27,7 @@ test('suite dependencies remain available to a pre-existing IDE without changing
     fs.writeFileSync(path.join(home, 'var', 'nexus', 'setup-result.json'), JSON.stringify({ state: 'environment-ready', programs: { git, svn } }));
     const environment = installedToolEnvironment(home, { PATH: '/old/parent' });
     assert.ok(environment.PATH.includes(path.dirname(git)));
-    assert.ok(environment.PATH.includes(path.dirname(svn)));
+    assert.equal(environment.PATH.includes(path.dirname(svn)),false);
     assert.ok(environment.PATH.endsWith('/old/parent'));
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
@@ -74,12 +74,13 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
     command: ['/tool/GuthonCodeTool'],
     codeSource: '/tool/GuthonCodeTool',
     home,
+    workspaceRoot: path.join(home, 'var'),
     workspaceResolveCommand: ['/tool/GuthonCodeTool', 'workspace-resolve', '--home', home],
     databaseTargetResolveCommand: ['/tool/GuthonCodeTool', 'database-target-resolve', '--home', home],
     databaseProbeCommand: ['/tool/GuthonCodeTool', 'database-probe', '--home', home],
     databaseDescribeCommand: ['/tool/GuthonCodeTool', 'database-describe', '--home', home],
     databaseQueryCommand: ['/tool/GuthonCodeTool', 'database-query-readonly', '--home', home],
-    linterCommand: [path.join(home, 'var', 'tools', 'guthon-lint')],
+    linterCommand: ['/tool/GuthonCodeTool', 'lint', '--home', home],
   });
 
   writeRuntimeDescriptor({
@@ -94,6 +95,7 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
     command: ['/repo/.venv/bin/python', '/repo/scripts/guthon_tool.py'],
     codeSource: '/repo/scripts/guthon_tool.py',
     home,
+    workspaceRoot: path.join(home, 'var'),
     workspaceResolveCommand: [
       '/repo/.venv/bin/python',
       '/repo/scripts/guthon_tool.py',
@@ -120,10 +122,30 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
       '/repo/.venv/bin/python', '/repo/scripts/guthon_tool.py',
       'database-query-readonly', '--home', home,
     ],
-    linterCommand: [path.join(home, 'var', 'tools', 'guthon-lint')],
+    linterCommand: ['/repo/.venv/bin/python', '/repo/scripts/guthon_tool.py', 'lint', '--home', home],
   });
 
   fs.rmSync(home, { recursive: true });
+});
+
+test('selecting development mode always asks for the source directory', () => {
+  assert.deepEqual(runtimeSelectionOptions('packaged'), {
+    probeScript: true, probePackaged: true,
+    selectScript: false, selectPackaged: false, selectDevelopment: false,
+  });
+  for (const mode of ['source-development', 'development']) {
+    assert.equal(runtimeSelectionOptions(mode).selectDevelopment, true, mode);
+  }
+  assert.equal(runtimeSelectionOptions('script').selectDevelopment, false);
+  assert.deepEqual(runtimeSelectionOptions('packaged', true), {
+    probeScript: true, probePackaged: true,
+    selectScript: true, selectPackaged: true, selectDevelopment: true,
+  });
+  // 命令必须复用该选项，否则仍会沿用旧的 developmentRoot 而不弹目录选择。
+  const extension = fs.readFileSync(path.join(__dirname, '../src/extension.js'), 'utf8');
+  const command = /registerCommand\('gushenCompletion\.selectExecutionMode'[\s\S]*?\n    \}\),/.exec(extension);
+  assert.ok(command, 'selectExecutionMode must stay registered');
+  assert.match(command[0], /runtimeSelectionOptions\(selected\.value, selectEntry\)/);
 });
 
 test('migrates the old development setting and keeps script paths separate', () => {
@@ -173,38 +195,17 @@ test('keeps the runtime descriptor untouched when its content is unchanged', () 
   fs.rmSync(home, { recursive: true });
 });
 
-test('Nexus lists every configured workspace and binds commands to workspaceKey', () => {
-  const extension = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.js'), 'utf8');
-  const manifest = require('../package.json');
-
-  assert.equal(extension.includes("workspaceRegistry.get(tool)"), true);
-  assert.equal(extension.includes("item.displayName"), true);
-  assert.equal(extension.includes("[item.workspaceKey]"), true);
-  assert.equal(extension.includes("gushenCompletion.selectWorkspaceSourceMode"), true);
-  assert.equal(extension.includes("sourceModeView"), false);
-  assert.equal(extension.includes("syncActive"), false);
-  assert.deepEqual(
-    manifest.contributes.views.guthon.map(({ id, name }) => ({ id, name })),
-    [
-      { id: 'gushenCompletion.toolView', name: '谷神工作区' },
-      { id: 'gushenCompletion.svnSourceView', name: '谷神源码' },
-    ]
-  );
-  assert.equal((extension.match(/toolItem\(\s*'添加产品或项目'/g) || []).length, 1);
-  assert.equal(extension.includes("new vscode.TreeItem('运行模式', vscode.TreeItemCollapsibleState.Collapsed)"), true);
-  assert.equal(extension.includes('`切换模式：${modeLabel'), true);
-  assert.equal(extension.includes('`当前版本：${applicationVersion}`'), true);
-  assert.equal(extension.includes("executionMode === 'packaged'\n      ? await detectCurrentVersion"), true);
-  assert.equal(extension.includes(": '最新';"), false);
-  assert.equal(extension.includes("this.updates?.snapshot.current?.toolVersion"), true);
-  assert.equal(extension.includes('`更新源：${UPDATE_SOURCES[updateSource]'), true);
-  assert.equal(extension.includes("toolItem('检查更新'"), true);
-  assert.equal(extension.includes("new vscode.TreeItem('更新中心'"), false);
-  assert.equal(extension.includes("checkUpdate.children ="), true);
-  assert.equal(extension.includes("return [workspace, projects, bridge, maintenance]"), true);
-  assert.equal(extension.includes("'回退到上一版本'"), true);
-  assert.equal(manifest.contributes.configuration.properties['gushenCompletion.updateSource'].default, 'gitee');
-  assert.equal(manifest.contributes.commands.some(({ command }) => command === 'gushenCompletion.checkToolUpdate'), true);
+test('Nexus presents project overview, current card and current source in order', () => {
+  const extension=fs.readFileSync(path.join(__dirname,'../src/extension.js'),'utf8');
+  const manifest=require('../package.json');
+  assert.deepEqual(manifest.contributes.views.guthon.map(({id,name})=>({id,name})),[
+    {id:'gushenCompletion.projectOverview',name:'项目总览'},
+    {id:'gushenCompletion.projectDetails',name:'当前项目'},
+    {id:'gushenCompletion.sourceView',name:'当前项目源码'}]);
+  assert(!extension.includes('ToolTreeDataProvider'));assert(!extension.includes('gushenCompletion.toolView'));
+  assert(manifest.contributes.commands.some(x=>x.command==='gushenCompletion.showProjectActions'));
+  const commands=new Map(manifest.contributes.commands.map(x=>[x.command,x]));
+  for(const entry of manifest.contributes.menus['view/title'].filter(x=>x.group.startsWith('navigation')))assert(commands.get(entry.command).icon,entry.command+' must render as an icon');
 });
 
 test('packaged application picker selects files only on Windows and macOS', () => {
@@ -221,4 +222,43 @@ test('packaged application picker selects files only on Windows and macOS', () =
     if (platform === 'win32') assert.equal(options.filters['可执行文件'][0], 'exe');
     else assert.equal(options.filters, undefined);
   }
+});
+
+
+test('lint descriptor preserves runtime and special characters as argument array', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime & % space-'));
+  try {
+    for (const tool of [
+      {mode:'packaged', toolPath:'/tool & %/GuthonCodeTool.exe'},
+      {mode:'script', toolPath:'/python & %/python.exe', toolEntry:'/tool & %/GuthonCodeTool.pyz'},
+      {mode:'source-development', toolPath:'/python & %/python', toolEntry:'/source & %/scripts/guthon_tool.py'},
+    ]) {
+      const descriptor = JSON.parse(fs.readFileSync(writeRuntimeDescriptor({...tool,toolHome:home}), 'utf8'));
+      assert.deepEqual(descriptor.linterCommand, [...descriptor.command, 'lint', '--home', home]);
+      assert.deepEqual([...descriptor.linterCommand, '--scope-from', '/scope & %/项目'],
+        [tool.toolPath, ...(tool.toolEntry ? [tool.toolEntry] : []), 'lint', '--home', home, '--scope-from', '/scope & %/项目']);
+    }
+  } finally { fs.rmSync(home, {recursive:true, force:true}); }
+});
+
+
+test('finds the platform application in a runtime directory including the older Mac folder', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-neighbor-runtime-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const longExe = path.join(root, 'GuthonCodeTool-windows-x64.exe');
+  const shortExe = path.join(root, 'GuthonCodeTool.exe');
+  const launcher = path.join(root, 'GuthonCodeTool');
+  assert.equal(packagedToolInDirectory(root, 'win32'), '');
+  fs.writeFileSync(shortExe, 'fixture');
+  assert.equal(packagedToolInDirectory(root, 'win32'), shortExe);
+  fs.writeFileSync(longExe, 'fixture');
+  assert.equal(packagedToolInDirectory(root, 'win32'), longExe);
+  fs.writeFileSync(launcher, 'fixture');
+  assert.equal(packagedToolInDirectory(root, 'darwin'), launcher);
+
+  const legacyDir = path.join(root, 'old', 'GuthonCodeTool');
+  fs.mkdirSync(legacyDir, { recursive: true });
+  const legacyLauncher = path.join(legacyDir, 'GuthonCodeTool');
+  fs.writeFileSync(legacyLauncher, 'fixture');
+  assert.equal(packagedToolInDirectory(path.dirname(legacyDir), 'darwin'), legacyLauncher);
 });

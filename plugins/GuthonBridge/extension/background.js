@@ -14,7 +14,7 @@ chrome.runtime.onInstalled.addListener(() => {
       }).catch(() => {});
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ["host-settings.js", "host-config.js", "nexus-locator.js", "workspace-selection.js", "task-client.js", "platform-layout.js", "tab-sorter.js", "content.js"]
+        files: ["host-settings.js", "host-config.js", "nexus-locator.js", "workspace-selection.js", "task-client.js", "refresh-target.js", "platform-layout.js", "tab-sorter.js", "content.js"]
       }).catch(() => {});
     });
   });
@@ -24,11 +24,6 @@ const BRIDGE_ROUTES = {
   "route-workspace": "/routeWorkspace",
   "save-pull-result": "/saveRemoteFile",
   "log-pull-failure": "/logPullFailure",
-  "pull-hub-source": "/pullHubSource",
-  "export-table-schema": "/exportTableSchema",
-  "export-bill-type": "/exportBillType",
-  "export-view-sql": "/exportViewSql",
-  "export-system-scripts": "/exportSystemScripts",
   "query-procedure-callers": "/queryProcedureCallers"
 };
 
@@ -108,9 +103,11 @@ async function handleBridgeEvent(event, command) {
     }
     if (event === 'page-lifecycle') {
       if (command.target?.type !== 'page-lifecycle') throw new Error('PAGE 生命周期命令类型不匹配');
-      if (command.target.action !== 'inspect' && route.workspace?.capabilities?.['svn.edit'] !== true) throw new Error('当前工作区未授权 PAGE 平台写入');
+      if (route.workspace?.capabilities?.['source.read'] !== true) throw new Error('当前工作区未授权 PAGE 读取');
+      if (!inspected.data.systemId || (inspected.data.systemIds || []).some(id => id !== inspected.data.systemId)) throw new Error('无法确定唯一的平台系统身份，请刷新平台上下文');
+      if (command.target.action !== 'inspect' && !['api.edit','svn.edit'].some(capability => route.workspace?.capabilities?.[capability] === true)) throw new Error('当前工作区未授权 PAGE 平台写入');
       const results = await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',func:runPageLifecycle,
-        args:[{...command.target, expectedOrigin:command.pageOrigin, systemIds:[inspected.data.systemId,...(inspected.data.systemIds || [])].filter(Boolean)}]});
+        args:[{...command.target, expectedOrigin:command.pageOrigin, systemIds:[inspected.data.systemId]}]});
       if (!results?.[0]?.result) throw new Error('PAGE 生命周期结果未知');
       data = results[0].result; ok = true;
       await bridgeRequest('/navigationResult', {requestId: command.requestId, clientId: identity,
@@ -186,7 +183,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const action = async () => {
         const stored = await chrome.storage.local.get('guthonBridgeRecentPulls');
         const records = Array.isArray(stored.guthonBridgeRecentPulls) ? stored.guthonBridgeRecentPulls : [];
-        if (message.type === 'bridge-history-list') return {ok:true,records:records.filter(item=>item?.pageOrigin===origin).slice(0,20)};
+        if (message.type === 'bridge-history-list') return {ok:true,records:records.filter(item=>item?.pageOrigin===origin && item.operation==='refresh-api-source').slice(0,20)};
         if (message.type !== 'bridge-history-save') throw new Error('不支持的历史操作');
         const entry = GuthonBridgeTaskHistory.create(message.payload?.record,message.payload?.result,origin);
         if (!entry) return {ok:true,stored:false};

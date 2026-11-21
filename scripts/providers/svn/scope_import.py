@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.parse import urlsplit
 
 from common.persistence import atomic_text
+from common.workspace_identity import validate_workspace_key
 
 from .nexus.manifest import (
     SAFE_ENTRY_ID,
@@ -472,6 +473,13 @@ def _scope_config_entry(raw: object, index: int) -> dict:
     return normalized
 
 
+def _manifest_workspace_key(value):
+    try:
+        return validate_workspace_key(str(value or "").strip())
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
+
+
 def build_manifest_from_config(text: str, workspace_key: str) -> ImportResult:
     """Build a sanitized authorization manifest from an editable config file.
 
@@ -483,9 +491,7 @@ def build_manifest_from_config(text: str, workspace_key: str) -> ImportResult:
     scripts.
     """
 
-    workspace_key = str(workspace_key or "").strip()
-    if not re.fullmatch(r"(?:products|projects)\.[A-Za-z0-9][A-Za-z0-9._-]*", workspace_key):
-        raise SystemExit("workspaceKey must be products.<id> or projects.<id>")
+    workspace_key = _manifest_workspace_key(workspace_key)
     payload = _read_scope_config_payload(text)
     declared_workspace = payload.get("workspaceKey") if isinstance(payload, dict) else None
     if declared_workspace not in (None, "", workspace_key):
@@ -708,9 +714,7 @@ def _entry_id(checkout: ParsedCheckout, used: set[str]) -> str:
 
 
 def build_manifest(text: str, workspace_key: str) -> ImportResult:
-    workspace_key = str(workspace_key or "").strip()
-    if not re.fullmatch(r"(?:products|projects)\.[A-Za-z0-9][A-Za-z0-9._-]*", workspace_key):
-        raise SystemExit("workspaceKey must be products.<id> or projects.<id>")
+    workspace_key = _manifest_workspace_key(workspace_key)
     checkouts, duplicate_count = parse_checkout_script(text)
     used_ids = set()
     entries = [

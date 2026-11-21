@@ -8,7 +8,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from common.gusen_hub import IndexRebuildRequired
+from common.legacy_source import IndexRebuildRequired
 from common.runtime_paths import runtime_home_context
 
 from . import page_nodes
@@ -411,7 +411,7 @@ class PageMcpServer:
         self.protocol_version = PROTOCOL_VERSION
 
     def _workspace(self, workspace_key: str):
-        from common import gusen_hub
+        from common import legacy_source as gusen_hub
 
         workspace = gusen_hub.resolve_workspace(gusen_hub.load_config(), workspace_key)
         if workspace["sourceMode"] != "svn" or workspace["svn"].get("checkoutLayout") != "manifest-working-copies":
@@ -432,7 +432,7 @@ class PageMcpServer:
             from common.page_editor import _data
             from common.page_structure import inspect
             return inspect(_data(_require_string(arguments, "content"))[0])
-        from common import gusen_hub
+        from common import legacy_source as gusen_hub
 
         if not isinstance(arguments, dict):
             raise page_nodes.PageIndexError("INVALID_ARGUMENT", "Tool arguments must be an object")
@@ -477,7 +477,7 @@ class PageMcpServer:
                     "expectedIdentity":config["expectedIdentities"][target["expectedIdentityRef"]],"selectionSource":selection,
                     "adapter":"builtin-readonly" if target.get("connectionRef") else "dbx","executed":False}
         if name == "search_all_workspaces":
-            from common import workspace_assistant
+            from common import legacy_workspace_assistant as workspace_assistant
             return workspace_assistant.search_all_workspaces(gusen_hub.load_config(), _require_string(arguments, "keyword"),
                          workspace_keys=arguments["workspaceKeys"], limit=_optional_int(arguments, "limit", 20))
         key = _require_string(arguments, "workspaceKey")
@@ -512,7 +512,7 @@ class PageMcpServer:
                 operations=arguments["operations"], dry_run=name.startswith("preview_"),
                 idempotency_key=_require_string(arguments, "idempotencyKey", optional=name.startswith("preview_")))
         if name == "search_source_content":
-            from common import gusen_hub, source_text_search
+            from common import legacy_source as gusen_hub, source_text_search
             from providers.svn.checkout import operation_lock, require_capability
             require_capability(workspace, "browse")
             with operation_lock(workspace, "body-search", shared=True), gusen_hub.index_connection(workspace, action="body-search", readonly=True) as conn:
@@ -522,7 +522,7 @@ class PageMcpServer:
                         cursor=_require_string(arguments,"cursor",optional=True),source_namespace=_require_string(arguments,"sourceNamespace",optional=True),
                         source_type=_require_string(arguments,"sourceType",optional=True))}
         if name == "get_workspace_source_map":
-            from common import workspace_assistant
+            from common import legacy_workspace_assistant as workspace_assistant
             return workspace_assistant.source_map(workspace, limit=_optional_int(arguments, "limit", 20),
                          cursor=_require_string(arguments, "cursor", optional=True))
         if name in {"renew_edit_token", "release_edit_lease"}:

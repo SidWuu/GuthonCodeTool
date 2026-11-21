@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+import argparse
+
+from common import legacy_source as gusen_hub
+
+
+def main(args=None, workspace=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace")
+    parsed = parser.parse_args(args)
+    if workspace is None:
+        cfg = gusen_hub.load_config()
+        if parsed.workspace:
+            gusen_hub.set_workspace(parsed.workspace)
+        workspace = gusen_hub.resolve_workspace(cfg)
+    with gusen_hub.index_connection(
+        workspace,
+        action="export-markdown-read",
+        readonly=True,
+    ) as conn:
+        if workspace["type"] == "product":
+            gusen_hub.export_product_docs(conn, workspace["scopeId"])
+        else:
+            gusen_hub.export_project_docs(conn, workspace["projectId"])
+
+
+if __name__ == "__main__":
+    main()

@@ -26,7 +26,7 @@ def check(executable):
         report = json.loads((home / 'var/nexus/setup-result.json').read_text(encoding='utf-8'))
         if report.get('state') != 'environment-ready':
             raise SystemExit('Installer did not prepare the environment')
-        if (home / 'var/.guthon/config.json').exists() or any((home / 'var/checkout').glob('*')):
+        if (home / 'var/.guthon/config.json').exists() or any((home / 'var').glob('*/checkout/*')):
             raise SystemExit('Installer crossed the plugin/business boundary')
         config = json.loads((home / 'Guthon.code-workspace').read_text(encoding='utf-8'))
         if not config['settings'].get('gushenCompletion.autoStartBridge'):

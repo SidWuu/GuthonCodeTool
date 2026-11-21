@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { checkRepository, publicKey, authorizationCommand, repositoryUrl } = require('../src/onboarding-team');
+const { checkRepository, publicKey, authorizationCommand, repositoryUrl, openTeamSyncTerminal } = require('../src/onboarding-team');
 
 test('repository access uses an argument array and never stores command output', async () => {
   let args;
@@ -33,4 +33,19 @@ test('first-connection terminal command quotes shell metacharacters', () => {
   assert.ok(command.startsWith("& 'git' 'ls-remote'"));
   assert.ok(command.includes("a''b.git"));
   assert.ok(authorizationCommand('ssh://git@example.test:2222/repo.git', 'win32').includes("'-p' '2222' 'git@example.test'"));
+});
+
+test('team sync terminal uses the current backend and quotes the source and home', () => {
+  const tool = { toolPath: '/runtime/python', toolEntry: '/dev source/guthon_tool.py', toolHome: "/dev/团队's data", env: {} };
+  for (const [platform, quote] of [['darwin', "/dev/团队'\"'\"'s data"], ['win32', "/dev/团队''s data"]]) {
+    let options, command;
+    const window = { createTerminal: value => {
+      options = value;
+      return { show() {}, sendText(text) { command = text; } };
+    } };
+    openTeamSyncTerminal(window,tool,['--team-source','http://example.test/team.git'],platform);
+    assert.equal(options.cwd,tool.toolHome);
+    assert.equal(options.shellPath,platform==='win32'?'powershell.exe':'/bin/sh');
+    assert.ok(command.includes(`'/dev source/guthon_tool.py' 'setup' '--home' '${quote}' '--' '--team-source'`));
+  }
 });

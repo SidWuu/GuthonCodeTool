@@ -9,12 +9,12 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
-from pathlib import Path
 import re
 import time
 import uuid
 from urllib.parse import urlencode
 
+from common.runtime_paths import workspace_root
 from providers.svn.checkout import atomic_json, operation_lock, require_capability
 from .manifest import load_authorized_scope
 
@@ -29,7 +29,7 @@ def _digest(value):
 def _request(home, port, path, body=None):
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError("Invalid local Bridge port")
-    token = (Path(home) / "var/nexus/bridge/token").read_text().strip()
+    token = (workspace_root(home) / "nexus/bridge/token").read_text().strip()
     if not re.fullmatch(r"[a-f0-9]{64}", token):
         raise ValueError("Bridge pairing token is invalid; start Bridge in Nexus")
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)

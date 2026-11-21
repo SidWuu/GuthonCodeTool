@@ -92,7 +92,7 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <span class="eyebrow"><span class="eyebrow-dot"></span>GuthonCodeTool Current Capabilities</span>
 <h1>GuthonCodeTool<br/>全功能说明</h1>
 <p>完整说明当前版本提供的功能、关键实现与设计原因。内容以现有源码、配置契约和测试为准，帮助开发人员理解各模块如何协作，以及每条安全边界解决什么问题。</p>
-<div class="hero-meta"><span>DATABASE + SVN</span><span>功能与原理</span><span>安全边界</span><span>Nexus · Bridge · MCP</span><span>治理与发布</span></div>
+<div class="hero-meta"><span>API 源码 + 数据库诊断</span><span>功能与原理</span><span>安全边界</span><span>Nexus · Bridge · MCP</span><span>治理与发布</span></div>
 <div class="hero-actions">
 <a class="btn btn-primary" href="#1-产品定位与设计原则">开始阅读</a>
 <a class="btn btn-ghost" href="index.html">使用手册</a>
@@ -111,58 +111,50 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 <a class="toc-link toc-sub" href="#2-2-目录与调用链">2.2 目录与调用链</a>
 <a class="toc-link" href="#3-工作区与配置">3. 工作区与配置</a>
 <a class="toc-link toc-sub" href="#3-1-稳定身份与配置">3.1 稳定身份与配置</a>
+<a class="toc-link toc-sub" href="#svn-api-migration-reference">SVN 切换 API 参考</a>
 <a class="toc-link toc-sub" href="#3-2-创建切换与删除">3.2 创建、切换与删除</a>
 <a class="toc-link toc-sub" href="#3-3-命令与运行描述">3.3 命令与运行描述</a>
-<a class="toc-link toc-sub" href="#runtime-cli-reference">CLI 与运行描述参考</a>
-<a class="toc-link" href="#4-database-模式">4. DATABASE 模式</a>
-<a class="toc-link toc-sub" href="#4-1-源码与元数据同步">4.1 源码与元数据同步</a>
-<a class="toc-link toc-sub" href="#4-2-workcopy-开发">4.2 Workcopy 开发</a>
-<a class="toc-link toc-sub" href="#4-3-只读数据库排查">4.3 只读数据库排查</a>
-<a class="toc-link toc-sub" href="#database-target-reference">目标、凭据与适配器</a>
-<a class="toc-link toc-sub" href="#database-query-reference">查询、输出与诊断历史</a>
-<a class="toc-link toc-sub" href="#database-plan-reference">正式只读验证计划</a>
-<a class="toc-link" href="#5-svn-模式">5. SVN 模式</a>
-<a class="toc-link toc-sub" href="#5-1-检出与认证">5.1 检出与认证</a>
-<a class="toc-link toc-sub" href="#5-2-业务目录与虚拟文档">5.2 业务目录与虚拟文档</a>
-<a class="toc-link toc-sub" href="#5-3-受控编辑">5.3 受控编辑</a>
-<a class="toc-link toc-sub" href="#svn-batch-reference">精确批量写入</a>
-<a class="toc-link toc-sub" href="#5-4-scm-冲突与交付">5.4 SCM、冲突与交付</a>
+<a class="toc-link" href="#4-数据库诊断">4. 数据库诊断与测试</a>
+<a class="toc-link toc-sub" href="#4-3-只读数据库排查">4.1 只读数据库排查</a>
+<a class="toc-link" href="#5-api源码">5. API 源码与本地编辑</a>
+<a class="toc-link toc-sub" href="#5-1-拉取与合并">5.1 拉取与合并</a>
+<a class="toc-link toc-sub" href="#5-2-上传与冲突">5.2 上传、冲突与回执</a>
+<a class="toc-link toc-sub" href="#page-local-editor">5.3 本地页面编辑与预览</a>
 <a class="toc-link" href="#6-索引与ai上下文">6. 索引与 AI 上下文</a>
 <a class="toc-link toc-sub" href="#6-1-工作区事实索引">6.1 工作区事实索引</a>
 <a class="toc-link toc-sub" href="#6-2-检索与有界上下文">6.2 检索与有界上下文</a>
-<a class="toc-link toc-sub" href="#bounded-query-reference">有界查询入口参考</a>
 <a class="toc-link" href="#7-guthon-nexus">7. Guthon Nexus</a>
-<a class="toc-link toc-sub" href="#7-1-工作区驾驶舱">7.1 工作区驾驶舱</a>
+<a class="toc-link toc-sub" href="#7-1-工作区驾驶舱">7.1 工作区与源码</a>
+<a class="toc-link toc-sub" href="#project-details">当前项目卡片</a>
+<a class="toc-link toc-sub" href="#project-more-actions">更多菜单功能</a>
+<a class="toc-link toc-sub" href="#module-parameter-reference">模块参数编辑与受控上传</a>
 <a class="toc-link toc-sub" href="#7-2-语言与导航">7.2 语言与导航</a>
 <a class="toc-link toc-sub" href="#7-3-工具更新">7.3 工具更新</a>
 <a class="toc-link" href="#8-guthon-bridge">8. Guthon Bridge</a>
 <a class="toc-link toc-sub" href="#8-1-页面能力">8.1 页面能力</a>
 <a class="toc-link toc-sub" href="#8-2-路由与安全边界">8.2 路由与安全边界</a>
-<a class="toc-link" href="#9-guthon-svn-mcp">9. Guthon SVN MCP</a>
+<a class="toc-link" href="#9-guthon-api-mcp">9. API MCP</a>
 <a class="toc-link toc-sub" href="#9-1-入口与能力">9.1 入口与能力</a>
-<a class="toc-link toc-sub" href="#9-2-共享索引与安全边界">9.2 共享索引与安全边界</a>
-<a class="toc-link toc-sub" href="#9-3-开发状态与验证">9.3 写入范围与验证</a>
-<a class="toc-link toc-sub" href="#9-4-调用流程" data-title="9.4 调用流程与参数约束">9.4 调用流程与参数约束</a>
+<a class="toc-link toc-sub" href="#9-2-共享索引与安全边界">9.2 查询与受控修改</a>
+<a class="toc-link toc-sub" href="#9-3-开发状态与验证">9.3 验证边界</a>
 <a class="toc-link" href="#10-guthon-team">10. guthon-team 治理</a>
 <a class="toc-link toc-sub" href="#10-1-安装与更新">10.1 安装与更新</a>
 <a class="toc-link toc-sub" href="#10-2-规范门禁">10.2 规范门禁</a>
 <a class="toc-link" href="#11-构建发布与验证">11. 构建、发布与验证</a>
 <a class="toc-link toc-sub" href="#11-1-发行物">11.1 发行物</a>
-<a class="toc-link toc-sub" href="#release-integrity">发行签名与完整性</a>
 <a class="toc-link toc-sub" href="#11-2-验证边界">11.2 验证边界</a>
-<a class="toc-link toc-sub" href="#maintainer-validation">维护者验证入口</a>
 <div class="no-result" id="noResult">没有匹配的章节</div>
 </nav>
 </aside>
 <main class="main">
 <div class="feature-grid">
-<article class="feature-card"><div class="feature-icon">01</div><h3>双源码模式</h3><p>DATABASE 与 SVN 共用工作区、索引和 UI，分别采用适合各自事实来源的安全模型。</p></article>
+<article class="feature-card"><div class="feature-icon">01</div><h3>源码接入</h3><p>通过官方 API 选择项目范围并维护当前源码。</p></article>
 <article class="feature-card"><div class="feature-icon">02</div><h3>稳定工作区路由</h3><p>产品和项目使用显式 workspaceKey，CLI、Nexus 与 Bridge 始终传递同一身份。</p></article>
-<article class="feature-card"><div class="feature-icon">03</div><h3>受控源码修改</h3><p>DATABASE 修改 Workcopy；SVN 校验授权、会话、版本和文件内容后原子写回。</p></article>
+<article class="feature-card"><div class="feature-icon">03</div><h3>受控源码修改</h3><p>编辑单一源码目录，使用基线、租约和冲突检查保护本地修改。</p></article>
 <article class="feature-card"><div class="feature-icon">04</div><h3>本地事实索引</h3><p>每个工作区用独立 SQLite 保存对象、调用关系和关键事实，支持精确定位与 AI 分析。</p></article>
 <article class="feature-card"><div class="feature-icon">05</div><h3>Nexus 开发入口</h3><p>在 VS Code 中完成配置、导航、编辑、差异、冲突处理、提交和 Bridge 管理。</p></article>
-<article class="feature-card"><div class="feature-icon">06</div><h3>Bridge 页面增强</h3><p>把谷神网页身份路由到本地工作区，提供 DATABASE 拉取、元数据导出和页面辅助。</p></article>
-<article class="feature-card"><div class="feature-icon">07</div><h3>SVN MCP 服务</h3><p>AI 客户端通过独立 stdio 入口查询 SVN PAGE 与过程函数，并受控修改本地源码。</p></article>
+<article class="feature-card"><div class="feature-icon">06</div><h3>Bridge 页面增强</h3><p>把谷神网页身份路由到本地工作区，提供当前对象定位、刷新和页面辅助。</p></article>
+<article class="feature-card"><div class="feature-icon">07</div><h3>API MCP 服务</h3><p>AI 客户端按工作区查询源码，并受控修改本地文件。</p></article>
 <article class="feature-card"><div class="feature-icon">08</div><h3>团队治理</h3><p>规范、Linter、Agent Hook 与 Git Hook 使用同一规则核心，给出可复核的诊断结果。</p></article>
 <article class="feature-card"><div class="feature-icon">09</div><h3>可验证发行</h3><p>跨平台应用、VSIX、Bridge 与 Skill 分别构建与验证，更新经过校验、自检并支持回退。</p></article>
 </div>
@@ -172,159 +164,48 @@ blockquote p{margin:3px 0;color:var(--muted)}blockquote a{color:var(--primary)}
 
 <section class="section">
 <h2 id="1-产品定位与设计原则">1. 产品定位与设计原则</h2>
-<h3 id="1-1-功能边界">1.1 功能边界</h3>
-<p>GuthonCodeTool 把谷神平台的源码与元数据整理为按产品或项目隔离的本地工作区。开发人员可以同步 PAGE、过程函数、系统脚本及数据库元数据，也可以从已授权的 SVN 仓库检出源码；随后通过本地索引完成搜索、跳转、调用关系分析、差异审阅和受控修改。</p>
-<div class="plugin-highlight">
-<div><strong>工具负责</strong><span>工作区路由、源码同步、索引、受控编辑、差异与交付证据，以及 Nexus、Bridge 和 SVN MCP 所需的共享本地能力。</span></div>
-<div><strong>平台负责</strong><span>谷神页面中的编译、发布、运行和业务验证。这些结果按需要另行核验；源码交付以成功提交的 SVN revision 为准。</span></div>
-<div><strong>本地私有</strong><span>真实配置、凭据、源码、索引、日志和业务资料只保存在显式选择的本地数据目录中。</span></div>
-</div>
-<h3 id="1-2-核心设计选择">1.2 核心设计选择</h3>
-<table class="comparison-table">
-<thead><tr><th>设计</th><th>原因</th></tr></thead>
-<tbody>
-<tr><td><strong>一个工作区只选择一个源码 provider</strong><br/>DATABASE 或 SVN。</td><td>防止同一对象同时出现两个事实来源，避免同步、编辑和交付时无法判断哪一份有效。</td></tr>
-<tr><td><strong>产品与项目使用稳定 workspaceKey</strong><br/><code>products.&lt;id&gt;</code> 或 <code>projects.&lt;id&gt;</code>。</td><td>目录名、显示名和当前窗口都会变化；稳定键能让 CLI、Nexus、Bridge、MCP、数据库目标和索引指向同一边界。</td></tr>
-<tr><td><strong>工具源码与运行数据分离</strong></td><td>升级或切换开发/发行入口时不搬迁私有数据，也不会把业务源码和凭据误带入公开仓库。</td></tr>
-<tr><td><strong>DATABASE 与 SVN 使用不同写入模型</strong></td><td>数据库导出是快照，适合 readonly/workcopy；SVN checkout 本身已有版本基线，再复制一份会制造额外冲突。</td></tr>
-<tr><td><strong>AI 默认读取索引与有界证据</strong></td><td>减少扫描和上下文体积，同时保留路径、对象身份、调用位置和 hash，使结论可回到源码核验。</td></tr>
-<tr><td><strong>所有高风险操作显式触发</strong></td><td>源码覆盖、SVN 更新、提交、撤销和工具升级都会改变本地或远端状态，必须由开发人员明确选择范围。</td></tr>
-</tbody>
-</table>
+<h3 id="1-1-功能边界">1.1 功能边界</h3><p>GuthonCodeTool 通过谷神项目 API 接入源码，在各项目独立的本地目录中编辑、检索并按需上传；Nexus 提供开发界面，Bridge 提供浏览器增强。数据库诊断和测试是独立能力，需要明确连接和目标身份。</p><p>本地保存、API 上传回读、平台编译发布与业务验证分别确认。当前源码分支仍在集成，运行入口和端到端效果以实际构建与验证为准。</p>
+<h3 id="1-2-核心设计选择">1.2 核心设计选择</h3><p>每个产品或项目使用明确的 workspaceKey 和独立的源码目录、索引、API 配置与基线。拉取按选择的子系统和数据源执行；本地编辑与远端变更冲突时保留内容并要求处理。操作结果不代替业务验收。</p>
 </section>
 
 <section class="section">
 <h2 id="2-运行架构">2. 运行架构</h2>
-<h3 id="2-1-组件职责">2.1 组件职责</h3>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>Guthon Nexus（VS Code） ──┐ 展示工作区、源码、索引与 SCM；管理 Bridge
-Guthon Bridge（Chrome） ──┼─→ GuthonCodeTool（Python CLI 与共享实现）
-AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同步、索引、Workcopy
-  独立 stdio 进程              ├─ DATABASE provider
-                             └─ SVN provider → 授权 checkout + context/index.db</code></pre></div>
-<ul>
-<li><strong>统一 CLI：</strong><code>scripts/guthon_tool.py</code> 负责编排命令；<code>scripts/common/gusen_hub.py</code> 复用工作区解析、同步状态、索引和 Workcopy 规则。</li>
-<li><strong>DATABASE provider：</strong>读取配置的数据源，导出源码及元数据，并提供受限的只读数据库排查。</li>
-<li><strong>SVN provider：</strong>管理根检出、授权清单、虚拟对象投影、文件写入、SCM、冲突和交付回执。</li>
-<li><strong>Nexus：</strong>只通过参数数组启动工具，不经过 Shell；因此路径、空格和 Windows/macOS 参数行为一致。</li>
-<li><strong>Bridge：</strong>由 Nexus 使用 VS Code 自带的 Node 运行环境启停，普通用户无需另装运行时。</li>
-<li><strong>SVN MCP：</strong>由已配置的 AI 客户端独立启动 stdio 服务；对显式 SVN 工作区调用共享 PAGE/过程函数查询与受控修改服务，默认暴露写入工具，但每次写入仍需授权和编辑租约。</li>
-</ul>
-<p>Nexus 复用常驻 ToolHost。Bridge 使用有界工作区客户端池，同一工作区串行、不同工作区最多四个并行。工作区列表可由 Nexus 视图共享；普通界面刷新不扫描全部 SVN working copy，本地状态刷新与远端检查使用不同命令。</p>
-<h3 id="2-2-目录与调用链">2.2 目录与调用链</h3>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>&lt;toolHome&gt;/
-├── GuthonCodeTool/                 # 可公开、可替换的工具源码
-├── config/                         # 真实运行配置
-├── docs/private/                   # 本机私有资料
-└── var/                            # 独立的私有工作区
-    ├── AGENTS.md
-    ├── tools/guthon-lint
-    ├── nexus/{bridge,tool-runtime.json}
-    ├── checkout/&lt;配置 ID&gt;/         # SVN working copy
-    └── workspace/&lt;工程&gt;/
-        ├── source/{readonly,workcopy}/  # 仅 DATABASE
-        ├── database/                   # 仅 DATABASE
-        └── context/{index.db,state.json,source-mode.json,logs}/</code></pre></div>
-<p><code>toolHome</code> 只能由 <code>--home</code>、运行描述文件或 <code>GUTHON_HOME/GUTHON_TOOL_HOME</code> 环境变量显式提供。源码不能沿父目录猜测 <code>config</code> 或 <code>var</code>，因为这种猜测会让开发仓库、发行应用和用户数据相互污染。</p>
-<p>Nexus 将当前应用入口、toolHome 和运行模式写入运行描述文件，Bridge 据此使用同一工作空间。MCP 客户端需单独配置可执行入口及显式 toolHome；它不会因 Nexus 切换模式而自动重写客户端配置。配置和工作区分别按请求加载，不使用全局“当前工作区”。</p>
-<h4 id="source-repository">公开仓库与业务开发入口</h4>
-<p>公开仓库中的 <code>config/</code> 只保存示例与 schema，<code>scripts/</code> 实现 CLI 和 provider，<code>plugins/GuthonNexus/</code> 与 <code>plugins/GuthonBridge/</code> 分别提供编辑器和浏览器组件，<code>skills/guthon-testing/</code> 提供谷神开发与只读验证流程。维护工具先读 <a href="https://github.com/SidWuu/GuthonCodeTool/blob/main/AGENTS.md">AGENTS.md</a>，再用 <a href="https://github.com/SidWuu/GuthonCodeTool/blob/main/AI_CODE_INDEX.md">代码导航索引</a> 定位模块；业务开发则从独立私有工作区的 <code>&lt;toolHome&gt;/var/AGENTS.md</code> 进入，不把业务源码复制进工具仓库。</p>
-<p>DATABASE 工作区包含 <code>docs/</code>、<code>source/readonly/</code>、<code>source/workcopy/</code>、<code>database/{schema,billtype,views}/</code> 与 <code>context/</code>；SVN 工作区只在工作区目录保存说明和派生资料，源码位于唯一 checkout。目录前缀 <code>PRD</code>/<code>PRJ</code> 只控制显示顺序，不是工作区身份。私有 Git 忽略根级 <code>checkout/</code>，SVN 源码差异、更新、撤销和提交由 SVN 管理，不将其强制纳入第二套 Git 历史。</p>
+<h3 id="2-1-组件职责">2.1 组件职责</h3><p>CLI 和 ToolHost 解析同一工作区登记，按 API、SVN、DATABASE 能力执行；Nexus 负责项目配置、源码界面、编辑与状态，Bridge 负责受信任页面的定位与辅助，MCP 提供按工作区限定的本地查询和编辑。数据库诊断通过独立连接或 DBX 操作。</p>
+<h4 id="api-source-preview">API 接入与范围</h4><p>源码 API 登录要求谷神平台主版本至少为 <code>2.0.0</code>，日期版本不早于 <code>202611101305</code>；平台未返回可核验版本或低于门槛时报告 <code>API_VERSION_UNSUPPORTED</code>。实际可用操作还取决于平台提供的接口、账号权限及当前项目有效会话；本地已同步源码的查询和编辑不要求平台在线。</p><p>API 支持项目地址、账号登录及验证码；勾选“保存密码”后，Nexus 在本机扩展存储中加密保存登录信息，不写入工作区配置或系统钥匙串。保存范围由明确的 toolHome、workspaceKey 和平台地址共同确定。Nexus 使用 AES-256-GCM 加密，随机密钥与加密记录分别存放于扩展全局存储的 <code>api-login/encryption.key</code> 和 <code>api-login/&lt;scopehash&gt;.json</code>；密钥也在本机，须限制同一账号对这些文件的访问，不能将其视为可抵御同账号文件访问的保护。API 保存密码只供本地 Nexus 使用；独立 CLI/MCP 不自动读取这份凭据；独立 MCP 的受支持在线工具可委派到同一项目的 Nexus 登录会话，具体动作见 <a href="#9-guthon-api-mcp">API MCP</a>。本地源码查询与编辑能力保留。数据库凭据存储独立于 API 登录，不受此变更影响。旧系统钥匙串中的 API 登录记录不会被读取、迁移或删除；升级后需要手动登录一次并勾选保存密码。卡片通过平台核验登录状态；临时网络或队列故障显示待核验状态并禁用主操作。后端仅在内存中保留会话及登录协议使用的凭据摘要；Nexus 可解密已保存的登录信息并通过标准输入发起合并的恢复登录。恢复失败后停止重复自动尝试，直到用户明确重新登录。收到明确登录失效应答后，可恢复登录并重试已登记的只读请求；上传、签出及保存请求不会自动重放。未保存密码且后端重启后，需要重新登录。选择全部或指定子系统，Nexus 自动使用所选子系统关联的数据源，不再弹出共享数据源选择；空选择不自动扩大范围。CLI 中显式配置额外数据源的能力保留。PAGE、过程函数、系统脚本、表与视图按各自系统或数据源归属处理；公共文件及项目配置按范围设置获取。</p><p>发行后端内置 HTTPS CA 证书资源，并保留系统信任设置；项目平台与谷神登录服务分别连接。证书校验失败会明确标识 <code>API_TLS_CERTIFICATE_ERROR</code> 和失败的服务，不会关闭证书验证。</p>
+<h3 id="2-2-目录与调用链">2.2 目录与调用链</h3><pre><code>&lt;toolHome&gt;/
+├── config/                         # 本地配置
+└── var/                            # IDE 打开的开发根，可自定义名称
+    ├── workspace/
+    │   └── &lt;新 API 项目&gt;/
+    │       ├── checkout/           # 当前源码
+    │       ├── context/            # 索引、基线和恢复记录
+    │       ├── runtime/            # 日志和缓存
+    │       └── docs/               # 项目文档
+    └── nexus/                     # 本机工具状态</code></pre><p>新增 SVN 和 DATABASE 项目的登记目录也在 <code>workspace/</code> 下。使用默认布局的 SVN 项目签出到项目内的 <code>checkout/</code>，显式配置的 checkout 及旧分类项目沿用既有路径。DATABASE 的原文和工作副本分别位于 <code>source/readonly/</code> 和 <code>source/workcopy/</code>；真实配置、凭据和业务源码不放入公开工具仓库。系统关联的数据源以及显式选择的共享数据源可能包含共享对象，应确认范围后拉取。</p><p>平台 PAGE 的 <code>fileName</code> 和 <code>superFileName</code> 支持以单个 <code>/</code> 开头的站点路径，映射到对应页面身份目录内；原始平台元数据保留，路径穿越、空段及重复文件映射仍会拒绝。</p>
+<h4 id="source-repository">公开仓库与业务开发入口</h4><p>工具源码和工作数据分别管理；在业务窗口使用明确的 toolHome、workspaceKey 与项目目录，不从目录名猜测目标。</p>
 </section>
 
 <section class="section">
 <h2 id="3-工作区与配置">3. 工作区与配置</h2>
-<h3 id="3-1-稳定身份与配置">3.1 稳定身份与配置</h3>
-<ul>
-<li><code>datasource.yaml</code>：数据源注册和 DATABASE 连接引用。</li>
-<li><code>products.yaml</code>：产品名称、稳定 ID、数据源、子系统范围和可选 SVN 根地址。</li>
-<li><code>projects.yaml</code>：项目快照的独立配置。项目与产品并列管理，不保存产品工作区引用。</li>
-<li><code>source-tables.yaml</code>：DATABASE 源码表及语义字段映射。</li>
-<li><code>sync.yaml</code>：公共同步规则、SVN 用户名、拉取校验和白名单；不保存默认工作区。</li>
-<li><code>database-testing.yaml</code>：只读数据库目标、连接引用、环境身份与正式验证范围。</li>
-<li><code>context/source-mode.json</code>：当前工作区的 DATABASE/SVN 选择；缺失时采用 DATABASE。</li>
-</ul>
-<p>所有调用方必须传递同一 <code>workspaceKey</code>。Bridge 在缺少该键时只能根据页面身份查找候选；如果存在多个匹配项，选择仅对当前请求有效，不写入全局状态。这样多个产品、项目和窗口可以同时工作而不串线。</p>
-<h4 id="workspace-config-reference">配置字段与故障隔离</h4>
-<p>产品和项目分别声明数据源与系统映射。下例只展示公开字段，完整格式见 <a href="https://github.com/SidWuu/GuthonCodeTool/blob/main/config/README.md">配置参考</a>：</p>
-<div class="code-wrap"><span class="code-lang">yaml</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>products:
-  demo-product:
-    name: 示例产品
-    aliases: [示例简称]
-    datasource: demo-product-dev
-    systems:
-      include:
-        mappings:
-          demo.system:
-            system_id: SYS-DEMO
-            data_source_id: &quot;0000&quot;
-    page_origins: []</code></pre></div>
-<p><code>mappings</code> 的键为系统 alias，每项对应一对 <code>system_id/data_source_id</code>。SVN 用它识别与分组完整检出的源码；DATABASE 按 alias 查询并使用本地 <code>system-data.json</code> 缓存。项目拥有自己的数据源 ID，不复用产品值。源码模式不写入产品/项目 YAML，而保存在各工作区的 <code>context/source-mode.json</code>。</p>
-<p>工作区列表以 <code>configErrors</code> 返回单项配置错误，不阻断无关工作区；冲突身份和重叠 SVN 授权范围仍拒绝使用。不要通过更换目录名绕过身份校验。</p>
-<p><code>aliases</code> 是可选的工作区名称数组，用于名称与任务 prompt 定位；与系统 <code>mappings</code> 的 alias 不同，不改变稳定 ID、源码来源或目录。名称按规范化后的完整文本匹配，不以模糊子串猜测；重名或别名冲突返回候选，指定产品/项目类型可缩小范围。</p>
-<h3 id="3-2-创建切换与删除">3.2 创建、切换与删除</h3>
-<ol>
-<li><strong>首次设置：</strong><code>setup</code> 只创建缺失的公开模板和空注册表，不覆盖已有配置。</li>
-<li><strong>添加工作区：</strong>向导收集产品/项目、名称、稳定 ID 和源码模式，随后原子写入相关注册表。DATABASE 和 SVN 的连接细节在对应模块继续配置。</li>
-<li><strong>切换 toolHome：</strong>Nexus 先在候选目录执行设置与验证，通过后才保存新目录。失败或取消不会破坏当前可用配置。</li>
-<li><strong>切换源码模式：</strong>只更新目标工作区的 <code>source-mode.json</code>，不会影响其他工作区。</li>
-<li><strong>删除工作区：</strong>先显示目录、配置和独占资源的精确范围；项目 <code>docs/</code> 下有文件时提示检查是否需要备份。确认后把工作区目录移入系统废纸篓，并只删除对应注册项和专属配置。</li>
-</ol>
-<p>项目删除不会连带删除产品；共享数据源也不会因某个工作区删除而被误删。该设计把“身份”“物理目录”和“可共享资源”分别核对，避免用目录递归推断业务关系。</p>
-<h4>拉取历史与归档</h4>
-<p>“查看源码拉取历史”按固定观察快照分页，可导出 JSON 或 Markdown。归档先预览候选，再确认完整工作区键；只处理明确归属的本地终态记录，保留备份。恢复前核验归档 ID 与当前日志状态；日志已变化时拒绝覆盖。无身份、损坏或未知状态的记录保留，共享 Bridge 日志仅导出、不清理。</p>
-<h3 id="3-3-命令与运行描述">3.3 命令与运行描述</h3>
-<table class="comparison-table"><thead><tr><th>运行模式</th><th>入口与要求</th><th>适用场景</th></tr></thead><tbody>
-<tr><td>发行模式</td><td>macOS 目录包中的启动文件，或 Windows x64 EXE。</td><td>常规使用，无需另装工具后端的 Python。</td></tr>
-<tr><td>调试模式</td><td>本机 64 位 Python 3.12+、同一 Release 的 <code>GuthonCodeTool-python.pyz</code> 与同目录的 <code>GuthonCodeTool-checksums.txt</code>；初始化时检查依赖、自检和 ToolHost 协议。</td><td>已有 Python 环境、需要脚本运行方式。</td></tr>
-<tr><td>开发模式</td><td>显式源码目录及其 <code>.venv</code> Python。</td><td>维护工具源码，修改后重启相应 ToolHost。</td></tr>
-</tbody></table>
-<p>三种模式共用显式选择的 toolHome。模式切换不迁移配置与业务源码，MCP 的独立客户端配置也不会随之自动改写。</p>
-<p>统一 CLI 覆盖以下功能族：</p>
-<div class="plugin-highlight">
-<div><strong>设置与路由</strong><span><code>setup</code>、<code>workspace-create/delete</code>、<code>workspaces</code>、<code>workspace-resolve</code>、<code>workspace-summary</code>、<code>source-mode</code>、<code>route</code>。</span></div>
-<div><strong>同步与索引</strong><span><code>sync-source</code>、<code>sync-source-all</code>、<code>sync-all</code>、<code>pull</code>、<code>reindex</code>、<code>search</code>、<code>context-pack</code>。</span></div>
-<div><strong>数据与源码</strong><span>元数据导出、数据库目标解析与只读查询、Workcopy 操作，以及完整的 <code>svn</code> 命令族。</span></div>
-<div><strong>命令自省</strong><span><code>help &lt;command&gt;</code>，以及任意命令的 <code>--help</code>；<code>svn &lt;action&gt; --help</code> 单独说明该 action 的专属参数。</span></div>
-</div>
-<p>同步与索引也提供语义明确的别名：<code>source-sync</code> 对应 <code>sync-source</code>、<code>source-sync-full</code> 对应 <code>sync-source-all</code>、<code>workspace-sync</code> 对应 <code>sync-all</code>、<code>index-rebuild</code> 对应 <code>reindex</code>；<code>index-init</code> 用于索引初始化。具体参数以当前入口的帮助为准。</p>
-<p><code>workspace-resolve</code> 返回唯一工作区、实际 <code>root</code>、provider、索引就绪度和下一步建议，不读取源码正文。支持 <code>--workspace</code>、<code>--name</code>、<code>--kind product|project</code>、<code>--path</code>、<code>--prompt</code>、<code>--current-workspace</code>；<code>--stdin</code> 可接收同等选择字段的 JSON，避免把 prompt 拼入 shell。名称、别名、prompt 与路径都复用同一注册清单，不能定位时返回结构化候选或错误，不选择默认工作区。</p>
-<p>MCP 的 <code>resolve_workspace</code> 同样支持 <code>workspaceKey</code>、<code>name</code>、<code>kind</code>、<code>path</code>、<code>prompt</code> 和 <code>currentWorkspaceKey</code>；后续业务工具仍显式传工作区键。配套 guthon-guard 提供 <code>guthon-use</code> 命令/Skill，并通过提交 Hook 保存当前对话目标。参考来源不作为目标，多个目标或与既有绑定冲突需要明确选择。宿主不提供 Hook 身份时只解析，由调用方携带上下文；不设置全局 ACTIVE。操作步骤见<a href="GuthonCodeTool_使用手册.html#agent-workspace-selection">选择 AI 任务目标</a>。</p>
-<p>CLI <code>--stdin</code> 的 JSON 字段为 <code>workspace_key</code>、<code>name</code>、<code>kind</code>、<code>path</code>、<code>prompt</code>、<code>current_workspace</code>；例如 <code>{"name":"示例项目","kind":"project"}</code>。MCP 使用其工具 schema 中的驼峰字段；两者复用相同解析服务。</p>
-<p>返回结果中的 <code>indexFirst.examples</code> 同时给出各场景可直接复制运行的完整 argv（含 <code>--home</code>、<code>--workspace</code> 与必填参数），使 Agent 不依赖外部文档即可发起有界查询；参数仍可随时用 <code>help</code> 或 <code>--help</code> 复核。</p>
-<h4 id="runtime-cli-reference">CLI 与 runtime descriptor 参考</h4>
-<p>以下源码命令从工具仓库根运行。先将 <code>GUTHON_HOME</code> 显式设为真实本地数据目录；Windows PowerShell 使用 <code>.\.venv\Scripts\python.exe</code>。发行与调试环境使用运行描述文件中的实际入口，不照搬源码路径。公共参数属于统一 CLI，子命令专属参数放在 <code>--</code> 后：</p>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>.venv/bin/python scripts/guthon_tool.py workspaces --home &quot;$GUTHON_HOME&quot;
-.venv/bin/python scripts/guthon_tool.py help context-pack
-.venv/bin/python scripts/guthon_tool.py svn --home &quot;$GUTHON_HOME&quot; --workspace products.demo -- facts --help
-.venv/bin/python scripts/guthon_tool.py command-metadata</code></pre></div>
-<table class="comparison-table"><thead><tr><th>任务</th><th>命令或参数契约</th></tr></thead><tbody>
-<tr><td>初始化与工作区</td><td><code>setup</code>、<code>workspace-create</code>（JSON stdin）、<code>workspaces</code>、<code>workspace-resolve</code>。首次 setup 创建空注册表及缺失模板，既有文件不覆盖；新增工作区不需重新初始化数据目录。</td></tr>
-<tr><td>同步与单项导出</td><td><code>sync-source</code>、<code>sync-source-all</code>、<code>sync-all</code>、<code>export-schema</code>、<code>export-bill-type</code>、<code>export-system-script</code>、<code>export-view</code>。目标始终用显式 <code>--workspace products.&lt;id&gt;/projects.&lt;id&gt;</code>；例如视图可在 <code>--</code> 后按 <code>--data-source-ids/--view-ids</code> 筛选。</td></tr>
-<tr><td>索引与上下文</td><td><code>reindex</code>、<code>index-doctor</code>、<code>index-compact</code>、<code>export-markdown</code>、<code>search</code>、<code>context-pack</code>。<code>query</code>、<code>svn</code> 和 <code>context-pack</code> 的函数参数接受 <code>--fun/--fun-id</code> 同义写法。</td></tr>
-<tr><td>SVN 路线</td><td><code>source-mode -- set --mode svn</code> 选择 provider；<code>svn scope-import/scope-preview</code> 导入并预览范围；<code>sync-from-config</code> 接入配置；<code>refresh</code> 显式更新远程，<code>status --diff</code> 查本地状态，<code>delivery-status</code> 查交付回执。兼容命令名与专属参数以当前帮助为准。</td></tr>
-<tr><td>结果格式</td><td><code>--json</code> 或显式 <code>--format json</code> 返回 <code>apiVersion=1</code> 且保留原有字段；文本、表格、CSV 按显式格式输出。MCP 和 ToolHost 使用各自协议帧，不混入普通 CLI 展示文本。</td></tr>
-</tbody></table>
-<p><code>&lt;toolHome&gt;/var/nexus/tool-runtime.json</code> 包含 <code>command/home</code>、运行模式、代码来源、ToolHost 协议，以及 cwd 无关的 <code>workspaceResolveCommand</code>、<code>databaseTargetResolveCommand</code>、<code>databaseProbeCommand</code>、<code>databaseDescribeCommand</code>、<code>databaseQueryCommand</code> 和 <code>linterCommand</code> 数组。Agent 在业务 cwd 先解析工作区，数据库排查再解析目标；不拼装 <code>../../scripts</code> 或从 PRD/PRJ 目录名猜测。</p>
-<p>CLI 与 Node 的动作分类、超时和帮助共用 <code>scripts/common/command_metadata.json</code>，构建生成 Nexus 副本并检查字节一致性。<code>version</code> 和 MCP runtime status 返回后端 <code>buildId</code>；Nexus 状态栏及输出另显示插件构建，二者不能互相代替。失败输出保留目标工作区、首条失败阶段和完整诊断。</p>
+<h3 id="3-1-稳定身份与配置">3.1 稳定身份与配置</h3><p>每个工作区使用稳定的 <code>workspaceKey</code>；Nexus 在登记时要求明确选择项目同步方式，统一配置 schema 3 支持 API、SVN 和 DATABASE。API schema 2 可继续登记 API 项目。未指定 ID 时生成 <code>ws_</code> 加 UUID；CLI 也可指定 ID、目录、别名和 <code>sourceMode</code>，省略同步方式时沿用 API 默认值。旧版分类登记后端使用生成的 ID 和操作者选择的项目／产品类型，创建前按当前后端报告的登记格式确定请求。各工作区独立配置 API 地址、系统和数据源范围。checkout、基线和操作记录绑定平台身份；已有基线后更换平台地址需另建工作区或明确迁移。CodeBuddy 打开 <code>var/</code> 根并由 Nexus 在当前窗口切换；Nexus 使用 <code>context.workspaceState</code> 按 toolHome 保存和恢复工作区 key；根窗口未选择时不猜测目标，失效 key 会清除，运行中的窗口各自保持选择，不写共享 ACTIVE。后端请求仍传明确 key。原有窗口选择行为有隔离客户端证据；本轮三层视图通过源码联动与卡片预览检查，安装后的 IDE 展示仍需独立验收。Codex 可打开具体项目目录并继承开发根的 <code>AGENTS.md</code>。</p><h4 id="workspace-config-reference">配置字段与故障隔离</h4><p>新目录使用 <code>schemaVersion: 3</code> 的 <code>config/guthon.json</code>，包含 <code>workspaces</code>、<code>sync</code>、<code>datasource</code>、<code>databaseTesting</code>、<code>apiWorkspaces</code> 与 <code>sourceTables</code>；登记项明确 <code>sourceMode</code>。新增登记的 <code>directory</code> 保存为 <code>workspace/&lt;项目目录&gt;</code>。既有单级 <code>directory</code> 和显式 <code>root</code> 按原路径解析。已有 API schema 2 保持原版本和默认 API 语义，不在加载时升级。完整旧分类 YAML 可只读解析，保留 key、路径、有效模式及源码字段映射；<code>setup</code> 不为旧空间补建 Git 或改写目录。项目总览、当前卡片及源码入口按已解析的同步方式路由。配置格式可离线预览并显式升级至 schema 3。源码同步方式另行处理。新 API 工作区包含 <code>checkout/</code>、<code>context/</code>、<code>runtime/</code> 和初始为空的 <code>docs/</code>；兼容项目按登记和授权范围解析实际路径。<code>context/</code> 中索引可重建，基线、冲突与回执需保留以便恢复；<code>runtime/</code> 为日志和缓存，两者默认由根 Git 忽略。平台继承和只读保护根据对象元数据判断。<code>var/</code> 是唯一 Git 根；首次初始化新空间时创建空 <code>workspace/</code>、<code>rules/</code> 与 <code>docs/</code>；已有空间重跑 setup 保留原规范布局。团队规范优先使用已存在的 <code>rules/</code>，没有时沿用 <code>docs/</code>，解析摘要的 <code>rulesDir</code> 返回实际目录。共用参考继续放在根 <code>docs/</code>；工具生成的方言 API 参考缓存位于 <code>nexus/api-reference/谷神方言API/</code>，与团队管理的规范文件分开。根 <code>AGENTS.md</code> 非覆盖式生成，<code>.gitignore</code> 只更新受管块；不为每个工作区生成重复入口。共用 <code>nexus/</code>、<code>tools/</code>、<code>.guthon/</code> 等运行目录继续遵循既有契约并由根忽略规则覆盖。API 登录信息由 Nexus 单独加密存储。旧 JSON schema 1 和不支持的版本明确报错；活动统一 JSON 与旧 YAML 并存时报告 <code>CONFIG_AUTHORITY_CONFLICT</code>，不混读或自动转换。局部配置错误通过 <code>configErrors</code> 返回，其他无冲突项目继续解析。公共摘要区分 <code>providerCapabilities</code> 配置声明、<code>capabilities</code> 当前可用入口与 <code>executionReady</code>；<code>workspaceBinding</code> 供核对同 key 的来源变化，不代表迁移及全部旧会话停用已实现。SVN/DATABASE 使用旧索引格式和本地就绪检查。各索引按工作区隔离。真实地址、密码和业务内容不应写入公开示例。</p>
+<p>统一配置 schema 3 下，DATABASE 和 SVN 项目在当前项目卡片直接登录。DATABASE 登录会验证该连接能读取谷神主数据中的子系统。SVN 项目可独立设置仓库地址与用户名，旧配置可继续沿用共享 SVN 账号。SVN 密码由客户端验证后保存在系统凭据库，后端在需要时通过标准输入传给 SVN。已有本地 SVN 认证方式仍适用。DATABASE 主数据连接绑定到当前项目的源码数据源，密码存入系统凭据库。DATABASE 同步范围依据主数据连接返回的子系统及其数据源身份。字段映射使用统一配置的 <code>sourceTables</code>；省略 <code>sync.sync</code> 时，增量同步使用 10 分钟回看窗口。完整更新会在访问主库前核对 PAGE、过程函数和系统脚本的字段映射。SVN 范围根据配置的仓库 URL 浅枚举可读目录，并识别目录名称标记。清单以数据源为单位合并已配置或可靠匹配的子系统，同一数据源映射到多个子系统时会一起签出。公共源码和开发建议单独列出。已建立的 SVN 授权清单、工作副本和已同步 DATABASE 源码的缩小范围由各自的迁移流程处理。操作见<a href="GuthonCodeTool_使用手册.html#project-settings-guide">项目设置</a>。</p><p>在明确的本地数据目录中，用 <code>configuration-upgrade plan</code> 查看源文件、目标版本和保留的项目身份。关闭同一目录的其他写入入口后，执行 <code>configuration-upgrade apply --offline --confirm &lt;planId&gt;</code>。命令先核对预览和原文件摘要，再在 <code>config/.configuration-upgrades/</code> 备份并发布统一配置。遇到 <code>CONFIG_UPGRADE_PENDING</code> 时运行 <code>configuration-upgrade status</code>，根据返回的事务 ID 执行 <code>recover --offline --confirm &lt;transactionId&gt;</code>。发布前恢复原文件，发布后以写入的统一配置完成登记。所有命令均使用已核对的 <code>--home</code>，动作参数放在 <code>--</code> 后。</p>
+<h4 id="project-docs-import">从原目录迁移项目文档</h4><p>“当前项目 → … → 从原目录迁移”适用于重新登记后的 API、SVN 和 DATABASE 项目。选择同一本地数据目录下 <code>backup/workspace/&lt;原项目&gt;</code>，Nexus 使用当前项目已登记的文档路径，仅复制 <code>docs/</code> 下的普通文件与目录，保留原文件内容、相对路径及空目录。备份原件保留在原处。源码、版本库、配置和索引由新项目各自建立。若目标存在同名同内容文件则跳过，遇到同名不同内容、文件与目录重名、符号链接或特殊文件时，在复制前停止。复制因磁盘或权限错误中断后，可处理问题并重新执行。操作步骤见<a href="GuthonCodeTool_使用手册.html#reregister-project-docs">重新登记项目并迁移文档</a>。</p>
+<h4 id="svn-api-migration-reference">SVN 切换 API 的命令和核对范围</h4>
+<p>源项目须登记在 schema 3 下。<code>svn-api-migration</code> 按 <code>--home</code> 和 <code>--workspace</code> 选择唯一项目；<code>preflight</code> 检查授权 working copy、仓库身份、本地状态和未解决的交付记录。操作者提交谷神平台最终生效依据，并在切换前确认所有旧写入入口离线。目标平台与项目依照已配置的来源地址（如有）、系统 ID、数据源 ID 及关联核对。</p>
+<table><tr><th>动作</th><th>输入与结果</th></tr>
+<tr><td><code>prepare</code></td><td>标准输入 JSON 的 <code>serverUrl</code>、<code>platformEvidence</code> 与 <code>login</code>（<code>userId</code>、<code>password</code>、可选 <code>randCode</code>）。读取 API 候选，建立独立基线和索引，返回缺项、歧义或可审阅计划。凭据仅用于本次认证。</td></tr>
+<tr><td><code>plan</code></td><td>读取当前可审阅计划。对象按类型、所有者和稳定 ID 核对，继承来源独立检查；字节相同与需人工比较的对象分别列出。API 额外对象单列。缺项、歧义、读取或索引失败会阻断。</td></tr>
+<tr><td><code>apply --offline --confirm &lt;planId&gt;</code></td><td>标准输入 JSON 提供 <code>login</code> 和 <code>manualReview</code>，后者按待核对的 SVN 相对路径填写依据。再次检查旧侧状态、候选和平台范围及正文摘要。以原子更新当前登记作为切换点，保留原 key、项目根、文档、旧 SVN 工作副本和上下文。新源码进入项目根 <code>checkout/</code>，新基线和索引另存于 <code>context/api-provider/</code>。</td></tr>
+<tr><td><code>status</code> / <code>recover --offline --confirm &lt;transactionId&gt;</code></td><td>根据实际登记判断中断状态。发布前恢复候选位置，发布后确认现有 API 登记。备份与核对记录保存在 <code>config/.svn-api-migrations/</code>。旧 SVN 写入绑定在重新核验时失效。</td></tr>
+</table>
+<p>自动核对覆盖可映射的受管对象及字节摘要。跨格式正文、旧平台最终提交、运行时效果和业务结果各自依据实际证据。DATABASE 项目仍按原模式接入；执行步骤见<a href="GuthonCodeTool_使用手册.html#migrate-local-changes">使用手册</a>。</p>
+<h3 id="3-2-创建切换与删除">3.2 创建、切换与删除</h3><p>在 Nexus 创建项目并明确选择目标；删除前核对预览及保留的数据。任务开始时按明确目标或路径解析 workspaceKey，不依赖全局默认项目。</p>
+<h3 id="3-3-命令与运行描述">3.3 命令与运行描述</h3><h4 id="runtime-cli-reference">CLI 与 runtime descriptor 参考</h4><p>执行“设置/切换工作空间”时，先选择本地数据目录，再按当前运行方式明确选择后端入口，避免新 API 空间沿用有效的旧 SVN 后端。用户设置中的数据目录只用于打开该数据目录、所属开发根或开发子目录的窗口；工作区的显式连接优先。无关联的窗口显示初始化或连接入口。首次从当前开发目录初始化时，数据目录固定为其上一级。Nexus 优先识别上一级的发行应用，即使用户设置保留了开发模式。缺少对应入口时可单独选择运行目录。新配置通过 <code>workspaceDirectory</code> 记录开发目录名称，缺省为 <code>var</code>。目录、入口选择及执行确认阶段只准备选择结果；取消或目标目录读取失败保留原运行入口与目录配置，初始化或读取成功后才保存。“刷新当前状态”和窗口内工作区切换继续使用已配置入口。</p><p>使用 <code>api &lt;action&gt; --stdin</code> 传递结构化输入，CLI 与 ToolHost 共用工作区身份。动作包括配置、登录、拉取、定向刷新、状态、目录、读取、编辑、差异、冲突处理、上传、回读核对、索引和查询；完整参数以当前命令帮助为准。<code>api pull --stdin</code> 输入 <code>{"checkOnly":true}</code> 可只读下载并检查当前范围，不发布源码、不重建索引、不改变范围或拉取状态。凭据通过标准输入传递，不放入命令参数。</p><p>Nexus 刷新状态时只请求完整范围的汇总和非干净文件清单，避免大项目状态超出传输预算；<code>api status</code> 默认仍返回完整文件列表，<code>changesOnly: true</code> 可仅返回变更项及 <code>summary</code> 计数。状态刷新使用可重建的文件指纹/哈希缓存，仅重新读取发生变化的正文；每次仍检查范围、只读、冲突与删除状态。上传和受控写入保留原有实时校验。卡片先显示轻量项目信息，再异步恢复已保存的登录；平台认证不阻塞本地源码打开、检索或配置向导。自动恢复失败后不再重复尝试，需在卡片手动登录。登录完成后立即显示会话，源码状态在后台刷新；同项目并发刷新与会话恢复合并处理。文件事件先核对登记路径，排除配置/临时文件；无变化的重复索引事件不复制整个索引或改变代次。API 元数据与原文摘要匹配的极简 PAGE、无 SQL 视图会被识别为元数据型源码，不作为格式失败，也不生成不存在的结构或 SQL 事实。真正的身份冲突或无法解析内容保留原文与诊断，其他可解析对象继续处理。重新打开窗口后，可直接从源码树查看已保存的目录诊断，无需再次重建整个索引。</p><p>运行描述使用显式 toolHome 和命令数组；发行、源码及调试模式的入口不同。实际能力以当前安装版本为准。</p>
 </section>
 
 <section class="section">
-<h2 id="4-database-模式">4. DATABASE 模式</h2>
-<h3 id="4-1-源码与元数据同步">4.1 源码与元数据同步</h3>
-<p>DATABASE provider 根据目标工作区的数据源、子系统范围和语义映射读取 PAGE、过程函数与系统脚本，生成结构化的 <code>source/readonly</code>。PAGE 保存原始 JSON，同时拆出 GSS、JavaScript、SQL、事件和组件脚本；过程函数按包与函数组织；项目快照内的继承关系只使用同一快照的数据，不跨到产品工作区。</p>
-<p>元数据导出包含表结构、单据类型、系统脚本和视图。<code>sync-all</code> 固定执行“源码与索引 → 表结构 → 单据类型 → 系统脚本 → 视图”。任一步失败或执行期间配置摘要改变，后续步骤都会停止；只有全部成功才把工作区标记为 <code>SYNCED</code>。这样“同步完成”代表一个一致快照，而不是五个时间点不同的局部结果。</p>
-<h3 id="4-2-workcopy-开发">4.2 Workcopy 开发</h3>
-<ol>
-<li>从 readonly 创建目标对象的 Workcopy，并保存来源身份。</li>
-<li>开发人员只修改 <code>source/workcopy</code>，readonly 始终表示最近一次数据库导出。</li>
-<li><code>workcopy status</code> 汇总状态，<code>diff</code> 生成差异，<code>package</code> 生成可交付清单。</li>
-<li>再次拉取时，默认直接比较新 readonly 与现有 workcopy；存在差异便保留 workcopy，防止覆盖开发修改。</li>
-</ol>
-<p><code>rules.pull_diff_check</code> 默认启用。只有显式关闭时才允许拉取覆盖 workcopy。自动 Git 暂存也只处理本次新生成且原本未跟踪的目标文件，不会暂存已有修改、其他工作区文件或被忽略内容。</p>
-<p>采用双目录是因为数据库导出没有版本控制工作副本。readonly 提供可重建基线，workcopy 保留人工修改，两者的差异就是需要审阅和回填平台的内容。</p>
-<p>JSON 请求的 <code>force=true</code> 需同时提供完整工作区键作为 <code>confirmation</code>，并先备份到相邻 <code>.guthon-trash/&lt;时间戳&gt;/</code>；<code>workcopy trash-list</code> 列出备份，<code>workcopy restore &lt;backup&gt; --check</code> 预览恢复范围，正式恢复确认完整工作区键并先备份当前副本。远程未找到源码时返回失败及缓存可用提示，不修改 Workcopy；确需从缓存创建副本时使用 <code>create-workcopy</code>。PAGE 业务修改落在拆分脚本，原始 <code>raw.json</code> 不作为编辑入口。</p>
-<p>源码镜像写入与 SQLite 更新保留恢复记录，失败回滚，下次同步先处理未完成事务。导出内容相同则保留原文件，变化时原子替换；不据此宣称已使用数据库远端增量水位。私有 Git 暂存加锁，只处理本次明确生成且原先未跟踪的文件，排除回收站、日志及同时手工新增文件；路径按原始字节传递以保留中文名称。</p>
-<h3 id="4-3-只读数据库排查">4.3 只读数据库排查</h3>
+<h2 id="4-数据库诊断">4. 数据库诊断与测试</h2>
+<h3 id="4-3-只读数据库排查">4.1 只读数据库排查</h3>
 <p>工具可按工作区、开发/测试环境和私有目标配置解析数据库连接，支持 MySQL、PostgreSQL 与 Oracle。查询必须核对 database/schema 和实际可见表；正式测试计划另有声明的验证范围。密码默认写入系统凭据库，配置只保存连接引用。</p>
 <ul>
 <li><code>database-probe</code>：验证驱动、连接和只读能力。</li>
@@ -348,405 +229,77 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <p><code>database-history-list/show</code> 提供脱敏查询历史，<code>database-compare</code> 提供目标间计数对比，<code>diagnosis-template</code> 生成查询模板；计数不同不直接代表功能错误。描述缓存绑定完整目标摘要、TTL 及 probe 失效 epoch。<code>diagnosis-list/show</code> 供 Nexus 查看最近最多 100 条诊断摘要或精确详情，不读取 SQL、参数或结果行，也不重新运行查询。固定案例报告默认隐藏绑定参数，只有明确 <code>--include-params</code> 才写入原文；报告位于私有 <code>var/docs/业务排查文档/</code>，模板见公开的 <a href="https://github.com/SidWuu/GuthonCodeTool/blob/main/config/example/source-diagnosis.example.json">source-diagnosis 示例</a>。</p>
 <h4 id="database-plan-reference">正式只读验证计划</h4>
 <p><code>database-test-artifacts</code> 提供 <code>validate-config</code>、<code>init-plan</code>、<code>run-readonly</code>、<code>export-dbx-plan</code> 和 <code>import-dbx-results</code> 等子命令。正式目标和计划需声明系统、数据源与租户证据，计划 SQL 按实际源码和业务键限定范围。<code>allowedTables</code> 是兼容旧配置的可选表名提示，用于生成计划草案，不作为查询授权名单。配置与 SQL 仍须满足已核验目标的 database/schema，内置查询对每个物理表核验实际可见元数据；DBX 交接由调用方先核验身份和表结构。静态工件校验不能代替真实身份、业务用户行权限或 WHERE 业务语义核验。执行器先核身份，前置条件失败或结果截断时停止相应用例；平台结果用例还需与源码和目标绑定的版本及触发证据。内置连接可执行只读计划，DBX-only 目标通过交接、结果导入和本地 evaluate 完成证据处理。</p>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>.venv/bin/python scripts/guthon_tool.py database-test-artifacts -- \
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>.venv/bin/python scripts/guthon_tool.py database-test-artifacts --home /absolute/toolHome -- \
   run-readonly /absolute/private/plan.json \
-  --config /absolute/toolHome/config/database-testing.yaml \
+  --config /absolute/toolHome/config/guthon.json \
   --out-dir /absolute/private/new-run</code></pre></div>
 <p>每次运行使用新的私有目录，保存结果和报告，不覆盖旧运行；执行器不发布、不触发平台或清理数据。<code>diagnose case.json --dry-run</code> 只做未绑定 SQL 的静态校验，不连接也不写报告。模板的 <code>--case-out</code> 产生不能直接执行的案例草稿，并保留调用方的 <code>--max-rows</code>。</p>
+
 </section>
 
 <section class="section">
-<h2 id="5-svn-模式">5. SVN 模式</h2>
-<h3 id="5-1-检出与认证">5.1 检出与认证</h3>
-<p>每个 SVN 工作区用 <code>svn.url</code> 配置一个仓库根地址，并完整检出为一个 <code>repository-root</code>。<code>systems.include.mappings</code> 中的系统和数据源映射只负责对象身份、中文名称与业务分组，不裁剪检出目录。完整根检出保证跨子系统引用、公共源码和同名对象都有共同 revision 基线。</p>
-<ul>
-<li>可从文件选择或粘贴 checkout 内容导入根地址；工具只解析字面量地址，不执行脚本。</li>
-<li>变量、多个根地址或不安全的本地目标会被拒绝，避免把导入功能变成命令执行入口。</li>
-<li>公共用户名保存在同步配置；密码经标准输入交给 SVN 认证缓存或系统钥匙串，不进入 YAML、日志、命令参数或编辑会话。</li>
-<li>登录验证只使用当前配置地址及同一根地址下已有明确授权的子目录，路径权限拒绝时可继续检查下一个地址；密码、证书、网络错误立即返回。验证不会修改检出布局，登录成功也不代表根目录拥有完整 checkout 权限。</li>
-<li>兼容谷神旧 HTTPS 自签证书：检出、更新、远程检查和提交默认允许 <code>expired,cn-mismatch,unknown-ca,not-yet-valid,other</code>，可通过 <code>GUTHON_SVN_TRUSTED_CERT_FAILURES</code> 缩小允许集合。该策略只作用于 SVN，发行附件下载和验签继续保留现有校验。</li>
-<li>检出、更新、清理和重建索引都显示实际处理范围；同一工作区的重叠操作通过操作锁阻止。</li>
-<li>大型仓库的检出或更新包含后续索引扫描；扫描期间会定期显示已扫描文件数，中断后应先读取工作区与索引状态。</li>
-</ul>
-<p>SVN 工作区要求客户端 1.10+。平台下载的 <code>svnCheckoutHere.sh</code>/<code>svnCheckoutHere.bat</code> 只在显式导入时解析一次，不执行，也不从其他工作区自动发现。预览显示新增、移除与变更数量，确认后写入工作区 <code>context/authorized-scope.json</code> 并检出；后续以配置为准，移出配置的旧 working copy 不会自动删除。</p>
-<p>兼容读取旧 <code>svn.scope/checkoutPaths</code> 及 <code>sync-from-script/sync-from-bat</code> 命令；高级手工接入可用 <code>import-svn-scope</code>，日常不要求维护 <code>svn.scope_manifest</code>。SVN 模式的 <code>sync-all</code> 只更新本地索引与摘要，不执行 <code>svn update</code>；远程更新显式使用 <code>svn refresh</code>。</p>
-<h3 id="5-2-业务目录与虚拟文档">5.2 业务目录与虚拟文档</h3>
-<p>PAGE JSON 的逻辑身份来自内部 <code>pageId</code>，缺少时使用文件名。谷神导出文件名与该编码不同也可正常索引，物理路径仍用于授权定位和写回；原文件名及页面编码保持原样，保存期间继续校验身份、路径和内容哈希。后端解析规则升级后需完整重建 SVN 索引。</p>
-<p>SVN checkout 是唯一源码事实。工具从其中识别系统、数据源、PAGE、过程函数、系统脚本、表和视图，写入工作区独立 SQLite 索引。Nexus 的“谷神源码”树只读取索引；展开单个 PAGE 时才解析目标 JSON，因此大型仓库不会在每次展开树节点时全量扫描。</p>
-<table class="comparison-table">
-<thead><tr><th>对象与展示</th><th>编辑边界</th></tr></thead>
-<tbody>
-<tr><td><strong>PAGE：</strong>按索引中的模型、模块和页面顺序展示，内部固定分为 GSS、JavaScript、SQL、字段及服务事件。</td><td>脚本与 SQL 以虚拟文档投影，可受控写回原始 JSON；本地页面编辑器提供支持范围内的字段属性与同容器排序。</td></tr>
-<tr><td><strong>过程函数：</strong>按包名和函数名组织，支持复制稳定身份、跳转与调用位置。</td><td>函数源码可以受控编辑，写回对应物理文件。</td></tr>
-<tr><td><strong>系统脚本：</strong>按业务子系统分组。</td><td>可受控编辑和提交。</td></tr>
-<tr><td><strong>表与视图：</strong>作为结构和引用事实进入索引。</td><td>视图仅允许编辑已有的 <code>viewSql</code> SQL 字符串；表格定义（含字段新增、修改）、视图字段和其他元数据保持只读。视图字段由平台解析 SQL 自动生成。</td></tr>
-</tbody>
-</table>
-<p>业务分组优先使用显式系统映射；缺失时根据系统/数据源根目录的 <code>$.中文名称</code>、<code>pages/index.md</code> 和 <code>procedures/index.md</code> 保守推断。证据不足的系统或数据源保留独立分组，Skill/Public 归入“公共源码”。页面目录、叶子顺序及 SCM 中文名复用页面索引，过程函数包与包内函数分别按名称排序；过程函数节点可复制函数名或 <code>包名.函数名</code>。</p>
-<p>PAGE 脚本标签显示页面、节点标签与事件名；完整 PAGE_ID、JSON Pointer 和工作区可从路径与源码悬浮提示核对。Quick Diff 按完整脚本身份隔离差异基线。</p>
-<h3 id="5-3-受控编辑">5.3 受控编辑</h3>
-<p>打开可写虚拟文档时，后端创建独立编辑租约，记录 workspace、对象身份、授权相对路径、文件 hash、SVN BASE revision、JSON Pointer、编码、BOM 和换行风格。保存时按以下顺序处理：</p>
-<ol>
-<li>重新核对工作区、provider、对象身份和路径，拒绝越出授权 checkout。</li>
-<li>检查物理文件、当前片段、文件 hash 与 BASE 状态；缓存标签缺少会话或仍显示只读时，Nexus 先强制重新加载一次，再由后端作最终判定。</li>
-<li>同一 PAGE 的其他片段发生变化但当前片段未变时，在最新 JSON 上安全重放；同一片段已经变化则拒绝旧租约覆盖。</li>
-<li>保留编码、BOM、换行和文件权限，以最小范围原子替换，再按物理文件增量刷新索引。</li>
-</ol>
-<p><code>svn read-batch</code> 可以一次读取多个对象；<code>write-batch</code> 会先预检全部目标，拒绝同一物理文件出现两次，任一写入失败时恢复已写文件，全部成功后统一更新索引。短时读写使用带超时的跨进程锁，长操作使用工作区操作锁，解决 Nexus、CLI 和自动化同时访问同一 checkout 的竞争。</p>
-<h4 id="svn-batch-reference">精确批量写入</h4>
-<p>已知“旧文本 → 新文本”时，<code>svn write-batch</code> 可直接接收对象身份和 <code>replacements</code>，由后端打开目标并取得租约；先读多个对象或生成完整候选时，用 <code>read-batch</code> 返回正文和文档 ID。旧显式会话写法仍兼容。命令不允许同一物理文件在批次中重复出现；不要自行遍历 checkout 或循环重试锁。</p>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>.venv/bin/python scripts/guthon_tool.py svn --home &quot;$GUTHON_HOME&quot; \
-  --workspace products.demo -- write-batch &lt; /absolute/private/change-plan.json</code></pre></div>
-<div class="code-wrap"><span class="code-lang">json</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>{
-  &quot;changes&quot;: [{
-    &quot;sourceType&quot;: &quot;procedure&quot;,
-    &quot;sourceId&quot;: &quot;demo.pkg#save&quot;,
-    &quot;funId&quot;: &quot;save&quot;,
-    &quot;replacements&quot;: [{&quot;old&quot;: &quot;return true;&quot;, &quot;new&quot;: &quot;return false;&quot;, &quot;expectedCount&quot;: 1}]
-  }]
-}</code></pre></div>
-<p>编辑账本仅在文件不存在时新建；损坏 JSON、错误身份或记录类型会报错并保留原文件。共享操作日志记录 schema 和各阶段时间，实体写回与不同语义仍分别校验。已有文件的直接修改会标记为外部修改，并交给“管理本地源码变更”重新检查。</p>
-<h4 id="page-local-editor">本地页面编辑与预览</h4>
-<p>此功能适用于 SVN 工作区的 JSON PAGE。字段、按钮和代码管理可独立使用；原版布局显示另需对应平台的设计器静态资源。具体操作见<a href="GuthonCodeTool_使用手册.html#local-page-editor">使用手册</a>。</p>
-<h5 id="page-editor-capabilities">能力与源码树的关系</h5>
-<p>单击 PAGE 打开本地编辑器，双击或点击展开箭头继续展开原有事件与字段节点。源代码管理中对 JSON PAGE 文件执行“在 Nexus 中编辑”也进入本地编辑器；明确指定的脚本或字段分块仍进入共用代码编辑器。本地编辑器默认不自动打开原版设计视图，查看布局需主动点击对应按钮。预览标题、标签页和树根显示“页面名称 · PAGE ID”；名称优先采用源码树目录索引中的有效名称，PAGE ID 占位值不作为名称。</p>
-<p>预览树隐藏行、列、匿名容器及没有业务标题的单项页签包装，保留表单、表格与有业务标题的页签。页面事件、区域脚本与 SQL、按钮和字段按归属组织，只显示已有事件。点击区域定位清单，点击字段或按钮显示已有属性，点击事件进入共用代码编辑器。</p>
-<table class="comparison-table">
-<thead><tr><th>对象</th><th>支持范围</th></tr></thead>
-<tbody>
-<tr><td>字段</td><td>修改已导出的标题、宽高、标签宽度、输入最大长度、隐藏和只读等受支持属性；调整同一字段集合内的顺序。</td></tr>
-<tr><td>区域按钮</td><td>在所属区域的字段清单上方按名称显示，不展示内部按钮 ID；可修改已有名称、别名及受支持的显示属性，调整同一区域按钮顺序，并进入已有前端脚本和服务事件。查询表单的首个按钮配置对应平台“重置”；“查询”由原版组件绘制，不作为新增的可编辑按钮。</td></tr>
-<tr><td>事件与 SQL</td><td>与源码树共用代码标签、继承解析和受控保存流程。仅修改项目段时保留继承标记；修改产品段按既有规则校验并物化到项目源码。</td></tr>
-<tr><td>高级字段配置</td><td>属性面板不等价于完整字段 JSON；数据源字段集合、复杂嵌套配置和未开放属性仍需原有源码分块入口。</td></tr>
-</tbody>
-</table>
-<h5 id="page-editor-save">草稿与保存边界</h5>
-<p>布局和属性调整进入页面草稿，已有属性、代码及排序操作可联合预检，经现有页面租约原子写回、刷新索引并验证差异。源码身份、授权范围及内容哈希继续由原有写回流程校验。保存到本地不触发平台同步、编译或 SVN 提交。</p>
-<p>代码标签的未保存输入由 IDE 管理。代码通过共用编辑器保存后，与外部源码更新共用三方比较：在当前文件版本上保留互不冲突的属性、按钮及脚本草稿，双方已改成相同值的操作从未保存差异中移除。排序保存需关闭相关已保存代码标签，以免位置变化后旧标签指向其他对象。</p>
-<p>页面草稿保存在 IDE 私有工作区存储。字段和脚本使用身份索引定位，撤销历史按修改记录保存，避免每次编辑复制整页；最多保留 50 步撤销，批量调整作为一步，失败时回退该批次。源码变化时保留旧草稿用于导出比较；保存结果不明确时保留请求并提供恢复检查。预览内现有字段或按钮身份不唯一时限制修改；未知控件的属性保持只读，同集合排序独立校验身份。</p>
-<p>字段与代码管理首次载入页面基线，后续按序传递变化和状态；缺失中间消息时重新取得基线，旧消息不覆盖新画面。普通属性修改局部更新字段及导航标记，排序、脚本、基线和比较范围变化时重新渲染相应视图。原版设计器仍按其模型初始化契约更新，不将这项优化等同于实际平台渲染性能。</p>
-<p>恢复历史存于 IDE 私有存储的 <code>page-recovery/</code>，按页面身份保存带内容校验的独立记录；完整临时记录同步后，以同目录硬链接原子发布正式文件，已存在的文件只在内容一致时复用。工作区状态仅保存引用，界面只接收恢复摘要，导出时才读取完整历史。记录缺失、损坏或保存失败时明确报错并保留原状态，不以空历史替代，也不自动删除历史。已保存且无待核对操作的关闭会话，仅在最新状态持久化完成后按数量和含撤销、重做历史的估算大小回收；未保存草稿或代码、待核对源码及写入、原版候选和运行中任务继续保留，避免改变保存全部草稿的范围。</p>
-<p>“比较改动”提供两个只读视角：SVN BASE → 本地已保存源码，与 SCM 使用同一本机基线，不包含窗口未保存输入；本地保存版本 → 当前窗口草稿，只包含尚未保存的页面调整。前者在左侧树使用与 Nexus 源码树相同的 SVN 修改主题色和 M 标记，后者使用蓝色主题色和 ● 标记，可同时存在；标记向所属区域和页面汇总。已删除项保留独立比较入口。中间按属性、事件及排序显示修改前后内容，退出比较不修改草稿。</p>
-<p>SVN 比较在工作区授权范围内读取本机 BASE，不访问服务器 HEAD、不新建编辑租约。字段与按钮按唯一原生身份匹配，保留大整数精度；匿名等长集合按位置比较，身份不明确且长度变化的集合整体展示。忽略 JSON 格式与键顺序差异时会明确提示，详细原文仍可从 SCM 查看；超过 1000 项时保留全部标记并提示仅展示前 1000 项。没有可读 BASE 或超出响应预算时明确显示不可用，不以空页面替代。</p>
-<p>外部更新时，干净会话自动载入；存在草稿时，按原先加载的值、当前文件值和窗口值进行三方比较。仅在页面来源、工作副本、区域及控件身份唯一且结构、顺序和可编辑范围保持一致时迁移；匿名数组成员、结构增删或移动、身份和属性类型变化均保留旧草稿，要求人工核对。未保存代码、原版未确认对话框及结果待核对的写入不会自动迁移。</p>
-<p>同一属性或完整脚本节点被双方改成不同值时，“外部修改冲突”保留三方内容，由用户逐项选择；全部选择完成前不替换原草稿，完成后重新读取文件，只有文件版本仍匹配才迁移。文件再次变化时重新比较并清除旧版本选择。脚本按完整节点比较，不自动合并同一脚本内部的不同行。迁移只调整窗口草稿，后续保存继续执行租约、源码及差异预检；迁移后的撤销针对新基线上的本地调整。</p>
-<p>冲突预览每份内容最多显示 8000 字，完整三方值保存在 IDE 私有恢复记录并随草稿导出；旧版本记录在重新载入或显式冲突选择后保留。重开 IDE 时，旧基线草稿及报告供导出核对，不按历史选择自动覆盖当前文件。原版设置对话框发生外部更新时保留当前画面并暂停保存，需先保留输入、关闭对话框后处理。本地保存清除 ●，不会清除尚存的 SVN 差异。操作步骤见<a href="GuthonCodeTool_使用手册.html#local-page-compare">比较修改并到平台验收</a>。</p>
-<h5 id="page-editor-assets">平台资源、缓存与版本</h5>
-<p>Nexus 使用 IDE 自带运行时读取平台入口 HTML，动态解析实际引用的脚本和样式地址，再下载同源静态依赖。文件名中的构建后缀不写死；普通使用无需开发者工具、独立 Node.js 或手工填写资源目录。</p>
-<p>静态文件由 Nexus 直接获取，不共享浏览器 Cookie。是否允许匿名下载取决于平台部署；浏览器已登录不保证 Nexus 能取得受保护资源，此时可导入已有资源包。在线“去平台对照”仍需要浏览器登录。</p>
-<p>资源自动存于当前显式本地数据目录 <code>&lt;toolHome&gt;/var/nexus/page-designer/</code>：</p>
-<ul>
-<li><code>platforms/&lt;平台标识&gt;/&lt;构建指纹&gt;/</code>：保存 <code>snapshot.json</code> 校验清单与 <code>guthon/</code> 静态文件；同平台同构建复用，不同平台或构建隔离。</li>
-<li><code>workspaces/&lt;工作区标识&gt;.json</code>：记录 workspaceKey 对应的平台入口和所选资源版本；切换只影响当前工作区。</li>
-</ul>
-<p>构建指纹包含入口 HTML 及入口脚本、样式的实际摘要，不能只凭版本名称或主程序文件名判断。下载先进入临时目录，完整校验后才激活；失败、不兼容或缓存损坏时不覆盖现有可用资源，也不改用其他平台的快照。</p>
-<p>打开已绑定页面时，成功的版本检查结果在 24 小时内复用；到期再次打开会检查平台构建。检查失败时保留已校验缓存并标明离线状态，短时间内不重复失败请求。发现新构建时提示下载切换或继续旧缓存，不静默替换；支持手动检查、导入和选择缓存版本回退。</p>
-<p>从资源菜单到下载、校验及打开视图，同工作区重复点击复用当前任务。资源按钮在处理期间禁用，完成或失败后恢复；通知与“Guthon Nexus SVN”输出显示阶段、逐文件进度、累计大小及完成结果。</p>
-<h5 id="page-editor-limits">限制与效果验收</h5>
-<p>图形面板不提供字段或按钮增删、跨容器移动及新增属性或事件；AI 可通过下文的受控结构接口新增字段、区域按钮及缺失事件。两类入口都不执行业务脚本或 SQL 查询。静态快照不包含自动采集的工作区系统样式、字典或自定义组件元数据，缺失内容不视为完整支持。</p>
-<p>原版设计器负责布局显示，字段与代码管理页不模拟平台外观。原版资源校验成功只证明文件与构建符合检查条件，不证明与在线平台效果一致；系统动态样式、组件、运行时行为及业务结果仍需客户端和平台验收。对照应使用相同 PAGE 版本、内容区宽度、缩放和设计/运行模式。</p>
-<h5 id="page-editor-maintenance">维护者准备资源包</h5>
-<p>维护脚本与 Nexus 共用资源下载和校验实现。准备新快照可执行 <code>node scripts/prepare_page_designer.mjs --platform-url https://platform.example/guthon/index.html --output /absolute/new-directory</code>；已有快照可用 <code>--source /absolute/platform-assets</code> 校验，或同时指定新的 <code>--output</code> 复制。已有输出目录不覆盖，资源不进入公开 VSIX。</p>
-<h4>项目与产品继承</h4>
-<p>独占一行的 <code>inherit()</code> / <code>@inherit()</code> 标记支持带分号或省略分号；注释、字符串和其他表达式内的相似文本不作为继承入口。解析版本变化后，应完整重建目标 SVN 工作区索引。</p>
-<p>SVN 项目过程函数将普通 <code>.gss</code> 与同目录的 <code>.inherit.gss</code> 关联为一个逻辑函数；后者作为只读产品层。Nexus 默认在项目可编辑标签页显示展开后的完整源码，以低饱和度整行背景区分产品与项目段，编辑器差异基线也同步展开，避免把继承段误标为修改。只改项目段时保存仍保留继承标记；改动产品段时将完整候选保存到项目文件或 PAGE 项目事件，并复核产品哈希。<code>return @inherit();</code> 等不能证明控制流等价的标记需在保存产品改动时显式核对。</p>
-<p>PAGE 产品事件集合存在时，省略的事件键按空源码处理；仅含继承标志且展开后为空的事件不生成 Nexus 源码分块。项目附加代码与非空产品代码仍保留；产品集合缺失或结构异常仍提示继承诊断。原始 PAGE JSON 不因索引投影而改变。</p>
-<p>PAGE 服务组件的项目 <code>.gss</code> 与同目录同名 <code>.inherit.gss</code> 也按项目层和只读产品层关联；父文件独立索引，不参与 PAGE 别名去重，也不能取得编辑权限。全量重建、单文件刷新和变更批次刷新均保持该分层，编辑与保存始终落到项目子文件。只读来源视图仍可用于查看两层物理来源；旧解析版本的索引需完整重建。</p>
-<h3 id="5-4-scm-冲突与交付">5.4 SCM、冲突与交付</h3>
-<ul>
-<li>每个工作区注册一个 SCM provider；内部按中文业务子系统分组，同组可聚合数据源与多个系统 working copy，公共源码单独成组。</li>
-<li>本地差异比较 SVN BASE 与 working copy；远端差异比较 working copy 与 SVN HEAD。PAGE 默认显示脚本、SQL 和字段的可读差异，也可查看原始 JSON。</li>
-<li>支持全部、业务组、原生多选和单文件范围的提交或更新。提交前复核 selection token、文件 hash、当前 SVN 状态和目标文件远端变化，不使用 Git 暂存区。</li>
-<li>放弃修改只回退所选文件到 BASE；远端已有新 revision 不会阻止本地撤销，但提交仍会检查目标文件远端安全性。</li>
-<li>重叠文本冲突可用三方合并处理，保存并确认后才标记 resolved；新增、删除、未跟踪、属性和树冲突继续阻断。</li>
-</ul>
-<p>跨 working copy 的提交按组依次执行，会产生多个 revision，不伪装成原子事务。每次成功提交都追加持久交付回执，记录交付编号、revision、文件和时间。目标文件成功提交并取得 revision，即视为本次源码交付成功；编译、发布和业务运行按需要另行验证。</p>
-<p>跨组保存中断时，交付记录保留已确认提交的 revision、剩余文件与结果不确定标记。恢复前重新预览并取得新令牌，只选择仍有本地差异的候选，再核对文件 hash 和远程状态；不把历史 PARTIAL 回执直接改成全部成功。平台保存执行真实 SVN commit，受独立 <code>svn.platform_save</code> 能力限制；MCP 的本地结构与节点更新不执行提交。</p>
+<h2 id="5-api源码">5. API 源码与本地编辑</h2>
+<h3 id="5-1-拉取与合并">5.1 拉取与合并</h3><p>拉取使用远端基线、本地文件和平台版本比较，能安全合并的非重叠修改保留；无法合并的冲突保留本地内容并报告。局部拉取只处理已请求范围，不删除范围外文件。范围变更同步调整已下载对象的索引；索引指纹与当前平台/范围不一致时拒绝查询，避免显示旧范围的结果。定向刷新需要唯一对象，找不到或不唯一时报错，不退回全量拉取。</p><p>拉取范围向导通过 <code>api scope-apply</code> 完成一次范围同步：先检查将移出范围的源码；存在本地修改、冲突、未保存编辑内容或未登记文件时停止，提示用户处理后重新选择，原范围和文件保持不变。检查通过后下载并核验拟选范围，下载失败时不保存新配置；下载完成后再次核对当前设置与文件状态，再保存范围、合并源码并重建一次索引。结果分别报告范围是否保存、源码发布、索引诊断和失败阶段。发布开始后失败可能部分完成，不能按整体回滚理解；源码树、卡片和本地变更随后读取真实当前状态。普通更新源码时，范围外的未保存编辑器不阻断所选范围更新，所选范围内的未保存文档仍阻止覆盖；明确切换范围时，将移出范围的未保存内容按上述预检规则阻止范围切换。范围切换成功后，仅清理移出范围且已登记、与同步基线一致的真实文件；清理前保留可恢复备份，资源管理器随文件删除刷新。未登记文件不会被直接删除。共享数据源仍被所选子系统使用时保留，平台账号、连接配置和当前范围内文件不作为范围外清理对象。</p><p>编辑器未保存内容和 PAGE 草稿需先保存或处理；不同进程的协调状态以实际运行结果为准，不把后端检查等同于客户端验收。</p>
+<h4 id="api-change-bundle">API 工作区本地变更包 CLI</h4>
+<p><code>api export-changes --stdin</code> 将当前项目范围内已登记、可写且有本地修改的对象导出为 JSON；请求必须给出 checkout 之外、尚不存在的绝对 <code>output</code> 路径，可选 <code>paths</code> 数组按源码相对路径筛选。不提供 <code>paths</code> 时导出当前范围内符合条件的对象。筛选是交集，返回的 <code>fileCount</code> 需与预期对象清单核对；没有可导出对象时报错。</p>
+<p>变更包顶层包含 <code>schemaVersion: 1</code>、<code>workspaceKey</code> 和 <code>files</code>；每个对象包含 <code>path</code>、<code>metadata</code>、<code>baseContent</code>、<code>localContent</code>、<code>baseHash</code> 和 <code>localHash</code>。身份字段按对象类型包括 <code>sourceType</code>、<code>pageId</code>、<code>systemId</code>、<code>procedureId</code>、<code>funId</code>、<code>dataSourceId</code>、<code>tableId</code>、<code>viewId</code>、<code>scriptType</code>；正文摘要按 UTF-8 计算 SHA-256。正文可能包含私有源码，应保存在受控私有位置。导出只读取当前 API 工作区，不自动上传或修改原工作区。</p>
+<p><code>api import-changes --stdin</code> 接收绝对 <code>input</code> 路径，默认预览；输入文件不超过 64 MB，包内包含 1 至 200 个对象；超过导入上限时，应在导出前用 <code>paths</code> 分批选择并逐批核对。先在目标项目完成 API 范围配置与拉取，并确保目标是同一 <code>workspaceKey</code> 下已登记的可写对象。导入按包内相对路径读取当前已登记对象，再核对身份和正文摘要；不会仅凭身份自动匹配不同路径。预览按变更包的基线、本地修改与目标当前文件生成三方合并，返回 <code>planHash</code>、<code>changes</code>、<code>conflicts</code> 和 <code>complete</code>；<code>changes</code> 仅含路径和前后摘要，不包含合并后的正文或文本差异，因此预览不能直接审阅合并正文。预览不写源码。</p>
+<p>审阅完整对象清单和无冲突结果后，使用相同输入文件、<code>apply: true</code> 和该次 <code>planHash</code> 应用。输入或目标状态发生变化时必须重新预览；存在冲突不能应用。应用前还会检查编辑器状态与文件哈希，随后逐项写入当前 checkout 并更新索引；它不会自动上传。中途中断、写入或后续索引更新失败时先检查操作记录与实际文件，核对已应用范围，再处理索引；不假定批次自动回滚或盲目重试。</p>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code># 使用私有绝对路径；按实际项目替换 workspaceKey。
+printf '%s' '{"output":"/absolute/private/changes.json"}' | .venv/bin/python scripts/guthon_tool.py api --home "$GUTHON_HOME" --workspace ws_demo -- export-changes --stdin
+printf '%s' '{"input":"/absolute/private/changes.json"}' | .venv/bin/python scripts/guthon_tool.py api --home "$GUTHON_HOME" --workspace ws_demo -- import-changes --stdin
+# 审阅预览并确认无冲突后，将下方占位符替换为本次返回的 planHash。
+printf '%s' '{"input":"/absolute/private/changes.json","apply":true,"planHash":"&lt;planHash&gt;"}' | .venv/bin/python scripts/guthon_tool.py api --home "$GUTHON_HOME" --workspace ws_demo -- import-changes --stdin</code></pre></div>
+<p>变更包用于符合上述身份和路径契约的 API 工作区本地修改。已有 SVN 项目先在原侧完成交付，再按<a href="#svn-api-migration-reference">SVN 切换 API 参考</a>核对并切换同一个项目。</p>
+<h4 id="api-export-reference">源码资料与单据类型导出</h4><p><code>export-schema</code>、<code>export-view</code> 和 <code>export-system-script</code> 使用当前 API checkout 的已获取资料，输出到独立导出目录，导出结果不作为可上传源码。单据类型提供官方只读索引资料，完整定义的导出仍使用数据库连接；<code>export-bill-type</code> 使用单独配置的数据库连接，先核对目标和数据源范围。</p>
+<h4 id="api-history-boundary">操作记录与交付追溯</h4><p>API 工作区保存本地同步、上传等操作记录及回执，可按操作编号检查结果并在支持的情形下只读回读恢复。它们依赖当前本地数据目录与工作区，记录从工具实际操作开始；它们不是平台全量版本历史，也不提供 SVN 全局 revision 的连续编号、跨对象提交集合或按历史 revision 重建、比较和交付的同等能力。变更包是本地修改的传递材料，不是平台提交或版本发布记录。需要追溯旧 SVN revision、确定交付范围或核验最终签入、编译与发布时，应结合原 SVN 记录、平台记录及实际交付证据核对。</p><h3 id="5-2-上传与冲突">5.2 上传、冲突与回执</h3><p>上传审阅清单显示业务名称、类型、路径和状态，可逐项勾选及打开差异。确认后只发送所选文件；审阅期间文件内容改变时要求重新核对，取消不上传。结果继续按文件记录已回读、失败、未执行与未知状态。</p><p>上传前重新读取平台对象并预合并，检查身份和本地状态；确认后逐项上传并回读。结构化 PAGE（非服务组件 GSS）以原生编辑接口的 <code>bean/version</code> 为依据，保持现有 XML 路径和单一可编辑文件；本地 XML 是原生模型的无损表示，保存时解码为 JSON，使用带 <code>pageVersion</code> 的原生保存接口，并关闭自动编译，不回写下载接口的 XML。已核验的原生基线只在项目、对象路径与版本一致时复用。旧基线只有与当前原生模型一致才可升级；导出表示不同、无法无损表示或版本缺失时明确报告，不猜造身份、继承层或版本。原生元数据尚无源码版本的对象仅供查看。保存前核对原生签出归属，不强制覆盖他人签出。PAGE 回读独立读取原生模型，核对版本、非空脚本、控件身份和有效配置；只允许已知默认值与空配置的规范化，包括数据源字段及主键定义省略零小数精度；非零精度、控件身份、非空脚本以及页面缩放等同名属性仍严格核对，不按关键词删除产品代码包装。其他源码沿用逐类型接口，应答和独立回读须一致。平台规范正文同步回同一 checkout，提交后的本地修改继续合并保留，重叠变化进入冲突处理。回执保存提交、原生接受版本及回读摘要；应答丢失时只读核对，不重发保存。回执可表示部分完成、失败或结果未知，未知时先查原操作和平台状态，不重复提交。上传回读与平台最终提交、编译、发布及业务结果是不同阶段。</p><p>表与视图支持明确确认后的平台结构同步，会执行 DDL；需核对数值身份和已上传状态，再独立验证数据库结果。过程函数可从已有过程包右键创建，使用官方新建接口分配平台对象后回读到本地；不能把未登记的任意本地文件当作新函数直接上传。创建需要明确包、数据源、函数编码与中文名称，并确认本次平台写入。</p>
+<h3 id="page-local-editor">5.3 PAGE 本地与在线编辑</h3><p>源码树的“编辑页面”默认打开 Nexus 本地页面编辑器，提供字段和代码编辑；全量、子系统范围和目录同步使用官方分页下载的 PAGE XML，复用版本匹配的已核验原生基线。其余结构化 PAGE 的下载 XML 可只读查看。需要原生模型时，通过“编辑页面”或“更新指定 API 源码”只更新所选页面。取得可核验的原生基线后，可继续离线编辑。本地编辑器保留草稿撤销、恢复和比较能力。服务组件、仅含最简元数据或不支持设计的对象使用源码入口。</p><h4 id="page-editor-capabilities">页面编辑范围</h4><p>本地页面编辑器的“在线编辑器”打开当前 API 项目的官方在线设计器 iframe；需要登录当前 API 项目并能访问平台，无需下载、导入或配置设计器资源缓存。存在未保存的本地草稿时，须先成功保存到本地，才能打开在线编辑器；保存失败时保留输入并处理原因。官方设计器的字段、按钮、属性、事件和布局等可编辑范围由当前平台决定，返回的修改写入同一 checkout 文件。代码分块与字段集合 JSON 继续使用独立的源码编辑入口。</p>
+<p>原生“重新打开方式”和资源管理器右键入口通过已登记项目及后端对象身份解析 PAGE，服务组件、只读或不支持的对象使用原文入口。原生编辑器与源码树入口复用同一页面会话、草稿和恢复记录，不创建第二套可上传源码。</p><h4 id="page-editor-save">保存、比较与冲突</h4><p>保存前核对页面身份、文件版本、原文哈希和其他未保存输入；原生 XML 由后端校验，继承文件保持只读。保存后独立回读本地文件，源码管理显示与平台基线的差异。来源变化或保存结果未知时保留当前编辑，先核对文件与原操作，不直接重放保存。本地编辑器和在线编辑器的保存都只更新本地源码，上传仍需单独执行。官方消息未提供编辑中脏状态，在线窗口打开期间保留编辑登记；确认保存完成且没有后续修改后，关闭设计器再上传。</p><h4 id="page-editor-assets">设计器连接</h4><p>在线编辑器通过当前 API 项目的登录会话加载官方设计器并交换文档。首次连接、平台显示和实际保存应分别核验；本地编辑不依赖此连接。</p><h4 id="page-editor-limits">限制</h4><p>设计器未识别的格式或控件不能推定为支持；平台资源加载、Nexus 本地保存、上传回读和平台业务结果分别验证。项目过程函数的继承展开编辑继续核对父层来源及哈希，父层文件保持只读。</p>
 </section>
 
 <section class="section">
 <h2 id="6-索引与ai上下文">6. 索引与 AI 上下文</h2>
-<h3 id="6-1-工作区事实索引">6.1 工作区事实索引</h3>
-<p>每个工作区维护自己的 <code>context/index.db</code>，DATABASE 从 readonly 建索引，SVN 从授权 checkout 流式建索引。索引保存：</p>
-<ul>
-<li>源码对象身份、真实相对路径、物理 working copy、内容 hash 和对象定位信息。</li>
-<li>静态调用、低置信动态调用、调用位置和目标身份。</li>
-<li>PAGE 片段、字段到表列、单据路由、表读写、条件、赋值和异常事实。</li>
-<li>SVN PAGE 的可重建脚本、SQL、字段集合节点目录与界面字段目录，包含当前 JSON Pointer、局部语义身份、区域、解析版本与索引 generation；正文仍从授权 working copy 按需读取。无原生身份的数据源列不进入界面字段目录。</li>
-<li>SVN 对象的 JSON Pointer、BASE 信息和支持增量刷新的文件关联。</li>
-</ul>
-<p>SQLite 不支持原生表/字段注释；索引初始化会在 <code>gusen_schema_comment</code> 中保存中文说明。按 <code>table_name</code> 查询时，<code>column_name=''</code> 是表说明，其余行是字段说明；已有索引再次初始化时会补齐。</p>
-<h4 id="index-storage">索引存储与空间整理</h4>
-<p>字段集合的派生正文采用紧凑 JSON，保留属性值及字符串内部空白；脚本和 SQL 正文保持原样。正文搜索的行号与偏移属于保存的索引片段，字段集合的格式可与虚拟文档不同，应通过 JSON Pointer 回读当前源码。原始 PAGE 和片段定位元数据不受存储精简影响。</p>
-<p><code>index-compact</code> 默认只预览文件大小、空闲页和可精简字段正文；加 <code>--apply</code> 后整理字段正文、优化可用的 FTS 检索索引并执行 SQLite VACUUM；SVN 模式共用工作区操作锁，DATABASE 模式由 SQLite 序列化写入，完成后检查数据库完整性。已截断的字段正文跳过，继续保留部分覆盖标记。字段整理失败时事务回滚；压实失败会报错，已提交的正文精简仍保留。操作不重建源码索引、不连接业务数据库、不修改源码或 Git，保留对象身份、片段哈希、索引代次和变更历史。压实时需预留临时磁盘空间，实际回收量以结果为准；操作步骤见<a href="GuthonCodeTool_使用手册.html#index-storage">使用手册</a>。</p>
-<h4>完整重建与增量维护</h4>
-<ul>
-<li><strong>身份与提交：</strong>同名对象以数据源、working copy 和业务身份区分，PAGE ID 保持工作区全局身份。全量重建在事务内完成；身份或授权错误回滚，个别坏文件或未解决的 SVN 冲突会形成带错误清单的 PARTIAL 索引，日志列出被阻断的文件供人工合并。取消或失败时保留旧索引。</li>
-<li><strong>首次重建：</strong>完整扫描授权文件并建立明细，检索索引在同一事务末尾批量构建。首次使用或解析版本不兼容时需显式完整重建；不把后台监听当作版本迁移入口。</li>
-<li><strong>日常更新：</strong>按 SVN 实际变更路径批量增删索引；新增目录只扫描相应子树，无变化时跳过解析和写入。删除 PAGE 时重新核对授权页面目录，继承来源变化联动刷新项目文件。</li>
-<li><strong>编辑与监听：</strong>虚拟保存、撤销和提交按物理文件增量刷新。文件监听按工作区合并、串行处理，哈希与状态已发布的文件跳过；SVN 更新和索引发布共用操作锁。</li>
-<li><strong>失败恢复：</strong>监听批次失败时先保留该事务涉及的全部文件路径。明确定位到本批文件的 JSON/编码解析错误会隔离失败文件，其余路径另起事务继续维护；身份冲突、关联文件错误及无法定位的错误保留批次边界，要求人工核对。SVN 文本冲突和树冲突按文件阻断：其余文件照常发布，日志逐条输出“冲突阻断”及目标路径；被阻断文件保留上一次索引内容并暂停自动重试，完成三方合并并标记已解决后重新索引。未版本化的冲突产物（<code>.mine</code>、<code>.r&lt;版本&gt;</code>）不是授权源码，不参与解析也不阻断批次。暂时性读取故障最多自动重试两次，分别等待 1 秒和 5 秒；解析、权限或身份错误暂停自动重试，其他文件变化不会重置其重试次数。失败文件自身变化或用户点击索引行、执行“重试 SVN 索引失败文件”时重新检查。未成功部分保留旧索引并显示“待恢复”，每次后端请求最多 1000 个路径。恢复记录保存在 IDE 私有工作区状态，按工作区及工作副本身份隔离；重开 IDE 后校验路径并显示待恢复记录，由用户定向重试。首次建索引或索引版本不兼容仍需完整重建。</li>
-<li><strong>任务与日志：</strong>排队超时只取消尚未发送的请求；工作区等锁有超时和阶段提示，不中断未知写入。日志记录实际后端构建、毫秒时间戳、批次汇总和完整耗时，失败保留目标路径。</li>
-<li><strong>模式隔离：</strong>SVN 更新、预览、提交与索引不执行 DATABASE 的 Git 自动暂存扫描，也不清理旧 readonly/workcopy。</li>
-</ul>
-<p><code>svn init</code> 全量建索引，<code>svn refresh</code> 通常按更新结果增量维护；无法安全定位范围的结构变化退回完整扫描。日常 SCM 只执行必要的 <code>svn info --xml</code>/<code>svn status --xml</code>，写回与更新仍使用完整安全检查。普通浏览、虚拟编辑和调用查询仅访问本地 working copy，不查询源码数据库。</p>
-<p>索引保存只读派生片段与可选正文/标签 trigram FTS，完整重建后提供有界检索；结果带来源身份、哈希和覆盖缺口。源码编辑仍以授权文件为准，索引不提供第二个可编辑副本。</p>
-<p>SVN MCP、Nexus 和 CLI 使用同一份可重建索引，MCP 的独立入口、工具能力和开发边界见第 9 章。PAGE 语义投影与 SVN 对象目录分别报告就绪状态；旧索引需由目标工作区显式全量重建后才提供对应查询；索引 generation 变化会使旧分页游标失效。</p>
-<p>排队超过 120 秒只取消尚未发送的请求；工作区阻塞等锁默认最多 60 秒，并输出等待阶段。源码内容与状态未变化时 generation 不空转。坏文件产生的 PARTIAL 索引不等于完整同步成功；授权或身份错误保留旧索引。</p>
-<p>Nexus 的 SVN“重建索引”支持协作式取消，ToolHost 通过 <code>cancel-index-v1</code> 声明支持：扫描检查点可回滚当前索引事务，发布屏障后以真实完成结果为准，初始化元数据可能已经完成。DATABASE 重建、SVN 更新/提交和源码写回不适用该扫描取消语义；旧 ToolHost 不接收新控制帧。启动或写入期间切换运行环境会报忙，原请求的工作区不变。</p>
-<h3 id="6-2-检索与有界上下文">6.2 检索与有界上下文</h3>
-<div class="plugin-highlight">
-<div><strong>统一搜索</strong><span><code>search</code> 同时查询源码身份和事实索引；结果可打开精确源码位置。</span></div>
-<div><strong>关系查询</strong><span><code>svn definition/callers/find/context</code> 提供定义、引用、调用链和局部上下文。</span></div>
-<div><strong>事实解释</strong><span><code>svn facts/explain</code> 返回写入位置、控制条件、表关系和有界调用者链。</span></div>
-</div>
-<p><code>context-pack</code> 默认生成精简上下文，只保留少量直接关系、高价值事实、路径和短 hash；需要更多证据时再请求详细版本或 continuation token。该流程让 AI 先根据稳定身份和事实缩小范围，再读取准确片段，避免把整个业务仓库塞入上下文后凭相似名称猜测。</p>
-<p>“导出 AI 上下文文件”在当前私有工作区的 <code>context/ai/</code> 创建新 Markdown 文件，默认仅包含有界索引摘要；影响证据或继承正文须明确选择。文件带来源身份与截断提示，不自动上传，也不覆盖已有上下文文件。</p>
-<p>Markdown 源码索引和调用索引只在显式执行导出命令时生成，不属于 Nexus 日常运行链路。运行时以 SQLite 为事实来源，可以快速增量更新，也避免大量派生文件污染私有 Git。</p>
-<h4 id="bounded-query-reference">按问题选择有界查询</h4>
-<table class="comparison-table"><thead><tr><th>问题</th><th>SVN 查询入口</th></tr></thead><tbody>
-<tr><td>对象名、别名或 ID 不明</td><td><code>svn find --keyword &lt;词&gt;</code></td></tr>
-<tr><td>条件、赋值、异常或字段关系</td><td><code>svn facts --keyword &lt;词&gt;</code>，或 <code>--table &lt;表名&gt;</code></td></tr>
-<tr><td>表或单据的写入原因链</td><td><code>svn explain --table &lt;表名&gt;</code>，或 <code>--bill-type &lt;类型&gt; --data-source-id &lt;ID&gt;</code></td></tr>
-<tr><td>一跳出入边上下文</td><td><code>svn context --source-id &lt;ID&gt; --fun-id &lt;函数&gt;</code></td></tr>
-<tr><td>共享函数调用方</td><td><code>svn callers --alias &lt;别名&gt; --fun-id &lt;函数&gt;</code></td></tr>
-</tbody></table>
-<p>DATABASE 使用对应 <code>query</code> 命令族，其中 <code>find</code> 使用位置参数，<code>context/callers</code> 可用 <code>--fun</code>。结果携带路径、PAGE JSON Pointer、行号、控制条件和调用者。先用索引缩小范围，再在索引未初始化、明确漏项、证据不足或实际修改前读取对应局部源码；不把整个 checkout 或完整 PAGE 当作默认查询输入。</p>
-<p>可选 FTS5 加速 ASCII 三字符以上的身份子串预筛，中文、短词、LIKE 通配和旧索引保留原有结果。<code>svn text-search</code> 查询私有片段正文，每片段最多索引 200 万字符，超限标为部分覆盖；需完整 reindex 才启用正文覆盖。<code>svn changed-sources --since-generation &lt;代次&gt;</code> 查询最近 500 个保留代次内的新增、修改与删除；代次过旧或未知时重新获取快照。</p>
-<p><code>list_sources</code> 返回有界分页对象摘要和计数；PAGE 与过程函数按返回的 namespace、working copy 和精确身份继续读取。索引状态为 <code>PARTIAL</code> 且 <code>projectionGapCount&gt;0</code> 时，某些 JSON PAGE 有片段但缺少语义节点；可按精确 <code>sourcePath</code> 执行 <code>svn reindex-file --path</code>，范围较多时完整重建，不能将缺口解释为空页面。</p>
-<p><code>source-map</code> 提供有界源码地图，<code>search-all</code> 只跨显式选定的工作区检索，<code>context-pack --write-context</code> 把有界 Markdown 写入目标 <code>context/ai/</code>。源码对象分享链接只含工作区和精确身份，接收端需配置相同工作区，不含源码、本机路径或编辑租约。<code>parser-feedback</code> 从 stdin 接收已声明脱敏的最小反馈，<code>doctor --bundle &lt;目录&gt;</code> 只导出运行/索引元数据，排除源码、凭据和原始日志。</p>
+<h3 id="6-1-工作区事实索引">6.1 工作区事实索引</h3><p>项目在其登记的上下文目录内建立 <code>index.db</code> 派生索引，覆盖已拉取源码的对象、PAGE 节点和静态调用等可识别事实。查询结果有范围和截断边界；无法识别的动态行为需继续核验源码与平台。</p><h4 id="index-storage">索引空间</h4><p>索引可重建；清理或重建前核对工作区并保留源码和基线。索引结果不代表平台或业务执行结果。</p>
+<h3 id="6-2-检索与有界上下文">6.2 检索与有界上下文</h3><h4 id="bounded-query-reference">有界查询入口</h4><p>API 提供 <code>catalog</code>、<code>search</code>、<code>context</code>、<code>callers</code>、<code>facts</code> 和 <code>explain</code>；MCP 对同一工作区提供查询。读取时检查路径、源码哈希、覆盖范围与分页，不把未检出对象视为不存在。</p>
 </section>
 
 <section class="section">
 <h2 id="7-guthon-nexus">7. Guthon Nexus</h2>
-<h3 id="7-1-工作区驾驶舱">7.1 工作区驾驶舱</h3>
-<p>Guthon Nexus 是统一 VS Code 扩展，DATABASE 与 SVN 工作区同时出现在同一侧边栏。每个节点绑定自己的 workspaceKey，菜单由 CLI 返回的有效 capabilities 决定，因此没有配置的功能不会显示为可执行操作。</p>
-<p>VS Code 与 CodeBuddy 的扩展设置各自保存；“设置/切换工作空间”可让另一端选择同一 toolHome，读取已有产品/项目配置、状态和 SQLite 源码索引，不新建工作区或重建索引。“刷新已有工作空间状态”会清理 Nexus 的工作区及源码树缓存并重读本地数据，不执行 SVN 更新或全量扫描。</p>
-<p>“检查此工作区环境”只检查指定工作区关联的本地依赖，“维护 → 检查本地环境”覆盖全部已配置工作区。数据库驱动按 DATABASE 源码数据源及内置只读目标确定；纯 SVN、仅 DBX 的目标不要求无关本地驱动，系统凭据库仅按凭据来源需要检查。配置失败时依赖范围标为未确认，不用“本次未使用”替代错误；源码数据源仍按原契约只支持 MySQL/PostgreSQL，内置只读目标可使用 Oracle。备用密码来源存在时，凭据库不可用可显示提醒，但不核验备用值。</p>
-<p>Nexus 展示检查项和固定处理入口，配置文件限定为工具已知文件；运行入口或数据目录在检查期间变化时，需重新检查后再处理。检查只读取本地配置和依赖、探测本机 Bridge 健康端点，不取用系统凭据库中的密码或密码文件，不执行数据库连接或平台业务验证。CLI 原有 <code>doctor --json</code> 仍返回检查列表，含 FAIL 时退出码为 1；新增 <code>doctor --report</code> 返回完整报告，检查执行完成时退出码为 0，结果需读取 <code>health</code>、<code>summary</code> 和 <code>checks</code>，报告的 <code>ok=true</code> 不表示环境检查全部通过。可用显式 <code>--workspace</code> 或 <code>--workspace-key</code> 限定范围，两者同时提供时必须一致。<code>--bundle</code> 继续只导出允许的元数据，不与 <code>--report</code> 合用。</p>
-<ul>
-<li>配置或切换 toolHome、添加/删除产品和项目、切换源码来源、打开配置与目录。</li>
-<li>显示同步状态、索引就绪度、SVN working copy、本地/远端变更和最近交付回执。普通本地修改不计入健康问题；索引未就绪、同步失败、资料部分完成及跳过的 SVN scope 仍提示处理。本地修改数按工作副本统计，实时文件状态从 SVN 变更入口查看。</li>
-<li>执行 DATABASE 同步、元数据导出、Workcopy 管理和只读数据库排查。</li>
-<li>执行 SVN 检出、更新、索引、业务目录浏览、虚拟编辑、差异、冲突处理和精确提交。</li>
-<li>搜索当前工作区完整索引，并复制精简或详细 AI 上下文。</li>
-<li>启动、停止和检查 Bridge；管理发行/调试运行模式。</li>
-</ul>
-<p>完整索引搜索与 SVN 快速打开共用输入即查询的搜索窗口；完整搜索回车打开源码，结果按钮分别复制精简、详细 AI 上下文或导出文件。查询按输入合并并串行执行，迟到的旧结果不覆盖新关键词；关闭窗口后不再更新结果。结果达到查询上限时显示截断提示，需细化关键词，不能把当前列表视为全部匹配；操作步骤见<a href="GuthonCodeTool_使用手册.html#2-4-驾驶舱与工作区管理">使用手册：驾驶舱与工作区管理</a>。</p>
-<p>SCM 顶部及业务分组提供刷新本地状态、提交全部本地修改、更新全部远程变更。“更新全部远程变更”先检查远程并展示文件列表，再弹窗确认；取消保留列表供查看差异，不保存文档或执行更新，普通本地刷新也保留远程列表。确认后才保存未保存的 SVN 文档，根据保存后的本地状态执行更新或 SVN 原生合并；单文件更新使用相同流程并保持精确路径范围。</p>
-<p>本地文件行依据后端可操作标记显示提交、撤销和查看按钮，不要求 Nexus 编辑记录或索引身份；缺少索引身份时查看原始差异。远程文件行只显示一个云下载更新按钮，悬浮提示注明来源；同一文件的本地与远程记录分别展示并打开各自差异。本地差异比较 <code>SVN BASE ↔ 工作副本</code>，当前远程差异比较 <code>工作副本 ↔ SVN HEAD</code>；同文件存在本地修改时，后者也会体现本地差异。严格区分纯远程内容需比较 <code>BASE ↔ HEAD</code>，当前远程入口仍保持工作副本与 HEAD 的比较方式。</p>
-<p>“谷神源码”树支持展开、收缩、刷新、水平滚动、索引搜索、从树跳到资源管理器，以及从当前虚拟文档或物理文件反向定位树节点。顶部展开、收缩按钮作用于所选容器；选中源码分块或单文件节点时作用于其父节点。收缩递归收起目标子树并选中目标节点，恢复焦点时保持收起，其他页面保持原状态；未选中节点时不执行操作。路径跳转会核对 workspace、checkout 和 sourcePath，拒绝越界。</p>
-<p>SVN 管理锁按 working copy 汇总为一条锁提示，不把状态正常的锁目录计作源码修改；目录项不提供文件差异或文件提交入口。锁未清理前，该 working copy 内的文件不可提交。点击锁提示或对应更新按钮时，先对当前明确范围执行原生 <code>svn cleanup</code>，不附加删除未跟踪文件或撤销源码的选项，再重新检查状态；即使远程没有新版本，也会清理管理锁。CLI 的 <code>svn cleanup --working-copy &lt;id&gt;</code> 必须显式指定授权 working copy，属于本地写操作，不执行更新、撤销或提交。</p>
-<h3 id="7-2-语言与导航">7.2 语言与导航</h3>
-<ul>
-<li><code>.gss</code> 是独立 Guthon GSS 语言，在 Java 语法基础上注入 Velocity/GSS 指令和变量；兼容的 <code>.vm</code> 保持 Java 关联。</li>
-<li>Java、JavaScript、SQL 提供谷神 API 补全与悬停说明；路由规则根据上下文选择 <code>sqltools</code>、<code>sql</code> 或 <code>sqlh</code> 等 API 族。</li>
-<li>过程函数调用支持静态字面量形式的 <code>$vs.proc.invoke</code>、<code>$vs.thread.run</code>、<code>$vs.thread.runFutureTask</code>，以及 <code>proc.find</code> 绑定后的方法调用；在函数名上转到索引中的定义。变量或字符串拼接目标不做猜测；过程函数内的 <code>@子方法(...)</code> 可转到当前源码的 <code>#function</code> 声明。定义跳转与“谷神源码”树使用同一虚拟文档，支持从编辑器定位树节点；索引对象也支持查找引用与调用位置。</li>
-<li>SVN 虚拟 GSS 根据当前文档的 <code>#function</code> 声明补全 <code>@</code> 调用，并提示重复的本地函数名；PAGE 字段集合分块先用当前有效 JSON 的 <code>fieldId</code> 补全 <code>selectCodefieldId</code>，再按精确 PAGE 身份和字面前缀查询其他集合的有界候选，标明来源；候选较多时继续输入前缀缩小范围。同一集合重复值会警告；兄弟分块有未保存修改时不引用其旧索引。这些提示不替代平台语法或业务校验。</li>
-<li>源码树中的 PAGE JSON 和过程函数提供“预览源码影响”及“浏览影响证据”。PAGE 展示索引中的表访问、显式字段关系与逻辑事实，可跳转到字段关系所属集合或表访问、逻辑事实的源码片段与索引行；过程函数展示静态调用边与动态调用线索，并可跳转到索引行。预览显示 PAGE 索引代次及源码哈希，结果按上限截取，索引文件身份不一致时拒绝归因。PAGE 字段关系只覆盖显式 selectBox 证据，不能用于自动删除判定。</li>
-<li>PAGE 节点的“查找其他 PAGE 的字段”在同一工作区与命名空间内按 <code>fieldId</code> 字面前缀有界分页检索，返回 PAGE、工作副本、字段集合与表列 ID 来源；所有跨 PAGE 关系标为未验证，不自动补全或推断引用。命令面板和 Chrome Bridge 弹窗、页面左下角按钮共用本地精确定位：PAGE 只传完整 PAGE ID，过程函数只传包名与函数名；由用户明确选择 SVN 工作区，多份源码当次选择，再打开受控虚拟文档。浏览器入口要求已安装包含 URI 处理器的 VSIX，并在安装后重载 VS Code。</li>
-<li>补全索引、人工片段和路由规则分别维护，使自动生成 API 与项目特定规则可以独立更新。</li>
-<li>SCM 使用 VS Code Quick Diff 以 SVN BASE 标出增删改，点击装饰即可内联查看。</li>
-</ul>
-<p>跨对象定义与引用依赖工作区索引，不扫描所有文件；当前虚拟文档的本地函数与字段提示读取编辑器正文。过程函数调用按索引证据定位，遇到同名身份无法确认时仍须核对目标源码。</p>
-<p>过程函数补全可为 <code>proc.invoke</code> 提供包名/函数，为 <code>proc.find</code> 提供包名；各命名空间分别显示。索引不可用时仍保留当前文档本地建议。PAGE 的不同事件即使 BASE 正文相同，内联差异也按完整脚本身份隔离；已有标签按完整身份复用，升级后关闭重开旧标签可更新标题。仅独立 PAGE GSS 服务组件使用中文标签，有函数名的过程函数仍显示英文函数名。</p>
-<h3 id="7-3-工具更新">7.3 工具更新</h3>
-<p>“运行模式 → 检查更新”统一检查后端、Nexus VSIX 与 Chrome Bridge。默认每天首次激活后后台检查，角标显示候选数量；安装由用户确认。发行与调试模式从 GitHub / Gitee 取得候选，开发模式从显式 developmentRoot 构建本地 Nexus 与 Bridge，后端继续使用源码。</p>
-<ol>
-<li>使用内置公钥验证版本、组件清单和校验文件签名，下载后复核 SHA-256。</li>
-<li>候选后端在临时数据目录执行自检，通过后再切换受管入口；失败保留已有安装。</li>
-<li>Nexus 自安装最后执行，安装后可立即重新加载窗口或稍后；各 IDE 分别核验实际安装。</li>
-<li>Chrome 首次需从固定托管目录加载并配对，后续空闲时自动重载。待恢复或结果未知的任务会延后重载；平台页面不自动刷新。</li>
-<li>保留上一可用后端、缓存与中断记录；回退应用不会自动回退扩展、Skill 或数据格式。</li>
-</ol>
-<p>同一数据目录共享后端和 Chrome 文件，多窗口安装互斥。每日缓存重新验签；Nexus 构建标识忽略编辑器添加的安装记录和 JSON 排版，只比较代码、资源与有效配置。因此同版本的实际代码变化仍可更新，已加载目标构建后清除待重载提示。</p>
-
-<p>更新与回退共用跨窗口锁；新候选自检通过前保留原安装，中断的半安装目录保留为 recovery 备份。版本探测失败明确报错并允许重试，缓存不覆盖回退状态。调试模式使用用户选择且校验通过的 Python，不能将源码构建能力写成已交付的一键隔离运行环境。</p>
+<h3 id="7-1-工作区驾驶舱">7.1 工作区与源码</h3><p>API、SVN 和 DATABASE 项目卡片共用同步摘要与常用操作区。SVN 和 DATABASE 从本地索引和已选范围取得源码数量与范围摘要。SVN 修改数来自最近的工作副本状态，DATABASE 有工作副本时显示修改待检查。DATABASE 批量更新在输出中逐阶段报告连接、查询、本地写入、索引和导出的耗时及可用计数。SVN 报告授权范围、签出或更新、本地状态和索引进度。源码树复用分类图标与主题色。SVN 将授权范围内的 <code>public/bill-types.json</code>、<code>public/module-comps.json</code> 投影为单据类型和下拉组件，条目直接呈现在对应源码分类，单据类型按数据源分组，条目按编码排序并以只读方式打开。DATABASE 使用本地源码片段和导出对象索引，检索、重建索引和调用定位可离线执行。页面和过程函数保存时核对打开时的版本，只写工作副本。三种模式的源码树可从当前节点刷新对应文件。SVN 的物理目录更新可纳入新文件；虚拟菜单按已定位的文件更新。</p><p>Nexus 提供项目配置、API 登录、范围选择、源码树、差异、上传和冲突入口；项目状态与实际能力以安装构建和当前工作区为准。CodeBuddy 打开 var 根，通过 Nexus 在当前窗口选择工作区。所有已登记 checkout 都纳入编辑状态和文件监听，源码树及源代码管理只显示当前选中工作区；切换后仍须核对目标。源码树按页面、过程函数、表、视图、系统脚本、模块参数、单据类型、下拉组件和开发参考分类；后三类随已同步且纳入范围的资料显示。类别内部继续使用系统/菜单或数据源/过程包名称。各模块及其下级图标使用跟随 IDE 主题的模块颜色，冲突、缺失和修改状态色优先。原始目录与文件路径保持不变。菜单缓存独立保存，登录或查询菜单后更新。</p><p>源码树使用默认排序时，API、SVN 和 DATABASE 按当前项目的数据源 ID 升序显示分组。页面和系统脚本的子系统按所属数据源 ID 排列，同一数据源下继续沿用子系统原有顺序。无法确定数据源的子系统排在后面。分组内继续按菜单、模块或对象顺序显示，Nexus 设置也可切换为按显示名称排序。</p><h4 id="project-details">当前项目卡片</h4><p>Nexus 从上到下显示“项目总览”“当前项目”和“当前项目源码”。总览读取已登记项目和本地摘要，不批量登录或拉取；搜索只影响列表，不改变当前项目。点击项目行后卡片和源码树一起切换，窗口根目录、标签页和草稿保留。源码树与项目 SCM 聚焦当前项目。API 使用快照差异，SVN 使用授权 working copy 的状态和 BASE 差异，DATABASE 从只读索引浏览并用 Workcopy 管理修改。单项目配置/状态错误保留诊断行，不影响其他无冲突项目；全局配置错误清除可操作目标，修复后可刷新恢复。配置诊断可打开明确数据目录下的配置文件检查，不自动修复、转换或改 provider。未登录时，卡片提供平台地址、账号、密码、“保存密码”和“登录”；平台要求验证码时显示验证码输入。登录后紧凑显示项目、版本、地址和用户，版本与用户来自当前会话或最近登录记录；窗口无法唯一确定目标时选择工作区。</p><p>登录后的卡片提供“更新源码”和“上传代码”，并显示子系统范围、源码数和修改数；卡片下方以紧凑的图标按钮直接提供搜索源码、本地修改、操作记录、同步范围、索引管理和环境检查；平台连接与数据库设置继续通过项目设置子菜单进入。“当前项目 → … → 项目设置 → 退出登录”清除当前项目保存的 API 登录信息和运行会话，并显示登录卡片，不重置本地源码或代码编辑器。在线页面编辑器持有平台登录令牌，需先保存关闭再退出；本地凭据删除失败时仍清理当前运行会话，并明确提示尚未完成的部分。索引检查与恢复从卡片的环境检查进入，源码与数据库排查记录从操作记录选择。命令面板中的项目全部操作提供分组排列的可搜索列表，无需先选择分类。新窗口的视图初始高度优先分配给源码区；IDE 已保存的视图大小由原生分隔线调整并记忆，不写入项目配置。源代码管理标题栏以更新状态和上传本地修改图标显示操作，说明放在悬停提示中。源码数统计当前范围内的文件状态项，修改数统计其中非 <code>CLEAN</code> 状态，可能包含冲突、缺失等状态，须查看项目状态核对。更新按钮要求已配置地址并选择子系统；修改数尚未检查时显示“修改待检查”，点击上传后仍会实时核对；完成检查后，上传按钮仅在范围内存在可写修改时可用。按钮可用不代表上传回读或业务验收已通过。</p><p>过程函数树节点可显示为 <code>functionName($arg1, $arg2) 中文名称 [return $result]</code>：参数保留实际声明的名称和顺序；确认无参数时显示 <code>()</code>，无法从可靠的声明、配置或文档确定时显示 <code>(无)</code>。仅确认启用返回值时显示返回标记，其中展示过程函数自身的返回变量或表达式；多个分支的表达式去重并按源码顺序排列，例如 <code>[return null | $result]</code>。排除内部 <code>#function</code> 的返回、注释和字符串；没有可靠表达式时显示 <code>[return 无]</code>。未启用或无法确认返回值时不显示标记；展示不执行函数，也不推断运行时的值。参数依次优先采用注释和字符串之外的实际 <code>@DECLARE_PROCEDURE</code> 声明、开头生成的 <code>@config</code> JSON 中的 params ID、以及多行 <code>@param</code> 文档；不从调用代码推断。返回值优先采用配置标志，其次采用元数据标志，最后参考文档。已索引的源码头在查询时解析，升级解析或展示后通常重载窗口、刷新源码树即可，无需仅为此重新下载源码或重建整个索引；源码修改仍按正常流程更新索引。搜索、定位等其他展示位置使用英文名称和中文名称。产品或当前对象没有继承来源时，“查看继承源码”直接提示“无继承源码”。更新和上传的实际请求、应答、持久化阶段及耗时展示在“输出 → GuthonCodeTool”；日志不包含登录凭据、请求正文或源码正文，平台成功应答不等同最终业务验收。</p><h4 id="project-more-actions">项目操作与源码右键</h4><p>项目总览的右键操作使用目标项目的稳定 key。schema 3 允许尚未配置来源、且无源码、索引、操作历史和未保存 API 草稿的项目修改同步方式，保留原登记、目录和文档。已有内容的 SVN 项目切换 API 走<a href="#svn-api-migration-reference">同项目迁移</a>。操作入口见<a href="GuthonCodeTool_使用手册.html#2-4-驾驶舱与工作区管理">工作区管理</a>。</p><p>SVN 的更新沿用授权清单及原生 working copy。清单模式可审阅物理文件差异、处理冲突、撤销或按 working copy 分组提交 SVN，回执可在“操作记录”查看。SVN revision 只证明仓库提交，平台最终提交与生效独立核验。旧 sparse 布局继续使用原 checkout、更新和差异入口，清单模式特有能力以项目配置为准。</p><p>DATABASE 的“更新源码”执行数据库源码与结构资料导出，维护 readonly 镜像与本地索引。Workcopy 保留原比较、交付与显式覆盖规则。浏览器从已匹配的 DATABASE 项目拉取页面或过程函数到工作副本；SVN 浏览器入口只定位和查询授权源码，更新走 Nexus 或 CLI。API 浏览器刷新保持原语义。</p><p>MCP 可通过 <code>--provider api</code>、<code>--provider svn</code> 或 <code>--provider database</code> 选择服务。SVN MCP 提供本地查询和按权限受控编辑，提交仍在 Nexus/CLI 审阅。DATABASE MCP 查询本地索引与历史。已有完整分类 YAML 的旧 MCP 命令保留 SVN 默认入口，统一配置默认 API。</p>
+<p>三个面板都使用 Webview 视图承载内容，并由 IDE 渲染原生标题栏和级联菜单。CodeBuddy 对展开的 Webview 面板持续显示适用的标题栏图标，无需调整 IDE 设置；其他宿主的显隐遵循其原生行为。“项目总览 → …”包含“工具设置”和“检查更新”两个原生子菜单，工作区尚未初始化时也可打开。工具设置管理运行方式、本地数据目录和团队规则同步。检查更新包括更新来源设置。浏览器增强的启停入口在更多菜单的一级。“当前项目”的“…”一级菜单提供打开项目目录、查看工作区源码和配置 MCP。“项目设置”是原生子菜单，包含源码连接、同步范围、项目配置和修改同步方式。API 还显示数据库查询与验证、官方参考资料配置及退出登录。API、SVN 和 DATABASE 均可从当前项目卡片的“索引管理”重建本地索引。API 还可查看解析诊断、重试待更新文件。SVN 和 DATABASE 可查看本地索引状态。“源码工具”原生子菜单为 API 提供同步模块参数和官方参考资料，为支持授权清单的 SVN 项目提供查看授权范围和检查远端变更。API 项目右键菜单提供带确认的删除入口。环境检查提供当前项目的运行检查。操作记录分别读取源码同步上传及数据库排查历史；未知上传仍先核对平台结果，不重发上传。</p>
+<table><thead><tr><th>入口</th><th>功能</th><th>范围与限制</th></tr></thead><tbody>
+<tr><td>源码视图标题菜单</td><td>导出源码说明</td><td>导出当前项目的源码目录和调用索引。</td></tr>
+<tr><td>表、视图、系统脚本分类及对应对象右键</td><td>导出表结构、视图或系统脚本</td><td>传递选中的数据源、子系统或对象；资料位于独立导出目录，不读取业务数据。</td></tr>
+<tr><td>单据类型分类、数据源及条目右键</td><td>导出单据类型</td><td>使用另行配置的数据库连接导出完整定义，按选中数据源和编码筛选；只读 Markdown 不等同完整定义。</td></tr>
+<tr><td>页面与过程函数右键</td><td>查看使用位置</td><td>列出当前索引识别的静态调用；支持打开对应源码位置，动态引用及范围外源码需另行核验。</td></tr>
+<tr><td>源码分类、包、系统目录或文件右键</td><td>更新指定 API 源码</td><td>目录按物理范围读取官方分页列表，可发现新文件并保留本地修改；精确页面更新核对该页面的原生模型和版本。对象路径迁移时停止并提示，避免重复源码。</td></tr>
+<tr><td>顶层过程函数分类右键</td><td>列表平铺、树形结构</td><td>切换过程包组织方式，原始路径不变；数据源、过程包和函数节点不提供此切换。</td></tr>
+<tr><td>开发参考分类</td><td>开发参考</td><td>按需查阅当前项目的前后端 API、页面结构、事件、规则及缺失资料。</td></tr>
+</tbody></table>
+<p>新版界面移除本地修改包导入、导出入口；已有高级 CLI 变更包契约继续有效。源码资料导出不会生成第二套可上传源码。</p>
+<p>单据类型和下拉组件分别从一个官方只读 Markdown 文件解析，条目保留原文件路径、行号与文件哈希。单据类型按当前数据源范围过滤，相关字段不推定为主键；下拉组件保留原有权限说明。普通搜索可按编码、名称和关联表检索，结果打开原文对应行。刷新条目或分组时按物理路径去重，所需平台接口各请求一次；单据类型和下拉组件共用配置接口。不同的本地参考文件会保留并报告；条目数与物理文件数不是同一统计口径。</p>
+<h4 id="module-parameter-reference">模块参数编辑与受控上传</h4><p>模块参数以系统编码和参数编码共同标识。同步时每个选中子系统调用一次 <code>getConfigs</code> 获取列表，汇总到一个只读的 <code>otherconfig/module-parameters.json</code>，不逐项预拉详情；条目数与生成的物理文件数分别统计。清单支持按身份、名称等列表信息查找，不能当作完整参数正文。需要加载具体条目详情时请求一次，写入原有 <code>systems/&lt;sid&gt;/module-parameters/&lt;id&gt;.json</code> 缓存，并通过既有基线和冲突保护保留本地修改。详情保留接口实际返回的完整 JSON，不将模板默认值和项目值合并，也不补齐缺失节点。源码树、搜索和定位共用当前项目索引；默认打开可编辑的 <code>data</code> JSON，完整接口原文仍只读。模板、对象身份、版本元数据及其他根节点不可通过参数编辑修改。</p><p>本地编辑共用文档租约、原文件哈希、预览与幂等保存记录；保存只替换同一快照的 data 节点，其他原文保留。本地保存不会修改平台。差异预览对比平台基线与当前编辑输入；源代码管理可比较已保存的本地修改。旧只读快照在明确打开编辑时升级本地编辑能力，保留内容、基线和已有修改。</p><p>模块参数上传使用独立预览计划，绑定明确路径、本地哈希、平台数据与模板版本、当前用户及签出者。用户确认后再次核对；必要时按原生接口普通签出，核实属于当前用户后保存 data，并独立回读核对。其他用户已签出的对象拒绝上传，不使用 force，也不自动签入或撤销签出。源码与模块参数同时有修改时先选择本次上传范围。平台最终签入仍从原生平台完成。</p><p>每次保存请求前持久化提交快照和阶段；超时或未知结果不重发。未确认操作阻止同一参数的新上传计划，核对原操作只读取平台状态；仅签出而未保存时也不会自动续传。平台已确认保存但本地同步冲突时，分别保留平台结果与本地输入，不能把本地失败当作平台没有保存。预览和结果不等同配置业务效果验收。</p><p>普通更新源码会同步模块参数，也可在“源码工具”或分类右键单独同步。独立同步更新该类型的汇总清单；详情按需加载，已有详情和本地修改按源码发布及冲突保护处理，不删除其他类型源码。编辑和上传均不执行数据库结构同步。</p>
+<p>“源码工具 → 同步官方参考资料”独立请求官方配置与技能资料接口，登记匹配的本地文件；与平台版本不同的已有文件保留原文，按有来源标记的本地快照索引并报告，不重新拉取业务源码。平台参考使用当前工作区已登记的 <code>skills/platform-kit/apis/</code>，用于 API 补全、悬停、页面属性说明及参考阅读，并通过 <code>read_platform_reference</code> 提供按需读取。API 查询支持分页；事件继承组读取对应基组。上游清单引用的缺失文件显式列出，工程目录和文件后缀约定不覆盖本项目规则；结构字典和事件资料不作为未经平台核验的严格保存校验器。资料按索引代次更新，原文件保持只读。</p>
+<p>SVN 工作副本管理锁会在源代码管理显示。点击锁提示可对该授权工作副本执行 <code>svn cleanup</code>，保留本地修改。远端有更新时继续进入预览与确认。</p>
+<h3 id="7-2-语言与导航">7.2 语言与导航</h3><p>源码名称由下载元数据统一派生：表中文名、视图中文名及系统脚本用途说明进入索引、搜索、源码树与上传审阅；旧平台缺少描述时保留对象编码，不改变路径和身份。源码树过滤仅改变展示，原生资源管理器复用同一源码状态和目录汇总。</p><p>继承调用导航复用父层路径及哈希核验，仅打开只读父层；展开后的产品段提供来源入口。过程调用识别包含 <code>invokeWithGlobalTrans</code> 和 <code>runFutureTaskWithGlobalTrans</code>，定义跳转与调用索引使用相同的静态目标约束，动态目标仍需核验。本地函数悬停只读取紧邻声明的注释。</p><p>GSS、JavaScript 和 SQL 的补全、悬停及定位结合官方语言资源和 Nexus 快捷输入。内置 API 与当前项目参考由同一补全入口合并，按完整 API 路径与参数签名去重，保留不同参数的重载及快捷前缀；无法确定类型对应关系的旧模板保持独立。PAGE 与过程函数可按精确身份定位；浏览器相关能力需要配对 Bridge。</p><h4 id="view-sql-editor">视图 SQL 编辑</h4><p>打开视图默认显示 SQL 虚拟文档，使用 SQL 语言服务、定位和行内差异。保存前核对视图编码、原文件哈希、租约和候选，只修改原文件的 <code>/viewSql</code>，其余 XML 或 JSON 原文保留；不会生成另一套可上传 SQL 文件。缺少 SQL 节点的官方视图默认展示原始 XML，不生成空 SQL；需要显式编辑完整定义时使用原始源码入口，并校验当前对象身份。真正的继承文件或身份冲突继续只读。保存只更新本地 checkout，上传与结构同步仍是独立操作。</p><h3 id="7-3-工具更新">7.3 工具更新</h3><p>工具、Nexus 和 Bridge 按各自更新流程核验并生效。官方语言能力更新从 Open VSX 检查资源，临时编辑器比较更新日志、命令、编辑器声明、语言资源、可识别接口与最低平台版本，区分已有对应入口、待适配核验、无需采用及实际生效状态。命令对应不证明协议或实机验收；未知功能变化需随 Nexus 适配发布。报告分别列出 API 签名新增、移除和文档变化；该入口仅替换经验证的资源，不安装官方扩展或替换后端协议。下载、启用和实际生效分别确认。应用更新与回退使用互斥锁；仅当锁记录包含合法进程号且系统明确报告该进程不存在时，才尝试恢复遗留锁。进程仍存活、无权确认（EPERM）或锁记录损坏、未知时保留锁，不按锁龄抢占。</p>
 </section>
 
 <section class="section">
 <h2 id="8-guthon-bridge">8. Guthon Bridge</h2>
-<h3 id="8-1-页面能力">8.1 页面能力</h3>
-<table class="comparison-table"><thead><tr><th>能力</th><th>范围与结果</th></tr></thead><tbody>
-<tr><td>DATABASE 源码与元数据拉取</td><td>拉取 PAGE、过程函数、系统脚本，导出表结构、单据类型与视图。按页面身份路由到工作区，由统一 CLI 保存资料。</td></tr>
-<tr><td>字段复制、粘贴与平移</td><td>模块开发页支持输入和表格组件；可勾选灰色标识的隐藏字段。粘贴保留隐藏状态，并在显示、隐藏两组中按 fieldId 去重。平台保存仍需用户执行。</td></tr>
-<tr><td>脚本与函数导航</td><td>静态过程方法支持 Ctrl/Cmd 点击，包括 <code>proc.invoke</code>、<code>thread.run</code>、<code>thread.runFutureTask</code> 和 <code>proc.find</code> 绑定调用；函数内子方法支持跳转；调用方提示可交给本地索引查询。支持从过程函数“由我签出的页面”列表直接打开对应函数。</td></tr>
-<tr><td>管理列表滚动</td><td>以谷神 2.0 为主要适配目标，1.5 仅在相同列表控件结构下启用。数据表管理表格/卡片主列表、表字段列表、开发日志与增量发布保留顶部按钮；模块参数、系统脚本和视图管理保留查询区与左侧树，列表独立纵向滚动。数据字典保留左侧分类树；数据字典和单据类型保留查询区、操作区及分页，列表独立滚动；视图管理、数据字典与单据类型支持小屏横向滚动，定时任务管理的横向滚动条保持在列表可视区域内。</td></tr>
-<tr><td>平台 → Nexus 定位</td><td>从当前 PAGE 或过程函数页签提取完整 PAGE ID，或包名与函数名，通过 URI 请求 Nexus；用户选择 SVN 工作区和精确候选。</td></tr>
-<tr id="bridge-tab-sort"><td>标签拖动排序</td><td>顶部功能标签及模块开发 PAGE、过程函数编辑标签可在各自标签栏内排序；首页、右侧菜单、禁用标签保持固定，关闭按钮保留原操作。仅适配已识别的 Element 卡片标签栏，弹窗和页面设计内部标签不处理。拖到左右边缘时使用原标签栏的滚动按钮继续移动。</td></tr>
-<tr><td>Nexus → 平台定位</td><td>源码树右键或虚拟文档命令定位已打开的平台页签。PAGE 按完整编码、过程函数按包名、函数名和当前数据源匹配；多页签当次选择。</td></tr>
-</tbody></table>
-<p>字段继承脚本的 <code>inherit()</code> / <code>@inherit()</code> 按产品源码展开后复制，空结果保留为空；缺少来源或无法安全展开时拒绝复制。页面辅助不依赖本地拉取服务，源码拉取与双向定位需要服务及工作区配置。</p>
-<p>左下角按钮组随开发页签挂载，页面身份与工作区查询异步进行；切换页签通过 DOM 事件刷新。左下角“源码拉取”保留为显式操作入口，点击后匹配或选择工作区。SVN 工作区仍不支持 DATABASE 拉取，服务端会拒绝该请求；弹窗中的导出能力按工作区模式显示。</p>
-<p>管理列表增强识别 2.0 侧栏或 1.5 顶栏布局；版本信息未加载时仍可按完整布局结构识别，并继续核对页签、内容区和列表控件；不匹配、未完成挂载或未知布局安全跳过，不访问平台私有脚本对象。由扩展处理动态挂载、视图切换与窗口缩放，退出目标页或扩展失效时清理。更新扩展后刷新页面即可生效，不需要连接本地服务。</p>
-<p>标签排序仅调整标签头的显示顺序，保留原生标签身份、内容面板和编辑器实例，不保存或重建源码。上层功能标签顺序按平台来源地址保存在当前 Chrome 扩展的本地存储；下层 PAGE、过程函数标签仅在当前页面会话中记忆，刷新页面后不恢复。动态新增、关闭和重绘标签后重新应用顺序；停用增强时还原本次挂载时的顺序和标签属性。排序无需本地服务或工作区配置。操作见<a href="GuthonCodeTool_使用手册.html#bridge-tab-sort">标签排序步骤</a>，恢复问题见<a href="GuthonCodeTool_QA.html?q=%E6%A0%87%E7%AD%BE%E6%8E%92%E5%BA%8F">标签排序问题解答</a>。</p>
-
-<p><code>$vs.proc.runServiceComp</code> 与 <code>$vs.thread.runServiceComp</code> 支持在首参的静态服务组件 ID 上导航。Bridge 按精确 PAGE ID 打开模块开发中的组件，目标须存在于当前应用系统对象树；Nexus 的 SVN 模式按 PAGE ID 查找索引中的 GSS 组件源码，DATABASE 模式查找已拉取组件的 <code>compScript.vm</code> 并核对对象元数据。变量、插值和拼接 ID 不做猜测；Nexus 保留同一 ID 的多个精确候选供选择，Bridge 遇到多个候选需先选择应用系统。</p>
-<h3 id="8-2-路由与安全边界">8.2 路由与安全边界</h3>
-<ul>
-<li>请求携带 workspaceKey 时，Bridge 继续核对页面身份；缺失时按 <code>pageOrigin + dataSourceId + systemId</code> 查找候选。</li>
-<li>存在多个候选时由用户为当前请求选择，不写入全局默认，也不影响其他页面。</li>
-<li>允许访问的页面范围由扩展的来源、域名后缀和路径规则限制。</li>
-<li>本地服务默认监听 <code>127.0.0.1:17361</code>，扩展须使用相同端口并完成令牌配对。</li>
-<li>Nexus 把当前应用入口和 toolHome 传给 Bridge，用户无需手工配置环境变量或安装 Node.js。</li>
-</ul>
-<p>首次连接时从 Nexus 复制配对令牌，在扩展弹窗保存；两端默认端口为 <code>17361</code>。服务重启保留令牌，页面不能读取令牌。Nexus 以带令牌的状态请求确认实例，未认证的 health 只说明有服务在线。</p>
-<p><code>/pageContext</code> 最多保留 64 个浏览器页签快照，每个快照含最多 32 个平台内部页签，租约 150 秒。快照只含有界身份元数据，不含正文、SQL、选中文本和本机路径。Bearer SSE 推送快照变化、定位指令及回执，60 秒元数据心跳恢复暂停的扩展后台或重启的服务。来源、工作区或租约失效时拒绝导航，重连不重放。</p>
-<p>长任务通过 <code>/submitJob</code>/<code>/jobStatus</code> 提交持久请求并短轮询，扩展重启后可从“查询待恢复任务”回查；Bridge 重启把未完成任务标记 UNKNOWN，不自动重放。弹窗只记录最近 20 次成功拉取对象和上次导出目录，按同一平台来源显示；UNKNOWN 不进入成功历史。再次拉取创建新请求，丢弃旧 force/confirmation。<code>pull-log tail/summary</code> 只观察工作区与 Bridge 保留日志的有界窗口，返回坏行与缺口提示；日志在 5 MiB 轮转一份。</p>
-<p>有明确 workspaceKey 的任务按工作区串行，最多 4 个工作区并行、32 个队列项和 8 个工作区客户端；闲置客户端按近期使用回收。未解析工作区的旧请求仍走单队列，每条命令重新核对归属。<code>/status</code> 返回 <code>activeWorkspaces</code>，不以一个全局“当前工作区”描述并行任务。写入期间 Node 可为读取启动独立只读 ToolHost，执行与排队超时按请求参数传递；MCP 工具调用保持 FIFO，协议线程仍可即时回应 ping。</p>
-<p>独立 <code>host-settings.js</code> 保存允许的平台主机规则，托管更新保留该文件。<code>web_accessible_resources</code> 使用 Chrome 要求的 HTTP/HTTPS 来源模式，内容脚本与页面脚本另行校验 <code>/guthon/</code> 路径及允许主机，不能只凭资源声明推断访问权限。</p>
-<p>导出根固定为 <code>&lt;toolHome&gt;/var/nexus/bridge/exports</code>，维护者可显式设置 <code>GUTHON_BRIDGE_EXPORT_ROOT</code>；历史目录不能绕过约束。平台提示不展示本机路径或原始异常，详细信息保留在扩展弹窗和本地输出。端口占用时报错，不接管另一实例。令牌仅保存于本地运行目录与扩展存储；网页和 MAIN world 仍共享页面脚本环境，配对本身不能证明平台没有 XSS。</p>
-<p>Bridge 的普通拉取不自动向平台写回源码，也不执行 SVN commit；SVN 检出、编辑和提交从 Nexus 或明确的受控接口完成。明确发起的整页新建、复制和删除会调用平台原生接口，范围见<a href="#page-lifecycle">PAGE 生命周期</a>。</p>
 <p id="bridge-native-guid">原生元数据维护接口 <code>/nativeMetadata</code> 绑定配对平台、工作区、数据源及精确字段，支持只读检查，以及将现有非空 BIGINT 主键的生成方式设为平台 GUID（<code>isIncrement=2</code>）。写入前要求字段快照一致，保存后以原生 API 回读。表字段修正后，可检查指定页面的同一主键投影，冻结页面版本与摘要，再仅补齐 GUID 标记并通过原生保存启用自动编译；保存后回读整页核对预期修改。页面版本漂移或系统身份不符时拒绝派发。同一请求不重复派发，结果未知时只检查原字段或页面。不修改字段类型、数据库自增或默认值，不执行建表、SQL或任意过程，也不写本地 <code>tables/</code> 只读副本。只读运行入口检查仅返回同源静态脚本路径，不导出平台会话凭据。另有显式授权的 <code>save-native-record</code> 单表新增动作：绑定页面、父主页、保存按钮与源码版本，先只读预检，再带原生页面和菜单请求头保存并独立主键回读，候选与身份沿平台会话核验；不接受明细网格、更新、任意服务、SQL或调用者指定的主键、身份、时间戳。既有保存按钮的钩子发布支持原节点修改及明确缺失节点的新增，要求调用前完成 SVN MCP 源码租约、预览、更新及差异回读，携带源码操作标识；再以原生版本和原脚本文本比对，仅替换该钩子并自动编译、整页回读。该接口不执行任意测试脚本、不提交 SVN、不整页覆盖本地版本。显式配置的私有静态步骤清单可冻结有限的原生服务调用，绑定开发环境、工作区、来源、组件、父页、版本及全部参数；调用者只选步骤名，不能指定 URL、别名或参数。执行沿原生权限与业务服务；已声明的页面查询只读调用精确原生表格和搜索控件，不执行 SQL 或任意测试脚本，不自动重放未知请求。显式配置的 <code>GUTHON_NATIVE_SOURCE_PLAN_FILE</code> 可冻结开发函数的原生创建、参数和源码保存、MCP登记及隐藏保存字段追加；HTTP请求只选择步骤，不能提供源码、接口地址或SQL。新建函数及保存参数可显式冻结事务与返回模式（严格为 0/1），省略时仍为 0/1，MCP 登记保持 0/1。过程函数核验数据源及精确父过程身份，不要求当前界面系统包含该函数；PAGE 与 MCP 登记仍核验系统归属。函数发布逐字核对原版本与源码，并在保存前后核对既有事务与返回模式；服务组件源码发布绑定受控保存后的源码哈希、原生版本、完整原文与唯一片段，只修改组件脚本，保留事务模式并完整回读，检查及保存请求均只能选择本机冻结的步骤；大函数支持绑定已验证过程操作、原生版本及唯一命中原文的精确片段发布，保留未涉及源码，完整回读比对后只返回核验摘要；隐藏字段绑定受控源码操作、原生版本及原字段清单，仅追加无脚本字段，不覆盖既有字段。原生规范化导致整页比较未通过时，保留未知回执并独立检查目标，不重新派发。<code>/nativeMetadataResult</code> 按原请求标识查询回执。</p>
-
+<h3 id="8-1-页面能力">8.1 页面能力</h3><p>Chrome 扩展提供字段复制、列表滚动、页签排序、网页导航和当前对象定位；按需通过本机 Bridge 定向刷新已匹配的 API 对象。当前对象导出到独立目录，已有不同内容的同名文件不会被覆盖。API 核心使用不要求安装 Chrome 扩展。</p><h4 id="bridge-tab-sort">标签排序</h4><p>拖动顶部功能标签或 PAGE、过程函数编辑标签可调整同一行内顺序，首页和菜单固定。上层顺序按平台来源保存在扩展中，下层仅保留本次页面会话；只移动标签头，不重建编辑器。仅支持已识别的标签栏。</p><h3 id="8-2-路由与安全边界">8.2 路由与安全边界</h3><p>服务使用本机 Bearer 配对；浏览器扩展校验来源，页面上下文和工作区路由需匹配。PAGE ID、过程包名和函数名通过 Nexus URI 传递，候选需由当前项目目录消歧；Nexus URI 接线和已安装客户端仍需验证。未知或未匹配对象不扩大刷新范围。</p>
 </section>
 
 <section class="section">
-<h2 id="9-guthon-svn-mcp">9. Guthon SVN MCP</h2>
-<p>SVN MCP 与 Nexus、Bridge 同属 GuthonCodeTool 的用户入口，但职责不同：Nexus 服务 VS Code 中的开发与 SVN SCM，Bridge 服务受限谷神网页，MCP 服务 AI 客户端对已授权 SVN PAGE 和过程函数的定位、证据读取和受控源码修改。MCP 是共享服务的协议适配，不建立第二套索引、授权清单或文件写回路径。推荐客户端别名为 <code>guthon-svn</code>；旧 <code>guthon-page</code> 别名仍可指向同一入口，迁移不应重复启动两个服务。</p>
-<h3 id="9-1-入口与能力">9.1 入口与能力</h3>
-<p>客户端以 <code>mcp --stdio --home &lt;toolHome&gt;</code> 启动独立进程；stdio 握手支持 MCP <code>2025-03-26</code>、<code>2025-06-18</code> 与 <code>2025-11-25</code>；不支持无握手的新版协议，客户端须确认服务端返回的版本。<code>--home</code> 明确目标数据目录，每次工具调用再传 <code>workspaceKey</code>；PAGE 查询还需精确 <code>sourceNamespace</code>、<code>sourceId</code>，必要时带 <code>funId</code>；过程函数需带 <code>sourceNamespace + sourceId + funId</code>；唯一命中时可省略 <code>workingCopyId</code>，多候选必须补全。运行入口可用发行应用、Release pyz 或源码开发环境，但客户端配置分别指向各自实际存在的可执行文件和绝对路径。</p>
-<p>默认发现 <strong>66 个工具</strong>；加 <code>--read-only</code> 时发现 49 个只读工具（包括操作回查和候选预览），隐藏 17 个写入源码、租约或恢复状态的工具。</p>
-<h4>客户端配置参考</h4>
-<p>客户端配置始终分开传递 <code>command</code> 和 <code>args</code>。发行模式的 command 是应用文件；pyz 模式为 Python，args 以 pyz 路径开头；源码模式为仓库 Python，args 以 <code>scripts/guthon_tool.py</code> 的绝对路径开头，再接 <code>mcp --stdio --home</code> 和数据目录。包含空格的路径仍是一个参数，不使用 Shell 展开 <code>~</code> 或环境变量。</p>
-<table class="comparison-table"><thead><tr><th>客户端</th><th>配置位置与注意事项</th></tr></thead><tbody>
-<tr><td>Codex</td><td>个人 <code>~/.codex/config.toml</code> 的 <code>mcp_servers</code> 服务表，或已信任项目的 <code>.codex/config.toml</code>。也可用 CLI 添加服务；与手工配置二选一，保留已有服务。参见<a href="https://developers.openai.com/codex/mcp">官方 MCP 文档</a>。</td></tr>
-<tr><td>CodeBuddy IDE / Code</td><td>IDE 的 MCP 设置支持添加 JSON 服务；Code CLI 可使用个人 <code>~/.codebuddy/.mcp.json</code> 或项目 <code>.mcp.json</code> 的 <code>mcpServers</code>。IDE 用“Try to Run”、CLI 用 <code>/mcp</code> 检查连接。参见<a href="https://www.codebuddy.cn/docs/ide/User-guide/MCP">IDE 文档</a>与<a href="https://www.codebuddy.cn/docs/cli/mcp">CLI 文档</a>。</td></tr>
-<tr><td>ZCode</td><td>可在 MCP 服务器设置中新增 stdio 服务或导入 Codex 配置。原生用户配置为 <code>~/.zcode/cli/config.json</code>、项目配置为 <code>.zcode/config.json</code>，服务位于 <code>mcp.servers</code>；同一作用域原生配置已有服务时，不再合并 <code>.agents/mcp.json</code>，不要分散配置。参见<a href="https://zcode.z.ai/cn/docs/mcp-services">官方文档</a>。</td></tr>
-</tbody></table>
-<p>Windows JSON 路径使用正斜杠或正确转义的反斜杠。个人路径通常放在用户配置中；不要覆盖其他 MCP 服务，也不要把含本机路径的配置误提交到公开仓库。注册成功、进程握手、工具发现和索引就绪分别检查。</p>
-<h4>只读查询（以下为常用工具；完整清单以 tools/list 为准）</h4>
-<table class="comparison-table">
-<thead><tr><th>工具</th><th>作用</th></tr></thead>
-<tbody>
-<tr><td><code>get_runtime_status</code></td><td>查看本地服务版本、协议和工作区数量。</td></tr>
-<tr><td><code>resolve_workspace</code></td><td>核对显式工作区键；不根据唯一候选静默选择写入工作区。</td></tr>
-<tr><td><code>get_index_status</code></td><td>检查 PAGE 节点、字段和关系投影状态；<code>projectionGapCount</code> 标记有片段却缺少语义节点的 JSON PAGE，不将其误报为 <code>READY</code>。</td></tr>
-<tr><td><code>get_index_health</code></td><td>检查 SVN 对象目录就绪度、过期源码、扫描错误及 PAGE 投影缺口；对象目录可独立于 PAGE 投影就绪。</td></tr>
-<tr><td><code>search_sources</code></td><td>分页检索 PAGE、过程函数等索引对象及精确身份。</td></tr>
-<tr><td><code>read_source_document</code></td><td>按精确身份和偏移有界读取当前源码或 JSON 子树，不创建编辑租约；读取过程函数时传入 <code>sourceType=procedure</code>。</td></tr>
-<tr><td><code>list_procedure_callers</code></td><td>读取精确过程函数的有界调用方索引证据。</td></tr>
-<tr><td><code>list_page_nodes</code></td><td>分页列出 PAGE 脚本、SQL 与字段集合节点，不返回整页 JSON。</td></tr>
-<tr><td><code>read_page_nodes</code></td><td>从授权源码定点读取所选 PAGE 节点正文。</td></tr>
-<tr><td><code>read_inherited_source</code></td><td>按精确身份有界读取项目原文、产品原文、展开片段和来源位置；不创建编辑租约。过程函数需带 <code>workingCopyId</code>，PAGE JSON 需带项目脚本 <code>jsonPointer</code>，PAGE GSS 使用页面身份。</td></tr>
-<tr><td><code>list_page_fields</code></td><td>分页列出有组件宿主的 UI 字段身份、区域和集合位置；可用 <code>fieldIdPrefix</code> 按字面前缀筛选，分页游标绑定此过滤条件。</td></tr>
-<tr><td><code>search_page_fields</code></td><td>在同一工作区和命名空间中按字面前缀分页查找其他 PAGE 的 UI 字段，返回 PAGE、集合与表列来源；不推断页面间引用。</td></tr>
-<tr><td><code>get_page_field</code></td><td>按稳定身份或附带源码 hash 的 Pointer 读取单个 UI 字段。</td></tr>
-<tr><td><code>list_page_field_relations</code></td><td>列出显式字段关联及未解析映射证据。</td></tr>
-<tr><td><code>check_page_field_references</code></td><td>报告字段引用风险；结果不能作为删除许可。</td></tr>
-<tr><td><code>get_source_context</code></td><td>读取精确 PAGE 的片段目录、表访问与逻辑事实摘要，附带片段 Pointer 和索引行号；结果有界。</td></tr>
-</tbody>
-</table>
-
-<h4>编辑流程与操作回查（下表为常用入口；完整分类以 tools/list 为准）</h4>
-<table class="comparison-table">
-<thead><tr><th>工具</th><th>作用</th></tr></thead>
-<tbody>
-<tr><td><code>get_page_lifecycle_context / open_page_lifecycle_edit / preview_page_lifecycle / apply_page_lifecycle</code></td><td>经已配对 Bridge 查询模块和页面、冻结并预览整页新建/复制/删除，再单次派发平台原生操作。整页写入回执与本地源码同步分别核验。</td></tr>
-<tr><td><code>get_page_design_contract</code></td><td>返回设计操作参数、控件类型、分控件事件及参数、按钮后台事件及可修改属性。</td></tr>
-<tr><td><code>inspect_page_design / validate_page_design</code></td><td>前者检查精确授权 PAGE；后者只在内存检查 AI 生成的候选 JSON。返回有界身份和结构诊断，不创建 PAGE，也不证明平台验收。</td></tr>
-<tr><td><code>open_page_structure_edit / preview_page_structure / update_page_structure</code></td><td>按平台契约创建、复制、编辑、删除和移动字段/按钮，管理事件、数据源和原生布局；共用预览、PAGE 写入日志及恢复。</td></tr>
-<tr><td><code>open_page_node_edit</code></td><td>为稳定 PAGE 脚本或 SQL 节点取得短期编辑令牌。</td></tr>
-<tr><td><code>preview_page_nodes</code></td><td>预检一个 PAGE 内的节点候选修改，不写源码。</td></tr>
-<tr><td><code>update_page_nodes</code></td><td>以幂等键将同页节点候选写入授权 SVN working copy。</td></tr>
-<tr><td><code>open_page_field_insert</code></td><td>准备同一 UI 字段集合内的单字段新增或拷贝，并冻结候选身份与位置。</td></tr>
-<tr><td><code>preview_page_field_insert</code></td><td>预检已冻结的字段候选，不写源码。</td></tr>
-<tr><td><code>insert_page_field</code></td><td>以幂等键插入该字段；不覆盖原有字段内容。</td></tr>
-<tr><td><code>open_page_field_update / preview_page_field_update / update_page_field</code></td><td>受控修改稳定 UI 字段已有的 label / disName 显示字符串；不能修改身份、绑定或脚本。</td></tr>
-<tr><td><code>get_page_operation</code></td><td>按操作 ID 或幂等键查询 PAGE 节点/字段写入阶段及当前核验状态。</td></tr>
-<tr><td><code>resume_page_operation</code></td><td>继续已记录 PAGE 操作的索引和 SVN diff 后置核验，不重写源码。</td></tr>
-<tr><td><code>open_procedure_edit</code></td><td>按完整过程函数身份取得短期编辑令牌。</td></tr>
-<tr><td><code>preview_procedure</code></td><td>预检过程函数完整候选或精确替换，不写源码。</td></tr>
-<tr><td><code>update_procedure</code></td><td>以幂等键写入一份授权过程函数物理文件。</td></tr>
-<tr><td><code>get_procedure_operation</code></td><td>按操作 ID 或幂等键查询过程函数写入阶段。</td></tr>
-<tr><td><code>resume_procedure_operation</code></td><td>继续过程函数写后的索引和 SVN diff 核验，不重写源码。</td></tr>
-</tbody>
-</table>
-<p>对象搜索与目录查询有界分页；PAGE 目录只给身份、Pointer、类型和 hash，正文仍须从授权源码定点读取。过程函数按偏移和最大字符数读取，重名目标无法区分时拒绝归因。结果携带来源身份和索引 generation，失效游标会被拒绝。PAGE 查询服务由 CLI <code>svn page-query</code> 和 Nexus 后端复用；Nexus 源码树的“浏览 PAGE 语义节点”命令按页选择并再次复核源码后打开现有虚拟文档。索引返回 <code>INDEX_STALE</code>、<code>PARTIAL</code> 或 <code>REBUILD_REQUIRED</code> 时，命令提供当前 PAGE 刷新或工作区重建入口，完成后需要重新浏览；尚无独立 MCP 面板。</p>
-<h3 id="9-2-共享索引与安全边界">9.2 共享索引与安全边界</h3>
-<ul>
-<li>MCP 只面向显式配置的 SVN manifest 工作区。PAGE 需完整页面身份；过程函数唯一命中时可省略 <code>workingCopyId</code>，多候选或继承读取须提供准确工作副本身份。不能只凭显示名称或目录位置猜测。</li>
-<li><code>context/index.db</code> 保存可重建的 SVN 对象目录、PAGE 节点、界面字段和保守关系投影；PAGE JSON、过程函数、脚本与 SQL 正文仍以授权 working copy 为准。无原生身份的数据源列仍通过字段集合按需读取。对象目录就绪不依赖 PAGE 语义投影就绪。</li>
-<li>字段关系仅确认显式 <code>selectCodefieldId</code> 等有证据的子集，并保留未解析 <code>otherSetFields</code> 诊断。动态、继承与反射组引用尚未形成完整闭包，<code>check_page_field_references</code> 不能批准字段删除。</li>
-<li>MCP 不自动安装到客户端，不修改既有 MCP 配置，也不决定 AI 何时调用。工具是否可见及是否主动调用取决于客户端连接和 guthon-team 的工具路由规则。</li>
-</ul>
-<p>MCP 风险注解按副作用区分：查询和预览为只读；租约创建、续期、释放、写后核验恢复为非只读、非破坏性；源码写入保留破坏性标记。工具声明不访问开放世界，注解不替代客户端审批和服务端授权。<code>--read-only</code> 隐藏所有非只读工具。</p>
-<p>已完成且无活动租约的操作记录通过 CLI <code>svn operation-gc --before &lt;ISO日期&gt;</code> 预检，核对计划后追加 <code>--apply --confirmation &lt;planHash&gt;</code> 归档；待恢复、损坏或仍有关联活动租约的记录不会归档。MCP 保留 <code>inspect_operations</code> 巡检及原操作状态查询和恢复入口。</p>
-<h3 id="9-3-开发状态与验证">9.3 写入范围与验证</h3>
-<p>PAGE 提供 <code>open_page_node_edit</code>、<code>preview_page_nodes</code>、<code>update_page_nodes</code>、<code>get_page_operation</code>、<code>resume_page_operation</code> 五个工具，限定稳定的同页脚本/SQL 字符串节点；另支持已有字段 <code>label</code> / <code>disName</code> 的受控显示文本修改；提供 <code>open_page_field_insert</code>、<code>preview_page_field_insert</code>、<code>insert_page_field</code>，只允许同一已识别 UI 字段集合内的单字段新增或拷贝，并共用 PAGE operation 查询/恢复。过程函数提供 <code>open_procedure_edit</code>、<code>preview_procedure</code>、<code>update_procedure</code>、<code>get_procedure_operation</code>、<code>resume_procedure_operation</code> 五个工具，限定完整身份匹配的一份授权物理文件。工具可见不等于目标可写：编辑令牌绑定授权、会话和源码快照；预览不落盘，正式写入重新校验 <code>edit</code> 能力、当前源码、索引及 SVN 状态，再以 <code>idempotencyKey</code> 记录操作。只改本地 SVN working copy，后续记录索引与 diff 核验，不执行 SVN commit。受控结构接口支持字段/按钮增改删、同页同类型复制与区域移动、事件、数据源及原生行列/TAB 布局。整页新建、复制和删除通过已配对 Bridge 使用平台原生接口；平台提交发布、菜单管理及任意根元数据修改仍不提供。</p>
-<p>具体安装版本应在客户端核对握手、工具清单、目标索引和实际源码差异。一个工作区索引就绪不能代表其他工作区也就绪；<code>PARTIAL</code>、<code>REBUILD_REQUIRED</code> 与 <code>INDEX_STALE</code> 应按目标身份重新取证。字段删除和移动不会自动修正脚本引用；完整字段关系闭包不在当前能力范围内；复杂映射需逐项核验，预览保留未解析证据；使用默认写入能力时应人工核对 SVN diff，不把工具响应当作平台运行证明。具体配置和调用顺序见<a href="GuthonCodeTool_使用手册.html#5-mcp">使用手册第 5 章</a>。</p>
-<h3 id="9-4-调用流程">9.4 调用流程与参数约束</h3>
-<h4>定位与有界读取</h4>
-<ol>
-<li>重启或重载 MCP 客户端，确认发现 <code>guthon-svn</code> 及包含结构编辑入口的工具清单。先调用 <code>get_runtime_status</code>，再以明确 <code>workspaceKey</code> 调用 PAGE 的 <code>get_index_status</code> 或过程函数的 <code>get_index_health</code>。</li>
-<li>用 <code>search_sources</code> 搜索 PAGE 名称或 ID，并设 <code>sourceType=page</code>、较小的 <code>limit</code>。从结果复制真实 <code>sourceNamespace</code>、<code>sourceId</code> 和 <code>funId</code>；同名对象不猜第一个。</li>
-<li>以完整身份调用 <code>list_page_nodes</code> 或 <code>list_page_fields</code>；从目录选择稳定的 <code>semanticNodeId</code>/<code>semanticFieldId</code>，再用 <code>read_page_nodes</code>/<code>get_page_field</code> 定点读取。若改用 <code>jsonPointer</code>，同时传目录返回的 <code>indexedSourceHash</code>。</li>
-<li>需要局部证据时调用 <code>get_source_context</code> 或 <code>list_page_field_relations</code>；<code>check_page_field_references</code> 只提示显式和未解析引用风险，不能证明字段可安全删除。</li>
-</ol>
-<div class="code-wrap"><span class="code-lang">json</span><button class="copy-btn" type="button" onclick="copyCode(this)">复制</button><pre><code>{"name":"get_index_status","arguments":{"workspaceKey":"products.&lt;id&gt;"}}
-{"name":"search_sources","arguments":{"workspaceKey":"products.&lt;id&gt;","sourceType":"page","keyword":"页面名或 PAGE ID","limit":20}}
-{"name":"list_page_nodes","arguments":{"workspaceKey":"products.&lt;id&gt;","sourceNamespace":"从搜索结果复制","sourceId":"从搜索结果复制","funId":"从搜索结果复制","limit":20}}</code></pre></div>
-<p>过程函数先以 <code>sourceType=procedure</code> 调用 <code>search_sources</code>，复制结果中的完整 <code>sourceNamespace</code>、<code>sourceId</code>、<code>funId</code> 和 <code>workingCopyId</code>，再以 <code>sourceType=procedure</code> 调用 <code>read_source_document</code>，按 <code>offset</code>/<code>maxChars</code> 有界读取；如需调用方证据，用 <code>list_procedure_callers</code>。同名或多 working copy 不猜第一个；调用方索引无法区分同别名目标时会拒绝归因。</p>
-<h4>PAGE 脚本与 SQL</h4>
-<p>默认 MCP 允许 AI 对<strong>已授权 SVN working copy 中的稳定脚本/SQL 字符串节点</strong>发起本地修改；已有字段显示文本可用专用更新工具；同一集合的单字段新增/拷贝见下文。这些节点接口不创建缺失结构；字段、按钮及事件新增使用下文的结构入口，任意 JSON 元数据和字段集合整体替换仍不开放。操作前应确认目标 <code>workspaceKey</code>、PAGE 身份、当前文件差异和工作区 <code>edit</code> 能力；仅仅发现写入工具不代表某个对象已获写入许可。</p>
-<ol>
-<li>从 <code>list_page_nodes</code> 的结果选定 <code>identityStability=STABLE</code> 且 <code>nodeType=SCRIPT</code> 或 <code>SQL</code> 的目标，调用 <code>open_page_node_edit</code> 获取绑定当前源码与授权状态的短期 <code>editToken</code>。</li>
-<li>用 <code>preview_page_nodes</code> 提交 <code>editToken</code> 和新 <code>content</code>，检查候选 hash、变更摘要和错误；预览不落盘，也不保证后续写入时源码仍未变化。</li>
-<li>确认修改后用同一批 token 和内容调用 <code>update_page_nodes</code>，提供调用方生成并保存的唯一 <code>idempotencyKey</code>（8–128 个无空格的可打印 ASCII 字符）。多个节点必须属于同一份 PAGE，服务会重新预检并一次写入本地文件。</li>
-<li>保存返回的 <code>operationId</code>。响应丢失时先用 <code>get_page_operation</code> 按原 <code>idempotencyKey</code> 查询，不要换 key 盲目重试；后置索引或 diff 核验未完成时按 <code>operationId</code> 调用 <code>resume_page_operation</code>。</li>
-<li>最后在 Nexus 的 SCM 中人工审阅 SVN diff，并按项目流程验证；MCP 不执行 SVN commit，也不把本地写入当作谷神平台提交或运行成功。</li>
-</ol>
-<h4>过程函数</h4>
-<p>过程函数写入只针对完整身份确定且获授权的 SVN working copy 物理文件。调用 <code>open_procedure_edit</code> 获取短期 <code>editToken</code>，以 <code>preview_procedure</code> 提交完整 <code>content</code> 或精确 <code>replacements</code> 检查候选 hash（预览不落盘），再以同一 token、候选和唯一 <code>idempotencyKey</code> 调用 <code>update_procedure</code>。响应丢失时用 <code>get_procedure_operation</code> 按原 key 查询；后置索引或 SVN diff 核验未完成时，用返回的 <code>operationId</code> 调用 <code>resume_procedure_operation</code>。最后人工审阅目标文件 diff；不可将本地写入等同平台运行成功，也不可通过 MCP 提交 SVN。</p>
-<p>SVN MCP 风险标记按副作用区分：查询和预览为只读；编辑租约创建、续期、释放、写入后的索引与差异验证恢复为非只读、非破坏性；源码写入保留破坏性标记。平台上下文查询、整页生命周期租约和派发标记访问外部平台，其余操作限定本地授权工作区。客户端仍可根据实际请求和授权策略要求审批；风险标记不替代服务端校验，--read-only 仍隐藏所有非只读工具。</p>
-<p>Bridge 的 web_accessible_resources 按 Chrome 要求使用 http://*/* 和 https://*/* 来源匹配；该字段不能用 /guthon/* 限制路径。内容脚本仍仅自动注入 /guthon/*，页面脚本继续校验允许的地址。若出现 Invalid match pattern，请更新扩展目录后重新加载。</p>
-<aside class="notice"><div class="notice-icon">!</div><div><p>写入依赖编辑租约、源码/索引 hash、授权范围和 SVN 状态的再次核对。实际使用时核对客户端工具清单、版本与目标工作区状态；出现未完成或外部改动时先查看 operation 状态和实际 diff，不强行覆盖。删除、移动或改绑定前核对显式关联和未解析映射；工具不自动改写业务脚本引用。</p></div></aside>
-<h4>同集合字段新增与拷贝</h4>
-<p>仅支持一份 PAGE 中<strong>同一个已识别 UI 字段集合</strong>的单字段新增或拷贝；不支持跨 PAGE、跨区域/集合、反射组、删除或移动。先用 <code>list_page_fields</code> 获取字段的 <code>collectionPointer</code>、<code>semanticFieldId</code> 和 <code>indexedSourceHash</code>；空集合可从 <code>list_page_nodes</code> 的 <code>FIELD_COLLECTION</code> 节点取 Pointer。目标必须属于表单、查询、主表或明细表组件，且当前索引与源码一致。</p>
-<ol>
-<li>调用 <code>open_page_field_insert</code>，传完整 PAGE 身份、<code>collectionPointer</code>、<code>indexedSourceHash</code> 和 <code>action=add</code> 或 <code>copy</code>。新增时传完整 <code>field</code> 对象（至少有 <code>fieldId</code>、<code>type</code>）；拷贝时传同集合来源的稳定 <code>sourceSemanticFieldId</code>、新的 <code>newFieldId</code>，可选 <code>newLabel</code>。可用 <code>afterSemanticFieldId</code> 指定同集合插入锚点，否则追加。服务始终生成字段自身的新 <code>id</code>；若候选带 <code>guid</code> 键则重生成，否则保持无 <code>guid</code>，不会把缺失值当成重复身份。返回固定候选和短期 <code>editToken</code>；不要自行改写 token 内的候选。</li>
-<li>调用 <code>preview_page_field_insert</code> 核对候选 hash、字段编码和插入位置。预览不落盘，且不是正式写入的并发保证。</li>
-<li>确认后以同一 <code>editToken</code> 和唯一 <code>idempotencyKey</code> 调用 <code>insert_page_field</code>。响应丢失先用共享的 <code>get_page_operation</code> 按原 key 查询；后置索引或 SVN diff 核验未完成时用 <code>resume_page_operation</code>，不要换 key 再插一次。</li>
-<li>人工审阅目标 PAGE 的 SVN diff，确认字段配置、顺序、引用与平台行为；MCP 不执行 SVN commit。</li>
-</ol>
-<p>本阶段拒绝字段编码重复、来源身份不稳定、双重编码 PAGE、疑似反射或未解析字段引用。复制生成字段自身的新身份，并重建附属按钮身份；不自动修正脚本和关联关系。保存后核对实际 SVN diff；平台运行与业务行为另行验证。</p>
-
-<h4 id="page-structure-edit">PAGE 设计契约与结构编辑</h4>
-<p>先调用 <code>get_page_design_contract</code> 获取操作参数、字段类型、事件和属性路径；使用 <code>inspect_page_design</code> 检查精确授权页面，或用 <code>validate_page_design</code> 在内存检查 AI 生成的候选。诊断包括表格列缺失/重复内部 ID、同区域重复字段编码、错误对象形状和不符合原生 <code>views.rows</code> 的布局。结果有界且明确不代表平台往返编辑或业务运行已通过。</p>
-<p>调用 <code>open_page_structure_edit</code>，核对 <code>insertTargets</code>、<code>eventOwners</code> 及 owner 的 <code>properties</code>/<code>allowedEvents</code>。租约绑定不可变页面身份，已创建的空白 PAGE 不再需要字段或占位脚本。整页新建、复制和删除见下文生命周期入口；本结构接口只修改已有授权文件。</p>
-<table class="comparison-table"><thead><tr><th>操作 kind</th><th>参数与行为</th></tr></thead><tbody>
-<tr><td><code>insert / copy</code></td><td>新增传 <code>collectionPointer,item</code>；同页复制传来源 <code>collectionPointer,fieldKey</code>、可选 <code>targetCollectionPointer</code> 及设置新字段编码/别名的 <code>patch</code>。缺失 ID 和原生默认结构由共享构造器补齐；复制重建字段和附属按钮身份。</td></tr>
-<tr><td><code>patch</code></td><td>传 <code>ownerPointer,patch</code>，按返回的属性路径修改字段、按钮、控件或页面设置，例如 <code>selectBox.forceSelection</code>。内部 id/guid 和产品层不可改。编辑保留原生身份。</td></tr>
-<tr><td><code>remove / move</code></td><td>传精确 <code>collectionPointer,fieldKey</code>；移动另传 <code>targetCollectionPointer</code>，只允许同页同类型区域。产品字段/按钮不能删除或移出。操作不会自动修正 SQL、脚本或外部引用。</td></tr>
-<tr><td><code>event / removeEvent</code></td><td>传 <code>ownerPointer,eventType,eventName</code>；增改事件另传 <code>content</code>。只支持 owner 返回的导出键；继承事件通过既有继承编辑入口处理。</td></tr>
-<tr><td><code>datasource</code></td><td>传控件 <code>ownerPointer</code> 和原生数据源 <code>value</code>，包含 <code>dsType,fields,pks</code> 及 <code>sql</code> 或 <code>script</code>。声明来自平台元数据；不执行 SQL、不调用在线 SQL 解析或编译，继承数据源走继承入口。</td></tr>
-<tr><td><code>repairIdentities</code></td><td>传 <code>collectionPointer</code>，只补齐缺失内部 ID 或重建重复项的 ID，保留首个有效 ID、字段编码和属性；产品成员不自动修复。先预览并核对受影响列，不能以该操作自动合并重复业务字段。</td></tr>
-<tr><td><code>grid</code></td><td>传栅格表单 <code>ownerPointer,rows</code>，设置原生 <code>gridRows</code>，由 <code>cell.control.ctrlId</code> 绑定字段；新增字段需同批放入单元格，否则平台保存会丢弃未放置字段。删除或移动栅格字段时，用 layout 同步调整字段和单元格。</td></tr>
-<tr><td><code>layout</code></td><td>传完整原生 <code>rows</code> 行列/控件/TAB 树，调整控件增删和布局；同步派生 <code>views.ctrls</code>。新控件需显式名称和已核对的配置；新增字段补齐原生结构，保留已有成员身份及产品层。</td></tr>
-<tr><td><code>property / text / order</code></td><td>沿用常用显示属性、已存在脚本/SQL 和同集合排序入口。参数以契约返回值为准。</td></tr>
-</tbody></table>
-<p><code>preview_page_structure</code> 与 <code>update_page_structure</code> 接收相同 <code>operations</code>。预览返回候选 hash、<code>createdNodes</code> 和 <code>designDiagnostics</code>；缺失身份在同一源码快照下确定生成，保存与预览一致。删除、移动、事件删除、身份修复和布局替换单独用一次单操作批次，新增与排序分开保存并重新取得租约，防止数组位置变化误改对象。以唯一 <code>idempotencyKey</code> 正式保存，未知结果按原 key 查询 operation，后置核验未完成按 operationId 恢复。</p>
-<p>事件按真实控件区分：表格列有 <code>formaterScript/onChangeScript/getCellStyleScript</code>；表格后台 SQL 前事件为 <code>beforeSqlSelectScript</code>。按钮前台点击为 <code>pageEvents.onClickScript</code>；提交按钮后台事件按保存、删除、导出动作返回，保留平台的 <code>complateSaveScript</code>/<code>complateDeleteScript</code> 拼写。按钮别名可空，仅填写时要求区域内唯一；启用权限隐藏时必须同时配置别名和权限。</p>
-<p>字段集合直接保存也会补齐新成员并拒绝已有成员的身份被悄悄更换。表格列必须具有唯一内部 ID：平台编辑按 ID 定位替换，缺失或重复可能改错列并出现原字段与改后字段并存。显式 <code>selectCodefieldId</code> 需在目标集合唯一命中；复杂映射仍须逐项核验。源码检查和本地预览不等于已安装客户端或平台验证。</p>
-<p>CLI 共用 <code>svn page-editor</code> JSON stdin：<code>contract</code> 查询契约，<code>inspect</code> 检查精确页面，<code>validate</code> 检查候选，<code>structure-open</code> 取得租约，<code>preview/save/resume</code> 预览、保存与恢复。遵循 runtime descriptor 的命令及显式 home/workspace 契约。更新后重启 MCP 才能发现新工具。</p>
-<h4 id="page-lifecycle">整个 PAGE 的新建、复制与删除</h4>
-<p>整页生命周期直接影响谷神平台，和本地结构编辑分开。需更新本地工具、Bridge 服务及 Chrome 扩展，重启 MCP，在平台登录并选择正确系统、展开目标模块树，Bridge 弹窗绑定工作区和配对令牌。工作区必须启用 <code>svn.edit</code>；服务和扩展分别核对目标页签来源、工作区、当前系统及已加载模块。无连接或身份不匹配即拒绝，不改用猜测的配置路径或凭据。</p>
-<ol><li>调用 <code>get_page_lifecycle_context</code>，传 <code>workspaceKey</code>，可选 <code>contextId,pageId,bridgePort</code>（默认 17361）；多个页签时先从返回候选选择 contextId。获取平台模块的 systemId/mkId 和来源 PAGE 元数据/源码版本。</li>
-<li>调用 <code>open_page_lifecycle_edit</code>，指定 <code>action=create/copy/delete</code>、页签和属性。新建需真实 <code>systemId,mkId,pageType,pageName</code>，按类型补齐 <code>pageAliasId,title</code>，可指定权限、事务和原生页面模板；页面类型为 0–6。复制/删除需精确来源 <code>pageId</code>，复制可覆盖目标模块、名称、别名等，不能改变原页面类型。未指定复制别名时沿平台规则追加 <code>.copy</code>。产品页禁止删除。</li>
-<li>调用 <code>preview_page_lifecycle</code> 审阅冻结的来源、目标、平台来源和 <code>candidateHash</code>；再以同一 hash、editToken 和唯一 <code>idempotencyKey</code> 调用 <code>apply_page_lifecycle</code>。平台自行分配 PAGE ID，并通过原生复制逻辑处理内容与身份，不伪造 checkout 文件。派发前复查来源元数据和源码版本，并拒绝目标平台未保存的草稿。</li>
-<li>按返回的 <code>page-life:v1:</code> operationId 用 <code>get_page_operation</code> 查询，或 <code>resume_page_operation</code> 继续等待原回执；恢复只查询，不重发。租约只消费一次，换 key 也不能重复派发。<code>PENDING/UNKNOWN/APPLIED_UNVERIFIED</code> 均不能视为创建或删除已完整验证，必须先对照平台模块树及原操作记录。</li>
-<li>平台操作完成后刷新模块树并按现有同步流程更新本地 SVN 源码与索引；生命周期响应明确返回 <code>localSourceSynchronized=false</code>，不自动提交 SVN、发布或覆盖已有本地差异。</li></ol>
-<p>平台接口调用成功不等于已安装环境、跨版本平台或业务验收。当前生命周期不自动管理菜单，不自动保存设计器草稿；复制完成后仍应检查绑定、权限、事件和字段属性的后续编辑。与他人同时编辑时，版本复查不能代替平台服务端事务级并发保证。</p>
-<h4>已有字段显示文本</h4>
-<p>通过 <code>open_page_field_update</code> 指定稳定 <code>semanticFieldId</code>、当前 <code>indexedSourceHash</code> 与仅包含 <code>label</code> / <code>disName</code> 的 patch；<code>preview_page_field_update</code> 检查冻结候选，再以 <code>update_page_field</code> 和唯一幂等键写入。共用 PAGE 操作回查与后置核验。该接口不修改字段编码、类型、绑定或脚本。</p>
-<p>结果带 <code>nextCursor</code> 才继续翻页。<code>CURSOR_STALE</code> 从第一页重查；<code>SOURCE_STALE</code> / <code>INDEX_STALE</code> 先刷新目标源码与索引，不能沿用旧 Pointer。响应不明先按原幂等键回查，不换键重复写入。</p>
+<h2 id="9-guthon-api-mcp">9. API MCP</h2>
+<h3 id="9-1-入口与能力">9.1 入口与能力</h3><p>当前 Nexus 向导支持 CodeBuddy、Trae 和 VS Code，在匹配的当前打开目录分别写入 <code>.mcp.json</code>、<code>.trae/mcp.json</code>、<code>.vscode/mcp.json</code> 的 <code>guthon-api</code> 条目；配置入口要求窗口打开 var、工作区目录或 checkout。Codex 使用其原生 MCP 配置，操作见<a href="GuthonCodeTool_使用手册.html#codex-mcp-setup">Codex 配置步骤</a>。</p><p>MCP 配置向导按实际发行应用、源码或 pyz 入口生成 stdio 参数，以数组保留含空格路径；预览后只合并本工具服务，保留其他服务及 JSONC 注释，覆盖前核对原文件并备份。重复生成不会重复添加服务。连接检查分别报告后端工具发现和在线只读查询结果；后端独立探测不代表 AI 客户端已经批准或加载该项目服务。CodeBuddy IDE 的项目 MCP 需在其原生 MCP 页面审查并批准，随后以实际工具调用核验。</p><p>独立 MCP 进程的在线工具可通过项目绑定的本机会话登记委派到 Nexus 现有登录会话；凭据不进入客户端配置、请求或日志。登记使用回环地址和私有令牌，校验项目与固定动作，关闭窗口或退出登录后不会绕过认证。普通本地索引查询和受控本地编辑继续独立运行；平台请求结果未知时保留原回执，不自动重放。</p><p>AI 客户端可通过 <code>mcp --stdio --home &lt;toolHome&gt;</code> 启动 API MCP；使用 <code>--read-only</code> 限制为查询。每次请求使用明确 workspaceKey，按当前项目索引和文件读取，具体工具以客户端发现的清单为准。</p><p>MCP 文档租约只返回有界正文前缀；大文件会给出截断与后续偏移，完整读取使用 <code>read_source</code> 分页并核对同一文件哈希。预览差异也标识截断，候选摘要始终绑定完整候选，不应把正文前缀当作完整文件写回。</p><p>支持该工具的构建可用 <code>load_module_parameter</code> 传入 <code>workspaceKey</code>、<code>systemId</code> 和 <code>configId</code>，只读请求平台详情并加载到本地缓存；需要完整正文时再用 <code>read_source</code> 分页读取并核对文件哈希。工具可用性以客户端实际发现的清单为准；该加载不上传或修改平台参数。</p><h3 id="9-2-共享索引与安全边界">9.2 查询与受控修改</h3><p>查询包含源码目录、内容、调用方、事实、PAGE 节点、字段与设计契约；查询结果需检查当前文件哈希、分页和覆盖边界。受控本地修改通过 <code>open_document</code>、<code>preview_document</code>、<code>write_document</code> 和 <code>close_document</code> 使用租约、预览和幂等键；结果未知且未取得操作编号时，用原 <code>idempotencyKey</code> 调用只读 <code>find_document_operation</code> 找回原操作，再以 <code>verify_document_operation</code> 核对；未找到不证明请求未派发，不能据此重发。宿主审批拒绝而尚无操作时，可明确确认调用 <code>close_unstarted_source_request</code> 关闭原幂等请求：单文档绑定原租约与预览，批次绑定原计划与摘要；关闭与写入使用同一派发锁。返回 <code>CLOSED_BEFORE_WRITE</code> 才证明原键已被持久关闭、迟到请求也不会写入；若返回已有操作编号，只继续核验，不撤销源码。文档原键查询也可取回关闭证明。后续写入须有当前授权、有效候选及新的幂等键。编辑租约仍有效且源码与继承父层未变化时，可用 <code>renew_document</code> 续期；已过期租约须重新打开。<code>resume_document_operation</code> 只恢复原操作的回读和索引，源码不符时保留现场，不重放写入。</p><p>单文档和批次的失败回执通过 <code>error.mutation</code> 携带 owner 核验的工作区、原请求选择字段及阶段：<code>NOT_STARTED</code>、<code>PREPARED</code> 表示本次尚未派发源码写入，后者可能已有操作编号；<code>WRITE_STARTED</code> 表示可能已写入，不能仅按错误码判断未写。<code>REJECTED</code> 仍须核对原记录和当前原文；Hook 仅在明确拒绝且回读匹配原文后解除对应未知状态，不清除其他操作。runtime descriptor 的 <code>linterCommand</code> 经后端 <code>lint --home</code> 委派到已安装 Linter，保留参数与退出码，适用于源码、pyz 和发行应用入口。</p><h4 id="api-batch-reference">批量读取与跨文件修改</h4><p><code>read_objects_batch</code> 一次读取 1 至 20 个本地对象或 PAGE 节点，所有对象共用最多 50000 字符的正文预算；逐项返回内容、错误和截断状态，按各项偏移继续读取时核对 <code>sourceHash</code>。对象分别读取，不构成跨对象原子快照。<code>get_index_health</code> 查询索引健康状态，<code>get_definition</code> 解析唯一源码定义，<code>query_table_references</code> 查询表访问和显式 PAGE 字段映射；结果受索引覆盖限制，列筛选不覆盖动态引用和 SQL 列访问，不能据此证明删除安全。<code>get_source_diff</code> 按页读取 API 基线与本地文件的原文或 PAGE 可读差异，并返回基线和源码哈希。</p><p><code>preview_source_batch</code> 接收 1 至 200 个文件对象；同一 PAGE 的多个节点修改须合并到该页面的一项中，不能在同一批次重复路径。每项由 Schema 严格三选一：<code>path+content</code>、<code>path+operations</code>（前两类可加 <code>expectedHash</code>），或仅 <code>leaseId+previewId</code>。直接候选由批次入口取得租约，不要求额外逐个打开文档；已有预览项不得再带路径、候选或预期哈希。非法混合在调用 producer 前拒绝；CLI 入口继续执行同等互斥校验。<code>apply_source_batch</code> 绑定计划、摘要和幂等键，写入前检查全部候选、项目范围、源码状态和未保存编辑；预检未通过不开始批量写入。写入异常时尝试恢复原文并回读，恢复失败会报告 <code>ROLLBACK_INCOMPLETE</code>，不能假定已经全部回滚。</p><p>中断或结果未知时使用 <code>get_source_batch_operation</code> 和 <code>verify_source_batch</code> 检查原操作及逐文件状态，再使用 <code>recover_source_batch</code> 核对或修复索引；需恢复原文时须明确传入 <code>rollback: true</code> 和 <code>confirm: true</code>。原批次为原文与候选混合状态时，Hook 须先完成全部分页及当前哈希核验，才能放行同一操作的明确 rollback；不会因此放行新批次。存在外部修改或未保存编辑时保留现场并拒绝覆盖；恢复不会重新应用候选。批量操作只修改本地 checkout，不上传平台。单次 MCP 整体请求上限为 1048576 字符，可能先于单项或 200 对象上限触发，应按实际请求大小分批。</p><h4 id="api-page-lifecycle-reference">整页新建、复制与删除</h4><p>整页操作使用 <code>get_page_lifecycle_context</code> 查询配对的平台上下文，<code>open_page_lifecycle_edit</code> 冻结目标，<code>preview_page_lifecycle</code> 审阅，再由 <code>apply_page_lifecycle</code> 使用候选摘要和幂等键派发平台操作。<code>get_page_lifecycle_operation</code> 和 <code>list_page_lifecycle_operations</code> 查询原操作，<code>resume_page_lifecycle_operation</code> 只查询原请求回执，不重复新建、复制或删除。</p><p>需要已配对 Bridge、当前项目匹配的平台页面会话和平台支持的接口；多个上下文须选定唯一目标。新建身份由平台分配；复制或删除核对原页面身份和源码版本，产品 PAGE 不允许删除，目标模块须在当前项目范围中。整页操作直接作用于平台。平台写入应答后，Bridge 单独回读原生页面：新建或复制核对返回的页面身份及所属系统、模块，删除核对页面已不存在。平台应答不等同回读成功；回读失败或身份、模块不符时返回 <code>APPLIED_UNVERIFIED</code>。<code>UNKNOWN</code> 表示派发或回执中断后结果未确认。这两种状态均须先查原操作及平台实际状态，不重新派发写入；恢复入口仅查询已有原请求回执，不能保证再次执行平台回读。操作不自动同步本地 checkout；平台结果明确后另行更新源码并核对。</p><p>CLI 使用 <code>api source-batch</code> 的 <code>preview/apply/verify/recover</code>，<code>api page-lifecycle</code> 的 <code>context/open/preview/apply/status/resume/history</code>，以及 <code>api read-batch</code>、<code>api document</code>、<code>api index-health</code> 和 <code>api table-references</code>；均通过 <code>--stdin</code> 提供 JSON。源码差异使用 <code>api diff</code> 的 <code>view</code>、分页参数；具体输入和当前工具清单以帮助和工具发现为准。</p><h4 id="page-structure-edit">PAGE 结构编辑</h4><p>可先检查设计契约和候选，再预览字段、按钮、事件、数据源及布局调整；具体可操作范围以返回契约为准。修改与平台上传分开，引用、平台往返保存和业务行为需要核验。</p><h3 id="9-3-开发状态与验证">9.3 验证边界</h3><p>本地索引、文件写入与 API 回读均不能单独证明平台编译、发布或业务执行。客户端接线、真实目标和安装包需分别验证。</p>
 </section>
 
 <section class="section">
 <h2 id="10-guthon-team">10. guthon-team 治理</h2>
 <h3 id="10-1-安装与更新">10.1 安装与更新</h3>
-<p>团队治理通过团队 Marketplace 中的 <code>guthon-guard</code> 插件分发。插件在新任务的 SessionStart 阶段检查工作区并幂等初始化：已是当前版本时不重复写入，缺失或版本更新时补齐规范、Linter、API 索引和配置。支持 Hook 的客户端还需对插件 Hook 完成信任；不支持 Marketplace 或 Hook 的环境可使用同一发行物中的独立安装器。</p>
-<p>治理安装面向业务 <code>var</code> 工作区，不写入 GuthonCodeTool 源码仓库。核心 AGENTS、规范正文和 <code>guthon-lint</code> 即使没有 Marketplace 或 Hook 也能使用，Hook 只负责自动选择检查时机。</p>
+<p>Nexus 初始化从团队内网仓库的 <code>main</code> 获取发布载荷，使用 guthon-team 独立安装器预检并同步根 <code>AGENTS.md</code>、规范、API 索引、Linter 和 Git pre-commit。全新开发根使用 <code>rules/</code>。已有根缺少 <code>rules/</code> 时继续使用原 <code>docs/</code>。文件或现有 Git Hook 配置冲突会暂停同步，保留原有内容。手动同步使用相同的安装器，作用于当前连接的统一工作空间。Nexus 优先使用该空间已记住的地址，其次使用 <code>GUTHON_TEAM_MARKETPLACE_URL</code> 或 Windows 安装助手配置的地址。后台同步通过 Git 现有凭据访问仓库。需要交互认证时，可在 IDE 终端运行同一次同步，由 Git 处理凭据。</p>
+<p>CLI <code>setup</code> 可通过 <code>--team-source</code> 指定团队 Git URL 或本地 Git 仓库的绝对路径，也可以使用上述环境变量。团队同步使用 Git 和 Python 3。单独准备目录时可用 <code>--no-team-sync</code>。部署 <code>guthon-guard</code> 并信任其 Hook 后，可以启用 Agent 生命周期检查和会话启动时的规范维护。初始化步骤见<a href="GuthonCodeTool_使用手册.html#1-4-设置工作空间">使用手册</a>。</p>
 <p>Release 中的 <code>guthon-testing.zip</code> 可单独安装到客户端 Skills 目录；普通用户可使用工具内置只读连接器，无需为此安装 DBX/MCP。首次在 Nexus 为目标工作区配置专用只读数据库账号，Skill 安装不代替连接与环境身份配置。其源码与适用范围见 <a href="https://github.com/SidWuu/GuthonCodeTool/tree/main/skills/guthon-testing">Guthon Testing Skill</a>。</p>
 <h3 id="10-2-规范门禁">10.2 规范门禁</h3>
 <div class="plugin-highlight">
@@ -755,15 +308,15 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <div><strong>时机层</strong><span>Agent Hook 在任务与工具生命周期检查，Git Hook 在提交前兜底；需要时可把同一 CLI 接入 CI。</span></div>
 </div>
 <p>版本清单和文件哈希用于判断规范是否完整、是否被本地修改以及升级是否安全。人工修改不会被静默覆盖；强制更新前先备份。私有 API 索引使工具能明确判断函数是否存在，避免用通用语言经验猜测谷神方言。</p>
-<p>治理采用“语义规范 + 可执行 Linter + 生命周期 Hook + Git/CI 兜底”，因为提示词只能提醒，不能稳定证明每次修改都经过同一规则。Linter 通过只代表已覆盖的静态规则通过，不代表数据库、平台编译、SVN 或业务流程已经验证。</p>
+<p>治理采用“语义规范 + 可执行 Linter + 生命周期 Hook + Git/CI 兜底”，因为提示词只能提醒，不能稳定证明每次修改都经过同一规则。Linter 通过只代表已覆盖的静态规则通过，不代表数据库、平台编译、上传或业务流程已经验证。</p>
 <p>从业务 cwd 执行 Linter 的 <code>--changed</code> 时只检查当前工作区；Git pre-commit 的 <code>--staged</code> 检查整个暂存集合。两者使用 runtime descriptor 的明确入口，静态门禁不扩大业务源码的发布或数据写入权限。</p>
 </section>
 
 <section class="section">
 <h2 id="11-构建发布与验证">11. 构建、发布与验证</h2>
 <h3 id="11-1-发行物">11.1 发行物</h3>
-<p>Windows 的 GuthonCodeSetup 下载清单与首次配置统一见 <a href="GuthonCodeTool_Windows安装步骤.html#one-click">Windows 安装步骤第一章：一键安装配置</a>。默认一键安装器采用精简联网模式：内置后端、Nexus、Bridge、独立 Python 与安装指南；复用已有 CodeBuddy、Git、SVN，仅对缺失工具从固定官方 HTTPS 地址下载并校验 SHA-256。下载失败可重新运行，已校验缓存会复用。首次安装缺失工具时需要联网；离线完整包仍可由维护者按原流程构建。单独安装或修复仍可采用手动流程。</p>
-<p>Python 应用使用 PyInstaller 构建，并内置公开配置模板与版本信息：Windows 为单文件 EXE，macOS 为目录形态（onedir）。Nexus 发行模式统一选择可执行文件：Windows 选择 EXE，macOS 进入完整应用目录选择同名启动文件。构建必须在目标系统执行，以生成 Windows x64 应用和 macOS ARM64 应用。发布流程同时完成：</p>
+<p>Windows 的 GuthonCodeSetup 下载清单与首次配置统一见 <a href="GuthonCodeTool_Windows安装步骤.html#one-click">Windows 安装步骤第一章：一键安装配置</a>。默认一键安装器采用精简联网模式：内置后端、Nexus、Bridge、独立 Python 与安装指南；复用已有 CodeBuddy、Git，仅对缺失工具从固定官方 HTTPS 地址下载并校验 SHA-256。下载失败可重新运行，已校验缓存会复用。首次安装缺失工具时需要联网；离线完整包仍可由维护者按原流程构建。单独安装或修复仍可采用手动流程。</p>
+<p>Python 应用使用 PyInstaller 构建，并内置公开配置模板与版本信息：Windows 为单文件 EXE，macOS 为单文件 GuthonCodeTool。两种发行形态都可从开发目录的上一级识别。构建必须在目标系统执行，以生成 Windows x64 应用和 macOS ARM64 应用。发布流程同时完成：</p>
 <ul>
 <li>运行 Python、Nexus 与 Bridge 的相关测试。</li>
 <li>打包 Guthon Nexus VSIX 和 Guthon Bridge Chrome ZIP。</li>
@@ -781,11 +334,11 @@ AI 客户端 → SVN MCP ──────┘    ├─ 工作区解析、同�
 <thead><tr><th>验证证据</th><th>能够证明的范围</th></tr></thead>
 <tbody>
 <tr><td>Python、Nexus 或 Bridge 自动化测试</td><td>源码级命令、路由和组件行为；不能证明已安装 VSIX、真实浏览器或远端服务。</td></tr>
-<tr><td>MCP stdio 协议、临时打包及真实 SVN 验证</td><td>协议握手、工具发现、临时 SVN 夹具中的 PAGE/过程函数读写、租约和故障恢复。不能证明 AI 自动路由、已安装 VSIX、Windows 或平台运行。</td></tr>
+<tr><td>MCP stdio 协议与临时项目夹具</td><td>协议握手、工具发现及夹具中受控读写的结果；不能证明 AI 自动路由、已安装 VSIX、Windows 或真实平台运行。</td></tr>
 <tr><td>打包应用 <code>self-test</code></td><td>发行物可启动、可解析内置资源并能在临时目录完成基础设置。</td></tr>
 <tr><td>SQLite 索引与静态事实</td><td>当前本地源码快照中的对象、关系和可识别规则；不能证明运行时分支一定执行。</td></tr>
 <tr><td>数据库只读查询</td><td>指定目标和时点的数据库记录；不能证明页面版本、缓存或业务流程结果。</td></tr>
-<tr><td>SVN revision 与交付回执</td><td>所列文件已经提交到对应 revision，本次源码交付成功；编译、发布和运行结果需分别取证。</td></tr>
+<tr><td>API 上传与回读回执</td><td>记录各对象的上传与回读状态；部分完成或未知状态需继续核对，平台最终提交、编译、发布和运行另行取证。</td></tr>
 <tr><td><code>guthon-lint</code> 通过</td><td>已实现的静态治理规则没有发现问题；不能替代平台或业务验证。</td></tr>
 </tbody>
 </table>

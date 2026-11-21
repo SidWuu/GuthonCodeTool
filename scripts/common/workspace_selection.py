@@ -13,8 +13,6 @@ from pathlib import Path
 from common import gusen_hub as hub
 
 
-KINDS = {"product": "products", "products": "products", "产品": "products",
-         "project": "projects", "projects": "projects", "项目": "projects"}
 COMMAND = re.compile(r"^\s*(?:/(?:guthon-guard:)?guthon-use|\$(?:guthon-guard:)?guthon-use)(?:\s+|$)(.*)$", re.S)
 REFERENCE = re.compile(r"参考|参照|对照|借鉴|继承|来源|来自|基于|reference\b|refer to\b", re.I)
 ACTION = re.compile(r"修改|修复|实现|开发|调整|排查|查询|分析|定位|切换|选择|处理|目标|modify\b|fix\b|inspect\b|switch\b", re.I)
@@ -30,11 +28,13 @@ def summary(workspace):
             "sourceMode": workspace["sourceMode"], "aliases": workspace.get("aliases", [])}
 
 
-def select_workspace(config, *, workspace_key="", name="", kind="", path=None,
-                     prompt="", current_workspace=""):
+def select_workspace(config, *, workspace_key="", name="", path=None,
+                     prompt="", current_workspace="", kind=""):
     """Return a context or a bounded, reviewable selection error; never persist it."""
     diagnostics = []
     workspaces = hub.list_workspaces(config, errors=diagnostics)
+    if kind in ("product", "project"):
+        workspaces = [item for item in workspaces if item.get("type") == kind]
     by_key = {item["workspaceKey"]: item for item in workspaces}
 
     def failure(code, message, candidates=None):
@@ -44,7 +44,9 @@ def select_workspace(config, *, workspace_key="", name="", kind="", path=None,
                 "complete": len(items) <= 50, "truncated": len(items) > 50,
                 "configErrors": diagnostics}
 
-    for field, value in (("workspaceKey", workspace_key), ("name", name), ("kind", kind),
+    if kind not in ("", "product", "project"):
+        return failure("WORKSPACE_INPUT_INVALID", "kind must be product or project", [])
+    for field, value in (("workspaceKey", workspace_key), ("name", name),
                          ("prompt", prompt), ("currentWorkspaceKey", current_workspace)):
         if not isinstance(value, str):
             return failure("WORKSPACE_INPUT_INVALID", f"{field} must be a string", [])
@@ -69,25 +71,21 @@ def select_workspace(config, *, workspace_key="", name="", kind="", path=None,
         if words in (["status"], ["当前"]):
             action = "status"
         else:
-            if words[0] in KINDS:
-                kind = words.pop(0)
             name = " ".join(words)
             if not name:
-                return failure("WORKSPACE_INPUT_INVALID", "Supply a workspace name after the kind")
-            if re.fullmatch(r"(?:products|projects)\.[A-Za-z0-9._-]+", name):
+                return failure("WORKSPACE_INPUT_INVALID", "Supply a workspace name")
+            if name in by_key:
                 workspace_key, name = name, ""
             explicit = True
     if workspace_key and name:
         return failure("WORKSPACE_INPUT_INVALID", "workspaceKey and name are mutually exclusive", [])
-    if kind and kind not in KINDS:
-        return failure("WORKSPACE_INPUT_INVALID", "kind must be product or project", [])
-    pool = [item for item in workspaces if not kind or item["kind"] == KINDS[kind]]
+    pool = workspaces
     selected = None
     source = ""
     if workspace_key:
         selected = by_key.get(workspace_key)
         if selected not in pool:
-            return failure("WORKSPACE_NOT_FOUND", f"Unknown workspace or kind mismatch: {workspace_key}", [])
+            return failure("WORKSPACE_NOT_FOUND", f"Unknown workspace: {workspace_key}", [])
         source = "key"
     elif name:
         matches = [item for item in pool if normalized(name) in {
@@ -115,9 +113,6 @@ def select_workspace(config, *, workspace_key="", name="", kind="", path=None,
         targets = {}
         for start, end, item in occurrences:
             prefix = re.split(r"[，,。；;\n]", text[:start])[-1]
-            typed = re.search(r"(项目|产品|project|product)\s*[：:是为]?\s*$", prefix, re.I)
-            if typed and item["kind"] != KINDS[typed[1].lower()]:
-                continue
             if re.match(r"\s*(?:作为参考|供参考|仅供参考|as (?:a )?reference)", text[end:], re.I):
                 continue
             references = list(REFERENCE.finditer(prefix))
@@ -143,18 +138,21 @@ def select_workspace(config, *, workspace_key="", name="", kind="", path=None,
         if path:
             candidate = Path(path).expanduser().resolve()
             conflicting = [item for item in pool if item["workspaceKey"] != current_workspace
-                           and (candidate == item["root"].resolve() or item["root"].resolve() in candidate.parents)]
+                           and any(candidate == base.resolve() or base.resolve() in candidate.parents
+                                   for base in (item['root'], *[x['path'] for x in item['sourceRoots']]))]
             if conflicting:
                 return failure("WORKSPACE_CONFLICT", "cwd differs from the conversation target; select explicitly", conflicting)
     if selected is None and path:
         candidate = Path(path).expanduser().resolve()
-        matches = [item for item in pool if candidate == item["root"].resolve() or item["root"].resolve() in candidate.parents]
+        matches = [item for item in pool if any(candidate == base.resolve() or base.resolve() in candidate.parents
+                                               for base in (item['root'], *[x['path'] for x in item['sourceRoots']]))]
+        if len(matches) > 1:
+            return failure('WORKSPACE_AMBIGUOUS', 'Path must match exactly one registered workspace', matches)
         if matches:
-            matches.sort(key=lambda item: len(item["root"].parts), reverse=True)
             selected, source = matches[0], "path"
     if selected is None:
         return failure("WORKSPACE_AMBIGUOUS" if len(pool) > 1 else "WORKSPACE_REQUIRED",
-                       "Select a project/product by name, key or configured path", pool)
+                       "Select a workspace by name, key or configured path", pool)
     context = hub.workspace_agent_context(config, selected)
     return {"ok": True, **context, **summary(selected), "action": action,
             "selectionSource": source, "explicit": explicit, "configErrors": diagnostics}

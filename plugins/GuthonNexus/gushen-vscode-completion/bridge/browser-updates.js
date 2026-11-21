@@ -2,9 +2,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-function createBrowserUpdates(home, { now = Date.now, busy = () => false } = {}) {
+function createBrowserUpdates(home, { now = Date.now, busy = () => false, spaceRoot = path.join(home, 'var') } = {}) {
   const clients = new Map();
-  const directory = path.join(home, 'var', 'nexus', 'updates', 'chrome');
+  const directory = path.join(spaceRoot, 'nexus', 'updates', 'chrome');
   let guard;
   function read(file) {
     try {

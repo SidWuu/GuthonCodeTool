@@ -284,7 +284,7 @@ class SvnScmManager {
     for (const [group, resourceStates] of resources) group.resourceStates = resourceStates;
     record.sourceControl.count = (value.changes?.length || 0) + remoteChanges.length;
     this.quickDiffProvider?.setStatus?.(record.workspace.workspaceKey, record.status);
-    this.onStatusChanged?.(record.workspace.workspaceKey, record.status);
+    this.onStatusChanged?.(record.workspace.workspaceKey, record.status, record.workspace);
     return record.status;
   }
 

@@ -8,7 +8,7 @@ import time
 import uuid
 from pathlib import Path
 
-from common import gusen_hub
+from common import legacy_source as gusen_hub
 from common.inheritance import project as project_inheritance
 from common.source_format import decode_source
 from providers.svn.checkout import (

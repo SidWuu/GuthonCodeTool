@@ -1,7 +1,3 @@
-const path = require('node:path');
-
-const PROCEDURE_PATH = /\/workspace\/((PRD|PRJ) [^/]+)\/source\/(workcopy|readonly)\/([^/]+)\//;
-
 function serviceComponentTargetAt(source, offset) {
   const calls = /\$vs\.(?:proc|thread)\.runServiceComp\s*\(\s*(['"])([A-Za-z0-9_.-]{1,100})\1(?=\s*[,\)])/g;
   for (const match of source.matchAll(calls)) {
@@ -12,7 +8,7 @@ function serviceComponentTargetAt(source, offset) {
 }
 
 function procedureTargetAt(source, offset) {
-  const directCalls = /\$vs\.(?:proc\.invoke|thread\.(?:run|runFutureTask))\s*\(\s*(['"])([A-Za-z_][\w.]*)\1\s*,\s*(['"])([A-Za-z_]\w*)\3(?=\s*[,\)])/g;
+  const directCalls = /\$vs\.(?:proc\.(?:invoke|invokeWithGlobalTrans)|thread\.(?:run|runFutureTask|runFutureTaskWithGlobalTrans))\s*\(\s*(['"])([A-Za-z_][\w.]*)\1\s*,\s*(['"])([A-Za-z_]\w*)\3(?=\s*[,\)])/g;
   for (const match of source.matchAll(directCalls)) {
     const start = match.index + match[0].lastIndexOf(match[4]);
     if (offset >= start && offset <= start + match[4].length) {
@@ -55,43 +51,28 @@ function localFunctionDefinitionAt(source, offset) {
   return null;
 }
 
-function procedureDefinitionIdentity(workspaceKey, definition) {
-  return {
-    workspaceKey,
-    sourceType: definition.sourceType,
-    sourceId: definition.sourceId,
-    funId: definition.funId || '',
-    sourcePath: definition.sourcePath || '',
-    workingCopyId: definition.workingCopyId || definition.scopeEntryId || '',
-    jsonPointer: '',
-  };
-}
 
-function sourceInfo(filePath) {
-  const match = path.normalize(filePath).replaceAll('\\', '/').match(PROCEDURE_PATH);
-  return match && { owner: match[1], kind: match[2], layer: match[3], business: match[4] };
+function localFunctionAt(source, offset) {
+  const call = [...source.matchAll(/@([A-Za-z_$][\w$]*)\s*\(/g)].find(match =>
+    offset >= match.index + 1 && offset <= match.index + 1 + match[1].length);
+  const declarations = [...source.matchAll(/^[ \t]*#function[ \t]+([A-Za-z_$][\w$]*)(?:[ \t]*\(([^)\r\n]*)\))?/gm)];
+  const declaration = call ? declarations.find(match => match[1] === call[1]) : declarations.find(match => {
+    const start = match.index + match[0].indexOf(match[1]);
+    return offset >= start && offset <= start + match[1].length;
+  });
+  if (!declaration) return;
+  const comments = [];
+  for (const line of source.slice(0, declaration.index).replace(/\r?\n$/, '').split(/\r?\n/).reverse()) {
+    if (/^\s*\*\//.test(line)) continue;
+    const comment = line.match(/^\s*(?:\/\/|##|\/\*|\*)\s?(.*?)(?:\*\/)?\s*$/);
+    if (!comment) break;
+    comments.unshift(comment[1]);
+  }
+  return {name: declaration[1], signature: `${declaration[1]}(${declaration[2] || ''})`,
+    comment: comments.join('\n'), start: declaration.index + declaration[0].indexOf(declaration[1])};
 }
-
-function selectDefinitionPaths(paths, currentPath) {
-  const current = sourceInfo(currentPath);
-  const preferredLayer = current?.layer === 'readonly' ? 'readonly' : 'workcopy';
-  const score = (filePath) => {
-    const candidate = sourceInfo(filePath);
-    if (!candidate) return [5, 2];
-    let scope = 4;
-    if (current) {
-      if (candidate.kind === current.kind && candidate.owner === current.owner && candidate.business === current.business) scope = 0;
-      else if (candidate.kind === current.kind && candidate.business === current.business) scope = 1;
-      else if (candidate.business === current.business) scope = 2;
-      else if (candidate.kind === current.kind) scope = 3;
-    }
-    return [scope, candidate.layer === preferredLayer ? 0 : 1];
-  };
-  const ranked = paths.map((filePath) => ({ filePath, score: score(filePath) }))
-    .sort((a, b) => a.score[0] - b.score[0] || a.score[1] - b.score[1] || a.filePath.localeCompare(b.filePath));
-  if (!ranked.length) return [];
-  return ranked.filter((item) => item.score[0] === ranked[0].score[0] && item.score[1] === ranked[0].score[1])
-    .map((item) => item.filePath);
+function inheritCallAt(source, offset) {
+  return [...source.matchAll(/@inherit\s*\(\s*\)/g)].some(match =>
+    offset >= match.index && offset <= match.index + match[0].length);
 }
-
-module.exports = { serviceComponentTargetAt, localFunctionDefinitionAt, procedureDefinitionIdentity, procedureTargetAt, selectDefinitionPaths };
+module.exports = { serviceComponentTargetAt, localFunctionDefinitionAt, procedureTargetAt, localFunctionAt, inheritCallAt };

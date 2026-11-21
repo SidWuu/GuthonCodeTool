@@ -77,7 +77,7 @@ test('administrative locks have one recovery entry and directories cannot open f
 function inlineCommands(contextValue) {
   const manifest = require('../package.json');
   return manifest.contributes.menus['scm/resourceState/context'].filter((item) => {
-    if (!item.group.startsWith('inline@')) return false;
+    if (!item.group.startsWith('inline@') || !item.when.includes('/^guthon-svn-/')) return false;
     const clause = item.when.split(' && ').find((part) => part.startsWith('scmResourceState '));
     const regex = clause.match(/^scmResourceState =~ \/(.*)\/$/);
     if (regex) return new RegExp(regex[1]).test(contextValue);

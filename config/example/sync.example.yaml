@@ -1,33 +1,3 @@
-# 公共 SVN 登录、全局同步窗口和安全规则。
-svn:
-  # Nexus 内全部产品和项目共用的 SVN 用户名；密码在 Nexus 中输入后由 SVN 系统凭据存储。
-  username: ""
-
-sync:
-  # 轮询间隔秒数，供外部定时同步任务使用。
-  interval_seconds: 600
-  # 增量查询回看分钟数，用于覆盖时间边界和时钟偏差。
-  lookback_minutes: 10
-
-# 源码可用性和变更判断规则。
-rules:
-  # 保留项；当前实现固定要求已签入或属于下方签出人白名单。
-  require_check_in_date: true
-  # 允许同步其未签入源码的签出人 ID 列表。
-  allow_unchecked_check_out_user_ids:
-    # 示例签出人 ID，可按需增加多个列表项。
-    - U00000XXXX
-  # 保留项；当前实现有 VERSION_MAC 时固定优先用作变更键。
-  prefer_version_mac: true
-  # 保留项；当前实现固定跳过错误标记为 1 的源码。
-  skip_error_source: true
-  # 拉取 workcopy 后，自动暂存其所在 Git 仓库中的未跟踪新文件；不会强制添加被忽略文件。
-  pull_auto_add_git: false
-  # Bridge 拉取时是否比较 readonly/workcopy；有差异时保留 workcopy，false 时直接覆盖。
-  pull_diff_check: true
-  # 手动拉取 PAGE 时，true 拉取整个模块菜单，false 只拉取选中的菜单；缺省按 false 处理。
-  pull_more_page: false
-
 # 谷神 API 文档与 VSCode 补全数据同步配置。
 guthon_api:
   # 当前启用的谷神版本，同时决定根目录文档和插件补全数据。

@@ -12,16 +12,22 @@ import os
 import re
 import sys
 import tempfile
-from datetime import datetime
 import zipfile
 from pathlib import Path
 from importlib.resources import files
 from functools import lru_cache
 from common.command_errors import error_code
-from common.operation_control import OperationCancelled, RequestControl, request_control, checkpoint, restrict_to_index
+from common.runtime_paths import tool_source_root
+from common.operation_control import (
+    OperationCancelled,
+    request_control,
+    checkpoint,
+)
 
-COMMAND_METADATA = json.loads(files("common").joinpath("command_metadata.json").read_text(encoding="utf-8"))
-COMMAND_ALIASES = COMMAND_METADATA.get('commandAliases',{})
+COMMAND_METADATA = json.loads(
+    files("common").joinpath("command_metadata.json").read_text(encoding="utf-8")
+)
+COMMAND_ALIASES = COMMAND_METADATA.get("commandAliases", {})
 
 
 def _configure_stdio_utf8() -> None:
@@ -48,17 +54,23 @@ def application_version() -> str:
 def application_build_info():
     try:
         value = json.loads(bundled_bytes("BUILD_INFO.json"))
-        if not isinstance(value, dict) or not re.fullmatch(r"sha256:[a-f0-9]{64}", value.get("buildId", "")):
+        if not isinstance(value, dict) or not re.fullmatch(
+            r"sha256:[a-f0-9]{64}", value.get("buildId", "")
+        ):
             raise SystemExit("Bundled build identity is invalid")
         return value
     except (OSError, KeyError):
         if getattr(sys, "frozen", False) or Path(sys.argv[0]).suffix == ".pyz":
-            return {"buildId": "unavailable", "coverage": "LEGACY_ARTIFACT_WITHOUT_BUILD_ID"}
+            return {
+                "buildId": "unavailable",
+                "coverage": "LEGACY_ARTIFACT_WITHOUT_BUILD_ID",
+            }
         from common.build_info import source_build_info
+
         return source_build_info(SOURCE_ROOT)
 
 
-SOURCE_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_ROOT = tool_source_root()
 
 
 def bundled_bytes(relative: str) -> bytes:
@@ -67,123 +79,132 @@ def bundled_bytes(relative: str) -> bytes:
         with zipfile.ZipFile(archive) as bundle:
             return bundle.read(relative)
     return (resource_root() / relative).read_bytes()
-CONFIG_FILES = (
-    "datasource.yaml",
-    "products.yaml",
-    "projects.yaml",
-    "source-tables.yaml",
-    "sync.yaml",
-    "database-testing.yaml",
-)
-EMPTY_REGISTRY_FILES = {
-    "datasource.yaml": "# 本地数据库连接由 Nexus 添加产品/项目时写入。\ndatasource: {}\n",
-    "products.yaml": "# 本地产品工作区；可在 Nexus 中随时添加。\nproducts: {}\n",
-    "database-testing.yaml": "# 本地数据库测试目标；由 configure 添加连接与身份。\nschemaVersion: 1\nconnections: {}\nexpectedIdentities: {}\ndatabaseTests: {}\n",
-    "projects.yaml": "# 本地项目工作区；可在 Nexus 中随时添加。\nprojects: {}\n",
-}
+
+
 SCRIPT_COMMANDS = {
     "doctor": ("common.doctor", "main"),
-    "export-schema": ("providers.database.export_table_schema_sql", "main"),
-    "export-bill-type": ("providers.database.export_bill_type_sql", "main"),
-    "export-view": ("providers.database.export_view_sql", "main"),
-    "export-system-script": ("providers.database.export_system_script_sql", "main"),
     "query": ("common.query_hub_context", "main"),
-    "diagnose": ("providers.database.run_source_diagnosis", "main"),
-    "create-workcopy": ("common.gusen_hub", "create_work_copy"),
-    "workcopy": ("common.gusen_hub", "work_copy_cli"),
+    "diagnose": ("common.source_diagnosis", "main"),
     "database-test-artifacts": ("common.database_test_artifacts", "main"),
+    "export-bill-type": ("common.database_exports.export_bill_type_sql", "main"),
 }
-COMMAND_STEPS = {
-    "sync-source-all": "source",
-    "sync-source": "source",
-    "export-schema": "schema",
-    "export-bill-type": "billType",
-    "export-system-script": "systemScripts",
-    "export-view": "views",
-}
-SVN_BROWSE_ACTIONS = {name for name, spec in COMMAND_METADATA["svnActions"].items() if spec["kind"] == "read"}
-TOOLHOST_READ_COMMANDS = {name for name, spec in COMMAND_METADATA["commands"].items() if spec["kind"] == "read"}
 DATABASE_COMMANDS = {
-    "database-target-resolve", "database-target-configure", "database-probe", "database-connect-test",
-    "database-describe", "database-query-readonly", "database-diagnose", "database-target-list", "database-target-remove",
-    "database-dbx-import", "database-dbx-handoff", "database-history-list", "database-history-show",
-    "diagnosis-list", "diagnosis-show", "database-compare", "diagnosis-template",
-    "database-credentials-export", "database-credentials-import",
-}
-TOOLHOST_READ_COMMANDS.update(DATABASE_COMMANDS - {"database-target-configure", "database-target-remove", "database-dbx-import", "database-credentials-export", "database-credentials-import"})
-
-CLI_COMMANDS = (
-    "version", "command-metadata", "serve", "mcp", "setup", "workspace-create", "workspace-delete",
-    "svn-login-configure", "import-svn-scope", "workspaces", "workspace-resolve",
-    "database-target-resolve", "database-target-configure", "database-probe",
-    "database-describe", "database-query-readonly", "workspace-summary", "search",
-    "context-pack", "source-map", "search-all", "pull-log", "parser-feedback", "index-doctor", "source-mode", "route", "init", "svn", "sync-source-all",
-    "sync-source", "reindex", "index-compact", "sync-all", "pull", "export-markdown",
-    *SCRIPT_COMMANDS, "self-test", *sorted(DATABASE_COMMANDS - {"database-target-resolve", "database-target-configure", "database-probe", "database-describe", "database-query-readonly"}),
-)
-CLI_COMMANDS=(*CLI_COMMANDS,*COMMAND_ALIASES)
-GLOBAL_COMMANDS = {
-    "setup",
-    "workspace-create",
-    "workspace-delete",
-    "svn-login-configure",
-    "doctor",
-    "route",
-    "workspaces",
-    "workspace-resolve",
     "database-target-resolve",
+    "database-target-configure",
     "database-probe",
+    "database-connect-test",
     "database-describe",
     "database-query-readonly",
+    "database-diagnose",
+    "database-target-list",
+    "database-target-remove",
+    "database-dbx-import",
+    "database-dbx-handoff",
+    "database-history-list",
+    "database-history-show",
+    "diagnosis-list",
+    "diagnosis-show",
+    "database-compare",
+    "diagnosis-template",
+    "database-credentials-export",
+    "database-credentials-import",
+}
+CLI_COMMANDS = tuple(
+    dict.fromkeys(
+        (
+            "version",
+            "command-metadata",
+            "serve",
+            "mcp",
+            "lint",
+            "api",
+            "svn",
+            "legacy-source",
+            "pull",
+            "workcopy",
+            "create-workcopy",
+            "setup",
+            "configuration-info",
+            "configuration-upgrade",
+            "svn-api-migration",
+            "workspace-create",
+            "workspace-delete",
+            "workspace-source-mode",
+            "workspace-source-settings",
+            "workspaces",
+            "workspace-resolve",
+            "workspace-summary",
+            "route",
+            "search",
+            "context-pack",
+            "source-map",
+            "pull-log",
+            "parser-feedback",
+            "index-doctor",
+            "index-compact",
+            "init",
+            "sync-source-all",
+            "sync-source",
+            "reindex",
+            "sync-all",
+            "export-markdown",
+            "self-test",
+            "export-schema",
+            "export-view",
+            "export-system-script",
+            *sorted(DATABASE_COMMANDS),
+            *SCRIPT_COMMANDS,
+            *COMMAND_ALIASES,
+        )
+    )
+)
+GLOBAL_COMMANDS = {
+    "setup",
+    "configuration-info",
+    "workspace-create",
+    "workspace-delete",
+    "workspace-source-mode",
+    "workspace-source-settings",
+    "workspaces",
+    "workspace-resolve",
+    "route",
+    "doctor",
     "self-test",
+    "database-test-artifacts",
+    *DATABASE_COMMANDS,
 }
-GLOBAL_COMMANDS.update(DATABASE_COMMANDS - {"database-target-configure", "database-target-remove", "database-dbx-import", "database-credentials-export", "database-credentials-import"})
-GLOBAL_COMMANDS.update({"database-test-artifacts", "search-all"})
-
-DATABASE_ONLY_COMMANDS = {
-    "export-schema": "database.schemaExport",
-    "export-bill-type": "database.billTypeExport",
-    "export-system-script": "database.systemScriptExport",
-    "export-view": "database.viewExport",
-    "diagnose": "database.diagnose",
-}
-# 每个 action 的 {说明, 专属参数用法, stdin 约定}；与 run() 分支保持一致，帮助输出与 action 列表都依赖本表。
-SVN_ACTION_SPECS = COMMAND_METADATA["svnActions"]
-SVN_ACTIONS = tuple(SVN_ACTION_SPECS)
-# 这些命令不接受命令级选项，输入从 stdin 读取 JSON。
 STDIN_JSON_COMMANDS = {
     "workspace-create",
     "workspace-delete",
-    "svn-login-configure",
+    "workspace-source-mode",
+    "workspace-source-settings",
     "database-target-configure",
-    "parser-feedback",
     "database-dbx-import",
+    "parser-feedback",
     "route",
-    "pull",
 }
-SVN_USAGE_PREFIX = "guthon_tool.py svn --home <toolHome> --workspace <workspaceKey> --"
-
-
-def build_import_svn_scope_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="guthon_tool.py import-svn-scope")
-    source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--script", help="path to svnCheckoutHere.sh or svnCheckoutHere.bat")
-    source.add_argument("--bat", help="legacy alias for a checkout BAT path")
-    source.add_argument("--config", help="path to an editable svn-scope.yaml/json configuration")
-    parser.add_argument("--output", required=True, help="target authorized-scope.json path")
-    parser.add_argument("--replace", action="store_true", help="replace an existing changed manifest")
-    return parser
 
 
 def build_workspace_resolve_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="guthon_tool.py workspace-resolve")
     parser.add_argument("--path", default=str(Path.cwd()))
     parser.add_argument("--name", default="", help="Exact registered name or alias")
-    parser.add_argument("--kind", choices=["product", "project"], default="")
-    parser.add_argument("--prompt", default="", help="Resolve an unambiguous task target")
-    parser.add_argument("--current-workspace", default="", help="Conversation-local previous workspaceKey")
-    parser.add_argument("--stdin", action="store_true", help="Read selectors as JSON; useful for lifecycle hooks")
+    parser.add_argument("--kind", default="", choices=("product", "project"), help="Optional existing product/project identity filter")
+    parser.add_argument(
+        "--prompt", default="", help="Resolve an unambiguous task target"
+    )
+    parser.add_argument(
+        "--current-workspace",
+        default="",
+        help="Conversation-local previous workspaceKey",
+    )
+    parser.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read selectors as JSON; useful for lifecycle hooks",
+    )
     return parser
+
 
 
 def build_database_parser(command: str) -> argparse.ArgumentParser:
@@ -193,17 +214,35 @@ def build_database_parser(command: str) -> argparse.ArgumentParser:
     parser.add_argument("--target-id", default="")
     parser.add_argument("--profile", default="")
     if command in {"database-describe", "database-diagnose", "database-dbx-handoff"}:
-        parser.add_argument("--table", required=command == "database-describe", default="")
-    if command in {"database-query-readonly", "database-diagnose", "database-dbx-handoff"}:
+        parser.add_argument(
+            "--table", required=command == "database-describe", default=""
+        )
+    if command in {
+        "database-query-readonly",
+        "database-diagnose",
+        "database-dbx-handoff",
+    }:
         sql = parser.add_mutually_exclusive_group()
-        sql.add_argument("--sql", help="single SELECT, or @path.sql; query also accepts stdin JSON")
+        sql.add_argument(
+            "--sql", help="single SELECT, or @path.sql; query also accepts stdin JSON"
+        )
         sql.add_argument("--sql-file", help="UTF-8 file containing a single SELECT")
-        sql.add_argument("--stdin", action="store_true", help="read sql/maxRows JSON from stdin (diagnose is probe-only by default)")
+        sql.add_argument(
+            "--stdin",
+            action="store_true",
+            help="read sql/maxRows JSON from stdin (diagnose is probe-only by default)",
+        )
         parser.add_argument("--max-rows", type=int)
-        parser.add_argument("--format", choices=["json", "table", "csv", "xlsx"], default="json")
+        parser.add_argument(
+            "--format", choices=["json", "table", "csv", "xlsx"], default="json"
+        )
         parser.add_argument("--output", help="write results to this local file")
-        if command in {'database-query-readonly','database-diagnose'}:
-            parser.add_argument('--explain', action='store_true', help='MySQL/PostgreSQL 优化器估计计划；不执行 ANALYZE，不支持 Oracle 计划表写入')
+        if command in {"database-query-readonly", "database-diagnose"}:
+            parser.add_argument(
+                "--explain",
+                action="store_true",
+                help="MySQL/PostgreSQL 优化器估计计划；不执行 ANALYZE，不支持 Oracle 计划表写入",
+            )
     if command == "database-describe":
         parser.add_argument("--refresh", action="store_true")
         parser.add_argument("--cache-ttl", type=int, default=300)
@@ -217,17 +256,25 @@ def build_database_parser(command: str) -> argparse.ArgumentParser:
     if command == "database-compare":
         parser.add_argument("--tables", required=True)
         parser.add_argument("--target-ids", default="")
-        parser.add_argument("--capture", default="", help="import complete identity-bound dev/test COUNT evidence")
+        parser.add_argument(
+            "--capture",
+            default="",
+            help="import complete identity-bound dev/test COUNT evidence",
+        )
     if command == "diagnosis-template":
         parser.add_argument("--name", required=True)
         parser.add_argument("--parameters", default="{}")
         parser.add_argument("--template-dir", default="")
         parser.add_argument("--max-rows", type=int, default=100)
-        parser.add_argument("--format", choices=["json", "table", "csv"], default="json")
+        parser.add_argument(
+            "--format", choices=["json", "table", "csv"], default="json"
+        )
         parser.add_argument("--output")
-        parser.add_argument('--case-out',help='生成需人工审阅的legacy诊断案例草稿；不连接数据库')
-        parser.add_argument('--datasource',default='')
-        parser.add_argument('--source-evidence',default='')
+        parser.add_argument(
+            "--case-out", help="生成需人工审阅的legacy诊断案例草稿；不连接数据库"
+        )
+        parser.add_argument("--datasource", default="")
+        parser.add_argument("--source-evidence", default="")
     if command in {"database-credentials-export", "database-credentials-import"}:
         parser.add_argument("--vault", required=True)
         parser.add_argument("--credential-ref", action="append", required=True)
@@ -236,14 +283,9 @@ def build_database_parser(command: str) -> argparse.ArgumentParser:
         parser.add_argument("--confirmation", required=True)
     if command == "database-target-remove":
         parser.add_argument("--check", action="store_true", help="preview removal")
-        parser.add_argument("--confirmation", default="", help="exact target-id for removal")
-    return parser
-
-
-def build_source_mode_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="guthon_tool.py source-mode")
-    parser.add_argument("action", choices=["get", "set"])
-    parser.add_argument("--mode", choices=["database", "svn"])
+        parser.add_argument(
+            "--confirmation", default="", help="exact target-id for removal"
+        )
     return parser
 
 
@@ -255,22 +297,28 @@ def build_index_doctor_parser():
 
 def build_index_compact_parser():
     parser = argparse.ArgumentParser(prog="guthon_tool.py index-compact")
-    parser.add_argument("--apply", action="store_true", help="compact the derived index; omit to preview")
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="compact the derived index; omit to preview",
+    )
     return parser
 
 
 def build_pull_log_parser():
     parser = argparse.ArgumentParser(prog="guthon_tool.py pull-log")
-    parser.add_argument("action", choices=("tail", "summary", "export", "archive", "restore"))
+    parser.add_argument(
+        "action", choices=("tail", "summary", "export", "archive", "restore")
+    )
     parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument('--cursor',default='')
-    parser.add_argument('--generation',default='')
-    parser.add_argument('--format',choices=['json','markdown'],default='json')
-    parser.add_argument('--before',default='')
-    parser.add_argument('--check',action='store_true')
-    parser.add_argument('--confirmation',default='')
-    parser.add_argument('--plan-hash',default='')
-    parser.add_argument('--archive-id',default='')
+    parser.add_argument("--cursor", default="")
+    parser.add_argument("--generation", default="")
+    parser.add_argument("--format", choices=["json", "markdown"], default="json")
+    parser.add_argument("--before", default="")
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--confirmation", default="")
+    parser.add_argument("--plan-hash", default="")
+    parser.add_argument("--archive-id", default="")
     return parser
 
 
@@ -286,7 +334,11 @@ def build_search_parser(command: str) -> argparse.ArgumentParser:
         parser.add_argument("--source-namespace", default="")
         parser.add_argument("--include-source", action="store_true")
         parser.add_argument("--max-chars", type=int, default=8000)
-        parser.add_argument("--write-context", action="store_true", help="save Markdown into this workspace context/ai")
+        parser.add_argument(
+            "--write-context",
+            action="store_true",
+            help="save Markdown into this workspace context/ai",
+        )
     return parser
 
 
@@ -294,94 +346,64 @@ def build_source_map_parser():
     parser = argparse.ArgumentParser(prog="guthon_tool.py source-map")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--cursor", default="")
-    parser.add_argument("--write", action="store_true", help="write the bounded Markdown map to workspace context/ai")
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="write the bounded Markdown map to workspace context/ai",
+    )
     return parser
 
 
-def build_search_all_parser():
-    parser = argparse.ArgumentParser(prog="guthon_tool.py search-all")
-    parser.add_argument("--query", required=True)
-    parser.add_argument("--workspace-key", action="append", default=[])
-    parser.add_argument("--limit", type=int, default=20)
-    return parser
+from providers.api.cli import parser as build_api_parser
+from common.configuration_upgrade import parser as build_configuration_upgrade_parser
+from common.svn_api_migration import parser as build_svn_api_migration_parser
+from common.legacy_source_cli import build_svn_parser
 
-
-def build_svn_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="guthon_tool.py svn")
-    parser.add_argument("action", choices=list(SVN_ACTIONS))
-    parser.add_argument("--prune", action="store_true", help="exclude paths removed from the configured sparse scope")
-    parser.add_argument(
-        "--accept-scope-change",
-        action="store_true",
-        help="accept the reviewed workspace checkout script as the new exact authorization manifest",
-    )
-    parser.add_argument("--diff", action="store_true", help="include full svn diff in status output")
-    parser.add_argument("--remote", action="store_true", help="contact the repository and report out-of-date paths")
-    parser.add_argument(
-        "--merge-local",
-        action="store_true",
-        help="explicitly allow native SVN update/merge when the selected working copy has local changes",
-    )
-    parser.add_argument(
-        "--working-copy",
-        action="append",
-        default=[],
-        help="limit a manifest operation to exact scope entry ids; repeat to select multiple entries",
-    )
-    parser.add_argument(
-        "--source-type",
-        choices=["page", "procedure", "system-script", "table", "view", "skill", "public"],
-    )
-    parser.add_argument("--source-id")
-    parser.add_argument("--fun-id", "--fun", dest="fun_id", default="")
-    parser.add_argument("--json-pointer", default="")
-    parser.add_argument("--session")
-    parser.add_argument("--document")
-    parser.add_argument("--path")
-    parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument("--selection-token")
-    parser.add_argument("--candidate", action="append", default=[])
-    parser.add_argument("--alias")
-    parser.add_argument("--keyword", default="")
-    parser.add_argument("--table", default="")
-    parser.add_argument("--bill-type", default="")
-    parser.add_argument("--data-source-id", default="")
-    parser.add_argument("--operation", default="WRITE")
-    parser.add_argument("--fact-limit", type=int, default=4)
-    parser.add_argument("--caller-depth", type=int, default=2)
-    parser.add_argument("--continuation", type=int, default=0)
-    parser.add_argument("--include-details", action="store_true")
-    parser.add_argument("--edit-token", default="")
-    parser.add_argument("--before", default="")
-    parser.add_argument("--confirmation", default="")
-    parser.add_argument("--apply", action="store_true", help="apply the confirmed operation archive plan")
-    parser.add_argument("--cursor", default="")
-    parser.add_argument("--since-generation", default="")
-    parser.add_argument("--column", default="")
-    parser.add_argument("--graph", action="store_true")
-    parser.add_argument("--start-line", type=int, default=1)
-    parser.add_argument("--end-line", type=int, default=100)
+def build_setup_parser():
+    parser = argparse.ArgumentParser(prog="guthon_tool.py setup")
+    parser.add_argument("--workspace-directory", help="Name of the development directory directly inside --home (default: var)")
+    team = parser.add_mutually_exclusive_group()
+    team.add_argument("--team-source", help="Trusted guthon-team Git URL or absolute local repository path (default: GUTHON_TEAM_MARKETPLACE_URL)")
+    team.add_argument("--no-team-sync", action="store_true", help="Prepare the workspace layout only")
     return parser
 
 
 COMMAND_PARSER_BUILDERS = {
-    "import-svn-scope": build_import_svn_scope_parser,
+    "setup": build_setup_parser,
+    "api": build_api_parser,
+    "configuration-upgrade": build_configuration_upgrade_parser,
+    "svn-api-migration": build_svn_api_migration_parser,
+    "svn": build_svn_parser,
     "workspace-resolve": build_workspace_resolve_parser,
     "database-target-resolve": lambda: build_database_parser("database-target-resolve"),
     "database-probe": lambda: build_database_parser("database-probe"),
     "database-describe": lambda: build_database_parser("database-describe"),
     "database-query-readonly": lambda: build_database_parser("database-query-readonly"),
-    "source-mode": build_source_mode_parser,
     "index-doctor": build_index_doctor_parser,
     "index-compact": build_index_compact_parser,
     "pull-log": build_pull_log_parser,
     "source-map": build_source_map_parser,
-    "search-all": build_search_all_parser,
     "search": lambda: build_search_parser("search"),
     "context-pack": lambda: build_search_parser("context-pack"),
-    "svn": build_svn_parser,
 }
-COMMAND_PARSER_BUILDERS.update({command: (lambda name=command: build_database_parser(name)) for command in DATABASE_COMMANDS})
+from providers.api.exports import parser as build_export_parser
+
+COMMAND_PARSER_BUILDERS.update(
+    {
+        command: (lambda source=kind: build_export_parser(source))
+        for command, kind in {
+            "export-schema": "table",
+            "export-view": "view",
+            "export-system-script": "system-script",
+        }.items()
+    }
+)
+COMMAND_PARSER_BUILDERS.update(
+    {
+        command: (lambda name=command: build_database_parser(name))
+        for command in DATABASE_COMMANDS
+    }
+)
 # 委托模块自带 parser 的命令：帮助直接交给该模块的 argparse 输出。
 HELP_DELEGATES = {
     **SCRIPT_COMMANDS,
@@ -395,39 +417,33 @@ def _top_level_parser() -> argparse.ArgumentParser:
         "command",
         choices=CLI_COMMANDS,
     )
-    parser.add_argument("--home", help="Directory that stores local config and private source data")
-    parser.add_argument("--workspace", help="Logical workspace key: products.<id> or projects.<id>")
-    parser.add_argument("--json", dest="json_output", action="store_true", help="emit a structured command result or error")
-    parser.add_argument('--format', dest='output_format', choices=['json','text','table','csv','xlsx'],
-                        help='统一输出格式；xlsx仅用于数据库查询且必须指定私有文件输出')
+    parser.add_argument(
+        "--home", help="Directory that stores local config and private source data"
+    )
+    parser.add_argument(
+        "--workspace", help="Stable workspace ID returned by workspace-create or workspaces"
+    )
+    parser.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="emit a structured command result or error",
+    )
+    parser.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["json", "text", "table", "csv", "xlsx"],
+        help="统一输出格式；xlsx仅用于数据库查询且必须指定私有文件输出",
+    )
     return parser
 
 
-def _svn_action_from(tokens: list[str]) -> str:
-    """Return the svn action named in a help request, skipping --home/--workspace values."""
-
-    skip_value = False
-    for token in tokens:
-        if skip_value:
-            skip_value = False
-            continue
-        if token in {"--home", "--workspace"}:
-            skip_value = True
-        elif token != "--" and token in SVN_ACTION_SPECS:
-            return token
-    return ""
-
-
 def _print_command_help(topic: str, rest: list[str]) -> int:
-    topic=COMMAND_ALIASES.get(topic,topic)
-    recommended=next((alias for alias,target in COMMAND_ALIASES.items() if target==topic),None)
-    if recommended:
-        descriptions={'sync-source':'按provider同步源码；SVN本地扫描，不执行远程update',
-                      'sync-source-all':'DATABASE完整拉取；SVN完整本地扫描并重建',
-                      'sync-all':'同步当前provider支持的工作区源码及相关资料',
-                      'reindex':'从当前本地源码重建索引，不拉取远程源码',
-                      'init':'初始化DATABASE索引结构；SVN初始化请用svn init'}
-        print(f'推荐命令：{recommended}；兼容命令：{topic}。{descriptions[topic]}')
+    topic = COMMAND_ALIASES.get(topic, topic)
+    if topic == "lint":
+        print("lint --home <toolHome> [Linter 参数]：调用已安装的团队 Linter。")
+        print("查看完整参数：lint --home <toolHome> --help")
+        return 0
     if topic in HELP_DELEGATES:
         module_name, function_name = HELP_DELEGATES[topic]
         module = importlib.import_module(module_name)
@@ -440,22 +456,14 @@ def _print_command_help(topic: str, rest: list[str]) -> int:
     builder = COMMAND_PARSER_BUILDERS.get(topic)
     if builder is not None:
         parser = builder()
-        if topic == "svn":
-            action = _svn_action_from(rest)
-            spec = SVN_ACTION_SPECS.get(action)
-            if spec:
-                options = spec.get("options", "")
-                print(f"usage: {SVN_USAGE_PREFIX} {action}" + (f" {options}" if options else ""))
-                print(f"  {spec['summary']}")
-                if spec.get("stdin"):
-                    print(f"  stdin：{spec['stdin']}")
-                print("\nsvn 全部 action 的共用选项：\n")
         parser.print_help()
         return 0
     print(f"guthon_tool.py {topic} 没有命令级选项，仅接受 --home/--workspace。")
     if topic in STDIN_JSON_COMMANDS:
         print("输入从 stdin 读取 JSON。")
-    print("用 `guthon_tool.py --help` 查看全部命令，用 `guthon_tool.py help <command>` 查看具体命令。")
+    print(
+        "用 `guthon_tool.py --help` 查看全部命令，用 `guthon_tool.py help <command>` 查看具体命令。"
+    )
     return 0
 
 
@@ -476,7 +484,7 @@ def _dispatch_help(raw: list[str]) -> int | None:
             break
     if topic is None or topic in {"version", "serve", "mcp"}:
         return None
-    return _print_command_help(topic, raw[topic_index + 1:])
+    return _print_command_help(topic, raw[topic_index + 1 :])
 
 
 def _command_help(argv: list[str]) -> int:
@@ -495,472 +503,311 @@ def resource_root() -> Path:
     return Path(getattr(sys, "_MEIPASS", SOURCE_ROOT))
 
 
-def setup_config(home: Path) -> list[Path]:
-    from common.persistence import file_lock
-    with file_lock(home / "config" / ".configuration.lock"):
-        return _setup_config(home)
+def setup_config(home: Path, *, workspace_name=None, team_source=None) -> list[Path]:
+    from common import config_store
+    return config_store.initialize(home, workspace_name=workspace_name, team_source=team_source)
 
 
-def _setup_config(home: Path) -> list[Path]:
-    config_dir = home / "config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    created = []
-    for filename in CONFIG_FILES:
-        target = config_dir / filename
-        if not target.exists():
-            if filename in EMPTY_REGISTRY_FILES:
-                target.write_text(EMPTY_REGISTRY_FILES[filename], encoding="utf-8")
-            else:
-                template_name = f"config/example/{filename.replace('.yaml', '.example.yaml')}"
-                try:
-                    target.write_bytes(bundled_bytes(template_name))
-                except (OSError, KeyError, zipfile.BadZipFile) as error:
-                    raise SystemExit(f"Missing bundled config template: {template_name}") from error
-            created.append(target)
-    return created
-
-
-def _auto_add_operation_enabled(command: str, extra_args: list[str], workspace=None) -> bool:
-    # SVN owns its checkout and selection ledger; Git workcopy auto-add belongs
-    # to DATABASE exports. Never enumerate legacy DATABASE trees for SVN work.
-    if command == "svn" or workspace and workspace.get("sourceMode") == "svn":
-        return False
-    if command in {"source-mode", "workspace-summary", "search", "context-pack", "database-target-configure", "index-compact"}:
-        return False
-    return True
-
-
-def run(command: str, home: Path, extra_args: list[str], selected_workspace=None) -> int:
-    command=COMMAND_ALIASES.get(command,command)
+def run(
+    command: str, home: Path, extra_args: list[str], selected_workspace=None
+) -> int:
+    command = COMMAND_ALIASES.get(command, command)
     os.environ["GUTHON_HOME"] = str(home)
-    if command == "self-test":
-        with tempfile.TemporaryDirectory() as temp:
-            test_home = Path(temp) / "home"
-            created = setup_config(test_home)
-            os.environ["GUTHON_HOME"] = str(test_home)
-            from common import gusen_hub
-            from common.workspace_config import create_workspace
+    if command == "lint":
+        import runpy
 
-            configured = create_workspace(
-                test_home,
-                {
-                    "kind": "product",
-                    "id": "self-test",
-                    "name": "Self Test",
-                    "sourceMode": "svn",
-                    "svnUsername": "self-test",
-                },
-                gusen_hub,
-            )
-            configured_database = create_workspace(
-                test_home,
-                {
-                    "kind": "project",
-                    "id": "self-test-db",
-                    "name": "Self Test Database",
-                    "sourceMode": "database",
-                    "datasource": {
-                        "id": "self-test-db-dev",
-                        "type": "postgresql",
-                        "host": "127.0.0.1",
-                        "port": 5432,
-                        "database": "self_test",
-                        "username": "self_test",
-                        "password": "",
-                    },
-                },
-                gusen_hub,
-            )
-            assert len(created) == len(CONFIG_FILES)
-            assert configured["workspace"]["workspaceKey"] == "products.self-test"
-            assert configured["workspace"]["sourceMode"] == "svn"
-            assert configured_database["workspace"]["workspaceKey"] == "projects.self-test-db"
-            assert configured_database["workspace"]["sourceMode"] == "database"
-            database_workspace = gusen_hub.resolve_workspace(
-                gusen_hub.load_config(),
-                "projects.self-test-db",
-            )
-            assert database_workspace["datasource"]["type"] == "postgresql"
-            # 子命令帮助必须可达，否则 Agent 无法自省有界查询参数而退回全库检索。
-            help_output = io.StringIO()
-            with contextlib.redirect_stdout(help_output):
-                assert _command_help(["svn", "facts"]) == 0
-                assert _command_help(["query", "explain"]) == 0
-            assert "--keyword" in help_output.getvalue()
-            assert "explain" in help_output.getvalue()
-        print("guthon_tool self-test: ok")
-        return 0
-    if command == "setup":
-        created = setup_config(home)
-        print(f"配置目录已准备：{home / 'config'}")
-        print("已创建：" + ("、".join(path.name for path in created) or "无（保留现有配置）"))
-        return 0
-    if command == "import-svn-scope":
-        if not selected_workspace:
-            raise SystemExit("Missing --workspace. Use products.<id> or projects.<id>.")
-        parsed = build_import_svn_scope_parser().parse_args(extra_args)
-        from providers.svn.scope_import import (
-            build_manifest,
-            build_manifest_from_config,
-            read_checkout_script,
-            write_manifest,
-        )
+        from common.runtime_paths import workspace_root
 
-        source_path = Path(parsed.config or parsed.script or parsed.bat).expanduser().resolve()
-        if parsed.config:
-            try:
-                result = build_manifest_from_config(source_path.read_text(encoding="utf-8"), selected_workspace)
-            except (OSError, UnicodeDecodeError) as error:
-                raise SystemExit(f"Cannot read SVN scope configuration: {source_path}") from error
-        else:
-            result = build_manifest(read_checkout_script(source_path), selected_workspace)
-        output_path = Path(parsed.output).expanduser()
-        if not output_path.is_absolute():
-            output_path = home / output_path
-        summary = write_manifest(output_path.resolve(), result, replace=parsed.replace)
-        print(json.dumps(summary, ensure_ascii=False, indent=2))
-        return 0
+        root = workspace_root(home)
+        script = root / ".guthon" / "bin" / "guthon_lint.py"
+        if not script.is_file():
+            raise SystemExit(f"未安装 Guthon Linter：{script}；请先初始化团队规范")
+        lint = runpy.run_path(str(script))
+        return lint["main"](["--repo", str(root), "--scope-from", str(Path.cwd()), *extra_args])
 
     from common import gusen_hub
 
-    if command == "workspace-create":
-        if extra_args:
-            raise SystemExit("workspace-create does not accept extra arguments")
-        from common.workspace_config import create_workspace
+    if command == "self-test":
+        with tempfile.TemporaryDirectory() as temp:
+            test_home = Path(temp)
+            setup_config(test_home)
+            previous = os.environ["GUTHON_HOME"]
+            os.environ["GUTHON_HOME"] = str(test_home)
+            try:
+                from common.workspace_config import create_workspace
 
-        result = create_workspace(home, json.load(sys.stdin), gusen_hub)
+                created = create_workspace(
+                    test_home,
+                    {"id": "self-test", "name": "Self Test"},
+                    gusen_hub,
+                )
+                workspace = gusen_hub.resolve_workspace(
+                    gusen_hub.load_config(), "self-test"
+                )
+                assert created["workspace"]["sourceMode"] == "api"
+                assert (
+                    workspace["providerSourceRoot"]
+                    == (test_home / "var/workspace/Self Test/checkout").resolve()
+                )
+                from providers.api.index import rebuild, catalog
+
+                assert rebuild(workspace)["complete"]
+                assert catalog(workspace)["objects"] == []
+                capture = io.StringIO()
+                with contextlib.redirect_stdout(capture):
+                    _command_help(["api"])
+                assert "upload" in capture.getvalue()
+            finally:
+                os.environ["GUTHON_HOME"] = previous
+        print("guthon_tool self-test: ok")
+        return 0
+    if command == "setup":
+        options = build_setup_parser().parse_args(extra_args)
+        team_source = None if options.no_team_sync else (
+            options.team_source or os.environ.get("GUTHON_TEAM_MARKETPLACE_URL")
+        )
+        created = setup_config(home, workspace_name=options.workspace_directory, team_source=team_source)
+        result = {"ok": True, "created": [str(x) for x in created]}
+        if team_source:
+            result["governance"] = "ready"
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    if command == "workspace-delete":
-        if extra_args:
-            raise SystemExit("workspace-delete does not accept extra arguments")
-        from common.workspace_config import delete_workspace_config
+    if command == "svn-api-migration":
+        if not selected_workspace:
+            raise SystemExit("svn-api-migration requires --workspace")
+        from common import svn_api_migration
+        from common.command_errors import CommandError
+        from providers.api.client import ApiError
 
-        result = delete_workspace_config(home, json.load(sys.stdin), gusen_hub)
+        try:
+            result = svn_api_migration.run(home, selected_workspace, extra_args, sys.stdin)
+        except ApiError as error:
+            raise CommandError(error.code, str(error)) from error
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    if command == "svn-login-configure":
+    if command == "configuration-upgrade":
+        if selected_workspace:
+            raise SystemExit("configuration-upgrade applies to a toolHome")
+        from common import configuration_upgrade
+        print(json.dumps(configuration_upgrade.run(home, extra_args), ensure_ascii=False))
+        return 0
+    if command == "configuration-info":
+        from common import config_store
         if extra_args:
-            raise SystemExit("svn-login-configure does not accept extra arguments")
-        from common.workspace_config import configure_svn_username
+            raise SystemExit("configuration-info 不接受额外参数")
+        print(json.dumps(config_store.info(home), ensure_ascii=False))
+        return 0
+    if command == "workspace-source-settings":
+        if extra_args or not selected_workspace:
+            raise SystemExit("workspace-source-settings 需要 --workspace 和 stdin JSON")
+        from common.workspace_source_settings import run as source_settings
 
-        result = configure_svn_username(home, json.load(sys.stdin))
+        result = source_settings(home, selected_workspace, json.load(sys.stdin), gusen_hub)
         print(json.dumps(result, ensure_ascii=False))
         return 0
+    if command in {"workspace-create", "workspace-delete", "workspace-source-mode"}:
+        if extra_args:
+            raise SystemExit(command + "只接受stdin JSON")
+        from common.workspace_config import change_source_mode, create_workspace, delete_workspace_config
+
+        handler = {"workspace-create": create_workspace, "workspace-delete": delete_workspace_config,
+                   "workspace-source-mode": change_source_mode}[command]
+        result = handler(home, json.load(sys.stdin), gusen_hub)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    if command == 'doctor':
+        from common.doctor import main
+        return main(extra_args, workspace_key=selected_workspace or '')
+    config = gusen_hub.load_config()
     if command == "workspaces":
-        config = gusen_hub.load_config()
         errors = []
         workspaces = gusen_hub.list_workspaces(config, errors=errors)
-        print(json.dumps(
-            {"ok": True, "workspaces": [gusen_hub.workspace_summary(config, item) for item in workspaces], "configErrors": errors},
-            ensure_ascii=False,
-        ))
+        summaries = []
+        for workspace in workspaces:
+            try:
+                summaries.append(gusen_hub.workspace_summary(config, workspace))
+            except (SystemExit, ValueError, TypeError, OSError) as error:
+                errors.append({'workspaceKey': workspace['workspaceKey'], 'code': 'WORKSPACE_STATE_INVALID',
+                               'message': str(error)})
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "workspaces": summaries,
+                    "configErrors": errors,
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
     if command == "route":
-        payload = json.load(sys.stdin)
-        print(json.dumps(gusen_hub.route_workspace_request(gusen_hub.load_config(), payload), ensure_ascii=False))
+        print(
+            json.dumps(
+                gusen_hub.route_workspace_request(config, json.load(sys.stdin)),
+                ensure_ascii=False,
+            )
+        )
         return 0
     if selected_workspace:
         gusen_hub.set_workspace(selected_workspace)
-    if command == "doctor":
-        from common import doctor
-        return doctor.main(extra_args, workspace_key=selected_workspace or "")
-    if command not in GLOBAL_COMMANDS and command != "pull" and not selected_workspace:
-        raise SystemExit("Missing --workspace. Use products.<id> or projects.<id>.")
-
-    config = gusen_hub.load_config()
-    workspace = None if command in GLOBAL_COMMANDS or command == "pull" and not selected_workspace else gusen_hub.resolve_workspace(config)
-    if command == "workspace-resolve" and selected_workspace:
-        workspace = gusen_hub.resolve_workspace(config, selected_workspace)
-    if command in DATABASE_COMMANDS and selected_workspace:
-        workspace = gusen_hub.resolve_workspace(config, selected_workspace)
+    if command not in GLOBAL_COMMANDS and not selected_workspace:
+        raise SystemExit("Missing --workspace. Select an explicit stable workspace ID.")
+    workspace = (
+        gusen_hub.resolve_workspace(config, selected_workspace)
+        if selected_workspace or command not in GLOBAL_COMMANDS
+        else None
+    )
     checkpoint()
-    restrict_to_index(command == 'reindex' and workspace is not None and workspace['sourceMode'] == 'svn')
-    if workspace and command in DATABASE_ONLY_COMMANDS and workspace["sourceMode"] != "database":
-        raise SystemExit(
-            f"{command} is unavailable in SVN source mode for {workspace['workspaceKey']}; "
-            "use the local SVN index or an explicit database workspace"
-        )
-    if command == "svn" and extra_args[:1] != ["reindex-files"]:
-        _svn_progress(f"请求已进入后端 · {extra_args[0] if extra_args else 'svn'} · {workspace['workspaceKey']}")
-    auto_add_git = bool((config.get("sync", {}).get("rules") or {}).get("pull_auto_add_git"))
-    auto_add_operation = auto_add_git and _auto_add_operation_enabled(command, extra_args, workspace)
-    before = set()
-    if workspace and auto_add_operation:
-        workspace_prefix = gusen_hub.workspace_var_prefix(workspace)
-        if workspace_prefix:
-            before = gusen_hub.untracked_files(pathspec=[workspace_prefix])
-    os.environ["GUTHON_DEFER_GIT_ADD"] = "1"
-    step = COMMAND_STEPS.get(command)
-    if workspace and workspace.get("sourceMode") == "svn":
-        if command in {"reindex", "sync-all"}:
-            step = "source"
-        elif command == "svn" and extra_args and extra_args[0] in {"init", "refresh"}:
-            step = "source"
-    result_code = 0
-    try:
-        with gusen_hub.operation_generated_files() as generated_paths:
-            result_code = _run_workspace_command(command, extra_args, gusen_hub, config, workspace)
-        # Doctor returns structured check failures as a normal diagnostic result.
-        if result_code and command != "doctor":
-            raise RuntimeError(f"{command} failed with exit code {result_code}")
-        if step:
-            gusen_hub.update_workspace_state(config, workspace, step, "SUCCESS")
-    except (Exception, SystemExit, OperationCancelled) as error:
-        if workspace and step:
-            status = 'CANCELLED' if isinstance(error, OperationCancelled) else "PARTIAL" if error_code(error) == "INDEX_PARTIAL" else "FAILED"
-            gusen_hub.update_workspace_state(config, workspace, step, status, error)
-        raise
-    finally:
-        os.environ.pop("GUTHON_DEFER_GIT_ADD", None)
-    if (
-        workspace
-        and auto_add_operation
-        and command not in {"init", "reindex", "export-markdown", "workcopy", "create-workcopy", "source-mode"}
-    ):
-        gusen_hub.auto_add_operation_files(config, before, workspace, generated_paths)
-    return result_code
-
-
-def _svn_progress(message: str) -> None:
-    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [SVN] {message}", file=sys.stderr, flush=True)
-
-
-def _reindex_svn(gusen_hub, config, workspace, on_progress=None) -> dict:
-    if on_progress is not None:
-        on_progress(f"{workspace['displayName']}｜索引｜后端 {application_version()} · {application_build_info()['buildId']}")
-    conn = gusen_hub.connect_index_for_workspace(
-        workspace,
-        action="index-init",
-        rebuild_incompatible=True,
-    )
-    try:
-        result = gusen_hub.index_svn_workspace(conn, config, workspace, on_progress=on_progress)
-    finally:
-        conn.close()
-    if result.get("failures"):
-        if result.get("indexPreserved", True):
-            raise SystemExit(f"SVN 索引未更新，已保留旧索引：{result['errors']}")
-        blocked = result.get("blocked") or []
-        detail = ""
-        if blocked:
-            paths = [item.get("path") or "" for item in blocked[:5]]
-            detail = (
-                f"；冲突阻断 {len(blocked)} 个：{'、'.join(paths)}"
-                + (" 等" if len(blocked) > 5 else "")
-                + "，请合并后标记「SVN 冲突为已解决」再重建索引"
-            )
-        raise gusen_hub.IndexPartialError(f"SVN 索引已发布（PARTIAL）{detail}：{result['errors']}")
-    return result
-
-
-def _connect_incremental_svn_index(gusen_hub, config, workspace, on_progress=None):
-    try:
-        return gusen_hub.connect_index_for_workspace(workspace, action="index-init")
-    except gusen_hub.IndexRebuildRequired:
-        if on_progress is not None:
-            on_progress(f"{workspace['displayName']}｜索引｜旧索引无法原地升级，自动完整重建")
-        _reindex_svn(gusen_hub, config, workspace, on_progress=on_progress)
-        return gusen_hub.connect_index_for_workspace(workspace, action="index-init")
-
-
-def _reindex_svn_files(
-    gusen_hub,
-    config,
-    workspace,
-    source_paths: list[str],
-    on_progress=None,
-) -> list[dict]:
-    paths = list(dict.fromkeys(source_paths))
-    if on_progress is not None:
-        on_progress(f"{workspace['displayName']}｜索引｜开始更新 {len(paths)} 个源码文件")
-    connection = _connect_incremental_svn_index(
-        gusen_hub,
-        config,
-        workspace,
-        on_progress=on_progress,
-    )
-    try:
-        results = []
-        for source_path in paths:
-            results.append(
-                gusen_hub.index_svn_workspace_file(connection, config, workspace, source_path)
-            )
-    finally:
-        connection.close()
-    if on_progress is not None:
-        on_progress(f"{workspace['displayName']}｜索引｜完成 · {len(results)} 个源码文件")
-    return results
-
-
-def _manifest_refresh_paths(workspace: dict, refresh_result: dict) -> list[str]:
-    """Return canonical changed paths, including directories and deleted files."""
-
-    from providers.svn.nexus import catalog
-    from providers.svn.nexus.manifest import (
-        load_authorized_scope, logical_path_for_entry, resolve_authorized_path,
-    )
-
-    scope = load_authorized_scope(workspace)
-    entries = {entry.id: entry for entry in scope.entries}
-    paths = []
-    for updated in refresh_result.get("updated") or []:
-        entry = entries.get(updated.get("id"))
-        if entry is None:
-            raise SystemExit("SVN refresh returned an unknown working copy")
-        paths.extend(updated.get("paths") or [])
-        for raw in updated.get("updatePaths") or []:
-            target = Path(raw)
-            if not target.is_absolute():
-                target = entry.root / target
-            relative = target.resolve().relative_to(entry.root.resolve()).as_posix()
-            paths.append(logical_path_for_entry(entry, relative) or entry.local_subdir)
-        changes = [] if updated.get("paths") else list((updated.get("before") or {}).get("remoteChanges") or [])
-        if refresh_result.get("action") == "refreshed-with-local-merge":
-            changes.extend((updated.get("before") or {}).get("changes") or [])
-            changes.extend((updated.get("after") or {}).get("changes") or [])
-        for change in changes:
-            if updated.get("paths") and logical_path_for_entry(entry, change["path"]) not in updated["paths"]:
-                continue
-            # Directory property changes do not change source contents.
-            if change.get("item") in {"", "none", "normal"}:
-                if (change.get("properties") in {None, "", "none", "normal"}
-                        or not (entry.root / change["path"]).is_file()):
-                    continue
-            # SVN can mark ancestor directories modified when descendants
-            # changed. Their own contents are not source files; update
-            # notifications and added/deleted subtrees cover the real changes.
-            if change.get("item") == "modified" and (entry.root / change["path"]).is_dir():
-                continue
-            # Conflict artifacts (.mine, .r1234) and other unversioned files are
-            # not authorized source and must not become incremental index paths.
-            if change.get("item") in {"unversioned", "ignored", "external"}:
-                target = entry.root / change["path"]
-                if not (target.is_file() and catalog.source_file_supported(entry, target)):
-                    continue
-            paths.append(logical_path_for_entry(entry, change["path"]) or entry.local_subdir)
-    normalized = []
-    for path in paths:
-        entry, _target, relative = resolve_authorized_path(scope, path)
-        normalized.append(logical_path_for_entry(entry, relative) or entry.local_subdir)
-    return list(dict.fromkeys(normalized))
-
-
-def _reindex_svn_refresh(gusen_hub, config, workspace, refresh_result: dict, on_progress=None) -> dict:
-    if on_progress is not None:
-        on_progress(f"{workspace['displayName']}｜索引｜开始更新后的增量索引")
-    paths = _manifest_refresh_paths(workspace, refresh_result)
-    connection = _connect_incremental_svn_index(gusen_hub, config, workspace, on_progress=on_progress)
-    try:
-        result = gusen_hub.index_svn_workspace_changes(
-            connection, config, workspace, paths, refresh_result, on_progress=on_progress,
-        )
-    finally:
-        connection.close()
-    blocked = result.get("blocked") or []
-    if on_progress is not None:
-        for item in blocked:
-            on_progress(f"{workspace['displayName']}｜索引｜冲突阻断 · {item['path']} · {item['error']}")
-    if result.get("failures"):
-        raise SystemExit(f"增量索引未发布，已保留旧索引：{result['errors']}")
-    if on_progress is not None:
-        on_progress(
-            f"{workspace['displayName']}｜索引｜更新后的索引完成 · "
-            f"对象 {result.get('changed', 0)} · 失败 {result.get('failures', 0)}"
-            + (f" · 冲突阻断 {len(blocked)} 个待合并" if blocked else "")
-        )
-    return result
+    return _run_workspace_command(command, extra_args, gusen_hub, config, workspace)
 
 
 def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
+    if workspace and workspace["sourceMode"] != "api" and command not in {
+        "workspace-resolve", "workspace-summary", "pull-log", "index-doctor", *DATABASE_COMMANDS
+    }:
+        from common.legacy_source_cli import run as run_legacy
+        return run_legacy(command, extra_args, config, workspace)
+    if command in {"svn", "legacy-source", "pull", "workcopy", "create-workcopy"}:
+        raise SystemExit(f"{command} requires an explicitly selected legacy workspace")
+    if command == "api":
+        from providers.api.cli import run as run_api
+
+        return run_api(workspace, extra_args)
     if command == "workspace-resolve":
         parsed = build_workspace_resolve_parser().parse_args(extra_args)
         from common.workspace_selection import select_workspace
-        selectors = {"workspace_key": workspace["workspaceKey"] if workspace else "",
-                     "name": parsed.name, "kind": parsed.kind, "path": parsed.path,
-                     "prompt": parsed.prompt, "current_workspace": parsed.current_workspace}
+
+        selectors = {
+            "workspace_key": workspace["workspaceKey"] if workspace else "",
+            "name": parsed.name,
+            "kind": parsed.kind,
+            "path": parsed.path,
+            "prompt": parsed.prompt,
+            "current_workspace": parsed.current_workspace,
+        }
         if parsed.stdin:
             supplied = json.load(sys.stdin)
             if not isinstance(supplied, dict) or set(supplied) - set(selectors):
-                raise SystemExit("workspace-resolve stdin must be a JSON object of supported selectors")
+                raise SystemExit(
+                    "workspace-resolve stdin must be a JSON object of supported selectors"
+                )
             selectors.update(supplied)
         result = select_workspace(config, **selectors)
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result["ok"] or result.get("action") == "list" else 1
     if command in DATABASE_COMMANDS:
         from common import database_cli
+
         parsed = build_database_parser(command).parse_args(extra_args)
         return database_cli.run(command, parsed, gusen_hub, config, workspace)
-    if command == "source-mode":
-        parsed = build_source_mode_parser().parse_args(extra_args)
-        if parsed.action == "get":
-            if parsed.mode:
-                raise SystemExit("source-mode get does not accept --mode")
-            result = gusen_hub.workspace_summary(config, workspace)
-        else:
-            if not parsed.mode:
-                raise SystemExit("source-mode set requires --mode database|svn")
-            result, updated = gusen_hub.change_workspace_source_mode(config, workspace, parsed.mode)
-            result["workspace"] = gusen_hub.workspace_summary(config, updated)
-        print(json.dumps(result, ensure_ascii=False))
-        return 0
     if command == "workspace-summary":
         if extra_args:
             raise SystemExit("workspace-summary does not accept extra arguments")
-        print(json.dumps({"ok": True, "workspace": gusen_hub.workspace_summary(config, workspace)}, ensure_ascii=False))
-        return 0
-    if command == "search-all":
-        from common import workspace_assistant
-        parsed = build_search_all_parser().parse_args(extra_args)
-        print(json.dumps(workspace_assistant.search_all_workspaces(config, parsed.query,
-                       workspace_keys=parsed.workspace_key, limit=parsed.limit), ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "workspace": gusen_hub.workspace_summary(config, workspace),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
     if command == "parser-feedback":
         if extra_args:
             raise SystemExit("parser-feedback accepts only stdin JSON")
         from common.parser_feedback import save_feedback
-        print(json.dumps(save_feedback(workspace, json.load(sys.stdin)), ensure_ascii=False, indent=2))
+
+        print(
+            json.dumps(
+                save_feedback(workspace, json.load(sys.stdin)),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
     if command == "pull-log":
         from common import pull_history
+
         parsed = build_pull_log_parser().parse_args(extra_args)
-        bridge_root=Path(gusen_hub.VAR_DIR) / 'nexus' / 'bridge'
-        if parsed.action in {'tail','summary'}:
-            result=pull_history.query_history(workspace,bridge_root,limit=parsed.limit,
-                                             summary=parsed.action=='summary',cursor=parsed.cursor)
-        elif parsed.action=='export':
-            result=pull_history.export_history(workspace,bridge_root,format=parsed.format,generation=parsed.generation)
-        elif parsed.action=='archive':
-            if not parsed.before:raise SystemExit('pull-log archive requires --before YYYY-MM-DD')
-            result=pull_history.archive_history(workspace,bridge_root,before=parsed.before,check=parsed.check,
-                                               confirmation=parsed.confirmation,plan_hash=parsed.plan_hash)
+        bridge_root = Path(gusen_hub.VAR_DIR) / "nexus" / "bridge"
+        if parsed.action in {"tail", "summary"}:
+            result = pull_history.query_history(
+                workspace,
+                bridge_root,
+                limit=parsed.limit,
+                summary=parsed.action == "summary",
+                cursor=parsed.cursor,
+            )
+        elif parsed.action == "export":
+            result = pull_history.export_history(
+                workspace,
+                bridge_root,
+                format=parsed.format,
+                generation=parsed.generation,
+            )
+        elif parsed.action == "archive":
+            if not parsed.before:
+                raise SystemExit("pull-log archive requires --before YYYY-MM-DD")
+            result = pull_history.archive_history(
+                workspace,
+                bridge_root,
+                before=parsed.before,
+                check=parsed.check,
+                confirmation=parsed.confirmation,
+                plan_hash=parsed.plan_hash,
+            )
         else:
-            if not parsed.archive_id:raise SystemExit('pull-log restore requires --archive-id')
-            result=pull_history.restore_history(workspace,archive_id=parsed.archive_id,check=parsed.check,
-                                               confirmation=parsed.confirmation,plan_hash=parsed.plan_hash)
+            if not parsed.archive_id:
+                raise SystemExit("pull-log restore requires --archive-id")
+            result = pull_history.restore_history(
+                workspace,
+                archive_id=parsed.archive_id,
+                check=parsed.check,
+                confirmation=parsed.confirmation,
+                plan_hash=parsed.plan_hash,
+            )
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result['ok'] else 1
+        return 0 if result["ok"] else 1
     if command == "source-map":
         from common import workspace_assistant
+
         parsed = build_source_map_parser().parse_args(extra_args)
-        result = workspace_assistant.source_map(workspace, limit=parsed.limit, cursor=parsed.cursor)
+        result = workspace_assistant.source_map(
+            workspace, limit=parsed.limit, cursor=parsed.cursor
+        )
         if parsed.write:
             from common.persistence import atomic_text
+
             path = workspace["contextDir"] / "ai" / "SOURCE_MAP.md"
             atomic_text(path, result["markdown"])
             result["artifactPath"] = str(path)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     if command == "index-doctor":
-        from providers.svn.nexus.source_queries import index_health
         parsed = build_index_doctor_parser().parse_args(extra_args)
-        result = index_health(workspace, limit=parsed.limit) if workspace.get("sourceMode") == "svn" else gusen_hub.workspace_index_state(workspace)
-        print(json.dumps({"ok": True, "workspaceKey": workspace["workspaceKey"], **result}, ensure_ascii=False, indent=2))
+        result = gusen_hub.workspace_index_state(workspace)
+        print(
+            json.dumps(
+                {"ok": True, "workspaceKey": workspace["workspaceKey"], **result},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
     if command == "index-compact":
         from common.index_maintenance import compact_index
+
         parsed = build_index_compact_parser().parse_args(extra_args)
-        print(json.dumps(compact_index(workspace, apply=parsed.apply), ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                compact_index(workspace, apply=parsed.apply),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
     if command in {"search", "context-pack"}:
         from common import workspace_assistant
@@ -974,66 +821,35 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
                 parsed.source_id,
                 parsed.fun_id,
                 parsed.limit,
-                parsed.detailed, include_source=parsed.include_source, max_chars=parsed.max_chars,
+                parsed.detailed,
+                include_source=parsed.include_source,
+                max_chars=parsed.max_chars,
                 source_namespace=parsed.source_namespace,
             )
         )
         if command == "context-pack" and parsed.write_context:
             from common.persistence import atomic_text
-            filename = gusen_hub.path_part(parsed.source_id + ("." + parsed.fun_id if parsed.fun_id else "")) + ".md"
+
+            filename = (
+                gusen_hub.path_part(
+                    parsed.source_id + ("." + parsed.fun_id if parsed.fun_id else "")
+                )
+                + ".md"
+            )
             target = workspace["contextDir"] / "ai" / filename
             atomic_text(target, result["markdown"])
             result["artifactPath"] = str(target.resolve())
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    if command == "svn":
-        from providers.svn import cli as svn_cli
+    if command in {"init", "reindex"}:
+        from providers.api.index import rebuild
 
-        parsed = build_svn_parser().parse_args(extra_args)
-        return svn_cli.run(
-            parsed, extra_args, gusen_hub, config, workspace,
-            on_progress=_svn_progress, reindex=_reindex_svn,
-            reindex_files=_reindex_svn_files, reindex_refresh=_reindex_svn_refresh,
-        )
-    if command == "init":
-        if workspace["sourceMode"] == "svn":
-            raise SystemExit("Use 'svn init' to initialize an SVN source workspace")
-        gusen_hub.ensure_workspace_structure(workspace)
-        gusen_hub.run_sync_once(["--init-only"])
-        gusen_hub.update_workspace_state(config, workspace, "source", "INITIALIZED")
-        print("本地源码索引初始化完成")
+        print(json.dumps(rebuild(workspace), ensure_ascii=False))
         return 0
-    if command == "sync-source-all":
-        gusen_hub.run_sync_once(["--full-rebuild"])
-        verb = "本地 SVN 扫描并索引重建" if workspace["sourceMode"] == "svn" else "全部源码拉取并索引重建"
-        print(f"工作区{verb}完成：{workspace['workspaceKey']}")
-        return 0
-    if command == "sync-source":
-        gusen_hub.run_sync_once([])
-        verb = "本地 SVN 扫描" if workspace["sourceMode"] == "svn" else "源码拉取"
-        print(f"工作区{verb}完成：{workspace['workspaceKey']}")
-        return 0
-    if command == "reindex":
-        gusen_hub.run_sync_once(
-            ["--reindex-calls"],
-            on_progress=_svn_progress if workspace["sourceMode"] == "svn" else None,
-        )
-        if workspace["sourceMode"] == "svn":
-            gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
-        print("本地索引重建完成")
-        return 0
-    if command == "pull":
-        try:
-            payload = json.load(sys.stdin)
-        except json.JSONDecodeError as error:
-            raise SystemExit("pull requires a JSON stdin payload") from error
-        if not isinstance(payload, dict):
-            raise SystemExit("pull stdin must be a JSON object")
-        if workspace:
-            payload["workspaceKey"] = workspace["workspaceKey"]
-        result = gusen_hub.pull_source_to_work_copy(payload)
-        print(json.dumps(result, ensure_ascii=False))
-        return 0
+    if command in {"sync-source", "sync-source-all", "sync-all"}:
+        from providers.api.cli import run as run_api
+
+        return run_api(workspace, ["pull"])
     if command == "export-markdown":
         if extra_args:
             raise SystemExit("export-markdown does not accept extra arguments")
@@ -1041,6 +857,17 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
 
         export_hub_markdown.main([], workspace)
         return 0
+    if command in {"export-schema", "export-view", "export-system-script"}:
+        from providers.api.exports import main
+
+        return main(
+            {
+                "export-schema": "table",
+                "export-view": "view",
+                "export-system-script": "system-script",
+            }[command],
+            extra_args,
+        )
     if command in SCRIPT_COMMANDS:
         module_name, function_name = SCRIPT_COMMANDS[command]
         module = importlib.import_module(module_name)
@@ -1048,51 +875,25 @@ def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
         if isinstance(result, dict):
             return 0 if result.get("ok", True) else 1
         return int(result) if isinstance(result, (bool, int)) else 0
-    if command == "sync-all":
-        if workspace["sourceMode"] == "svn":
-            gusen_hub.run_sync_once([])
-            gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
-            gusen_hub.update_workspace_state(config, workspace, full_sync=True)
-            print(f"SVN 工作区本地扫描、索引和资料摘要完成：{workspace['workspaceKey']}")
-            return 0
-        from providers.database import export_bill_type_sql
-        from providers.database import export_system_script_sql
-        from providers.database import export_table_schema_sql
-        from providers.database import export_view_sql
-
-        expected_digest = gusen_hub.workspace_config_digest(config, workspace)
-        steps = (
-            ("source", "源码与索引", lambda: gusen_hub.run_sync_once([])),
-            ("schema", "数据库表结构", lambda: export_table_schema_sql.main([])),
-            ("billType", "单据类型", lambda: export_bill_type_sql.main([])),
-            ("systemScripts", "系统脚本", lambda: export_system_script_sql.main([])),
-            ("views", "视图", lambda: export_view_sql.main([])),
-        )
-        for state_step, label, action in steps:
-            latest = gusen_hub.load_config()
-            latest_workspace = gusen_hub.resolve_workspace(latest, workspace["workspaceKey"])
-            if gusen_hub.workspace_config_digest(latest, latest_workspace) != expected_digest:
-                raise SystemExit(f"同步期间工作区配置发生变化：{workspace['workspaceKey']}")
-            print(f"同步：{label}", flush=True)
-            try:
-                result = action()
-                if result not in (None, 0):
-                    raise RuntimeError(f"{label} failed with exit code {result}")
-                gusen_hub.update_workspace_state(config, workspace, state_step, "SUCCESS")
-            except (Exception, SystemExit) as error:
-                gusen_hub.update_workspace_state(config, workspace, state_step, "FAILED", error)
-                raise
-        gusen_hub.update_workspace_state(config, workspace, full_sync=True)
-        print(f"工作区全量同步完成：{workspace['workspaceKey']}")
-        return 0
     raise SystemExit(f"Unsupported command: {command}")
 
 
 def _toolhost_request_kind(command: str, args: list[str]) -> str:
-    spec = COMMAND_METADATA["svnActions"].get(args[0], {}) if command == "svn" and args else COMMAND_METADATA["commands"].get(command, {})
-    if any(token == flag or token.startswith(flag + "=") for flag in spec.get("writeFlags", []) for token in args):
+    spec = (
+        COMMAND_METADATA["apiActions"].get(args[0], {})
+        if command == "api" and args
+        else COMMAND_METADATA["svnActions"].get(args[0], {})
+        if command == "svn" and args
+        else COMMAND_METADATA["commands"].get(command, {})
+    )
+    if any(
+        token == flag or token.startswith(flag + "=")
+        for flag in spec.get("writeFlags", [])
+        for token in args
+    ):
         return "write"
-    if any(token in spec.get('writeArguments',[]) for token in args):return 'write'
+    if any(token in spec.get("writeArguments", []) for token in args):
+        return "write"
     return spec.get("kind", "write")
 
 
@@ -1102,17 +903,27 @@ def serve_stdio(home: Path) -> int:
     # temporary file, while the protocol reader can still acknowledge cancel.
     import threading
     from common.toolhost_requests import ToolHostRequests
-    protocol_output = os.fdopen(os.dup(sys.stdout.fileno()), 'w', encoding='utf-8', buffering=1)
+
+    protocol_output = os.fdopen(
+        os.dup(sys.stdout.fileno()), "w", encoding="utf-8", buffering=1
+    )
     protocol_lock = threading.Lock()
+
     def reply(frame):
         with protocol_lock:
-            protocol_output.write(json.dumps(frame, ensure_ascii=False) + '\n')
+            protocol_output.write(json.dumps(frame, ensure_ascii=False) + "\n")
             protocol_output.flush()
+
     os.environ["GUTHON_HOME"] = str(home)
-    reply({
-        "type": "ready", "protocolVersion": 1, "version": application_version(),
-        "pid": os.getpid(), 'capabilities':['cancel-index-v1'],
-    })
+    reply(
+        {
+            "type": "ready",
+            "protocolVersion": 1,
+            "version": application_version(),
+            "pid": os.getpid(),
+            "capabilities": ["cancel-index-v1"],
+        }
+    )
     requests = ToolHostRequests(protocol_input, reply, COMMAND_METADATA)
     for line, queued_id, control in requests:
         request_id = None
@@ -1126,9 +937,15 @@ def serve_stdio(home: Path) -> int:
             workspace_key = request.get("workspaceKey", "")
             if not isinstance(request_id, str) or not request_id:
                 raise ValueError("id must be a non-empty string")
-            if not isinstance(command, str) or command not in CLI_COMMANDS or command in {"serve", "mcp", "self-test"}:
+            if (
+                not isinstance(command, str)
+                or command not in CLI_COMMANDS
+                or command in {"serve", "mcp", "self-test", "configuration-upgrade", "svn-api-migration"}
+            ):
                 raise ValueError("unsupported command")
-            if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
+            if not isinstance(args, list) or any(
+                not isinstance(arg, str) for arg in args
+            ):
                 raise ValueError("args must be a string array")
             if not isinstance(workspace_key, str):
                 raise ValueError("workspaceKey must be a string")
@@ -1144,18 +961,32 @@ def serve_stdio(home: Path) -> int:
                 with tempfile.TemporaryFile() as native_stdout:
                     os.dup2(native_stdout.fileno(), 1)
                     try:
-                        sys.stdin = io.StringIO("" if payload is None else json.dumps(payload, ensure_ascii=False))
+                        sys.stdin = io.StringIO(
+                            ""
+                            if payload is None
+                            else json.dumps(payload, ensure_ascii=False)
+                        )
                         with contextlib.redirect_stdout(capture):
                             if command == "command-metadata":
                                 print(json.dumps(COMMAND_METADATA, ensure_ascii=False))
                                 code = 0
                             elif command == "version":
-                                print(json.dumps({"version": application_version(), **application_build_info()}, ensure_ascii=False))
+                                print(
+                                    json.dumps(
+                                        {
+                                            "version": application_version(),
+                                            **application_build_info(),
+                                        },
+                                        ensure_ascii=False,
+                                    )
+                                )
                                 code = 0
                             else:
                                 with request_control(control):
                                     checkpoint()
-                                    code = run(command, home, args, workspace_key or None)
+                                    code = run(
+                                        command, home, args, workspace_key or None
+                                    )
                     finally:
                         os.dup2(saved_stdout_fd, 1)
                     native_stdout.seek(0)
@@ -1173,12 +1004,27 @@ def serve_stdio(home: Path) -> int:
                 result = json.loads(output)
             except json.JSONDecodeError:
                 result = {"stdout": output}
-            response = {"id": request_id, "type": "result", "ok": True, "result": result}
+            response = {
+                "id": request_id,
+                "type": "result",
+                "ok": True,
+                "result": result,
+            }
         except (Exception, SystemExit, OperationCancelled) as error:
-            response = {"id": request_id, "type": "result", "ok": False, "error": {
-                "code": error_code(error, "INVALID_REQUEST" if isinstance(error, ValueError) else "COMMAND_FAILED"),
-                "message": str(error),
-            }}
+            response = {
+                "id": request_id,
+                "type": "result",
+                "ok": False,
+                "error": {
+                    "code": error_code(
+                        error,
+                        "INVALID_REQUEST"
+                        if isinstance(error, ValueError)
+                        else "COMMAND_FAILED",
+                    ),
+                    "message": str(error),
+                },
+            }
         requests.finish(queued_id, control)
         reply(response)
     protocol_output.close()
@@ -1188,6 +1034,14 @@ def serve_stdio(home: Path) -> int:
 def main(argv=None) -> int:
     _configure_stdio_utf8()
     raw = list(sys.argv[1:] if argv is None else argv)
+    if raw[:1] == ["lint"]:
+        # Leave all linter options (including --format/--json) untouched.
+        parser = argparse.ArgumentParser(prog="guthon_tool.py lint", add_help=False)
+        parser.add_argument("--home", required=True)
+        parsed, lint_args = parser.parse_known_args(raw[1:])
+        if lint_args[:1] == ["--"]:
+            lint_args = lint_args[1:]
+        return run("lint", Path(parsed.home).expanduser().resolve(), lint_args)
     if raw[:1] == ["help"]:
         return _command_help(raw[1:])
     help_code = _dispatch_help(raw)
@@ -1197,72 +1051,134 @@ def main(argv=None) -> int:
     args, extra_args = parser.parse_known_args(raw)
     if extra_args[:1] == ["--"]:
         extra_args = extra_args[1:]
-    if args.json_output and args.output_format not in (None,'json'):
-        parser.error('--json cannot be combined with a non-JSON --format')
+    if args.json_output and args.output_format not in (None, "json"):
+        parser.error("--json cannot be combined with a non-JSON --format")
     if args.command == "version":
         if args.home or args.workspace or extra_args:
-            parser.error("version does not accept --home, --workspace, or extra arguments")
-        value={"version": application_version(), **application_build_info()}
+            parser.error(
+                "version does not accept --home, --workspace, or extra arguments"
+            )
+        value = {"version": application_version(), **application_build_info()}
         if args.json_output or args.output_format:
-            from common.cli_output import envelope,render
-            if args.output_format=='xlsx':parser.error('version does not support XLSX')
-            print(render(envelope(json.dumps(value),command='version'),args.output_format or 'json'),end='')
-        else:print(json.dumps(value,ensure_ascii=False))
+            from common.cli_output import envelope, render
+
+            if args.output_format == "xlsx":
+                parser.error("version does not support XLSX")
+            print(
+                render(
+                    envelope(json.dumps(value), command="version"),
+                    args.output_format or "json",
+                ),
+                end="",
+            )
+        else:
+            print(json.dumps(value, ensure_ascii=False))
         return 0
     if args.command == "command-metadata":
         if args.workspace or extra_args:
             parser.error("command-metadata does not accept command-level arguments")
         if args.json_output or args.output_format:
-            from common.cli_output import envelope,render
-            if args.output_format=='xlsx':parser.error('command-metadata does not support XLSX')
-            print(render(envelope(json.dumps(COMMAND_METADATA),command='command-metadata'),args.output_format or 'json'),end='')
-        else:print(json.dumps(COMMAND_METADATA, ensure_ascii=False, indent=2))
+            from common.cli_output import envelope, render
+
+            if args.output_format == "xlsx":
+                parser.error("command-metadata does not support XLSX")
+            print(
+                render(
+                    envelope(json.dumps(COMMAND_METADATA), command="command-metadata"),
+                    args.output_format or "json",
+                ),
+                end="",
+            )
+        else:
+            print(json.dumps(COMMAND_METADATA, ensure_ascii=False, indent=2))
         return 0
     if not args.home:
         args.home = os.environ.get("GUTHON_HOME") or os.environ.get("GUTHON_TOOL_HOME")
     if not args.home:
         parser.error("--home or GUTHON_HOME / GUTHON_TOOL_HOME is required")
     if args.command == "serve":
-        if args.json_output or args.output_format:parser.error('serve uses its own stdio protocol; output formatting is unavailable')
+        if args.json_output or args.output_format:
+            parser.error(
+                "serve uses its own stdio protocol; output formatting is unavailable"
+            )
         if args.workspace or extra_args != ["--stdio"]:
-            parser.error("serve requires --stdio and does not accept --workspace or extra arguments")
+            parser.error(
+                "serve requires --stdio and does not accept --workspace or extra arguments"
+            )
         return serve_stdio(Path(args.home).expanduser().resolve())
     if args.command == "mcp":
-        if args.json_output or args.output_format:parser.error('mcp uses its own protocol; output formatting is unavailable')
-        if args.workspace or extra_args not in (
-            ["--stdio"], ["--stdio", "--read-only"], ["--stdio", "--enable-page-write"]
-        ):
-            parser.error("mcp requires --stdio; optional --read-only disables local SVN source writes")
+        if args.json_output or args.output_format:
+            parser.error("mcp uses its own protocol; output formatting is unavailable")
+        mcp_parser = argparse.ArgumentParser(prog="guthon_tool.py mcp")
+        mcp_parser.add_argument("--stdio", action="store_true", required=True)
+        mcp_parser.add_argument("--provider", choices=["api", "svn", "database"])
+        access = mcp_parser.add_mutually_exclusive_group()
+        access.add_argument("--read-only", action="store_true")
+        access.add_argument("--enable-page-write", action="store_true")
+        options = mcp_parser.parse_args(extra_args)
+        if args.workspace:
+            parser.error("MCP tools require an explicit workspaceKey per request")
         home = Path(args.home).expanduser().resolve()
-        os.environ["GUTHON_HOME"] = str(home)
-        from providers.svn.nexus.mcp_server import serve_stdio as serve_mcp_stdio
+        provider = options.provider
+        if provider is None:
+            from common import config_store
+            legacy_only = not config_store.unified(home) and all(
+                (home / "config" / name).is_file() for name in config_store.LEGACY_SECTIONS.values()
+            )
+            provider = "svn" if legacy_only else "api"
+        if provider == "svn":
+            from providers.svn.nexus.mcp_server import serve_stdio as serve_mcp_stdio
+        elif provider == "database":
+            from providers.database.mcp_server import serve_stdio as serve_mcp_stdio
+        else:
+            from providers.api.mcp_server import serve_stdio as serve_mcp_stdio
+        return serve_mcp_stdio(home, application_version(), enable_writes=not options.read_only)
 
-        return serve_mcp_stdio(
-            home, application_version(), enable_writes="--read-only" not in extra_args,
-        )
     home = Path(args.home).expanduser().resolve()
-    if args.output_format in {'csv','table','text','xlsx'} and args.command in {'database-query-readonly','database-diagnose','database-dbx-handoff'}:
-        requested='table' if args.output_format=='text' else args.output_format
-        extra_args=[*extra_args,'--format',requested]
-        return run(args.command,home,extra_args,args.workspace)
-    if args.output_format=='xlsx':parser.error('XLSX is only available for an executed database query with --output')
+    if args.output_format in {"csv", "table", "text", "xlsx"} and args.command in {
+        "database-query-readonly",
+        "database-diagnose",
+        "database-dbx-handoff",
+    }:
+        requested = "table" if args.output_format == "text" else args.output_format
+        extra_args = [*extra_args, "--format", requested]
+        return run(args.command, home, extra_args, args.workspace)
+    if args.output_format == "xlsx":
+        parser.error(
+            "XLSX is only available for an executed database query with --output"
+        )
     if not args.json_output and not args.output_format:
         return run(args.command, home, extra_args, args.workspace)
-    if args.command in {"doctor", "workcopy"}:
+    if args.command == "doctor":
         extra_args = [*extra_args, "--json"]
     capture = io.StringIO()
     from common.cli_output import envelope, render
+
     try:
         with contextlib.redirect_stdout(capture):
             code = run(args.command, home, extra_args, args.workspace)
-        result=envelope(capture.getvalue(),command=args.command,workspace_key=args.workspace,exit_code=code)
-        print(render(result,args.output_format or 'json'),end='')
+        result = envelope(
+            capture.getvalue(),
+            command=args.command,
+            workspace_key=args.workspace,
+            exit_code=code,
+        )
+        print(render(result, args.output_format or "json"), end="")
         return code
     except (Exception, SystemExit) as error:
-        result=envelope(json.dumps({'ok':False,'error':{'code':error_code(error),'message':str(error)}}),command=args.command,workspace_key=args.workspace,exit_code=1)
-        print(render(result,args.output_format or 'json'),end='')
+        result = envelope(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": {"code": error_code(error), "message": str(error)},
+                }
+            ),
+            command=args.command,
+            workspace_key=args.workspace,
+            exit_code=1,
+        )
+        print(render(result, args.output_format or "json"), end="")
         return 1
-
 
 
 if __name__ == "__main__":

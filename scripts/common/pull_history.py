@@ -16,7 +16,7 @@ from common.workspace_identity import validate_workspace_key
 
 READ_LIMIT = 2 * 1024 * 1024
 SUMMARY_FIELDS = {'sourceType', 'sourceTable', 'sourceId', 'alias', 'funId', 'changed', 'pulled',
-                  'workCopyStatus', 'workCopyAction', 'localChanged', 'revision', 'failures', 'status'}
+                  'localChanged', 'failures', 'status', 'errorCode', 'operationId', 'complete', 'downloadComplete', 'downloadedFiles', 'uploaded'}
 COVERAGE = 'Only retained bounded windows; historical gaps and missing workspace identities are not reconstructed'
 TERMINAL_STATUSES = {'OK', 'SUCCESS', 'FAILED', 'ERROR', 'COMPLETED'}
 

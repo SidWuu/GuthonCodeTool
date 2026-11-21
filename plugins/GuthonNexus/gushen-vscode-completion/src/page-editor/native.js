@@ -7,7 +7,7 @@
   let vm, incoming, version, baseline, loading = false, waiting = false, generation = 0;
   const missingApis = new Set();
   function evidence() {
-    document.getElementById('native-evidence').textContent = `${incoming?.resourceApp || '原版资源'} · 清单 ${(incoming?.resourceDigest || '').slice(0, 12)} · SVN ${incoming?.baseRevision || '未知'} · ${incoming?.resourceStatus || '平台版本未核验'} · 系统样式与运行效果未核验${missingApis.size ? ' · 缺失接口 ' + [...missingApis].join('、') : ''}`;
+    document.getElementById('native-evidence').textContent = `${incoming?.resourceApp || '原版资源'} · 清单 ${(incoming?.resourceDigest || '').slice(0, 12)} · API 基线 ${incoming?.apiVersion || '未知'} · ${incoming?.resourceStatus || '平台版本未核验'} · 系统样式与运行效果未核验${missingApis.size ? ' · 缺失接口 ' + [...missingApis].join('、') : ''}`;
   }
   const context = () => vm?.$refs.workAreaPage?.page?.getPageContext(true);
   const dialogs = () => [...document.querySelectorAll('.el-dialog__wrapper')].filter(item => getComputedStyle(item).display !== 'none');

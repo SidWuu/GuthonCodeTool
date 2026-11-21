@@ -15,20 +15,20 @@ expectedIdentities:
 
 # 可选内置只读连接；密码由 Nexus 写入系统凭据库，不写入本文件。
 connections:
-  projects.demo.trade-dev:
+  ws_demo.trade-dev:
     engine: mysql
     host: db.dev.example
     port: 3306
     database: demo_trade
     username: readonly_user
-    credentialRef: projects.demo.trade-dev
+    credentialRef: ws_demo.trade-dev
     # 无 keyring 时可明确选择以下来源（不要把密码写入本文件）：
     # passwordEnv: GUTHON_DEMO_DB_PASSWORD
     # passwordFile: /absolute/private/password.txt
     connectTimeoutSeconds: 10
 
 databaseTests:
-  projects.demo:
+  ws_demo:
     defaults:
       diagnosisTargetId: trade-dev
       byEnvironment:
@@ -38,7 +38,7 @@ databaseTests:
         # DBX 用户保留 connectionId；无 DBX 用户使用 connectionRef。二者可同时配置。
         systemId: SYS-DEMO
         dataSourceId: DS-DEMO
-        connectionRef: projects.demo.trade-dev
+        connectionRef: ws_demo.trade-dev
         database: demo_trade
         # Oracle target 的 database 填服务数据库，并增加 schema: DEMO_OWNER。
         environment: dev
@@ -53,15 +53,15 @@ databaseTests:
 
       # Nexus 的“配置数据库排查”会生成这种轻量目标；只能快速排查，不能参与正式验收计划。
       # - id: trade-test
-      #   connectionRef: projects.demo.trade-test
+      #   connectionRef: ws_demo.trade-test
       #   validationScope: diagnosis-only
       #   database: demo_trade_test
       #   environment: test
       #   access: read-only
-      #   expectedIdentityRef: projects.demo.trade-test.identity
+      #   expectedIdentityRef: ws_demo.trade-test.identity
 
 # 命名目标可通过 --profile demo-dev 选择；显式工作区/target/environment仍必须一致。
 profiles:
   demo-dev:
-    workspaceKey: projects.demo
+    workspaceKey: ws_demo
     targetId: trade-dev

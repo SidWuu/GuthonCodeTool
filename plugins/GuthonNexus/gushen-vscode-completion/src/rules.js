@@ -145,6 +145,9 @@ function itemMatchRank(item, typedPrefix) {
     return 0;
   }
 
+  if ((item.aliases || []).some(alias => segmentMatchRank(alias, typed) < 9)) {
+    return Math.min(...item.aliases.map(alias => segmentMatchRank(alias, typed)));
+  }
   const prefixRank = segmentMatchRank(item.prefix, typed);
   if (prefixRank < 9) {
     return prefixRank;
@@ -170,6 +173,11 @@ function filterItems(data, route, typedPrefix) {
   const sourceItems = data[route.source] || [];
 
   return sourceItems.filter((item) => {
+    if (typedPrefix === '$' || /^\$v(?:s)?$/.test(typedPrefix)) return item.apiPath === '$vs';
+    const qualified = String(typedPrefix || '').replace(/^\$v\./, '$vs.');
+    if (/^\$vs\..*\.$/.test(qualified) || qualified === '$vs.') {
+      return item.apiPath?.slice(0,item.apiPath.lastIndexOf('.')) === qualified.slice(0,-1);
+    }
     if (route.group && normalizeKey(item.group) !== normalizeKey(route.group)) {
       return false;
     }
@@ -248,6 +256,7 @@ function shortDescription(description, maxLength = 36) {
 }
 
 function itemLabel(item) {
+  if (item.signature) return {label:item.signature, description:shortDescription(item.description)};
   const description = shortDescription(item.description);
 
   if (!description) {
@@ -261,6 +270,11 @@ function itemLabel(item) {
 }
 
 function itemDocumentation(item) {
+  if (item.signature) return `\`\`\`guthonscript
+${item.apiPath.slice(0,item.apiPath.lastIndexOf('.')+1)}${item.signature}
+\`\`\`
+
+${item.officialDocumentation}`;
   const body = itemBodyToDisplayText(item.body);
   const description = normalizeText(item.description);
 
@@ -276,6 +290,7 @@ function itemDocumentation(item) {
 }
 
 function itemFilterText(item, typedPrefix) {
+  if (item.aliases) return [item.prefix,...item.aliases].join(' ');
   const typed = normalizeText(typedPrefix);
   const normalizedTyped = normalizeKey(typed);
 
@@ -292,7 +307,7 @@ function itemFilterText(item, typedPrefix) {
 
 function shouldProvideApiCompletions(currentWord) {
   const word = normalizeText(currentWord);
-  return /[A-Za-z0-9_]/.test(word) && !word.startsWith('$');
+  return word === '$' || /^\$v(?:s)?(?:\.[A-Za-z0-9_$]*)*$/.test(word) || /[A-Za-z0-9_]/.test(word) && !word.startsWith('$');
 }
 
 function itemGroupRank(item) {

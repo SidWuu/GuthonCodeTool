@@ -288,7 +288,7 @@ def extract_page_scripts(value, *, missing_product_as_empty=False, include_empty
     return fields
 
 
-def extract_page_fields(value, *, include_content: bool = True) -> list[dict]:
+def extract_page_fields(value, *, include_content: bool = True, include_buttons: bool = False) -> list[dict]:
     """Return PAGE field collections; materialize content only for document callers."""
 
     fields = []
@@ -299,12 +299,12 @@ def extract_page_fields(value, *, include_content: bool = True) -> list[dict]:
             next_labels = [*labels, *([label] if label else [])]
             for key, child in current.items():
                 child_parts = [*parts, key]
-                if key == "fields" and isinstance(child, list):
+                if (key == "fields" or include_buttons and key == "buttons") and isinstance(child, list):
                     fields.append(
                         {
                             "json_pointer": json_pointer(child_parts),
                             "script_type": "fields",
-                            "label": " / ".join(next_labels[-3:]) or "字段",
+                            "label": " / ".join([*next_labels[-3:], "按钮"]) if key == "buttons" else " / ".join(next_labels[-3:]) or "字段",
                             "content": json.dumps(child, ensure_ascii=False, indent=2) if include_content else None,
                         }
                     )

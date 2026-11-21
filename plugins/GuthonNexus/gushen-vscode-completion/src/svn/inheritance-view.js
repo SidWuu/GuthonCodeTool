@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { BoundedCache } = require('./bounded-cache');
+const { BoundedCache } = require('../source/bounded-cache');
 const { utf16Offset } = require('./virtual-fs');
 const SCHEME = 'guthon-svn-inherit';
 const MAX_VIEW_CHARS = 1_000_000;

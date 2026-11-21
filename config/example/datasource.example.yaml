@@ -1,12 +1,12 @@
 # 数据库连接模板；真实凭据通过环境变量提供。
-# 数据源集合；键名供 products.yaml 和 projects.yaml 的 datasource 引用。
+# 数据源集合；键名供 guthon.json 的 workspaces 记录中的 datasource 引用。
 datasource:
   # 数据源键名统一使用“对象 ID-环境”。
   demo-product-dev:
     # name 统一使用“项目名_环境”。
     name: 示例产品_开发
-    # 对应 products.yaml 或 projects.yaml 中的对象。
-    object: products.demo-product
+    # 对应 guthon.json 中注册的稳定 workspaceKey。
+    object: ws_demo
     # 环境标识使用 dev 或 test。
     environment: dev
     # 数据库类型；支持 mysql 和 postgresql（MariaDB 归一为 mysql）。
@@ -25,7 +25,7 @@ datasource:
   # 独立测试库；源码排查脚本只允许连接显式启用的 test 数据源。
   demo-product-test:
     name: 示例产品_测试
-    object: products.demo-product
+    object: ws_demo
     environment: test
     diagnosis:
       enabled: true
@@ -43,7 +43,7 @@ datasource:
   # 项目开发库的数据源标识。
   demo-project-dev:
     name: 示例项目_开发
-    object: projects.demo-project
+    object: ws_customer_demo
     environment: dev
     # 数据库类型；支持 mysql 和 postgresql（MariaDB 归一为 mysql）。
     type: mysql

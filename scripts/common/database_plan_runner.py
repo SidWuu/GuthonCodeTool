@@ -15,6 +15,7 @@ from pathlib import Path
 from common import database_readonly as readonly
 from common import database_test_artifacts as artifacts
 from common.database_sql import validate_single_select
+from common.runtime_paths import tool_source_root
 
 
 def run_plan(plan, config, output_dir, *, max_rows=100, platform_evidence=None):
@@ -37,7 +38,7 @@ def run_plan(plan, config, output_dir, *, max_rows=100, platform_evidence=None):
             except ValueError as error:
                 raise artifacts.ArtifactError('QUERY_UNSUPPORTED', str(error)) from error
     directory = Path(output_dir).resolve()
-    public_root = Path(__file__).resolve().parents[2]
+    public_root = tool_source_root()
     if directory.is_relative_to(public_root):
         raise artifacts.ArtifactError('PRIVATE_OUTPUT_REQUIRED', '数据库结果不得写入工具源码仓库')
     # No overwrite or reuse of a previous run, including failed runs.

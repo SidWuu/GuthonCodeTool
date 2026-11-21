@@ -8,9 +8,9 @@ import json
 import sys
 from pathlib import Path
 
-from common import gusen_hub
-from providers.database._export_common import normalize_values as normalize_view_ids
-from providers.database._export_common import write_source
+from common import legacy_source as gusen_hub
+from common.database_exports._export_common import normalize_values as normalize_view_ids
+from common.database_exports._export_common import write_source
 from providers.database.export_table_schema_sql import (
     normalize_data_source_ids,
     resolve_data_source_ids,

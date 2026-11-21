@@ -358,7 +358,7 @@ def _current_work_copy_source(metadata: dict):
     if workspace.get("sourceMode") == "svn":
         with hub.index_connection(workspace, action="workcopy-status-read", readonly=True) as conn:
             return lookup(conn)
-    conn = hub.connect_index(workspace["indexPath"])
+    conn = hub.connect_index(workspace["indexPath"], readonly=True)
     try:
         return lookup(conn)
     finally:
@@ -377,6 +377,8 @@ def inspect_work_copy(path):
     if not (target / hub.WORK_COPY_META_FILE).exists():
         raise SystemExit(f"未找到工作副本元数据: {path}")
     metadata = hub._work_copy_metadata(target)
+    if metadata.get("workspaceKey") != hub.current_workspace()["workspaceKey"]:
+        raise SystemExit("Workcopy workspace identity mismatch")
     _row, source_path, change_key = hub._current_work_copy_source(metadata)
     return target, hub._work_copy_state(target, source_path, change_key)
 
@@ -479,7 +481,7 @@ def work_copy_cli(args=None):
         output = target / hub.WORK_COPY_DIFF_FILE
     if parsed.command == "package":
         output = hub._write_work_copy_delivery(target, status)
-    result = {**status, "output": str(output) if output else ""}
+    result = {"ok": True, **status, "output": str(output) if output else ""}
     if parsed.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
@@ -496,6 +498,7 @@ def create_work_copy(args=None):
     parser.add_argument("--source-id", default="")
     parser.add_argument("--alias", default="")
     parser.add_argument("--fun", default="")
+    parser.add_argument("--json", action="store_true")
     parsed = parser.parse_args(args)
     cfg = hub.load_config()
     workspace = hub.resolve_workspace(cfg)
@@ -505,22 +508,35 @@ def create_work_copy(args=None):
             row = hub.find_svn_source(conn, workspace, parsed.type, parsed.source_id, parsed.alias, parsed.fun)
             result = hub.create_work_copy_from_row(conn, cfg, row, workspace)
     else:
-        conn = hub.connect_index(workspace["indexPath"])
+        conn = hub.connect_index(workspace["indexPath"], readonly=True)
         try:
-            if not parsed.alias:
-                raise SystemExit("--alias is required in database source mode")
-            row = hub.find_work_copy_source(
-                conn,
-                scope_id if layer == "PRODUCT" else None,
-                project_id or None,
-                parsed.type,
-                parsed.alias,
-                parsed.fun,
-            )
+            if parsed.source_id:
+                rows = conn.execute(
+                    """SELECT * FROM gusen_source_record
+                       WHERE scope_id=? AND provider='database' AND source_table=? AND source_id=? AND fun_id=?""",
+                    (scope_id, parsed.type, parsed.source_id, parsed.fun),
+                ).fetchall()
+                if len(rows) != 1:
+                    raise SystemExit("Indexed DATABASE source not found or ambiguous")
+                row = rows[0]
+            else:
+                if not parsed.alias:
+                    raise SystemExit("--alias or --source-id is required in database source mode")
+                row = hub.find_work_copy_source(
+                    conn,
+                    scope_id if layer == "PRODUCT" else None,
+                    project_id or None,
+                    parsed.type,
+                    parsed.alias,
+                    parsed.fun,
+                )
             result = hub.create_work_copy_from_row(conn, cfg, row, workspace)
         finally:
             conn.close()
-    print(result["path"])
+    if parsed.json:
+        print(json.dumps({"ok": True, "workspaceKey": workspace["workspaceKey"], **result}, ensure_ascii=False))
+    else:
+        print(result["path"])
 
 
 def create_work_copy_from_row(conn, cfg, row, workspace, diff_check=True):
@@ -563,4 +579,4 @@ def _work_copy_source_relative_path(source_path, workspace):
 
 
 # Load the facade after defining aliases, so either import order is supported.
-from common import gusen_hub as hub
+from common import legacy_source as hub

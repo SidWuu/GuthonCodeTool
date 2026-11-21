@@ -20,12 +20,13 @@ function zip(files, modes = {}) {
 }
 const rules = { protocols: ['https:'], ipRanges: [], domainSuffixes: ['dev.example.com'], pathPrefixes: ['/guthon/'] };
 
-function fixture(t) {
+function fixture(t, { legacyMac = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-components-')); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const key = crypto.generateKeyPairSync('ed25519');
   const trustFile = path.join(root, 'trust.json');
   fs.writeFileSync(trustFile, JSON.stringify({ schemaVersion: 1, requireSignature: true, keys: { fixture: key.publicKey.export({ type: 'spki', format: 'pem' }) } }));
-  const data = Object.fromEntries(Object.values(ASSETS).map(name => [name, Buffer.from('fixture-' + name)]));
+  const names = { ...ASSETS, ...(legacyMac ? { macos: 'GuthonCodeTool-macos-arm64.zip' } : {}) };
+  const data = Object.fromEntries(Object.values(names).map(name => [name, Buffer.from('fixture-' + name)]));
   data[ASSETS.nexus] = zip({
     'extension/package.json': JSON.stringify({ name: 'guthon-nexus-vscode', publisher: 'gushen-local', version: '2.5.0', engines: { vscode: '^1.75.0' } }),
     'extension/tool-version.json': '{"version":"0.4.0"}',

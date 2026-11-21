@@ -53,7 +53,18 @@ class ArtifactError(ValueError):
 
 
 def load_yaml(path: Path) -> dict:
-    value = gusen_hub.load_yaml(path)
+    from common import config_store
+
+    path = Path(path)
+    if config_store.is_default_database_path(path):
+        def expand(value):
+            if isinstance(value, str): return gusen_hub._expand_env(value)
+            if isinstance(value, list): return [expand(item) for item in value]
+            if isinstance(value, dict): return {key: expand(item) for key, item in value.items()}
+            return value
+        value = expand(config_store.database_testing(path.parent.parent))
+    else:
+        value = gusen_hub.load_yaml(path)
     if not isinstance(value, dict):
         raise ArtifactError("CONFIG_INVALID", "数据库测试配置必须是 YAML 对象")
     return value
@@ -392,8 +403,8 @@ def validate_plan(plan: dict, config: dict | None = None) -> dict:
         raise ArtifactError("PLAN_VERSION_UNSUPPORTED", "测试计划仅支持 schemaVersion=1")
     if not WORKSPACE_KEY.fullmatch(str(plan["workspaceKey"])):
         raise ArtifactError("ARTIFACT_INVALID", "测试计划 workspaceKey 无效")
-    if plan["sourceMode"] not in {"database", "svn"}:
-        raise ArtifactError("ARTIFACT_INVALID", "测试计划 sourceMode 仅允许 database/svn")
+    if plan["sourceMode"] not in {"api"}:
+        raise ArtifactError("ARTIFACT_INVALID", "测试计划 sourceMode 仅允许 api")
     if _is_placeholder(str(plan["sourceDigest"])):
         raise ArtifactError("ARTIFACT_INVALID", "测试计划 sourceDigest 仍是占位值")
     if not isinstance(plan["cases"], list) or not plan["cases"]:
@@ -949,11 +960,11 @@ def _emit(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
 
 
-def build_plan_template(config: dict, workspace_key: str, *, system_id: str, data_source_id: str, target_id: str = "", source_mode: str = "svn") -> dict:
+def build_plan_template(config: dict, workspace_key: str, *, system_id: str, data_source_id: str, target_id: str = "", source_mode: str = "api") -> dict:
     """Build a draft; source and acceptance placeholders deliberately block validation."""
     target = resolve_target(config, workspace_key, system_id=system_id, data_source_id=data_source_id, target_id=target_id)
-    if source_mode not in {"svn", "database"}:
-        raise ArtifactError("ARTIFACT_INVALID", "sourceMode 仅允许 svn/database")
+    if source_mode not in {"api"}:
+        raise ArtifactError("ARTIFACT_INVALID", "sourceMode 仅允许 api")
     qualifier = str(target.get("schema") or target["database"])
     checks = [
         {"id": f"check-{index}", "sql": f"SELECT COUNT(*) AS row_count FROM {qualifier}.{table}", "assert": {"type": "scalar_equals", "column": "row_count", "valueType": "integer", "expected": "<expected-row-count>"}}
@@ -999,7 +1010,7 @@ def main(argv: list[str] | None = None) -> int:
     init_parser.add_argument("--system-id", required=True)
     init_parser.add_argument("--data-source-id", required=True)
     init_parser.add_argument("--target-id", default="")
-    init_parser.add_argument("--source-mode", choices=("svn", "database"), default="svn")
+    init_parser.add_argument("--source-mode", choices=("api",), default="api")
     init_parser.add_argument("--out", required=True, type=Path)
 
     export_dbx = commands.add_parser("export-dbx-plan", help="生成身份优先的 DBX MCP 调用交接文件，不执行查询")

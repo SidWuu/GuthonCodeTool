@@ -5,8 +5,9 @@ const readline = require('node:readline');
 const COMMAND_METADATA = require('../data/tool-command-metadata.json');
 
 function commandMetadata(command, args) {
-  const registry = command === 'svn' ? COMMAND_METADATA.svnActions : COMMAND_METADATA.commands;
-  const key = command === 'svn' ? args[0] : command;
+  const actions = command === 'api' ? COMMAND_METADATA.apiActions : command === 'svn' ? COMMAND_METADATA.svnActions : undefined;
+  const registry = actions || COMMAND_METADATA.commands;
+  const key = actions ? args[0] : command;
   return Object.hasOwn(registry, key) ? registry[key] : undefined;
 }
 

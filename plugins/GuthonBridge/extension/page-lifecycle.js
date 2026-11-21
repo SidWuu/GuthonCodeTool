@@ -58,7 +58,12 @@ async function runPageLifecycle(payload) {
         if (page.isProduct) throw new Error('产品 PAGE 不允许删除');
         dispatched = true;
         await checked('/develop/dev/pages/remove.htm', {pageId:page.pageId});
-        return {state:'SUCCEEDED', action:'delete', page:clean(page), platformApplied:true};
+        try {
+          const after = await checked('/develop/dev/pages/getPageBaseInfo.htm', {pageId:page.pageId});
+          if (Object.hasOwn(after, 'page') && after.page === null) return {state:'SUCCEEDED', action:'delete', page:clean(page), platformApplied:true};
+        } catch { /* A failed lookup does not prove that the PAGE was deleted. */ }
+        return {state:'APPLIED_UNVERIFIED', action:'delete', page:clean(page), platformApplied:true,
+          message:'平台已响应删除，但未能确认 PAGE 已消失；请核对平台，禁止重试写入'};
       }
       const keys = ['systemId','mkId','pageType','pageName','pageAliasId','title','accessTag','bntAuth','runInTran','isCanInter','isTextResponse','pageTemplateType'];
       const properties = payload.properties || {};
@@ -76,9 +81,16 @@ async function runPageLifecycle(payload) {
       dispatched = true;
       const saved = await checked(payload.action === 'copy' ? '/develop/dev/models/pastePageInfo.htm' : '/develop/dev/pages/savePages.htm', form);
       const created = saved.bean || saved.page;
-      return {state:created?.pageId && created.pageId !== page?.pageId ? 'SUCCEEDED' : 'APPLIED_UNVERIFIED',
-        action:payload.action, page:clean(created), platformApplied:true,
-        message:created?.pageId ? '' : '平台已返回成功，但未提供新 PAGE 身份；先核对模块树，禁止重试写入'};
+      if (created?.pageId && created.pageId !== page?.pageId) {
+        try {
+          const after = (await checked('/develop/dev/pages/getPageBaseInfo.htm', {pageId:created.pageId})).page;
+          if (after?.pageId === created.pageId && after.systemId === form.systemId && after.mkId === form.mkId) {
+            return {state:'SUCCEEDED', action:payload.action, page:clean(after), platformApplied:true};
+          }
+        } catch { /* Acknowledgement without readback must not trigger another write. */ }
+      }
+      return {state:'APPLIED_UNVERIFIED', action:payload.action, page:clean(created), platformApplied:true,
+        message:'平台已响应，但新 PAGE 身份或所属模块未通过回读；请核对平台，禁止重试写入'};
     } catch (error) {
       return {state:dispatched ? 'UNKNOWN' : 'REJECTED', platformApplied:dispatched ? null : false,
         message:String(error.message || error).slice(0,512)};

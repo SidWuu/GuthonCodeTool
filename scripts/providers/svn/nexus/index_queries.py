@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
-from common import gusen_hub, source_facts
+from common import legacy_source as gusen_hub, source_facts
 from common.inheritance import SOURCE_CATALOG_VERSION
 
 from .manifest import load_authorized_scope, source_relative_path
@@ -319,9 +319,11 @@ def _tree_metadata(
 
 
 def _catalog_fragments(row: dict):
+    from .public_sources import reference_type
+
     source_type = row["source_table"]
     suffix = Path(row["source_path"]).suffix.lower()
-    if source_type == "page" and suffix == ".json":
+    if (source_type == "page" and suffix == ".json") or reference_type(source_type, row["source_path"]):
         return None
     fixed = {
         "page": ("gss", ""),
@@ -333,6 +335,8 @@ def _catalog_fragments(row: dict):
 
 
 def catalog(workspace: dict) -> dict:
+    from common.source_tree_order import local_navigation_groups
+    from .public_sources import reference_type
     scope = load_authorized_scope(workspace)
     entries = {entry.id: entry for entry in scope.entries}
     subsystem_orders = _subsystem_tree_orders(workspace, scope)
@@ -365,6 +369,8 @@ def catalog(workspace: dict) -> dict:
             procedure_locations[entry.id] = _procedure_index_locations(entry)
     objects = []
     counts = {}
+    systems, data_sources = {}, {}
+    projected_names = {entry.local_subdir: entry_names[entry.id] for entry in scope.entries}
     for row in rows:
         entry = entries.get(row.get("scope_entry_id") or "")
         if entry is None:
@@ -375,11 +381,9 @@ def catalog(workspace: dict) -> dict:
             page_locations[location_key] = _page_index_locations(source_entry)
         if row["source_table"] == "procedure" and location_key not in procedure_locations:
             procedure_locations[location_key] = _procedure_index_locations(source_entry)
-        entry_name = (
-            _entry_name(source_entry)
-            if entry.category == "root"
-            else entry_names[entry.id]
-        )
+        if location_key not in projected_names:
+            projected_names[location_key] = _entry_name(source_entry)
+        entry_name = projected_names[location_key]
         directories, label = _tree_metadata(
             source_entry,
             row,
@@ -388,6 +392,10 @@ def catalog(workspace: dict) -> dict:
             entry_name,
         )
         source_type = row["source_table"]
+        if source_type in {"page","system-script"} and row.get("system_id"):
+            systems[row["system_id"]] = entry_name
+        if source_type in {"procedure","table","view"} and row.get("data_source_id"):
+            data_sources[row["data_source_id"]] = entry_name
         relative = _relative_source_path(source_entry, row["source_path"])
         location = None
         if relative is not None:
@@ -422,9 +430,12 @@ def catalog(workspace: dict) -> dict:
             "scopeEntryId": row.get("scope_entry_id") or "",
             "status": row["status"],
             "treePath": directories,
+            "treeScopeId": (row.get("system_id") if source_type in {"page","system-script"} else
+                            row.get("data_source_id") if source_type in {"procedure","table","view"} else "") or "",
             "treeLabel": label,
             "treeOrder": tree_order,
             "fragments": _catalog_fragments(row),
+            "referenceCategory": reference_type(source_type, row["source_path"]),
         })
     return {
         "ok": True,
@@ -432,6 +443,7 @@ def catalog(workspace: dict) -> dict:
         "workspaceKey": workspace["workspaceKey"],
         "objects": objects,
         "counts": counts,
+        "navigationGroups": local_navigation_groups(workspace, systems, data_sources, infer_svn_sources=True),
         "errors": [],
     }
 

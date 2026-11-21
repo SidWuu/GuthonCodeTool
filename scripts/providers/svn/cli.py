@@ -177,7 +177,15 @@ def _lifecycle(command):
             result = checkout.initialize(workspace, gusen_hub.CONFIG_DIR, bootstrap)
         result["reindex"] = _reindex_svn(gusen_hub, config, workspace)
         gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
-    elif parsed.action == 'refresh':
+    elif parsed.action in {"refresh","refresh-node"}:
+        node_paths = None
+        if parsed.action == "refresh-node":
+            payload = json.load(sys.stdin)
+            node_paths = payload.get("paths") if isinstance(payload,dict) else None
+            if (not manifest_layout or parsed.path or parsed.working_copy or not isinstance(node_paths,list)
+                    or not 1 <= len(node_paths) <= 20000
+                    or any(not isinstance(path,str) or not path.strip() for path in node_paths)):
+                raise SystemExit("SVN node refresh requires exact paths from one authorized checkout")
         if manifest_layout and parsed.path and parsed.working_copy:
             raise SystemExit("svn refresh accepts --path or --working-copy, not both")
         if not manifest_layout and parsed.path:
@@ -190,7 +198,8 @@ def _lifecycle(command):
                     workspace,
                     merge_local=parsed.merge_local,
                     working_copy_ids=parsed.working_copy,
-                    logical_paths=[parsed.path] if parsed.path else None,
+                    logical_paths=node_paths or ([parsed.path] if parsed.path else None),
+                    tree_targets=node_paths is not None,
                     on_progress=_svn_progress,
                 )
             else:
@@ -727,6 +736,8 @@ def _scm(command):
         raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
     from providers.svn.nexus import scm
 
+    if parsed.action == "scm-session":
+        return scm.ensure_review_session(workspace)
     if parsed.action == "cleanup":
         result = scm.cleanup(workspace, working_copy_ids=parsed.working_copy, on_progress=_svn_progress)
     elif parsed.action == "scm-status":
@@ -834,11 +845,11 @@ def _page_editor(command):
 
 ACTION_HANDLERS = {
     **dict.fromkeys(("auth-cache", "scope-preview", "scope-import", "sync-from-script",
-                    "sync-from-bat", "sync-from-config", "init", "refresh", "status"), _lifecycle),
+                    "sync-from-bat", "sync-from-config", "init", "refresh", "refresh-node", "status"), _lifecycle),
     **dict.fromkeys(("fragments", "read", "read-batch", "write", "write-batch"), _documents),
     **dict.fromkeys(("catalog", "definition", "callers", "find", "context", "facts", "explain"), _queries),
     **dict.fromkeys(MAINTENANCE_ACTIONS, _maintenance),
-    **dict.fromkeys(("cleanup", "scm-status", "diff", "conflict", "resolve-conflict", "history",
+    **dict.fromkeys(("cleanup", "scm-status", "scm-session", "diff", "conflict", "resolve-conflict", "history",
                     "delivery-status", "revert-preview", "platform-save-preview", "revert",
                     "platform-save"), _scm),
     "reindex-file": _reindex_file,

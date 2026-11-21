@@ -1,14 +1,15 @@
 const crypto = require('node:crypto');
-const { normalizeVersion, releaseAsset, parseChecksums, request, updateUrl } = require('./tool-updater');
+const { normalizeVersion, releaseAsset, parseChecksums, request, updateUrl, assetNameFor } = require('./tool-updater');
 const { readTrust, verifySignature, SIGNATURE_ASSET } = require('./release-signature');
 
 const CATALOG_ASSET = 'GuthonCodeTool-release.json';
 const NEXUS_ID = 'gushen-local.guthon-nexus-vscode';
 const ASSETS = {
-  windows: 'GuthonCodeTool-windows-x64.exe', macos: 'GuthonCodeTool-macos-arm64.zip',
+  windows: assetNameFor('win32', 'x64'), macos: assetNameFor('darwin', 'arm64'),
   script: 'GuthonCodeTool-python.pyz', requirements: 'GuthonCodeTool-python-requirements.txt',
   nexus: 'guthon-nexus-vscode.vsix', bridge: 'GuthonCodeTool-chrome.zip',
 };
+const releaseAssetNames = release => Object.values({ ...ASSETS, macos: assetNameFor('darwin', 'arm64', release) });
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
 class ReleaseCatalogUnavailable extends Error {
@@ -39,7 +40,7 @@ function validateCatalog(catalog, release, checksums) {
   for (const item of [tool, nexus, bridge]) normalizeVersion(item?.version);
   if (tool.version !== release.version || nexus.id !== NEXUS_ID || bridge.protocolVersion !== 2
       || tool.pythonMinimum !== '3.12') throw new Error('三组件身份或更新协议不受支持');
-  for (const name of Object.values(ASSETS)) {
+  for (const name of releaseAssetNames(release)) {
     const item = catalog.assets[name];
     if (!item || !Number.isSafeInteger(item.size) || item.size < 1 || item.size > 256 * 1024 * 1024
         || !/^[a-f0-9]{64}$/.test(item.sha256 || '') || checksums.get(name) !== item.sha256) throw new Error('发行清单与签名摘要不一致：' + name);
@@ -75,4 +76,4 @@ async function verifiedRelease(release, storageRoot, { requester = request, bund
   return verifyReleaseBytes(release, storageRoot, { checksumsBytes, signatureBytes, catalogBytes }, bundledTrustFile);
 }
 
-module.exports = { CATALOG_ASSET, NEXUS_ID, ASSETS, hash, validateCatalog, verifiedRelease, verifyReleaseBytes, ReleaseCatalogUnavailable };
+module.exports = { CATALOG_ASSET, NEXUS_ID, ASSETS, releaseAssetNames, hash, validateCatalog, verifiedRelease, verifyReleaseBytes, ReleaseCatalogUnavailable };

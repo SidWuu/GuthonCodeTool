@@ -27,7 +27,7 @@ def reindex_changed_files(conn, workspace, paths):
 
 
 def index_changes(conn, workspace, paths, refresh_result, on_progress=None, *, skip_current=False):
-    from common import gusen_hub as hub
+    from common import legacy_source as hub
 
     require_capability(workspace, "reindex")
     scope = load_authorized_scope(workspace)

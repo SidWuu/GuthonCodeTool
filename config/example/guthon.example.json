@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 3,
+  "sourceTables": {},
+  "workspaces": {},
+  "sync": {
+    "guthon_api": {
+      "active_version": "2.0",
+      "bundle_files": {
+        "v2_0": "docs/private/guthon-api/2.0/app.<hash>.js"
+      }
+    }
+  },
+  "datasource": {
+    "datasource": {}
+  },
+  "databaseTesting": {
+    "schemaVersion": 1,
+    "connections": {},
+    "expectedIdentities": {},
+    "databaseTests": {}
+  },
+  "apiWorkspaces": {}
+}

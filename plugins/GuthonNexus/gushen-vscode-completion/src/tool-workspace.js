@@ -1,26 +1,86 @@
+const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { workspaceRoot } = require('./workspace-root');
 
-const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const LEGACY_CONFIG_FILES = ['products.yaml','projects.yaml','sync.yaml','datasource.yaml','source-tables.yaml'];
+const WORKSPACE_CONFIG_FILES = ['guthon.json', ...LEGACY_CONFIG_FILES, 'database-testing.yaml'];
 
-function existingWorkspaceConfig(toolHome) {
-  const configDir = path.join(toolHome, 'config');
-  const required = ['sync.yaml', 'products.yaml', 'projects.yaml'];
-  const missing = required.filter((name) => {
-    try { return !fs.statSync(path.join(configDir, name)).isFile(); }
-    catch { return true; }
-  });
-  if (missing.length) throw new Error(`所选目录缺少已有工作空间配置：${missing.join('、')}。请选择包含 config 和 var 的本地数据目录`);
-  try {
-    if (fs.statSync(path.join(toolHome, 'var')).isDirectory()) return;
-  } catch { /* Report the same validation error below. */ }
-  throw new Error('所选目录缺少已有的 var 工作空间。请选择包含 config 和 var 的本地数据目录');
+function hasWorkspaceConfigFiles(home) {
+  return Boolean(home) && WORKSPACE_CONFIG_FILES.some(name => fs.existsSync(path.join(home, 'config', name)));
 }
 
-async function prepareWorkspaceSetup(config, window) {
-  const toolHome = config.get('toolHome', '');
-  const initialized = Boolean(toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml')));
-  if (initialized) {
+function hasWorkspaceConfiguration(toolHome) {
+  if(!toolHome)return false;
+  try {return fs.statSync(path.join(toolHome,'config','guthon.json')).isFile();}
+  catch {}
+  try {return LEGACY_CONFIG_FILES
+    .every(name=>fs.statSync(path.join(toolHome,'config',name)).isFile());}
+  catch {return false;}
+}
+
+function existingWorkspaceConfig(toolHome) {
+  if(!hasWorkspaceConfiguration(toolHome)) throw new Error('所选目录缺少已有工作空间配置：需要 guthon.json 或完整旧 YAML。请选择包含配置的本地数据目录');
+}
+
+function windowToolHome(config, folders = []) {
+  const home = config.get('toolHome', '');
+  if (typeof home !== 'string' || !path.isAbsolute(home)) return '';
+  const setting = config.inspect?.('toolHome');
+  if (setting?.workspaceFolderValue !== undefined || setting?.workspaceValue !== undefined) return home;
+  const canonical = value => {
+    try { return fs.realpathSync(value); }
+    catch { return path.resolve(value); }
+  };
+  if (!folders?.length) return '';
+  const root = canonical(home);
+  const directories = folders.map(canonical);
+  if (directories.every(directory => path.relative(root, directory) === '')) return home;
+  let space;
+  try { space = canonical(workspaceRoot(home)); }
+  catch { return ''; }
+  const belongs = directory => {
+    const relative = path.relative(space, directory);
+    return path.relative(root, directory) === '' ||
+      (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
+  };
+  return directories.every(belongs) ? home : '';
+}
+
+function workspaceSetupCard(folders, attachedHome) {
+  if (hasWorkspaceConfigFiles(attachedHome)) {
+    return { title: '工具入口不可用', message: '请为这个工作区选择可用的 GuthonCodeTool 后端。',
+      directory: attachedHome, action: '检查工具入口' };
+  }
+  if (folders?.length !== 1) {
+    return { title: '还未连接谷神工作区', message: '选择一个已有数据目录，或选择新目录进行初始化。' };
+  }
+  const folder = folders[0];
+  const parent = path.dirname(folder);
+  let directory;
+  if (hasWorkspaceConfigFiles(folder)) directory = folder;
+  else if (hasWorkspaceConfigFiles(parent)) {
+    try { if (path.relative(workspaceRoot(parent), folder) === '') directory = parent; }
+    catch { if (path.basename(folder) === 'var') directory = parent; }
+  }
+  if (directory) {
+    return { title: '当前目录尚未连接', message: '连接后即可查看这个目录下的谷神项目。',
+      directory, action: '连接此目录' };
+  }
+  return { title: '当前开发目录尚未初始化', message: '配置保存在上一级目录，当前文件夹用于开发。',
+    directory: parent, workspaceDirectory: path.basename(folder), workspaceRoot: folder, action: '初始化此文件夹' };
+}
+
+async function prepareWorkspaceSetup(config, window, { toolHome = config.get('toolHome', ''), directory, workspaceDirectory, browse = false } = {}) {
+  const initialized = hasWorkspaceConfiguration(toolHome);
+  if (directory && workspaceDirectory) {
+    if (hasWorkspaceConfigFiles(directory)) {
+      throw new Error(`上一级已有谷神配置，请打开已绑定的开发目录：${workspaceRoot(directory)}`);
+    }
+    return { mode: 'setup', toolHome: directory, workspaceDirectory };
+  }
+  if (directory) return workspaceSetupTarget(directory);
+  if (initialized && !browse) {
     const confirmed = await window.showWarningMessage(
       `当前工作空间已设置：${toolHome}\n请选择刷新当前状态或切换工作空间。`,
       { modal: true },
@@ -41,113 +101,177 @@ async function prepareWorkspaceSetup(config, window) {
   });
   if (!selected?.length) return undefined;
 
-  const selectedHome = selected[0].fsPath;
-  if (fs.existsSync(path.join(selectedHome, 'config', 'sync.yaml'))) {
+  return workspaceSetupTarget(selected[0].fsPath);
+}
+
+function workspaceSetupTarget(selectedHome) {
+  if (hasWorkspaceConfiguration(selectedHome)) {
     existingWorkspaceConfig(selectedHome);
     return { mode: 'switch', toolHome: selectedHome };
+  }
+  if (hasWorkspaceConfigFiles(selectedHome)) {
+    throw new Error('旧配置不完整，请核对 products/projects、sync、datasource 和 source-tables；不会创建或转换配置');
   }
   return { mode: 'setup', toolHome: selectedHome };
 }
 
-function workspaceActions(item) {
-  const capability = (name) => Boolean(item.capabilities?.[name]);
-  if (item.sourceMode === 'svn') {
-    return {
-      source: [
-        ['搜索工作区完整索引', 'gushenCompletion.searchWorkspace', 'search'],
-        capability('svn.initialize') && ['检出/更新完整 SVN 仓库', 'gushenCompletion.initializeSvn', 'repo-clone'],
-        capability('svn.reindex') && ['扫描/重建本地 SVN 索引', 'gushenCompletion.reindexCalls', 'refresh'],
-        capability('svn.browse') && ['查看谷神同步源码', 'gushenCompletion.focusSvnSource', 'list-tree'],
-        capability('svn.status') && ['管理本地源码变更', 'gushenCompletion.manageSvnChanges', 'source-control'],
-        ['导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book'],
-      ].filter(Boolean),
-      workcopy: [],
-      metadata: [['配置数据库只读目标', 'gushenCompletion.configureDatabaseDiagnosis', 'database']],
-      diagnose: false,
-      syncAll: undefined,
-    };
+function workspaceActions() {
+  return {source:[
+    ['配置 API 项目地址','gushenCompletion.configureApiSource','settings-gear'],
+    ['登录 API 项目','gushenCompletion.loginApiSource','key'],
+    ['选择拉取的子系统','gushenCompletion.selectApiSystems','list-selection'],
+    ['通过 API 拉取源码','gushenCompletion.pullApiSource','cloud-download'],
+    ['搜索当前项目源码','gushenCompletion.searchWorkspace','search'],
+    ['查看源码树','gushenCompletion.focusApiSource','list-tree'],
+    ['重建源码索引','gushenCompletion.reindexCalls','refresh'],
+    ['重试待更新索引','gushenCompletion.retryApiIndexFailures','refresh'],
+    ['查看工作区源码','gushenCompletion.openApiCheckout','folder-opened'],
+    ['查看 API 源码状态','gushenCompletion.showApiStatus','info'],
+    ['查看 API 操作历史','gushenCompletion.showApiHistory','history'],
+    ['导出本地修改包','gushenCompletion.exportApiChanges','export'],
+    ['预览并导入本地修改包','gushenCompletion.importApiChanges','import'],
+    ['查看系统菜单','gushenCompletion.showApiSystemMenu','list-tree'],
+  ],metadata:[
+    ['配置数据库只读目标','gushenCompletion.configureDatabaseDiagnosis','database'],
+    ['导出表结构','gushenCompletion.exportSchema','table'],
+    ['导出单据类型','gushenCompletion.exportBillTypes','list-tree'],
+    ['导出系统脚本','gushenCompletion.exportSystemScripts','file-code'],
+    ['导出视图源码','gushenCompletion.exportViews','eye'],
+    ['导出源码索引文档','gushenCompletion.exportMarkdown','book'],
+  ],diagnose:true,syncAll:undefined};
+}
+
+const WORKSPACE_SOURCE_MODES = [
+  { label: 'API', sourceMode: 'api', description: '推荐 · 通过谷神开发平台拉取和上传源码' },
+  { label: 'SVN', sourceMode: 'svn', description: '通过授权 SVN 工作副本同步' },
+  { label: 'DATABASE', sourceMode: 'database', description: '使用已配置的数据库来源与 Workcopy' },
+];
+
+async function pickWorkspaceSourceMode(window, allowedModes, currentMode) {
+  const options = WORKSPACE_SOURCE_MODES.filter(item => allowedModes.includes(item.sourceMode) && item.sourceMode !== currentMode);
+  const selected = await window.showQuickPick(options, {
+    title: currentMode ? '选择新的同步方式' : '选择项目同步方式',
+  });
+  return selected?.sourceMode;
+}
+
+async function promptWorkspaceCreation(window, configuration) {
+  if (configuration?.ok !== true || configuration.initialized !== true) {
+    throw new Error('请先设置可用的 GuthonCodeTool 本地数据目录');
   }
-  return {
-    source: [
-      ['搜索工作区完整索引', 'gushenCompletion.searchWorkspace', 'search'],
-      ['拉取源码重建索引', 'gushenCompletion.initSourceIndex', 'database'],
-      ['拉取源码', 'gushenCompletion.syncWorkspaceSource', 'sync'],
-      ['重建索引', 'gushenCompletion.reindexCalls', 'refresh'],
-      ['导出源码索引文档', 'gushenCompletion.exportMarkdown', 'book'],
-    ],
-    workcopy: [['检查或打包 Workcopy', 'gushenCompletion.inspectWorkcopy', 'package']],
-    metadata: [
-      ['配置数据库只读目标', 'gushenCompletion.configureDatabaseDiagnosis', 'database'],
-      ['导出表结构', 'gushenCompletion.exportSchema', 'table'],
-      ['导出单据类型', 'gushenCompletion.exportBillTypes', 'list-tree'],
-      ['导出系统脚本', 'gushenCompletion.exportSystemScripts', 'file-code'],
-      ['导出视图源码', 'gushenCompletion.exportViews', 'eye'],
-    ],
-    diagnose: true,
-    syncAll: ['同步工作区全部资料', 'gushenCompletion.syncWorkspaceAll', 'cloud-download'],
-  };
-}
-
-function suggestedWorkspaceId(name, kind, now = new Date()) {
-  const normalized = String(name || '')
-    .normalize('NFKD')
-    .replace(/[^A-Za-z0-9._-]+/g, '-')
-    .replace(/^[.-]+|[.-]+$/g, '')
-    .toLowerCase();
-  if (normalized) return normalized;
-  const stamp = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, '0'),
-    String(now.getDate()).padStart(2, '0'),
-    String(now.getHours()).padStart(2, '0'),
-    String(now.getMinutes()).padStart(2, '0'),
-  ].join('');
-  return `${kind}-${stamp}`;
-}
-
-async function promptWorkspaceCreation(window, workspaces, _toolHome, now = new Date()) {
-  const kindChoice = await window.showQuickPick([
-    { label: '产品', description: '创建 products.<id>', value: 'product' },
-    { label: '项目', description: '创建独立的 projects.<id> 快照工作区', value: 'project' },
-  ], { title: '添加谷神产品或项目' });
-  if (!kindChoice) return undefined;
+  const classified = configuration.schemaVersion === undefined
+    && typeof configuration.migrationAvailable === 'boolean'
+    && ['legacy', 'unified'].includes(configuration.mode);
+  if (!classified && configuration.mode === 'legacy') {
+    throw new Error('此后端读取旧配置时支持浏览和同步。请先按配置升级流程转换为统一配置，再添加项目');
+  }
+  if (!classified && (configuration.mode !== 'unified' || ![2, 3].includes(configuration.schemaVersion))) {
+    throw new Error('当前后端的工作区登记格式无法识别，请检查运行入口和本地数据目录');
+  }
 
   const name = await window.showInputBox({
-    title: `输入${kindChoice.label}名称`,
+    title: '输入项目名称',
     prompt: '该名称用于 Nexus 显示和本地工作区目录',
-    validateInput: (value) => String(value || '').trim() ? undefined : '名称不能为空',
+    validateInput: value => String(value || '').trim() ? undefined : '名称不能为空',
   });
   if (name === undefined) return undefined;
-  const ids = new Set((workspaces || []).map((item) => item.id));
-  const id = await window.showInputBox({
-    title: `确认${kindChoice.label}稳定 ID`,
-    value: suggestedWorkspaceId(name, kindChoice.value, now),
-    prompt: '创建后保持不变，用于 workspaceKey 和本地配置引用',
-    validateInput: (value) => {
-      const candidate = String(value || '').trim();
-      if (!SAFE_ID.test(candidate) || candidate === '.' || candidate === '..') return '仅允许字母、数字、点、下划线和横线，且须以字母或数字开头';
-      return ids.has(candidate) ? '该 ID 已存在' : undefined;
-    },
-  });
-  if (id === undefined) return undefined;
-  const source = await window.showQuickPick([
-    { label: 'SVN', description: '先创建 Nexus，再在项目节点中设置登录和导入范围', value: 'svn' },
-    { label: 'DATABASE', description: '先创建 Nexus，后续再补充数据源配置', value: 'database' },
-  ], { title: '选择源码来源' });
-  if (!source) return undefined;
+  const modes = Array.isArray(configuration.workspaceSourceModes) ? configuration.workspaceSourceModes : ['api'];
+  const sourceMode = await pickWorkspaceSourceMode(window, modes);
+  if (!sourceMode) return undefined;
+  if (!classified) return { name: name.trim(), sourceMode };
 
-  return {
-    kind: kindChoice.value,
-    id: id.trim(),
-    name: name.trim(),
-    sourceMode: source.value,
-  };
+  const type = await window.showQuickPick([
+    { label: '项目', kind: 'project' },
+    { label: '产品', kind: 'product' },
+  ], { title: '选择当前后端使用的工作区类型' });
+  if (!type) return undefined;
+  return { name: name.trim(), id: 'ws_' + randomUUID().replaceAll('-', ''), kind: type.kind, sourceMode };
+}
+
+// Keep the running window independent; workspaceState only seeds its next session.
+class WindowWorkspaceSelection {
+  constructor({getWorkspaces, getFolders, window, onChange, state, getScope=()=>''}) {
+    Object.assign(this,{getWorkspaces,getFolders,window,onChange,state,getScope});
+    this.key='';this.diagnosticKey='';this.revision=0;this.scope=undefined;this.pendingState=Promise.resolve();
+  }
+  syncScope() {
+    const home=this.getScope();
+    let scope=home ? path.resolve(home) : '';
+    if(process.platform==='win32')scope=scope.toLowerCase();
+    if(scope!==this.scope) {
+      this.scope=scope;this.revision++;
+      this.diagnosticKey='';
+      this.key=scope && this.state ? this.state.get('guthon.windowWorkspace.'+Buffer.from(scope).toString('base64url'),'') : '';
+    }
+    return scope;
+  }
+  save(scope,key,expected) {
+    if(!scope || !this.state)return Promise.resolve();
+    const storageKey='guthon.windowWorkspace.'+Buffer.from(scope).toString('base64url');
+    const update=this.pendingState.catch(()=>{}).then(()=>{
+      if(expected!==undefined && this.state.get(storageKey,'')!==expected)return;
+      return this.state.update(storageKey,key || undefined);
+    });
+    this.pendingState=update;
+    return update;
+  }
+  async current() {
+    const scope=this.syncScope(),revision=this.revision,workspaces=await this.getWorkspaces();
+    if(scope!==this.syncScope() || revision!==this.revision)return this.current();
+    if(this.key) {
+      const selected=workspaces.find(item=>item.workspaceKey===this.key);
+      if(selected)return selected;
+      const removed=this.key;this.key='';this.diagnosticKey=removed;
+      await this.save(scope,'',removed);
+      if(scope!==this.syncScope() || revision!==this.revision)return this.current();
+    }
+    if(this.diagnosticKey)return undefined;
+    const folders=this.getFolders().map(folder=>path.resolve(folder));
+    const matched=workspaces.filter(item=>[item.root,item.checkoutPath].filter(Boolean).some(root=>folders.some(folder=>{
+      const relative=path.relative(path.resolve(root),folder);
+      return relative==='' || (relative!=='..' && !relative.startsWith('..'+path.sep) && !path.isAbsolute(relative));
+    })));
+    return matched.length===1 ? matched[0] : undefined;
+  }
+  async select(key='', {switchWindow=false}={}) {
+    const scope=this.syncScope(),revision=++this.revision,workspaces=await this.getWorkspaces();
+    if(scope!==this.syncScope() || revision!==this.revision)return undefined;
+    let selected;
+    if(key) {
+      selected=workspaces.find(item=>item.workspaceKey===key);
+      if(!selected)throw new Error(`找不到工作区：${key}`);
+      if(!switchWindow)return selected;
+    } else {
+      if(!switchWindow) {
+        const current=await this.current();
+        if(scope!==this.syncScope() || revision!==this.revision)return undefined;
+        if(current)return current;
+      }
+      const choice=await this.window.showQuickPick(workspaces.map(item=>({label:item.displayName || item.name || item.workspaceKey,description:item.workspaceKey,workspace:item})),{title:'选择当前窗口的工作区'});
+      if(scope!==this.syncScope() || revision!==this.revision || !choice)return undefined;
+      selected=choice.workspace;
+    }
+    this.key=selected.workspaceKey;this.diagnosticKey='';
+    this.onChange?.();
+    await this.save(scope,this.key);
+    return selected;
+  }
+  async inspectDiagnostic(key) {
+    const scope=this.syncScope();this.revision++;this.key='';this.diagnosticKey=key;
+    this.onChange?.();await this.save(scope,'');
+  }
+  clear() {this.revision++;this.key='';this.diagnosticKey='';this.scope=undefined;}
 }
 
 module.exports = {
+  hasWorkspaceConfiguration,
+  hasWorkspaceConfigFiles,
   existingWorkspaceConfig,
   prepareWorkspaceSetup,
+  windowToolHome,
+  workspaceSetupCard,
   promptWorkspaceCreation,
-  suggestedWorkspaceId,
+  pickWorkspaceSourceMode,
+  WindowWorkspaceSelection,
   workspaceActions,
 };

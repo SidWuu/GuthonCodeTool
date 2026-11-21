@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { readArchive, archiveJson } = require('../plugins/GuthonNexus/gushen-vscode-completion/src/update-archive');
-const { ASSETS, CATALOG_ASSET, NEXUS_ID } = require('../plugins/GuthonNexus/gushen-vscode-completion/src/release-catalog');
+const { ASSETS, CATALOG_ASSET, NEXUS_ID, releaseAssetNames } = require('../plugins/GuthonNexus/gushen-vscode-completion/src/release-catalog');
 const args = process.argv.slice(2);
 if (args.length !== 4 || args[0] !== '--release-dir' || args[2] !== '--version' || !/^\d+\.\d+\.\d+$/.test(args[3])) throw new Error('Use --release-dir DIR --version VERSION');
 const root = fs.realpathSync(args[1]), version = args[3];
@@ -14,7 +14,8 @@ const tool = archiveJson(readArchive(path.join(root, ASSETS.nexus)), 'extension/
 const bridge = archiveJson(readArchive(path.join(root, ASSETS.bridge)), 'extension/manifest.json');
 if (nexus.publisher + '.' + nexus.name !== NEXUS_ID || tool.version !== version || bridge.version !== version) throw new Error('Packaged component identities or versions differ from the release');
 const assets = {};
-for (const name of Object.values(ASSETS)) {
+const publishedFiles = { assets: fs.readdirSync(root, { withFileTypes: true }).map(file => ({ name: file.name })) };
+for (const name of releaseAssetNames(publishedFiles)) {
   const file = path.join(root, name), stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Invalid release asset ' + name);
   const hash = crypto.createHash('sha256');

@@ -15,6 +15,7 @@ const UPDATE_SOURCES = {
     latestUrl: 'https://gitee.com/api/v5/repos/sidwu/GuthonCodeTool/releases/latest',
   },
 };
+const LEGACY_MACOS_ASSET = 'GuthonCodeTool-macos-arm64.zip';
 const CHECKSUM_ASSET = 'GuthonCodeTool-checksums.txt';
 const STATE_FILE = 'tool-update-state.json';
 const versionCache = new Map();
@@ -38,9 +39,14 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function assetNameFor(platform = process.platform, arch = process.arch) {
+function assetNameFor(platform = process.platform, arch = process.arch, release) {
   if (platform === 'win32' && arch === 'x64') return 'GuthonCodeTool-windows-x64.exe';
-  if (platform === 'darwin' && arch === 'arm64') return 'GuthonCodeTool-macos-arm64.zip';
+  if (platform === 'darwin' && arch === 'arm64') {
+    const assets = release?.assets || [];
+    if (!assets.some(item => item.name === 'GuthonCodeTool')
+        && assets.some(item => item.name === LEGACY_MACOS_ASSET)) return LEGACY_MACOS_ASSET;
+    return 'GuthonCodeTool';
+  }
   throw new Error(`当前系统没有 GuthonCodeTool 发行版本：${platform}-${arch}`);
 }
 
@@ -162,13 +168,52 @@ function assetDigest(asset) {
   return match[1].toLowerCase();
 }
 
+function recoverExitedUpdateLock(lockPath) {
+  let ownerPath, raw, owner;
+  try {
+    if (!fs.lstatSync(lockPath).isDirectory()) return false;
+    const names = fs.readdirSync(lockPath);
+    if (names.length !== 1 || !/^(owner\.json|\.owner-recovery-[a-f0-9-]+\.json)$/.test(names[0])) return false;
+    ownerPath = path.join(lockPath, names[0]);
+    const stat = fs.lstatSync(ownerPath);
+    if (!stat.isFile() || stat.size > 4096) return false;
+    raw = fs.readFileSync(ownerPath, 'utf8'); owner = JSON.parse(raw);
+    if (!owner || !Number.isInteger(owner.pid) || owner.pid <= 0) return false;
+  } catch { return false; }
+  const exited = () => {
+    try { process.kill(owner.pid, 0); return false; }
+    catch (error) { return error.code === 'ESRCH'; }
+  };
+  if (!exited()) return false;
+  // Claim the record inside the directory: another owner can never observe a
+  // missing lock directory until this exact dead record has been verified.
+  const claimed = path.join(lockPath, `.owner-recovery-${crypto.randomUUID()}.json`);
+  try { fs.renameSync(ownerPath, claimed); }
+  catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+  try {
+    if (fs.readFileSync(claimed, 'utf8') !== raw || !exited()) return false;
+    const remaining = fs.readdirSync(lockPath);
+    if (remaining.length !== 1 || remaining[0] !== path.basename(claimed)) return false;
+    fs.unlinkSync(claimed); fs.rmdirSync(lockPath);
+    return true;
+  } catch (error) {
+    if (['ENOENT','ENOTEMPTY','EEXIST'].includes(error.code)) return false;
+    throw error;
+  } finally {
+    if (fs.existsSync(claimed) && !fs.existsSync(ownerPath)) fs.renameSync(claimed, ownerPath);
+  }
+}
+
 async function withUpdateLock(storageRoot, action) {
   fs.mkdirSync(storageRoot, { recursive: true });
   const lockPath = path.join(storageRoot, '.application-update.lock');
+  const blocked = () => new Error(`其它窗口正在更新或回退应用，或锁持有者无法确认；已保留 ${lockPath}`);
   try { fs.mkdirSync(lockPath); }
   catch (error) {
-    if (error.code === 'EEXIST') throw new Error(`其它窗口正在更新或回退应用；若更新进程已退出，请先检查 ${lockPath} 再移除锁目录`);
-    throw error;
+    if (error.code !== 'EEXIST') throw error;
+    if (!recoverExitedUpdateLock(lockPath)) throw blocked();
+    try { fs.mkdirSync(lockPath); }
+    catch (retryError) { if (retryError.code === 'EEXIST') throw blocked(); throw retryError; }
   }
   try {
     fs.writeFileSync(path.join(lockPath, 'owner.json'), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
@@ -236,7 +281,8 @@ async function installRelease({
     release, storageRoot, platform, arch, onProgress, processRunner, downloader, requester, bundledTrustFile, trustStorageRoot, alreadyLocked: true,
   }));
   normalizeVersion(release.version);
-  const assetName = assetNameFor(platform, arch);
+  const assetName = assetNameFor(platform, arch, release);
+  const isLegacyMacArchive = assetName === LEGACY_MACOS_ASSET;
   const asset = releaseAsset(release, assetName);
   const checksumAsset = releaseAsset(release, CHECKSUM_ASSET);
   onProgress(`读取 ${release.sourceLabel} 校验信息`);
@@ -272,10 +318,10 @@ async function installRelease({
     finalDir,
     platform === 'darwin' ? 'GuthonCodeTool' : 'GuthonCodeTool.exe'
   );
-  if (platform === 'win32' && fs.existsSync(installedExecutable)) {
+  if (!isLegacyMacArchive && fs.existsSync(installedExecutable)) {
     onProgress('验证已下载版本');
     try {
-      if (platform === 'win32' && await sha256Stream(installedExecutable) !== expectedHash) throw new Error('已安装文件 SHA-256 不匹配');
+      if (await sha256Stream(installedExecutable) !== expectedHash) throw new Error('已安装文件 SHA-256 不匹配');
       await verifyExecutable(installedExecutable, release.version, processRunner);
       return {
         version: release.version,
@@ -299,22 +345,20 @@ async function installRelease({
     const actualHash = await sha256Stream(archivePath);
     if (actualHash !== expectedHash) throw new Error(`SHA-256 校验失败：${assetName}`);
 
-    let executablePath;
-    if (platform === 'darwin') {
-      onProgress('解压 macOS 应用');
+    const executablePath = path.join(stagingDir, path.basename(installedExecutable));
+    if (isLegacyMacArchive) {
+      onProgress('解压旧版 macOS 应用');
       await processRunner('/usr/bin/ditto', ['-x', '-k', archivePath, stagingDir]);
-      executablePath = path.join(stagingDir, 'GuthonCodeTool');
       if (!fs.existsSync(executablePath)) {
         const legacyExecutable = path.join(stagingDir, 'dist', 'GuthonCodeTool');
         if (!fs.existsSync(legacyExecutable)) throw new Error('macOS 压缩包中缺少 GuthonCodeTool');
         fs.renameSync(legacyExecutable, executablePath);
         fs.rmdirSync(path.join(stagingDir, 'dist'));
       }
-      fs.chmodSync(executablePath, 0o755);
     } else {
-      executablePath = path.join(stagingDir, 'GuthonCodeTool.exe');
       fs.copyFileSync(archivePath, executablePath);
     }
+    if (platform === 'darwin') fs.chmodSync(executablePath, 0o755);
 
     onProgress('核对版本并运行新版本自检');
     await verifyExecutable(executablePath, release.version, processRunner);

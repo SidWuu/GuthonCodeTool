@@ -37,7 +37,7 @@ def mcp_tools(command: list[str], home: str, *, read_only: bool) -> list[dict]:
     if initialized.get("protocolVersion") != "2025-11-25":
         raise RuntimeError("MCP protocol negotiation did not return 2025-11-25")
     tools = by_id.get(2, {}).get("result", {}).get("tools")
-    from providers.svn.nexus.mcp_server import TOOLS, WRITE_TOOLS
+    from providers.api.mcp_server import TOOLS, WRITE_TOOLS
     registered = TOOLS + WRITE_TOOLS
     expected = sum(bool(tool["annotations"]["readOnlyHint"]) for tool in registered) if read_only else len(registered)
     if not isinstance(tools, list) or len(tools) != expected:
@@ -105,7 +105,7 @@ def main() -> int:
         raise RuntimeError("Version response is empty")
     with tempfile.TemporaryDirectory(prefix="guthon-release-smoke-") as home:
         run([*command, "self-test", "--home", home])
-        run([*command, "setup", "--home", home])
+        run([*command, "setup", "--home", home, "--no-team-sync"])
         check_doctor(command, home)
         all_tools = mcp_tools(command, home, read_only=False)
         readonly_tools = mcp_tools(command, home, read_only=True)

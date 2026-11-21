@@ -3,6 +3,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const { toolArguments } = require('./tool-runtime');
 const execute = promisify(execFile);
 
 function sshTool(name) {
@@ -16,8 +17,26 @@ function sshTool(name) {
 
 function repositoryUrl(value) {
   const url = new URL(value);
-  if (/[\x00-\x20"\\]/.test(value) || !['ssh:', 'https:', 'http:'].includes(url.protocol) || !url.hostname || url.password || url.search || url.hash) throw new Error('内网市场地址无效');
+  if (/[\x00-\x20"\\]/.test(value) || !['ssh:', 'https:', 'http:'].includes(url.protocol)
+      || !url.hostname || url.pathname === '/' || url.password || url.search || url.hash
+      || (url.protocol !== 'ssh:' && url.username)) throw new Error('请输入团队提供的不含密码或令牌的内网 Git 地址');
   return url;
+}
+
+async function workspaceTeamSource(window, configured = process.env.GUTHON_TEAM_MARKETPLACE_URL, edit = false) {
+  if (configured && !edit) {
+    repositoryUrl(configured);
+    return configured;
+  }
+  return window.showInputBox({
+    title: '连接 guthon-team',
+    prompt: '输入团队提供的内网 Git 克隆地址，用于同步规则和开发门禁。',
+    value: edit ? configured : undefined,
+    validateInput: value => {
+      try { repositoryUrl(value); }
+      catch { return '请输入团队提供的不含密码或令牌的内网 Git 地址'; }
+    },
+  });
 }
 
 async function checkRepository(value, run = execute, environment = {}) {
@@ -41,12 +60,27 @@ async function publicKey(home = os.homedir(), run = execute) {
   return value;
 }
 
-function authorizationCommand(value, platform = process.platform) {
-  const url = repositoryUrl(value);
-  const args = url.protocol === 'ssh:' ? [sshTool('ssh'), '-T', '-p', url.port || '22', `${decodeURIComponent(url.username || 'git')}@${url.hostname}`]
-    : ['git', 'ls-remote', value, 'HEAD'];
+function terminalCommand(args, platform) {
   const quote = platform === 'win32' ? text => "'" + text.replace(/'/g, "''") + "'" : text => "'" + text.replace(/'/g, "'\"'\"'") + "'";
   return (platform === 'win32' ? '& ' : '') + args.map(quote).join(' ');
 }
 
-module.exports = { checkRepository, publicKey, authorizationCommand, repositoryUrl };
+function authorizationCommand(value, platform = process.platform) {
+  const url = repositoryUrl(value);
+  const args = url.protocol === 'ssh:' ? [sshTool('ssh'), '-T', '-p', url.port || '22', `${decodeURIComponent(url.username || 'git')}@${url.hostname}`]
+    : ['git', 'ls-remote', value, 'HEAD'];
+  return terminalCommand(args, platform);
+}
+
+function openTeamSyncTerminal(window, tool, args, platform = process.platform) {
+  const terminal = window.createTerminal({
+    name: 'Guthon 团队规则同步',
+    cwd: tool.toolHome,
+    env: tool.env,
+    ...(platform === 'win32' ? { shellPath: 'powershell.exe', shellArgs: ['-NoLogo', '-NoProfile'] } : { shellPath: '/bin/sh' }),
+  });
+  terminal.show();
+  terminal.sendText(terminalCommand([tool.toolPath, ...toolArguments(tool, 'setup', args)], platform));
+}
+
+module.exports = { checkRepository, publicKey, authorizationCommand, repositoryUrl, workspaceTeamSource, openTeamSyncTerminal };

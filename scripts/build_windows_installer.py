@@ -135,8 +135,8 @@ def prepare(args, stage):
                 validate_download(item)
                 prerequisites.append(dict(item))
                 continue
-            if set(item) != {"id", "file", "sha256", "args", "elevate"} or item["id"] not in ("codebuddy", "git", "svn"):
-                raise ValueError("依赖仅允许 codebuddy、git、svn")
+            if set(item) != {"id", "file", "sha256", "args", "elevate"} or item["id"] not in ("codebuddy", "git"):
+                raise ValueError("依赖仅允许 codebuddy、git")
             source = Path(item["file"])
             if not source.is_absolute():
                 source = args.prerequisites.parent / source
@@ -150,8 +150,8 @@ def prepare(args, stage):
             shutil.copy2(source, stage / name)
             prerequisites.append({"id": item["id"], "file": name, "args": item["args"], "elevate": item["elevate"]})
     ids = [item["id"] for item in prerequisites]
-    if len(set(ids)) != len(ids) or (not args.existing_tools and set(ids) != {"codebuddy", "git", "svn"}):
-        raise ValueError("完整安装包必须包含 CodeBuddy、Git、SVN 三项；已有环境试用包需显式 --existing-tools")
+    if len(set(ids)) != len(ids) or (not args.existing_tools and set(ids) != {"codebuddy", "git"}):
+        raise ValueError("完整安装包必须包含 CodeBuddy、Git 两项；已有环境试用包需显式 --existing-tools")
     with zipfile.ZipFile(stage / "nexus.vsix") as archive:
         nexus = json.loads(archive.read("extension/package.json"))
         tool_version = json.loads(archive.read("extension/tool-version.json"))["version"]

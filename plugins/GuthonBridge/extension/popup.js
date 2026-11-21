@@ -9,7 +9,6 @@ const pullHubBtn = document.getElementById("pullHubBtn");
 const copyFieldsBtn = document.getElementById("copyFieldsBtn");
 const pasteFieldsBtn = document.getElementById("pasteFieldsBtn");
 const locateNexusBtn = document.getElementById("locateNexusBtn");
-const forceRefreshBtn = document.getElementById("forceRefreshBtn");
 const closeBtn = document.getElementById("closeBtn");
 
 function setStatus(message) {
@@ -19,17 +18,17 @@ function setStatus(message) {
 function setResolvedTarget(target) {
   if (target?.mode === "table-schema") {
     procedureEl.value = [target.dataSourceId, target.dataSourceName].filter(Boolean).join(" ");
-    funIdEl.value = Array.isArray(target.tableIds) && target.tableIds.length > 0 ? target.tableIds.join(", ") : "当前数据源全部表";
+    funIdEl.value = Array.isArray(target.tableIds) && target.tableIds.length > 0 ? target.tableIds.join(", ") : "未选中表";
     return;
   }
   if (target?.mode === "billtype") {
     procedureEl.value = [target.dataSourceId, target.dataSourceName].filter(Boolean).join(" ");
-    funIdEl.value = Array.isArray(target.billTypeCodes) && target.billTypeCodes.length > 0 ? target.billTypeCodes.join(", ") : "当前数据源全部单据类型";
+    funIdEl.value = Array.isArray(target.billTypeCodes) && target.billTypeCodes.length > 0 ? target.billTypeCodes.join(", ") : "未选中单据类型";
     return;
   }
   if (target?.mode === "views") {
     procedureEl.value = [target.dataSourceId, target.dataSourceName].filter(Boolean).join(" ");
-    funIdEl.value = Array.isArray(target.viewIds) && target.viewIds.length > 0 ? target.viewIds.join(", ") : "当前数据源全部视图";
+    funIdEl.value = Array.isArray(target.viewIds) && target.viewIds.length > 0 ? target.viewIds.join(", ") : "未选中视图";
     return;
   }
   if (target?.mode === "system-scripts") {
@@ -57,28 +56,19 @@ function isProcedureUrl(url) {
 }
 
 function setPopupMode(mode) {
-  pullHubBtn.dataset.mode = mode;
-  forceRefreshBtn.dataset.mode = mode;
   const isModule = mode === "module";
-  const isTableSchema = mode === "table-schema";
-  const isBillType = mode === "billtype";
-  const isViews = mode === "views";
-  const isSystemScripts = mode === "system-scripts";
-  const canPullSource = !isTableSchema && !isBillType && !isViews && !isSystemScripts;
+  const isOther = ["table-schema", "billtype", "views", "system-scripts"].includes(mode);
   document.querySelector(".title").textContent = "Guthon Bridge";
   procedureEl.closest("label").hidden = isModule;
   funIdEl.closest("label").hidden = isModule;
-  outputDirEl.closest("label").hidden = isModule || isTableSchema || isBillType || isViews || isSystemScripts;
-  procedureLabelEl.textContent = isSystemScripts ? "应用系统" : isTableSchema || isBillType || isViews ? "数据源" : "包名";
-  funIdLabelEl.textContent = isSystemScripts ? "脚本类型" : isTableSchema ? "数据表" : isBillType ? "单据类型" : isViews ? "视图" : "函数名";
-  pullPageBtn.textContent = isModule ? "打开复制模式" : "拉取页面当前源码";
-  pullPageBtn.hidden = isTableSchema || isBillType || isViews || isSystemScripts;
-  pullHubBtn.textContent = isSystemScripts ? "拉取选中脚本" : isTableSchema ? "拉取表结构" : isBillType ? "拉取单据类型" : isViews ? "拉取视图源码" : "拉取源码表版本";
+  outputDirEl.closest("label").hidden = isModule || isOther;
+  procedureLabelEl.textContent = mode === "system-scripts" ? "应用系统" : isOther ? "数据源" : "包名";
+  funIdLabelEl.textContent = mode === "system-scripts" ? "脚本类型" : mode === "table-schema" ? "数据表" : mode === "billtype" ? "单据类型" : mode === "views" ? "视图" : "函数名";
+  pullPageBtn.textContent = isModule ? "打开复制模式" : "导出页面当前源码";
+  pullPageBtn.hidden = isOther;
+  pullHubBtn.textContent = "刷新当前对象";
   copyFieldsBtn.hidden = !isModule;
   pasteFieldsBtn.hidden = !isModule;
-  forceRefreshBtn.textContent = isSystemScripts ? "拉取全部脚本" : "强制刷新";
-  forceRefreshBtn.hidden = !canPullSource && !isSystemScripts;
-  pullHubBtn.parentElement.classList.toggle("full-width", !canPullSource);
 }
 
 function isAbsolutePath(value) {
@@ -139,44 +129,6 @@ async function sendWorkspaceRequest(type, payload) {
   });
 }
 
-async function resolveWorkspaceSummary(tab, target) {
-  const pageOrigin = tab.url ? new URL(tab.url).origin : "";
-  const cachedWorkspaceKey = await GuthonBridgeWorkspace.storedWorkspaceKey(tab.url || pageOrigin);
-  const identity = {
-    pageOrigin,
-    dataSourceId: target.dataSourceId || "",
-    systemId: target.systemId || ""
-  };
-  if (cachedWorkspaceKey) {
-    const result = await chrome.runtime.sendMessage({
-      type: "route-workspace",
-      payload: { ...identity, workspaceKey: cachedWorkspaceKey }
-    });
-    if (result?.ok) return result.workspace;
-  }
-  const route = await chrome.runtime.sendMessage({
-    type: "route-workspace",
-    payload: identity
-  });
-  if (route?.ok) return route.workspace;
-  if (!route?.candidates?.length) return null;
-  const workspaceKey = await GuthonBridgeWorkspace.select(route.candidates, tab.url || pageOrigin);
-  const result = await chrome.runtime.sendMessage({
-    type: "route-workspace",
-    payload: { ...identity, workspaceKey }
-  });
-  return result?.workspace || null;
-}
-
-function applyWorkspaceSourceMode(workspace) {
-  if (workspace?.sourceMode !== "svn") return false;
-  pullPageBtn.hidden = true;
-  pullHubBtn.hidden = true;
-  forceRefreshBtn.hidden = true;
-  setStatus(`当前工作区使用 SVN 源码模式\n请在 Guthon Nexus 中扫描索引、打开 Workcopy 或预检/写回 SVN`);
-  return true;
-}
-
 async function runInMainWorld(tabId, command, payload) {
   try {
     const result = await chrome.tabs.sendMessage(tabId, {
@@ -223,7 +175,7 @@ async function resolveHubSourceTarget() {
   }
   const result = await runInMainWorld(tab.id, "inspect-hub-source", {});
   if (!result?.ok) {
-    throw new Error(result?.message || "未识别到源码表查询条件");
+    throw new Error(result?.message || "未识别到当前对象");
   }
   const target = {
     mode: result.data.mode || "procedure",
@@ -349,75 +301,9 @@ async function runFieldsMover(type) {
   return response.data;
 }
 
-async function runHubPull(force = false, pullAllSystemScripts = false) {
+async function runHubPull() {
   const target = await resolveHubSourceTarget();
-  if (target.mode === "system-scripts") {
-    const scriptTypes = pullAllSystemScripts ? [] : target.scriptTypes;
-    if (!pullAllSystemScripts && scriptTypes.length === 0) {
-      throw new Error("请先点击脚本行进行选中，或使用“拉取全部脚本”");
-    }
-    return sendWorkspaceRequest(
-      "export-system-scripts",
-      {
-        dataSourceId: target.dataSourceId || "",
-        systemIds: [target.systemId],
-        scriptTypes
-      }
-    );
-  }
-  if (target.mode === "views") {
-    return sendWorkspaceRequest(
-      "export-view-sql",
-      {
-        dataSourceIds: [target.dataSourceId],
-        viewIds: target.viewIds
-      }
-    );
-  }
-  if (target.mode === "billtype") {
-    return sendWorkspaceRequest(
-      "export-bill-type",
-      {
-        dataSourceIds: [target.dataSourceId],
-        billTypeCodes: target.billTypeCodes
-      }
-    );
-  }
-  if (target.mode === "table-schema") {
-    return sendWorkspaceRequest(
-      "export-table-schema",
-      {
-        dataSourceId: target.dataSourceId,
-        tableIds: target.tableIds
-      }
-    );
-  }
-  const pageSource = target.mode === "page-source";
-  const payload = {
-    sourceType: pageSource ? "page" : "procedure",
-    sourceId: pageSource ? target.pageId || target.procedureId || "" : target.procedureId || "",
-    alias: target.procedureKeyword || "",
-    funId: pageSource ? "" : target.funId || "",
-    dataSourceId: target.dataSourceId || "",
-    systemId: target.systemId || "",
-    force
-  };
-  if (payload.sourceType === "page" && !payload.sourceId && !payload.alias) {
-    throw new Error("当前页面没有识别到页面源码表查询条件");
-  }
-  if (payload.sourceType === "procedure" && ((!payload.sourceId && !payload.alias) || !payload.funId)) {
-    throw new Error("当前页面没有识别到过程函数源码表查询条件");
-  }
-  if (force) {
-    const workspace = await resolveWorkspaceSummary(await getActiveTab(), target);
-    if (!workspace?.workspaceKey) throw new Error("强制刷新前必须明确选择工作区");
-    const key = workspace.workspaceKey;
-    const typed = window.prompt(`强制刷新将备份并覆盖工作副本。请输入工作区 ${key} 确认：`, "");
-    if (typed !== key) throw new Error("已取消强制刷新");
-    payload.workspaceKey = key;
-    payload.confirmation = key;
-  }
-  return sendWorkspaceRequest("pull-hub-source", payload);
+  return sendWorkspaceRequest("refresh-api-source", GuthonBridgeRefreshTarget.build(target));
 }
 
 pullPageBtn.addEventListener("click", async () => {
@@ -461,42 +347,12 @@ pullPageBtn.addEventListener("click", async () => {
 
 pullHubBtn.addEventListener("click", async () => {
   try {
-    const tab = await getActiveTab();
-    if (!tab.url || !isSupportedGuthonUrl(tab.url)) {
-      throw new Error("请先打开谷神开发平台页面");
-    }
-    const isTableSchema = pullHubBtn.dataset.mode === "table-schema";
-    const isBillType = pullHubBtn.dataset.mode === "billtype";
-    const isViews = pullHubBtn.dataset.mode === "views";
-    const isSystemScripts = pullHubBtn.dataset.mode === "system-scripts";
-    setStatus(`${isSystemScripts ? "正在拉取选中系统脚本" : isViews ? "正在拉取视图源码" : isBillType ? "正在拉取单据类型" : isTableSchema ? "正在拉取表结构" : "正在从源码表拉取"}...\n${tab.url}`);
+    setStatus("正在刷新选中的源码对象...");
     const result = await runHubPull();
-    if (!result?.ok) {
-      throw new Error(result?.message || (isSystemScripts ? "系统脚本拉取失败" : isViews ? "视图源码拉取失败" : isBillType ? "单据类型拉取失败" : isTableSchema ? "表结构拉取失败" : "源码表拉取失败"));
-    }
-    if (isSystemScripts) {
-      setStatus(["系统脚本拉取成功", `工作副本：${result.work_copy_paths?.[0] || ""}`, `数量：${result.exported_system_script_count ?? ""}`].join("\n"));
-      return;
-    }
-    if (isViews) {
-      setStatus(["视图源码拉取成功", `输出目录：${result.outputDir}`, `数量：${result.exported_view_count ?? ""}`].join("\n"));
-      return;
-    }
-    if (isBillType) {
-      setStatus(["单据类型拉取成功", `输出目录：${result.outputDir}`, `数量：${result.exported_bill_type_count ?? ""}`].join("\n"));
-      return;
-    }
-    if (isTableSchema) {
-      setStatus(["表结构拉取成功", `输出目录：${result.outputDir}`, `表数量：${result.exported_table_count ?? ""}`].join("\n"));
-      return;
-    }
-    setStatus([result.message || "源码表拉取成功", `工作副本：${result.workCopyPath}`].join("\n"));
+    if (!result?.ok) throw new Error(result?.message || "刷新失败");
+    setStatus(result.message || "刷新请求已完成，请在 Nexus 查看结果和本地修改状态。");
   } catch (error) {
-    const isTableSchema = pullHubBtn.dataset.mode === "table-schema";
-    const isBillType = pullHubBtn.dataset.mode === "billtype";
-    const isViews = pullHubBtn.dataset.mode === "views";
-    const isSystemScripts = pullHubBtn.dataset.mode === "system-scripts";
-    setStatus(`${isSystemScripts ? "系统脚本拉取失败" : isViews ? "视图源码拉取失败" : isBillType ? "单据类型拉取失败" : isTableSchema ? "表结构拉取失败" : "源码表拉取失败"}\n${error.message}`);
+    setStatus(`刷新失败\n${error.message}`);
   }
 });
 
@@ -523,32 +379,9 @@ locateNexusBtn.addEventListener("click", async () => {
     const target = await resolveHubSourceTarget();
     const locator = GuthonBridgeNexusLocator.build(target);
     await chrome.tabs.create({ url: locator.uri });
-    setStatus(`已向 Nexus 发送 ${locator.description}\n请在 Nexus 中选择 SVN 工作区和源码`);
+    setStatus(`已向 Nexus 发送 ${locator.description}\n请在 Nexus 中选择工作区和源码`);
   } catch (error) {
     setStatus(`定位失败\n${error.message}\n可在 Nexus 命令面板手动定位 PAGE 或过程函数`);
-  }
-});
-
-forceRefreshBtn.addEventListener("click", async () => {
-  try {
-    if (forceRefreshBtn.dataset.mode === "system-scripts") {
-      setStatus("正在拉取当前应用系统全部脚本...");
-      const result = await runHubPull(false, true);
-      if (!result?.ok) {
-        throw new Error(result?.message || "系统脚本拉取失败");
-      }
-      setStatus(["系统脚本拉取成功", `输出目录：${result.outputDir}`, `数量：${result.exported_system_script_count ?? ""}`].join("\n"));
-      return;
-    }
-    setStatus("正在强制刷新源码表版本...");
-    const result = await runHubPull(true);
-    if (!result?.ok) {
-      throw new Error(result?.message || "强制刷新失败");
-    }
-    setStatus([result.message || "强制刷新成功", `工作副本：${result.workCopyPath}`].join("\n"));
-  } catch (error) {
-    const action = forceRefreshBtn.dataset.mode === "system-scripts" ? "系统脚本拉取失败" : "强制刷新失败";
-    setStatus(`${action}\n${error.message}`);
   }
 });
 
@@ -588,7 +421,7 @@ async function refreshRecentPulls() {
       try {
         const tab = await getActiveTab();
         const request = GuthonBridgeTaskHistory.replay(entry,new URL(tab.url).origin);
-        if (!window.confirm(`再次拉取 ${description}？\n按当前工作区规则保护本地修改，不沿用旧的强制覆盖确认。`)) return;
+        if (!window.confirm(`再次拉取 ${description}？\n按工作区规则保护本地修改。`)) return;
         button.disabled = true;
         setStatus('正在再次拉取历史对象...');
         const result = await GuthonBridgeTasks.run(request.type,request.payload);
@@ -630,7 +463,6 @@ async function initializePopup() {
   pullHubBtn.disabled = true;
   copyFieldsBtn.disabled = true;
   pasteFieldsBtn.disabled = true;
-  forceRefreshBtn.disabled = true;
   locateNexusBtn.hidden = true;
   const settings = await chrome.storage.local.get(["guthonBridgeToken", "guthonBridgePort"]);
   document.getElementById("bridgeToken").value = settings.guthonBridgeToken || "";
@@ -671,25 +503,20 @@ async function initializePopup() {
             ? `页面：${target.procedureKeyword}`
             : `包名：${target.procedureKeyword}`,
         target.mode === "system-scripts"
-          ? `脚本类型：${target.scriptTypes.length > 0 ? target.scriptTypes.join(", ") : "未选中，可使用全部拉取"}`
+          ? `脚本类型：${target.scriptTypes.length > 0 ? target.scriptTypes.join(", ") : "未选中"}`
           : target.mode === "views"
-          ? `视图：${target.viewIds.length > 0 ? target.viewIds.join(", ") : "当前数据源全部视图"}`
+          ? `视图：${target.viewIds.length > 0 ? target.viewIds.join(", ") : "未选中视图"}`
           : target.mode === "billtype"
-          ? `单据类型：${target.billTypeCodes.length > 0 ? target.billTypeCodes.join(", ") : "当前数据源全部单据类型"}`
+          ? `单据类型：${target.billTypeCodes.length > 0 ? target.billTypeCodes.join(", ") : "未选中单据类型"}`
           : target.mode === "table-schema"
-          ? `数据表：${target.tableIds.length > 0 ? target.tableIds.join(", ") : "当前数据源全部表"}`
+          ? `数据表：${target.tableIds.length > 0 ? target.tableIds.join(", ") : "未选中表"}`
           : target.mode === "page-source"
             ? `片段：${target.funId}`
             : `函数名：${target.funId}`
       ].join("\n")
     );
-    const workspace = await resolveWorkspaceSummary(tab, target);
-    if (applyWorkspaceSourceMode(workspace)) {
-      return;
-    }
     pullPageBtn.disabled = target.mode === "table-schema" || target.mode === "billtype" || target.mode === "views" || target.mode === "system-scripts";
     pullHubBtn.disabled = false;
-    forceRefreshBtn.disabled = target.mode === "table-schema" || target.mode === "billtype" || target.mode === "views";
     copyFieldsBtn.disabled = target.mode !== "page-source";
     pasteFieldsBtn.disabled = target.mode !== "page-source";
   } catch (error) {

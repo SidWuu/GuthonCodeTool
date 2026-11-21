@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
-const { readWorkspaces, WorkspaceRegistry } = require('../src/workspace-registry');
+const { readWorkspaces, readWorkspaceRegistry, WorkspaceRegistry } = require('../src/workspace-registry');
 
 function spawnResult({ stdout = '', stderr = '', code = 0 } = {}) {
   return (_command, _args, _options) => {
@@ -36,6 +36,21 @@ test('rejects an invalid workspace registry instead of silently showing no proje
   );
 });
 
+test('preserves project diagnostics without changing list consumers', async () => {
+  const snapshot = {workspaces:[{workspaceKey:'ws_ok',sourceMode:'api'}],
+    configErrors:[{workspaceKey:'projects.bad',code:'CONFIG_INVALID',message:'需要修复路径'}]};
+  const tool = {mode:'packaged',toolPath:'/tool',toolHome:'/home'};
+  assert.deepEqual(await readWorkspaceRegistry(tool,spawnResult({stdout:JSON.stringify({ok:true,...snapshot})})),snapshot);
+  const registry = new WorkspaceRegistry(async () => snapshot);
+  assert.deepEqual(await registry.get(tool),snapshot.workspaces);
+  assert.deepEqual(await registry.getSnapshot(tool),snapshot);
+});
+
+test('rejects malformed diagnostics instead of losing invalid projects', async () => {
+  await assert.rejects(readWorkspaceRegistry({mode:'packaged',toolPath:'/tool',toolHome:'/home'},
+    spawnResult({stdout:JSON.stringify({ok:true,workspaces:[],configErrors:{hidden:true}})})),/configErrors/);
+});
+
 test('shares one request across views and invalidates after a workspace change', async () => {
   let reads = 0;
   let finish;
@@ -48,14 +63,14 @@ test('shares one request across views and invalidates after a workspace change',
   const second = registry.get(tool);
   await Promise.resolve();
   assert.equal(reads, 1);
-  finish([{ workspaceKey: 'products.a' }]);
+  finish({ configErrors: [], workspaces: [{ workspaceKey: 'products.a' }] });
   assert.deepEqual(await first, await second);
   assert.deepEqual(await registry.get(tool), [{ workspaceKey: 'products.a' }]);
   assert.equal(reads, 1);
   registry.invalidate();
   const next = registry.get(tool);
   await Promise.resolve();
-  finish([{ workspaceKey: 'products.b' }]);
+  finish({ configErrors: [], workspaces: [{ workspaceKey: 'products.b' }] });
   assert.deepEqual(await next, [{ workspaceKey: 'products.b' }]);
   assert.equal(reads, 2);
 });
@@ -75,11 +90,11 @@ test('does not cache a failed request or an old result after invalidation', asyn
   const stale = registry.get(tool);
   await Promise.resolve();
   registry.invalidate();
-  finish.resolve([{ workspaceKey: 'products.old' }]);
+  finish.resolve({ configErrors: [], workspaces: [{ workspaceKey: 'products.old' }] });
   await stale;
   const current = registry.get(tool);
   await Promise.resolve();
-  finish.resolve([{ workspaceKey: 'products.new' }]);
+  finish.resolve({ configErrors: [], workspaces: [{ workspaceKey: 'products.new' }] });
   assert.deepEqual(await current, [{ workspaceKey: 'products.new' }]);
   assert.equal(reads, 3);
 });

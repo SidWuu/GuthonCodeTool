@@ -163,3 +163,17 @@ test('snapshot preparation works with the IDE bundled Node HTTP client when fetc
  const downloaded=await snapshot.download(f.url,directory,{fetchImpl:null});
  assert.equal(downloaded.build,remote.build);
 });
+
+
+test('neutral workspace keys have isolated resource bindings',async t=>{
+  const f=await fixture(t);
+  const first=await f.manager.connect('ws_1.a-b',f.url);
+  assert.equal(await f.manager.cached('ws_2'),null);
+  await f.manager.connect('ws_2',f.url);
+  assert.equal((await f.manager.cached('ws_1.a-b')).workspaceKey,'ws_1.a-b');
+  assert.equal((await f.manager.cached('ws_2')).workspaceKey,'ws_2');
+  assert.notEqual((await f.manager.location('ws_1.a-b')).binding,(await f.manager.location('ws_2')).binding);
+  assert.equal(first.build,(await f.manager.cached('ws_2')).build);
+  for(const key of ['', '.hidden', '_hidden', '-hidden', 'ws/a', 'ws one', 'ws\n', 123])
+    await assert.rejects(f.manager.location(key),/workspaceKey/);
+});

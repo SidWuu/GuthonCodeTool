@@ -21,7 +21,7 @@ def main(argv=None) -> int:
     source.add_argument("--script", help="Path to svnCheckoutHere.sh or svnCheckoutHere.bat")
     source.add_argument("--bat", help="Windows-specific alias for a svnCheckoutHere.bat path")
     source.add_argument("--config", help="Path to an editable svn-scope.yaml/json configuration")
-    parser.add_argument("--workspace", required=True, help="Exact workspace key: products.<id> or projects.<id>")
+    parser.add_argument("--workspace", required=True, help="Exact registered workspace key")
     parser.add_argument("--output", required=True, help="Target authorized-scope.json path")
     parser.add_argument(
         "--replace",

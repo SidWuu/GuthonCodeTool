@@ -6,30 +6,40 @@ const path = require('node:path');
 const { createOnboarding, readiness, page, nextAction } = require('../src/onboarding');
 
 function readyEvidence() {
-  return { report: { state: 'environment-ready', version: '0.3.1', nexusVersion: '2.5.0', guardMinimumVersion: '0.2.10', installedAt: '2026-10-08T00:00:00Z' },
+  return { report: { bundleId: 'bundle', marketplaceUrl: 'ssh://git@example.test/team/guthon-team.git',
+      state: 'environment-ready', version: '0.3.1', nexusVersion: '2.5.0', guardMinimumVersion: '0.2.10', installedAt: '2026-10-08T00:00:00Z' },
+    governanceBundleId: 'bundle',
     toolVersion: '0.3.1', nexusVersion: '2.5.0',
     hook: { schemaVersion: 1, ready: true, event: 'SessionStart', pluginVersion: '0.2.10', observedAt: '2026-10-08T01:00:00Z' },
     chrome: { installId: 'id', version: '0.3.1' }, clients: [{ installId: 'id', version: '0.3.1', protocolVersion: 2 }] };
 }
 
-test('tool and plugin runtime checks are required; configuration files alone do not mean ready', () => {
+test('tool and governance are required; lifecycle hook readiness is independent', () => {
   assert.equal(readiness(readyEvidence()).complete, true);
   for (const mutation of [
-    x => x.hook = {}, x => x.hook.ready = false, x => x.hook.observedAt = '2026-10-07T00:00:00Z',
-    x => x.hook.pluginVersion = '0.2.9', x => x.clients = [],
-    x => x.clients[0].installId = 'old-install',
+    x => x.governanceBundleId = 'old-bundle',
     x => x.toolVersion = '0.3.0', x => x.nexusVersion = '2.4.0',
   ]) {
     const evidence = readyEvidence(); mutation(evidence);
     assert.equal(readiness(evidence).complete, false);
   }
+  const evidence = readyEvidence();
+  evidence.hook = {};
+  assert.equal(readiness(evidence).complete, true);
+  assert.equal(readiness(evidence).team, false);
 });
 
 test('installation steps only check tools, plugins and browser environment', () => {
   assert.equal(nextAction({}), 'refresh');
-  assert.equal(nextAction({ tool: true }), 'team');
-  assert.equal(nextAction({ tool: true, team: true }), 'chrome');
-  assert.equal(nextAction({ tool: true, team: true, bridge: true }), 'finish');
+  assert.equal(nextAction({ tool: true }), 'repository');
+  assert.equal(nextAction({ tool: true, governance: true }), 'finish');
+});
+
+test('API-only installation completes while optional browser pairing stays independently unverified',()=>{
+  const evidence=readyEvidence();evidence.clients=[];
+  assert.deepEqual(readiness(evidence),{tool:true,governance:true,team:true,bridge:false,complete:true});
+  evidence.clients=[{installId:'other',version:evidence.chrome.version,protocolVersion:2}];
+  assert.equal(readiness(evidence).bridge,false);assert.equal(readiness(evidence).complete,true);
 });
 
 test('HTML escapes errors and never emits pairing tokens', () => {
@@ -47,7 +57,7 @@ function fixture(t) {
   const evidence = readyEvidence();
   write('var/nexus/setup-result.json', { ...evidence.report, bundleId: 'bundle' });
   write('var/.guthon/hook-runtime.json', evidence.hook);
-  write('var/nexus/onboarding.json', { schemaVersion: 1 });
+  write('var/nexus/onboarding.json', { schemaVersion: 1, governanceBundleId: evidence.governanceBundleId });
   write('var/nexus/updates/chrome/extension/managed-install.json', { schemaVersion: 1, version: '0.3.1', installId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' });
   write('var/nexus/updates/chrome/extension/manifest.json', { version: '0.3.1' });
   fs.writeFileSync(path.join(home, 'var/nexus/updates/chrome/extension/host-settings.js'), 'globalThis.GuthonBridgeHostSettings = ' + JSON.stringify({ protocols: ['http:', 'https:'], ipRanges: [], domainSuffixes: ['old.example.test'], pathPrefixes: ['/guthon/'] }) + ';');
@@ -60,7 +70,13 @@ function fixture(t) {
     env: { clipboard: { writeText: async text => calls.push(['clipboard', text]) } } };
   const wizard = createOnboarding({ vscode, context: { extension: { packageJSON: { version: '2.5.0' } } },
     getTool: () => ({ toolHome: home, toolPath: '/fixture/tool', mode: 'packaged' }),
-    client: { run: async (_key, command) => { assert.equal(command, 'version', 'must not query business workspaces or indexes'); return { version: '0.3.1' }; } },
+    repositoryCheck: async source => { assert.equal(source, evidence.report.marketplaceUrl); },
+    client: { run: async (_key, command, args) => {
+      if (command === 'version') return { version: '0.3.1' };
+      assert.equal(command, 'setup', 'must not query business workspaces or indexes');
+      assert.deepEqual(args, ['--team-source', evidence.report.marketplaceUrl]);
+      return { governance: 'ready' };
+    } },
     getWorkspaces: async () => assert.fail('installation must not enumerate business workspaces'),
     bridge: { isRunning: () => true, request: async () => ({ clients: [{ installId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', version: '0.3.1', protocolVersion: 2 }] }) } });
   t.after(() => wizard.dispose());
@@ -81,9 +97,10 @@ test('successful onboarding persists completion and avoids reopening on later la
   await f.wizard.openIfNeeded();
 });
 
-test('a pending plugin cannot finish and installation cannot start business operations', async t => {
+test('onboarding synchronizes the team bundle before finishing, with no agent hook', async t => {
   const f = fixture(t);
   f.write('var/.guthon/hook-runtime.json', {});
+  f.write('var/nexus/onboarding.json', { schemaVersion: 1 });
   await f.wizard.open();
   await f.wizard.action('login');
   assert.deepEqual(f.calls, []);
@@ -91,6 +108,11 @@ test('a pending plugin cannot finish and installation cannot start business oper
   await f.wizard.action('finish');
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.home, 'var/nexus/onboarding.json'))).completedAt, undefined);
   assert.ok(f.panel.webview.html.includes('仍有未通过'));
+  await f.wizard.action('continue');
+  assert.equal((await f.wizard.snapshot()).complete, true);
+  assert.equal((await f.wizard.snapshot()).team, false);
+  await f.wizard.action('finish');
+  assert.equal(f.disposed(), true);
 });
 
 test('untrusted workspaces cannot execute onboarding commands', async t => {

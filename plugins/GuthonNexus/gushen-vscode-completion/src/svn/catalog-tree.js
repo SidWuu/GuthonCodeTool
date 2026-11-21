@@ -1,33 +1,5 @@
 const {fragmentIdentity} = require('./virtual-fs');
-const CATEGORY_LABELS = {
-  pages: '页面',
-  procedures: '过程函数',
-  'system-script': '系统脚本',
-  tables: '表',
-  views: '视图',
-  skill: 'Skill',
-  public: 'Public',
-};
-
-const CATEGORY_ICONS = {
-  pages: 'layout',
-  procedures: 'symbol-method',
-  'system-script': 'terminal',
-  tables: 'table',
-  views: 'eye',
-  skill: 'book',
-  public: 'folder-library',
-};
-
-const SOURCE_ICONS = {
-  page: 'preview',
-  procedure: 'symbol-method',
-  'system-script': 'terminal',
-  table: 'table',
-  view: 'eye',
-  skill: 'book',
-  public: 'file-code',
-};
+const {MODULE_STYLES,SOURCE_CATEGORIES,sourceTreeIcon,sourceTreeIdentity,datasourceTreeName,sourceGroupDatasourceId,compareDatasourceIds}=require('../source/tree-styles');
 
 const FRAGMENT_TYPE_ORDER = {
   gss: 0,
@@ -42,27 +14,20 @@ function compareFragmentType(left, right) {
     - (FRAGMENT_TYPE_ORDER[right?.scriptType] ?? Number.MAX_SAFE_INTEGER);
 }
 
-function groupCatalog(objects) {
+function groupCatalog(objects, navigationGroups, byName) {
   const grouped = new Map();
   for (const object of objects || []) {
-    const category = {
-      page: 'pages',
-      procedure: 'procedures',
-      'system-script': 'system-script',
-      skill: 'skill',
-      public: 'public',
-    }[object.sourceType] || `${object.sourceType}s`;
+    const category = object.referenceCategory || SOURCE_CATEGORIES[object.sourceType] || 'public';
     if (!grouped.has(category)) grouped.set(category, []);
     grouped.get(category).push(object);
   }
-  return [...grouped.entries()]
-    .sort(([left], [right]) => (CATEGORY_LABELS[left] || left).localeCompare(CATEGORY_LABELS[right] || right, 'zh-CN'))
-    .map(([category, items]) => ({
+  return Object.keys(MODULE_STYLES).filter(category=>grouped.has(category))
+    .map(category => ({
       kind: 'category',
       category,
-      label: CATEGORY_LABELS[category] || category,
-      count: items.length,
-      children: buildSourceTree(items),
+      label: MODULE_STYLES[category].label,
+      count: grouped.get(category).length,
+      children: buildSourceTree(grouped.get(category), category, navigationGroups, byName),
     }));
 }
 
@@ -103,6 +68,12 @@ function compareSortOrder(leftOrder, rightOrder) {
 }
 
 function compareTreeOrder(left, right) {
+  const datasourceDifference=compareDatasourceIds(left.datasourceOrderId,right.datasourceOrderId);
+  if(datasourceDifference)return datasourceDifference;
+  if(left.code && right.code) {
+    const difference=left.code.localeCompare(right.code,'en',{numeric:true});
+    if(difference)return difference;
+  }
   const orderDifference = compareSortOrder(left?.sortOrder, right?.sortOrder);
   if (orderDifference) return orderDifference;
   if (left.kind !== right.kind) return left.kind === 'directory' ? -1 : 1;
@@ -115,19 +86,23 @@ function earlierTreeOrder(left, right) {
   return compareSortOrder(left, right) <= 0 ? left : right;
 }
 
-function buildSourceTree(objects) {
+function buildSourceTree(objects, category, navigationGroups, byName) {
   const root = { children: [], directories: new Map() };
   for (const object of objects || []) {
     let parent = root;
-    for (const rawSegment of object.treePath || []) {
+    for (const [depth,rawSegment] of (object.treePath || []).entries()) {
       const segment = String(rawSegment || '').trim();
       if (!segment) continue;
-      let directory = parent.directories.get(segment);
+      const code=depth===0 && object.treeScopeId || '';
+      const key=code || segment;
+      let directory = parent.directories.get(key);
       if (!directory) {
         directory = {
-          kind: 'directory', label: segment, children: [], directories: new Map(), sortOrder: undefined,
+          kind: 'directory', label: depth===0 && ['procedure','table','view'].includes(object.sourceType)?datasourceTreeName(segment):segment,
+          code, datasourceOrderId: depth===0 && !byName ? sourceGroupDatasourceId(navigationGroups,category,code,segment) : undefined,
+          children: [], directories: new Map(), sortOrder: undefined,
         };
-        parent.directories.set(segment, directory);
+        parent.directories.set(key, directory);
         parent.children.push(directory);
       }
       parent = directory;
@@ -144,7 +119,9 @@ function buildSourceTree(objects) {
       }
       node.sortOrder = earlierTreeOrder(node.sortOrder, child.sortOrder);
     }
-    node.children.sort(compareTreeOrder);
+    node.children.sort(byName ? ((left,right)=>Number(right.kind==='directory')-Number(left.kind==='directory')
+      || (left.object?.sourceName || left.label).localeCompare(right.object?.sourceName || right.label,'zh-CN')
+      || compareTreeOrder(left,right)) : compareTreeOrder);
   };
   finalize(root);
   return root.children;
@@ -157,6 +134,7 @@ function fragmentLabel(fragment) {
     vm: 'GSS',
     sql: 'SQL',
     fields: '字段',
+    json: 'JSON',
   }[fragment.scriptType] || fragment.scriptType || '源码';
   if (fragment.label) return `${typeLabel} · ${fragment.label}`;
   const pointer = fragment.jsonPointer || '';
@@ -247,16 +225,18 @@ class SvnCatalogTreeProvider {
     const localPage = object.sourceType === 'page' && /\.json$/i.test(object.sourcePath || '');
     const opensReadOnlyMetadata = Array.isArray(fragments) && fragments.length === 0
       && ['table', 'view', 'skill', 'public'].includes(object.sourceType);
-    const opensDirectly = !localPage && Array.isArray(fragments)
+    const opensDirectly = !localPage && !object.referenceCategory && Array.isArray(fragments)
       && (fragments.length === 1 || opensReadOnlyMetadata);
     const identity = fragmentIdentity(workspaceKey, object, fragments?.[0]);
-    if (object.sourceType !== 'page') identity.documentName=serviceComponentDocumentName(object);
+    if (object.sourceType === 'public' || object.sourceType === 'skill') identity.documentName=object.sourceName;
+    else if (object.sourceType !== 'page') identity.documentName=serviceComponentDocumentName(object);
     const element = {
       kind: opensDirectly ? 'document' : 'object',
       label: child.label,
       description: object.status === 'OK' ? undefined : object.status,
       tooltip: `${object.sourcePath}\n${workspaceKey}`,
-      icon: SOURCE_ICONS[object.sourceType] || 'file-code',
+      category: object.referenceCategory || SOURCE_CATEGORIES[object.sourceType],
+      icon: object.sourceType === 'public' && !object.referenceCategory && /\.json$/i.test(object.sourcePath) ? 'json' : undefined,
       object,
       workspaceKey,
       parent,
@@ -350,14 +330,24 @@ class SvnCatalogTreeProvider {
     for (const [key, cached] of this.decorationElements) {
       if ((cached.workspaceKey || cached.workspace?.workspaceKey) === workspaceKey) this.decorationElements.delete(key);
     }
-    element.children = groupCatalog(catalog.objects).map((category) => {
+    const byName=this.vscode.workspace.getConfiguration?.('gushenCompletion')?.get('sourceTreeOrder')==='name';
+    element.children = groupCatalog(catalog.objects,catalog.navigationGroups,byName).map((category) => {
       const categoryElement = {
         ...category,
         workspaceKey: element.workspace.workspaceKey,
         description: String(category.count),
-        icon: CATEGORY_ICONS[category.category] || 'folder',
         parent: element,
       };
+      if (['bill-type','dropdown'].includes(category.category)) {
+        categoryElement.referenceFiles=catalog.objects.filter(object=>object.referenceCategory===category.category);
+        categoryElement.datasourceNames=new Map(catalog.objects.filter(object=>object.treeScopeId &&
+          ['procedure','table','view'].includes(object.sourceType) && object.treePath?.length)
+          .map(object=>[object.treeScopeId,datasourceTreeName(object.treePath[0])]));
+        categoryElement.byName=byName;
+        categoryElement.description=undefined;
+        categoryElement.children=undefined;
+        return categoryElement;
+      }
       categoryElement.children = this._decorateChildren(
         category.children,
         categoryElement,
@@ -372,19 +362,30 @@ class SvnCatalogTreeProvider {
     const collapsible = ['document', 'fragment', 'message'].includes(element.kind)
       ? this.vscode.TreeItemCollapsibleState.None
       : this.vscode.TreeItemCollapsibleState.Collapsed;
-    const item = new this.vscode.TreeItem(element.label, collapsible);
+    const object=element.object;
+    const name=object?.sourceName!==object?.sourceId ? object?.sourceName : '';
+    const display=object && !['skill','public'].includes(object.sourceType) ?
+      sourceTreeIdentity(name,object.funId || object.sourceId,element.label)
+      : sourceTreeIdentity(element.label,element.code,element.label);
+    const item = new this.vscode.TreeItem(display.label, collapsible);
+    if(display.code)item.guthonCode=display.code;
     item.description = element.description;
     item.tooltip = element.tooltip;
-    item.iconPath = new this.vscode.ThemeIcon(element.icon || 'file-code');
+    let owner=element;
+    while(owner && !owner.category)owner=owner.parent;
+    item.iconPath = sourceTreeIcon(this.vscode,owner?.category,element.icon);
     item.resourceUri = this._treeUri(element);
     if (['document', 'object', 'fragment'].includes(element.kind)) {
       item.contextValue = element.object?.sourceType === 'procedure'
         ? 'guthonSvnProcedure'
+        : element.kind==='fragment' && element.parent?.object?.sourceType==='page' && element.fragment?.scriptType!=='fields'
+          ? 'guthonSvnPageFragment'
         : element.object?.sourceType === 'page'
           && String(element.object?.sourcePath || '').toLowerCase().endsWith('.json')
           ? 'guthonSvnPage'
         : 'guthonSvnSource';
     }
+    if(['category','directory'].includes(element.kind))item.contextValue='guthonSvnContainer';
     if (element.command) item.command = element.command;
     return item;
   }
@@ -409,6 +410,40 @@ class SvnCatalogTreeProvider {
     if (element.kind === 'workspace') {
       return this._workspaceChildren(element);
     }
+    if(element.referenceFiles && !element.children) {
+      if(!element.loading)element.loading=Promise.all(element.referenceFiles.map(async object=>{
+        const result=await this.backend.fragments(element.workspaceKey,object);
+        return result.fragments.map(fragment=>({object,fragment}));
+      })).then(results=>{
+        const compare=(a,b)=>a.localeCompare(b,'en',{numeric:true});
+        const entries=results.flat().sort((left,right)=>compareDatasourceIds(left.fragment.dataSourceId,right.fragment.dataSourceId)
+          || compare(left.fragment.code || '',right.fragment.code || '')
+          || left.fragment.label.localeCompare(right.fragment.label,'zh-CN'));
+        const groups=new Map(), children=[];
+        for(const {object,fragment} of entries) {
+          let parent=element;
+          const id=fragment.dataSourceId;
+          if(element.category==='bill-type' && id) {
+            if(!groups.has(id)) {
+              const group={kind:'directory',label:element.datasourceNames.get(id) || id,code:id,icon:'folder',
+                workspaceKey:element.workspaceKey,parent:element,children:[]};
+              groups.set(id,group);children.push(group);
+            }
+            parent=groups.get(id);
+          }
+          const row={kind:'fragment',label:fragment.label,code:fragment.code,icon:'json',
+            tooltip:[object.sourcePath,fragment.code,fragment.jsonPointer].filter(Boolean).join(' · '),parent,
+            workspaceKey:element.workspaceKey,fragment,command:{command:'gushenCompletion.openSvnDocument',
+              title:'查看 SVN 参考条目',arguments:[{...fragmentIdentity(element.workspaceKey,object,fragment),documentName:fragment.label}]}};
+          (parent===element?children:parent.children).push(row);
+        }
+        if(element.byName)children.sort((left,right)=>left.label.localeCompare(right.label,'zh-CN'));
+        element.description=String(entries.length);
+        return element.children=children.length?children:[{kind:'message',label:'没有可读取的参考条目',parent:element}];
+      }).catch(error=>[{kind:'message',label:`读取参考条目失败：${error.message}`,parent:element}])
+        .finally(()=>{element.loading=undefined;});
+      return element.loading;
+    }
     if (element.kind === 'category' || element.kind === 'directory') {
       if (element.children.some((child) => child.kind === 'source')) {
         element.children = this._decorateChildren(element.children, element, element.workspaceKey);
@@ -417,6 +452,11 @@ class SvnCatalogTreeProvider {
     }
     if (element.kind === 'object') {
       if (element.children) return element.children;
+      const raw = element.object.referenceCategory ? [{
+        kind:'document',label:'查看原始 JSON',icon:'json',parent:element,
+        command:{command:'gushenCompletion.openSvnDocument',title:'查看原始 JSON',
+          arguments:[{...fragmentIdentity(element.workspaceKey,element.object),documentName:element.object.sourceName}]},
+      }] : [];
       if (!Array.isArray(element.object.fragments)) {
         const identity = {
           sourceType: element.object.sourceType,
@@ -425,11 +465,17 @@ class SvnCatalogTreeProvider {
         };
         const workingCopyId = element.object.workingCopyId || element.object.scopeEntryId || '';
         if (workingCopyId) identity.workingCopyId = workingCopyId;
-        const result = await this.backend.fragments(element.workspaceKey, identity);
-        element.object.fragments = result.fragments || [];
+        try {
+          const result = await this.backend.fragments(element.workspaceKey, identity);
+          element.object.fragments = result.fragments || [];
+        } catch(error) {
+          if(!raw.length)throw error;
+          return [...raw,{kind:'message',label:`JSON 条目读取失败：${error.message}`,icon:'warning',parent:element}];
+        }
       }
       const fragments = [...element.object.fragments].sort(compareFragmentType);
       if (!fragments.length) {
+        if (raw.length) return element.children=raw;
         element.children = [{
           kind: 'message',
           label: '无受控分块（原文件可在资源管理器查看）',
@@ -438,7 +484,7 @@ class SvnCatalogTreeProvider {
         }];
         return element.children;
       }
-      element.children = fragments.map((fragment) => ({
+      element.children = [...raw,...fragments.map((fragment) => ({
         kind: 'fragment',
         label: fragmentLabel(fragment),
         tooltip: fragment.jsonPointer || fragment.label,
@@ -446,6 +492,7 @@ class SvnCatalogTreeProvider {
           ? 'database'
           : fragment.scriptType === 'fields'
             ? 'symbol-field'
+            : fragment.scriptType === 'json' ? 'json'
             : ['gss', 'vm'].includes(fragment.scriptType)
               ? 'symbol-method'
               : 'symbol-event',
@@ -455,9 +502,10 @@ class SvnCatalogTreeProvider {
         command: {
           command: 'gushenCompletion.openSvnDocument',
           title: '打开 SVN 源码分块',
-          arguments: [fragmentIdentity(element.workspaceKey, element.object, fragment)],
+          arguments: [{...fragmentIdentity(element.workspaceKey, element.object, fragment),
+            ...(fragment.scriptType==='json' ? {documentName:fragment.label} : {})}],
         },
-      }));
+      }))];
       return element.children;
     }
     return [];
@@ -486,10 +534,7 @@ class SvnCatalogTreeProvider {
 module.exports = {
   buildSourceTree,
   compareTreeOrder,
-  CATEGORY_ICONS,
-  CATEGORY_LABELS,
   compareFragmentType,
-  SOURCE_ICONS,
   SvnCatalogTreeProvider,
   fragmentLabel,
   groupCatalog,

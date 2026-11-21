@@ -2,6 +2,14 @@
   "schemaVersion": 1,
   "defaultTimeoutMs": 120000,
   "commands": {
+    "lint": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "configuration-info": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
     "workspace-summary": {
       "kind": "read",
       "timeoutMs": 120000
@@ -102,7 +110,9 @@
     "index-compact": {
       "kind": "read",
       "timeoutMs": 1800000,
-      "writeFlags": ["--apply"]
+      "writeFlags": [
+        "--apply"
+      ]
     },
     "command-metadata": {
       "kind": "read",
@@ -143,10 +153,6 @@
         "--case-out",
         "--output"
       ]
-    },
-    "search-all": {
-      "kind": "read",
-      "timeoutMs": 120000
     },
     "parser-feedback": {
       "kind": "write",
@@ -202,15 +208,15 @@
       "kind": "write",
       "timeoutMs": 120000
     },
+    "workspace-source-mode": {
+      "kind": "write",
+      "timeoutMs": 15000
+    },
+    "workspace-source-settings": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
     "workspace-delete": {
-      "kind": "write",
-      "timeoutMs": 120000
-    },
-    "svn-login-configure": {
-      "kind": "write",
-      "timeoutMs": 120000
-    },
-    "import-svn-scope": {
       "kind": "write",
       "timeoutMs": 120000
     },
@@ -218,19 +224,7 @@
       "kind": "write",
       "timeoutMs": 120000
     },
-    "source-mode": {
-      "kind": "write",
-      "timeoutMs": 120000
-    },
     "init": {
-      "kind": "write",
-      "timeoutMs": 120000
-    },
-    "svn": {
-      "kind": "write",
-      "timeoutMs": 120000
-    },
-    "pull": {
       "kind": "write",
       "timeoutMs": 120000
     },
@@ -255,14 +249,6 @@
       "timeoutMs": 120000
     },
     "diagnose": {
-      "kind": "write",
-      "timeoutMs": 120000
-    },
-    "create-workcopy": {
-      "kind": "write",
-      "timeoutMs": 120000
-    },
-    "workcopy": {
       "kind": "write",
       "timeoutMs": 120000
     },
@@ -299,6 +285,226 @@
       "kind": "write",
       "timeoutMs": 120000,
       "canonicalCommand": "init"
+    },
+    "api": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "svn": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "pull": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "workcopy": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "create-workcopy": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "legacy-source": {
+      "kind": "read",
+      "writeArguments": ["edit-save","sync-node"],
+      "timeoutMs": 120000
+    }
+  },
+  "configIdPattern": "[A-Za-z0-9][A-Za-z0-9._-]*",
+  "commandAliases": {
+    "source-sync": "sync-source",
+    "source-sync-full": "sync-source-all",
+    "workspace-sync": "sync-all",
+    "index-rebuild": "reindex",
+    "index-init": "init"
+  },
+  "apiActions": {
+    "configure": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "login": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "logout": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "session": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "captcha": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "systems": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "data-sources": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "pull": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "scope-apply": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "refresh": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "status": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "catalog": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "read": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "write": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "diff": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "revert": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "upload": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "sync-database": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "index": {
+      "kind": "write",
+      "timeoutMs": 1800000,
+      "cancellable": true
+    },
+    "search": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "context": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "callers": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "facts": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "explain": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "inheritance": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "inherited-write": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "page": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "view": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "designer-context": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "editor-state": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "history": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "operation": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "conflict": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "resolve-conflict": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "create-function": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "system-menu": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "verify-upload": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "export-changes": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "import-changes": {
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "platform-request": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "page-lifecycle": {
+      "kind": "write",
+      "timeoutMs": 180000
+    },
+    "source-batch": {
+      "kind": "write",
+      "timeoutMs": 600000
+    },
+    "read-batch": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "document": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
+    "index-health": {
+      "kind": "read",
+      "timeoutMs": 120000
+    },
+    "table-references": {
+      "kind": "read",
+      "timeoutMs": 120000
     }
   },
   "svnActions": {
@@ -345,6 +551,12 @@
     "refresh": {
       "summary": "更新本地 working copy，并按变更增量刷新索引",
       "options": "[--merge-local] [--working-copy <id>]... [--path <逻辑路径>] [--prune]",
+      "kind": "write",
+      "timeoutMs": 1800000
+    },
+    "refresh-node": {
+      "summary": "更新 SVN 源码节点的精确文件和目录",
+      "stdin": "{\"paths\":[\"逻辑路径\"]}",
       "kind": "write",
       "timeoutMs": 1800000
     },
@@ -567,14 +779,10 @@
       "options": "JSON stdin: {\"paths\":[\"<逻辑路径>\", ...]}，1..1000 个路径",
       "kind": "write",
       "timeoutMs": 120000
+    },
+    "scm-session": {
+      "kind": "write",
+      "timeoutMs": 120000
     }
-  },
-  "configIdPattern": "[A-Za-z0-9][A-Za-z0-9._-]*",
-  "commandAliases": {
-    "source-sync": "sync-source",
-    "source-sync-full": "sync-source-all",
-    "workspace-sync": "sync-all",
-    "index-rebuild": "reindex",
-    "index-init": "init"
   }
 }

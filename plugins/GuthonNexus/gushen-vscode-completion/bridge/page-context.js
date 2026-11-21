@@ -1,6 +1,8 @@
 const crypto = require('node:crypto');
+const {metadataTarget} = require('./native-metadata');
 
-const WORKSPACE = /^(products|projects)\.[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+const WORKSPACE = /^[A-Za-z0-9][A-Za-z0-9._-]*$(?![\s\S])/;
+const isWorkspaceKey = value => typeof value === 'string' && WORKSPACE.test(value);
 const CLIENT = /^[a-zA-Z0-9-]{16,80}$/;
 const PAGE = /^PG-[A-Za-z0-9-]{1,96}$/;
 const ALIAS = /^[A-Za-z_$][A-Za-z0-9_.$]{0,255}$/;
@@ -28,7 +30,7 @@ function lifecycleTarget(value) {
 }
 
 function snapshot(payload) {
-  if (!WORKSPACE.test(payload?.workspaceKey) || !CLIENT.test(payload?.clientId)
+  if (!isWorkspaceKey(payload?.workspaceKey) || !CLIENT.test(payload?.clientId)
       || !Number.isInteger(payload.tabId) || payload.tabId < 0) throw new Error('页面快照缺少有效工作区或页签身份');
   const origin = new URL(payload.pageOrigin);
   if (!['https:', 'http:'].includes(origin.protocol) || origin.origin !== payload.pageOrigin) throw new Error('页面来源无效');
@@ -84,7 +86,7 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     return item;
   }
   function list(workspaceKey) {
-    if (!WORKSPACE.test(workspaceKey)) throw new Error('必须指定有效 workspaceKey');
+    if (!isWorkspaceKey(workspaceKey)) throw new Error('必须指定有效 workspaceKey');
     expire(); return [...contexts.values()].filter(item => item.workspaceKey === workspaceKey);
   }
   function remove(clientId, tabId) {
@@ -99,14 +101,15 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
   }
   function dispatch(payload, lifecycle = false) {
     const context = get(payload.contextId, payload.workspaceKey);
-    const target = lifecycle ? lifecycleTarget(payload.target) : navigationTarget(payload.target);
+    const metadata = lifecycle === 'metadata';
+    const target = metadata ? metadataTarget(payload.target) : lifecycle ? lifecycleTarget(payload.target) : navigationTarget(payload.target);
     if (![...subscribers].some(s => s.clientId === context.clientId && !s.res.destroyed)) throw new Error('浏览器事件连接未就绪，请刷新平台页签');
     if (commands.size >= 64) throw new Error('浏览器定位请求过多，请等待完成');
     const item = {requestId: crypto.randomUUID(), contextId: context.contextId, clientId: context.clientId,
       tabId: context.tabId, workspaceKey: context.workspaceKey, pageOrigin: context.pageOrigin,
       target, state: 'PENDING', expiresAt: now() + (lifecycle ? 120000 : commandTtlMs)};
     commands.set(item.requestId, item);
-    emit(lifecycle ? 'page-lifecycle' : 'navigate', item, s => s.clientId === context.clientId);
+    emit(metadata ? 'native-metadata' : lifecycle ? 'page-lifecycle' : 'navigate', item, s => s.clientId === context.clientId);
     return {ok: true, requestId: item.requestId, state: item.state};
   }
   function result(payload) {
@@ -114,7 +117,7 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     const item = commands.get(payload.requestId);
     if (!item || item.workspaceKey !== payload.workspaceKey) throw new Error('定位请求已过期或不属于目标工作区；禁止自动重放');
     return {ok: true, requestId: item.requestId, state: item.state, message: item.message || '',
-      ...(item.target.type === 'page-lifecycle' ? {data: item.data || null} : {})};
+      ...(['page-lifecycle','native-metadata'].includes(item.target.type) ? {data: item.data || null} : {})};
   }
   function complete(payload) {
     expire();
@@ -127,11 +130,15 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
       item.data = Object.fromEntries(['state','action','page','sourceVersion','modules','systemIds','message','platformApplied']
         .filter(key => payload.data[key] !== undefined).map(key => [key,payload.data[key]]));
     }
+    if (item.target.type === 'native-metadata' && payload.data && JSON.stringify(payload.data).length <= 32000) {
+      item.data = Object.fromEntries(['state','action','field','snapshot','before','after','changed','message','platformApplied','pageId','sourceVersion','projectionCount','guidFlags','autoCompileRequested','savedVersion','runtimePath','scripts']
+        .filter(key => payload.data[key] !== undefined).map(key => [key,payload.data[key]]));
+    }
     emit('navigation-result', result(item), s => s.workspaceKey === item.workspaceKey);
     return result(item);
   }
   function subscribe(res, filter) {
-    if (!(CLIENT.test(filter.clientId || '') || WORKSPACE.test(filter.workspaceKey || ''))
+    if (!(CLIENT.test(filter.clientId || '') || isWorkspaceKey(filter.workspaceKey))
         || (filter.clientId && filter.workspaceKey)) throw new Error('事件订阅需要唯一 clientId 或 workspaceKey');
     if (subscribers.size >= 32) throw new Error('事件订阅容量已满');
     // A worker reconnect replaces its prior stream. Pending commands are never replayed.
@@ -143,7 +150,7 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     res.on('close', () => {clearInterval(heartbeat); subscribers.delete(subscriber);});
   }
   function dispose() {for (const s of subscribers) s.res.end(); subscribers.clear();}
-  return {publish, list, remove, get, navigate: payload => dispatch(payload), lifecycle: payload => dispatch(payload, true), result, complete, subscribe, expire, dispose};
+  return {publish, list, remove, get, navigate: payload => dispatch(payload), lifecycle: payload => dispatch(payload, true), metadata: payload => dispatch(payload,'metadata'), result, complete, subscribe, expire, dispose};
 }
 
-module.exports = {createPageContexts, snapshot, navigationTarget};
+module.exports = {createPageContexts, snapshot, navigationTarget, isWorkspaceKey};

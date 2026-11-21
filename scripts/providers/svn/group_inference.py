@@ -54,6 +54,18 @@ def _name_score(system_name: str, datasource_name: str) -> float:
     return SequenceMatcher(None, system, datasource).ratio()
 
 
+def match_datasource_name(system_name: str, names_by_id: dict[str, str]) -> tuple[str, float] | None:
+    """Return a strong, unambiguous name match for one system."""
+    ranked = sorted(((_name_score(system_name, name), key) for key, name in names_by_id.items()), reverse=True)
+    if not ranked:
+        return None
+    best_score, key = ranked[0]
+    runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
+    if best_score >= 0.82 and best_score - runner_up >= 0.12:
+        return key, best_score
+    return None
+
+
 def _index_text(root: Path, category: str) -> str:
     index_path = root / ("pages/index.md" if category == "systems" else "procedures/index.md")
     try:
@@ -104,14 +116,13 @@ def infer_groups(checkout_root: Path, working_copies: list[dict]) -> dict:
     matches = {}
     assigned_datasources = set()
     unresolved = []
+    datasource_by_id = {item["id"]: item for item in datasources}
+    names_by_id = {key: item["name"] for key, item in datasource_by_id.items()}
     for system in systems:
-        ranked = sorted(
-            ((_name_score(system["name"], datasource["name"]), datasource) for datasource in datasources),
-            key=lambda item: (-item[0], item[1]["id"]),
-        )
-        best_score, best = ranked[0] if ranked else (0.0, None)
-        runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
-        if best is not None and best_score >= 0.82 and best_score - runner_up >= 0.12:
+        name_match = match_datasource_name(system["name"], names_by_id)
+        if name_match:
+            data_source_id, best_score = name_match
+            best = datasource_by_id[data_source_id]
             matches[system["id"]] = {
                 "dataSourceId": best["id"],
                 "systemName": system["name"],

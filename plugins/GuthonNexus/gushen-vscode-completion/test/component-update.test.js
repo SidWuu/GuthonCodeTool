@@ -19,6 +19,13 @@ test('three-component catalog is signed; versions and per-file hashes cannot be 
   f.data[CATALOG_ASSET] = Buffer.from(JSON.stringify({ ...f.catalog, releaseVersion: '99.0.0' }));
   await assert.rejects(f.signed(), /哈希/);
 });
+test('signed catalog accepts the previous macOS archive and uses its signed asset during preparation', async t => {
+  const f = fixture(t, { legacyMac: true });
+  const verified = await f.signed();
+  const plan = [{ id: 'tool', update: true }];
+  const result = await prepareUpdate(verified, plan, f.root, { platform: 'darwin', arch: 'arm64', downloader: f.downloader });
+  assert.deepEqual(Object.keys(result.files), ['GuthonCodeTool-macos-arm64.zip']);
+});
 test('missing mirror assets and missing catalog fail before any install', async t => {
   const f = fixture(t); f.release.assets = f.release.assets.filter(item => item.name !== ASSETS.nexus);
   await assert.rejects(f.signed(), /缺少/);
@@ -114,12 +121,13 @@ test('daily check uses local calendar days, retries failures, and changing sourc
   assert.equal(supportsEditor('^1.75.0', '1.105.0'), true);
   assert.equal(supportsEditor('^1.75.0', '1.74.0'), false);
 });
-test('release catalog builder reads actual packaged component versions', t => {
-  const f = fixture(t), assets = path.join(f.root, 'release'); fs.mkdirSync(assets);
-  for (const name of Object.values(ASSETS)) fs.writeFileSync(path.join(assets, name), f.data[name]);
+for (const legacyMac of [false, true]) test(`release catalog builder reads packaged component versions with legacyMac=${legacyMac}`, t => {
+  const f = fixture(t, { legacyMac }), assets = path.join(f.root, 'release'); fs.mkdirSync(assets);
+  for (const name of Object.keys(f.catalog.assets)) fs.writeFileSync(path.join(assets, name), f.data[name]);
   const script = path.resolve(__dirname, '../../../../scripts/build_release_catalog.mjs');
   execFileSync(process.execPath, [script, '--release-dir', assets, '--version', '0.4.0']);
   const built = JSON.parse(fs.readFileSync(path.join(assets, CATALOG_ASSET)));
   assert.equal(built.components.nexus.version, '2.5.0');
   assert.equal(built.components.bridge.protocolVersion, 2);
+  assert.deepEqual(built.assets, f.catalog.assets);
 });

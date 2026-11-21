@@ -1,7 +1,15 @@
 const { spawn } = require('node:child_process');
 const { toolArguments } = require('./tool-runtime');
 
-function readWorkspaces(tool, spawnProcess = spawn) {
+function workspaceSnapshot(payload) {
+  if(payload?.ok!==true || !Array.isArray(payload.workspaces))throw new Error('缺少 ok=true 或 workspaces 数组');
+  const configErrors=payload.configErrors ?? [];
+  if(!Array.isArray(configErrors) || configErrors.some(item=>!item || typeof item.workspaceKey!=='string'
+    || typeof item.code!=='string' || typeof item.message!=='string'))throw new Error('configErrors 必须为项目诊断数组');
+  return {workspaces:payload.workspaces,configErrors};
+}
+
+function readWorkspaceRegistry(tool, spawnProcess = spawn) {
   return new Promise((resolve, reject) => {
     const child = spawnProcess(tool.toolPath, toolArguments(tool, 'workspaces'), { shell: false });
     let stdout = '';
@@ -12,11 +20,7 @@ function readWorkspaces(tool, spawnProcess = spawn) {
     child.on('close', (code) => {
       if (code) return reject(new Error((stderr || stdout || `退出码 ${code}`).trim()));
       try {
-        const payload = JSON.parse(stdout);
-        if (payload?.ok !== true || !Array.isArray(payload.workspaces)) {
-          throw new Error('缺少 ok=true 或 workspaces 数组');
-        }
-        resolve(payload.workspaces);
+        resolve(workspaceSnapshot(JSON.parse(stdout)));
       } catch (error) {
         reject(new Error(`工作区列表无效：${error.message}`));
       }
@@ -24,8 +28,13 @@ function readWorkspaces(tool, spawnProcess = spawn) {
   });
 }
 
+// Preserve existing list consumers; the shared registry also retains diagnostics.
+function readWorkspaces(tool, spawnProcess = spawn) {
+  return readWorkspaceRegistry(tool, spawnProcess).then(result => result.workspaces);
+}
+
 class WorkspaceRegistry {
-  constructor(read = readWorkspaces) {
+  constructor(read = readWorkspaceRegistry) {
     this.read = read;
     this.key = '';
     this.value = undefined;
@@ -34,6 +43,10 @@ class WorkspaceRegistry {
   }
 
   get(tool) {
+    return this.getSnapshot(tool).then(result => result.workspaces);
+  }
+
+  getSnapshot(tool) {
     const key = JSON.stringify([tool.toolPath, tool.toolEntry || '', tool.toolHome]);
     if (this.key !== key) {
       this.invalidate();
@@ -62,4 +75,4 @@ class WorkspaceRegistry {
   }
 }
 
-module.exports = { readWorkspaces, WorkspaceRegistry };
+module.exports = { readWorkspaces, readWorkspaceRegistry, workspaceSnapshot, WorkspaceRegistry };

@@ -4,11 +4,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { zip, rules } = require('./update-fixture');
-const { localRelease, prepareLocalUpdate } = require('../src/local-update');
+const { localRelease, prepareLocalUpdate, findVsce } = require('../src/local-update');
 const { packageFingerprint, chromeFiles } = require('../src/extension-package');
 const { updatePlan, applyUpdate, managedChrome } = require('../src/component-update');
 const { createUpdateCenter } = require('../src/update-center');
 const { extensionBuildInfo } = require('../src/extension-build');
+const { readArchive } = require('../src/update-archive');
+const { ASSETS } = require('../src/release-catalog');
 function fixture(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-local-update-')); t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const source = path.join(home, 'source'), nexus = path.join(source, 'plugins/GuthonNexus/gushen-vscode-completion'), chrome = path.join(source, 'plugins/GuthonBridge/extension');
@@ -22,7 +24,10 @@ function fixture(t) {
   write('plugins/GuthonBridge/bridge/server.js', 'const CLIENT="../../GuthonNexus/gushen-vscode-completion/src/tool-process-client";');
   write('plugins/GuthonBridge/bridge/page-context.js', 'local contexts');
   write('plugins/GuthonBridge/bridge/browser-updates.js', 'local updates');
-  write('scripts/common/command_metadata.json', '{"schemaVersion":1,"defaultTimeoutMs":1000,"commands":{},"svnActions":{}}');
+  for (const name of ['native-metadata.js', 'native-step-registry.js', 'native-source-plan.js']) {
+    write('plugins/GuthonBridge/bridge/' + name, 'local ' + name);
+  }
+  write('scripts/common/command_metadata.json', '{"schemaVersion":1,"defaultTimeoutMs":1000,"commands":{},"apiActions":{}}');
   write('plugins/GuthonBridge/extension/manifest.json', '{"name":"Guthon Bridge","manifest_version":3,"version":"0.3.1"}');
   write('plugins/GuthonBridge/extension/background.js', 'local chrome');
   write('plugins/GuthonBridge/extension/host-settings.js', 'globalThis.GuthonBridgeHostSettings = ' + JSON.stringify(rules) + ';');
@@ -73,6 +78,40 @@ test('local build snapshots use installed tools, apply plugin files and never re
   assert.equal(fs.existsSync(path.join(f.nexus, 'guthon-nexus-vscode.vsix')), false);
   const managed = managedChrome(path.join(f.home, 'updates'));
   assert.equal(packageFingerprint(chromeFiles(managed.directory), new Set(['host-settings.js'])), local.catalog.components.bridge.buildId);
+});
+test('local snapshot fingerprints the exact installed JSONC runtime and rejects missing or mismatched dependencies', t => {
+  const f=fixture(t),manifestPath=path.join(f.nexus,'package.json'),manifest=JSON.parse(fs.readFileSync(manifestPath));
+  manifest.dependencies={'jsonc-parser':'3.3.1'};fs.writeFileSync(manifestPath,JSON.stringify(manifest));
+  assert.throws(()=>localRelease(f.source),/缺少 Nexus 运行依赖.*npm ci/);
+  const dependencyRoot=path.join(f.nexus,'node_modules','jsonc-parser');
+  fs.cpSync(path.dirname(require.resolve('jsonc-parser/package.json')),dependencyRoot,{recursive:true});
+  const local=localRelease(f.source),original=local.catalog.components.nexus.buildId;
+  assert.ok(local.nexusFiles.has('node_modules/jsonc-parser/lib/umd/main.js'));
+  assert.ok(local.nexusFiles.has('node_modules/jsonc-parser/LICENSE.md'));
+  const code=path.join(dependencyRoot,'lib/umd/impl/edit.js');fs.appendFileSync(code,'\n// changed runtime\n');
+  assert.notEqual(localRelease(f.source).catalog.components.nexus.buildId,original);
+  fs.rmSync(code);assert.throws(()=>localRelease(f.source),/运行依赖 jsonc-parser 不完整/);
+  const depManifest=path.join(dependencyRoot,'package.json'),dependency=JSON.parse(fs.readFileSync(depManifest));
+  dependency.version='0.0.0';fs.writeFileSync(depManifest,JSON.stringify(dependency));
+  fs.writeFileSync(code,'');assert.throws(()=>localRelease(f.source),/版本或入口不匹配/);
+});
+test('real local VSIX includes and loads the JSONC runtime and its license', async t => {
+  const f=fixture(t);let packager;
+  try {packager=findVsce(f.source);} catch {t.skip('installed vsce is unavailable');return;}
+  const manifestPath=path.join(f.nexus,'package.json'),manifest=JSON.parse(fs.readFileSync(manifestPath));
+  manifest.dependencies={'jsonc-parser':'3.3.1'};manifest.main='./src/main.js';manifest.activationEvents=['onStartupFinished'];fs.writeFileSync(manifestPath,JSON.stringify(manifest));
+  fs.cpSync(path.dirname(require.resolve('jsonc-parser/package.json')),path.join(f.nexus,'node_modules','jsonc-parser'),{recursive:true});
+  fs.writeFileSync(path.join(f.nexus,'src/main.js'),"module.exports=()=>require('jsonc-parser').parse('{/*comment*/\\\"answer\\\":42,}');\n");
+  const local=localRelease(f.source),prepared=await prepareLocalUpdate(local,[{id:'nexus',update:true}],path.join(f.home,'updates'),{packager});
+  const entries=readArchive(prepared.files[ASSETS.nexus]);
+  assert.ok(entries.has('extension/node_modules/jsonc-parser/LICENSE.md'));
+  for(const [name,bytes] of local.nexusFiles) if(name.startsWith('node_modules/jsonc-parser/')) assert.deepEqual(entries.get('extension/'+name)?.data(),bytes,name);
+  const installed=path.join(f.home,'extracted');
+  for(const [name,entry] of entries) if(name.startsWith('extension/') && !entry.directory) {
+    const target=path.join(installed,name.slice('extension/'.length));fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,entry.data());
+  }
+  assert.deepEqual(require(path.join(installed,'src/main.js'))(),{answer:42});
+  assert.equal(extensionBuildInfo(installed).buildId,local.catalog.components.nexus.buildId);
 });
 test('same-version local installation becomes active after reload despite editor metadata', async t => {
   const f = fixture(t), local = localRelease(f.source), installed = path.join(f.home, 'installed');

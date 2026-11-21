@@ -277,6 +277,12 @@ def cache_authentication(workspace: dict, password: str) -> dict:
 
     if not isinstance(password, str) or not password:
         raise SystemExit("SVN password must not be empty")
+    settings = workspace["svn"]
+    if settings.get("checkoutLayout") == "legacy-sparse":
+        if not settings["repositoryUrl"]:
+            raise SystemExit("请先配置 SVN 仓库地址，再验证登录")
+        run_remote_svn(["info", settings["repositoryUrl"]], settings, password=password)
+        return {"ok": True, "action": "authentication-cached", "workspaceKey": workspace["workspaceKey"]}
     script_path, manifest_path, config_path = _paths(workspace)
     result, _source = _build_workspace_manifest(workspace, script_path, config_path)
     entries = result.manifest.get("entries") or []

@@ -35,8 +35,9 @@ class ToolHostRequests:
                 if isinstance(request, dict):
                     command, args = request.get('command'), request.get('args', [])
                     if isinstance(args, list) and all(isinstance(item, str) for item in args):
-                        registry = self.metadata['svnActions'] if command == 'svn' else self.metadata['commands']
-                        key = args[0] if command == 'svn' and args else command
+                        group = 'apiActions' if command == 'api' else 'svnActions' if command == 'svn' else None
+                        registry = self.metadata[group] if group else self.metadata['commands']
+                        key = args[0] if group and args else command
                         if isinstance(key, str):
                             control.supported = registry.get(key, {}).get('cancellable', False)
                 if isinstance(identifier, str):

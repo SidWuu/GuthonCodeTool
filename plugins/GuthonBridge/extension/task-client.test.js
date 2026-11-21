@@ -23,17 +23,17 @@ function fixture(){
  return {client,storage,jobs,get submissions(){return submissions;},set loseAck(value){loseAck=value;}};
 }
 test('short worker requests survive service-worker teardown between submission and every poll',async()=>{
- const f=fixture();const result=await f.client().run('pull-hub-source',{workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',alias:'demo',funId:'save'});
+ const f=fixture();const result=await f.client().run('refresh-api-source',{workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',alias:'demo',funId:'save'});
  assert.equal(result.ok,true);assert.equal(f.submissions,1);assert.deepEqual(f.storage.guthonBridgePendingJobs,{});
  assert.equal(f.storage.guthonBridgeRecentPulls.length,1);
 });
 test('lost acknowledgment and popup reload resume only the durable request without resubmitting writes',async()=>{
- const f=fixture();f.loseAck=true;const result=await f.client().run('pull-hub-source',{workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',alias:'demo',funId:'save'});
+ const f=fixture();f.loseAck=true;const result=await f.client().run('refresh-api-source',{workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',alias:'demo',funId:'save'});
  assert.equal(result.taskPending,true);assert.equal(f.submissions,1);assert.equal(Object.keys(f.storage.guthonBridgePendingJobs).length,1);
  const resumed=await f.client().resume();assert.equal(resumed[0].ok,true);assert.equal(f.submissions,1);
 });
 test('server restart unknown is surfaced and never automatically replays a write',async()=>{
- const f=fixture();f.loseAck=true;await f.client().run('export-view-sql',{workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',viewIds:['view1']});
+ const f=fixture();f.loseAck=true;await f.client().run('refresh-api-source',{workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',sourceType:'view',sourceId:'view1',dataSourceId:'DS-1'});
  for(const job of f.jobs.values())job.state='UNKNOWN';
  const result=await f.client().resume();assert.equal(result[0].resultUnknown,true);assert.equal(f.submissions,1);
  assert.equal((f.storage.guthonBridgeRecentPulls||[]).length,0);
@@ -41,17 +41,17 @@ test('server restart unknown is surfaced and never automatically replays a write
 
 test('explicit recent-target pull creates a new task without reusing force or confirmation',async()=>{
  const f=fixture();
- await f.client().run('pull-hub-source',{workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',alias:'demo.pkg',funId:'save',force:true,confirmation:'products.demo'});
+ await f.client().run('refresh-api-source',{workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',alias:'demo.pkg',funId:'save',force:true,confirmation:'products.demo'});
  const request=require('./task-history').replay(f.storage.guthonBridgeRecentPulls[0],'https://gusen.steel56.com.cn');
  await f.client().run(request.type,request.payload);
  assert.equal(f.submissions,2);
  const latest=[...f.jobs.values()].at(-1);
- assert.equal(latest.payload.force,false);assert.equal(latest.payload.confirmation,undefined);
+ assert.equal(latest.payload.force,undefined);assert.equal(latest.payload.confirmation,undefined);
  assert.equal(latest.workspaceKey,'products.demo');
 });
 
 test('concurrent identical button requests share the persisted operation identity',async()=>{
  const f=fixture();const client=f.client();const payload={workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',alias:'demo',funId:'save'};
- const results=await Promise.all([client.run('pull-hub-source',payload),client.run('pull-hub-source',payload)]);
+ const results=await Promise.all([client.run('refresh-api-source',payload),client.run('refresh-api-source',payload)]);
  assert.ok(results.every(result=>result.ok));assert.equal(f.submissions,1);
 });

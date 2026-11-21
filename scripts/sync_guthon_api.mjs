@@ -35,8 +35,9 @@ function resolveToolHome(explicit) {
 
 function toolDataPaths(toolHome) {
   return {
-    apiDir: path.join(toolHome, 'var', 'docs', '谷神方言API'),
-    syncConfigPath: path.join(toolHome, 'config', 'sync.yaml'),
+    apiDir: path.join(toolHome, 'var', 'nexus', 'api-reference', '谷神方言API'),
+    syncConfigPath: fs.existsSync(path.join(toolHome,'config','guthon.json'))
+      ? path.join(toolHome,'config','guthon.json') : path.join(toolHome, 'config', 'sync.yaml'),
   };
 }
 
@@ -50,6 +51,15 @@ function unquote(value) {
 
 function loadApiConfig(filePath, toolHome) {
   if (!toolHome) throw new Error('缺少 toolHome，无法解析 guthon_api bundle 路径');
+  if(path.basename(filePath)==='guthon.json') {
+    const document=JSON.parse(fs.readFileSync(filePath,'utf8'));
+    const config=document.sync?.guthon_api;
+    const activeVersion=String(config?.active_version ?? '');
+    if(![2,3].includes(document.schemaVersion) || !/^[A-Za-z0-9._-]+$/.test(activeVersion))throw new Error('单一配置缺少有效的 guthon_api.active_version');
+    const configuredFile=config.bundle_files?.[`v${activeVersion.replace(/\./g,'_')}`];
+    if(typeof configuredFile!=='string' || !configuredFile)throw new Error(`未配置谷神 ${config.active_version} 的 bundle_file`);
+    return {activeVersion,bundleFile:path.resolve(toolHome,configuredFile)};
+  }
   // ponytail: only this small sync.yaml section is needed; use a YAML package if it grows.
   const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
   let inApi = false;
@@ -432,7 +442,12 @@ function selfTest() {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-api-home-'));
   try {
     const { apiDir, syncConfigPath } = toolDataPaths(tempHome);
-    assert.equal(apiDir, path.join(tempHome, 'var', 'docs', '谷神方言API'));
+    assert.equal(apiDir, path.join(tempHome, 'var', 'nexus', 'api-reference', '谷神方言API'));
+    const teamDocs = path.join(tempHome, 'var', 'docs', '谷神方言API');
+    assert.notEqual(apiDir, teamDocs);
+    fs.mkdirSync(teamDocs, {recursive:true});
+    fs.writeFileSync(path.join(teamDocs,'java.md'),'team managed reference');
+    assert.equal(fs.readFileSync(path.join(teamDocs,'java.md'),'utf8'),'team managed reference');
     assert.equal(syncConfigPath, path.join(tempHome, 'config', 'sync.yaml'));
     fs.mkdirSync(path.dirname(syncConfigPath), { recursive: true });
     fs.writeFileSync(
@@ -443,6 +458,10 @@ function selfTest() {
     assert.equal(loaded.activeVersion, '2.0');
     // bundle 路径相对 toolHome 解析，不再相对源码仓库解析。
     assert.equal(loaded.bundleFile, path.join(tempHome, 'var/docs/private/guthon-api/2.0/app.js'));
+    const unified=path.join(tempHome,'config','guthon.json');
+    fs.writeFileSync(unified,JSON.stringify({schemaVersion:2,sync:{guthon_api:{active_version:'2.0',bundle_files:{v2_0:'var/docs/private/guthon-api/2.0/app.js'}}}}));
+    assert.equal(toolDataPaths(tempHome).syncConfigPath,unified);
+    assert.deepEqual(loadApiConfig(unified,tempHome),loaded);
     assert.equal(changedContents(new Map([
       [path.join(apiDir, 'custom.md'), Buffer.from('不得覆盖')],
     ]), [path.join(apiDir, 'custom.md')]).size, 0);

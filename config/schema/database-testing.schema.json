@@ -28,7 +28,7 @@
     "databaseTests": {
       "type": "object",
       "patternProperties": {
-        "^(products|projects)\\.[A-Za-z0-9][A-Za-z0-9._-]*$": {
+        "^[A-Za-z0-9][A-Za-z0-9._-]*$": {
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -84,7 +84,7 @@
           "properties": {
             "workspaceKey": {
               "type": "string",
-              "pattern": "^(products|projects)\\.[A-Za-z0-9][A-Za-z0-9._-]*$"
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
             "targetId": {
               "type": "string",

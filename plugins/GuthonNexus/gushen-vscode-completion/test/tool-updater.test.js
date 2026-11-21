@@ -34,9 +34,13 @@ test('bundled application version matches the repository release version', () =>
   assert.equal(bundledVersion, rootVersion);
 });
 
-test('selects only the two supported release assets', () => {
+test('selects the current executable and supports older macOS archives', () => {
+  const legacy = { name: 'GuthonCodeTool-macos-arm64.zip' };
+  const executable = { name: 'GuthonCodeTool' };
   assert.equal(assetNameFor('win32', 'x64'), 'GuthonCodeTool-windows-x64.exe');
-  assert.equal(assetNameFor('darwin', 'arm64'), 'GuthonCodeTool-macos-arm64.zip');
+  assert.equal(assetNameFor('darwin', 'arm64'), executable.name);
+  assert.equal(assetNameFor('darwin', 'arm64', { assets: [legacy] }), legacy.name);
+  assert.equal(assetNameFor('darwin', 'arm64', { assets: [legacy, executable] }), executable.name);
   assert.throws(() => assetNameFor('darwin', 'x64'), /没有 GuthonCodeTool 发行版本/);
 });
 
@@ -169,7 +173,42 @@ test('downloads, verifies, self-tests and installs a Windows release', async () 
   }
 });
 
-for (const archiveEntry of ['GuthonCodeTool', 'dist/GuthonCodeTool']) test(`installs a macOS release containing ${archiveEntry}`, async () => {
+test('installs and reuses the macOS single-file executable without unpacking an archive', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-updater-single-mac-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const bytes = Buffer.from('standalone macOS fixture');
+  const hash = crypto.createHash('sha256').update(bytes).digest('hex');
+  let downloads = 0;
+  const options = {
+    release: { version: '0.2.6', sourceLabel: 'Fixture', assets: [
+      { name: 'GuthonCodeTool', url: 'https://fixture.example/app', size: bytes.length },
+      { name: 'GuthonCodeTool-checksums.txt', url: 'https://fixture.example/checksums' },
+    ] },
+    storageRoot: root,
+    platform: 'darwin',
+    arch: 'arm64',
+    bundledTrustFile: path.join(root, 'no-pinned-key.json'),
+    requester: async () => Buffer.from(`${hash}  GuthonCodeTool\n`),
+    downloader: async (_url, target) => {
+      downloads++;
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, bytes);
+      return bytes.length;
+    },
+    processRunner: async (file, args) => {
+      assert.equal(path.basename(file), 'GuthonCodeTool');
+      if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o111, 0o111);
+      return { stdout: args[0] === 'version' ? '{"version":"0.2.6"}' : '' };
+    },
+  };
+  const result = await installRelease(options);
+  assert.deepEqual(fs.readdirSync(path.dirname(result.toolPath)), ['GuthonCodeTool']);
+  assert.deepEqual(fs.readFileSync(result.toolPath), bytes);
+  assert.equal((await installRelease(options)).toolPath, result.toolPath);
+  assert.equal(downloads, 1);
+});
+
+for (const archiveEntry of ['GuthonCodeTool', 'dist/GuthonCodeTool']) test(`installs a legacy macOS archive containing ${archiveEntry}`, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-updater-macos-'));
   const artifact = Buffer.from('macOS archive fixture');
   const hash = crypto.createHash('sha256').update(artifact).digest('hex');
@@ -357,4 +396,45 @@ test('version probes never rewrite application rollback state', async () => {
     assert.equal(await detectCurrentVersion('/unused',root,tool,async()=>({stdout:'{"version":"0.2.9"}'})), '0.2.9');
     assert.equal(fs.readFileSync(path.join(root,'tool-update-state.json'),'utf8'),original);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('recovers a lock only after its recorded process has exited',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'update-exited-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const child=require('node:child_process').spawnSync(process.execPath,['-e','']);assert.equal(child.status,0);
+  const lock=path.join(root,'.application-update.lock');fs.mkdirSync(lock);fs.writeFileSync(path.join(lock,'owner.json'),JSON.stringify({pid:child.pid,startedAt:'2000-01-01T00:00:00Z'}));
+  fs.writeFileSync(path.join(root,'keep'),'keep');let ran=0;
+  await withUpdateLock(root,async()=>{ran++;assert.equal(JSON.parse(fs.readFileSync(path.join(lock,'owner.json'))).pid,process.pid);});
+  assert.equal(ran,1);assert(!fs.existsSync(lock));assert.equal(fs.readFileSync(path.join(root,'keep'),'utf8'),'keep');
+});
+
+test('an old timestamp never permits taking a live update lock',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'update-live-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const lock=path.join(root,'.application-update.lock');fs.mkdirSync(lock);const record=JSON.stringify({pid:process.pid,startedAt:'2000-01-01T00:00:00Z'});fs.writeFileSync(path.join(lock,'owner.json'),record);
+  await assert.rejects(withUpdateLock(root,async()=>assert.fail('live owner replaced')),/其它窗口正在更新/);
+  assert.equal(fs.readFileSync(path.join(lock,'owner.json'),'utf8'),record);
+});
+
+test('missing or damaged update owner records are retained',async t=>{
+  for(const content of [null,'{bad json',JSON.stringify({pid:-1})]){
+    const root=fs.mkdtempSync(path.join(os.tmpdir(),'update-owner-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+    const lock=path.join(root,'.application-update.lock');fs.mkdirSync(lock);if(content!==null)fs.writeFileSync(path.join(lock,'owner.json'),content);
+    await assert.rejects(withUpdateLock(root,async()=>assert.fail('unknown owner replaced')),/锁持有者无法确认/);assert(fs.existsSync(lock));
+    if(content!==null)assert.equal(fs.readFileSync(path.join(lock,'owner.json'),'utf8'),content);
+  }
+});
+
+test('revalidates a lock owner after claiming a stale record',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'update-owner-race-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const child=require('node:child_process').spawnSync(process.execPath,['-e','']);const lock=path.join(root,'.application-update.lock');fs.mkdirSync(lock);
+  const owner=path.join(lock,'owner.json');fs.writeFileSync(owner,JSON.stringify({pid:child.pid}));const rename=fs.renameSync;let replaced=false;
+  t.mock.method(fs,'renameSync',(from,to)=>{if(from===owner && !replaced){replaced=true;fs.writeFileSync(owner,JSON.stringify({pid:process.pid}));}return rename(from,to);});
+  await assert.rejects(withUpdateLock(root,async()=>assert.fail('new active owner replaced')),/其它窗口正在更新/);
+  assert.equal(JSON.parse(fs.readFileSync(owner)).pid,process.pid);
+});
+
+test('update errors release the recovered lock and allow a later check',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'update-recovered-error-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const child=require('node:child_process').spawnSync(process.execPath,['-e','']);const lock=path.join(root,'.application-update.lock');fs.mkdirSync(lock);fs.writeFileSync(path.join(lock,'owner.json'),JSON.stringify({pid:child.pid}));
+  await assert.rejects(withUpdateLock(root,async()=>{throw new Error('fixture failed');}),/fixture failed/);assert(!fs.existsSync(lock));
+  assert.equal(await withUpdateLock(root,async()=> 'next check'),'next check');
 });

@@ -1,4 +1,4 @@
-/* Read-only draft comparison; source SVN differences are computed losslessly by the backend. */
+/* Read-only draft comparison; source API 基线 differences are computed losslessly by the backend. */
 const text = value => JSON.stringify(value, null, 2);
 function draftChanges(draft) {
   const rows = [], paths = new Set();

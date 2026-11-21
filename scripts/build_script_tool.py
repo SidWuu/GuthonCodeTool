@@ -35,6 +35,9 @@ def build(destination: Path) -> Path:
         shutil.copytree(ROOT / "config" / "example", stage / "config" / "example")
         data = ROOT / "plugins" / "GuthonNexus" / "gushen-vscode-completion" / "data"
         shutil.copytree(data, stage / "plugins" / "GuthonNexus" / "gushen-vscode-completion" / "data")
+        if (data / "official-api.json").is_file():
+            license_root = data.parent / "resources" / "official-language-support"
+            shutil.copytree(license_root, stage / "plugins" / "GuthonNexus" / "gushen-vscode-completion" / "resources" / "official-language-support")
         (stage / "__main__.py").write_text(
             "from guthon_tool import main\nraise SystemExit(main())\n", encoding="utf-8"
         )

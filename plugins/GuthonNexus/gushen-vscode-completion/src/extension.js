@@ -16,22 +16,21 @@ const {
   shouldProvideApiCompletions,
 } = require('./rules');
 const { createDocumentSelector } = require('./selector');
-const { procedureTargetAt, serviceComponentTargetAt, selectDefinitionPaths } = require('./definition');
-const { prepareWorkspaceSetup, promptWorkspaceCreation, workspaceActions } = require('./tool-workspace');
+const { enrichCompletionData, mergeApiCompletionItems } = require('./api-completion');
+const { workspaceRoot } = require('./workspace-root');
+const { prepareWorkspaceSetup, promptWorkspaceCreation, WindowWorkspaceSelection, windowToolHome, workspaceSetupCard, hasWorkspaceConfigFiles, pickWorkspaceSourceMode } = require('./tool-workspace');
 const { promptDatabaseDiagnosis } = require('./database-config');
-const { exportAiContext, validateContextResult } = require('./ai-context-export');
 const { ToolJsonClient } = require('./tool-json-client');
-const { workspaceCockpit } = require('./workspace-assistant');
-const { showWorkspaceSearch } = require('./workspace-search');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 const {
-  normalizeExecutionMode, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime,
-  writeRuntimeDescriptor, runtimeConfigurationTarget, installedToolEnvironment,
+  normalizeExecutionMode, runtimeSelectionOptions, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime, initializationRuntimeInDirectory,
+  writeRuntimeDescriptor, runtimeConfigurationTarget, installedSetupReport, installedToolEnvironment, toolArguments,
 } = require('./tool-runtime');
 const { ToolProcessClient } = require('./tool-process-client');
 const { probeScriptRuntime } = require('./script-runtime');
 const { createUpdateCenter } = require('./update-center');
 const { createOnboarding } = require('./onboarding');
+const { workspaceTeamSource, openTeamSyncTerminal } = require('./onboarding-team');
 const {
   UPDATE_SOURCES,
   detectCurrentVersion,
@@ -40,33 +39,15 @@ const {
   writeUpdateState,
   withUpdateLock,
 } = require('./tool-updater');
-const {
-  filterWorkspacesBySourceMode,
-  selectWorkspaceSourceMode,
-  sourceModeLabel,
-} = require('./source-mode');
 const { WorkspaceRegistry } = require('./workspace-registry');
-const { activateSvn, selectEditableIdentity, sourceModuleElement } = require('./svn/activate');
-const { clearLegacyCredentials, promptForPassword } = require('./svn/credentials');
-const {isWorkspaceKey} = require('./workspace-identity');
-const { workspaceKeyFromSourceControlId } = require('./svn/scm-manager');
-const {
-  createSvnScopeInputFile,
-  hasSvnScopeInput,
-  removeSvnScopeInputFile,
-  waitForEditorTabClose,
-} = require('./svn/scope-input');
 
 const SUPPORTED_LANGUAGES = ['java', 'guthon-gss', 'javascript', 'sql'];
-const SUPPORTED_SCHEMES = ['file', 'untitled', 'guthon-svn-edit'];
+const SUPPORTED_SCHEMES = ['file', 'untitled', 'guthon-api-edit'];
 const TOOL_COMMANDS = {
   setup: 'setup',
   workspaceCreate: 'workspace-create',
   workspaceDelete: 'workspace-delete',
-  svnLoginConfigure: 'svn-login-configure',
-  syncSourceAll: 'sync-source-all',
-  syncSource: 'sync-source',
-  syncAll: 'sync-all',
+  workspaceSourceMode: 'workspace-source-mode',
   reindex: 'reindex',
   exportMarkdown: 'export-markdown',
   exportSchema: 'export-schema',
@@ -75,21 +56,13 @@ const TOOL_COMMANDS = {
   exportViews: 'export-view',
   doctor: 'doctor',
   diagnose: 'diagnose',
-  workcopy: 'workcopy',
-  svn: 'svn',
-  sourceMode: 'source-mode',
-  search: 'search',
-  contextPack: 'context-pack',
   pullLog: 'pull-log',
   databaseTargetConfigure: 'database-target-configure',
 };
-const CONFIG_FILES = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'source-tables.yaml', 'sync.yaml', 'database-testing.yaml'];
 const TOOL_LABELS = {
   setup: '设置工作空间',
-  'sync-source-all': '拉取源码重建索引',
-  'sync-source': '拉取源码',
-  'sync-all': '同步工作区全部资料',
   reindex: '重建索引',
+  'sync-all': '更新 DATABASE 源码',
   'export-markdown': '导出源码索引文档',
   'export-schema': '导出表结构',
   'export-bill-type': '导出单据类型',
@@ -97,12 +70,8 @@ const TOOL_LABELS = {
   'export-view': '导出视图源码',
   doctor: '检查本地环境',
   diagnose: '执行源码逻辑排查',
-  workcopy: '执行 Workcopy 操作',
-  svn: 'SVN 检出/更新',
-  'source-mode': '设置项目源码来源',
-  'workspace-create': '添加产品或项目',
-  'workspace-delete': '删除产品或项目',
-  'svn-login-configure': '设置工作区 SVN 用户名',
+  'workspace-create': '添加工作区',
+  'workspace-delete': '删除工作区',
   search: '搜索工作区完整索引',
   'context-pack': '生成 AI 上下文',
   'database-target-configure': '配置数据库排查',
@@ -136,7 +105,7 @@ function claimToolRun(command, workspaceKey, labelOverride = '') {
     return null;
   }
   const runKey = toolRunKey(command, workspaceKey);
-  const sourceCommands = new Set(['svn','init','reindex','sync-all','sync-source','sync-source-all','pull','source-mode','workspace-delete','export-schema','export-view','export-bill-type','export-system-script']);
+  const sourceCommands = new Set(['api','reindex','workspace-delete','export-schema','export-view','export-bill-type','export-system-script']);
   const selectedScope = workspaceKey || '__all__';
   const scopeBusy = sourceCommands.has(command) && [...activeToolRuns].some((key) => {
     const [otherCommand, otherScope] = key.split('::');
@@ -163,17 +132,20 @@ function loadRules(context) {
 }
 
 let completionDataCache = null;
+let activeApiServices;
 
 function loadData(context) {
   const dataDir = path.join(context.extensionPath, 'data');
   const indexPath = path.join(dataDir, 'index.json');
   const manualDataPath = path.join(dataDir, 'manual.json');
+  const bundledOfficialDataPath = path.join(dataDir, 'official-api.json');
+  const officialDataPath = context.globalStorageUri ? require('./official-update').getOfficialCatalogPath(context,bundledOfficialDataPath) : bundledOfficialDataPath;
   // 补全与悬停都会读取这份数据；按文件签名缓存，避免每次请求同步解析数百 KB JSON。
-  const signature = [indexPath, manualDataPath]
+  const signature = [indexPath, manualDataPath, officialDataPath]
     .map((file) => {
       try {
         const stats = fs.statSync(file);
-        return `${stats.size}:${stats.mtimeMs}`;
+        return `${file}:${stats.size}:${stats.mtimeMs}`;
       } catch {
         return 'missing';
       }
@@ -181,7 +153,7 @@ function loadData(context) {
     .join('|');
   if (completionDataCache?.signature === signature) return completionDataCache.value;
   const manualData = fs.existsSync(manualDataPath) ? readJson(manualDataPath) : {};
-  const value = mergeCompletionData(readJson(indexPath), manualData);
+  const value = enrichCompletionData(mergeCompletionData(readJson(indexPath), manualData), readJson(officialDataPath));
   completionDataCache = { signature, value };
   return value;
 }
@@ -196,8 +168,9 @@ function completionRange(document, position, currentWord) {
 }
 
 function toCompletionItem(item, range, route, currentWord) {
-  const completion = new vscode.CompletionItem(itemLabel(item), vscode.CompletionItemKind.Snippet);
-  completion.detail = `${item.language}/${item.group}`;
+  const kind = item.completionKind === 'function' ? vscode.CompletionItemKind.Function : item.completionKind === 'module' ? vscode.CompletionItemKind.Class : vscode.CompletionItemKind.Snippet;
+  const completion = new vscode.CompletionItem(itemLabel(item), kind);
+  completion.detail = item.apiPath || `${item.language}/${item.group}`;
   completion.documentation = new vscode.MarkdownString(itemDocumentation(item));
   completion.insertText = new vscode.SnippetString(itemBodyToSnippet(item.body));
   completion.range = range;
@@ -206,11 +179,9 @@ function toCompletionItem(item, range, route, currentWord) {
   return completion;
 }
 
-function createProvider(context) {
-  const data = loadData(context);
-
+function createProvider(context, loadReferences = async () => []) {
   return {
-    provideCompletionItems(document, position) {
+    async provideCompletionItems(document, position, token) {
       const lineText = document.lineAt(position.line).text;
       const currentWord = getCurrentWord(lineText, position.character);
       if (!shouldProvideApiCompletions(currentWord)) {
@@ -219,6 +190,17 @@ function createProvider(context) {
       const rules = loadRules(context);
       const languageId = document.languageId === 'guthon-gss' ? 'java' : document.languageId;
       const route = resolveRoute(rules, languageId, currentWord);
+      const version = document.version;
+      const base = loadData(context)[route.source] || [];
+      let references = [];
+      try {
+        references = await loadReferences(document);
+      } catch (error) {
+        toolOutput().appendLine(`项目 API 补全参考读取失败：${error.message}`);
+      }
+      if (token?.isCancellationRequested || document.version !== version) return [];
+      const data = {[route.source]: mergeApiCompletionItems(base,
+        references.filter(item => item.language === route.source))};
       const items = filterItems(data, route, currentWord);
       const range = completionRange(document, position, currentWord);
 
@@ -227,39 +209,11 @@ function createProvider(context) {
   };
 }
 
-function createDefinitionProvider() {
-  return {
-    async provideDefinition(document, position) {
-      const source = document.getText();
-      const offset = document.offsetAt(position);
-      const component = serviceComponentTargetAt(source, offset);
-      const target = procedureTargetAt(source, offset);
-      if (!component && !target) return undefined;
-      const pattern = component
-        ? `**/page/**/* ${component.componentId}/scripts/compScript.vm`
-        : `**/procedure/${target.alias}/${target.fun}/source.vm`;
-      let uris = await vscode.workspace.findFiles(pattern, '**/.guthon-baseline/**');
-      if (component) {
-        const matches = await Promise.all(uris.map(async uri => {
-          try {
-            const meta = JSON.parse(await fs.promises.readFile(path.join(path.dirname(uri.fsPath), '..', 'meta.json'), 'utf8'));
-            return meta.source_table === 'page' && meta.source_id === component.componentId;
-          } catch (error) {
-            if (error.code === 'ENOENT') return false;
-            throw error;
-          }
-        }));
-        uris = uris.filter((uri, index) => matches[index]);
-      }
-      const selected = new Set(selectDefinitionPaths(uris.map((uri) => uri.fsPath), document.uri.fsPath));
-      return uris.filter((uri) => selected.has(uri.fsPath))
-        .map((uri) => new vscode.Location(uri, new vscode.Position(0, 0)));
-    },
-  };
+function createDefinitionProvider(resolveDefinition = async()=>undefined) {
+  return {provideDefinition:(document,position)=>resolveDefinition(document,position)};
 }
 
 function createHoverProvider(context) {
-  const data = loadData(context);
 
   return {
     provideHover(document, position) {
@@ -270,7 +224,7 @@ function createHoverProvider(context) {
       if (!range) return undefined;
 
       const languageId = document.languageId === 'guthon-gss' ? 'java' : document.languageId;
-      const items = findHoverItems(data, languageId, document.getText(range));
+      const items = findHoverItems(loadData(context), languageId, document.getText(range));
       if (!items.length) return undefined;
 
       const documentation = [...new Set(items.map(itemDocumentation))].join('\n\n---\n\n');
@@ -288,24 +242,28 @@ async function configuredRuntime(config, mode, options = {}) {
       const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: '选择 GuthonCodeTool 源码仓库根目录' });
       if (!selected) return undefined;
       developmentRoot = selected[0].fsPath;
-    }
-    try {
-      runtime = resolveDevelopmentRuntime(developmentRoot);
-    } catch {
-      const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: '选择 GuthonCodeTool 源码仓库根目录' });
-      if (!selected) return undefined;
-      developmentRoot = selected[0].fsPath;
       try {
         runtime = resolveDevelopmentRuntime(developmentRoot);
       } catch (error) {
-        vscode.window.showErrorMessage(error.message);
+        vscode.window.showErrorMessage(`所选源码目录不可用：${error.message}`);
         return undefined;
       }
+    } else {
+      try {
+        runtime = resolveDevelopmentRuntime(developmentRoot);
+      } catch {
+        const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: '选择 GuthonCodeTool 源码仓库根目录' });
+        if (!selected) return undefined;
+        developmentRoot = selected[0].fsPath;
+        try {
+          runtime = resolveDevelopmentRuntime(developmentRoot);
+        } catch (error) {
+          vscode.window.showErrorMessage(error.message);
+          return undefined;
+        }
+      }
     }
-    if (config.get('developmentRoot', '') !== developmentRoot) {
-      await config.update('developmentRoot', developmentRoot, runtimeConfigurationTarget(config, 'developmentRoot', vscode.ConfigurationTarget));
-    }
-    return runtime;
+    return { runtime, configuration: { developmentRoot } };
   } else if (mode === 'script') {
     let pythonPath = config.get('scriptPythonPath', '');
     let scriptPath = config.get('scriptToolPath', '');
@@ -362,13 +320,7 @@ async function configuredRuntime(config, mode, options = {}) {
         if (chosen !== '继续使用核心功能') return undefined;
       }
     }
-    if (config.get('scriptPythonPath', '') !== pythonPath) {
-      await config.update('scriptPythonPath', pythonPath, runtimeConfigurationTarget(config, 'scriptPythonPath', vscode.ConfigurationTarget));
-    }
-    if (config.get('scriptToolPath', '') !== scriptPath) {
-      await config.update('scriptToolPath', scriptPath, runtimeConfigurationTarget(config, 'scriptToolPath', vscode.ConfigurationTarget));
-    }
-    return runtime;
+    return { runtime, configuration: { scriptPythonPath: pythonPath, scriptToolPath: scriptPath } };
   } else {
     let toolPath = resolvePackagedTool(config.get('toolPath', ''));
     let selectPackaged = options.selectPackaged || !toolPath;
@@ -386,12 +338,12 @@ async function configuredRuntime(config, mode, options = {}) {
         filters: process.platform === 'win32' ? { '可执行文件': ['exe'] } : undefined,
         title: process.platform === 'win32'
           ? '选择 GuthonCodeTool EXE 可执行文件'
-          : '选择 GuthonCodeTool 可执行文件（应用目录内的 GuthonCodeTool）',
+          : '选择 macOS 可执行文件 GuthonCodeTool',
       });
       if (!selected) return undefined;
       const candidate = resolvePackagedTool(selected[0].fsPath);
       if (!candidate) {
-        vscode.window.showErrorMessage('请选择 GuthonCodeTool 可执行文件：Windows 选择 EXE，macOS 选择应用目录内的 GuthonCodeTool 启动文件');
+        vscode.window.showErrorMessage('请选择 GuthonCodeTool 可执行文件：Windows 选择 EXE，macOS 选择 GuthonCodeTool 文件');
         return undefined;
       }
       toolPath = candidate;
@@ -401,29 +353,120 @@ async function configuredRuntime(config, mode, options = {}) {
         vscode.window.showErrorMessage(`所选发行应用不可用：${error.message}`);
         return undefined;
       }
-      await config.update('toolPath', toolPath, runtimeConfigurationTarget(config, 'toolPath', vscode.ConfigurationTarget));
     }
-    return { mode: 'packaged', toolPath };
+    return { runtime: { mode: 'packaged', toolPath }, configuration: { toolPath } };
   }
+}
+
+async function initializationRuntime(config, directory) {
+  const preferredMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
+  const pythonPath = config.get('scriptPythonPath', '');
+  let selection = initializationRuntimeInDirectory(directory, preferredMode, pythonPath);
+  if (!selection) {
+    const folders = await vscode.window.showOpenDialog({
+      defaultUri: vscode.Uri.file(directory),
+      canSelectFiles: false, canSelectFolders: true, canSelectMany: false,
+      title: '选择 GuthonCodeTool 运行目录',
+    });
+    if (!folders?.length) return undefined;
+    const runtimeDirectory = folders[0].fsPath;
+    selection = initializationRuntimeInDirectory(runtimeDirectory, preferredMode, pythonPath);
+    if (!selection) {
+      await vscode.window.showErrorMessage(`所选运行目录缺少可用的 GuthonCodeTool：${runtimeDirectory}`);
+      return undefined;
+    }
+  }
+  const { runtime } = selection;
+  if (runtime.mode === 'script') {
+    const selected = await configuredRuntime({ get: (key, fallback) => selection.configuration[key] ?? config.get(key, fallback) },
+      runtime.mode, { probeScript: true });
+    return selected && { ...selected, configuration: { ...selected.configuration, executionMode: runtime.mode } };
+  }
+  if (runtime.mode === 'packaged') {
+    try {
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: '正在检查 GuthonCodeTool' },
+        () => verifyExecutable(runtime.toolPath));
+    } catch (error) {
+      await vscode.window.showErrorMessage(`发行应用无法启动：${runtime.toolPath}。原因：${error.message}`);
+      return undefined;
+    }
+  }
+  return selection;
+}
+
+async function applyRuntimeSelection(config, selection, scope) {
+  for (const [key, value] of Object.entries(selection.configuration)) {
+    const current = scope === vscode.ConfigurationTarget.Workspace ? config.inspect?.(key)?.workspaceValue : config.get(key, '');
+    if (current !== value) {
+      await config.update(key, value, scope ?? runtimeConfigurationTarget(config, key, vscode.ConfigurationTarget));
+    }
+  }
+}
+
+function localWorkspaceFolders() {
+  const folders = vscode.workspace.workspaceFolders || [];
+  return folders.every(item => item.uri.scheme === 'file') ? folders.map(item => item.uri.fsPath) : null;
 }
 
 async function configuredTool(options = {}) {
   const config = vscode.workspace.getConfiguration('gushenCompletion');
-  const mode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
-  const runtime = await configuredRuntime(config, mode);
-  if (!runtime) return undefined;
-  let toolHome = options.toolHome || config.get('toolHome', '');
+  const toolHome = options.toolHome || windowToolHome(config, localWorkspaceFolders());
   if (!toolHome) {
-    const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: '选择 GuthonCodeTool 本地数据目录' });
-    if (!selected) return undefined;
-    toolHome = selected[0].fsPath;
-    if (options.persistToolHome !== false) {
-      await config.update('toolHome', toolHome, runtimeConfigurationTarget(config, 'toolHome', vscode.ConfigurationTarget));
-    }
+    vscode.window.showInformationMessage('请在 Nexus 侧栏初始化或连接这个工作区');
+    return undefined;
   }
+  const mode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
+  const selected = await configuredRuntime(config, mode);
+  if (!selected) return undefined;
+  await applyRuntimeSelection(config, selected);
+  const runtime = selected.runtime;
   const tool = { ...runtime, toolHome, env: installedToolEnvironment(toolHome) };
   if (options.writeDescriptor !== false) writeRuntimeDescriptor(tool);
   return tool;
+}
+
+async function syncWorkspaceTeamRules(tool, { runTool, state, extraArgs = [], confirm = false }) {
+  const home = path.resolve(tool.toolHome);
+  const key = 'guthon.teamSource.' + (process.platform === 'win32' ? home.toLowerCase() : home);
+  const saved = state.get(key);
+  let source;
+  try {
+    source = await workspaceTeamSource(vscode.window,
+      saved || process.env.GUTHON_TEAM_MARKETPLACE_URL || installedSetupReport(tool.toolHome)?.marketplaceUrl);
+  } catch (error) {
+    await vscode.window.showErrorMessage(`团队仓库地址无效：${error.message}`);
+    return false;
+  }
+  let completed = false;
+  let terminalStarted = false;
+  while (source) {
+    const args = [...extraArgs, '--team-source', source];
+    try {
+      completed = await runTool(TOOL_COMMANDS.setup, args, confirm, '', null, undefined, tool);
+      break;
+    } catch (error) {
+      if (error.code !== 'TEAM_GIT_AUTH_REQUIRED') throw error;
+      const action = await vscode.window.showErrorMessage(
+        '团队仓库需要 Git 认证或读取权限。可在终端完成认证和同步，也可更换仓库地址。',
+        '在终端认证并同步', '更换仓库地址');
+      if (action === '在终端认证并同步') {
+        openTeamSyncTerminal(vscode.window, tool, args);
+        terminalStarted = true;
+        break;
+      }
+      if (action !== '更换仓库地址') return false;
+      source = await workspaceTeamSource(vscode.window, source, true);
+      confirm = false;
+    }
+  }
+  if ((completed || terminalStarted) && source !== saved) {
+    try {
+      await state.update(key, source);
+    } catch (error) {
+      await vscode.window.showWarningMessage(`保存团队仓库地址失败：${error.message}`);
+    }
+  }
+  return completed;
 }
 
 async function runToolCommand(
@@ -436,7 +479,9 @@ async function runToolCommand(
   stdinPayload = undefined,
   configuredToolOverride = undefined
 ) {
-  const label = TOOL_LABELS[command] || command;
+  const teamSync = command === TOOL_COMMANDS.setup && extraArgs.includes('--team-source');
+  const databaseSync = command === 'sync-all';
+  const label = teamSync && !askForConfirmation ? '团队规则同步' : TOOL_LABELS[command] || command;
   const release = claimedRunRelease || claimToolRun(command, workspaceKey);
   if (!release) return false;
   if (askForConfirmation) {
@@ -455,25 +500,40 @@ async function runToolCommand(
   const modeLabel = {
     'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
   }[tool.mode] || tool.mode;
-  const execute = async (token) => {
+  const execute = async (token, progress) => {
     const elapsed = operationTimer();
+    if (databaseSync) output.show(true);
     output.appendLine(`运行：${command}${workspaceKey ? ` · ${workspaceKey}` : ''}（${modeLabel}）`);
+    let pendingProgress = '';
     try {
       const result = await processClient.request(tool, command, extraArgs, workspaceKey, stdinPayload, {
-        onOutput: (value) => output.append(value),
+        onOutput: (value) => {
+          output.append(value);
+          if (!databaseSync || !progress) return;
+          const lines = (pendingProgress + value).split(/\r?\n/);
+          pendingProgress = lines.pop();
+          const latest = lines.map(line => /^\[\d{2}:\d{2}:\d{2}\.\d{3}\] \[DATABASE\] (.+)$/.exec(line)?.[1])
+            .filter(Boolean).at(-1);
+          if (latest) progress.report({message:latest});
+        },
         token,
       });
+      if (teamSync && result.governance !== 'ready') {
+        throw new Error('后端未确认团队规范同步完成，请更新 GuthonCodeTool 运行入口');
+      }
       const summary = indexResultSummary(command, result);
       if (summary !== undefined) output.appendLine(summary);
       else if (result?.stdout) output.append(result.stdout);
       else output.appendLine(JSON.stringify(result, null, 2));
       output.appendLine(`GuthonCodeTool 完成：${command}`);
-      vscode.window.showInformationMessage(`GuthonCodeTool 完成：${command}`);
+      if (teamSync && !askForConfirmation) vscode.window.showInformationMessage('团队规则和开发门禁已同步');
+      else vscode.window.showInformationMessage(`GuthonCodeTool 完成：${command}`);
       return true;
     } catch (error) {
       const target = workspaceKey ? ` · ${workspaceKey}` : '';
       output.show(true);
       output.appendLine(`${label}${error.code === 'OPERATION_CANCELLED' ? '已取消' : '失败'}${target}（${modeLabel}）：${error.message}`);
+      if (teamSync && error.code === 'TEAM_GIT_AUTH_REQUIRED') throw error;
       if (error.code === 'OPERATION_CANCELLED') vscode.window.showInformationMessage(`${label}已取消${target}。详情见“输出 → GuthonCodeTool”`);
       else vscode.window.showErrorMessage(`${label}失败${target}（${modeLabel}）：${error.message}。详情见“输出 → GuthonCodeTool”`);
       return false;
@@ -481,8 +541,8 @@ async function runToolCommand(
       output.appendLine(`本次命令完整耗时：${elapsed()}`);
     }
   };
-  const progressExecute = () => command === 'reindex'
-    ? vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:`${label}${workspaceKey ? ' · '+workspaceKey : ''}`,cancellable:true}, (_progress, token) => execute(token))
+  const progressExecute = () => command === 'reindex' || teamSync || databaseSync
+    ? vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:`${label}${workspaceKey ? ' · '+workspaceKey : ''}`,cancellable:command === 'reindex'}, (progress, token) => execute(token, progress))
     : execute();
   const pending = toolQueue.then(progressExecute, progressExecute);
   toolQueue = pending.catch(() => false);
@@ -491,8 +551,8 @@ async function runToolCommand(
 
 function configuredToolFromSettings() {
   const config = vscode.workspace.getConfiguration('gushenCompletion');
-  const toolHome = config.get('toolHome', '');
-  if (!toolHome || !fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'))) return undefined;
+  const toolHome = windowToolHome(config, localWorkspaceFolders());
+  if (!hasWorkspaceConfigFiles(toolHome)) return undefined;
   try {
     const mode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
     const runtime = mode === 'source-development'
@@ -507,230 +567,6 @@ function configuredToolFromSettings() {
   }
 }
 
-function toolItem(label, command, icon, description, args = []) {
-  const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
-  item.command = { command, title: label, arguments: args };
-  item.iconPath = new vscode.ThemeIcon(icon);
-  item.description = description;
-  return item;
-}
-
-function staticItem(label, icon, description) {
-  const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
-  item.iconPath = new vscode.ThemeIcon(icon);
-  item.description = description;
-  return item;
-}
-
-class ToolTreeDataProvider {
-  constructor(bridge = { isRunning: () => false }, context, workspaceRegistry = new WorkspaceRegistry()) {
-    this.bridge = bridge;
-    this.context = context;
-    this.workspaceRegistry = workspaceRegistry;
-    this.changed = new vscode.EventEmitter();
-    this.onDidChangeTreeData = this.changed.event;
-  }
-
-  refresh() {
-    this.changed.fire();
-  }
-
-  getTreeItem(item) {
-    return item;
-  }
-
-  async getChildren(element) {
-    if (element) return element.children || [];
-    const config = vscode.workspace.getConfiguration('gushenCompletion');
-    const toolHome = config.get('toolHome', '');
-    const executionMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
-    const developmentRoot = config.get('developmentRoot', '');
-    const scriptToolPath = config.get('scriptToolPath', '');
-    const updateSource = config.get('updateSource', 'gitee');
-    const storageRoot = this.context.globalStorageUri.fsPath;
-    const configuredToolPath = resolvePackagedTool(config.get('toolPath', ''));
-    // Show the selected backend's actual version; source mode never overwrites the checkout.
-    const applicationVersion = executionMode === 'packaged'
-      ? await detectCurrentVersion(this.context.extensionPath, storageRoot, configuredToolPath).catch(() => '无法探测')
-      : this.updates?.snapshot.current?.toolVersion || '待探测';
-    const updateState = readUpdateState(storageRoot);
-    const ready = toolHome && fs.existsSync(path.join(toolHome, 'config', 'sync.yaml'));
-    const workspace = new vscode.TreeItem('工作区', vscode.TreeItemCollapsibleState.Expanded);
-    workspace.iconPath = new vscode.ThemeIcon(ready ? 'pass-filled' : 'warning');
-    workspace.description = ready ? '已配置' : '未配置';
-    const configFiles = new vscode.TreeItem('配置文件', vscode.TreeItemCollapsibleState.Collapsed);
-    configFiles.iconPath = new vscode.ThemeIcon('settings-gear');
-    configFiles.children = CONFIG_FILES
-      .filter((filename) => filename !== 'database-testing.yaml' || fs.existsSync(path.join(toolHome, 'config', filename)))
-      .map((filename) => toolItem(filename, 'gushenCompletion.editConfig', 'edit', undefined, [filename]));
-    const runtime = new vscode.TreeItem('运行模式', vscode.TreeItemCollapsibleState.Collapsed);
-    const modeLabel = {
-      'source-development': '开发模式', script: '调试模式', packaged: '发行模式',
-    }[executionMode] || '发行模式';
-    const entryPath = executionMode === 'source-development'
-      ? (developmentRoot ? path.join(developmentRoot, 'scripts', 'guthon_tool.py') : '')
-      : executionMode === 'script' ? scriptToolPath : configuredToolPath;
-    const entryItem = staticItem('当前入口', 'file-code', entryPath ? path.basename(entryPath) : '未配置');
-    entryItem.tooltip = entryPath || '尚未选择工具入口';
-    entryItem.command = { command: 'gushenCompletion.selectExecutionMode', title: '切换工具入口', arguments: [true] };
-    const homeItem = staticItem('本地数据目录', 'folder', toolHome ? path.basename(toolHome) : '未配置');
-    homeItem.tooltip = toolHome || '尚未选择本地数据目录';
-    homeItem.command = { command: 'gushenCompletion.setupTool', title: '切换工作空间' };
-    runtime.iconPath = new vscode.ThemeIcon(executionMode === 'packaged' ? 'package' : 'beaker');
-    runtime.description = modeLabel;
-    const update = this.updates?.snapshot;
-    const checkUpdate = toolItem('检查更新', 'gushenCompletion.checkToolUpdate', 'sync',
-      update?.count ? update.count + '项可更新' : update?.pending ? '待生效' : update?.unavailable ? '更新源待新版发行' : '');
-    checkUpdate.tooltip = update?.error || update?.info || '检查后端、Nexus 与 Chrome Bridge 的版本';
-    checkUpdate.children = [
-      ...(update?.rows || []).map(item => staticItem(item.label, item.update ? 'cloud-download' : 'versions',
-        (item.current || '未确认/未托管') + (item.target ? ' → ' + item.target : '') + (item.status ? ' · ' + item.status : ''))),
-      ...(update?.error ? [staticItem('检查未完成', 'warning', update.error)] : []),
-      ...(update?.info ? [staticItem('发行信息', 'info', update.info)] : []),
-    ];
-    checkUpdate.collapsibleState = checkUpdate.children.length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None;
-    runtime.children = [
-      toolItem(
-        `切换模式：${modeLabel}`,
-        'gushenCompletion.selectExecutionMode',
-        executionMode === 'packaged' ? 'package' : 'beaker',
-        executionMode === 'source-development'
-          ? (path.basename(developmentRoot) || '源码仓库')
-          : executionMode === 'script'
-            ? (path.basename(scriptToolPath) || 'Release 脚本')
-            : '打包应用'
-      ),
-      staticItem(`当前版本：${applicationVersion}`, 'tag'),
-      entryItem,
-      homeItem,
-      executionMode === 'source-development' ? staticItem('更新源：本地源码', 'repo', path.basename(developmentRoot) || '未配置') : toolItem(
-        `更新源：${UPDATE_SOURCES[updateSource]?.label || 'Gitee'}`,
-        'gushenCompletion.selectUpdateSource',
-        'cloud'
-      ),
-      checkUpdate,
-      toolItem(
-        '回退到上一版本',
-        'gushenCompletion.rollbackToolUpdate',
-        'history',
-        updateState.previousVersion ? `可回退到 ${updateState.previousVersion}` : '暂无可回退版本'
-      ),
-    ];
-    workspace.children = [
-      runtime,
-      toolItem(
-        ready ? '切换工作空间' : '设置工作空间',
-        'gushenCompletion.setupTool',
-        'folder-library',
-        ready ? (path.basename(toolHome) || '已配置') : '选择本地数据目录'
-      ),
-      configFiles,
-      toolItem('打开本地数据目录', 'gushenCompletion.openToolHome', 'folder-opened'),
-    ].filter(Boolean);
-    const projects = new vscode.TreeItem('项目', vscode.TreeItemCollapsibleState.Expanded);
-    projects.iconPath = new vscode.ThemeIcon('folder-library');
-    const tool = configuredToolFromSettings();
-    try {
-      const workspaces = tool ? await this.workspaceRegistry.get(tool) : [];
-      projects.children = [toolItem(
-        '添加产品或项目',
-        'gushenCompletion.addWorkspace',
-        'add',
-        '创建本地配置并选择源码来源'
-      ), ...workspaces.map((item) => {
-        const actions = workspaceActions(item);
-        const cockpit = workspaceCockpit(item, this.indexRecovery?.(item.workspaceKey));
-        const node = new vscode.TreeItem(item.displayName, vscode.TreeItemCollapsibleState.Collapsed);
-        node.command = {
-          command: 'gushenCompletion.expandProjectSource',
-          title: '展开源码与索引',
-        };
-        node.description = `${item.id} · ${item.sourceMode === 'svn' ? 'SVN' : '数据库'} · ${cockpit.description}`;
-        node.iconPath = new vscode.ThemeIcon(cockpit.icon);
-        node.contextValue = 'guthonWorkspace';
-        node.guthonWorkspaceKey = item.workspaceKey;
-        node.guthonDisplayName = item.displayName;
-        const cockpitNode = new vscode.TreeItem(cockpit.label, vscode.TreeItemCollapsibleState.Expanded);
-        cockpitNode.description = cockpit.description;
-        cockpitNode.iconPath = new vscode.ThemeIcon(cockpit.icon);
-        cockpitNode.children = cockpit.rows.map((row) => row.command
-          ? toolItem(row.label, row.command, row.icon, row.description, [item.workspaceKey])
-          : staticItem(row.label, row.icon, row.description));
-        const source = new vscode.TreeItem('源码与索引', vscode.TreeItemCollapsibleState.Expanded);
-        source.iconPath = new vscode.ThemeIcon('code');
-        source.children = actions.source.map(([label, command, icon]) =>
-          toolItem(label, command, icon, undefined, [item.workspaceKey]));
-        const metadata = new vscode.TreeItem('配置资料', vscode.TreeItemCollapsibleState.Collapsed);
-        metadata.iconPath = new vscode.ThemeIcon('server');
-        metadata.children = actions.metadata.map(([label, command, icon]) =>
-          toolItem(label, command, icon, undefined, [item.workspaceKey]));
-        const syncItem = actions.syncAll
-          ? toolItem(...actions.syncAll, undefined, [item.workspaceKey])
-          : undefined;
-        node.children = [
-          cockpitNode,
-          toolItem('检查此工作区环境', 'gushenCompletion.runDoctor', 'pulse', undefined, [item.workspaceKey]),
-          toolItem(
-            `源码来源：${sourceModeLabel(item.sourceMode)}`,
-            'gushenCompletion.selectWorkspaceSourceMode',
-            item.sourceMode === 'svn' ? 'repo' : 'database',
-            '当前项目',
-            [item.workspaceKey, item.sourceMode, item.root]
-          ),
-          item.sourceMode === 'svn' && toolItem(
-            '设置工作区 SVN 登录',
-            'gushenCompletion.setSvnCredentials',
-            'key',
-            '全工作区共用',
-            [item.workspaceKey],
-          ),
-          item.sourceMode === 'svn' && item.capabilities?.['svn.initialize'] && toolItem(
-            '导入/粘贴 SVN checkout 配置',
-            'gushenCompletion.importSvnScope',
-            'file-add',
-            '支持多行粘贴',
-            [item.workspaceKey],
-          ),
-          syncItem,
-          item.sourceMode === 'svn' && item.scopeConfigPath && toolItem(
-            '编辑 SVN 地址配置',
-            'gushenCompletion.editSvnScope',
-            'edit',
-            item.scopeConfigReady ? '已配置' : '待配置',
-            [item.workspaceKey]
-          ),
-          toolItem('打开工作区目录', 'gushenCompletion.openWorkspace', 'folder-opened', undefined, [item.root]),
-          source,
-          actions.metadata.length && metadata,
-          actions.diagnose && toolItem('执行源码逻辑排查', 'gushenCompletion.runDiagnosis', 'search', undefined, [item.workspaceKey]),
-          toolItem('查看最近诊断历史', 'gushenCompletion.showDiagnosisHistory', 'history', '只读元数据', [item.workspaceKey]),
-          ...actions.workcopy.map(([label, command, icon]) =>
-            toolItem(label, command, icon, undefined, [item.workspaceKey])),
-        ].filter(Boolean);
-        return node;
-      })];
-    } catch (error) {
-      projects.children = [toolItem(`读取失败：${error.message}`, 'gushenCompletion.refreshToolView', 'error')];
-    }
-    const maintenance = new vscode.TreeItem('维护', vscode.TreeItemCollapsibleState.Expanded);
-    maintenance.iconPath = new vscode.ThemeIcon('tools');
-    maintenance.children = [
-      toolItem('检查本地环境', 'gushenCompletion.runDoctor', 'pulse'),
-    ];
-    const bridge = new vscode.TreeItem('Guthon Bridge', vscode.TreeItemCollapsibleState.Expanded);
-    const bridgeRunning = this.bridge.isRunning();
-    bridge.iconPath = new vscode.ThemeIcon(bridgeRunning ? 'vm-running' : 'vm-outline');
-    bridge.description = bridgeRunning ? '运行中 · 127.0.0.1:17361' : '未启动';
-    bridge.children = [
-      toolItem(
-        bridgeRunning ? '停止 Guthon Bridge' : '启动 Guthon Bridge',
-        bridgeRunning ? 'gushenCompletion.stopBridge' : 'gushenCompletion.startBridge',
-        bridgeRunning ? 'debug-stop' : 'play'
-      ),
-    ];
-    return [workspace, projects, bridge, maintenance];
-  }
-}
 
 function activate(context) {
   const nexusBuild = require('./extension-build').registerExtensionBuild(vscode,context);
@@ -740,16 +576,18 @@ function activate(context) {
   if (initialConfig.get('executionMode', 'packaged') === 'development') {
     void initialConfig.update('executionMode', 'source-development', vscode.ConfigurationTarget.Global);
   }
-  const provider = createProvider(context);
+  let referenceCatalog;
+  const provider = createProvider(context, document => referenceCatalog?.data(document) || []);
   const selector = createDocumentSelector(SUPPORTED_LANGUAGES, SUPPORTED_SCHEMES);
   const disposable = vscode.languages.registerCompletionItemProvider(
     selector,
     provider,
     '.'
   );
+  let apiNavigation;
   const definitionDisposable = vscode.languages.registerDefinitionProvider(
-    createDocumentSelector(['java', 'guthon-gss'], ['file', 'untitled']),
-    createDefinitionProvider()
+    createDocumentSelector(['java','guthon-gss','javascript','sql'], ['file','untitled','guthon-api-edit']),
+    createDefinitionProvider((document,position)=>apiNavigation?.definition(document,position))
   );
   const hoverDisposable = vscode.languages.registerHoverProvider(
     selector,
@@ -759,12 +597,10 @@ function activate(context) {
   toolOutput().appendLine(`已加载 Nexus ${nexusBuild.version} · ${nexusBuild.buildId}`);
   const workspaceRegistry = new WorkspaceRegistry(async (tool) => {
     const result = await processClient.request(tool, 'workspaces');
-    if (result?.ok !== true || !Array.isArray(result.workspaces)) {
-      throw new Error('工作区列表无效：缺少 ok=true 或 workspaces 数组');
-    }
-    return result.workspaces;
+    return require('./workspace-registry').workspaceSnapshot(result);
   });
-  let toolView;
+  const projectOverview=require('./project-overview').registerProjectOverview({vscode,context});
+  let projectCard;
   const bridge = createBridgeProcess({
     scriptPath: resolveBridgeScript(context.extensionPath),
     getPort: () => vscode.workspace.getConfiguration('gushenCompletion').get('bridgePort', 17361),
@@ -773,155 +609,270 @@ function activate(context) {
     onExit: (code) => {
       if (code) vscode.window.showErrorMessage(`Guthon Bridge 已退出（退出码 ${code}），请查看输出面板`);
     },
-    onStateChange: () => toolView?.refresh(),
+    onStateChange: () => {void vscode.commands.executeCommand('setContext','gushenCompletion.bridgeRunning',bridge.isRunning());projectCard?.refresh();},
   });
-  toolView = new ToolTreeDataProvider(bridge, context, workspaceRegistry);
-  const toolViewDisposable = vscode.window.createTreeView('gushenCompletion.toolView', { treeDataProvider: toolView });
-  const listSvnWorkspaces = async () => {
-    const tool = configuredToolFromSettings();
-    if (!tool) return [];
-    return filterWorkspacesBySourceMode(await workspaceRegistry.get(tool), 'svn');
+  void vscode.commands.executeCommand('setContext','gushenCompletion.bridgeRunning',bridge.isRunning());
+  const refreshToolData = () => {workspaceRegistry.invalidate();projectCard?.refresh();};
+  const apiServices = activeApiServices = require('./api/activate').activateApi({vscode,context,getTool:async()=>configuredToolFromSettings(),processClient,
+    getOutput:toolOutput,onUpdated:()=>projectCard?.refresh(),onStatus:(key,status)=>projectOverview.provider.updateSummary(key,status)});
+  const allWorkspaces = async () => {
+    const tool=configuredToolFromSettings();if(!tool)return [];
+    return (await workspaceRegistry.getSnapshot(tool)).workspaces;
   };
-  const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
-  void clearLegacyCredentials(context.secrets, toolHome).catch(() => {});
-  const svnServices = activateSvn({
-    vscode,
-    context,
-    getTool: async () => configuredToolFromSettings(),
-    listSvnWorkspaces,
-    invalidateWorkspaces: () => workspaceRegistry.invalidate(),
-    processClient,
-    bridge,
-    onToolTreeChanged: () => toolView.refresh(),
-    claimOperation: (workspaceKey, label) => claimToolRun(TOOL_COMMANDS.svn, workspaceKey, label),
+  let refreshGeneration=0;
+  const selection=new WindowWorkspaceSelection({getWorkspaces:allWorkspaces,state:context.workspaceState,
+    getScope:()=>configuredToolFromSettings()?.toolHome || '',
+    getFolders:()=> (vscode.workspace.workspaceFolders || []).map(item=>item.uri.fsPath),window:vscode.window,
+    onChange:()=>{projectCard?.invalidate();void refreshApiWorkspaces();}});
+  const scopedWorkspaces=async()=>{const selected=await selection.current();return selected?[selected]:[];};
+  let legacyProjects;
+  const loadLegacyProjects = () => legacyProjects ||= require('./legacy-project').registerLegacyProjects({
+    vscode, context, getTool: configuredToolFromSettings, processClient, sourceTree: apiServices.sourceTree,
+    getWorkspaces: allWorkspaces, getSelected: () => selection.current(), runTool, getOutput: toolOutput,
+    refreshProjects: async () => { workspaceRegistry.invalidate(); await refreshApiWorkspaces(); },
+    onStatus: (key, status, workspace) => {
+      projectOverview.provider.updateSummary(key, status);
+      projectCard?.updateLegacyStatus(workspace,status);
+    },
   });
-  toolView.indexRecovery = svnServices.indexRecovery;
-  const refreshToolData = () => {
-    workspaceRegistry.invalidate();
-    toolView.refresh();
+  projectCard=require('./api/project-card').registerProjectCard({vscode,context,api:apiServices,getWorkspaces:scopedWorkspaces,
+    onLegacyAction:(workspace,action)=>loadLegacyProjects().action(workspace,action),
+    onLegacyLogin:(workspace,credentials)=>loadLegacyProjects().login(workspace,credentials),
+    getDiagnostic:()=>projectOverview.provider.diagnostic(),getSetup:()=>projectOverview.provider.setup,onSummary:(key,status)=>projectOverview.provider.updateSummary(key,status)});
+  function setSourceMenuContexts(workspace) {
+    const mode=workspace?.sourceMode || (workspace?'api':'');
+    const managed=workspace?.executionReady===true && workspace.configuration?.schemaVersion===3;
+    const svnManifest=mode==='svn' && workspace.checkoutLayout==='manifest-working-copies'
+      && workspace.executionReady===true;
+    return Promise.all(Object.entries({
+      currentSourceIsApi:mode==='api',
+      currentProjectHasManagedSourceSettings:managed,
+      currentProjectCanChooseSourceScope:mode==='api' || (managed && (mode==='database' || svnManifest)),
+      currentSvnUsesManifest:svnManifest,
+      currentSvnHasWorkingCopies:svnManifest && !!workspace.workingCopies?.length,
+    }).map(([name,value])=>vscode.commands.executeCommand('setContext',`gushenCompletion.${name}`,value)));
+  }
+  const refreshApiWorkspaces = async()=>{
+    const generation=++refreshGeneration;
+    let snapshot,selected,tool;
+    try {
+      tool=configuredToolFromSettings();
+      snapshot=tool?await workspaceRegistry.getSnapshot(tool):{workspaces:[],configErrors:[]};
+      selected=await selection.current();
+      if(generation!==refreshGeneration)return;
+      const apiWorkspaces=snapshot.workspaces.filter(item=>!item.sourceMode || item.sourceMode==='api');
+      const selectedApi=selected && (!selected.sourceMode || selected.sourceMode==='api');
+      const folders = localWorkspaceFolders();
+      const config = vscode.workspace.getConfiguration('gushenCompletion');
+      const setup = tool ? undefined : workspaceSetupCard(folders, windowToolHome(config, folders));
+      projectOverview.provider.setSnapshot(snapshot,selected?.workspaceKey || '',selection.diagnosticKey,setup);
+      if (snapshot.workspaces.some(item => item.sourceMode === 'svn' && item.executionReady === true) ||
+          (selected?.sourceMode === 'database' && selected.executionReady === true)) loadLegacyProjects();
+      const legacyUpdate = legacyProjects?.sync(selected, snapshot.workspaces);
+      apiServices.sourceTree.setProjectPresentation(selected,projectOverview.provider.diagnostic(),legacyProjects);
+      await vscode.commands.executeCommand('setContext','gushenCompletion.needsWorkspaceSetup',!!setup);
+      await vscode.commands.executeCommand('setContext','gushenCompletion.hasCurrentProject',!!selected);
+      await setSourceMenuContexts(selected);
+      await Promise.all([legacyUpdate, apiServices.syncWorkspaces(apiWorkspaces,selectedApi?selected.workspaceKey:'')]);
+      if(generation!==refreshGeneration)return;
+      await projectCard.refresh();
+    } catch(error) {
+      if(generation!==refreshGeneration)return;
+      const key=error.workspaceKey || selected?.workspaceKey;
+      if(snapshot && key)projectOverview.provider.setProjectError(key,error);
+      else projectOverview.provider.setError(error, tool?.toolHome);
+      await legacyProjects?.sync(undefined, []);
+      apiServices.sourceTree.setSelectedWorkspace('');
+      apiServices.sourceTree.setProjectPresentation(undefined,projectOverview.provider.diagnostic());
+      await vscode.commands.executeCommand('setContext','gushenCompletion.needsWorkspaceSetup',false);
+      await vscode.commands.executeCommand('setContext','gushenCompletion.hasCurrentProject',false);
+      await setSourceMenuContexts(undefined);
+      projectCard.invalidate();await projectCard.refresh();
+    }
   };
+  const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders?.(() => { void refreshApiWorkspaces(); });
+  if (foldersChanged) context.subscriptions.push(foldersChanged);
+  // 排序方式变化时重建源码树，避免继续使用按旧顺序缓存的目录。
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration?.((event) => {
+    if (!event.affectsConfiguration('gushenCompletion.sourceTreeOrder')) return;
+    apiServices.sourceTree.invalidate();
+    apiServices.sourceTree.refresh();
+  }) || { dispose() {} });
   const updateCenter = createUpdateCenter({ vscode, context, bridge, processClient,
     getTool: configuredToolFromSettings, loadedVersion: nexusBuild.version, loadedBuildId: nexusBuild.buildId,
     isBusy: () => activeToolRuns.size > 0,
     setBusy: value => { applicationUpdateRunning = value; },
-    refresh: () => toolView.refresh(), treeView: toolViewDisposable,
+    refresh: () => projectCard?.refresh(),
     log: message => toolOutput().appendLine(message) });
-  toolView.updates = updateCenter;
-  const refreshLocalWorkspaceViews = async () => {
-    refreshToolData();
-    svnServices.catalogTree.refresh();
-    await svnServices.refreshWorkspaceList();
-  };
-  const assistantClient = new ToolJsonClient({
-    getTool: async () => configuredToolFromSettings(),
-    processClient,
-  });
 
-  const copyAiContext = async (workspaceKey, identity, detailed = false) => {
-    if (!workspaceKey || !identity?.sourceId) throw new Error('所选结果没有可定位的源码对象');
-    const args = ['--source-id', identity.sourceId];
-    if (identity.funId) args.push('--fun-id', identity.funId);
-    if (identity.sourceNamespace) args.push('--source-namespace', identity.sourceNamespace);
-    if (detailed) args.push('--detailed', '--limit', '12');
-    const result = await assistantClient.run(workspaceKey, TOOL_COMMANDS.contextPack, args);
-    validateContextResult(result, workspaceKey, identity);
-    await vscode.env.clipboard.writeText(result.markdown);
-    vscode.window.showInformationMessage(`${detailed ? '详细' : '精简'} AI 上下文已复制：${identity.sourceId}`);
-    return result;
-  };
-
-  const selectWorkspace = async (workspaceKey = '', sourceMode = '') => {
-    const tool = configuredToolFromSettings();
-    if (!tool) throw new Error('请先配置 GuthonCodeTool');
-    const allWorkspaces = await workspaceRegistry.get(tool);
-    const workspaces = sourceMode
-      ? filterWorkspacesBySourceMode(allWorkspaces, sourceMode)
-      : allWorkspaces;
-    if (workspaceKey) {
-      const selected = workspaces.find((item) => item.workspaceKey === workspaceKey);
-      if (!selected) throw new Error(`找不到工作区：${workspaceKey}`);
-      return selected;
-    }
-    if (workspaces.length===1) return workspaces[0];
-    return vscode.window.showQuickPick(workspaces.map((item) => ({
-      label: item.displayName,
-      description: `${item.workspaceKey} · ${sourceModeLabel(item.sourceMode)}`,
-      workspace: item,
-    })), { title: '选择统一搜索的工作区' }).then((item) => item?.workspace);
-  };
-
-  const saveAiContext = async (workspace, identity) => {
-    const choices = [
-      { label: '索引摘要', value: 'metadata', description: '保留精确源码身份与有界调用/事实，不读取正文' },
-    ];
-    if (workspace.sourceMode === 'svn' && ['page', 'procedure'].includes(identity.sourceType)) {
-      choices.push({ label: '摘要与影响预览', value: 'impact', description: '加入当前索引中的有界表访问、字段关系或调用证据' });
-      if (identity.sourceNamespace && (identity.sourceType === 'procedure' || (identity.jsonPointer && ['gss', 'vm', 'js', 'sql'].includes(identity.fragmentType)))) {
-        choices.push({ label: '摘要、影响与继承上下文', value: 'inheritance', description: '显式读取当前片段最多 8000 字继承正文；不复制整 PAGE' });
+  const refreshLocalWorkspaceViews = async () => {refreshToolData();apiServices.sourceTree.refresh();await refreshApiWorkspaces();projectCard.refresh();};
+  const assistantClient = new ToolJsonClient({getTool:async()=>configuredToolFromSettings(),processClient});
+  const selectWorkspace = (workspaceKey,options) => selection.select(workspaceKey || '',options);
+  const {workspaceKeyFrom,projectMenuHandler,projectToolHandler,projectDiagnosisHandler}=require('./api/project-actions');
+  const selectedToolCommand = command => projectToolHandler({vscode,selectWorkspace,runTool,command});
+  const projectMenu = command => projectMenuHandler({vscode,selectWorkspace,command});
+  const projectAction=require('./api/project-actions');
+  const sourceMenuAction = (legacyAction,apiCommand) => async value=>{
+    try {
+      const workspace=await selectWorkspace(workspaceKeyFrom(value));
+      if(!workspace)return;
+      if(!workspace.sourceMode || workspace.sourceMode==='api') {
+        if(apiCommand)return await vscode.commands.executeCommand(`gushenCompletion.${apiCommand}`,workspace.workspaceKey);
+        return;
       }
-    }
-    const selected = await vscode.window.showQuickPick(choices, { title: '选择 AI 上下文文件内容' });
-    if (!selected) return undefined;
-    const tool = configuredToolFromSettings();
-    if (!tool) throw new Error('请先配置明确的本地数据目录');
-    const result = await exportAiContext({
-      client: assistantClient, backend: svnServices.backend, toolHome: tool.toolHome, workspace, identity,
-      includeImpact: ['impact', 'inheritance'].includes(selected.value),
-      includeInheritance: selected.value === 'inheritance',
-    });
-    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(result.artifactPath));
-    await vscode.window.showTextDocument(document, { preview: true });
-    const action = await vscode.window.showInformationMessage(`AI 上下文已导出：${result.artifactPath}`, '复制文件路径');
-    if (action === '复制文件路径') await vscode.env.clipboard.writeText(result.artifactPath);
-    return result;
+      return await loadLegacyProjects().action(workspace,legacyAction);
+    } catch(error) {return vscode.window.showErrorMessage(`项目操作失败：${error.message}`);}
   };
-
-  const searchWorkspace = async (workspaceValue, sourceMode = '', exportOnly = false) => {
-    const requestedKey = typeof workspaceValue === 'string' ? workspaceValue : '';
-    const workspace = await selectWorkspace(requestedKey, sourceMode);
-    if (!workspace) return undefined;
-    const selected = await showWorkspaceSearch({
-      vscode,
-      title: `统一搜索 · ${workspace.displayName}`,
-      value: vscode.window.activeTextEditor?.selection && !vscode.window.activeTextEditor.selection.isEmpty
-        ? vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection).trim().slice(0,100) : '',
-      defaultAction: exportOnly ? 'context-file' : 'open',
-      search: query => assistantClient.run(workspace.workspaceKey, TOOL_COMMANDS.search, ['--query', query, '--limit', '30']),
-    });
-    if (!selected) return undefined;
-    if (selected.action === 'context-file') return saveAiContext(workspace, selected.item.identity);
-    if (selected.action === 'context') {
-      return copyAiContext(workspace.workspaceKey, selected.item.identity);
+  context.subscriptions.push(
+    ...['showProjectChecks','showProjectHistory','showProjectIndex'].map(command=>vscode.commands.registerCommand(`gushenCompletion.${command}`,async value=>{
+      const workspace=await selectWorkspace(workspaceKeyFrom(value));
+      if(!workspace)return;
+      if(command==='showProjectChecks')return vscode.commands.executeCommand('gushenCompletion.runDoctor',workspace.workspaceKey);
+      if(command==='showProjectIndex') {
+        try {return await projectAction.showProjectIndex({vscode,workspace,client:assistantClient});}
+        catch(error) {return vscode.window.showErrorMessage(`索引管理失败：${error.message}`);}
+      }
+      if(workspace.sourceMode && workspace.sourceMode!=='api')return loadLegacyProjects().action(workspace,'history');
+      return projectAction.showProjectHistory({vscode,workspace});
+    }))
+  );
+  referenceCatalog=new (require('./api/platform-reference').PlatformReferences)(apiServices);
+  context.subscriptions.push(vscode.languages.registerHoverProvider(selector,{
+    async provideHover(document,position,token) {
+      const range=document.getWordRangeAtPosition(position,/[$A-Za-z_][\w$]*(?:\.[A-Za-z_]\w*)+/);if(!range)return;
+      const word=document.getText(range),version=document.version,language=document.languageId==='guthon-gss'?'java':document.languageId;
+      const items=(await referenceCatalog.data(document)).filter(item=>item.apiPath===word&&item.language===language);
+      if(!items.length || token?.isCancellationRequested || document.version!==version)return;
+      return new vscode.Hover(new vscode.MarkdownString(items.map(item=>'**'+item.signature+'**\n\n'+item.officialDocumentation).join('\n\n---\n\n')),range);
     }
-    if (selected.action === 'context-detailed') {
-      return copyAiContext(workspace.workspaceKey, selected.item.identity, true);
-    }
-    if (workspace.sourceMode === 'svn' && selected.item.identity?.sourceType) {
-      const identity = await selectEditableIdentity(vscode, svnServices.backend, {
-        workspaceKey: workspace.workspaceKey,
-        ...selected.item.identity,
-      });
-      if (!identity) return undefined;
-      return svnServices.virtualFs.open(
-        identity,
-        selected.item.line > 0 ? { lineNumber: selected.item.line } : {}
-      );
-    }
-    if (!selected.item.filePath) throw new Error('该结果没有可打开的本地文件');
-    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(selected.item.filePath));
-    const editor = await vscode.window.showTextDocument(document, { preview: true });
-    if (selected.item.line > 0) {
-      const line = Math.min(selected.item.line - 1, Math.max(0, document.lineCount - 1));
-      editor.selection = new vscode.Selection(line, 0, line, 0);
-      editor.revealRange(new vscode.Range(line, 0, line, 0));
-    }
-    return editor;
-  };
+  }));
+  apiServices.setSelectWorkspace(selectWorkspace);
+  apiNavigation=require('./api/navigation').createApiNavigation({vscode,context,api:apiServices,selectWorkspace,getTool:configuredToolFromSettings,bridge,
+    locateLegacy:(workspace,identity)=>loadLegacyProjects().locate(workspace,identity),
+    legacyAction:(workspace,action)=>loadLegacyProjects().action(workspace,action)});
+  void refreshApiWorkspaces().catch(error=>vscode.window.showErrorMessage(`API 工作区初始化失败：${error.message}`));
+  function svnAction(action) {
+    return async (value, explicitPath, remote) => {
+      try {
+        const uri = value?.resourceUri || value;
+        const key = workspaceKeyFrom(value) || uri?.authority;
+        const workspace = await selectWorkspace(key);
+        const params = new URLSearchParams(uri?.query);
+        const sourcePath = explicitPath || params.get('path');
+        if (workspace?.sourceMode === 'svn') return await action(loadLegacyProjects(), workspace, sourcePath, remote, params, value);
+      } catch (error) { return vscode.window.showErrorMessage(error.message); }
+    };
+  }
   const toolCommands = [
+    vscode.commands.registerCommand('gushenCompletion.openSvnDocument', async target => {
+      try {
+        const workspace = await selectWorkspace(target.workspaceKey);
+        if (workspace?.sourceMode !== 'svn') throw new Error('请选择 SVN 项目');
+        return await loadLegacyProjects().virtualFs.open(target);
+      } catch (error) { return vscode.window.showErrorMessage(error.message); }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.openLocalPageEditor', async target => {
+      try {
+        const workspace=await selectWorkspace(target.workspaceKey);
+        if(workspace?.sourceMode!=='svn')throw new Error('请选择 SVN 项目');
+        return await loadLegacyProjects().editSvnPage(workspace,target.object);
+      } catch(error) {return vscode.window.showErrorMessage(error.message);}
+    }),
+    vscode.commands.registerCommand('gushenCompletion.syncLegacySourceNode',async item=>{
+      try {
+        const workspace=await selection.current();
+        if(!workspace || !['svn','database'].includes(workspace.sourceMode))throw new Error('请选择当前项目的源码节点');
+        return await loadLegacyProjects().updateNode(workspace,item);
+      } catch(error){return vscode.window.showErrorMessage(error.message);}
+    }),
+    vscode.commands.registerCommand('gushenCompletion.showSvnSourceInheritance',async item=>{
+      try {return await loadLegacyProjects().showInheritance(item);}
+      catch(error){return vscode.window.showErrorMessage(error.message);}
+    }),
+    vscode.commands.registerCommand('gushenCompletion.openDatabaseWorkcopy', async item => {
+      try { return await loadLegacyProjects().openWorkcopy(item); }
+      catch (error) { return vscode.window.showErrorMessage(error.message); }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.showDatabaseWorkcopyDiff', async item => {
+      try { return await loadLegacyProjects().openWorkcopy(item,true); }
+      catch (error) { return vscode.window.showErrorMessage(error.message); }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.showDatabaseProcedureCallers', async item => {
+      try { return await loadLegacyProjects().databaseCallers(item); }
+      catch (error) { return vscode.window.showErrorMessage(error.message); }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.openLegacyDocument', async item => {
+      try { return await loadLegacyProjects().openLocal(item); }
+      catch (error) { return vscode.window.showErrorMessage(error.message); }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.saveSvnToGuthon', svnAction((service, workspace) => service.action(workspace, 'upload'))),
+    vscode.commands.registerCommand('gushenCompletion.showSvnDiff', svnAction((service, workspace, sourcePath, remote) => service.diff(workspace, sourcePath, remote))),
+    vscode.commands.registerCommand('gushenCompletion.openSvnConflictMerge', svnAction((service, workspace, sourcePath) => service.conflict(workspace, sourcePath))),
+    vscode.commands.registerCommand('gushenCompletion.openSvnChangeInNexus', svnAction((service, w, path, _remote, params) => service.openSvnChange(w,path,params))),
+    vscode.commands.registerCommand('gushenCompletion.revertSingleSvnChange', svnAction((service, w, path) => path && service.review(w,"revert",path))),
+    vscode.commands.registerCommand('gushenCompletion.saveSelectedSvnNexusChanges', svnAction((service, w, path) => path && service.review(w,"platform-save",path))),
+    vscode.commands.registerCommand('gushenCompletion.markSvnConflictResolved', svnAction((service, w, path) => path && service.resolveConflict(w,path))),
+    vscode.commands.registerCommand('gushenCompletion.updateAllSvnChanges',svnAction((service,w,_path,_remote,params,value)=>
+      service.updateRemote(w,'',value?.guthonWorkingCopyIds || [params.get('workingCopyId')].filter(Boolean)))),
+    vscode.commands.registerCommand('gushenCompletion.updateSingleSvnChange',svnAction((service,w,path,_remote,params)=>
+      path && service.updateRemote(w,path,[params.get('workingCopyId')].filter(Boolean)))),
+    vscode.commands.registerCommand('gushenCompletion.showSvnHistory', svnAction((service, w, path) => path && service.history(w,path))),
+    vscode.commands.registerCommand('gushenCompletion.showSvnRawDiff', svnAction((service, w, path) => path && service.diff(w,path))),
+    vscode.commands.registerCommand('gushenCompletion.searchProjects',()=>projectOverview.provider.search()),
+    vscode.commands.registerCommand('gushenCompletion.refreshProjects',async()=>{workspaceRegistry.invalidate();await refreshApiWorkspaces();}),
+    vscode.commands.registerCommand('gushenCompletion.openProjectConfiguration',async(value='')=>{
+      const tool=configuredToolFromSettings();if(!tool)return vscode.window.showErrorMessage('请先设置本地数据目录');
+      const key=workspaceKeyFrom(value);
+      const names=['guthon.json','products.yaml','projects.yaml','sync.yaml','datasource.yaml','source-tables.yaml','database-testing.yaml'];
+      const files=names.map(name=>({label:name,file:path.join(tool.toolHome,'config',name)})).filter(item=>fs.existsSync(item.file));
+      if(!files.length)return vscode.window.showErrorMessage('当前数据目录没有可检查的配置文件');
+      const preferred=key.startsWith('products.')?'products.yaml':key.startsWith('projects.')?'projects.yaml':'';
+      files.sort((a,b)=>Number(b.label===preferred)-Number(a.label===preferred));
+      const selected=files.length===1?files[0]:await vscode.window.showQuickPick(files,{title:'检查当前工作空间配置',placeHolder:'修复后点击项目总览的刷新按钮'});
+      if(selected)await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(selected.file)),{preview:false});
+    }),
+    vscode.commands.registerCommand('gushenCompletion.switchWorkspace',async(value='')=>{
+      try {
+        const key=typeof value==='string'?value:value?.workspaceKey || '';
+        const diagnostic=key && projectOverview.provider.snapshot.configErrors.find(item=>item.workspaceKey===key);
+        if(diagnostic)return await selection.inspectDiagnostic(key);
+        return await selection.select(key,{switchWindow:true});
+      }
+      catch(error) {return vscode.window.showErrorMessage(`工作区切换失败：${error.message}`);}
+    }),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuOpenCheckout',projectMenu('openApiCheckout')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuSourceConnection',sourceMenuAction('connection','configureApiSource')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuSourceScope',sourceMenuAction('scope','selectApiSystems')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuConfigureDatabaseDiagnosis',projectMenu('configureDatabaseDiagnosis')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuReferenceSettings',projectMenu('configureReferenceAssets')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuSyncModuleParameters',projectMenu('syncModuleParameters')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuSyncPlatformReferences',projectMenu('syncPlatformReferences')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuLogout',projectMenu('logoutApiSource')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuSvnScope',sourceMenuAction('svn-scope')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuSvnRemote',sourceMenuAction('svn-remote')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuSvnLoginCache',sourceMenuAction('svn-login-cache')),
+    vscode.commands.registerCommand('gushenCompletion.configureProject', async value => {
+      try {
+        const workspace=await selectWorkspace(workspaceKeyFrom(value));
+        if(!workspace)return;
+        if(workspace.sourceMode && workspace.sourceMode!=='api') {
+          if(workspace.configuration?.format==='unified') {
+            const document=await vscode.workspace.openTextDocument(vscode.Uri.file(workspace.configuration.path));
+            return await vscode.window.showTextDocument(document,{preview:true});
+          }
+          return await vscode.commands.executeCommand('gushenCompletion.openProjectConfiguration',workspace.workspaceKey);
+        }
+        return await projectAction.showConfiguration({vscode,client:assistantClient,workspace});
+      } catch(error) {return vscode.window.showErrorMessage(`项目设置失败：${error.message}`);}
+    }),
+    vscode.commands.registerCommand('gushenCompletion.showProjectActions', async () => {
+      try {return await require('./api/project-actions').showProjectActions({vscode,getWorkspaces:scopedWorkspaces,bridge});}
+      catch(error) {return vscode.window.showErrorMessage(`项目操作失败：${error.message}`);}
+    }),
     vscode.commands.registerCommand('gushenCompletion.openOnboarding', () => onboarding.open()),
     vscode.commands.registerCommand('gushenCompletion.showDiagnosisHistory', async (workspaceValue = '') => {
       try {
-        const key = typeof workspaceValue === 'string' ? workspaceValue : workspaceValue?.guthonWorkspaceKey || workspaceValue?.workspaceKey || '';
+        const key = workspaceKeyFrom(workspaceValue);
         const selected = await selectWorkspace(key);
         if (!selected) return;
         const {showDiagnosisHistory} = require('./diagnosis-history-view');
@@ -947,188 +898,33 @@ function activate(context) {
         } catch (error) {return vscode.window.showErrorMessage(`拉取历史维护失败：${error.message}`);}
       }
     )),
-    vscode.commands.registerCommand('gushenCompletion.searchWorkspace', async (workspaceKey) => {
-      try {
-        return await searchWorkspace(workspaceKey);
-      } catch (error) {
-        return vscode.window.showErrorMessage(`统一搜索失败：${error.message}`);
-      }
-    }),
-    vscode.commands.registerCommand('gushenCompletion.searchCurrentSvnWorkspace', async () => {
-      try {
-        return await searchWorkspace(svnServices.selectedWorkspaceKey(), 'svn');
-      } catch (error) {
-        return vscode.window.showErrorMessage(`统一搜索失败：${error.message}`);
-      }
-    }),
-    vscode.commands.registerCommand('gushenCompletion.exportAiContext', async (element) => {
-      try {
-        const source = sourceModuleElement(element);
-        if (!source?.object) {
-          return await searchWorkspace(typeof element === 'string' ? element : element?.guthonWorkspaceKey || element?.workspaceKey || '', '', true);
-        }
-        const workspace = await selectWorkspace(source.workspaceKey);
-        if (!workspace) return;
-        const identity = {
-          ...source.object,
-          workingCopyId: source.object.workingCopyId || source.object.scopeEntryId || '',
-          ...(element?.fragment ? { jsonPointer: element.fragment.jsonPointer || '', fragmentType: element.fragment.scriptType || '' } : {}),
-        };
-        return await saveAiContext(workspace, identity);
-      } catch (error) { return vscode.window.showErrorMessage(`AI 上下文导出失败：${error.message}`); }
-    }),
-    vscode.commands.registerCommand('gushenCompletion.copySvnAiContext', async (element) => {
-      try {
-        const sourceElement = sourceModuleElement(element);
-        if (!sourceElement?.object) throw new Error('请选择一个 SVN 源码对象或其子节点');
-        return await copyAiContext(sourceElement.workspaceKey, sourceElement.object);
-      } catch (error) {
-        return vscode.window.showErrorMessage(`生成 AI 上下文失败：${error.message}`);
-      }
-    }),
-    vscode.commands.registerCommand('gushenCompletion.setSvnCredentials', async (workspaceKey) => {
-      let selectedWorkspaceKey = typeof workspaceKey === 'string' ? workspaceKey : '';
-      if (!selectedWorkspaceKey) {
-        const selected = await vscode.window.showQuickPick(
-          (await listSvnWorkspaces()).map((item) => ({
-            label: item.displayName,
-            description: item.workspaceKey,
-            workspaceKey: item.workspaceKey,
-          })),
-          { title: '选择用于保存公共 SVN 登录的工作区' }
-        );
-        if (!selected) return;
-        selectedWorkspaceKey = selected.workspaceKey;
-      }
-      const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === selectedWorkspaceKey);
-      if (!workspace) return vscode.window.showErrorMessage(`未找到 SVN 项目：${selectedWorkspaceKey}`);
-      const username = await vscode.window.showInputBox({
-        title: '设置当前本地数据工作区的 SVN 登录',
-        prompt: '公共 SVN 用户名（全部产品和项目共用）',
-        value: workspace.svnUsername || '',
-        ignoreFocusOut: true,
-        validateInput: (value) => String(value || '').trim() ? undefined : '用户名不能为空',
-      });
-      if (username === undefined) return;
-      const usernameConfigured = await runTool(
-        TOOL_COMMANDS.svnLoginConfigure,
-        [],
-        false,
-        '',
-        null,
-        { username: username.trim() }
-      );
-      if (!usernameConfigured) return false;
-      refreshToolData();
-      await svnServices.refreshWorkspaceList();
-      if (!workspace.scopeConfigReady && !workspace.checkoutScriptReady) {
-        return vscode.window.showInformationMessage(
-          '公共 SVN 用户名已保存。请先导入/粘贴 checkout 配置，再次点击此入口保存密码。'
-        );
-      }
-      const password = await promptForPassword(vscode.window);
-      if (!password) return;
-      try {
-        await svnServices.backend.cacheAuthentication(selectedWorkspaceKey, password);
-      } catch (error) {
-        return vscode.window.showErrorMessage(`SVN 登录保存失败：${error.message}`);
-      }
-      return vscode.window.showInformationMessage(
-        '公共 SVN 用户名已更新，密码已由 SVN 系统保存。'
-      );
-    }),
-    vscode.commands.registerCommand('gushenCompletion.quickOpenSvnSource', async (workspaceKey='') => {
-      const {quickOpenSource}=require('./svn/quick-open');
-      try {
-        return await quickOpenSource({vscode,listWorkspaces:listSvnWorkspaces,workspaceKey,
-          search:(key,keyword)=>assistantClient.run(key,TOOL_COMMANDS.search,['--query',keyword,'--limit','30']),
-          open:async(identity)=>svnServices.virtualFs.open(await selectEditableIdentity(vscode,svnServices.backend,identity))});
-      } catch(error){return vscode.window.showErrorMessage(error.message);}
-    }),
-    vscode.commands.registerCommand('gushenCompletion.selectWorkspaceSourceMode', async (
-      workspaceKey,
-      currentMode
-    ) => {
-      if (!isWorkspaceKey(workspaceKey)) return vscode.window.showErrorMessage('请在具有明确工作区键的产品或项目节点上切换源码模式');
-      const selected = await selectWorkspaceSourceMode(vscode.window, currentMode, async (current, next) => {
-        if (current !== 'svn' || next !== 'database') return true;
-        const dirtyDocuments = vscode.workspace.textDocuments.filter(
-          (document) => document.uri.scheme === 'guthon-svn-edit'
-            && document.uri.authority === workspaceKey
-            && document.isDirty
-        );
-        if (dirtyDocuments.length) {
-          const confirmed = await vscode.window.showWarningMessage(
-            `有 ${dirtyDocuments.length} 个 SVN 虚拟文档尚未保存到本地 checkout。`,
-            { modal: true },
-            '保存并切换'
-          );
-          if (confirmed !== '保存并切换') return false;
-          for (const document of dirtyDocuments) {
-            if (!await document.save()) return false;
-          }
-        }
-        const workspace = (await listSvnWorkspaces()).find(
-          (item) => item.workspaceKey === workspaceKey && item.workingCopies?.length
-        );
-        if (!workspace) return true;
-        let status;
-        try {
-          status = await svnServices.scm.refresh(workspace);
-        } catch (error) {
-          await vscode.window.showWarningMessage(
-            `无法确认 ${workspaceKey} 的 SVN 修改状态，可能有更新、保存或放弃操作正在执行。\n${error.message}`,
-            { modal: true }
-          );
-          return false;
-        }
-        const count = status.changes?.length || 0;
-        if (!count) return true;
-        const confirmed = await vscode.window.showWarningMessage(
-          `当前项目仍有 ${count} 个 SVN 本地变更。改为 DATABASE 后不会删除 checkout，但该项目将不再显示为 SVN SCM provider。`,
-          { modal: true },
-          '切换并保留修改'
-        );
-        return confirmed === '切换并保留修改';
-      });
-      if (!selected) return;
-      if (!await runTool(TOOL_COMMANDS.sourceMode, ['set', '--mode', selected], false, workspaceKey)) return;
-      refreshToolData();
-      await svnServices.refreshWorkspaceList();
-      return vscode.window.showInformationMessage(
-        `已将 ${workspaceKey} 设为 ${selected === 'svn' ? 'SVN' : 'DATABASE'}。请在该 Nexus 节点中继续配置。`
-      );
-    }),
-    vscode.commands.registerCommand('gushenCompletion.selectExecutionMode', async (selectEntry = false) => {
+    vscode.commands.registerCommand('gushenCompletion.selectExecutionMode', async (value = false) => {
+      const selectEntry=value===true;
       const config = vscode.workspace.getConfiguration('gushenCompletion');
       const currentMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
       const modes = [
         { label: '发行模式', description: '调用打包的 GuthonCodeTool 应用', value: 'packaged' },
-        { label: '开发模式', description: '使用 clone 仓库中的 .venv 和源码', value: 'source-development' },
+        { label: '开发模式', description: '使用 clone 仓库中的 .venv 和源码，选中后指定源码目录', value: 'source-development' },
         { label: '调试模式', description: '使用本地 Python 和 Release 单文件 .pyz', value: 'script' },
       ];
       const selected = selectEntry
         ? modes.find((item) => item.value === currentMode)
         : await vscode.window.showQuickPick(modes, { title: '选择 Guthon Nexus 运行模式' });
       if (!selected) return;
-      const runtime = await configuredRuntime(config, selected.value, {
-        probeScript: true,
-        probePackaged: true,
-        selectScript: selectEntry,
-        selectPackaged: selectEntry,
-        selectDevelopment: selectEntry,
-      });
-      if (!runtime) return;
+      const selection = await configuredRuntime(config, selected.value, runtimeSelectionOptions(selected.value, selectEntry));
+      if (!selection) return;
+      await applyRuntimeSelection(config, selection);
+      const runtime = selection.runtime;
       await processClient.stop();
       if (!selectEntry) {
         await config.update('executionMode', selected.value, runtimeConfigurationTarget(config, 'executionMode', vscode.ConfigurationTarget));
       }
-      const toolHome = config.get('toolHome', '');
+      const toolHome = windowToolHome(config, localWorkspaceFolders());
       if (toolHome) writeRuntimeDescriptor({ ...runtime, toolHome });
-      if (bridge.isRunning()) await bridge.restart({ ...runtime, toolHome });
+      if (toolHome && bridge.isRunning()) await bridge.restart({ ...runtime, toolHome });
       refreshToolData();
-      svnServices.catalogTree.refresh();
-      await svnServices.refreshWorkspaceList();
+      apiServices.sourceTree.refresh();
+      await refreshApiWorkspaces();
       return vscode.window.showInformationMessage(selectEntry ? '已更新当前入口' : `已切换为${selected.label}`);
     }),
     vscode.commands.registerCommand('gushenCompletion.restartDevelopmentToolHost', async () => {
@@ -1142,7 +938,7 @@ function activate(context) {
         if (currentTool) await bridge.restart(currentTool);
       }
       refreshToolData();
-      await svnServices.refreshWorkspaceList();
+      await refreshApiWorkspaces();
       return vscode.window.showInformationMessage('开发 ToolHost 已切换到当前源码');
     }),
     vscode.commands.registerCommand('gushenCompletion.selectUpdateSource', async () => {
@@ -1168,7 +964,7 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.rollbackToolUpdate', async () => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
       if (activeToolRuns.size) {
-        return vscode.window.showWarningMessage('当前有 GuthonCodeTool 或 SVN 操作正在执行，请完成后再回退');
+        return vscode.window.showWarningMessage('当前有 GuthonCodeTool 或源码操作正在执行，请完成后再回退');
       }
       if (applicationUpdateRunning) {
         return vscode.window.showInformationMessage('GuthonCodeTool 更新或回退正在执行，本次点击已忽略');
@@ -1211,14 +1007,14 @@ function activate(context) {
           writeUpdateState(storageRoot, previousState);
           throw error;
         }
-        const toolHome = config.get('toolHome', '');
+        const toolHome = windowToolHome(config, localWorkspaceFolders());
         const tool = { mode: 'packaged', toolPath: rollbackPath, toolHome };
         refreshToolData();
         try {
-          svnServices.catalogTree.refresh();
+          apiServices.sourceTree.refresh();
           if (toolHome) writeRuntimeDescriptor(tool);
           if (bridgeWasRunning) bridge.start(tool);
-          await svnServices.refreshWorkspaceList();
+          await refreshApiWorkspaces();
         } catch (error) {
           await vscode.window.showWarningMessage(`应用已回退，但运行状态刷新失败：${error.message}`);
         }
@@ -1234,23 +1030,44 @@ function activate(context) {
         applicationUpdateRunning = false;
       }
     }),
-    vscode.commands.registerCommand('gushenCompletion.setupTool', async () => {
+    vscode.commands.registerCommand('gushenCompletion.syncTeamRules', async () => {
+      if (!vscode.workspace.isTrusted) return vscode.window.showErrorMessage('请先信任当前工作区，再同步团队规则');
+      const tool = configuredToolFromSettings();
+      if (!tool) return vscode.window.showInformationMessage('请先在 Nexus 初始化或连接当前工作空间');
+      try {
+        const config = await processClient.request(tool, 'configuration-info');
+        if (config?.ok !== true || config.initialized !== true || config.mode !== 'unified') {
+          throw new Error('当前数据目录需要可用的统一工作空间配置');
+        }
+        return await syncWorkspaceTeamRules(tool, { runTool, state: context.globalState });
+      } catch (error) {
+        return vscode.window.showErrorMessage(`团队规则同步失败：${error.message}`);
+      }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.setupTool', async (action) => {
       const config = vscode.workspace.getConfiguration('gushenCompletion');
       const previousToolHome = config.get('toolHome', '');
+      const folders = localWorkspaceFolders();
+      const toolHome = windowToolHome(config, folders);
       let setup;
       try {
-        setup = await prepareWorkspaceSetup(config, vscode.window);
+        const target = action !== 'browse' && (action === 'current' || !hasWorkspaceConfigFiles(toolHome))
+          ? workspaceSetupCard(folders, toolHome) : undefined;
+        setup = await prepareWorkspaceSetup(config, vscode.window, {
+          toolHome, directory: target?.directory, workspaceDirectory: target?.workspaceDirectory,
+          browse: action === 'browse',
+        });
       } catch (error) {
         return vscode.window.showErrorMessage(error.message);
       }
       if (!setup) return;
       if (setup.mode === 'refresh') return refreshLocalWorkspaceViews();
-      const tool = await configuredTool({
-        toolHome: setup.toolHome,
-        persistToolHome: false,
-        writeDescriptor: false,
-      });
-      if (!tool) return;
+      const mode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
+      const selected = setup.mode === 'setup' && setup.workspaceDirectory
+        ? await initializationRuntime(config, setup.toolHome)
+        : await configuredRuntime(config, mode, runtimeSelectionOptions(mode, true));
+      if (!selected) return;
+      const tool = { ...selected.runtime, toolHome: setup.toolHome, env: installedToolEnvironment(setup.toolHome) };
       let workspaces;
       if (setup.mode === 'switch') {
         try {
@@ -1263,21 +1080,49 @@ function activate(context) {
           return vscode.window.showErrorMessage(`读取已有工作空间失败：${error.message}`);
         }
       } else {
-        const completed = await runTool(TOOL_COMMANDS.setup, [], true, '', null, undefined, tool);
+        if (!vscode.workspace.isTrusted) {
+          return vscode.window.showErrorMessage('请先信任当前工作区，再初始化团队规则和开发门禁。');
+        }
+        const args = [];
+        if (setup.workspaceDirectory && setup.workspaceDirectory !== 'var') {
+          try {
+            const capabilities = await processClient.request(tool, 'configuration-info');
+            if (!path.isAbsolute(capabilities?.workspaceRoot || '')) {
+              throw new Error('所选 GuthonCodeTool 后端版本不支持自定义开发目录');
+            }
+          } catch (error) {
+            await vscode.window.showErrorMessage(`无法初始化当前开发目录：${error.message}`);
+            return;
+          }
+          args.push('--workspace-directory', setup.workspaceDirectory);
+        }
+        const completed = await syncWorkspaceTeamRules(tool, { runTool, state: context.globalState, extraArgs: args, confirm: true });
         if (!completed) return;
       }
       try {
-        if (previousToolHome !== tool.toolHome) await processClient.stop();
+        if (previousToolHome !== tool.toolHome) {selection.clear();refreshGeneration++;projectCard?.invalidate();await apiServices.reset();await processClient.stop();}
+        const localBinding = folders?.length && (setup.workspaceDirectory || !windowToolHome({get: () => tool.toolHome}, folders));
+        const scope = localBinding ? vscode.ConfigurationTarget.Workspace : undefined;
+        await applyRuntimeSelection(config, selected, scope);
         writeRuntimeDescriptor(tool);
-        await config.update('toolHome', tool.toolHome, runtimeConfigurationTarget(config, 'toolHome', vscode.ConfigurationTarget));
+        await config.update('toolHome', tool.toolHome, scope ?? runtimeConfigurationTarget(config, 'toolHome', vscode.ConfigurationTarget));
       } catch (error) {
         return vscode.window.showErrorMessage(`Nexus 保存工作空间配置失败：${error.message}`);
       }
       if (bridge.isRunning() && previousToolHome !== tool.toolHome) await bridge.restart(tool);
       await refreshLocalWorkspaceViews();
+      if (!vscode.workspace.workspaceFolders?.length) {
+        const next = await vscode.window.showInformationMessage(
+          '数据目录已就绪。打开开发目录后即可添加或选择项目。', '打开开发目录'
+        );
+        if (next === '打开开发目录') {
+          await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(workspaceRoot(tool.toolHome)), { forceReuseWindow: true });
+        }
+        return;
+      }
       if (setup.mode === 'setup') {
         const next = await vscode.window.showInformationMessage(
-          '本地数据目录已初始化，是否现在添加第一个产品或项目？',
+          '工作区已初始化，团队规则和开发门禁已同步。是否现在添加第一个项目？',
           '立即添加',
           '稍后'
         );
@@ -1286,19 +1131,20 @@ function activate(context) {
         }
       }
       if (setup.mode === 'switch') {
-        return vscode.window.showInformationMessage(`已读取 ${workspaces.length} 个产品或项目及其现有索引状态`);
+        return vscode.window.showInformationMessage(`已读取 ${workspaces.length} 个工作区及其现有索引状态`);
       }
     }),
     vscode.commands.registerCommand('gushenCompletion.addWorkspace', async () => {
       const tool = await configuredTool();
       if (!tool) return false;
-      let workspaces;
+      let definition;
       try {
-        workspaces = await workspaceRegistry.get(tool);
+        const configuration = await processClient.request(tool, 'configuration-info');
+        definition = await promptWorkspaceCreation(vscode.window, configuration);
       } catch (error) {
-        return vscode.window.showErrorMessage(`读取现有产品/项目失败：${error.message}`);
+        await vscode.window.showErrorMessage(`添加项目失败：${error.message}`);
+        return false;
       }
-      const definition = await promptWorkspaceCreation(vscode.window, workspaces, tool.toolHome);
       if (!definition) return false;
       const created = await runTool(
         TOOL_COMMANDS.workspaceCreate,
@@ -1306,78 +1152,116 @@ function activate(context) {
         false,
         '',
         null,
-        definition
+        definition,
+        tool
       );
       if (!created) return false;
       refreshToolData();
-      await svnServices.refreshWorkspaceList();
+      await refreshApiWorkspaces();
 
-      const nextStep = definition.sourceMode === 'svn'
-        ? '请展开该 Nexus，再设置 SVN 登录、导入/粘贴 checkout 配置或编辑 SVN 地址。'
-        : '请后续在配置文件中补充 datasource 后再拉取源码。';
-      vscode.window.showInformationMessage(`${definition.name} Nexus 已创建。${nextStep}`);
+      const nextStep = {
+        api: '请选择新项目，配置平台地址并登录。',
+        svn: '请选择新项目，在当前项目卡片填写 SVN 地址并登录，再选择同步范围。',
+        database: '请选择新项目，在当前项目卡片填写主数据连接并登录，再选择同步范围。',
+      }[definition.sourceMode];
+      vscode.window.showInformationMessage(`已添加「${definition.name}」 · ${definition.sourceMode.toUpperCase()}。${nextStep}`);
       return true;
     }),
-    vscode.commands.registerCommand('gushenCompletion.deleteWorkspace', async (workspaceValue) => {
-      const workspaceKey = typeof workspaceValue === 'string'
-        ? workspaceValue
-        : workspaceValue?.guthonWorkspaceKey;
-      if (!isWorkspaceKey(workspaceKey)) return vscode.window.showErrorMessage('请在具体产品或项目节点上执行删除');
-      let plan;
+    vscode.commands.registerCommand('gushenCompletion.openProjectDirectory', async value => {
       try {
-        plan = await assistantClient.run('', TOOL_COMMANDS.workspaceDelete, [], {
-          mode: 'preview',
-          workspaceKey,
-        });
+        const workspace = await selectWorkspace(workspaceKeyFrom(value));
+        if (workspace) await vscode.commands.executeCommand('gushenCompletion.openWorkspace', workspace.root);
       } catch (error) {
-        return vscode.window.showErrorMessage(`无法读取删除范围：${error.message}`);
+        await vscode.window.showErrorMessage(`无法打开项目目录：${error.message}`);
       }
-      const existingDirectories = (plan.directories || []).filter((item) => item.exists);
-      const details = [
-        `配置：${plan.workspaceConfigPath}`,
-        plan.datasourceIds?.length ? `独占数据源：${plan.datasourceIds.join('、')}` : '独占数据源：无',
-        plan.databaseTestingConfigured ? '数据库排查配置：将删除当前工作区条目' : '数据库排查配置：无',
-        ...existingDirectories.map((item) => `${item.label}：${item.path}`),
-      ].join('\n');
-      const docsWarning = plan.kind === 'projects' && plan.docsHasFiles
-        ? '\n\n项目 docs 目录中存在文件，请检查是否需要备份。'
-        : '';
-      const confirmed = await vscode.window.showWarningMessage(
-        `确认删除 ${plan.displayName}（${workspaceKey}）？\n\n${details}${docsWarning}\n\n目录将移入系统废纸篓；未提交的本地源码修改也会一并移走。其他产品、项目和共享配置不会删除。`,
-        { modal: true },
-        '确认删除'
-      );
-      if (confirmed !== '确认删除') return false;
+    }),
+    vscode.commands.registerCommand('gushenCompletion.migrateProjectDocs', async () => {
       try {
-        for (const item of existingDirectories) {
-          await vscode.workspace.fs.delete(vscode.Uri.file(item.path), {
-            recursive: true,
-            useTrash: true,
-          });
+        const { migrateProjectDocs } = require('./project-docs-migration');
+        return await migrateProjectDocs({ vscode, getTool: configuredToolFromSettings,
+          getCurrentWorkspace: () => selection.current(), workspace: await selection.current() });
+      } catch (error) {
+        return vscode.window.showErrorMessage(`项目文档迁移未完成：${error.message}`);
+      }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.changeWorkspaceSourceMode', async value => {
+      const tool = configuredToolFromSettings();
+      if (!tool) return;
+      let workspace, sourceMode;
+      try {
+        workspace = await selectWorkspace(workspaceKeyFrom(value));
+        if (!workspace) return;
+        const config = await processClient.request(tool, 'configuration-info');
+        if (!Array.isArray(config.workspaceSourceModes) || config.workspaceSourceModes.length < 2) {
+          await vscode.window.showInformationMessage('请使用支持三种同步方式的后端及统一配置后，再修改项目同步方式');
+          return;
+        }
+        const currentMode = workspace.sourceMode || 'api';
+        sourceMode = await pickWorkspaceSourceMode(vscode.window, config.workspaceSourceModes, currentMode);
+        if (!sourceMode) return;
+        const confirmed = await vscode.window.showWarningMessage(
+          `将「${workspace.name}」的同步方式从 ${currentMode.toUpperCase()} 改为 ${sourceMode.toUpperCase()}？`,
+          { modal: true, detail: '可直接修改尚未接入的项目。已有来源配置、源码或历史时，SVN 转 API 需先完成迁移预检。' }, '确认修改');
+        if (confirmed !== '确认修改') return;
+        if (apiServices.editorState.workspaces.has(workspace.workspaceKey)) {
+          await apiServices.editorState.flush(workspace.workspaceKey);
+        }
+        const result = await processClient.request(tool, TOOL_COMMANDS.workspaceSourceMode, [], '', {
+          workspaceKey: workspace.workspaceKey, expectedMode: currentMode, sourceMode,
+        });
+        if (result.changed) {
+          apiServices.editorState.workspaces.delete(workspace.workspaceKey);
+          await refreshLocalWorkspaceViews();
+          await vscode.window.showInformationMessage(`「${workspace.name}」的同步方式已改为 ${sourceMode.toUpperCase()}`);
         }
       } catch (error) {
-        return vscode.window.showErrorMessage(
-          `删除已停止：无法把相关目录移入系统废纸篓（${error.message}）。配置尚未删除；已移入废纸篓的目录可恢复。`
-        );
+        if (error.code === 'WORKSPACE_MODE_MIGRATION_REQUIRED' && workspace?.sourceMode === 'svn' && sourceMode === 'api') {
+          const action = '复制迁移预检命令';
+          const chosen = await vscode.window.showWarningMessage('该 SVN 项目需要先核对原工作副本与交付记录，再进行 SVN 到 API 的迁移。', action);
+          if (chosen === action) {
+            const powershell = process.platform === 'win32';
+            const quote = value => powershell ? "'" + value.replaceAll("'", "''") + "'" : "'" + value.replaceAll("'", "'\\''") + "'";
+            const args = toolArguments(tool, 'svn-api-migration', ['preflight'], workspace.workspaceKey);
+            await vscode.env.clipboard.writeText((powershell ? '& ' : '') + [tool.toolPath, ...args].map(quote).join(' '));
+          }
+        } else {
+          await vscode.window.showErrorMessage(`修改同步方式失败：${error.message}`);
+        }
       }
+    }),
+    vscode.commands.registerCommand('gushenCompletion.deleteWorkspace', async (workspaceValue) => {
+      let workspace;
+      try {workspace=await selectWorkspace(workspaceKeyFrom(workspaceValue));}
+      catch(error) {return vscode.window.showErrorMessage(`无法选择项目：${error.message}`);}
+      if(!workspace)return;
+      const workspaceKey=workspace.workspaceKey;
+      let plan;
       try {
-        await assistantClient.run('', TOOL_COMMANDS.workspaceDelete, [], {
-          mode: 'delete',
-          workspaceKey,
-          confirmation: workspaceKey,
-        });
-      } catch (error) {
-        return vscode.window.showErrorMessage(
-          `目录已移入系统废纸篓，但配置删除失败：${error.message}。配置仍保留，可直接重试删除；已移入废纸篓的目录无需先恢复。`
-        );
-      }
+        const state=await apiServices.sourceTree.status(workspaceKey);
+        await apiServices.editorState.flush(workspaceKey);
+        const registered=apiServices.editorState.workspaces.get(workspaceKey);
+        if(apiServices.editorState.documents(workspaceKey,registered).some(item=>item.dirty)) throw new Error('该项目有未保存的编辑器或页面草稿，请先处理');
+        plan=await assistantClient.run('',TOOL_COMMANDS.workspaceDelete,[],{checkOnly:true,workspaceKey});
+        if(plan.workspaceKey!==workspaceKey || !Array.isArray(plan.paths) || plan.paths.some(p=>typeof p!=='string' || !path.isAbsolute(p))) throw new Error('删除预览身份或路径无效');
+      } catch(error) {return vscode.window.showErrorMessage(`无法读取删除范围：${error.message}`);}
+      const confirmed=await vscode.window.showWarningMessage(
+        `确认删除 ${plan.displayName}（${workspaceKey}）？\n\n${plan.paths.join('\n')}\n\n目录将移入系统废纸篓，本地源码修改也会一并移走。`,{modal:true},'确认删除');
+      if(confirmed!=='确认删除') return false;
+      try {
+        await apiServices.editorState.flush(workspaceKey);
+        const registered=apiServices.editorState.workspaces.get(workspaceKey);
+        if(apiServices.editorState.documents(workspaceKey,registered).some(item=>item.dirty)) throw new Error('确认后出现未保存的编辑器或页面草稿');
+        for(const target of plan.paths) if(fs.existsSync(target)) await vscode.workspace.fs.delete(vscode.Uri.file(target),{recursive:true,useTrash:true});
+      } catch(error) {return vscode.window.showErrorMessage(`删除已停止：${error.message}。配置尚未删除，已移入废纸篓的目录可恢复。`);}
+      try {await assistantClient.run('',TOOL_COMMANDS.workspaceDelete,[],{checkOnly:false,workspaceKey});}
+      catch(error) {return vscode.window.showErrorMessage(`目录已移入废纸篓，但配置删除失败：${error.message}。`);}
       refreshToolData();
-      await svnServices.refreshWorkspaceList();
+      await refreshApiWorkspaces();
       return vscode.window.showInformationMessage(`已删除 ${plan.displayName}，相关目录可从系统废纸篓恢复。`);
     }),
     vscode.commands.registerCommand('gushenCompletion.configureDatabaseDiagnosis', async (workspaceKey) => {
       if (typeof workspaceKey !== 'string' || !workspaceKey) {
-        return vscode.window.showErrorMessage('请从具体产品或项目下配置数据库排查');
+        return vscode.window.showErrorMessage('请选择具体工作区后配置数据库排查');
       }
       let definition;
       try {
@@ -1418,15 +1302,11 @@ function activate(context) {
       if (!await bridge.stop()) return vscode.window.showInformationMessage('Guthon Bridge 未运行');
       return vscode.window.showInformationMessage('Guthon Bridge 已停止');
     }),
-    vscode.commands.registerCommand('gushenCompletion.initSourceIndex', (workspaceKey) => runTool(TOOL_COMMANDS.syncSourceAll, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.syncWorkspaceSource', (workspaceKey) => runTool(TOOL_COMMANDS.syncSource, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.syncWorkspaceAll', (workspaceKey) => runTool(TOOL_COMMANDS.syncAll, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.reindexCalls', (workspaceKey) => runTool(TOOL_COMMANDS.reindex, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.exportMarkdown', (workspaceKey) => runTool(TOOL_COMMANDS.exportMarkdown, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.exportSchema', (workspaceKey) => runTool(TOOL_COMMANDS.exportSchema, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.exportBillTypes', (workspaceKey) => runTool(TOOL_COMMANDS.exportBillTypes, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.exportSystemScripts', (workspaceKey) => runTool(TOOL_COMMANDS.exportSystemScripts, [], true, workspaceKey)),
-    vscode.commands.registerCommand('gushenCompletion.exportViews', (workspaceKey) => runTool(TOOL_COMMANDS.exportViews, [], true, workspaceKey)),
+    vscode.commands.registerCommand('gushenCompletion.exportMarkdown', selectedToolCommand(TOOL_COMMANDS.exportMarkdown)),
+    vscode.commands.registerCommand('gushenCompletion.exportSchema', selectedToolCommand(TOOL_COMMANDS.exportSchema)),
+    vscode.commands.registerCommand('gushenCompletion.exportBillTypes', selectedToolCommand(TOOL_COMMANDS.exportBillTypes)),
+    vscode.commands.registerCommand('gushenCompletion.exportSystemScripts', selectedToolCommand(TOOL_COMMANDS.exportSystemScripts)),
+    vscode.commands.registerCommand('gushenCompletion.exportViews', selectedToolCommand(TOOL_COMMANDS.exportViews)),
     vscode.commands.registerCommand('gushenCompletion.runDoctor', async (workspaceValue = '') => {
       const workspaceKey = typeof workspaceValue === 'string' ? workspaceValue : workspaceValue?.guthonWorkspaceKey || '';
       const release = claimToolRun(TOOL_COMMANDS.doctor, workspaceKey);
@@ -1447,277 +1327,9 @@ function activate(context) {
       } catch (error) { return vscode.window.showErrorMessage(`环境检查未完成：${error.message}`); }
       finally { release(); }
     }),
-    vscode.commands.registerCommand('gushenCompletion.runDiagnosis', async (workspaceKey) => {
-      const selected = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: false, canSelectMany: false, filters: { JSON: ['json'] }, title: '选择排查定义 JSON' });
-      if (selected) return runTool(TOOL_COMMANDS.diagnose, [selected[0].fsPath], true, workspaceKey);
-    }),
-    vscode.commands.registerCommand('gushenCompletion.inspectWorkcopy', async (workspaceKey) => {
-      const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: '选择 Workcopy 目录' });
-      if (!selected) return;
-      const action = await vscode.window.showQuickPick([
-        { label: '查看状态', value: 'status' },
-        { label: '生成差异报告', value: 'diff' },
-        { label: '打包交付物', value: 'package' },
-      ], { title: 'Workcopy 操作' });
-      if (action) return runTool(TOOL_COMMANDS.workcopy, [action.value, selected[0].fsPath], true, workspaceKey);
-    }),
-    vscode.commands.registerCommand('gushenCompletion.initializeSvn', async (workspaceKey) => {
-      let release = claimToolRun(TOOL_COMMANDS.svn, workspaceKey);
-      if (!release) return false;
-      try {
-        const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
-        if (!workspace) {
-          void vscode.window.showErrorMessage(`未找到 SVN 项目：${workspaceKey}`);
-          return false;
-        }
-        svnServices.log('SVN 检出/更新', '读取 SVN 地址配置预览');
-        const hasScopeConfig = Boolean(workspace.scopeConfigReady);
-        const hasCheckoutScript = Boolean(workspace.checkoutScriptReady);
-        if (!hasScopeConfig && !hasCheckoutScript) {
-          void vscode.window.showWarningMessage(
-            `未找到 SVN 地址配置：${workspace.scopeConfigPath || 'config/products.yaml/projects.yaml'}。请先在对应文件中配置 svn.url，或使用“导入/粘贴 SVN checkout 配置”。`
-          );
-          return false;
-        }
-        let preview;
-        try {
-          preview = await svnServices.backend.scopePreview(workspaceKey);
-        } catch (error) {
-          void vscode.window.showErrorMessage(`无法解析工作区 SVN 地址配置：${error.message}`);
-          return false;
-        }
-        const changeSummary = `新增 ${preview.added}、移除 ${preview.removed}、变更 ${preview.modified}`;
-        const scopeSummary = `${preview.source === 'config' ? '地址配置' : '签出脚本'}包含 ${preview.entries} 个仓库地址`;
-        const confirmed = await vscode.window.showWarningMessage(
-          `将使用当前工程的 SVN ${preview.source === 'config' ? '地址配置（products.yaml/projects.yaml 的 svn.url）' : '签出脚本'}：${scopeSummary}（${changeSummary}），随后检出或更新完整 working copy。系统与数据源映射不限制 checkout 内容；配置不保存凭据。`,
-          { modal: true },
-          '检出/更新'
-        );
-        if (confirmed !== '检出/更新') return false;
-        const completed = await runTool(
-          TOOL_COMMANDS.svn,
-          ['sync-from-config', '--accept-scope-change'],
-          false,
-          workspaceKey,
-          release
-        );
-        release = null;
-        if (completed) {
-          refreshToolData();
-          await svnServices.refresh(workspaceKey);
-        }
-        return completed;
-      } finally {
-        if (release) release();
-      }
-    }),
-    vscode.commands.registerCommand('gushenCompletion.importSvnScope', async (workspaceKey, preferredSource = '') => {
-      const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
-      if (!workspace) return vscode.window.showErrorMessage(`未找到 SVN 项目：${workspaceKey}`);
-      const choice = preferredSource
-        ? { value: preferredSource }
-        : await vscode.window.showQuickPick([
-          { label: '选择 svnCheckoutHere.sh/.bat', value: 'file' },
-          { label: '粘贴一个或多个 SVN 地址/checkout 命令', value: 'paste' },
-        ], { title: '导入/粘贴 SVN checkout 配置' });
-      if (!choice) return;
-      let result;
-      try {
-        if (choice.value === 'file') {
-          const selected = await vscode.window.showOpenDialog({
-            canSelectFiles: true,
-            canSelectFolders: false,
-            canSelectMany: false,
-            filters: { 'SVN checkout 文件': ['sh', 'bat'], '所有文件': ['*'] },
-            title: '选择谷神 SVN checkout 文件',
-          });
-          if (!selected) return;
-          result = await svnServices.backend.scopeImportFile(workspaceKey, selected[0].fsPath);
-        } else {
-          const input = createSvnScopeInputFile(context.globalStorageUri?.fsPath);
-          try {
-            const document = await vscode.workspace.openTextDocument(vscode.Uri.file(input.file));
-            const closed = waitForEditorTabClose(vscode, document);
-            await vscode.window.showTextDocument(document, { preview: false });
-            await closed;
-            const action = await vscode.window.showInformationMessage(
-              'SVN 地址编辑器已关闭，请选择下一步。',
-              { modal: true },
-              '解析 SVN 地址',
-              '编辑 SVN 地址配置'
-            );
-            if (action === '编辑 SVN 地址配置') {
-              await vscode.commands.executeCommand('gushenCompletion.editSvnScope', workspaceKey);
-              return { action: 'edit' };
-            }
-            if (action !== '解析 SVN 地址') return;
-            const text = fs.readFileSync(input.file, 'utf8');
-            if (!hasSvnScopeInput(text)) {
-              const next = await vscode.window.showWarningMessage(
-                '未检测到 SVN 地址或 checkout 命令，没有执行解析。',
-                '编辑 SVN 地址配置'
-              );
-              if (next === '编辑 SVN 地址配置') {
-                await vscode.commands.executeCommand('gushenCompletion.editSvnScope', workspaceKey);
-                return { action: 'edit' };
-              }
-              return;
-            }
-            result = await svnServices.backend.scopeImport(workspaceKey, text, 'script');
-          } finally {
-            removeSvnScopeInputFile(input);
-          }
-        }
-      } catch (error) {
-        return vscode.window.showErrorMessage(`导入 SVN 地址失败：${error.message}`);
-      }
-      const message = result.url && Array.isArray(result.scope) && !result.scope.length
-        ? `已解析 SVN 根地址并写入 svn.url：${result.url}。将完整检出该地址下当前账号可见的所有目录。`
-        : result.url && Array.isArray(result.scope)
-          ? `已解析旧版显式范围配置：1 个 SVN URL、${result.scope.length} 个 scope。请检查配置后执行检出/更新。`
-        : result.added
-          ? `已向 ${result.output} 添加 ${result.added} 个 SVN 地址。请检查配置后执行检出/更新。`
-          : `SVN 地址配置没有变化。`;
-      vscode.window.showInformationMessage(message);
-      refreshToolData();
-      await svnServices.refreshWorkspaceList();
-      return result;
-    }),
-    vscode.commands.registerCommand('gushenCompletion.editSvnScope', async (workspaceKey) => {
-      const workspace = (await listSvnWorkspaces()).find((item) => item.workspaceKey === workspaceKey);
-      if (!workspace?.scopeConfigPath) return vscode.window.showErrorMessage('无法解析 SVN 地址配置路径');
-      const file = workspace.scopeConfigPath;
-      if (!fs.existsSync(file)) {
-        if (['products.yaml', 'projects.yaml'].includes(path.basename(file))) {
-          return vscode.window.showErrorMessage(`缺少工作区配置文件：${file}，请先执行设置工作空间`);
-        }
-        fs.mkdirSync(path.dirname(file), { recursive: true });
-        fs.writeFileSync(
-          file,
-          '# 请在当前产品/项目的 svn.url 中维护唯一 SVN 根地址。\n',
-          'utf8'
-        );
-        return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
-      }
-      return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
-    }),
-    vscode.commands.registerCommand('gushenCompletion.refreshSvn', async (workspaceValue) => {
-      const providerId = workspaceValue?.id || workspaceValue?.sourceControl?.id || '';
-      const workspaceKey = typeof workspaceValue === 'string'
-        ? workspaceValue
-        : workspaceValue?.guthonWorkspaceKey
-          || workspaceKeyFromSourceControlId(providerId);
-      const requestedWorkingCopyIds = Array.isArray(workspaceValue?.guthonWorkingCopyIds)
-        ? workspaceValue.guthonWorkingCopyIds.filter(Boolean)
-        : [];
-      if (!workspaceKey) return vscode.window.showErrorMessage('无法解析 SVN 项目');
-      let release = claimToolRun(TOOL_COMMANDS.svn, workspaceKey);
-      if (!release) return false;
-      const elapsed = operationTimer();
-      try {
-        if (!await svnServices.saveDirtyDocuments(workspaceKey, '更新 SVN', '更新 SVN')) return false;
-        const workspaces = await listSvnWorkspaces();
-        const workspace = workspaces.find((item) => item.workspaceKey === workspaceKey);
-        if (!workspace?.workingCopies?.length) {
-          const completed = await runTool(
-            TOOL_COMMANDS.svn,
-            ['refresh'],
-            true,
-            workspaceKey,
-            release
-          );
-          release = null;
-          if (completed) {
-            svnServices.scm.clearRemote(workspaceKey);
-            refreshToolData();
-            await svnServices.refresh(workspaceKey);
-          }
-          return completed;
-        }
-        svnServices.log('更新 SVN', '检查远程变更和本地修改');
-        const current = await svnServices.backend.scmStatus(
-          workspaceKey,
-          true,
-          svnServices.backendOutput
-        );
-        const currentById = new Map(current.workingCopies.map((item) => [item.id, item]));
-        let selectedWorkingCopyIds = requestedWorkingCopyIds;
-        if (!selectedWorkingCopyIds.length) {
-          const sourceGroups = (workspace.sourceControlGroups || []).map((group) => {
-            const items = (group.workingCopyIds || []).map((id) => currentById.get(id)).filter(Boolean);
-            const remoteCount = items.filter((item) => item.outOfDate).length;
-            const localCount = items.filter((item) => !item.clean).length;
-            return {
-              label: group.label,
-              description: `${group.dataSourceId || '公共'} · ${items.length} 个 working copy`,
-              detail: [
-                remoteCount ? `远程更新 ${remoteCount}` : '',
-                localCount ? `本地修改 ${localCount}` : '',
-              ].filter(Boolean).join(' · ') || '当前干净',
-              workingCopyIds: items.map((item) => item.id),
-            };
-          }).filter((group) => group.workingCopyIds.length);
-          const selected = await vscode.window.showQuickPick(
-            sourceGroups.length ? sourceGroups : current.workingCopies.map((item) => ({
-              label: item.id,
-              description: item.clean ? '干净' : '有本地修改',
-              detail: item.outOfDate ? '远程存在更新' : undefined,
-              workingCopyIds: [item.id],
-            })),
-            { title: '选择要更新的 SVN 子系统' }
-          );
-          if (!selected) return false;
-          selectedWorkingCopyIds = selected.workingCopyIds;
-        }
-        const selectedItems = selectedWorkingCopyIds.map((id) => currentById.get(id)).filter(Boolean);
-        if (!selectedItems.length) {
-          void vscode.window.showErrorMessage('所选子系统没有可更新的 SVN working copy');
-          return false;
-        }
-        const args = [
-          'refresh',
-          ...selectedItems.flatMap((item) => ['--working-copy', item.id]),
-        ];
-        svnServices.log('更新 SVN', `已选择 ${selectedItems.length} 个 working copy，准备执行 SVN update`);
-        if (selectedItems.some((item) => !item.clean)) {
-          const confirmed = await vscode.window.showWarningMessage(
-            '所选子系统存在本地修改。更新将由 SVN 执行原生文本合并，Nexus 不会自动解决冲突。',
-            { modal: true },
-            '更新并合并'
-          );
-          if (confirmed !== '更新并合并') return false;
-          args.push('--merge-local');
-        }
-        const completed = await runTool(
-          TOOL_COMMANDS.svn,
-          args,
-          true,
-          workspaceKey,
-          release
-        );
-        release = null;
-        if (completed) {
-          svnServices.scm.clearRemote(workspaceKey);
-          refreshToolData();
-          await svnServices.refresh(workspaceKey);
-        }
-        return completed;
-      } finally {
-        if (release) release();
-        const summary = `本次更新操作完整耗时：${elapsed()}`;
-        toolOutput().appendLine(summary);
-        svnServices.log('更新 SVN', summary);
-      }
-    }),
-    vscode.commands.registerCommand('gushenCompletion.showSvnStatus', async (workspaceKey) => {
-      await vscode.commands.executeCommand('gushenCompletion.refreshSvnScm', workspaceKey);
-      return vscode.commands.executeCommand('workbench.view.scm');
-    }),
-    vscode.commands.registerCommand('gushenCompletion.focusSvnSource', async () =>
-      vscode.commands.executeCommand('gushenCompletion.svnSourceView.focus')),
+    vscode.commands.registerCommand('gushenCompletion.runDiagnosis', projectDiagnosisHandler({vscode,selectWorkspace,runTool,command:TOOL_COMMANDS.diagnose})),
     vscode.commands.registerCommand('gushenCompletion.expandProjectSource', async () => {
-      await vscode.commands.executeCommand('gushenCompletion.toolView.focus');
-      return vscode.commands.executeCommand('list.expand');
+      return vscode.commands.executeCommand('gushenCompletion.sourceView.focus');
     }),
     vscode.commands.registerCommand('gushenCompletion.openWorkspace', (workspaceRoot) =>
       vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(workspaceRoot))),
@@ -1725,15 +1337,19 @@ function activate(context) {
       await refreshLocalWorkspaceViews();
     }),
     vscode.commands.registerCommand('gushenCompletion.editConfig', async (filename) => {
-      const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
+      const toolHome = windowToolHome(vscode.workspace.getConfiguration('gushenCompletion'), localWorkspaceFolders());
       if (!toolHome) return vscode.window.showErrorMessage('请先执行 “Guthon Nexus: 设置/切换工作空间”');
       const file = path.join(toolHome, 'config', filename);
       if (!fs.existsSync(file)) return vscode.window.showErrorMessage(`配置文件不存在：${file}。请先执行 “Guthon Nexus: 设置/切换工作空间”`);
       return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
     }),
     vscode.commands.registerCommand('gushenCompletion.openToolHome', () => {
-      const toolHome = vscode.workspace.getConfiguration('gushenCompletion').get('toolHome', '');
-      return toolHome ? vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(toolHome)) : vscode.window.showErrorMessage('请先执行 “Guthon Nexus: 设置/切换工作空间”');
+      const toolHome = windowToolHome(vscode.workspace.getConfiguration('gushenCompletion'), localWorkspaceFolders());
+      if (!toolHome) return vscode.window.showErrorMessage('请先执行 “Guthon Nexus: 设置/切换工作空间”');
+      if (!fs.existsSync(toolHome)) {
+        return vscode.window.showErrorMessage(`本地数据目录不存在：${toolHome}。请重新执行 “Guthon Nexus: 设置/切换工作空间” 选择现有目录`);
+      }
+      return vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(toolHome));
     }),
   ];
 
@@ -1759,11 +1375,11 @@ function activate(context) {
     disposable,
     definitionDisposable,
     hoverDisposable,
-    toolViewDisposable,
+    projectCard,
+    projectOverview,
     updateCenter,
     onboarding,
     ...(onboardingTrust ? [onboardingTrust] : []),
-    toolView.changed,
     bridgeOutput,
     bridge,
     processClient,
@@ -1773,13 +1389,12 @@ function activate(context) {
   void initializeInstalledEnvironment().catch(error => vscode.window.showErrorMessage(error.message));
 }
 
-function deactivate() {}
+async function deactivate() {const api=activeApiServices;activeApiServices=undefined;await api?.dispose();}
 
 module.exports = {
   activate,
   createDefinitionProvider,
   createHoverProvider,
   createProvider,
-  ToolTreeDataProvider,
   deactivate,
 };

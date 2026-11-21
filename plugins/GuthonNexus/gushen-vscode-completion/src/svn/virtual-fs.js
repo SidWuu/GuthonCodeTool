@@ -1,4 +1,4 @@
-const { BoundedCache } = require('./bounded-cache');
+const { BoundedCache } = require('../source/bounded-cache');
 const SCHEME = 'guthon-svn-edit';
 const GENERIC_SOURCE_EXTENSIONS = new Set(['json', 'md', 'txt', 'yaml', 'yml', 'gss', 'js', 'vm', 'sql']);
 
@@ -165,10 +165,9 @@ class SvnVirtualFileSystem {
     }
     const value = await this.backend.read(identity.workspaceKey, identity);
     let inheritance;
-    if (value.editable && identity.workspaceKey.startsWith('projects.')
-      && ['procedure', 'page'].includes(identity.sourceType)
+    if (['procedure', 'page'].includes(identity.sourceType)
       && (identity.sourceType === 'procedure' || identity.jsonPointer || /\.gss$/i.test(value.sourcePath || ''))
-      && /@?inherit\s*\(/.test(value.content)
+      && /^[ \t]*(?:return[ \t]+)?@?inherit\s*\([^\r\n]*\)\s*;?[ \t]*\r?$/m.test(value.content)
       && this.backend.pageQuery) {
       let offset = 0;
       let first;
@@ -182,6 +181,7 @@ class SvnVirtualFileSystem {
           ...(identity.sourceType === 'procedure'
             ? { workingCopyId: identity.workingCopyId || value.workingCopyId }
             : { jsonPointer: identity.jsonPointer }),
+          indexedSourceHash:value.sourceHash,
           offset, maxChars: 24_000,
         });
         first ||= result;

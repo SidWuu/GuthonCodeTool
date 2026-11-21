@@ -3,8 +3,10 @@ const TOOL_CLIENT_MODULE = "../../GuthonNexus/gushen-vscode-completion/src/tool-
 const { ToolProcessClient, WorkspaceQueue, WorkspaceToolPool } = require(TOOL_CLIENT_MODULE);
 const fs = require("fs");
 const path = require("path");
+const rootModule = path.join(path.dirname(require.resolve(TOOL_CLIENT_MODULE)), "workspace-root.js");
+const {workspaceRoot} = require(rootModule);
 const crypto = require("node:crypto");
-const {createPageContexts, snapshot} = require('./page-context');
+const {createPageContexts, snapshot, isWorkspaceKey} = require('./page-context');
 const pageContexts = createPageContexts();
 const {createMetadataJournal,metadataTarget} = require('./native-metadata');
 const { createBrowserUpdates } = require('./browser-updates');
@@ -20,7 +22,8 @@ const HUB_TOOL_HOME = process.env.GUTHON_TOOL_HOME || "";
 if (!HUB_TOOL_HOME || !path.isAbsolute(HUB_TOOL_HOME)) {
   throw new Error("GUTHON_TOOL_HOME 必须是显式本地数据目录绝对路径");
 }
-const BRIDGE_STATE_DIR = path.join(HUB_TOOL_HOME, "var", "nexus", "bridge");
+const spaceRoot = workspaceRoot(HUB_TOOL_HOME);
+const BRIDGE_STATE_DIR = path.join(spaceRoot, "nexus", "bridge");
 const metadataJournal = createMetadataJournal(path.join(BRIDGE_STATE_DIR,'native-metadata'));
 const TOKEN_PATH = path.join(BRIDGE_STATE_DIR, "token");
 if (process.env.GUTHON_BRIDGE_EXPORT_ROOT && !path.isAbsolute(process.env.GUTHON_BRIDGE_EXPORT_ROOT)) throw new Error("导出目录配置必须是绝对路径");
@@ -44,7 +47,7 @@ const bridgeCode = fs.readFileSync(__filename,"utf8")
   .replace(/^\/\/ GENERATED FILE[^\n]*\n\/\/ Source:[^\n]*\n/,"")
   .replace(/^const TOOL_CLIENT_MODULE = .*;$/m, 'const TOOL_CLIENT_MODULE = "tool-process-client";');
 const toolClientFile = require.resolve(TOOL_CLIENT_MODULE);
-const libraryHashes = [require.resolve('./page-context'), require.resolve('./browser-updates'), require.resolve('./native-metadata'), require.resolve('./native-step-registry'), toolClientFile, path.join(path.dirname(toolClientFile), 'workspace-scheduler.js'),
+const libraryHashes = [require.resolve('./page-context'), require.resolve('./browser-updates'), require.resolve('./native-metadata'), require.resolve('./native-step-registry'), require.resolve('./native-source-plan'), rootModule, toolClientFile, path.join(path.dirname(toolClientFile), 'workspace-scheduler.js'),
   path.join(path.dirname(toolClientFile), '../data/tool-command-metadata.json')]
   .map(file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'));
 const runtimeFingerprint = crypto.createHash("sha256").update(JSON.stringify([
@@ -91,7 +94,7 @@ const DEFAULT_TOOL_ENTRY = path.join(ROOT, "scripts", "guthon_tool.py");
 const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(BRIDGE_STATE_DIR, "pull-log.ndjson");
 const workspaceQueue = new WorkspaceQueue({limit:32,concurrency:4});
 let activeBusinessRequests = 0;
-const browserUpdates = createBrowserUpdates(HUB_TOOL_HOME, { busy: () => activeBusinessRequests > 0 || workspaceQueue.size > 0 });
+const browserUpdates = createBrowserUpdates(HUB_TOOL_HOME, { spaceRoot, busy: () => activeBusinessRequests > 0 || workspaceQueue.size > 0 });
 const toolProcessClient = new WorkspaceToolPool({limit:8,createClient:()=>new ToolProcessClient({
   env: { ...process.env, GUTHON_SUPPRESS_PULL_LOG: "1" },
 })});
@@ -232,68 +235,14 @@ function appendPullLog(options) {
 }
 
 function sourceSummary(payload, result = {}) {
-  const summary = {
-    workspaceKey: payload.workspaceKey || result.workspaceKey || "",
-    sourceType: payload.sourceType || "",
-    sourceId: payload.sourceId || "",
-    alias: payload.alias || "",
-    funId: payload.funId || "",
-    changed: result.changed ?? "",
-    pulled: result.pulled ?? "",
-    workCopyPath: result.workCopyPath || "",
-    workCopyStatus: result.workCopyStatus || "",
-    workCopyAction: result.workCopyAction || "",
-    localChanged: result.localChanged ?? ""
-  };
-  if ("gitAddStatus" in result) {
-    summary.gitAddStatus = result.gitAddStatus;
-    summary.gitAdded = result.gitAdded ?? 0;
-  }
-  return summary;
-}
-
-function tableSchemaSummary(payload, result = {}) {
-  return {
-    dataSourceId: payload.dataSourceId || "",
-    tableIds: Array.isArray(payload.tableIds) ? payload.tableIds : [],
-    exported_table_count: result.exported_table_count ?? "",
-    outputDir: result.outputDir || ""
-  };
-}
-
-function billTypeSummary(payload, result = {}) {
-  return {
-    dataSourceIds: Array.isArray(payload.dataSourceIds) ? payload.dataSourceIds : [],
-    billTypeCodes: Array.isArray(payload.billTypeCodes) ? payload.billTypeCodes : [],
-    exported_bill_type_count: result.exported_bill_type_count ?? "",
-    outputDir: result.outputDir || ""
-  };
-}
-
-function viewSqlSummary(payload, result = {}) {
-  return {
-    dataSourceIds: Array.isArray(payload.dataSourceIds) ? payload.dataSourceIds : [],
-    viewIds: Array.isArray(payload.viewIds) ? payload.viewIds : [],
-    exported_view_count: result.exported_view_count ?? "",
-    outputDir: result.outputDir || ""
-  };
-}
-
-function systemScriptSummary(payload, result = {}) {
-  return {
-    systemIds: Array.isArray(payload.systemIds) ? payload.systemIds : [],
-    scriptTypes: Array.isArray(payload.scriptTypes) ? payload.scriptTypes : [],
-    exported_system_script_count: result.exported_system_script_count ?? "",
-    workCopyPaths: Array.isArray(result.work_copy_paths) ? result.work_copy_paths : [],
-    outputDir: result.outputDir || ""
-  };
+  return { workspaceKey: payload.workspaceKey || result.workspaceKey || "", sourceType: payload.sourceType || "",
+    sourceId: payload.sourceId || "", pageId: payload.pageId || "", procedureId: payload.procedureId || "",
+    alias: payload.alias || "", funId: payload.funId || "", dataSourceId: payload.dataSourceId || "",
+    systemId: payload.systemId || "", scriptType: payload.scriptType || "" };
 }
 
 function commandErrorMessage(errorLabel, output, code) {
   const message = String(output || "").trim();
-  if (/(?:pymysql\.err\.(?:Operational|Interface)Error|psycopg\.(?:Operational|Interface)Error|CR_SERVER_LOST|Can't connect to MySQL server|Lost connection to MySQL server|connection (?:failed|refused)|server closed the connection unexpectedly|\((?:2003|2006|2013),)/i.test(message)) {
-    return "无法连接源码数据库，请确认已连接公司内网或 VPN 后重试";
-  }
   return message || `${errorLabel}失败，退出码：${code}`;
 }
 
@@ -316,67 +265,41 @@ async function resolveRequestWorkspace(payload) {
 }
 
 function enqueue(action, workspaceKey='') {
-  if (workspaceKey && !/^(products|projects)\.[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(workspaceKey)) return Promise.reject(new Error('工作区键无效'));
+  if (workspaceKey && !isWorkspaceKey(workspaceKey)) return Promise.reject(new Error('工作区键无效'));
   return workspaceQueue.enqueue(workspaceKey || '__unresolved__',action);
 }
 
-async function runHubPull(payload) {
+async function runApiRefresh(payload) {
+  const fields = ['sourceType', 'sourceId', 'pageId', 'procedureId', 'alias', 'funId', 'systemId', 'dataSourceId', 'scriptType'];
+  const target = Object.fromEntries(fields.filter(key => payload[key] !== undefined && payload[key] !== '')
+    .map(key => [key, payload[key]]));
+  if (Object.values(target).some(value => typeof value !== 'string' || !value.trim())) throw new Error('源码对象身份无效');
+  const type = target.sourceType;
+  if (type === 'page' ? !(target.pageId || target.sourceId)
+    : type === 'procedure' ? !((target.procedureId || target.sourceId || target.alias) && target.funId)
+    : type === 'table' || type === 'view' ? !(target.dataSourceId && target.sourceId)
+    : type === 'system-script' ? !(target.systemId && target.sourceId)
+    : true) throw new Error('请明确选择一个受支持的源码对象，不能刷新全部');
   const route = await resolveRequestWorkspace(payload);
   if (!route.ok) return route;
-  const routed = { ...payload, workspaceKey: route.workspaceKey, client: "bridge-legacy-pull" };
-  return runToolCommand("pull", [], "源码拉取", routed, route.workspaceKey);
-}
-
-async function runTableSchemaExport(payload) {
-  const route = await resolveRequestWorkspace(payload);
-  if (!route.ok) return route;
-  const toolArgs = [];
-  if (payload.dataSourceId) {
-    toolArgs.push("--data-source-ids", String(payload.dataSourceId));
+  if (route.workspace?.sourceMode === 'svn') {
+    throw new Error('SVN 项目通过 Nexus 更新 working copy，浏览器不拉取源码');
   }
-  if (Array.isArray(payload.tableIds) && payload.tableIds.length > 0) {
-    toolArgs.push("--table-ids", payload.tableIds.join(","));
+  if (route.workspace?.sourceMode === 'database') {
+    if (route.workspace.capabilities?.['database.sourceSync'] !== true || !['page', 'procedure'].includes(type)) {
+      throw new Error('DATABASE 浏览器拉取仅支持已授权的页面或过程函数');
+    }
+    return runToolCommand('pull', [], '拉取 DATABASE 工作副本', {
+      ...target, sourceId: target.sourceId || target.pageId || target.procedureId,
+      pageOrigin: payload.pageOrigin, workspaceKey: route.workspaceKey, client: 'bridge-legacy-pull',
+    }, route.workspaceKey);
   }
-  return runToolCommand("export-schema", toolArgs, "表结构拉取", undefined, route.workspaceKey);
-}
-
-async function runBillTypeExport(payload) {
-  const route = await resolveRequestWorkspace(payload);
-  if (!route.ok) return route;
-  const toolArgs = [];
-  if (Array.isArray(payload.dataSourceIds) && payload.dataSourceIds.length > 0) {
-    toolArgs.push("--data-source-ids", payload.dataSourceIds.join(","));
+  if (route.workspace?.capabilities?.['api.pull'] !== true) throw new Error('工作区未授权 API 源码拉取');
+  const result = await runToolCommand('api', ['refresh', '--stdin'], '源码刷新', target, route.workspaceKey);
+  if (result.complete === false || (Array.isArray(result.conflicts) && result.conflicts.length)) {
+    return { ...result, ok: false, message: result.message || '刷新存在冲突，本地修改已保留；请在 Nexus 检查结果' };
   }
-  if (Array.isArray(payload.billTypeCodes) && payload.billTypeCodes.length > 0) {
-    toolArgs.push("--bill-type-codes", payload.billTypeCodes.join(","));
-  }
-  return runToolCommand("export-bill-type", toolArgs, "单据类型拉取", undefined, route.workspaceKey);
-}
-
-async function runViewSqlExport(payload) {
-  const route = await resolveRequestWorkspace(payload);
-  if (!route.ok) return route;
-  const toolArgs = [];
-  if (Array.isArray(payload.dataSourceIds) && payload.dataSourceIds.length > 0) {
-    toolArgs.push("--data-source-ids", payload.dataSourceIds.join(","));
-  }
-  if (Array.isArray(payload.viewIds) && payload.viewIds.length > 0) {
-    toolArgs.push("--view-ids", payload.viewIds.join(","));
-  }
-  return runToolCommand("export-view", toolArgs, "视图源码拉取", undefined, route.workspaceKey);
-}
-
-async function runSystemScriptExport(payload) {
-  const route = await resolveRequestWorkspace(payload);
-  if (!route.ok) return route;
-  const toolArgs = [];
-  if (Array.isArray(payload.systemIds) && payload.systemIds.length > 0) {
-    toolArgs.push("--system-ids", payload.systemIds.join(","));
-  }
-  if (Array.isArray(payload.scriptTypes) && payload.scriptTypes.length > 0) {
-    toolArgs.push("--script-types", payload.scriptTypes.join(","), "--workcopy");
-  }
-  return runToolCommand("export-system-script", toolArgs, "系统脚本拉取", undefined, route.workspaceKey);
+  return result;
 }
 
 async function runProcedureCallers(payload) {
@@ -387,14 +310,31 @@ async function runProcedureCallers(payload) {
   }
   const route = await resolveRequestWorkspace(payload);
   if (!route.ok) return route;
-  const args = ["callers", "--alias", alias, "--fun", funId, "--limit", "100"];
-  return runToolCommand("query", args, "调用方查询", undefined, route.workspaceKey);
+  if (route.workspace?.capabilities?.['source.read'] !== true) throw new Error('工作区未授权源码查询');
+  const result = route.workspace?.sourceMode === 'svn' || route.workspace?.sourceMode === 'database'
+    ? await runToolCommand('legacy-source', ['callers', '--alias', alias, '--fun-id', funId], '调用方查询', undefined, route.workspaceKey)
+    : await runToolCommand('api', ['callers', '--stdin'], '调用方查询', { alias, funId, limit: 100 }, route.workspaceKey);
+  if (!Array.isArray(result.callers)) throw new Error('API 调用方查询未返回可用结果');
+  const callers = result.callers.map(caller => ({
+    ...caller,
+    source_table: caller.source_table || caller.sourceType,
+    source_id: caller.source_id || caller.sourceId,
+    source_alias_id: caller.source_alias_id || caller.alias,
+    fun_id: caller.fun_id || caller.funId,
+    source_name: caller.source_name || caller.name,
+    line_no: caller.line_no || caller.line,
+  }));
+  if (callers.some(caller => caller.source_table === 'page' ? !caller.source_id
+    : caller.source_table !== 'procedure' || !caller.source_alias_id || !caller.fun_id)) {
+    throw new Error('API 调用方结果缺少精确对象身份，暂不能定位');
+  }
+  return { ...result, callers };
 }
 
 function publicWorkspace(workspace) {
   if (!workspace) return workspace;
   return Object.fromEntries([
-    "workspaceKey", "type", "id", "name", "displayName", "sourceMode", "capabilities", "status"
+    "workspaceKey", "id", "name", "displayName", "sourceMode", "capabilities", "status"
   ].filter((key) => workspace[key] !== undefined).map((key) => [key, workspace[key]]));
 }
 
@@ -407,11 +347,7 @@ function publicRoute(route) {
 }
 
 const JOB_OPERATIONS = {
-  "pull-hub-source": { run: runHubPull, pullType: "source", summary: sourceSummary },
-  "export-table-schema": { run: runTableSchemaExport, pullType: "database", summary: tableSchemaSummary },
-  "export-bill-type": { run: runBillTypeExport, pullType: "billtype", summary: billTypeSummary },
-  "export-view-sql": { run: runViewSqlExport, pullType: "views", summary: viewSqlSummary },
-  "export-system-scripts": { run: runSystemScriptExport, pullType: "system-scripts", summary: systemScriptSummary },
+  "refresh-api-source": { run: runApiRefresh, pullType: "source", summary: sourceSummary },
   "query-procedure-callers": { run: runProcedureCallers },
 };
 const JOB_DIR = path.join(BRIDGE_STATE_DIR, "jobs");
@@ -457,7 +393,7 @@ function requestJobIdentity(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("任务请求必须是 JSON 对象");
   const { requestId, workspaceKey, pageOrigin } = body;
   if (typeof requestId !== "string" || !/^\d{13}_[a-f0-9-]{36}$/.test(requestId)) throw new Error("任务请求标识无效");
-  if (!/^(products|projects)\.[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(workspaceKey || "")) throw new Error("任务需要固定的工作区键");
+  if (!isWorkspaceKey(workspaceKey)) throw new Error("任务需要固定的工作区键");
   const origin = new URL(pageOrigin);
   if (!["http:", "https:"].includes(origin.protocol) || origin.origin !== pageOrigin) throw new Error("任务页面来源无效");
   return jobId(requestId, workspaceKey, pageOrigin);
@@ -494,7 +430,7 @@ function submitJob(body) {
     job.state = "RUNNING"; job.updatedAt = Date.now(); writeJob(job);
     try {
       // run implementations revalidate origin/identity against this fixed key
-      // before any database command. A route result cannot retarget the job.
+      // before any source command. A route result cannot retarget the job.
       const result = await operation.run(payload);
       if (result.workspaceKey && result.workspaceKey !== job.workspaceKey) throw new Error("任务工作区归属发生变化");
       if(Buffer.byteLength(JSON.stringify(result)) > MAX_BODY_BYTES) {
@@ -595,7 +531,8 @@ const server = http.createServer(async (req, res) => {
         }
         return sendJson(res,202,{ok:true,...metadataJournal.dispatch(payload,context,pageContexts.metadata)});
       }
-      if (req.url === '/pageLifecycle' && payload.target?.action !== 'inspect' && route.workspace?.capabilities?.['svn.edit'] !== true) throw new Error('工作区未授权 PAGE 平台写入');
+      if (req.url === '/pageLifecycle' && route.workspace?.capabilities?.['source.read'] !== true) throw new Error('工作区未授权 PAGE 读取');
+      if (req.url === '/pageLifecycle' && payload.target?.action !== 'inspect' && !['api.edit','svn.edit'].some(capability => route.workspace?.capabilities?.[capability] === true)) throw new Error('工作区未授权 PAGE 平台写入');
       return sendJson(res, 202, req.url === '/pageLifecycle' ? pageContexts.lifecycle(payload) : pageContexts.navigate(payload));
     } catch (error) { return sendJson(res, 400, {ok: false, message: error.message}); }
   }
@@ -630,6 +567,9 @@ const server = http.createServer(async (req, res) => {
       }
       const manifest = readManifest();
       const filePath = buildFilePath(payload);
+      if (fs.existsSync(filePath) && fs.readFileSync(filePath, "utf8") !== payload.content) {
+        return sendJson(res, 409, { ok: false, message: "导出文件已存在且内容不同，请先备份或移走本地文件" });
+      }
       const temporary = `${filePath}.${process.pid}.tmp`;
       fs.writeFileSync(temporary, payload.content, { encoding: "utf8", flag: "wx", mode: 0o600 });
       fs.renameSync(temporary, filePath);
@@ -698,131 +638,6 @@ const server = http.createServer(async (req, res) => {
       });
       return sendJson(res, 200, { ok: true });
     } catch (error) {
-      return sendJson(res, 500, { ok: false, message: error.message });
-    }
-  }
-
-  if (req.method === "POST" && req.url === "/pullHubSource") {
-    let payload = {};
-    try {
-      payload = await readBody(req);
-      const result = await enqueue(() => runHubPull(payload), payload.workspaceKey || "");
-      appendPullLog({
-        pullType: "source",
-        summary: sourceSummary(payload, result),
-        payload,
-        result,
-        ok: result?.ok
-      });
-      return sendJson(res, 200, result);
-    } catch (error) {
-      appendPullLog({
-        pullType: "source",
-        summary: sourceSummary(payload),
-        payload,
-        ok: false,
-        message: error.message
-      });
-      return sendJson(res, 500, { ok: false, message: error.message });
-    }
-  }
-
-  if (req.method === "POST" && req.url === "/exportTableSchema") {
-    let payload = {};
-    try {
-      payload = await readBody(req);
-      const result = await enqueue(() => runTableSchemaExport(payload), payload.workspaceKey || "");
-      appendPullLog({
-        pullType: "database",
-        summary: tableSchemaSummary(payload, result),
-        payload,
-        result,
-        ok: result?.ok
-      });
-      return sendJson(res, 200, result);
-    } catch (error) {
-      appendPullLog({
-        pullType: "database",
-        summary: tableSchemaSummary(payload),
-        payload,
-        ok: false,
-        message: error.message
-      });
-      return sendJson(res, 500, { ok: false, message: error.message });
-    }
-  }
-
-  if (req.method === "POST" && req.url === "/exportBillType") {
-    let payload = {};
-    try {
-      payload = await readBody(req);
-      const result = await enqueue(() => runBillTypeExport(payload), payload.workspaceKey || "");
-      appendPullLog({
-        pullType: "billtype",
-        summary: billTypeSummary(payload, result),
-        payload,
-        result,
-        ok: result?.ok
-      });
-      return sendJson(res, 200, result);
-    } catch (error) {
-      appendPullLog({
-        pullType: "billtype",
-        summary: billTypeSummary(payload),
-        payload,
-        ok: false,
-        message: error.message
-      });
-      return sendJson(res, 500, { ok: false, message: error.message });
-    }
-  }
-
-  if (req.method === "POST" && req.url === "/exportViewSql") {
-    let payload = {};
-    try {
-      payload = await readBody(req);
-      const result = await enqueue(() => runViewSqlExport(payload), payload.workspaceKey || "");
-      appendPullLog({
-        pullType: "views",
-        summary: viewSqlSummary(payload, result),
-        payload,
-        result,
-        ok: result?.ok
-      });
-      return sendJson(res, 200, result);
-    } catch (error) {
-      appendPullLog({
-        pullType: "views",
-        summary: viewSqlSummary(payload),
-        payload,
-        ok: false,
-        message: error.message
-      });
-      return sendJson(res, 500, { ok: false, message: error.message });
-    }
-  }
-
-  if (req.method === "POST" && req.url === "/exportSystemScripts") {
-    let payload = {};
-    try {
-      payload = await readBody(req);
-      const result = await enqueue(() => runSystemScriptExport(payload), payload.workspaceKey || "");
-      appendPullLog({
-        pullType: "system-scripts",
-        summary: systemScriptSummary(payload, result),
-        payload,
-        result,
-        ok: result?.ok
-      });
-      return sendJson(res, 200, result);
-    } catch (error) {
-      appendPullLog({
-        pullType: "system-scripts",
-        summary: systemScriptSummary(payload),
-        payload,
-        ok: false,
-        message: error.message
-      });
       return sendJson(res, 500, { ok: false, message: error.message });
     }
   }

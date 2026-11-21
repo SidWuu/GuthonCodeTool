@@ -17,7 +17,9 @@ test('snapshot projects bounded metadata and strips bodies, selections and URL q
   assert.equal(value.hash, '#/dev');
   assert.equal(JSON.stringify(value).includes('PRIVATE'), false);
   assert.equal(JSON.stringify(value).includes('secret'), false);
-  assert.throws(() => snapshot({...payload, workspaceKey: 'demo'}), /工作区/);
+  assert.equal(snapshot({...payload, workspaceKey: 'ws_1.x-y'}).workspaceKey, 'ws_1.x-y');
+  for (const workspaceKey of ['', '.hidden', '_hidden', '-hidden', 'ws/a', 'ws one', 'ws\n', 123])
+    assert.throws(() => snapshot({...payload, workspaceKey}), /工作区/);
   assert.throws(() => snapshot({...payload, pageOrigin: 'https://example.test/path'}), /来源/);
 });
 test('snapshots expire, clear changed workspace and enforce capacity', () => {
@@ -75,4 +77,21 @@ test('PAGE lifecycle uses exact paired context, bounded metadata receipts and no
     const next=response();registry.subscribe(next,{clientId:payload.clientId});
     assert.equal(next.frames.join('').includes('page-lifecycle'),false);
   } finally {registry.dispose();}
+});
+
+
+test('neutral workspace contexts and event subscriptions remain isolated', () => {
+  const registry = createPageContexts(), first = response(), second = response();
+  registry.subscribe(first, {workspaceKey: 'ws_1'});
+  registry.subscribe(second, {workspaceKey: 'ws_2'});
+  try {
+    const one = registry.publish({...payload, workspaceKey:'ws_1'});
+    registry.publish({...payload, clientId:'b'.repeat(32), workspaceKey:'ws_2'});
+    assert.equal(registry.list('ws_1').length, 1);
+    assert.equal(registry.list('ws_2').length, 1);
+    assert.throws(() => registry.get(one.contextId, 'ws_2'), /不属于/);
+    assert.ok(first.frames.some(frame => frame.includes('ws_1')));
+    assert.equal(first.frames.some(frame => frame.includes('ws_2')), false);
+    assert.ok(second.frames.some(frame => frame.includes('ws_2')));
+  } finally { registry.dispose(); }
 });

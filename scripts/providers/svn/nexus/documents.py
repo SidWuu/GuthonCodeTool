@@ -229,11 +229,15 @@ def _page_scripts(path: Path) -> tuple[list[dict], bool]:
 
 
 def _object_scripts(item: dict) -> tuple[list[dict], bool]:
+    from .public_sources import reference_type, reference_fragments
+
     path = Path(item["local_path"])
     # PAGE fragments must use the Nexus parser even when a scanner result already
     # carries legacy field-key types such as beforeSaveScript/onClickScript.
     if item["source_table"] == "page" and path.suffix.lower() == ".json":
         return _page_scripts(path)
+    if reference_type(item["source_table"], item["source_path"]):
+        return reference_fragments(path, decode_source(path.read_bytes())[0]), False
     existing = item.get("scripts")
     if isinstance(existing, list) and existing:
         return existing, bool(item.get("double_encoded"))
@@ -382,6 +386,8 @@ def fragments(
     fun_id: str = "",
     working_copy_id: str = "",
 ) -> dict:
+    from .public_sources import reference_type, reference_fragments
+
     require_capability(workspace, "browse")
     with operation_lock(workspace, "document-fragments", shared=True):
         item = _resolve_object(workspace, source_type, source_id, fun_id, working_copy_id)
@@ -394,6 +400,8 @@ def fragments(
                 base_path = Path(item["local_path"])
                 if item["source_table"] == "page" and base_path.suffix.lower() == ".json":
                     parsed, _double_encoded = _page_scripts_text(base_text)
+                elif reference_type(item["source_table"], item["source_path"]):
+                    parsed = reference_fragments(base_path, base_text)
                 elif item["source_table"] == "view" and base_path.suffix.lower() == ".json":
                     data = json.loads(base_text)
                     value = data.get("viewSql") if isinstance(data, dict) else None
@@ -425,6 +433,8 @@ def fragments(
                     "scriptType": script.get("script_type") or "",
                     "jsonPointer": script.get("json_path") or "",
                     "label": script.get("label") or "",
+                    **({"code":script["source_code"],"dataSourceId":script["data_source_id"]}
+                       if "source_code" in script else {}),
                     "status": (
                         "SVN_DIRTY"
                         if str(script.get("json_path") or "") in base_scripts
@@ -1016,7 +1026,7 @@ def page_node_operation_status(
 def sync_page_node_operation_index(workspace: dict, config: dict, *, operation_id: str) -> dict:
     """Refresh only a completed local PAGE operation in the shared workspace index."""
 
-    from common import gusen_hub
+    from common import legacy_source as gusen_hub
     from . import page_nodes
 
     require_capability(workspace, "edit")
@@ -1068,7 +1078,7 @@ def sync_page_node_operation_index(workspace: dict, config: dict, *, operation_i
 def verify_page_node_operation_diff(workspace: dict, *, operation_id: str) -> dict:
     """Verify the indexed PAGE against its exact SVN working-copy diff, without persisting source."""
 
-    from common import gusen_hub
+    from common import legacy_source as gusen_hub
     from . import page_nodes
 
     require_capability(workspace, "edit")

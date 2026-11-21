@@ -13,8 +13,8 @@ test('pageContext and SSE require Bearer, reject web Origin and recheck workspac
 require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
  const r=JSON.parse(line), p=r.input;
  if(r.command!=='route' || JSON.stringify(p).includes('PRIVATE'))process.exit(3);
- const valid=p.workspaceKey==='products.demo' && p.pageOrigin==='https://platform.test' && ['DS-1','DS-2'].includes(p.dataSourceId);
- process.stdout.write(JSON.stringify({type:'result',id:r.id,ok:valid,...(valid?{result:{ok:true,workspaceKey:p.workspaceKey,workspace:{capabilities:{'svn.edit':p.dataSourceId==='DS-1'}}}}:{error:{message:'Page identity does not match workspace'}})})+'\\n');
+ const valid=p.workspaceKey==='products.demo' && p.pageOrigin==='https://platform.test' && ['DS-1','DS-2','DS-3'].includes(p.dataSourceId);
+ process.stdout.write(JSON.stringify({type:'result',id:r.id,ok:valid,...(valid?{result:{ok:true,workspaceKey:p.workspaceKey,workspace:{capabilities:{'source.read':p.dataSourceId!=='DS-3','api.edit':p.dataSourceId==='DS-1','svn.edit':p.dataSourceId==='DS-1'}}}}:{error:{message:'Page identity does not match workspace'}})})+'\\n');
 });`);
   const port = 17548;
   const child = spawn(process.execPath, ['server.js'], {cwd: __dirname,
@@ -79,6 +79,10 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
       target:{...metadataPayload.target,dataSourceId:'DS-2'}})).status,400);
     const readonly = await (await post('/pageContext',{...payload,tabId:2,metadata:{dataSourceId:'DS-2'}})).json();
     assert.equal((await post('/pageLifecycle',{contextId:readonly.context.contextId,workspaceKey:payload.workspaceKey,target:{action:'delete',pageId:'PG-1'}})).status,400);
+    const noRead = await (await post('/pageContext',{...payload,tabId:3,metadata:{dataSourceId:'DS-3'}})).json();
+    assert.equal((await post('/pageLifecycle',{contextId:noRead.context.contextId,workspaceKey:payload.workspaceKey,target:{action:'inspect',pageId:''}})).status,400);
+    assert.equal((await post('/pageLifecycle',{contextId:published.context.contextId,workspaceKey:'projects.other',target:{action:'inspect',pageId:''}})).status,400);
+    await post('/removePageContext',{clientId:payload.clientId,tabId:3});
     await post('/removePageContext',{clientId:payload.clientId,tabId:2});
     await post('/removePageContext', {clientId: payload.clientId, tabId: 1});
     const contexts = await (await fetch(base + '/pageContext?workspaceKey=products.demo', {headers})).json();

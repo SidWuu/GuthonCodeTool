@@ -4,6 +4,8 @@ import json
 
 from common import gusen_hub
 from common import source_facts
+from providers.api import index
+from contextlib import closing
 
 
 def _rows(rows):
@@ -11,7 +13,9 @@ def _rows(rows):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Query bounded Gushen Hub context without reading source bodies.")
+    parser = argparse.ArgumentParser(
+        description="Query bounded Gushen Hub context without reading source bodies."
+    )
     parser.add_argument("--workspace")
     subparsers = parser.add_subparsers(dest="command", required=True)
     find = subparsers.add_parser("find")
@@ -20,6 +24,7 @@ def build_parser():
     context = subparsers.add_parser("context")
     context.add_argument("--source-id", required=True)
     context.add_argument("--fun", "--fun-id", dest="fun", default="")
+    context.add_argument("--source-namespace", default="")
     context.add_argument("--limit", type=int, default=20)
     callers = subparsers.add_parser("callers")
     callers.add_argument("--alias", required=True)
@@ -50,22 +55,24 @@ def main(args=None):
     if parsed.workspace:
         gusen_hub.set_workspace(parsed.workspace)
     workspace = gusen_hub.resolve_workspace(cfg)
-    scope_id = workspace["scopeId"]
-    with gusen_hub.index_connection(
-        workspace,
-        action="query-hub-context",
-        readonly=True,
-    ) as conn:
-        if parsed.command == "find":
-            result = {"scopeId": scope_id, "candidates": _rows(gusen_hub.find_source_candidates(conn, scope_id, parsed.keyword, parsed.limit))}
-        elif parsed.command == "context":
-            result = {key: (dict(value) if key == "source" else _rows(value)) for key, value in gusen_hub.query_source_context(conn, scope_id, parsed.source_id, parsed.fun, parsed.limit).items()}
-        elif parsed.command == "callers":
-            result = {
-                "target": {"alias": parsed.alias, "funId": parsed.fun},
-                "callers": _rows(gusen_hub.query_incoming_callers(conn, scope_id, parsed.alias, parsed.fun, parsed.limit)),
-            }
-        elif parsed.command == "facts":
+    scope_id = workspace["workspaceKey"]
+    if parsed.command == "find":
+        found = index.search(workspace, parsed.keyword, limit=parsed.limit)
+        candidates = found.pop("hits")
+        result = {**found, "scopeId": scope_id, "candidates": candidates}
+    elif parsed.command == "context":
+        source = index.resolve_source(
+            workspace, parsed.source_id, parsed.fun, parsed.source_namespace
+        )
+        result = index.context(workspace, source["source_path"], limit=parsed.limit)
+        result["scopeId"] = scope_id
+    elif parsed.command == "callers":
+        result = index.callers(workspace, parsed.alias, parsed.fun, limit=parsed.limit)
+        result["scopeId"] = scope_id
+        result["target"] = {"alias": parsed.alias, "funId": parsed.fun}
+    elif parsed.command == "facts":
+        index._bound(parsed.limit, parsed.continuation, 50)
+        with closing(index._connection(workspace)) as conn:
             result = source_facts.query_facts(
                 conn,
                 scope_id,
@@ -74,21 +81,31 @@ def main(args=None):
                 source_id=parsed.source_id,
                 limit=parsed.limit,
                 offset=parsed.continuation,
+                source_root=workspace["providerSourceRoot"],
             )
-        else:
-            result = source_facts.explain_table(
-                conn,
-                scope_id,
-                table_name=parsed.table,
-                bill_type_code=parsed.bill_type,
-                data_source_id=parsed.data_source_id,
-                operation=parsed.operation,
-                limit=parsed.limit,
-                offset=parsed.continuation,
-                fact_limit=parsed.fact_limit,
-                caller_depth=parsed.caller_depth,
-                include_details=parsed.include_details,
-            )
+            partial = conn.execute(
+                "SELECT COUNT(*) FROM gusen_source_record WHERE status<>'OK'"
+            ).fetchone()[0]
+        result.update(
+            workspaceKey=scope_id,
+            scopeId=scope_id,
+            partialSourceCount=partial,
+            complete=not result["truncated"] and not partial,
+        )
+    else:
+        result = index.explain(
+            workspace,
+            table_name=parsed.table,
+            bill_type_code=parsed.bill_type,
+            data_source_id=parsed.data_source_id,
+            operation=parsed.operation,
+            limit=parsed.limit,
+            offset=parsed.continuation,
+            fact_limit=parsed.fact_limit,
+            caller_depth=parsed.caller_depth,
+            include_details=parsed.include_details,
+        )
+        result["scopeId"] = scope_id
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

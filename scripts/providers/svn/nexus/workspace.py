@@ -300,6 +300,7 @@ def refresh(
     merge_local=False,
     working_copy_ids: list[str] | None = None,
     logical_paths: list[str] | None = None,
+    tree_targets=False,
     on_progress: ProgressCallback = None,
 ) -> dict:
     require_capability(workspace, "refresh")
@@ -319,9 +320,17 @@ def refresh(
     exact_targets: dict[str, list[tuple[Path, str, str]]] = {}
     for logical_path in requested_paths:
         entry, target, relative = resolve_authorized_path(scope, logical_path)
-        if target.is_dir() or not Path(relative).suffix:
+        if not tree_targets and (target.is_dir() or not Path(relative).suffix):
             raise SystemExit(f"Single SVN update target must be a file: {logical_path}")
+        if tree_targets and (not target.exists() or any(ord(char)<32 for char in str(target))):
+            raise SystemExit(f"SVN node target is no longer available: {logical_path}")
         exact_targets.setdefault(entry.id, []).append((target, relative, logical_path))
+        if tree_targets and target.suffix.lower()==".gss" and not target.name.endswith(".inherit.gss"):
+            parent=target.with_name(target.stem+".inherit.gss")
+            if parent.is_file() and not parent.is_symlink():
+                parent_rel=Path(relative).with_name(parent.name).as_posix()
+                parent_logical=Path(logical_path).with_name(parent.name).as_posix()
+                exact_targets[entry.id].append((parent,parent_rel,parent_logical))
     if exact_targets:
         selected = set(exact_targets)
     # An explicit update may follow a short watcher-triggered reindex for the
@@ -360,10 +369,10 @@ def refresh(
                 run_svn(["cleanup", "--", str(entry.root)])
                 _validate_existing(entry)
                 before = svn_status(entry.root, remote=True, settings=workspace["svn"])
-            targets = exact_targets.get(entry.id) or []
+            targets = list(dict.fromkeys(exact_targets.get(entry.id) or []))
             if targets:
                 remote_paths = {change.get("path") for change in before.get("remoteChanges") or []}
-                missing = [logical for _target, relative, logical in targets if relative not in remote_paths]
+                missing = [logical for _target, relative, logical in targets if relative not in remote_paths and not tree_targets]
                 if missing:
                     raise SystemExit(
                         f"SVN path is no longer a remote change: {', '.join(missing)}"
@@ -371,6 +380,8 @@ def refresh(
                 local_paths = {change.get("path") for change in before.get("changes") or []}
                 overlapping_local = [
                     logical for _target, relative, logical in targets if relative in local_paths
+                    or tree_targets and (relative=="." and local_paths or any(path.startswith(relative.rstrip("/")+"/") or
+                                            relative.startswith(path.rstrip("/")+"/") for path in local_paths if path))
                 ]
             else:
                 overlapping_local = [entry.id] if not before["clean"] else []
@@ -381,7 +392,25 @@ def refresh(
                 )
             update_paths = [target for target, _relative, _logical in targets] or [entry.root]
             _progress(on_progress, f"[{progress_index}/{total}] {label}｜更新｜执行 SVN update")
-            update_result = run_remote_svn(["update", *map(str, update_paths)], workspace["svn"])
+            if tree_targets:
+                notifications=[]
+                arguments=[]
+                argument_bytes=0
+                # Keep each SVN invocation below the Windows command-line limit.
+                for target in update_paths:
+                    value=str(target)
+                    if "@" in value:
+                        value+="@"
+                    size=len(value.encode("utf-16-le"))+8
+                    if arguments and argument_bytes+size>32_000:
+                        notifications.append(run_remote_svn(["update",*arguments],workspace["svn"]).stdout)
+                        arguments,argument_bytes=[],0
+                    arguments.append(value)
+                    argument_bytes+=size
+                notifications.append(run_remote_svn(["update",*arguments],workspace["svn"]).stdout)
+                update_output="\n".join(notifications)
+            else:
+                update_output=run_remote_svn(["update", *map(str, update_paths)], workspace["svn"]).stdout
             _progress(on_progress, f"[{progress_index}/{total}] {label}｜更新｜检查更新后状态")
             after = svn_status(entry.root)
             updated.append(
@@ -393,7 +422,7 @@ def refresh(
                     # actual update paths as remote status may predate a commit.
                     "updatePaths": [
                         match.group(1)
-                        for line in update_result.stdout.splitlines()
+                        for line in update_output.splitlines()
                         if (match := re.match(r"^[ADUCGERB ][ADUCGERB ][ADUCGERB ][ADUCGERB ] (.+)$", line))
                         and line[:4].strip()
                         and (line[0] != " " or Path(match.group(1)).is_file())
@@ -403,7 +432,7 @@ def refresh(
                 }
             )
             update_summary = next(
-                (line.strip() for line in reversed(update_result.stdout.splitlines()) if line.strip()),
+                (line.strip() for line in reversed(update_output.splitlines()) if line.strip()),
                 "SVN update 完成",
             )
             _progress(

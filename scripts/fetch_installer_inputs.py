@@ -23,9 +23,9 @@ def prepare(metadata, output, *, online=False):
     ids = set()
     for item in spec["prerequisites"]:
         if (set(item) != {"id", "url", "sha256", "args", "elevate", "type"}
-                or item["id"] not in {"codebuddy", "git", "svn"} or item["id"] in ids
+                or item["id"] not in {"codebuddy", "git"} or item["id"] in ids
                 or item["type"] not in {"exe", "msi"}):
-            raise ValueError("依赖输入必须为唯一的 codebuddy、git、svn 安装包")
+            raise ValueError("依赖输入必须为唯一的 codebuddy、git 安装包")
         validate_download(item)
         ids.add(item["id"])
         target = output / (item["id"] + "." + item["type"])
@@ -36,8 +36,8 @@ def prepare(metadata, output, *, online=False):
             fetch(item["url"], item["sha256"], target, limit=512 * 1024 * 1024)
             prerequisites.append({"id": item["id"], "file": str(target.resolve()), "sha256": item["sha256"],
                                   "args": item["args"], "elevate": item["elevate"]})
-    if ids != {"codebuddy", "git", "svn"}:
-        raise ValueError("完整安装包缺少必需的三项依赖")
+    if ids != {"codebuddy", "git"}:
+        raise ValueError("完整安装包缺少必需的 CodeBuddy 或 Git 依赖")
     write_json(output / "prerequisites.json", {"schemaVersion": 1, "prerequisites": prerequisites})
     write_json(output / "inputs.json", spec)
 

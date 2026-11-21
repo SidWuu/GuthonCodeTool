@@ -10,9 +10,9 @@ import re
 import sys
 from pathlib import Path
 
-from common import gusen_hub
+from common import legacy_source as gusen_hub
 from providers.database.export_table_schema_sql import normalize_data_source_ids
-from providers.database._export_common import normalize_values, write_json, write_source
+from common.database_exports._export_common import normalize_values, write_json, write_source
 
 
 STANDARD_TYPES = {

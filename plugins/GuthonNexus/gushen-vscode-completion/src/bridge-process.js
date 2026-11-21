@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { workspaceRoot } = require('./workspace-root');
 const { spawn } = require('node:child_process');
 
 function resolveBridgeScript(extensionPath) {
@@ -88,7 +89,7 @@ function createBridgeProcess(options) {
   }
 
   function pairingToken(toolHome) {
-    const token = fs.readFileSync(path.join(toolHome, 'var', 'nexus', 'bridge', 'token'), 'utf8').trim();
+    const token = fs.readFileSync(path.join(workspaceRoot(toolHome), 'nexus', 'bridge', 'token'), 'utf8').trim();
     if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('Bridge 配对令牌无效，请重新启动服务');
     return token;
   }

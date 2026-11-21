@@ -1,50 +1,61 @@
-# 配置说明
+# 本地配置参考
 
-YAML 配置文件首行说明各自用途；`system-data.json` 只是在 DATABASE 拉取时自动生成的本地缓存，SVN 不读取它。
+真实运行配置和业务数据保存在显式指定的本地数据目录 <code>&lt;toolHome&gt;</code>；仓库中的 `config/example/` 仅提供公开示例。通过 `setup --home <toolHome>` 初始化。新目录只生成 `config/guthon.json`；已有配置保持原样，不自动合并。日常从 Nexus 的“项目设置”向导调整拉取范围、平台连接和数据库目标，不需要逐个编辑配置文件。
 
-发行模式通常不再手工复制这些模板：先执行 Nexus“设置工作空间”，再用始终可见的“添加产品或项目”向导。首次设置会创建空的
-`datasource.yaml`、`products.yaml`、`projects.yaml`，向导在选择 SVN 或 DATABASE 后只生成对应 Nexus，不继续询问登录、checkout 或数据库连接；已有配置不会覆盖。SVN 登录、导入/粘贴 checkout 和范围编辑在新建 Nexus 节点内完成，DATABASE 的 datasource 后续补充。
-生成后 Nexus 会询问是否立即调整对应 YAML，因为系统 alias、`system_id`、`data_source_id` 仍须以实际谷神环境为准。
+新目录生成 `schemaVersion: 3` 的 `guthon.json`，包含 `workspaces`、`sync`、`datasource`、`databaseTesting`、`apiWorkspaces` 和 `sourceTables`。已有 API schema 2 保持版本与原文，不在加载时升级。完整的旧分类 YAML 可只读接入公共解析，包括 `source-tables.yaml` 字段映射；`setup` 核验已有旧配置后直接返回，不初始化 Git 或重写目录。旧 JSON schema 1、不支持的版本及统一 JSON 与活动 YAML 同时存在会报错，不自动回退或转换。凭据仍使用原引用。
 
-统一安装器只创建基础运行配置，不创建业务工作区。安装完成后，在 CodeBuddy 使用 GuthonNexus 的“添加产品或项目”等入口配置实际业务来源。
+公开空配置样例见 [guthon.example.json](example/guthon.example.json)。以下名称是统一配置中的分区，不代表独立活动配置文件。
 
-以下完整示例只供维护者手工配置或查阅字段：
+项目总览展示已登记的 API、SVN 与 DATABASE。各模式使用既有的授权和路径规则。SVN 优先读项目的 `svn.username`，缺省时沿用共享 `sync.svn.username`，并使用工作副本设置和授权清单。DATABASE 项目的主数据连接通过 `workspaces[workspaceKey].datasource` 绑定，系统凭据库通过 `credentialRef` 引用。DATABASE 从 `sourceTables` 或旧 `source-tables.yaml` 读取字段映射，从 `sync.sync` 和 `sync.rules` 读取增量与 Workcopy 保护设置。统一配置省略增量策略时，沿用 10 分钟回看窗口。完整更新在建立数据库连接和打开索引前检查 PAGE、过程函数与系统脚本的字段映射。配置格式升级和项目同步方式切换各有独立的验收条件。
+
+
+新建空间时，Nexus 可直接初始化 IDE 当前打开的开发目录。其上一级是 `toolHome`，配置写入 `<toolHome>/config/guthon.json`。命令行等价入口为 `setup --home <toolHome> -- --workspace-directory <目录名>`。非默认名称保存在 schema 3 的 `workspaceDirectory` 字段中，已有空间沿用原目录，未指定时继续使用 `var`。
+
+## 工作区
+
+`workspaces` 以稳定 workspaceKey 为键，记录 `name`、`directory`、`aliases`。`directory` 相对于开发根，新增登记保存为 `workspace/<项目目录>`，原来直接登记的单级目录和显式绝对 `root` 仍按原路径解析。schema 3 还要求每项明确 `sourceMode` 为 `api`、`svn` 或 `database`；API schema 2 的原登记继续按 API 解析。创建只需名称，默认生成 `ws_` 加 UUID 的稳定 key，也可显式提供 ID、单级目录名和别名。CLI 的 `directory` 入参填写单级目录名，由创建命令添加 `workspace/`。新项目目录名应避开受管目录名，例如 `context` 和 `runtime`。每个工作区独立设置 API 地址、系统与数据源范围，凭据不写入公开配置。默认布局的 API 和 SVN 项目源码位于 `<开发根>/workspace/<项目目录>/checkout/`；显式登记的 SVN checkout 路径与旧分类项目按原配置解析。同级 `context/` 保存索引、基线、冲突与回执，`runtime/` 保存日志和缓存，`docs/` 初始为空。`context/` 中除可重建索引外的恢复记录必须保留。
+
+明确选择全部或指定子系统；空选择不会自动拉取全部。Nexus 范围向导会自动同步新范围并刷新索引；将移出范围的文件有本地修改时先停止，用户处理并重新选择后才备份清理已同步文件；CLI 的 `api scope-apply --stdin` 提供同一流程，`api configure` 仍用于单独保存设置。关联数据源和显式共享数据源的对象按数据源粒度处理。密码通过标准输入和可选系统凭据库处理；本地保存、上传回读及业务验收分别核对。
+
+### 公共解析字段
+
+- `configuration` 返回格式、版本和权威路径；`workspaceBinding` 是来源绑定摘要，随 provider、源码路径、平台或范围变化而改变。它供受控入口重新核验，不表示所有旧会话停用流程已完成。
+- `sourceRoots` 区分 API checkout、SVN 已授权 working copy、DATABASE readonly/workcopy。schema 3 可通过绝对 `root` 和 `paths` 保留旧位置；`paths` 支持 `contextDir`、`runtimeDir`、`docsDir` 和适用的 `checkoutPath`。旧 YAML 的默认路径和 source-mode 优先级不变。
+- `providerCapabilities` 是目标配置声明；`capabilities` 是当前后端可用入口，`executionReady` 表示当前后端提供该模式的执行入口。索引就绪情况另看 `index.ready`；SVN/DATABASE 继续读取旧索引格式。
+- `workspaces` 与 `workspace-resolve` 返回局部 `configErrors`，异常项目不影响无冲突的其他项目；无法解析的整份配置仍报全局错误。源码绑定变化的核验使用当前权威配置，不把同一个 key 视为旧租约仍有效。
+
+### 旧配置读取范围
+
+完整旧空间需要 `products.yaml`、`projects.yaml`、`sync.yaml`、`datasource.yaml`、`source-tables.yaml`。`database-testing.yaml` 若已配置，继续使用原文件。读取不会新增统一 JSON、运行记录或业务目录；同时存在活动统一 JSON 和任何旧配置文件时明确报 `CONFIG_AUTHORITY_CONFLICT`。旧 YAML 和 API schema 2 可使用离线配置升级命令。
+
+`sourceTables` 保存原 `source-tables.yaml` 中 `source_tables` 的内容，运行适配仍输出 `source_tables.source_tables`，供 DATABASE 执行保留原映射，不使用示例字段替换。
+
+
+### 显式升级到 schema 3
+
+以下示例从工具源码目录执行。使用已选择的本地数据目录替换 `<toolHome>`。先预览登记与路径，关闭写入同一目录的 IDE 窗口、Bridge、ToolHost、MCP 和其他旧入口，再用实际预览 ID 确认发布。
 
 ```bash
-cp config/example/datasource.example.yaml "$GUTHON_HOME/config/datasource.yaml"
-cp config/example/products.example.yaml "$GUTHON_HOME/config/products.yaml"
-cp config/example/projects.example.yaml "$GUTHON_HOME/config/projects.yaml"
-cp config/example/source-tables.example.yaml "$GUTHON_HOME/config/source-tables.yaml"
-cp config/example/sync.example.yaml "$GUTHON_HOME/config/sync.yaml"
+python scripts/guthon_tool.py configuration-upgrade --home "<toolHome>" -- plan
+python scripts/guthon_tool.py configuration-upgrade --home "<toolHome>" -- apply --offline --confirm "<planId>"
 ```
 
-`datasource.yaml` 和 `system-data.json` 不提交。
+命令重新核对源配置和有效工作区映射，备份保存在 `config/.configuration-upgrades/<transactionId>/`。升级后的旧模式项目用 `legacyConfig` 记录原 provider 参数，显式 `sourceMode` 仍保持原模式。工作副本、索引、项目名、环境变量和凭据引用沿用原配置。确认新后端能列出原项目后，在 Nexus 重新连接该目录。
 
-上面命令在工具源码仓库根执行，`config/example/` 是仓库内的公开模板；真实运行配置和 `var/` 位于仓库之外。本文后续示例中的 `$GUTHON_HOME` 就是**本地数据目录（toolHome）**，与工具源码仓库是两个目录：先 `export GUTHON_HOME=/path/to/toolHome`，工具再通过显式 `--home` 读取其中的 `config/` 和 `var/`。`python scripts/guthon_tool.py setup --home "$GUTHON_HOME"` 会按模板在 `$GUTHON_HOME/config/` 创建缺失文件。
-
-谷神数据库快速排查和功能开发后的只读验证使用独立私有映射。日常从 Nexus 项目的“配置资料 → 配置数据库排查”创建 `diagnosis-only` 目标；连接密码写入操作系统凭据库，不进入 YAML、命令参数或日志。已有 DBX 的用户也可继续填写 `connectionId`。维护者可复制模板手工建立 `full` 正式验证目标：
+若出现 `CONFIG_UPGRADE_PENDING`，先保持原写入入口关闭，再核对状态并使用其返回的事务 ID 恢复。
 
 ```bash
-cp config/example/database-testing.example.yaml <运行数据-home>/config/database-testing.yaml
+python scripts/guthon_tool.py configuration-upgrade --home "<toolHome>" -- status
+python scripts/guthon_tool.py configuration-upgrade --home "<toolHome>" -- recover --offline --confirm "<transactionId>"
 ```
 
-填写后可用 `scripts/common/database_test_artifacts.py validate-config` 校验。`defaults.diagnosisTargetId` 指定 cwd 未明确环境时的默认诊断库，`defaults.byEnvironment.dev/test` 指定明确环境的默认目标；引用必须指向同一工作区内环境一致的 target。支持 MySQL、PostgreSQL、Oracle，只允许 `dev/test` 与 `read-only`；Oracle 必须明确服务 database 和业务 `schema`。内置连接使用 `connections` + `connectionRef`，DBX 使用 `connectionId`，可并存。`diagnosis-only` 只供快速排查；正式计划必须使用包含 `systemId`、`dataSourceId`、`allowedTables`、`tenantScope` 的 `full` target。完整流程见 [Guthon Testing Skill](../skills/guthon-testing/SKILL.md)，字段契约位于 `config/schema/`。
+发布前中断恢复原配置，发布后中断以已发布的 JSON 完成登记。摘要不符时保留现场核对。SVN 源码迁移以单个项目为单位，命令与标准输入见 [SVN 切换参考](../docs/GuthonCodeTool_全功能说明.html#svn-api-migration-reference)。
 
-## sync.yaml
+## sync
 
-`svn.username` 配置当前本地数据工作区共用的 SVN 用户名，所有产品和项目使用同一个值：
+`guthon_api` 保存谷神方言文档资源的版本及本机 bundle 位置，供 `scripts/sync_guthon_api.mjs` 使用；它不控制业务源码同步。
 
-```yaml
-svn:
-  username: "公共SVN用户名"
-```
-
-密码不写入任何 YAML。点击 Nexus 的“设置工作区 SVN 登录”输入一次密码；Nexus 只通过 stdin 传递本次输入，认证成功后由
-SVN auth cache/系统钥匙串保存并供所有产品和项目复用。
-
-`rules.pull_diff_check` 缺省为 `true`：Bridge 拉取源码后直接比较 `source/readonly` 与 `source/workcopy`，存在差异时保留 workcopy 并生成差异报告。设为 `false` 后，每次拉取都会直接覆盖 readonly/workcopy，且不生成 `source-meta.json` 或差异文件。
-
-## datasource.yaml
+## datasource
 
 配置产品库、项目库和独立测试库。数据源键名统一使用“对象 ID-环境”，`name` 统一使用“项目名_环境”。Nexus 会从连接地址自动填写 `type`、`host`、`port`、`database`，当前支持 MySQL、MariaDB 和 PostgreSQL：
 
@@ -57,7 +68,7 @@ demo-project-dev   -> 示例项目_开发
 测试数据源必须额外配置：
 
 ```yaml
-object: products.demo-product
+object: ws_demo
 environment: test
 diagnosis:
   enabled: true
@@ -69,185 +80,6 @@ databases:
 
 源码排查脚本只连接同时满足 `environment: test`、`diagnosis.enabled: true` 和 `diagnosis.query_only: true` 的数据源。`databases` 是该测试服务器允许查询的数据库白名单，开发库不配置 `diagnosis`。
 
-## 每个产品/项目的源码来源
-
-`products.yaml`、`projects.yaml` 不配置 `source_mode`。产品与项目是并列工作区；项目是产品某个版本的完整导出快照，其定义完全独立，也不要求先创建产品。Nexus 会在全部产品和项目节点下显示
-`源码来源：DATABASE/SVN`；选择结果写入该工作区自己的 `context/source-mode.json`。未选择时默认 DATABASE，
-同一个产品/项目同一时刻仍只启用一种源码 provider。
-
-```yaml
-products:
-  demo-product:
-    name: 示例产品
-    datasource: demo-product-dev
-```
-
-`database` 保持现有源码表、metadata 导出和业务诊断流程。新 `svn` 模式由审阅后的授权清单声明全部精确 URL，
-把 `<toolHome>/var/checkout/<配置 ID>` 下的一个或多个物理 working copy 聚合为唯一源码事实来源；不再依赖 datasource 或
-系统别名扩大范围，也不生成额外 readonly/workcopy 代码副本。
-
-SVN 示例（紧凑配置）：
-
-```yaml
-products:
-  demo-product:
-    name: 示例产品
-    systems:
-      include:
-        mappings:
-          demo.system:
-            system_id: SYS-DEMO
-            data_source_id: "0000"
-    svn:
-      # 唯一根地址包含当前账号有权读取的全部目录，默认完整 checkout。
-      url: "https://source.example/repo/product"
-```
-
-在 Nexus 的该产品节点选择 SVN，紧凑配置直接放在已有的 `products.yaml`（项目则放在 `projects.yaml`）对应条目的
-`svn.url` 下，可以手动修改。新增 SVN 产品/项目时粘贴唯一 SVN 根地址或完整 checkout 命令；输入期间不解析，保存并关闭后再解析。该地址已包含当前账号有权限的全部目录，Nexus 不按 `systems.include.mappings` 或 `scope` 缩小检出范围。也可选择谷神平台为它下载的 `svnCheckoutHere.sh`
-（macOS/Linux）/`svnCheckoutHere.bat`（Windows）作为一次性导入来源；脚本不会被执行。未显式选择的
-`context/svnCheckoutHere.*` 不会被自动读取。Nexus 自动生成只有一个根条目的 `context/authorized-scope.json`，并把唯一真实 working copy 放在
-`<toolHome>/var/checkout/<配置 ID>`，因此通常不需要配置 `svn.scope_manifest`、`checkout_layout` 或 `checkout_root`。工作区配置 ID 仍须在产品/项目之间唯一。
-
-旧的逐条 `svn.scope` 配置仍可读取，但新配置只写 `svn.url`。`systems.include.mappings` 继续用于页面身份匹配和业务分组，不参与 SVN checkout 授权或目录过滤。SVN 服务端返回无权限时 checkout 直接失败，不会把同一仓库拆成多个可跳过的 scope。
-
-旧范围配置仍支持完整条目和简单条目（直接增加到产品/项目已有的 `svn:` 块中）：
-
-```yaml
-products:
-  demo-product:
-    svn:
-      scope:
-        - url: "https://source.example/repo/pages/SYS-1"
-          localSubdir: "pages/SYS-1"
-          # category、writable 可省略，工具会从 URL/目录推断。
-        - "https://source.example/repo/skill skill"
-```
-
-旧格式仍可用 `checkoutPaths` 只检出指定子系统：
-
-```yaml
-projects:
-  demo-project:
-    svn:
-      scope:
-        - url: "https://source.example/repo/project"
-          checkoutPaths:
-            - skill
-            - public
-            - systems/SYS-DEMO
-            - datasources/0000
-```
-
-直接粘贴只有一条根地址的 `svn checkout` 命令时，Nexus 只写入 `svn.url`，并完整检出该地址。
-
-也可以每行直接写 `<url> <localSubdir>`（支持 `->` 或 `=>` 分隔）。配置文件只允许字面量 URL 和相对目录，
-不会保存用户名、密码或脚本变量；修改 `svn.url` 后执行“检出/更新完整 SVN 仓库”即可重建当前工作区的内部清单。
-
-SVN 授权范围中的 `views` 类目支持修改已有的 `viewSql` 字符串；`root`、`datasources` 聚合范围遵循同一规则。显式 `writable: false` 继续拒绝修改，不会自动提升已有授权。旧清单若将 `views` 显式设为只读，需核对后调整该目标条目。表格定义（含字段新增、修改）及视图字段/其他元数据只读；视图字段由平台解析 SQL 自动生成。
-
-Nexus 的“导入/粘贴 SVN checkout 配置”可选择 `.sh/.bat` 或粘贴 checkout 内容，并把唯一根地址写入当前 `products.yaml/projects.yaml` 的 `svn.url`；随后“检出/更新完整 SVN 仓库”会先显示地址及清单变更，确认后再写入脱敏清单、检出或更新。等价 CLI：
-
-```bash
-.venv/bin/python scripts/guthon_tool.py source-mode --home "$GUTHON_HOME" --workspace products.demo-product -- set --mode svn
-.venv/bin/python scripts/guthon_tool.py workspace-resolve --home "$GUTHON_HOME"  # 按当前 PRD/PRJ 路径解析身份与索引建议
-.venv/bin/python scripts/guthon_tool.py workspace-resolve --home "$GUTHON_HOME" --name "示例项目" --kind project  # 可从 var 根按注册名称解析
-.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- scope-preview
-.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- scope-import  # JSON stdin: {"text":"...","source":"script"}
-.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- sync-from-script --accept-scope-change
-# 已在 products.yaml/projects.yaml 配置 svn.url 后可使用同义入口：
-.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- sync-from-config --accept-scope-change
-```
-
-根 working copy 中的 `systems/<SYSTEM_ID>` 与 `datasources/<DATA_SOURCE_ID>` 会被识别为业务源码目录；`skill/public` 作为公共目录保留。`systems.include.mappings` 只用于身份匹配和展示分组，不改变 checkout 内容。
-
-一次性脚本导入支持 UTF-8/UTF-16/GB18030 BAT 和 UTF-8 shell 脚本，只接受字面量精确 URL 和安全的相对检出目录；会忽略 `rem`、`echo` 与 shell 注释
-中的命令以及 `--username`、`--password` 等认证参数。变量 URL、绝对目标目录、重复/重叠 URL、重复/重叠本地目录
-或无法识别的业务分类会阻止旧范围格式生成。凭据不会进入地址配置、清单、日志或公开配置。
-
-仅在需要覆盖默认 checkout 根或调整非核心高级能力时，才在产品/项目配置中增加 `svn:` 块。公共用户名只在 `sync.yaml` 的
-`svn.username` 配置一次；密码由 Nexus 临时交给 SVN 系统凭据存储。谷神 SVN 使用旧 HTTPS 自签证书，默认兼容 `expired,cn-mismatch,unknown-ca,not-yet-valid,other`，检出、更新、远程检查和提交共用该策略，无需另外设置证书。维护者可通过 `GUTHON_SVN_TRUSTED_CERT_FAILURES` 显式缩小允许集合；此设置只作用于 SVN，不影响发行附件下载和验签。Nexus 多 working-copy 模式默认启用 `platform_save`；设置 `svn.capabilities.platform_save: false` 可禁用该提交入口；
-保存仍需经过文件选择、内容哈希复核和远程最新状态检查；SVN 提交说明可选，留空可直接保存。
-
-Nexus 的“设置工作区 SVN 登录”读取 `sync.yaml` 中的公共用户名，只弹出一次密码输入框；密码不会进入 VS Code SecretStorage、
-YAML、授权清单、参数或日志。认证成功后由 SVN 自身按认证域保存，同一认证域下的所有产品和项目直接复用。登录验证依次使用当前配置的明确地址；遇到路径权限拒绝时继续检查其他地址。只配置根地址时，还可使用当前工作区已有授权清单中、同一根地址下的明确子目录；不猜目录、不探测其他工作区，密码、证书和网络错误立即返回。登录成功只证明某个授权地址可读，完整根 checkout 仍需要根目录读取权限。
-
-首次初始化和日常刷新：
-
-```bash
-.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- sync-from-script --accept-scope-change
-.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- refresh
-.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- status --diff
-.venv/bin/python scripts/guthon_tool.py svn --home "$GUTHON_HOME" --workspace products.demo-product -- status --remote
-```
-
-`sync-from-script` 首次检出签出脚本中筛选后的每个精确 URL，全部仓库使用同一份工作区认证；后续更新现有 working copy 并全量建索引。`sync-from-bat` 是 Windows BAT 的命令入口。`refresh` 可用重复的 `--working-copy <entry-id>` 精确选择物理
-working copy，有本地修改时必须显式增加 `--merge-local`。普通 `reindex` 只扫描本地文件。新清单布局不接受
-`--prune`，范围变更必须先审阅清单和本地目录，工具不会自动删除旧 checkout。
-SVN `reindex` 会在输出标签显示授权范围、每个 working copy 的状态/版本/解析进度以及索引事务结果；同一工作区的重复重建操作会被忽略。
-
-## products.yaml / projects.yaml 中的 systems
-
-每个产品、项目分别配置用于限制同步范围的子系统：
-
-```yaml
-products:
-  demo-product:
-    name: 示例产品
-    datasource: demo-product-dev
-    systems:
-      include:
-        mappings:
-          demo.system:
-            system_id: SYS-DEMO
-            data_source_id: "0000"
-    page_origins: []
-```
-
-页面源码按 `source-tables.yaml` 中配置的页面子系统字段过滤。
-
-过程函数按 `source-tables.yaml` 中配置的数据源字段过滤。
-
-DATABASE 的源码、表结构和单据类型拉取会在各自 datasource 的 `gd_system` 中按别名反查系统与数据源 ID。每个 datasource 只在首次使用或别名变化时查询，结果写入 `config/system-data.json`；删除该文件可强制重建缓存。
-
-SVN 不读取 `system-data.json`。产品和项目分别在 `mappings` 中维护自己的映射；alias 直接作为键，每项只有一对一的 `system_id`、`data_source_id`。项目的 `DATA_SOURCE_ID` 可能与产品不同，必须按该项目的签出脚本或平台信息配置。`data_source_id` 应写成字符串，避免 `0000` 被 YAML 解析为数字。
-
-如果多个子系统共用同一个数据源 ID，过程函数只存一份。DATABASE 根目录使用 `mappings` 中第一个匹配子系统的名称，后续重复子系统的 `procedure` 目录会链接到第一个目录。
-
-## source-tables.yaml
-
-页面源码除页面和模块字段外，还需配置模块排序、模型关联、模型名称、模型排序和父模型字段。PAGE 目录按完整模型父子链分组，并使用三位模型/模块序号自然排序；手动拉取会自动迁移路径和清理旧目录。
-
-在项目导出快照内部，过程函数的 `content_field` 配置项目脚本字段，`product_content_field` 配置继承标记对应的产品脚本字段。PAGE 后台脚本的产品快照直接读取 JSON 中与 `script` 同级的 `superScript`。这些字段属于同一个项目快照，不引用产品工作区。
-
-## 多工作区
-
-工具不设置默认工作区。工作区键来自 `products.yaml`、`projects.yaml`，所有工作区命令都必须显式传入：
-
-```bash
-.venv/bin/python scripts/guthon_tool.py sync-all --home "$GUTHON_HOME" --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py sync-source-all --home "$GUTHON_HOME" --workspace products.demo-product
-.venv/bin/python scripts/guthon_tool.py sync-source --home "$GUTHON_HOME" --workspace projects.demo-project
-.venv/bin/python scripts/guthon_tool.py reindex --home "$GUTHON_HOME" --workspace projects.demo-project
-.venv/bin/python scripts/guthon_tool.py export-markdown --home "$GUTHON_HOME" --workspace projects.demo-project
-```
-
-目录按显示名称平铺，真实身份始终使用稳定键：
-
-```text
-<toolHome>/var/workspace/PRD 示例产品/
-<toolHome>/var/workspace/PRJ 示例项目/
-```
-
-数据库工作区独立包含 `source/readonly`、`source/workcopy`、`database/{schema,billtype,views}`、`docs` 和
-`context/index.db`。SVN 新模式不创建 readonly/workcopy 代码目录，源码来自独立的
-根 working copy 的 `entry.localSubdir` 为 `"."`，因此源码直接位于
-`<toolHome>/var/checkout/<配置 ID>/`；非根 working copy 位于
-`<toolHome>/var/checkout/<配置 ID>/<entry.localSubdir>`。编辑会话只在 `context` 保存身份、独立编辑租约、hash、revision 和格式元数据，
-不保存源码正文。同一工作区的短时读写通过带超时的跨进程锁排队；批量自动修改可在 `svn write-batch` 的 JSON
-变更计划中直接填写对象身份，由 CLI 自动取得会话；需要先查看多个对象时使用 `svn read-batch`。不得用临时脚本直接改
-checkout。状态检查按 provider 的有效步骤计算：数据库为五步，SVN 为本地源码扫描一步。
-
 ## 源码逻辑排查
 
 复制排查定义模板到私有 `<toolHome>/var/` 目录后，按已拉取源码填写参数、逻辑步骤和查询 SQL：
@@ -255,18 +87,18 @@ checkout。状态检查按 provider 的有效步骤计算：数据库为五步�
 ```bash
 cp config/example/source-diagnosis.example.json "$GUTHON_HOME/var/diagnosis/cases/<排查名称>.json"
 .venv/bin/python scripts/guthon_tool.py diagnose --home "$GUTHON_HOME" \
-  --workspace products.demo-product -- "$GUTHON_HOME/var/diagnosis/cases/<排查名称>.json"
+  --workspace ws_demo -- "$GUTHON_HOME/var/diagnosis/cases/<排查名称>.json"
 ```
 
 排查定义中的 `database` 指定默认数据库；某一步需要查询另一个数据库时，在该步骤增加同名 `database` 覆盖。数据库必须存在于数据源的 `databases` 白名单中，脚本不会执行 `USE`。
 
-执行器只接受单条 `SELECT`，使用绑定参数，每一步在对应数据库的新只读事务中执行。首个不满足 `continue_when` 的步骤停止，报告写入 `<toolHome>/var/docs/业务排查文档/<日期>/`。完整参数、数据库、原生 SQL 和查询结果保存在报告中；终端只输出状态、停止步骤、结论和报告路径。
+执行器只接受单条 `SELECT`，使用绑定参数，每一步在对应数据库的新只读事务中执行。首个不满足 `continue_when` 的步骤停止，报告写入 `<toolHome>/var/docs/业务排查文档/<日期>/`。报告保存在私有目录，默认对绑定参数脱敏；终端只输出状态、停止步骤、结论和报告路径。
 
 ## 目标维护与凭据来源
 
-`setup` 同时创建空 `database-testing.yaml`，不绑定任何真实数据库。`database-target-list` 不读取密码，列出全部目标及选中依据；支持全局 `--workspace` 显式选择，未传时按 `--path` 解析。`database-target-configure` 的 JSON 可仅给已有 `targetId` 和新 `password`，其余连接字段沿用；目标顺序、引用及默认选择保持稳定。新增正式目标使用 `validationScope: full`，必须给出 `systemId/dataSourceId/allowedTables/tenantScope/evidenceRef`；已有正式目标更换连接身份也要提供新证据，不能复用旧探测结果。
+新目录的 `setup` 创建空 `databaseTesting` 分区，不绑定任何真实数据库。`database-target-list` 不读取密码，列出全部目标及选中依据；支持全局 `--workspace` 显式选择，未传时按 `--path` 解析。`database-target-configure` 的 JSON 可仅给已有 `targetId` 和新 `password`，其余连接字段沿用；目标顺序、引用及默认选择保持稳定。新增正式目标使用 `validationScope: full`，必须给出 `systemId/dataSourceId/tenantScope/evidenceRef`，`allowedTables` 为可选提示；已有正式目标更换连接身份也要提供新证据，不能复用旧探测结果。
 
-连接可声明 `credentialRef`、`passwordEnv`、`passwordFile`，后两项为显式本机来源，文件路径须为绝对路径。keyring 引用存在时优先使用；仅在配置了 fallback 时才允许回退。`datasource.yaml` 的源码同步链路复用相同解析器，已有 password 字段继续兼容。不要把密码输入 shell 参数；configure JSON 从 stdin 输入。配置保存串行加锁且原子替换；无 PyYAML 的依赖最小运行模式保存 JSON（合法 YAML 子集），加载器明确支持该格式，不会误送迷你 YAML 解析器。
+连接可声明 `credentialRef`、`passwordEnv`、`passwordFile`，后两项为显式本机来源，文件路径须为绝对路径。keyring 引用存在时优先使用；仅在配置了 fallback 时才允许回退。独立数据库诊断和只读单据类型导出按目标配置解析连接。不要把密码输入 shell 参数；configure JSON 从 stdin 输入。配置保存串行加锁且原子替换；无 PyYAML 的依赖最小运行模式保存 JSON（合法 YAML 子集），加载器明确支持该格式，不会误送迷你 YAML 解析器。
 
 目标删除先用 `database-target-remove --target-id <id> --check` 预览，正式删除要求 `--confirmation <id>`。只移除失去引用的连接、身份和凭据；如果凭据清理失败，错误明确区分“配置已删除”和“密码未清理”。切换密码来源后旧 keyring 项不会自动清理，需本地核查。DBX connectionId 不等于内置 connectionRef；resolve 会预告后续内置 probe/query 不可用，不能把 UUID 当作端点配置。
 

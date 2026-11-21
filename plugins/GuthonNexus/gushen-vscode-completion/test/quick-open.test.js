@@ -1,10 +1,12 @@
-const test=require('node:test');const assert=require('node:assert/strict');const {quickOpenSource}=require('../src/svn/quick-open');
-const {quickPickFixture,waitFor}=require('./quick-pick-fixture');
-test('one workspace opens the exact indexed candidate without extra workspaces/action prompts',async()=>{
- const f=quickPickFixture();let opened;const identity={sourceType:'procedure',sourceId:'same',funId:'save',sourceNamespace:'ns-two',workingCopyId:'wc-two'};
- f.vscode.window.activeTextEditor={selection:{isEmpty:false},document:{getText:()=> 'selectedName'}};
- const pending=quickOpenSource({vscode:f.vscode,listWorkspaces:async()=>[{workspaceKey:'products.demo',displayName:'demo'}],
-  search:async(key,query)=>{assert.equal(key,'products.demo');assert.equal(query,'selectedName');return {items:[{kind:'source',label:'source',identity}]};},open:async value=>{opened=value;}});
- await waitFor(()=>f.picker.items.length);f.accept();await pending;
- assert.deepEqual(opened,{workspaceKey:'products.demo',...identity});
+const test=require('node:test');const assert=require('node:assert/strict');const {createApiNavigation}=require('../src/api/navigation');
+test('quick open searches the selected API project and opens the exact result',async()=>{
+  const calls=[],commands=new Map(),dispose={dispose(){}};let uriHandler;
+  const vscode={commands:{registerCommand:(id,fn)=>(commands.set(id,fn),dispose)},env:{clipboard:{writeText:async()=>{}}},ThemeIcon:class{},
+    window:{createQuickPick(){const handlers={};const pick={items:[],selectedItems:[],onDidChangeValue:fn=>(handlers.change=fn,dispose),onDidAccept:fn=>(handlers.accept=fn,dispose),onDidHide:fn=>(handlers.hide=fn,dispose),onDidTriggerItemButton:()=>dispose,dispose(){},show(){handlers.change('save');setTimeout(()=>{this.selectedItems=[this.items[0]];handlers.accept();},260);}};return pick;},registerUriHandler:fn=>(uriHandler=fn,dispose)},
+    workspace:{textDocuments:[],onDidOpenTextDocument:()=>dispose,onDidChangeTextDocument:()=>dispose,onDidCloseTextDocument:()=>dispose},
+    languages:{createDiagnosticCollection:()=>({set(){},delete(){},dispose(){}}),registerCompletionItemProvider:()=>dispose}};
+  const api={editorState:{workspaces:new Map()},sourceTree:{open:async(key,p)=>calls.push({key,path:p})},run:async(key,action,input)=>{calls.push({key,action,input});return {hits:[{path:'a/save.gss',sourceType:'procedure',sourceId:'save',name:'save'}],indexGeneration:'g',nextOffset:null};}};
+  const nav=createApiNavigation({vscode,context:{subscriptions:[]},api,selectWorkspace:async key=>({workspaceKey:key,displayName:'Demo'}),getTool:()=>({toolHome:'/tmp'}),bridge:{}});
+  await commands.get('gushenCompletion.quickOpenApiSource')('projects.demo');
+  assert.equal(calls.find(x=>x.action==='search').key,'projects.demo');assert.deepEqual(calls.at(-1),{key:'projects.demo',path:'a/save.gss'});assert.ok(uriHandler);nav.dispose();
 });

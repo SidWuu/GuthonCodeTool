@@ -1,6 +1,5 @@
 const {isWorkspaceKey} = require('./workspace-identity');
 
-const configFiles = ['datasource.yaml', 'products.yaml', 'projects.yaml', 'source-tables.yaml', 'sync.yaml', 'database-testing.yaml'];
 const labels = {python: 'Python 运行环境', config: '工作区配置', 'database-config': '数据库能力配置',
   'database-readonly': '本地数据库依赖', 'vscode-data': '补全与帮助资源', bridge: 'Guthon Bridge'};
 const statuses = {PASS: '通过', WARN: '需留意', FAIL: '需处理', SKIP: '本次未使用'};
@@ -64,13 +63,7 @@ async function showEnvironmentCheck({vscode, client, workspaceKey = '', bridgePo
   if (check && ['FAIL', 'WARN'].includes(check.status)) {
     if (Object.hasOwn(actions, check.action)) return vscode.commands.executeCommand(actions[check.action].command);
     if (check.action === 'config') {
-      const file = configFiles.includes(check.configFile) ? check.configFile
-        : (await vscode.window.showQuickPick(configFiles, {title: '选择需要核对的配置文件'}));
-      if (file && configFiles.includes(file)) {
-        if (!isCurrent()) throw new Error('运行入口或数据目录已变化，请重新执行环境检查');
-        return vscode.commands.executeCommand('gushenCompletion.editConfig', file);
-      }
-      return;
+      return vscode.commands.executeCommand('gushenCompletion.configureProject',workspaceKey);
     }
   }
   const document = await vscode.workspace.openTextDocument({language: 'markdown', content: environmentReportMarkdown(report, workspaceKey)});

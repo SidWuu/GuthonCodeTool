@@ -60,12 +60,8 @@ body.guthon-bridge-popup {
 .guthon-bridge-popup .source-actions {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: 3fr 1fr;
-  gap: 8px;
-}
-
-.guthon-bridge-popup .source-actions.full-width {
   grid-template-columns: 1fr;
+  gap: 8px;
 }
 
 .guthon-bridge-popup button {
@@ -86,22 +82,6 @@ body.guthon-bridge-popup {
 
 .guthon-bridge-popup #pullPageBtn {
   grid-column: 1 / -1;
-}
-
-.guthon-bridge-popup .action-force {
-  min-height: 28px;
-  padding: 5px 8px;
-  border-color: #e6a23c;
-  color: #e6a23c;
-  background: #fdf6ec;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.guthon-bridge-popup .action-force:hover {
-  border-color: #e6a23c;
-  color: #fff;
-  background: #e6a23c;
 }
 
 .guthon-bridge-popup .action-nexus {
@@ -237,10 +217,6 @@ body.guthon-bridge-popup {
   border-color: #409eff;
   color: #fff;
   background: #409eff;
-}
-
-.guthon-bridge-inline:not([data-mode="system-scripts"]) .guthon-bridge-system-script-only {
-  display: none;
 }
 
 tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {

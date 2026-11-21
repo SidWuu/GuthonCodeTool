@@ -1,0 +1,118 @@
+{
+  "version": "1.0.11",
+  "minDateVersion": "202611101305",
+  "commands": {
+    "guthon-language-support.mcp.generateClientConfig": "Guthon: 生成 MCP 客户端配置",
+    "guthon-language-support.openPageDesigner": "Guthon: 在页面设计器中打开",
+    "guthon-language-support.refreshProjectExplorer": "刷新项目工作区",
+    "guthon-language-support.searchProjectFiles": "搜索工作区文件",
+    "guthon-language-support.filterProjectExplorer": "过滤工作区",
+    "guthon-language-support.updateSource": "更新所有源码",
+    "guthon-language-support.uploadSourceCode": "上传所有改动",
+    "guthon-language-support.menu.uploadSource": "上传代码",
+    "guthon-language-support.menu.update-system-source": "更新源码",
+    "guthon-language-support.menu.update-file-source": "更新源码",
+    "guthon-language-support.menu.update-other-config-source": "更新源码",
+    "guthon-language-support.menu.update-skills-source": "更新源码",
+    "guthon-language-support.menu.update-menu-source": "更新源码",
+    "guthon-language-support.menu.update-procedure-source": "更新源码",
+    "guthon-language-support.menu.update-procedure-datasource-source": "更新源码",
+    "guthon-language-support.menu.update-allsystem-source": "更新源码",
+    "guthon-language-support.menu.update-script-source": "更新源码",
+    "guthon-language-support.menu.update-system-script-source": "更新源码",
+    "guthon-language-support.menu.update-table-folder-source": "更新源码",
+    "guthon-language-support.menu.update-view-folder-source": "更新源码",
+    "guthon-language-support.menu.update-datasource-source": "更新源码",
+    "guthon-language-support.menu.update-table-source": "更新表格",
+    "guthon-language-support.menu.update-view-source": "更新视图",
+    "guthon-language-support.login": "Guthon: 登录",
+    "guthon-language-support.logout": "Guthon: 退出登录",
+    "guthon-language-support.menu.revertFile": "还原本地版本",
+    "guthon-language-support.menu.diffFile": "本地修改对比",
+    "guthon-language-support.menu.syncToDatabase": "同步到数据库",
+    "guthon-language-support.menu.revealInOS": "在文件资源管理器中显示",
+    "guthon-language-support.menu.copyFilePath": "复制绝对路径",
+    "guthon-language-support.menu.copyFileName": "复制文件名称",
+    "guthon-language-support.menu.copyRelativePath": "复制相对路径",
+    "guthon-language-support.menu.openPageDesigner": "以UI设计器打开",
+    "guthon-language-support.menu.revertWorkspaceFile": "还原本地版本",
+    "guthon-language-support.menu.diffWorkspaceFile": "本地修改对比",
+    "guthon-language-support.menu.openPageDesignerInTree": "以UI设计器打开",
+    "guthon-language-support.menu.deleteFile": "删除"
+  },
+  "customEditors": [
+    {
+      "viewType": "guthon.pgJsonEditor",
+      "displayName": "谷神UI设计器",
+      "selector": [
+        {
+          "filenamePattern": "PG-*.xml"
+        }
+      ],
+      "priority": "option"
+    }
+  ],
+  "languages": [
+    {
+      "id": "guthonscript",
+      "aliases": [
+        "GuthonScript",
+        "GdScript"
+      ],
+      "extensions": [
+        ".gss"
+      ],
+      "icon": {
+        "light": "./resources/gss-light.svg",
+        "dark": "./resources/gss-dark.svg"
+      },
+      "configuration": "./src/guthon-script/guthonscript-configuration.json"
+    }
+  ],
+  "grammars": [
+    {
+      "language": "guthonscript",
+      "scopeName": "source.guthonscript",
+      "path": "./src/guthon-script/syntaxes/guthonscript.tmLanguage.json"
+    }
+  ],
+  "endpoints": [
+    "/develop/login/ask.htm",
+    "/develop/login/doLoginInit.htm",
+    "/develop/login/getSystemInitVar.htm",
+    "/develop/login/getTranSign.htm",
+    "/develop/login/isLogin.htm",
+    "/develop/procedure/admin/saveFunInfo.htm",
+    "/develop/systems/apps/developSystemList.htm",
+    "/develop/systems/datasource/list.htm",
+    "/develop/systems/tables/createTable.htm",
+    "/develop/systems/views/createView.htm",
+    "/develop/vscode/source/download/getModulePage.htm",
+    "/develop/vscode/source/download/getModulePages.htm",
+    "/develop/vscode/source/download/getModuleTree.htm",
+    "/develop/vscode/source/download/getNextPage.htm",
+    "/develop/vscode/source/download/getOtherConfig.htm",
+    "/develop/vscode/source/download/getProcFun.htm",
+    "/develop/vscode/source/download/getProcedures.htm",
+    "/develop/vscode/source/download/getSkills.htm",
+    "/develop/vscode/source/download/getSystemScript.htm",
+    "/develop/vscode/source/download/getSystemScripts.htm",
+    "/develop/vscode/source/download/getTable.htm",
+    "/develop/vscode/source/download/getTables.htm",
+    "/develop/vscode/source/download/getView.htm",
+    "/develop/vscode/source/download/getViews.htm",
+    "/develop/vscode/source/upload/commitModulePage.htm",
+    "/develop/vscode/source/upload/commitProcFun.htm",
+    "/develop/vscode/source/upload/commitSystemScript.htm",
+    "/develop/vscode/source/upload/commitTable.htm",
+    "/develop/vscode/source/upload/commitView.htm"
+  ],
+  "source": {
+    "registry": "https://open-vsx.org/api/guthon/guthon-language-support/1.0.11",
+    "sha256": "f001204d08bb55c28909ccd209d20b11be5c732d11bb0aa724a16db035049286",
+    "verification": "static package review; runtime and live platform acceptance are separate"
+  },
+  "unnecessaryCommands": [
+    "guthon-language-support.menu.deleteFile"
+  ]
+}

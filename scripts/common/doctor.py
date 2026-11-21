@@ -17,13 +17,6 @@ import urllib.request
 from common import gusen_hub
 
 
-CONFIG_FILES = (
-    "datasource.yaml",
-    "products.yaml",
-    "projects.yaml",
-    "source-tables.yaml",
-    "sync.yaml",
-)
 EXTENSION_DATA = "plugins/GuthonNexus/gushen-vscode-completion/data"
 
 
@@ -41,22 +34,24 @@ def _database_requirements(workspaces):
     """Inspect configured capabilities without resolving passwords or opening connections."""
     engines, connections = set(), []
     for workspace in workspaces:
-        if workspace["sourceMode"] != "database":
+        if workspace['sourceMode'] != 'database':
             continue
-        source = workspace.get("datasource") or {}
+        source = workspace.get('datasource') or {}
+        configuration = workspace.get('configuration', {})
         if not source:
-            raise DependencyConfigError("products.yaml" if workspace["workspaceKey"].startswith("products.") else "projects.yaml",
-                                        f"{workspace['workspaceKey']} 尚未配置 DATABASE 数据源")
-        engine = source.get("type") or "mysql"
+            filename = 'guthon.json' if configuration.get('format') == 'unified' else ('products.yaml' if workspace['workspaceKey'].startswith('products.') else 'projects.yaml')
+            raise DependencyConfigError(filename, f"{workspace['workspaceKey']} 尚未配置 DATABASE 数据源")
+        engine = source.get('type') or 'mysql'
         if not isinstance(engine, str):
-            raise DependencyConfigError("datasource.yaml", "DATABASE 数据源类型必须为字符串")
-        engine = engine.strip().lower()
-        engine = {"mariadb": "mysql", "postgres": "postgresql"}.get(engine, engine)
-        if engine not in {"mysql", "postgresql"}:
-            raise DependencyConfigError("datasource.yaml", f"{workspace['workspaceKey']} 的 DATABASE 源码模式仅支持 MySQL/PostgreSQL")
-        engines.add(engine); connections.append(source)
+            raise DependencyConfigError('datasource.yaml', 'DATABASE 数据源类型必须为字符串')
+        engine = {'mariadb':'mysql', 'postgres':'postgresql'}.get(engine.strip().lower(), engine.strip().lower())
+        if engine not in {'mysql', 'postgresql'}:
+            raise DependencyConfigError('datasource.yaml', 'DATABASE 源码模式仅支持 MySQL/PostgreSQL')
+        engines.add(engine)
+        connections.append(source)
     testing_path = gusen_hub.CONFIG_DIR / "database-testing.yaml"
-    if testing_path.is_file():
+    from common import config_store
+    if testing_path.is_file() or config_store.unified(testing_path.parent.parent):
         from common import database_test_artifacts as artifacts
         try:
             testing = artifacts.load_yaml(testing_path)
@@ -91,7 +86,8 @@ def run_checks(bridge_port=17361, *, workspace_key=""):
     )
 
     workspaces = None
-    missing = [name for name in CONFIG_FILES if not (gusen_hub.CONFIG_DIR / name).is_file()]
+    from common import config_store
+    missing = [] if config_store.unified(gusen_hub.tool_home()) or config_store._legacy_files(gusen_hub.tool_home()) else ["guthon.json"]
     if missing:
         checks.append(result("config", "FAIL", f"missing: {', '.join(missing)}", code="CONFIG_MISSING", action="setup", required=True))
     else:
@@ -107,6 +103,15 @@ def run_checks(bridge_port=17361, *, workspace_key=""):
         except (Exception, SystemExit) as error:
             workspaces = None
             checks.append(result("config", "FAIL", str(error), code="CONFIG_INVALID", action="config", required=True))
+
+    if workspaces and any(item["sourceMode"] == "svn" for item in workspaces):
+        from providers.svn.checkout import client_version
+
+        try:
+            version = client_version()
+            checks.append(result("svn", "PASS", version, code="SVN_CLIENT_READY", required=True))
+        except (OSError, SystemExit) as error:
+            checks.append(result("svn", "FAIL", str(error), code="SVN_CLIENT_UNAVAILABLE", action="runtime", required=True))
 
     missing_drivers = []
     requirements = None

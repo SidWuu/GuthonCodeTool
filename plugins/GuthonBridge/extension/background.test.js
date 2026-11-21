@@ -27,7 +27,7 @@ function fixture() {
 
 test('background rejects foreign extension and untrusted page senders', async () => {
   const f = fixture();
-  const message = { type: 'pull-hub-source', payload: {} };
+  const message = { type: 'route-workspace', payload: {} };
   assert.equal((await f.send(message, {id:'b'.repeat(32),tab:{url:'https://gusen.steel56.com.cn/guthon/'}})).ok, false);
   assert.equal((await f.send(message, {id:f.id,tab:{url:'https://malicious.example/guthon/'}})).ok, false);
   assert.equal(f.calls.length, 0);
@@ -71,9 +71,9 @@ test('reverse event rechecks current platform identity before navigation and rep
 
 test('background owns origin and pairs every backend request at the configured port', async () => {
   const f = fixture();
-  const result = await f.send({type:'pull-hub-source',payload:{workspaceKey:'products.demo',pageOrigin:'https://forged.example'}},{id:f.id,tab:{id:1,url:'https://gusen.steel56.com.cn/guthon/'}});
+  const result = await f.send({type:'route-workspace',payload:{workspaceKey:'products.demo',pageOrigin:'https://forged.example'}},{id:f.id,tab:{id:1,url:'https://gusen.steel56.com.cn/guthon/'}});
   assert.equal(result.ok, true);
-  assert.equal(f.calls[0].url,'http://127.0.0.1:17499/pullHubSource');
+  assert.equal(f.calls[0].url,'http://127.0.0.1:17499/routeWorkspace');
   assert.equal(f.calls[0].options.headers.Authorization, `Bearer ${'f'.repeat(64)}`);
   assert.equal(JSON.parse(f.calls[0].options.body).pageOrigin,'https://gusen.steel56.com.cn');
 });
@@ -88,9 +88,11 @@ test('PAGE lifecycle writes are injected only after exact workspace and edit cap
   await f.send({type:'publish-page-context',payload:{workspaceKey:'products.demo',metadata:{systemId:'SYS-1'}}},{id:f.id,tab});
   const command={requestId:'lifecycle-1',clientId:'a'.repeat(32),contextId:`${'a'.repeat(32)}:1`,tabId:1,
     workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',target:{type:'page-lifecycle',action:'create'}};
+  f.context.fetch=async(url,options)=>{f.calls.push({url,options});return {ok:true,json:async()=>({ok:true,workspaceKey:'products.demo',workspace:{capabilities:{'source.read':true,'api.edit':false}}})};};
   await f.context.handleBridgeEvent('page-lifecycle',command);
   assert.equal(injected,0);
-  f.context.fetch=async(url,options)=>{f.calls.push({url,options});return {ok:true,json:async()=>({ok:true,workspaceKey:'products.demo',workspace:{capabilities:{'svn.edit':true}}})};};
+  assert.match(JSON.parse(f.calls.filter(call=>call.url.endsWith('/navigationResult')).at(-1).options.body).message,/写入/);
+  f.context.fetch=async(url,options)=>{f.calls.push({url,options});return {ok:true,json:async()=>({ok:true,workspaceKey:'products.demo',workspace:{capabilities:{'source.read':true,'api.edit':true}}})};};
   await f.context.handleBridgeEvent('page-lifecycle',command);
   assert.equal(injected,1);
   const receipt=JSON.parse(f.calls.filter(call=>call.url.endsWith('/navigationResult')).at(-1).options.body);
@@ -122,4 +124,36 @@ test('native metadata loads only its fixed extension adapter after authenticatin
   assert.equal(injected.length,2);assert.deepEqual(Array.from(injected[0].files),['native-metadata.js']);
   assert.equal(injected[1].args[0].expectedOrigin,command.pageOrigin);
   assert.deepEqual(Array.from(injected[1].args[0].systemIds),['SYS-1']);
+});
+
+test('PAGE lifecycle rejects ambiguous platform systems before injection', async () => {
+  const f = fixture(); const tab = {id: 1, url: 'https://gusen.steel56.com.cn/guthon/'};
+  f.context.chrome.tabs.get = async () => tab;
+  f.context.chrome.tabs.sendMessage = async () => ({ok: true, data: {systemId: '', systemIds: ['SYS-1', 'SYS-2']}});
+  let injections = 0;
+  f.context.chrome.scripting = {executeScript: async () => {injections++;}};
+  f.context.fetch = async (url, options) => {f.calls.push({url, options}); return {ok: true, json: async () => ({ok: true, workspaceKey: 'products.demo', workspace: {capabilities: {'source.read': true, 'api.edit': true}}})};};
+  await f.send({type: 'publish-page-context', payload: {workspaceKey: 'products.demo', metadata: {}}}, {id: f.id, tab});
+  await f.context.handleBridgeEvent('page-lifecycle', {requestId: 'request-ambiguous', clientId: 'a'.repeat(32), contextId: `${'a'.repeat(32)}:1`, tabId: 1, workspaceKey: 'products.demo', pageOrigin: 'https://gusen.steel56.com.cn', target: {type: 'page-lifecycle', action: 'create'}});
+  assert.equal(injections, 0);
+  const receipt = JSON.parse(f.calls.filter(call => call.url.endsWith('/navigationResult')).at(-1).options.body);
+  assert.equal(receipt.ok, false);
+  assert.match(receipt.message, /唯一.*系统/);
+});
+
+
+test('PAGE lifecycle rejects missing read authority or a changed platform origin', async () => {
+  const f = fixture(); const tab = {id: 1, url: 'https://gusen.steel56.com.cn/guthon/'};
+  f.context.chrome.tabs.get = async () => tab;
+  f.context.chrome.tabs.sendMessage = async () => ({ok: true, data: {systemId: 'SYS-1', systemIds: ['SYS-1']}});
+  let injections = 0;
+  f.context.chrome.scripting = {executeScript: async () => {injections++;}};
+  f.context.fetch = async (url, options) => {f.calls.push({url, options}); return {ok: true, json: async () => ({ok: true, workspaceKey: 'products.demo', workspace: {capabilities: {'api.edit': true, 'source.read': false}}})};};
+  await f.send({type: 'publish-page-context', payload: {workspaceKey: 'products.demo', metadata: {}}}, {id: f.id, tab});
+  const command = {requestId: 'request-no-read', clientId: 'a'.repeat(32), contextId: `${'a'.repeat(32)}:1`, tabId: 1, workspaceKey: 'products.demo', pageOrigin: 'https://gusen.steel56.com.cn', target: {type: 'page-lifecycle', action: 'inspect'}};
+  await f.context.handleBridgeEvent('page-lifecycle', command);
+  assert.match(JSON.parse(f.calls.filter(call => call.url.endsWith('/navigationResult')).at(-1).options.body).message, /读取/);
+  await f.context.handleBridgeEvent('page-lifecycle', {...command, requestId: 'request-origin', pageOrigin: 'https://other.example'});
+  assert.match(JSON.parse(f.calls.filter(call => call.url.endsWith('/navigationResult')).at(-1).options.body).message, /来源/);
+  assert.equal(injections, 0);
 });

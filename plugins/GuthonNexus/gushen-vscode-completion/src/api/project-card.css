@@ -1,0 +1,57 @@
+:root{color-scheme:light dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;padding:6px 8px;overflow-x:hidden;overflow-y:auto;color:var(--vscode-foreground,#c5cad3);background:var(--vscode-sideBar-background,#181a1f);font:12px/1.45 var(--vscode-font-family,sans-serif)}
+body.vscode-light {
+  --guthon-secondary-foreground: var(--vscode-foreground, #333333);
+  --guthon-secondary-background: var(--vscode-editorWidget-background, #f3f3f3);
+  --guthon-secondary-hover-background: var(--vscode-list-hoverBackground, #e8e8e8);
+  --guthon-secondary-border: var(--vscode-widget-border, var(--vscode-panel-border, #d4d4d4));
+}
+.project-card{padding:6px 8px;border:1px solid var(--vscode-widget-border,#3c424d);border-radius:5px;background:var(--vscode-editorWidget-background,#20242b)}
+dl{margin:0}
+.metadata-row{display:grid;grid-template-columns:34px minmax(0,1fr);gap:8px;align-items:baseline;min-height:17px}
+dt{color:var(--vscode-descriptionForeground,#9da5b4)}
+dd{margin:0;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+.metadata-row:first-child dd{font-weight:600}
+.primary-actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px}
+button{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:3px;color:var(--vscode-button-foreground,#fff);background:var(--vscode-button-background,#414857);min-height:26px;padding:3px 7px}
+button:hover{background:var(--vscode-button-hoverBackground,#4c5466)}
+button:focus-visible{outline:1px solid var(--vscode-focusBorder,#007fd4);outline-offset:2px}
+button:disabled{opacity:.45;cursor:default}
+.secondary{border-color:var(--guthon-secondary-border,transparent);color:var(--guthon-secondary-foreground,var(--vscode-button-secondaryForeground,#c5cad3));background:var(--guthon-secondary-background,var(--vscode-button-secondaryBackground,#303540))}
+.secondary:hover{background:var(--guthon-secondary-hover-background,var(--vscode-button-secondaryHoverBackground,#3b424e))}
+.source-summary{display:flex;gap:9px;justify-content:space-between;flex-wrap:wrap;padding:4px 1px 2px;color:var(--vscode-descriptionForeground,#9da5b4);font-size:11px;font-variant-numeric:tabular-nums}
+.has-changes{color:var(--vscode-gitDecoration-modifiedResourceForeground,#e2c08d)}
+.status:empty{display:none}
+.provider-notice,.diagnostic-card p{margin:8px 0;color:var(--vscode-descriptionForeground);overflow-wrap:anywhere}
+.diagnostic-card h2{font:inherit;font-weight:600;margin:0;overflow-wrap:anywhere}
+.diagnostic-card .diagnostic-code{color:var(--vscode-errorForeground)}
+.status{margin-top:5px;font-size:11px;color:var(--vscode-descriptionForeground,#9da5b4);overflow-wrap:anywhere}
+.empty{padding:5px 1px;color:var(--vscode-descriptionForeground,#9da5b4)}
+@media(max-width:230px){body{padding:6px}.project-card{padding:6px}.metadata-row{grid-template-columns:28px minmax(0,1fr);gap:5px}.source-summary{gap:4px;font-size:10px}}
+
+.login-card{padding:9px}
+.login-card h2{font-size:12px;font-weight:600;margin:0 0 9px;overflow-wrap:anywhere}
+.login-card input:not([type=checkbox]){font:inherit;color:var(--vscode-input-foreground,#c5cad3);background:var(--vscode-input-background,#181a1f);border:1px solid var(--vscode-input-border,transparent);border-radius:3px;min-width:0;width:100%;height:28px;padding:4px 7px;margin-bottom:6px}
+.login-card input:focus{outline:1px solid var(--vscode-focusBorder,#007fd4);outline-offset:-1px}
+.login-card input::placeholder{color:var(--vscode-input-placeholderForeground,#9da5b4)}
+.field-label{position:absolute;overflow:hidden;clip-path:inset(50%);width:1px;height:1px;white-space:nowrap}
+.password-row{display:flex;align-items:center;gap:7px}
+.password-row input[type=password]{flex:1}
+.remember{display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--vscode-descriptionForeground,#9da5b4);font-size:11px;margin-bottom:6px}
+.remember input{margin:0;accent-color:var(--vscode-checkbox-background,#007fd4)}
+.login-submit{width:100%;min-height:27px;font-weight:600}
+.captcha-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.captcha-row input{margin:0!important}
+.captcha-row img{max-width:100px;height:28px;object-fit:contain}
+
+.primary-actions button{min-height:27px;font-weight:600}
+.primary-actions.single-action{grid-template-columns:1fr}
+.project-tools{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-top:6px}
+.project-tools button{display:flex;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:26px;padding:3px 4px;overflow:hidden;font-size:11px;color:var(--guthon-secondary-foreground,var(--vscode-button-secondaryForeground,#c5cad3));background:var(--guthon-secondary-background,var(--vscode-button-secondaryBackground,#303540));border-color:var(--guthon-secondary-border,var(--vscode-widget-border,#3c424d))}
+.project-tools button:hover{background:var(--guthon-secondary-hover-background,var(--vscode-button-secondaryHoverBackground,#3b424e))}
+.project-tools svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+.project-tools span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:280px){.project-tools svg{display:none}}
+@media(max-width:185px){.project-tools{grid-template-columns:repeat(2,minmax(0,1fr))}}

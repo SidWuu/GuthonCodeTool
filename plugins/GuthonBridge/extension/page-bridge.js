@@ -1339,7 +1339,7 @@
     };
   }
 
-  function inspectCurrentHubSource() {
+  function inspectCurrentHubSource({ allowMissingPage = false } = {}) {
     const activeProcedureTab = document.querySelector('[role="tab"][aria-selected="true"][id^="tab-PR-"]');
     if (activeProcedureTab && isVisible(activeProcedureTab)) {
       return { dataSourceId: getDataSourceId(), ...inspectCurrentProcedure() };
@@ -1347,11 +1347,12 @@
     const activePageCode = getActivePageTabCode();
     if (activePageCode || location.href.includes("/gdpaas/dev/modules")) {
       const pageCode = activePageCode || getCurrentPageCode();
-      if (!pageCode) {
+      if (!pageCode && !allowMissingPage) {
         throw new Error("当前模块开发页面没有识别到页面编码");
       }
-      const systemIds = [...new Set(getAllVueInstances().map(vm => vm?.$store?.state?.modeDev?.systemId)
-        .filter(value => typeof value === 'string' && /^SYS-[A-Za-z0-9-]+$/.test(value)))];
+      const systemIds = [...new Set(Array.from(document.querySelectorAll("*"))
+        .map(element => getVueInstance(element)?.$store?.state?.modeDev?.systemId)
+        .filter(value => typeof value === "string" && /^SYS-[A-Za-z0-9-]+$/.test(value)))];
       return {
         mode: "page-source",
         systemId: systemIds.length === 1 ? systemIds[0] : "",
@@ -1382,7 +1383,7 @@
   }
 
   function inspectPageContext() {
-    const current = inspectCurrentHubSource();
+    const current = inspectCurrentHubSource({ allowMissingPage: true });
     const result = {mode: current.mode || 'procedure', hash: location.hash.split('?')[0].slice(0, 512)};
     for (const key of ['pageId', 'procedureKeyword', 'funId', 'dataSourceId', 'systemId']) {
       result[key] = typeof current[key] === 'string' ? current[key].slice(0, 256) : '';

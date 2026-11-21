@@ -749,6 +749,16 @@ def _candidate_records(
     return candidates, blockers
 
 
+def ensure_review_session(workspace):
+    """Open the workspace ledger explicitly before reviewing external modifications."""
+    require_capability(workspace, "status")
+    with operation_lock(workspace, "open-review-session", blocking=True):
+        session = load_session(workspace)
+        if not session_path(workspace).exists():
+            atomic_json(session_path(workspace), session)
+        return {"ok": True, "workspaceKey": workspace["workspaceKey"], "sessionId": session["sessionId"]}
+
+
 def preview(
     workspace: dict,
     *,

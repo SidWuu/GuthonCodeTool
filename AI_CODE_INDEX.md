@@ -10,79 +10,123 @@
 sourceRoot / developmentRoot = <toolHome>/GuthonCodeTool   工具源码（本仓库）
 toolHome / GUTHON_HOME       = <toolHome>                  本地数据目录
 runtimeConfig                = <toolHome>/config           真实运行配置
-runtimeVar                   = <toolHome>/var              私有谷神工作区（独立 Git）
+runtimeVar                   = <toolHome>/<workspaceDirectory>  私有谷神工作区（独立 Git，默认 var）
 ```
 
-- 本仓库只提供程序代码、`config/example/`、`config/schema/`、`VERSION`、发行资源；不含 `var/` 和真实 `config/*.yaml`。
+- 本仓库只提供程序代码、`config/example/`、`config/schema/`、`VERSION`、发行资源；不含 `var/` 和真实运行配置 `guthon.json`。
 - `toolHome` 只来自显式 `--home`、runtime descriptor 或 `GUTHON_HOME` / `GUTHON_TOOL_HOME`；不得用源码仓库相对路径推断运行数据。
 - CLI 统一入口：`python scripts/guthon_tool.py <command> --home <toolHome>`；命令参数自省用 `help <command>` 或 `<command> --help`。
-- runtime descriptor：`<toolHome>/var/nexus/tool-runtime.json`；linter：`<toolHome>/var/tools/guthon-lint`。
+- 新项目登记的目录为 `<workspaceRoot>/workspace/<项目目录>`。相对目录与既有直置项目由 `scripts/common/workspace_layout.py` 和 `scripts/common/workspace_registry.py` 解析。
+- 开发根由 `<toolHome>/config/guthon.json` 的可选 `workspaceDirectory` 指定。公共解析位于 `scripts/common/runtime_paths.py` 与 `plugins/GuthonNexus/gushen-vscode-completion/src/workspace-root.js`；运行描述与 Linter 分别位于 `<workspaceRoot>/nexus/tool-runtime.json` 和 `<workspaceRoot>/tools/guthon-lint`。
 
 ## Task to files
 
 | 需求 | 首选文件 | 常见联动 | 测试 |
 |---|---|---|---|
 | CLI 命令与参数 | `scripts/guthon_tool.py` | `scripts/common/gusen_hub.py` | `tests/test_guthon_tool.py` |
-| 工作区配置/创建 | `scripts/common/workspace_config.py` | `scripts/common/gusen_hub.py` | `tests/test_workspace_config.py` |
-| 工作区路由与解析 | `scripts/common/workspace_registry.py`（注册身份与 provider）、`scripts/common/workspace_selection.py`（名称/别名、路径与任务 prompt 选择） | `scripts/guthon_tool.py`（workspace-resolve）、`scripts/providers/svn/nexus/mcp_server.py`（共用选择器）、`scripts/providers/svn/nexus/workspace.py` | `tests/test_workspace_routing.py`、`tests/test_workspace_selection.py` |
+| 工作区登记与同步方式 | `scripts/common/config_store.py`、`scripts/common/workspace_config.py`、`scripts/common/workspace_layout.py` | `scripts/common/gusen_hub.py`、`scripts/guthon_tool.py`（`workspace-create`、`workspace-source-mode`） | `tests/test_unified_workspace.py`、`tests/test_config_store.py`、`tests/test_workspace_contract.py` |
+| SVN / DATABASE 登录、源码连接与范围 | `scripts/common/workspace_source_settings.py`、`scripts/common/workspace_source_scope.py`、`plugins/GuthonNexus/gushen-vscode-completion/src/project-source-settings.js` | `scripts/common/svn_workspace_config.py`、`scripts/providers/svn/group_inference.py`（目录名称匹配）、`plugins/GuthonNexus/gushen-vscode-completion/src/legacy-project.js` | `tests/test_workspace_source_settings.py` |
+| 工作区路由与解析 | `scripts/common/workspace_registry.py`、`scripts/common/workspace_sources.py`、`scripts/common/workspace_selection.py` | `scripts/common/workspace_config.py`、`scripts/guthon_tool.py` | `tests/test_unified_workspace.py` |
+| API 批量源码与 PAGE 原生模型 | `scripts/providers/api/download.py`（按子系统分页）、`scripts/providers/api/page_source.py`（只读导出和原生基线）、`scripts/providers/api/store.py`（保护本地修改） | `scripts/providers/api/sync.py`（范围和精确更新）、`plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js`（编辑前按页加载） | `tests/test_api_native_source.py` |
+| API 增量索引与查询 | `scripts/providers/api/index.py` | `scripts/providers/api/store.py`、`scripts/providers/api/mcp_server.py`、`plugins/GuthonNexus/gushen-vscode-completion/src/api/source-watcher.js`（文件事件与当前索引核对） | `tests/test_api_source.py` |
+| API 原请求关闭 | `scripts/providers/api/source_requests.py`（串行关闭未开始的幂等请求，不撤销已登记操作） | `scripts/providers/api/documents.py`、`scripts/providers/api/source_batch.py`、`scripts/providers/api/mcp_server.py` | `tests/test_api_request_closure.py` |
+| API 跨文件受控修改 | `scripts/providers/api/source_batch.py`（计划、预检、写入与原文恢复） | `scripts/providers/api/documents.py`、`scripts/providers/api/store.py`、`scripts/providers/api/cli.py`、`scripts/providers/api/mcp_server.py` | `tests/test_api_source_batch.py`、`tests/test_api_followup.py` |
+| API 整页生命周期 | `scripts/providers/api/page_lifecycle.py`（Bridge 平台上下文、新建/复制/删除及原回执核对） | `plugins/GuthonBridge/extension/page-lifecycle.js`、`plugins/GuthonBridge/bridge/server.js`、`scripts/providers/api/mcp_server.py` | `tests/test_api_page_lifecycle.py` |
+| API PAGE 可读与原文差异 | `scripts/providers/api/source_diff.py`（PAGE 语义投影、原文回退及哈希分页） | `plugins/GuthonNexus/gushen-vscode-completion/src/api/source-diff.js`（完整分页、只读快照）、`plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js`（SCM/上传审阅入口） | `tests/test_api_source_diff.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/api-source-diff.test.js` |
+| API 批量读取与表引用 | `scripts/providers/api/query_operations.py`（总正文预算、逐项错误与显式映射） | `scripts/providers/api/index.py`、`scripts/providers/api/mcp_server.py`、`scripts/providers/api/cli.py` | `tests/test_api_followup.py` |
+| API 项目导出与独立单据类型导出 | `scripts/providers/api/exports.py`、`scripts/common/database_exports/export_bill_type_sql.py` | `scripts/guthon_tool.py`、`scripts/common/database_readonly.py` | `tests/test_api_source.py` |
+| Bridge 页面定位与上下文 | `plugins/GuthonBridge/bridge/page-context.js`、`plugins/GuthonBridge/extension/nexus-locator.js` | `plugins/GuthonBridge/extension/background.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/source/browser-navigation.js` | `plugins/GuthonBridge/bridge/page-context.test.js` |
+| 工作空间初始化与团队规范同步 | `scripts/common/workspace_layout.py`、`scripts/common/team_governance.py` | `scripts/common/config_store.py`、`scripts/guthon_tool.py`（setup）、`plugins/GuthonNexus/gushen-vscode-completion/src/onboarding.js`（Windows 首次配置）、`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`（Nexus 初始化及手动同步） | `tests/test_unified_workspace.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/setup-runtime-selection.test.js` |
 | 工作区助手/状态摘要 | `scripts/common/workspace_assistant.py` | `scripts/common/gusen_hub.py` | `tests/test_workspace_assistant_features.py` |
-| Nexus 统一搜索与快速打开 | `plugins/GuthonNexus/gushen-vscode-completion/src/workspace-search.js`（共用搜索窗口、输入合并、迟到结果隔离与结果操作） | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/quick-open.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/workspace-search.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/quick-open.test.js` |
-| DATABASE 拉取/导出 | `scripts/providers/database/export_table_schema_sql.py` | `scripts/common/gusen_hub.py` | `tests/test_export_table_schema_sql.py` |
-| DATABASE 只读排查 | `scripts/common/database_readonly.py` | `scripts/providers/database/run_source_diagnosis.py` | `tests/test_run_source_diagnosis.py` |
 | 数据库 CLI / 目标管理 / 单连接排查 | `scripts/common/database_cli.py` | `scripts/common/database_readonly.py`、`scripts/common/database_sql.py`、`scripts/guthon_tool.py` | `tests/test_audit_regressions.py` |
 | 数据库查询 XLSX 结果与证据导出 | `scripts/common/query_xlsx.py` | `scripts/common/database_cli.py`、`scripts/common/persistence.py` | `tests/test_audit_regressions.py` |
 | Nexus 最近诊断历史视图 | `plugins/GuthonNexus/gushen-vscode-completion/src/diagnosis-history-view.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`、`scripts/common/database_operations.py` | `plugins/GuthonNexus/gushen-vscode-completion/test/diagnosis-history-view.test.js` |
 | 数据库测试计划/结果 | `scripts/common/database_test_artifacts.py` | `config/schema/database-testing.schema.json` | `tests/test_database_test_artifacts.py` |
-| Workcopy | `scripts/common/workcopy_store.py` | `scripts/common/gusen_hub.py`（公开门面/运行时覆盖） | `tests/test_workcopy.py` |
-| 上下文有界查询 | `scripts/common/query_hub_context.py` | `scripts/providers/svn/nexus/index_queries.py` | `tests/test_gusen_hub.py` |
-| SVN 检出与范围导入 | `scripts/providers/svn/checkout.py` | `scripts/providers/svn/scope_import.py` | `tests/test_svn_scope_import.py` |
-| SVN 索引与浏览 | `scripts/providers/svn/nexus/catalog.py` | `scripts/providers/svn/nexus/incremental.py`（更新后的批量增删索引）、`scripts/providers/svn/nexus/documents.py`（会话写入与内部 PAGE 操作记录） | `tests/test_svn_nexus_workspace.py` |
-| 通用有界源码读取 / 摘要 / 索引健康度 | `scripts/providers/svn/nexus/source_queries.py` | `scripts/providers/svn/nexus/mcp_server.py`、`scripts/common/workspace_assistant.py` | `tests/test_svn_nexus_workspace.py` |
-| SVN PAGE 语义节点/界面字段与 MCP | `scripts/providers/svn/nexus/page_nodes.py` | `scripts/common/page_projection.py`、`scripts/common/source_facts.py`、`scripts/providers/svn/nexus/page_mutation.py`（节点编辑租约）、`scripts/providers/svn/nexus/page_field_mutation.py`（单字段新增/拷贝）、`scripts/providers/svn/nexus/mcp_server.py`、`scripts/guthon_tool.py` | `tests/test_page_semantics.py`、`tests/test_page_mcp.py`、`tests/test_svn_nexus_workspace.py` |
-| PAGE 本地可视化编辑、排序与预览 | `scripts/common/page_editor.py`（模型与保留原文的属性/代码/排序操作）、`scripts/common/page_comparison.py`（只读、精确保留数值的原生身份差异）、`scripts/common/page_design.py`（平台字段/按钮构造、事件和属性契约）、`scripts/common/page_structure.py`（结构操作及设计诊断）、`scripts/common/page_layout.py`（原生行列/TAB 与派生控件目录）、`scripts/providers/svn/nexus/page_editor.py`（页面级租约与保存） | `scripts/providers/svn/nexus/documents.py`（联合原子写回）、`scripts/providers/svn/cli.py`（`page-editor`）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/controller.js`（页面会话、两类差异、外部更新检测、共用 SVN 代码入口、保存后草稿对齐与工作区资源任务去重/进度）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/editor.js`（层级导航、字段/区域按钮与代码管理，不模拟布局）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/outline.js`（从 PAGE 原文提取精简区域/页签导航与代码归属，隐藏技术包装，不参与写回）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/model.js`（页面草稿）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/comparison.js`（从未保存操作提取本地差异，独立于 SVN BASE 差异）、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/virtual-fs.js`（源码树/预览共用片段身份、代码标签、继承与保存） | `tests/test_page_editor.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/page-editor.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/page-outline.test.js` |
-| 本地原版设计器资源准备与适配 | `plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/resource-manager.js`（显式 toolHome 下的工作区绑定、平台/构建缓存、版本检查与回退）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/asset-snapshot.js`（共享构建探测、下载、导入） | `scripts/prepare_page_designer.mjs`（维护 CLI）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/platform-assets.js`（快照校验与启动注入）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/native.js`（原版视图与离线接口）、`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/native-model.js`（受限差分） | `plugins/GuthonNexus/gushen-vscode-completion/test/page-editor.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/page-resources.test.js` |
-| SVN 过程函数 MCP 读写 | `scripts/providers/svn/nexus/procedure_sources.py` | `scripts/providers/svn/nexus/procedure_mutation.py`、`scripts/providers/svn/nexus/documents.py`（共享租约/写回与操作记录）、`scripts/providers/svn/nexus/mcp_server.py` | `tests/test_svn_nexus_workspace.py`、`tests/test_page_mcp.py` |
-| SVN 项目继承源码 | `scripts/common/inheritance.py` | `scripts/common/page_projection.py`、`scripts/providers/svn/nexus/inheritance_sources.py`、`scripts/providers/svn/nexus/catalog.py`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/virtual-fs.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/inheritance-view.js` | `tests/test_svn_inheritance.py`、`tests/test_svn_nexus_workspace.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/svn-virtual-fs.test.js` |
-| SVN 视图 SQL 编辑 | `scripts/providers/svn/nexus/documents.py`（仅 `/viewSql`） | `scripts/providers/svn/nexus/manifest.py`、`scripts/providers/svn/projection.py`、`scripts/providers/svn/writeback.py`（SQL 投影/精确字符串写回） | `tests/test_svn_nexus_workspace.py`、`tests/test_svn_provider.py` |
-| SVN SCM/差异/写回 | `scripts/providers/svn/nexus/scm.py`（变更与管理锁分离、显式 working copy 锁清理） | `scripts/providers/svn/writeback.py` | `tests/test_svn_provider.py`、`tests/test_svn_nexus_workspace.py` |
-| Nexus 运行模式/toolHome | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-runtime.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-workspace.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/tool-runtime.test.js` |
+| PAGE 本地编辑与官方在线编辑 | `plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/controller.js`（本地草稿、保存及在线入口）、`plugins/GuthonNexus/gushen-vscode-completion/src/api/designer.js`（官方 iframe、窗口复用和本地回读） | `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`（页面入口与接线） | `plugins/GuthonNexus/gushen-vscode-completion/test/api-designer.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/api-ui.test.js` |
+| Nexus 运行模式/toolHome | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-runtime.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-workspace.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`（按当前窗口绑定数据目录；首启自动查找上一级后端，入口与目录在初始化成功后保存） | `plugins/GuthonNexus/gushen-vscode-completion/test/tool-runtime.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/setup-runtime-selection.test.js` |
 | ToolHost 与三运行模式 | `scripts/guthon_tool.py` | `plugins/GuthonNexus/gushen-vscode-completion/src/tool-process-client.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/script-runtime.js`、`scripts/build_script_tool.py` | `tests/test_toolhost.py`、`tests/test_build_script_tool.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/tool-process-client.test.js` |
+| Nexus 项目总览与三层视图 | `plugins/GuthonNexus/gushen-vscode-completion/src/project-overview.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/view-tree.js`（总览和源码内容）、`plugins/GuthonNexus/gushen-vscode-completion/src/api/project-card.js` | `plugins/GuthonNexus/gushen-vscode-completion/package.json`（原生菜单）、`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/tool-workspace.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/project-actions.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/project-overview.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/project-workspace-view.test.js` |
+| Nexus 重新登记后迁移 docs | `plugins/GuthonNexus/gushen-vscode-completion/src/project-docs-migration.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`、`plugins/GuthonNexus/gushen-vscode-completion/package.json` | `plugins/GuthonNexus/gushen-vscode-completion/test/project-docs-migration.test.js` |
+| 旧模式源码树分组排序 | `scripts/common/source_tree_order.py`（解析当前项目的数据源归属）、`plugins/GuthonNexus/gushen-vscode-completion/src/source/tree-styles.js` | `scripts/common/legacy_source_read.py`、`scripts/providers/svn/nexus/index_queries.py` | `plugins/GuthonNexus/gushen-vscode-completion/test/legacy-source-editor.test.js` |
 | Nexus UI 命令 | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` | `plugins/GuthonNexus/gushen-vscode-completion/package.json` | `plugins/GuthonNexus/gushen-vscode-completion/test/rules.test.js` |
-| Nexus SVN 集成 | `plugins/GuthonNexus/gushen-vscode-completion/src/svn/backend-client.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/svn/scm-manager.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/remote-update.js`（远程列表预览、确认后保存及更新） | `plugins/GuthonNexus/gushen-vscode-completion/test/svn-backend-client.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/svn-remote-update.test.js` |
-| Nexus 方言辅助、影响预览与 PAGE/过程函数定位 | `plugins/GuthonNexus/gushen-vscode-completion/src/svn/editor-assistance.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/svn/impact-preview.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/page-locator.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/activate.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/editor-assistance.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/impact-preview.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/page-locator.test.js` |
 | Bridge 服务端与持久异步任务 | `plugins/GuthonBridge/bridge/server.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/bridge-process.js` | `plugins/GuthonBridge/bridge/server.test.js` |
 | 原生平台接口与回读 | `plugins/GuthonBridge/bridge/native-metadata.js`（身份绑定、持久请求及回执） | `plugins/GuthonBridge/bridge/native-step-registry.js`（显式冻结的服务步骤）、`plugins/GuthonBridge/bridge/native-source-plan.js`（显式冻结的开发函数、MCP登记及隐藏保存字段）、`plugins/GuthonBridge/bridge/page-context.js`、`plugins/GuthonBridge/bridge/server.js`、`plugins/GuthonBridge/extension/native-metadata.js`、`plugins/GuthonBridge/extension/background.js` | `plugins/GuthonBridge/bridge/native-metadata.test.js`、`plugins/GuthonBridge/bridge/native-step-registry.test.js`、`plugins/GuthonBridge/bridge/native-source-plan.test.js`、`plugins/GuthonBridge/extension/native-metadata.test.js`、`plugins/GuthonBridge/bridge/navigation-server.test.js` |
-| Nexus → 平台定位、有界 pageContext 与 Bearer SSE | `plugins/GuthonBridge/bridge/page-context.js` | `plugins/GuthonBridge/extension/event-client.js`、`plugins/GuthonBridge/extension/background.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/browser-navigation.js` | `plugins/GuthonBridge/bridge/page-context.test.js`、`plugins/GuthonBridge/bridge/navigation-server.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/browser-navigation.test.js` |
-| Chrome Bridge 扩展与 PAGE/过程函数定位入口 | `plugins/GuthonBridge/extension/content.js`、`plugins/GuthonBridge/extension/popup.js` | `plugins/GuthonBridge/extension/page-bridge.js`、`plugins/GuthonBridge/extension/nexus-locator.js`、`plugins/GuthonBridge/extension/background.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/svn/page-locator.js` | `plugins/GuthonBridge/bridge/server.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/page-locator.test.js` |
-| 发行构建 | `scripts/build_guthon_tool.py` | `GuthonCodeTool.spec` | `tests/test_build_guthon_tool.py` |
+| 发行构建 | `scripts/build_guthon_tool.py`（macOS 与 Windows 单文件） | `.github/workflows/release.yml`、`GuthonCodeTool.spec` | `tests/test_build_guthon_tool.py` |
 | Windows 统一安装器与官方依赖下载 | `scripts/installer/engine.py` | `scripts/build_windows_installer.py`、`scripts/build_installer_components.py`、`scripts/fetch_installer_inputs.py`、`scripts/common/installer_downloads.py`（构建/运行时共享的固定 HTTPS 下载与校验）、`scripts/check_installer_runtime.py`、`scripts/check_windows_installer.py`、`installer/windows/GuthonCodeSetup.iss`、`.github/workflows/build-installer.yml` | `tests/test_windows_installer.py` |
+| Nexus API 补全合并与重载去重 | `plugins/GuthonNexus/gushen-vscode-completion/src/api-completion.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/api/platform-reference.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/api-completion.test.js` |
 | 谷神 API 补全数据 | `scripts/sync_guthon_api.mjs` | `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs` | 两个脚本的 `--self-test` |
 | 三组件更新 | `plugins/GuthonNexus/gushen-vscode-completion/src/update-center.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/component-update.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/release-catalog.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/update-archive.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/tool-updater.js`、`scripts/build_release_catalog.mjs` | `plugins/GuthonNexus/gushen-vscode-completion/test/component-update.test.js`、`plugins/GuthonNexus/gushen-vscode-completion/test/update-center.test.js` |
 | 环境自检 | `scripts/common/doctor.py`（按工作区能力确定依赖，保留 legacy JSON/退出码并提供结构化报告） | `scripts/guthon_tool.py`（配置载入失败前仍可进入自检）、`plugins/GuthonNexus/gushen-vscode-completion/src/environment-check.js`（报告校验与固定操作入口）、`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` | `tests/test_doctor.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/environment-check.test.js` |
+
+## Common workspace contract
+
+- `scripts/common/configuration_upgrade.py` 实现离线配置预览、发布与中断恢复，`scripts/common/svn_api_migration.py` 实现 SVN 源侧预检、API 候选和配置切换恢复；`scripts/common/svn_api_inventory.py` 对齐两侧对象身份和摘要。测试位于 `tests/test_configuration_upgrade.py` 和 `tests/test_svn_api_migration.py`。
+
+- `scripts/common/config_store.py` 读取 API schema 2、新 schema 3 与完整旧 YAML，保留 `sourceTables` 和环境、凭据引用。
+- `scripts/common/workspace_sources.py`、`scripts/common/workspace_registry.py` 统一配置与授权路径；`scripts/common/svn_workspace_config.py`、`scripts/common/svn_scope.py` 同时供 SVN provider 使用。
+- `scripts/common/legacy_source.py` 拥有 SVN 与 DATABASE 既有索引和源码流程及 DATABASE 拉取预检和进度，`scripts/common/legacy_source_cli.py` 接入 CLI，`scripts/common/legacy_source_read.py` 提供有界本地查询，`scripts/common/database_source_exports.py` 为 DATABASE 的表、视图、系统脚本和单据类型建立本地目录与检索索引。共有工作区和连接逻辑仍由 `scripts/common/gusen_hub.py` 提供。
+- `scripts/providers/svn/cli.py` 调度原生更新、索引和变更审阅，`scripts/providers/svn/nexus/scm.py` 校验并执行 SVN 提交和回执。DATABASE Workcopy 由 `scripts/common/workcopy_store.py` 管理。
+- Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/legacy-project.js` 从当前卡片做旧模式接线，复用 `plugins/GuthonNexus/gushen-vscode-completion/src/svn/` 的源码树、SCM、编辑租约与监听。`plugins/GuthonNexus/gushen-vscode-completion/src/database-source-tree.js` 提供 DATABASE 的源码分组和节点同步，`plugins/GuthonNexus/gushen-vscode-completion/src/database-source-editor.js` 与 `scripts/common/database_workcopy_edit.py` 提供受控工作副本编辑，`scripts/common/database_node_sync.py` 处理 readonly 节点同步，`plugins/GuthonNexus/gushen-vscode-completion/src/source/tree-styles.js` 提供三种模式共用的类别和图标。测试见 `tests/test_p3_provider_integration.py`。
+
+## Official feature adoption
+
+- `scripts/providers/api/content.py` 的名称派生由 `scripts/providers/api/store.py` 与索引共用，统一 CLI/MCP/源码树及上传审阅名称。
+
+- `plugins/GuthonNexus/gushen-vscode-completion/src/api/upload-review.js`：原生多选审阅、逐项差异和取消；上传仍由 `plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js` 核对快照并执行。
+- `plugins/GuthonNexus/gushen-vscode-completion/src/api/tree-filter.js`：仅展示过滤，保留原节点及父链；源码状态与资源管理器装饰共用 `plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js`。
+- `plugins/GuthonNexus/gushen-vscode-completion/src/api/mcp-session-host.js` 与 `scripts/providers/api/session_proxy.py`：独立 MCP 在线工具委派到明确项目的 Nexus 登录会话；不传递登录凭据、不重放请求。
+- `plugins/GuthonNexus/gushen-vscode-completion/src/api/mcp-configuration.js`：实际运行入口的 JSONC 配置预览合并、备份及工具发现/在线只读检查。
+- `plugins/GuthonNexus/gushen-vscode-completion/src/api/page-custom-editor.js`：原生 PAGE 编辑器入口，复用 `plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/controller.js` 的页面会话。
+- `plugins/GuthonNexus/gushen-vscode-completion/src/official-assessment.js` 与 `plugins/GuthonNexus/gushen-vscode-completion/data/official-compatibility.json`：官方命令、编辑器、API 和接口差异评估，供 `plugins/GuthonNexus/gushen-vscode-completion/src/official-update.js` 报告使用。
+- `docs/api-sync/official-adoption.md`：三批功能、验证及交付边界。
+
+## API source development
+
+当前源码接入统一使用 API。功能矩阵记录尚待完成的集成和验收，不把源码实现当成客户端或平台验收。
+
+| 模块 | 职责 |
+|---|---|
+| `scripts/common/config_store.py` | 单一配置源、保留旧目录读取，以及预览/确认/备份式配置迁移；不自动迁移真实目录。 |
+| `scripts/providers/api/client.py`、`workspace.py` | API 会话实时核验、只读请求登录恢复、验证码、HTTPS 信任、项目配置、范围及目录名称缓存；后端凭据摘要仅驻留内存。 |
+| `scripts/providers/api/download.py`、`store.py`、`sync.py` | 按范围下载、范围变更预检与备份清理编排、基线与冲突、上传前合并和平台回读。 |
+| `scripts/providers/api/page_source.py` | 结构化 PAGE 的原生 bean/version 读取、版本绑定的基线复用、本地无损 XML 表示、原生 JSON 保存和独立回读；导出 XML 不作保存输入。 |
+| `scripts/providers/api/cli.py`、`index.py`、`mcp_server.py` | CLI、索引、按精确源码查询页面/函数使用位置、查询时从已索引源码头和元数据派生过程函数签名及受控 MCP 接口。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/login-store.js` | 按 toolHome、workspaceKey 和平台地址隔离的 API 登录信息本地加密存储；由 Nexus 负责保存和恢复。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/authentication.js` | 本地加密登录恢复、失败后停止自动尝试、手动登录与当前项目退出；远程平台操作复用单个 ToolHost 的内存会话。 |
+| `scripts/providers/api/progress.py` | 通过 stderr 将实际平台请求、应答和持久化阶段传至 Nexus 输出，不记录认证、请求或源码正文。 |
+| `scripts/providers/api/module_parameters.py` | 按选中子系统读取模块参数列表并生成单个只读汇总清单；按复合身份加载单条完整 JSON 详情至原有缓存，复用 API 基线、冲突保护和索引。 |
+| `scripts/providers/api/module_parameter_editor.py`、`module_parameter_upload.py` | data JSON 投影、保护字段校验、旧只读描述符升级与文档租约；上传预览绑定、普通签出所有者核验、保存后回读、持久待核对门闩及只读恢复，不自动签入。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/module-parameter-editor.js` | 模块参数数据编辑、原生差异、本地保存与上传预览确认；共用源码虚拟文件系统的视图/模块参数投影。 |
+| `scripts/providers/api/reference_assets.py` | 模块参数汇总清单及官方单据类型/下拉组件各自共享 Markdown 的条目派生、配置引用，以及按工作区读取 API/结构/事件/规则和 PAGE 属性注解；原文件只读。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/platform-reference.js` | 按索引代次缓存的工作区 API 参考、补全/悬停与开发参考入口。 |
+| `scripts/providers/api/change_bundle.py` | 当前 API 工作区的本地变更包导出、预览和按计划摘要应用；从旧 SVN 工作区切换使用旧侧提交后新侧 API 拉取。 |
+| `scripts/providers/api/page.py`、`documents.py`、`editor_state.py` | PAGE 编辑、文档租约开关/续期、预览、幂等写入、原操作回读/索引恢复及编辑器状态协调。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`、`source-ui.js`、`project-card.js`、`project-actions.js` | 谷神项目卡片常用按钮与设置向导、原生项目菜单及命令面板操作列表、API 项目命令、按类型展示的源码树、过程函数树签名标签、顶层过程函数分类的树形/平铺布局与范围刷新、SCM；文件事件按登记范围处理，目录复用和重复索引短路；轻量卡片不等待全项目扫描。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/official-update.js` | 官方语言资源检查、更新和回退。 |
+| `plugins/GuthonNexus/gushen-vscode-completion/src/tool-updater.js` | 发行应用更新与回退；仅在合法锁持有者进程被明确判定不存在时恢复遗留锁。 |
 
 ## Python
 
 | 模块 | 职责 |
 |---|---|
 | `scripts/guthon_tool.py` | 统一 CLI、`--home` 契约、命令编排、子命令 parser 构建器与帮助自省、`self-test`。 |
-| `scripts/common/gusen_hub.py` | 工作区解析、索引连接、同步、Workcopy、状态与自动暂存的共享实现；`workspace_agent_context` 输出 `indexFirst` 可运行示例。 |
-| `scripts/common/workspace_config.py` | 工作区创建/删除与 YAML 读写。 |
+| `scripts/common/gusen_hub.py` | 显式 toolHome、工作区解析、索引连接和共享工具。 |
+| `scripts/common/workspace_config.py` | 在开发根 `workspace/` 下登记新项目，管理同步方式和登记删除。 |
+| `scripts/common/workspace_layout.py` | 初始化 var Git 根、根规则入口和受管忽略块，校验工作区目录名。 |
 | `scripts/common/workspace_assistant.py` | 工作区摘要、就绪状态与助手输出。 |
 | `scripts/common/index_bulk.py` | 在完整重建事务内暂停逐行检索索引触发器，批量构建并恢复；失败回滚数据和触发器。 |
 | `scripts/common/index_maintenance.py` | 显式预览或压实派生索引，紧凑保存字段集合正文并整理检索索引；保留源码、定位元数据和变更历史。 |
 | `scripts/common/source_facts.py` | 源码身份、事实解析与可重建 PAGE 节点/界面字段投影。 |
-| `scripts/common/index_schema_comments.py` | SQLite 索引表及字段的可查询注释。 |
 | `scripts/common/page_projection.py` | PAGE 虚拟文档投影、共享脚本/字段集合提取、语义节点/界面字段描述符及保留已有字段原文的单项插入；共享 PAGE 产品事件解析省略已确认的空继承分块，并供精确继承读取复用。 |
 | `scripts/common/inheritance.py` | 过程函数与 PAGE 项目脚本的继承标记识别、有效内容派生与来源片段；派生结果不作为可写物理文件。 |
 | `scripts/common/source_format.py` | 源码编解码与格式元数据。 |
 | `scripts/common/export_hub_markdown.py` | 全量 Markdown 导出。 |
-| `scripts/common/workspace_registry.py` | 工作区身份、存储根、provider 选择、路由元数据与同步状态；gusen_hub 公开 API 直接别名到实现。 |
+| `scripts/common/workspace_registry.py` | 工作区身份、存储根、API 路由元数据与同步状态；gusen_hub 公开 API 直接别名到实现。 |
 | `scripts/common/workspace_identity.py` | 从共享元数据定义配置 ID 和 workspaceKey 的唯一词法契约。 |
 | `scripts/common/build_info.py` | 只用公开后端源码/模板生成稳定构建标识；pyz/发行应用内置 BUILD_INFO。 |
 | `scripts/common/credential_vault.py` | 明确范围/确认后的 keyring 加密迁移，拒绝跨工作区共享凭据写入；Node AES-GCM/scrypt 只处理 stdin。 |
 | `scripts/common/database_dbx.py` | DBX 公开元数据导入、身份优先调用交接与保守结果规范化；不读取 DBX 凭据。 |
 | `scripts/common/database_operations.py` | 脱敏查询历史、目标摘要/TTL 描述缓存、多环境 COUNT 对比与 SQL 模板。 |
-| `scripts/common/source_changes.py` | 500 个已提交索引代次的新增/修改/删除元数据与固定边界分页。 |
 | `scripts/common/page_field_search.py` | 可选 PAGE 标签 trigram FTS 与精确子串残余；字段前缀/标签关键词游标保持确定性。 |
 | `scripts/common/source_text_search.py` | 私有片段正文及可选紧凑 trigram FTS，显式全量索引版本与部分覆盖。 |
 | `scripts/common/pull_history.py` | 工作区/Bridge 拉取历史有界观察窗口，只投影允许的元数据并显式标注缺口。 |
@@ -92,7 +136,6 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `scripts/common/runtime_paths.py` | 惰性显式 toolHome 与线程请求上下文，帮助不绑定源码根。 |
 | `plugins/GuthonNexus/gushen-vscode-completion/src/workspace-scheduler.js` | Bridge 按明确工作区串行、最多 4 个工作区并行；有界独立 ToolHost 池，仅回收闲置客户端。 |
 | `scripts/common/persistence.py` | 跨线程/进程锁及带 fsync 的原子文本持久化。 |
-| `scripts/common/source_store.py` | DATABASE 镜像与 SQLite 的备份、回滚及进程中断恢复。 |
 | `scripts/common/identity_search.py` | 可选 FTS5 身份预筛；短词、Unicode 与旧索引保留原路径。 |
 | `scripts/common/cli_output.py` | 显式CLI v1信封和JSON/文本/表格/CSV渲染，保留原有顶层字段。 |
 | `scripts/common/command_errors.py` | CLI / ToolHost 语义错误码，区分 SystemExit 原生退出消息。 |
@@ -105,40 +148,23 @@ runtimeVar                   = <toolHome>/var              私有谷神工作区
 | `scripts/common/database_plan_runner.py` | 内置只读计划执行、前置条件停跑、平台证据门槛与新私有运行工件。 |
 | `scripts/check_ai_code_index.py` | 校验本索引引用的路径存在。 |
 
-`scripts/common/workcopy_store.py` 负责镜像比较、保护/覆盖备份、回收恢复与 Workcopy CLI，gusen_hub 直接别名保持公开入口及 host override。
 
 ## Providers
 
-DATABASE：
+API：`scripts/providers/api/` 提供项目身份、下载、基线、同步、索引、PAGE 和 MCP；`scripts/common/database_exports/` 与 `scripts/common/source_diagnosis.py` 保留独立数据库导出与诊断。
 
-- `scripts/providers/database/export_table_schema_sql.py`（表结构）、`export_bill_type_sql.py`（单据类型）、`export_view_sql.py`（视图）、`export_system_script_sql.py`（系统脚本）。
-- `scripts/providers/database/_export_common.py`：共享输出规范化、精确产出登记和最近 100 条导出摘要。
-- `scripts/common/gusen_hub.py`：由统一 CLI 的 pull/create-workcopy/workcopy/sync-source 编排；退役的仅转发脚本不再分发。
-- `scripts/providers/database/run_source_diagnosis.py`：只读业务排查执行器。
+原生 PAGE XML 与 JSON 共用页面模型：`scripts/providers/api/native_page.py` 负责原生编辑模型的本地 XML 表示、投影、原文保留与定向编辑，`scripts/providers/api/content.py` 负责保存和上传的对象身份及继承约束，`scripts/providers/api/page.py` 提供 Nexus 页面快照、字段集合 JSON、预览与受控保存；`scripts/providers/api/inheritance_edit.py` 负责项目脚本继承展开写回的父层核对与幂等记录。
 
-SVN：
+`scripts/providers/api/xml_source.py` 提供 PAGE 与视图共用的 XML 字节位置解析、文本叶节点读取和原文保留；`scripts/providers/api/view_editor.py` 将当前视图的 `/viewSql` 映射为 SQL 虚拟文档，经租约、预览、幂等保存写回同一 checkout 文件。`scripts/providers/api/download.py` 共用解码下载与上传返回对象，并提供 PAGE 站点文件名到本地身份目录的路径映射（原生 PAGE 元数据识别复用）；`scripts/providers/api/sync.py` 核对上传应答的规范源码与独立回读结果，再以提交正文为祖先合并到当前文件。
 
-- `scripts/providers/svn/cli.py`：按生命周期、文档、索引查询、PAGE查询、SCM、维护分组的 action→handler 编排；统一 CLI 注入原进度/reindex 回调。
-
-- `scripts/providers/svn/nexus/incremental.py`：支持监听批次跳过已更新文件，按 SVN update 实际路径批量解析、清理删除项及关联索引，目录仅展开受影响子树，PAGE 删除核对页面别名，事务发布与继承关联刷新。
-- `scripts/providers/svn/checkout.py`：检出/更新、操作锁与 working copy 清单。
-- `scripts/providers/svn/scanner.py`、`projection.py`、`group_inference.py`、`dedup.py`：扫描、虚拟文档投影、模块归并与去重。
-- `scripts/providers/svn/writeback.py`：受控写回与差异校验。
-- `scripts/providers/svn/nexus/edit_sessions.py`：会话加载、结构校验与活跃租约容量；`operation_records.py`：共享日志 schema、原子保存和 phase 时间。documents 保留直接 API 别名与物理写回内核；损坏会话不重建。
-- `scripts/providers/svn/nexus/edit_leases.py`：未过期、源码未变更的租约续期与精确释放；`operation_maintenance.py`：有界巡检与确认后归档完成记录，拒绝 pending、损坏或活动租约记录。
-- `scripts/providers/svn/nexus/page_lifecycle.py`：经已配对 Bridge 查询平台模块/页面版本，冻结并预览整页新建/复制/删除，单次派发和独立回执日志，不制造本地 PAGE 文件、不重放未知写入。`plugins/GuthonBridge/extension/page-lifecycle.js` 由扩展后台单次注入，调用原生 PAGE 接口；不注册网页消息写命令。
-- `scripts/providers/svn/nexus/page_nodes.py`、`page_mutation.py`、`page_field_mutation.py`、`mcp_server.py`：PAGE 节点/界面字段有界查询、未解析映射及引用风险诊断、源码新鲜度核验、编辑租约、受控节点写入及同集合单字段新增/拷贝；`page_editor.py` 的结构接口复用可视化编辑内核，支持字段/按钮增改删、同页同类型复制与区域移动、分控件事件、数据源和原生布局；提供设计契约与候选诊断，经 CLI 和 MCP 租约、预览、幂等写入、回读恢复；MCP 提供显式 `--read-only`，CLI `svn page-query` 和 Nexus 后端共用查询层。
-- `scripts/providers/svn/nexus/procedure_sources.py`、`procedure_mutation.py`：独立于 PAGE 投影的 SVN 对象索引就绪检查、过程函数无会话有界读取/调用方证据、精确身份编辑租约、预览和幂等本地写入；共用 `documents.py` 的授权与物理文件写回内核。
-- `scripts/providers/svn/nexus/inheritance_sources.py`：基于授权索引与两层源码哈希，有界读取项目原文、产品原文和展开内容；Nexus `virtual-fs.js` 默认将展开内容投影到项目可编辑标签页，并按编辑范围决定保留标记或物化，同时校验产品哈希；`diff-content.js` 将相同投影用于虚拟编辑器 Quick Diff 基线，物理 SVN diff 不变；`catalog.py` 将过程函数和 PAGE 服务组件的 `.inherit.gss` 记为独立只读产品层，排除逻辑目录、PAGE 别名去重和可写入口；`manifest.py` 对所有布局统一拒绝父文件写入。
-- `scripts/providers/svn/nexus/source_queries.py`（无租约当前读、批读、分页对象摘要与健康度）、`catalog.py`、`documents.py`、`index_queries.py`、`manifest.py`、`scm.py`、`workspace.py`、`bootstrap.py`：Nexus 目录、文档与内部 PAGE 操作记录、有界查询、清单、SCM 与工作区初始化；`bootstrap.py` 的登录验证只探测当前配置及同一根下已有授权子目录，并经 stdin 交给 SVN 缓存密码。
+`scripts/providers/api/local_mutation.py` 记录单文档和批次请求的源码写入阶段；MCP 错误回执保留该事实，`find_document_operation` 按原幂等键只读查找文档操作，供 Hook 核对未知结果。
 
 ## Guthon Nexus
 
 `plugins/GuthonNexus/gushen-vscode-completion/src/onboarding.js` 和 `plugins/GuthonNexus/gushen-vscode-completion/src/onboarding-team.js`负责从零安装后的工具／插件环境确认、内网仓库检查与公钥引导；完成后日常不再弹出，不执行业务接入或索引。
 
-`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` 是命令与视图注册入口；`tool-runtime.js` 决定 source-development/script/packaged 命令并写入 runtime descriptor；`tool-process-client.js` 复用 ToolHost，写入期间的读取可使用独立只读进程，不重放写入；`script-runtime.js` 校验本地 Python 与 pyz；`tool-workspace.js` 负责设置/切换及接入已有工作空间；`workspace-registry.js` 与 `workspace-assistant.js` 维护工作区列表；`bridge-process.js` 启停 Bridge；`definition.js`、`selector.js`、`rules.js`、`tool-json-client.js`、`source-mode.js`、`database-config.js`、`tool-updater.js` 分别承担跳转、选择器、补全规则、ToolHost JSON 调用、源码模式、数据库配置与发行应用自更新。
+`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` 是命令与视图注册入口；`tool-runtime.js` 决定 source-development/script/packaged 命令并写入 runtime descriptor；`tool-process-client.js` 复用 ToolHost，写入期间的读取可使用独立只读进程，不重放写入；`script-runtime.js` 校验本地 Python 与 pyz；`tool-workspace.js` 负责设置/切换及接入已有工作空间；`workspace-registry.js` 与 `workspace-assistant.js` 维护工作区列表；`bridge-process.js` 启停 Bridge；`definition.js`、`selector.js`、`rules.js`、`tool-json-client.js`、`source-mode.js`、`database-config.js`、`tool-updater.js` 分别承担跳转、选择器、补全规则、ToolHost JSON 调用、API 模式识别、数据库配置与发行应用自更新。
 
-Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/source-watcher.js` 按工作区串行合并文件事件，调用 `backend-client.js` 的 `reindexFiles`；失败批次先保留全部路径，再依据 `scripts/providers/svn/nexus/incremental.py` 的错误类型隔离确切解析失败文件、有限重试临时读取故障，身份与关联错误保持批次边界；无关文件事件不重置预算，恢复路径和暂停状态保存在 IDE workspaceState。`activate.js` 提供定向恢复命令，`workspace-assistant.js` 将恢复状态投影到驾驶舱。后端不自动全量重建，正常日志只输出批次汇总；测试见 `plugins/GuthonNexus/gushen-vscode-completion/test/svn-source-watcher.test.js`。
 
 PAGE 草稿 `plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/model.js` 使用字段/脚本身份索引与修改记录维护差异、50 步撤销和原子批次，不逐次复制整页；输出操作保持基线顺序并继续供原生投影、预检和恢复使用。边界测试位于 `plugins/GuthonNexus/gushen-vscode-completion/test/page-model.test.js`。
 
@@ -146,13 +172,8 @@ PAGE 外部修改与共用代码保存统一使用 `plugins/GuthonNexus/gushen-v
 
 PAGE 消息由 `plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/state.js` 重建基线及有序变化，`controller.js` 首次发送基线、后续仅发送改变的操作和状态，`editor.js` 局部更新普通属性；消息缺口请求重新同步。恢复历史由 `plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/recovery-store.js` 在明确 IDE 私有存储中写入内容寻址记录，Memento 仅保存引用，导出时展开；控制器只回收已持久化的干净关闭会话，保留草稿、未知保存及运行任务。测试位于 `plugins/GuthonNexus/gushen-vscode-completion/test/page-state.test.js` 和 `plugins/GuthonNexus/gushen-vscode-completion/test/page-recovery-store.test.js`。
 
-Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/output-logging.js` 为工具及 SVN 输出提供逐行毫秒时间戳和单调时钟耗时。
+Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/output-logging.js` 为工具输出提供逐行毫秒时间戳和单调时钟耗时。
 
-Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/quick-open.js` 负责 SVN 工作区选择和精确候选定位，与完整索引搜索共用 `plugins/GuthonNexus/gushen-vscode-completion/src/workspace-search.js` 的输入即查询窗口；`plugins/GuthonNexus/gushen-vscode-completion/src/svn/bounded-cache.js` 为虚拟文档、差异和继承提供有界缓存，打开的文档保留租约。`plugins/GuthonNexus/gushen-vscode-completion/src/page-editor/controller.js` 合并同一页面快照的并发比较和工作区短时 SCM 通知；读取期间的新通知触发后续比较，关闭的页面在重开后读取 BASE。
-
-`plugins/GuthonNexus/gushen-vscode-completion/src/svn/page-locator.js` 验证平台定位 URI 和精确对象分享链接，并按 PAGE ID 精确查询服务组件 GSS 定义；URI 不携带本机路径或租约。`plugins/GuthonNexus/gushen-vscode-completion/src/svn/activate.js` 的 SCM 编辑入口对 JSON PAGE 文件核对目录索引身份后打开本地页面编辑器；明确指定的分块继续复用代码编辑器。
-
-`plugins/GuthonNexus/gushen-vscode-completion/src/pull-history-view.js` 渲染拉取历史；`plugins/GuthonNexus/gushen-vscode-completion/src/svn/editor-assistance.js` 融合本地函数、PAGE 字段与过程函数索引候选，取消或文档变更时丢弃迟到结果。
 
 `plugins/GuthonNexus/gushen-vscode-completion/src/diagnosis-history-view.js` 通过共享 ToolJsonClient 按明确工作区读取 diagnosis-list/show，只渲染允许的元数据，并重新验证详情记录 ID；工作区树和命令面板直接提供历史入口，不重跑数据库查询。
 
@@ -160,15 +181,14 @@ Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/quick-open.js` 负�
 
 ## Guthon Bridge
 
-`plugins/GuthonBridge/bridge/server.js` 是本地服务入口，读取 `GUTHON_TOOL_HOME`；`plugins/GuthonBridge/extension/` 下 `content.js`、`background.js`、`page-bridge.js`、`workspace-selection.js` 分别负责页面注入与页签变化刷新、后台路由、页面桥与工作区选择。`nexus-locator.js` 为弹窗和页面左下角入口生成 PAGE/过程函数 URI，Nexus `activate.js` 的 URI handler 复用 `page-locator.js` 的精确定位流程。
+`plugins/GuthonBridge/bridge/server.js` 是本地服务入口，读取 `GUTHON_TOOL_HOME`；`plugins/GuthonBridge/extension/` 下 `content.js`、`background.js`、`page-bridge.js`、`workspace-selection.js` 分别负责页面注入与页签变化刷新、后台路由、页面桥与工作区选择。`nexus-locator.js` 为弹窗和页面左下角入口生成 PAGE/过程函数 URI，URI 消费及目录定位依赖 Nexus 的 API 入口接线，以当前构建为准。
 
 Bridge `plugins/GuthonBridge/extension/platform-layout.js` 核对 2.0/1.5 布局与控件结构（兼容版本栏为空）后，按管理页签和实际列表容器（含数据表管理表格/卡片、视图管理、定时任务、单据类型、数据字典）设置滚动布局，由 `content.js` 在主机校验后启停，`bridge.css` 提供列表独立滚动、固定查询/操作区及小屏横向滚动；动态页面挂载、页签切换和窗口缩放触发更新，退出页面或扩展失效时清理。
 
 Bridge `plugins/GuthonBridge/extension/tab-sorter.js` 由 `content.js` 启停，在已知卡片标签栏内拖动排序，仅移动标签头，保留原生编辑器实例；首页与菜单固定。上层功能标签按平台 origin 保存到扩展本地存储，PAGE/过程函数标签仅在当前页面会话保留；观察挂载和重绘恢复顺序，清理时还原原顺序及属性。交互与注入回归见 `plugins/GuthonBridge/extension/tab-sorter.test.js`。
 
-Bridge `plugins/GuthonBridge/extension/task-client.js` 与 `background.js` 实现短请求提交/轮询及 worker 重启恢复；`host-config.js` 验证显式 IPv4/IPv6 范围，不扩大默认授权。`plugins/GuthonBridge/extension/task-history.js` 保存有界成功目标元数据，重拉丢弃旧 force/confirmation，固定原平台来源。
+Bridge `plugins/GuthonBridge/extension/task-client.js`、`background.js` 和 `task-history.js` 提供 API 定向刷新任务、轮询恢复及按平台来源隔离的历史；`host-config.js` 维护主机范围。
 
-`plugins/GuthonBridge/bridge/page-context.js` 保留有界、有租约的身份快照及不重放的导航回执；`plugins/GuthonBridge/extension/event-client.js` 用 Bearer fetch 解析 SSE；Nexus `plugins/GuthonNexus/gushen-vscode-completion/src/svn/browser-navigation.js` 明确选择工作区平台页签并复用 page-bridge 的精确对象导航。浏览器正文不进入快照，来源/工作区在服务端及浏览器重新校验；DOM 事件替代编辑器扫描，元数据心跳只用于租约和 worker 恢复。
 
 `plugins/GuthonNexus/gushen-vscode-completion/src/ai-context-export.js` 验证对象/快照并以0600新文件写入当前私有context/ai；`database-config.js` 提供full目标向导与精确ID预检。
 
@@ -179,9 +199,9 @@ Bridge `plugins/GuthonBridge/extension/task-client.js` 与 `background.js` 实�
 - `scripts/check_nexus_commands.mjs`：校验Nexus贡献、注册、激活、菜单与CLI元数据引用；CI重建后定向检查生成副本diff。
 - `scripts/check_release_smoke.py`：用临时 toolHome 检查源码、zipapp 或应用的版本、自检、初始化、doctor 必需资源与 MCP 工具发现（应用可直接传 macOS onedir 目录）；`scripts/check_public_docs.mjs` 校验四份公开 HTML 的脚本、链接、图片、章节目录、页脚内容位置及 QA 数据后再部署 Pages。
 - `GuthonCodeTool.spec`：打包配置。
-- `scripts/sync_guthon_api.mjs`：从 `<toolHome>/config/sync.yaml` 读取谷神版本，更新 `<toolHome>/var/docs/谷神方言API/` 与插件补全数据。
+- `scripts/sync_guthon_api.mjs`：从单一 `<toolHome>/config/guthon.json` 读取谷神版本，更新 `<toolHome>/var/nexus/api-reference/谷神方言API/` 与插件补全数据。
 - `.github/workflows/release.yml`：按 `[build]` 发布；`.github/scripts/release_plan.py` 按最后发布源码选择全量构建或同版本组件替换，`release_metadata.py` 更新完整附件摘要和发布基线。组件更新保留应用/安装器，只替换受影响附件及签名元数据；不等待 Gitee 镜像。
-- 发行说明源文件保存在本机忽略的 `docs/private/releases/`，仅作为提交和发行正文来源；CI 使用提交说明或手动传入的 `release_notes`，不读取私有目录。开发生成的 `*.vsix` 不跟踪，正式包在 Release 分发；Windows 指南配图继续跟踪，额外原始截图仅保存在忽略的私有目录。
+- 发行说明源文件保存在本机忽略的 `<sourceRoot>/docs/private/releases/`（本机私有资料，不随 Git worktree 分发），仅作为提交和发行正文来源；CI 使用提交说明或手动传入的 `release_notes`，不读取私有目录。开发生成的 `*.vsix` 不跟踪，正式包在 Release 分发；Windows 指南配图继续跟踪，额外原始截图仅保存在忽略的私有目录。
 - `scripts/sync_release_to_gitee.py`：维护者本机下载指定 GitHub 签名发行、使用系统钥匙串令牌补传 Gitee 附件、逐项下载核验哈希；`--verify-only` 为无令牌只读验收。`.github/workflows/sync-gitee-release.yml` 复用此入口作为手动备用同步；使用方式见 `docs/RELEASE_MIRROR.md`，本地测试见 `tests/test_sync_gitee_release.py`。
 - `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs`：从 API 文档目录生成 `plugins/GuthonNexus/gushen-vscode-completion/data/index.json`。
 - `scripts/vault_crypto.mjs`：仅处理明确凭据迁移的标准输入，不创建明文文件；pyz/发行应用包含该公开辅助脚本。
@@ -191,6 +211,8 @@ Bridge `plugins/GuthonBridge/extension/task-client.js` 与 `background.js` 实�
 - `docs/GuthonCodeTool_使用手册.html`、`docs/GuthonCodeTool_Windows安装步骤.html`、`docs/GuthonCodeTool_全功能说明.html`、`docs/GuthonCodeTool_QA.html`：用户操作步骤、Windows 安装步骤、完整能力参考与常见疑问。文档维护按 `AGENTS.md` 的“公开文档分工”选择实际受影响章节，不逐页追加功能说明。
 
 ## Validation
+
+首次从源码验证 Nexus 时，在插件目录先执行 `npm install --omit=dev --ignore-scripts --no-audit --no-fund`，确保运行时 JSONC 解析依赖和许可证可供标准打包与本地更新使用。
 
 ```bash
 python scripts/check_ai_code_index.py

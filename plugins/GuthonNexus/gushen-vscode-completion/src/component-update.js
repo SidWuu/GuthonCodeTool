@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { workspaceRoot } = require('./workspace-root');
 const crypto = require('node:crypto');
 const { ASSETS, NEXUS_ID } = require('./release-catalog');
 const { readArchive, archiveJson, extractArchive } = require('./update-archive');
@@ -9,8 +10,8 @@ const { probeScriptRuntime } = require('./script-runtime');
 
 function updateRoot(home) {
   if (!home || !path.isAbsolute(home)) throw new Error('请先设置明确的本地数据目录');
-  let directory = fs.existsSync(home) ? fs.realpathSync(home) : path.resolve(home);
-  for (const part of ['var', 'nexus', 'updates']) {
+  let directory = workspaceRoot(fs.existsSync(home) ? fs.realpathSync(home) : path.resolve(home));
+  for (const part of ['nexus', 'updates']) {
     directory = path.join(directory, part);
     if (fs.existsSync(directory) && fs.lstatSync(directory).isSymbolicLink()) throw new Error('更新运行目录不能通过符号链接重定向');
   }
@@ -109,7 +110,7 @@ async function prepareUpdate(verified, plan, root, { downloader = downloadAsset,
   const names = new Set();
   for (const item of selected) {
     if (item.id === 'tool') {
-      names.add(mode === 'script' ? ASSETS.script : assetNameFor(platform, arch));
+      names.add(mode === 'script' ? ASSETS.script : assetNameFor(platform, arch, verified.release));
       if (mode === 'script') names.add(ASSETS.requirements);
     } else names.add(ASSETS[item.id === 'bridge' ? 'bridge' : 'nexus']);
   }
@@ -185,7 +186,7 @@ async function applyUpdate(prepared, root, { mode, platform = process.platform, 
       let backend;
       if (mode === 'script') backend = { mode, toolEntry: path.join(prepared.scriptDirectory, ASSETS.script), version: verified.catalog.components.tool.version };
       else {
-        const downloader = async (_, target) => { const source = files[assetNameFor(platform, arch)]; fs.copyFileSync(source, target); return fs.statSync(target).size; };
+        const downloader = async (_, target) => { const source = files[assetNameFor(platform, arch, verified.release)]; fs.copyFileSync(source, target); return fs.statSync(target).size; };
         const requester = async url => {
           const item = verified.release.assets.find(asset => asset.url === url);
           if (item?.name === 'GuthonCodeTool-checksums.txt') return verified.checksumsBytes;

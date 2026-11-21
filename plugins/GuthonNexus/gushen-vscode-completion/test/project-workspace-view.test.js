@@ -1,0 +1,270 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const vm=require('node:vm');
+const {createRequire}=require('node:module');
+const {WorkspaceRegistry}=require('../src/workspace-registry');
+const {WindowWorkspaceSelection,windowToolHome,workspaceSetupCard}=require('../src/tool-workspace');
+const {ApiSourceUI}=require('../src/api/source-ui');
+const {ApiEditorState}=require('../src/api/editor-state');
+
+function fixture(t) {
+  const extension=path.resolve(__dirname,'../src/extension.js'),requireFromExtension=createRequire(extension);
+  const source=fs.readFileSync(extension,'utf8'),activate=fs.readFileSync(path.resolve(__dirname,'../src/api/activate.js'),'utf8');
+  const requests=[],commands=[],state=new Map();let registryReads=0;let cardProvider,failedKey;let response={ok:true,workspaces:[
+    {workspaceKey:'a',name:'甲',sourceMode:'api',root:'/home/var/a',checkoutPath:'/home/var/a/checkout'},
+    {workspaceKey:'b',name:'乙',sourceMode:'api',root:'/home/var/b',checkoutPath:'/home/var/b/checkout'},
+    {workspaceKey:'old',name:'旧项目',sourceMode:'svn',root:'/home/var/old',executionReady:false}],configErrors:[]};
+  class EventEmitter {constructor(){this.event=()=>({dispose(){}});}fire(){}dispose(){}}
+  class TreeItem {constructor(label){this.label=label;}}
+  const document={uri:{scheme:'file',fsPath:'/home/var/a/checkout/unsaved.gss'},isDirty:true,version:2};
+  const vscode={EventEmitter,TreeItem,TreeItemCollapsibleState:{None:0},
+    workspace:{workspaceFolders:[{uri:{scheme:'file',fsPath:'/home/var'}}],textDocuments:[document],getConfiguration:()=>({get:(key,fallback)=>key==='toolHome'?'/home':fallback})},
+    commands:{executeCommand:async(...args)=>commands.push(args)},
+    window:{createTreeView:()=>({dispose(){}}),registerWebviewViewProvider:(_id,provider)=>{cardProvider=provider;return {dispose(){}};},showErrorMessage:message=>{throw new Error(message);}}};
+  const context={extensionPath:path.resolve(__dirname,'..'),workspaceState:{get:(key,fallback)=>state.get(key)??fallback,update:async(key,value)=>state.set(key,value)}};
+  const run=async(key,action,payload)=>{
+    requests.push({key,action,payload});
+    if(action==='status' && key===failedKey)throw new Error('当前项目状态无法读取');
+    if(action==='editor-state')return {editorToken:'token-'+key};
+    if(action==='session')return {authenticated:true,session:{userName:'Fixture'}};
+    return {checkoutPath:`/home/var/${key}/checkout`,settings:{serverUrl:'https://fixture.invalid',systemIds:['A'],allSystems:false},
+      summary:{sourceCount:1,changedCount:key==='a'?1:0,uploadableCount:key==='a'?1:0},files:[]};
+  };
+  const editorState=new ApiEditorState({vscode,run});
+  const ui=new ApiSourceUI({vscode,run,editorState});
+  const tool={toolPath:'/tool',toolHome:'/home'};
+  const syncStart=activate.indexOf('  async function syncWorkspaces('),syncEnd=activate.indexOf('  return {run,readProjectSummary',syncStart);
+  const syncContext=vm.createContext({ui,path,getTool:async()=>tool,mcpSessionHost:{sync:async()=>{}},workspaceSyncGeneration:0});
+  vm.runInContext(activate.slice(syncStart,syncEnd)+';globalThis.synchronize=syncWorkspaces;',syncContext);
+  const api={sourceTree:ui,run,editorState,syncWorkspaces:syncContext.synchronize,readProjectSummary:key=>run(key,'status')};
+  const localWorkspaceFolders=()=>vscode.workspace.workspaceFolders.map(item=>item.uri.fsPath);
+  const sandbox=vm.createContext({path,vscode,context,WorkspaceRegistry,WindowWorkspaceSelection,
+    localWorkspaceFolders,windowToolHome,workspaceSetupCard,
+    configuredToolFromSettings:()=>windowToolHome(vscode.workspace.getConfiguration(),localWorkspaceFolders())?tool:undefined,
+    processClient:{request:async()=>{registryReads++;if(response instanceof Error)throw response;return response;}},
+    toolOutput:()=>({appendLine(){}}),bridgeOutput:{append(){}},resolveBridgeScript:()=>'',createBridgeProcess:()=>({isRunning:()=>false}),
+    require:name=>name==='./api/activate'?{activateApi:options=>{ui.onStatus=options.onStatus;return api;}}:requireFromExtension(name)});
+  const start=source.indexOf('  const workspaceRegistry ='),end=source.indexOf('  // 排序方式变化',start);
+  vm.runInContext(source.slice(start,end)+';globalThis.views={refresh:refreshApiWorkspaces,selection,projectOverview,projectCard,workspaceRegistry};',sandbox);
+  const views=sandbox.views;
+  views.cardProvider=cardProvider;
+  const cardView={webview:{onDidReceiveMessage:callback=>{cardView.receive=callback;return {dispose(){}};},postMessage:async()=>{}}};
+  views.cardProvider.resolveWebviewView(cardView);
+  t.after(async()=>{views.projectCard.dispose();views.projectOverview.dispose();ui.dispose();await editorState.close();});
+  return {views,ui,api,requests,commands,state,document,editorState,cardView,
+    setFolder(directory){vscode.workspace.workspaceFolders=[{uri:{scheme:'file',fsPath:directory}}];},
+    get registryReads(){return registryReads;},setResponse(value){response=value;views.workspaceRegistry.invalidate();},failStatus(key){failedKey=key;},get response(){return response;}};
+}
+
+test('root view lists all projects, keeps one current source and retains dirty A documents when choosing B or SVN',async t=>{
+  const f=fixture(t);await f.views.refresh();
+  assert.equal(f.views.projectOverview.provider.getChildren().length,3);
+  assert.equal(f.views.cardProvider.currentKey,undefined);assert.deepEqual(await f.ui.getChildren(),[]);
+  await f.views.selection.select('a',{switchWindow:true});await f.views.refresh();
+  assert.equal(f.views.cardProvider.currentKey,'a');assert.equal(f.ui.selectedWorkspaceKey,'a');
+  await f.views.selection.select('b',{switchWindow:true});await f.views.refresh();
+  assert.equal(f.views.cardProvider.currentKey,'b');assert.equal(f.ui.selectedWorkspaceKey,'b');
+  assert.equal(f.editorState.documents('a',f.editorState.workspaces.get('a'))[0].dirty,true);
+  await f.views.selection.select('old',{switchWindow:true});await f.views.refresh();
+  assert.equal(f.views.cardProvider.currentKey,'old');assert.match(f.cardView.webview.html,/SVN.*源码操作/);
+  assert.equal(f.ui.selectedWorkspaceKey,'');assert.match((await f.ui.getChildren())[0].label,/SVN/);
+  assert.equal(f.requests.filter(item=>item.key==='old').length,0);
+  assert.equal(f.document.isDirty,true);assert.equal(f.ui.workspaces.size,2);
+  assert.equal(f.commands.some(args=>args[0]==='vscode.openFolder'),false);
+});
+
+test('an unrelated folder offers setup and never reads the inherited data directory',async t=>{
+  const f=fixture(t);
+  f.setFolder('/new-home/new-workspace');
+  f.setResponse(new Error('旧配置缺少文件：source-tables.yaml'));
+  await f.views.refresh();
+  assert.equal(f.registryReads,0);
+  assert.deepEqual(f.requests,[]);
+  assert.match(f.cardView.webview.html,/当前开发目录尚未初始化/);
+  assert.match(f.cardView.webview.html,/初始化此文件夹/);
+  assert.doesNotMatch(f.cardView.webview.html,/source-tables/);
+  const row=f.views.projectOverview.provider.getChildren()[0];
+  assert.equal(f.views.projectOverview.provider.getTreeItem(row).command.command,'gushenCompletion.setupTool');
+  await f.cardView.receive({action:'setupCurrent'});
+  await f.cardView.receive({action:'setupBrowse'});
+  assert.deepEqual(f.commands.filter(args=>args[0]==='gushenCompletion.setupTool'),
+    [['gushenCompletion.setupTool','current'],['gushenCompletion.setupTool','browse']]);
+});
+
+test('invalid active configuration shows a diagnostic without selecting B or issuing its API calls',async t=>{
+  const f=fixture(t);await f.views.selection.select('a',{switchWindow:true});await f.views.refresh();
+  f.setResponse({...f.response,workspaces:f.response.workspaces.filter(item=>item.workspaceKey!=='a'),
+    configErrors:[{workspaceKey:'a',code:'CONFIG_INVALID',message:'甲的路径无效'}]});
+  await f.views.refresh();
+  assert.equal(f.views.cardProvider.currentKey,undefined);assert.equal(f.views.selection.diagnosticKey,'a');
+  assert.match(f.cardView.webview.html,/甲的路径无效/);assert.equal(f.ui.selectedWorkspaceKey,'');
+  assert.equal(f.requests.filter(item=>item.key==='b' && item.action==='session').length,0);
+  assert.equal(f.views.projectOverview.provider.getChildren().length,3);
+  await f.cardView.receive({workspaceKey:'a',action:'pull'});
+  assert.equal(f.commands.some(args=>args[0]==='gushenCompletion.pullApiSource'),false);
+});
+
+test('global configuration failure clears stale targets and recovers after a valid refresh',async t=>{
+  const f=fixture(t);await f.views.selection.select('a',{switchWindow:true});await f.views.refresh();
+  const valid=f.response;f.setResponse(new Error('CONFIG_AUTHORITY_CONFLICT'));await f.views.refresh();
+  assert.equal(f.views.projectOverview.provider.getChildren()[0].kind,'global');
+  assert.equal(f.views.cardProvider.currentKey,undefined);assert.match(f.cardView.webview.html,/CONFIG_AUTHORITY_CONFLICT/);
+  assert.match(f.cardView.webview.html,/title="\/home"/);
+  assert.equal(f.ui.selectedWorkspaceKey,'');assert.equal(f.document.isDirty,true);
+  f.setResponse(valid);await f.views.refresh();
+  assert.equal(f.views.cardProvider.currentKey,'a');assert.equal(f.ui.selectedWorkspaceKey,'a');
+});
+
+test('a current-project state failure preserves the other selectable projects',async t=>{
+  const f=fixture(t);f.failStatus('a');await f.views.selection.select('a',{switchWindow:true});await f.views.refresh();
+  assert.equal(f.views.projectOverview.provider.error,undefined);
+  assert.equal(f.views.projectOverview.provider.getChildren().filter(item=>item.kind==='project').length,2);
+  assert.equal(f.views.cardProvider.currentKey,undefined);assert.match(f.cardView.webview.html,/状态无法读取/);
+  await f.views.selection.select('b',{switchWindow:true});await f.views.refresh();
+  assert.equal(f.views.cardProvider.currentKey,'b');assert.equal(f.ui.selectedWorkspaceKey,'b');
+});
+
+test('legacy project service sends updates to SVN or DATABASE while keeping the selected key', async () => {
+  const {registerLegacyProjects}=require('../src/legacy-project');
+  const calls=[],subscriptions=[];
+  const output=[];
+  class EventEmitter {constructor(){this.event=()=>({dispose(){}});}fire(){}dispose(){}}
+  const svn={workspaceKey:'projects.svn',sourceMode:'svn',displayName:'SVN Fixture',
+    checkoutLayout:'manifest-working-copies',scopeManifestReady:true,workingCopies:[{id:'root',root:'/fixture/checkout',localSubdir:'.'}]};
+  const db={workspaceKey:'projects.db',sourceMode:'database',displayName:'DATABASE Fixture'};
+  const legacy=registerLegacyProjects({
+    vscode:{EventEmitter,workspace:{textDocuments:[]},
+      window:{showInformationMessage(){},showErrorMessage:message=>{throw new Error(message);}}},
+    context:{subscriptions},getTool:()=>({toolHome:'/fixture',toolPath:'/tool'}),
+    processClient:{request:async (_tool,command,args,key,_input,options)=>{
+      calls.push({command,args,key});
+      options.onOutput('[SVN] 正在索引\n');
+      return {ok:true};
+    }},
+    sourceTree:{refresh(){}},getWorkspaces:async()=>[svn,db],getSelected:async()=>svn,
+    refreshProjects:async()=>{},runTool:async (command,args,_visible,key)=>{calls.push({command,args,key});return true;},
+    getOutput:()=>({show:preserve=>output.push(preserve),appendLine:line=>output.push(line),append:text=>output.push(text)}),
+  });
+  try {
+    const beforeCheckout={...svn,scopeManifestReady:false,workingCopies:[],capabilities:{'svn.browse':true}};
+    assert.match((await legacy.children(beforeCheckout))[0].label,/尚未签出源码/);
+    assert.equal(calls.length,0);
+    await legacy.action(svn,'pull');
+    await legacy.action(db,'pull');
+    assert.deepEqual(calls,[
+      {command:'svn',args:['refresh'],key:'projects.svn'},
+      {command:'sync-all',args:[],key:'projects.db'},
+    ]);
+    assert.equal(output[0],true);
+    assert.equal(output[2],'[SVN] 正在索引\n');
+  } finally {for(const subscription of subscriptions)subscription.dispose();}
+});
+
+test('project settings route DATABASE and SVN credentials to the selected source provider', async () => {
+  const {registerLegacyProjects}=require('../src/legacy-project');
+  class Emitter {constructor(){this.event=()=>({dispose(){}});}fire(){}dispose(){}}
+  for (const [mode,address] of [['database','mysql://db.example:3306/master'],['svn','https://svn.example/repos/project']]) {
+    const workspace={workspaceKey:'ws-'+mode,displayName:mode,sourceMode:mode,configuration:{schemaVersion:3}};
+    const calls=[],fields=[],subscriptions=[];
+    const value={ok:true,workspaceKey:workspace.workspaceKey,sourceMode:mode,revision:'rev',
+      connection:{},sourceTablesConfigured:false,systemAliases:[]};
+    const values=[address,'fixture-user','fixture-private-value'];
+    const legacy=registerLegacyProjects({
+      vscode:{EventEmitter:Emitter,workspace:{textDocuments:[]},window:{
+        showQuickPick:()=>assert.fail('connection menu should go directly to the connection input'),
+        showInputBox:async options=>{fields.push(options);return values.shift();},
+        showInformationMessage(){},showErrorMessage:assert.fail,showWarningMessage:assert.fail}},
+      context:{subscriptions},getTool:()=>({toolHome:'/fixture',toolPath:'/tool'}),
+      processClient:{request:async (_tool,command,args,key,input)=>{calls.push({command,args,key,input});return value;}},
+      sourceTree:{refresh(){}},getWorkspaces:async()=>[workspace],getSelected:async()=>workspace,
+      refreshProjects:async()=>{},runTool:()=>assert.fail('settings do not pull source'),
+    });
+    try {
+      await legacy.action(workspace,'connection');
+      assert.match(fields[0].title,mode==='database'?/主数据数据库/:/SVN 仓库地址/);
+      assert.equal(fields[2].password,true);
+      assert(calls.every(call=>call.key===workspace.workspaceKey));
+      assert.equal(calls[0].input.action,'show');
+      const settings=calls[1].input.connection;
+      assert.equal(settings.username,'fixture-user');
+      assert.equal(settings.password,'fixture-private-value');
+      assert.equal(calls.length,2);
+      if(mode==='database') {
+        assert.equal(settings.database,'master');
+      } else {
+        assert.equal(settings.repositoryUrl,address);
+      }
+    } finally {for(const subscription of subscriptions)subscription.dispose();}
+  }
+});
+
+test('DATABASE and SVN scope pickers preserve the selected project and save before pulling', async () => {
+  const {configureSourceScope}=require('../src/project-source-settings');
+  for(const [mode,selected] of [['database','SYS'],['svn','systems/SYS']]) {
+    const workspace={workspaceKey:'ws-'+mode,displayName:'fixture',sourceMode:mode};
+    const calls=[];
+    const current={workspaceKey:workspace.workspaceKey,sourceMode:mode,revision:'rev',
+      options:[{id:selected,label:selected}],systemAliases:[],scopePaths:[]};
+    const vscode={window:{showQuickPick:async (rows,options)=>{
+      assert.equal(options.canPickMany,true);return rows;
+    },showInformationMessage:message=>calls.push(message)}};
+    await configureSourceScope({vscode,workspace,request:async input=>{
+      calls.push(input);return current;
+    },refreshProjects:async()=>calls.push('refresh')});
+    assert.deepEqual(calls.slice(0,3),[
+      {action:'scope-list'},{action:'scope-save',sourceMode:mode,revision:'rev',selected:[selected]},'refresh',
+    ]);
+  }
+});
+
+test('SVN scope picker shows one flat choice for a shared datasource and its subsystems',async()=>{
+  const {configureSourceScope}=require('../src/project-source-settings');
+  const workspace={workspaceKey:'ws-svn',displayName:'SVN fixture',sourceMode:'svn'};
+  const calls=[];
+  const choices=[
+    {id:'datasources/trade',label:'贸易系统',paths:['datasources/trade','systems/domestic','systems/global']},
+    {id:'public',label:'公共源码',paths:['public']},
+    {id:'skill',label:'开发建议',paths:['skill']},
+  ];
+  await configureSourceScope({workspace,vscode:{QuickPickItemKind:{Separator:-1},window:{
+    showQuickPick:async rows=>{
+      assert.deepEqual(rows.map(row=>row.label),['贸易系统','公共源码','开发建议']);
+      assert(rows.every(row=>!row.picked));
+      return [rows[0]];
+    },showInformationMessage(){},
+  }},request:async payload=>{
+    if(payload.action==='scope-save')calls.push([payload.selected,payload.grouped]);
+    return {workspaceKey:'ws-svn',sourceMode:'svn',revision:'v1',scopePaths:['.'],scopeConfigured:false,options:choices};
+  },refreshProjects:async()=>{}});
+  assert.deepEqual(calls,[[['datasources/trade'],true]]);
+});
+
+test('inline DATABASE and SVN logins use the configured backend and preserve the exact project identity', async()=>{
+  const {registerLegacyProjects}=require('../src/legacy-project');
+  class Emitter {constructor(){this.event=()=>({dispose(){}});}fire(){}dispose(){}}
+  for (const [mode,serverUrl] of [['database','mysql://db.example:3306/master'],['svn','https://svn.example/repos/project']]) {
+    const workspace={workspaceKey:'ws-'+mode,sourceMode:mode,configuration:{schemaVersion:3}};
+    const subscriptions=[],calls=[];
+    const legacy=registerLegacyProjects({
+      vscode:{EventEmitter:Emitter,workspace:{textDocuments:[]},window:{}},
+      context:{subscriptions},getTool:()=>({toolHome:'/fixture',toolPath:'/tool'}),
+      processClient:{request:async (_tool,command,args,key,input)=>{
+        calls.push({command,args,key,input});return {ok:true,workspaceKey:key,sourceMode:mode,revision:'checked'};
+      }},
+      sourceTree:{refresh(){}},getWorkspaces:async()=>[workspace],getSelected:async()=>workspace,
+      refreshProjects:async()=>calls.push('refresh'),runTool:()=>assert.fail('login must not start syncing'),
+    });
+    try {
+      await legacy.login(workspace,{serverUrl,userId:' fixture-user ',password:'fixture-secret'});
+      assert.deepEqual(calls.map(item=>item.input?.action || item),['show','login','refresh']);
+      assert.equal(calls[1].command,'workspace-source-settings');
+      assert.equal(calls[1].key,workspace.workspaceKey);
+      assert.equal(calls[1].input.revision,'checked');
+      assert.deepEqual(calls[1].input.connection,mode==='database'
+        ? {type:'mysql',host:'db.example',port:3306,database:'master',username:'fixture-user',password:'fixture-secret'}
+        : {repositoryUrl:serverUrl,username:'fixture-user',password:'fixture-secret'});
+    } finally {for(const subscription of subscriptions)subscription.dispose();}
+  }
+});

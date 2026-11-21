@@ -1,12 +1,13 @@
 // Private runtime cache: one binding per workspace, immutable snapshots per platform/build.
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { workspaceRoot } = require('../workspace-root');
 const crypto = require('node:crypto');
 const snapshot = require('./asset-snapshot');
+const {isWorkspaceKey} = require('../workspace-identity');
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 const ADAPTER = 'guthon-offline-v1';
-const validWorkspace = key => typeof key === 'string' && /^(products|projects)\.[A-Za-z0-9_-]+$/.test(key);
 const validBuild = key => typeof key === 'string' && /^[a-f0-9]{64}$/.test(key);
 
 class DesignerResources {
@@ -15,10 +16,10 @@ class DesignerResources {
     this.jobs = new Map(); this.failedChecks = new Map();
   }
   async location(workspaceKey) {
-    if (!validWorkspace(workspaceKey)) throw new Error('原版资源需要明确 workspaceKey');
+    if (!isWorkspaceKey(workspaceKey)) throw new Error('原版资源需要明确 workspaceKey');
     const tool = await this.getTool?.();
     if (!tool?.toolHome || !path.isAbsolute(tool.toolHome)) throw new Error('请先配置有效的本地数据目录');
-    const root = path.join(tool.toolHome, 'var', 'nexus', 'page-designer');
+    const root = path.join(workspaceRoot(tool.toolHome), 'nexus', 'page-designer');
     return {root, binding: path.join(root, 'workspaces', sha(workspaceKey) + '.json')};
   }
   async readBinding(workspaceKey) {

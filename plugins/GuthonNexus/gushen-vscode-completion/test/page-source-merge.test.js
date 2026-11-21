@@ -103,9 +103,9 @@ test('missing properties, inherited events and read-only snapshots cannot receiv
   assert.match(mergePageDraft(base, draft, inherited).blockedReason, /可编辑范围/);
 });
 
-test('workspace, path, namespace and checkout identity changes are rejected', () => {
+test('workspace and source path identity changes are rejected', () => {
   const base = snapshot(), draft = new PageDraft(base.model); draft.text('sql', 'pending');
-  for (const key of ['workspaceKey', 'sourceNamespace', 'sourceId', 'workingCopyId', 'sourcePath']) {
+  for (const key of ['workspaceKey', 'sourcePath']) {
     const fresh = snapshot(source(), 'new'); fresh[key] = 'other';
     assert.match(mergePageDraft(base, draft, fresh).blockedReason, /身份/);
   }

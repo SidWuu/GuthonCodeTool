@@ -13,17 +13,17 @@ const sources = [
   ['sql', 'sql.md'],
 ];
 
-// API 文档只来自显式目录或 toolHome（<toolHome>/var/docs/谷神方言API），
+// API 文档只来自显式目录或 toolHome（<toolHome>/var/nexus/api-reference/谷神方言API），
 // 不再从插件目录向上数层去找源码仓库里的 var。
 function resolveApiDir(explicitDir, env = process.env) {
   if (explicitDir) return path.resolve(explicitDir);
   const toolHome = String(env.GUTHON_TOOL_HOME || env.GUTHON_HOME || '').trim();
   if (!toolHome) {
     throw new Error(
-      '缺少 API 文档目录：请传入 <api-docs-dir>，或设置 GUTHON_TOOL_HOME / GUTHON_HOME 以使用 <toolHome>/var/docs/谷神方言API。'
+      '缺少 API 文档目录：请传入 <api-docs-dir>，或设置 GUTHON_TOOL_HOME / GUTHON_HOME 以使用 <toolHome>/var/nexus/api-reference/谷神方言API。'
     );
   }
-  return path.join(path.resolve(toolHome), 'var', 'docs', '谷神方言API');
+  return path.join(path.resolve(toolHome), 'var', 'nexus', 'api-reference', '谷神方言API');
 }
 
 function stripCell(value) {
@@ -110,11 +110,11 @@ function selfTest() {
   assert.throws(() => resolveApiDir('', {}), /缺少 API 文档目录/);
   assert.equal(
     resolveApiDir('', { GUTHON_TOOL_HOME: '/tmp/guthon-tool-home' }),
-    path.join('/tmp/guthon-tool-home', 'var', 'docs', '谷神方言API')
+    path.join('/tmp/guthon-tool-home', 'var', 'nexus', 'api-reference', '谷神方言API')
   );
   assert.equal(
     resolveApiDir('', { GUTHON_HOME: '/tmp/guthon-home' }),
-    path.join('/tmp/guthon-home', 'var', 'docs', '谷神方言API')
+    path.join('/tmp/guthon-home', 'var', 'nexus', 'api-reference', '谷神方言API')
   );
   assert.equal(resolveApiDir('/tmp/api-docs', {}), path.resolve('/tmp/api-docs'));
 
