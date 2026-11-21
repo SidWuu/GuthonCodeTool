@@ -107,21 +107,16 @@ def _lifecycle(command):
             raise SystemExit("svn scope sync requires manifest-working-copies")
         from providers.svn.nexus import bootstrap as nexus_bootstrap
         from providers.svn.nexus import workspace as nexus_workspace
-        from providers.svn.nexus.manifest import load_authorized_scope
 
         with checkout.operation_lock(workspace, "initialize-and-index", blocking=True):
             manifest_path = workspace["svn"].get("scopeManifestPath")
-            had_working_copies = False
             _svn_progress(f"{workspace['displayName']}｜授权范围｜检查现有 working copy")
-            if manifest_path and manifest_path.is_file():
-                old_scope = load_authorized_scope(workspace)
-                had_working_copies = any((entry.root / ".svn").is_dir() for entry in old_scope.entries)
-                if had_working_copies:
-                    current = nexus_workspace.status(workspace, on_progress=_svn_progress)
-                    if not current["status"]["clean"] and not parsed.merge_local:
-                        raise SystemExit(
-                            "SVN scope sync is blocked by local changes; review them first or explicitly allow merge-local"
-                        )
+            refresh_existing_scope = (
+                manifest_path is not None and manifest_path.is_file()
+                and nexus_workspace.preflight_scope_sync(
+                    workspace, merge_local=parsed.merge_local, on_progress=_svn_progress,
+                )
+            )
             _svn_progress(f"{workspace['displayName']}｜授权范围｜读取可编辑范围配置（无配置时导入签出脚本）")
             scope_import = nexus_bootstrap.import_scope(
                 workspace,
@@ -137,7 +132,7 @@ def _lifecycle(command):
                     merge_local=parsed.merge_local,
                     on_progress=_svn_progress,
                 )
-                if had_working_copies
+                if refresh_existing_scope
                 else None
             )
             initialized_scope = initialized.get("scope") or {}
@@ -146,7 +141,7 @@ def _lifecycle(command):
             result = {
                 "ok": True,
                 "action": (
-                    f"updated-from-{source_label}" if had_working_copies
+                    f"updated-from-{source_label}" if refresh_existing_scope
                     else f"checked-out-from-{source_label}"
                 ),
                 "scopeImport": scope_import,
@@ -163,7 +158,7 @@ def _lifecycle(command):
             }
             _svn_progress(
                 f"{workspace['displayName']}｜完成｜"
-                f"{'更新' if had_working_copies else '检出'} {result['workingCopies']} 个 working copy · "
+                f"{'更新' if refresh_existing_scope else '检出'} {result['workingCopies']} 个 working copy · "
                 f"跳过 {len(result['skipped'])} 个 · "
                 f"索引对象 {result['reindex'].get('changed', 0)}"
             )
@@ -174,8 +169,10 @@ def _lifecycle(command):
             from providers.svn.nexus import workspace as nexus_workspace
 
             with checkout.operation_lock(workspace, "initialize-and-index", blocking=True):
-                result = apply_saved_scope(workspace, on_progress=_svn_progress) or nexus_workspace.initialize(workspace)
-                result["reindex"] = _reindex_svn(gusen_hub, config, workspace)
+                result = apply_saved_scope(workspace, on_progress=_svn_progress) or nexus_workspace.initialize(
+                    workspace, on_progress=_svn_progress,
+                )
+                result["reindex"] = _reindex_svn(gusen_hub, config, workspace, on_progress=_svn_progress)
                 (workspace["contextDir"] / "svn-scope-reindex.pending").unlink(missing_ok=True)
         else:
             result = checkout.initialize(workspace, gusen_hub.CONFIG_DIR, bootstrap)

@@ -50,6 +50,18 @@ def _progress(callback: ProgressCallback, message: str) -> None:
         callback(message)
 
 
+def _checkout_interrupted(change: dict) -> bool:
+    return change.get("item") == "incomplete" or bool(change.get("wcLocked"))
+
+
+def _has_source_change(change: dict) -> bool:
+    return (
+        change.get("item") not in {None, "", "none", "normal", "incomplete"}
+        or change.get("properties") not in {None, "", "none", "normal"}
+        or any(change.get(flag) for flag in ("treeConflicted", "switched", "copied"))
+    )
+
+
 def state_path(workspace: dict) -> Path:
     return workspace["contextDir"] / "checkout-scope.json"
 
@@ -199,6 +211,25 @@ def _status(
     return state
 
 
+def preflight_scope_sync(workspace: dict, *, merge_local: bool, on_progress: ProgressCallback) -> bool:
+    """Check present copies before scope import and decide whether a full update is needed."""
+    scope = load_authorized_scope(workspace)
+    skipped_ids = {item["id"] for item in _matching_skipped(workspace, scope)}
+    expected = {entry.id for entry in scope.entries} - skipped_ids
+    existing = {entry.id for entry in scope.entries
+                if entry.id in expected and (entry.root / ".svn").is_dir()}
+    if not existing:
+        return False
+    require_capability(workspace, "status")
+    current = _status(workspace, scope, on_progress=on_progress, working_copy_ids=existing)
+    changes = [change for record in current["workingCopies"] for change in record["changes"]]
+    if not merge_local and any(_has_source_change(change) for change in changes):
+        raise SystemExit(
+            "SVN scope sync is blocked by local changes; review them first or explicitly allow merge-local"
+        )
+    return existing == expected and not any(_checkout_interrupted(change) for change in changes)
+
+
 def _merge_refreshed_state(
     workspace: dict,
     scope: AuthorizedScope,
@@ -261,6 +292,21 @@ def initialize(workspace: dict, *, on_progress: ProgressCallback = None) -> dict
                 continue
             _progress(on_progress, f"[{index}/{total}] {label}｜初始化｜检查本地状态")
             current = svn_status(entry.root)
+            changes = current["changes"]
+            if any(_checkout_interrupted(change) for change in changes):
+                if any(change.get("wcLocked") for change in changes):
+                    _progress(on_progress, f"[{index}/{total}] {label}｜初始化｜清理 SVN 工作副本锁")
+                    run_svn(["cleanup", "--", str(entry.root)])
+                    current = svn_status(entry.root)
+                if any(_has_source_change(change) for change in current["changes"]):
+                    raise SystemExit(f"SVN checkout recovery is blocked by local changes in {entry.id}")
+                if any(change.get("item") == "incomplete" for change in changes + current["changes"]):
+                    _progress(on_progress, f"[{index}/{total}] {label}｜初始化｜续签 SVN 工作副本")
+                    run_remote_svn(["update", str(entry.root)], workspace["svn"])
+                    info = _validate_existing(entry)
+                    current = svn_status(entry.root)
+                if any(_checkout_interrupted(change) for change in current["changes"]):
+                    raise SystemExit(f"SVN checkout remains incomplete or locked for scope entry {entry.id}: {entry.root}")
             records.append(_entry_record(entry, info, current))
             _progress(
                 on_progress,
