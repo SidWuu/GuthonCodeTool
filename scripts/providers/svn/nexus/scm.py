@@ -305,6 +305,11 @@ def status(
         label = scope_entry_label(workspace, entry)
         _progress(on_progress, f"[{index}/{total}] {label}｜SCM 状态｜{phase}")
         current = svn_scm_status_lightweight(entry.root, remote=remote, settings=workspace["svn"])
+        local_changes = current.get("changes") or []
+        needs_cleanup = any(
+            change.get("wcLocked") or change.get("item") == "incomplete"
+            for change in local_changes
+        )
         working_copies.append(
             {
                 "id": entry.id,
@@ -313,13 +318,22 @@ def status(
                 "revision": current.get("revision") or "",
                 "clean": current["clean"],
                 "outOfDate": current.get("outOfDate", False),
+                "needsCleanup": needs_cleanup,
             }
         )
-        local_changes = current.get("changes") or []
         conflict_artifacts = _text_conflict_artifacts(local_changes)
         visible_local_count = 0
         for change in local_changes:
             if change.get("path") in conflict_artifacts:
+                continue
+            # SVN repeats an administrative lock on every descendant directory.
+            # Keep those records in checkout status for recovery, not as edits.
+            if (
+                change.get("wcLocked")
+                and change.get("item") in {"", "normal", "none"}
+                and change.get("properties") in {"", "normal", "none"}
+                and not any(change.get(key) for key in ("treeConflicted", "switched", "copied"))
+            ):
                 continue
             visible_local_count += 1
             safe, logical_path, record = _safe_session_change(change, entry, session)
@@ -337,6 +351,7 @@ def status(
             untracked = change.get("item") == "unversioned"
             selectable = bool(
                 source_path_writable(entry, change["path"])
+                and not needs_cleanup
                 and change.get("item") == "modified"
                 and change.get("properties") in {"", "normal", "none"}
                 and not any(change.get(key) for key in ("treeConflicted", "switched", "copied", "wcLocked"))
@@ -401,6 +416,33 @@ def status(
         },
         "platformSave": _platform_state(workspace),
     }
+
+
+def cleanup(workspace: dict, *, working_copy_ids: list[str], on_progress: ProgressCallback = None) -> dict:
+    """Clear administrative locks in explicitly selected authorized working copies."""
+    require_capability(workspace, "refresh")
+    scope = load_authorized_scope(workspace)
+    selected = set(working_copy_ids)
+    unknown = selected - {entry.id for entry in scope.entries}
+    if not selected or unknown:
+        raise SystemExit("SVN cleanup requires explicit authorized working copy ids")
+    cleaned = []
+    with operation_lock(workspace, "manifest-cleanup", blocking=True):
+        for entry in scope.entries:
+            if entry.id not in selected:
+                continue
+            current = svn_scm_status_lightweight(entry.root)
+            if not any(change.get("wcLocked") or change.get("item") == "incomplete"
+                       for change in current["changes"]):
+                continue
+            _progress(on_progress, f"{scope_entry_label(workspace, entry)}｜清理 SVN working copy 锁")
+            run_svn(["cleanup", "--", str(entry.root)])
+            after = svn_scm_status_lightweight(entry.root)
+            if any(change.get("wcLocked") or change.get("item") == "incomplete"
+                   for change in after["changes"]):
+                raise SystemExit(f"SVN working copy still requires cleanup: {entry.id}")
+            cleaned.append(entry.id)
+    return {"ok": True, "workspaceKey": workspace["workspaceKey"], "cleaned": cleaned}
 
 
 def diff(workspace: dict, *, logical_path: str, remote=False) -> dict:

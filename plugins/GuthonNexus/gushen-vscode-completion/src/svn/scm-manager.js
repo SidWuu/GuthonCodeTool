@@ -212,12 +212,12 @@ class SvnScmManager {
             title: '打开 SVN 三方合并',
             arguments: [resourceUri],
           }
-          : {
+          : change.diffable === false ? undefined : {
             command: 'gushenCompletion.showSvnDiff',
             title: '查看 SVN 差异',
             arguments: [record.workspace.workspaceKey, change.path, state === 'REMOTE'],
           },
-        contextValue: `guthonSvn.${state}${
+        contextValue: change.diffable === false ? 'guthonSvn.NONFILE' : `guthonSvn.${state}${
           textConflict
             ? '.text'
             : canOpenNexus ? '.nexus' : ''
@@ -236,6 +236,32 @@ class SvnScmManager {
       for (const change of value.groups?.[state] || []) addChange(change, state);
     }
     for (const change of remoteChanges) addChange(change, 'REMOTE');
+    for (const workingCopy of value.workingCopies || []) {
+      if (!workingCopy.needsCleanup) continue;
+      const group = this._groupForChange(record, { workingCopyId: workingCopy.id });
+      if (!group) continue;
+      resources.get(group).push({
+        resourceUri: this.vscode.Uri.from({
+          scheme: 'guthon-svn-change',
+          authority: record.workspace.workspaceKey,
+          path: `/${workingCopy.id} · SVN 工作副本锁`,
+          query: 'placeholder=locked',
+        }),
+        contextValue: 'guthonSvn.LOCKED',
+        command: {
+          command: 'gushenCompletion.updateAllSvnChanges',
+          title: '清理 SVN 工作副本锁并检查更新',
+          arguments: [{
+            guthonWorkspaceKey: record.workspace.workspaceKey,
+            guthonWorkingCopyIds: [workingCopy.id],
+          }],
+        },
+        decorations: {
+          iconPath: new this.vscode.ThemeIcon('lock'),
+          tooltip: `${workingCopy.id} 的 SVN 管理锁需要清理。点击后清理锁并检查远程变更；保留本地修改。`,
+        },
+      });
+    }
     if (![...resources.values()].some((items) => items.length)) {
       const firstGroup = record.groups.values().next().value;
       if (firstGroup) {

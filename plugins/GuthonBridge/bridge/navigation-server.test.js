@@ -61,6 +61,22 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
     await post('/navigationResult',{...payload,requestId:lifecycle.requestId,ok:true,data:{state:'SUCCEEDED',page:{pageId:'PG-NEW'}}});
     const lifecycleResult = await (await fetch(base + `/navigationResult?workspaceKey=products.demo&requestId=${lifecycle.requestId}`,{headers})).json();
     assert.equal(lifecycleResult.data.page.pageId,'PG-NEW');
+    const metadataPayload={contextId:published.context.contextId,workspaceKey:payload.workspaceKey,
+      idempotencyKey:'inspect-field-guid-001',target:{action:'inspect-guid',dataSourceId:'DS-1',tableId:'EXAMPLE',fieldId:'ROW_ID'}};
+    const nativeAccepted=await (await post('/nativeMetadata',metadataPayload)).json();
+    assert.equal(nativeAccepted.state,'PENDING',JSON.stringify(nativeAccepted));
+    const nativeFrame=new TextDecoder().decode((await reader.read()).value);
+    assert.match(nativeFrame,/event: native-metadata/);
+    const replay=await (await post('/nativeMetadata',metadataPayload)).json();
+    assert.equal(replay.requestId,nativeAccepted.requestId);assert.equal(replay.replayed,false);
+    await post('/navigationResult',{...payload,requestId:nativeAccepted.requestId,ok:true,
+      data:{state:'SUCCEEDED',field:{fieldId:'ROW_ID',isIncrement:0},snapshot:'native-snapshot',platformApplied:false,projectionCount:2,guidFlags:[2,2],runtimePath:'/runtime/index.htm',scripts:['/runtime/app.js'],privateField:'DROP'}});
+    const nativeResult=await (await fetch(base+'/nativeMetadataResult?workspaceKey=products.demo&idempotencyKey='+metadataPayload.idempotencyKey,{headers})).json();
+    assert.equal(nativeResult.data.state,'SUCCEEDED');assert.equal(nativeResult.data.field.isIncrement,0);
+    assert.equal(nativeResult.data.projectionCount,2);assert.deepEqual(nativeResult.data.guidFlags,[2,2]);
+    assert.deepEqual(nativeResult.data.scripts,['/runtime/app.js']);assert.equal(nativeResult.data.privateField,undefined);
+    assert.equal((await post('/nativeMetadata',{...metadataPayload,idempotencyKey:'wrong-datasource-001',
+      target:{...metadataPayload.target,dataSourceId:'DS-2'}})).status,400);
     const readonly = await (await post('/pageContext',{...payload,tabId:2,metadata:{dataSourceId:'DS-2'}})).json();
     assert.equal((await post('/pageLifecycle',{contextId:readonly.context.contextId,workspaceKey:payload.workspaceKey,target:{action:'delete',pageId:'PG-1'}})).status,400);
     await post('/removePageContext',{clientId:payload.clientId,tabId:2});

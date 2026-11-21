@@ -6,7 +6,21 @@ async function updateRemoteChanges({
   const scope = { onOutput, ...(workingCopyIds.length ? { workingCopyIds } : {}) };
   log(`开始${sourcePath ? `更新指定文件 · ${sourcePath}` : '更新远程变更'}`);
   log('检查 SVN 远程变更和本地修改');
-  const current = await scm.refreshRemote(workspace, scope);
+  let current = await scm.refreshRemote(workspace, scope);
+  const pathWorkingCopies = sourcePath
+    ? new Set([...(current.changes || []), ...(current.remoteChanges || [])]
+      .filter((change) => change.path === sourcePath).map((change) => change.workingCopyId))
+    : undefined;
+  const lockedWorkingCopies = (current.workingCopies || []).filter((copy) => (
+    copy.needsCleanup
+    && (!workingCopyIds.length || workingCopyIds.includes(copy.id))
+    && (!pathWorkingCopies || pathWorkingCopies.has(copy.id))
+  )).map((copy) => copy.id);
+  if (lockedWorkingCopies.length) {
+    log(`清理 ${lockedWorkingCopies.length} 个 SVN 工作副本管理锁，保留本地修改`);
+    await backend.cleanup(workspaceKey, lockedWorkingCopies, { onOutput });
+    current = await scm.refreshRemote(workspace, scope);
+  }
   const selectedRemote = (current.remoteChanges || []).filter((change) => (
     (!sourcePath || change.path === sourcePath)
     && (!workingCopyIds.length || workingCopyIds.includes(change.workingCopyId))

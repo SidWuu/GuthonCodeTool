@@ -107,3 +107,19 @@ test('popup health uses authenticated status and reports non-JSON proxy response
   assert.equal(result.ok,false);
   assert.match(result.message,/无效响应.*502/);
 });
+
+test('native metadata loads only its fixed extension adapter after authenticating the current context',async()=>{
+  const f=fixture(),tab={id:1,url:'https://gusen.steel56.com.cn/guthon/'};const injected=[];
+  f.context.chrome.tabs.get=async()=>tab;
+  f.context.chrome.tabs.sendMessage=async()=>({ok:true,data:{dataSourceId:'DS-1',systemId:'SYS-1'}});
+  f.context.chrome.scripting={executeScript:async options=>{injected.push(options);return options.files?[]:[{result:{state:'SUCCEEDED'}}];}};
+  await f.send({type:'publish-page-context',payload:{workspaceKey:'products.demo',metadata:{dataSourceId:'DS-1'}}},{id:f.id,tab});
+  const command={requestId:'metadata-1',clientId:'a'.repeat(32),contextId:`${'a'.repeat(32)}:1`,tabId:1,
+    workspaceKey:'products.demo',pageOrigin:'https://gusen.steel56.com.cn',target:{type:'native-metadata',action:'inspect-runtime'}};
+  await f.context.handleBridgeEvent('native-metadata',command);assert.equal(injected.length,0);
+  f.context.fetch=async(url,options)=>{f.calls.push({url,options});return {ok:true,json:async()=>({ok:true,workspaceKey:'products.demo',workspace:{capabilities:{'svn.edit':true}}})};};
+  await f.context.handleBridgeEvent('native-metadata',command);
+  assert.equal(injected.length,2);assert.deepEqual(Array.from(injected[0].files),['native-metadata.js']);
+  assert.equal(injected[1].args[0].expectedOrigin,command.pageOrigin);
+  assert.deepEqual(Array.from(injected[1].args[0].systemIds),['SYS-1']);
+});

@@ -403,6 +403,12 @@
       "kind": "write",
       "timeoutMs": 120000
     },
+    "cleanup": {
+      "summary": "清理明确指定 working copy 的 SVN 管理锁，保留本地修改",
+      "options": "--working-copy <id> [--working-copy <id>]...",
+      "kind": "write",
+      "timeoutMs": 120000
+    },
     "scm-status": {
       "summary": "报告 SCM 变更集（含可选远端核对）",
       "options": "[--remote] [--working-copy <id>]...",

@@ -1,4 +1,4 @@
-importScripts("host-settings.js", "host-config.js", "nexus-locator.js", "task-history.js", "event-client.js", "component-client.js", "page-lifecycle.js");
+importScripts("host-settings.js", "host-config.js", "nexus-locator.js", "task-history.js", "event-client.js", "component-client.js", "page-lifecycle.js", "native-metadata.js");
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.tabs.query({}, (tabs) => {
@@ -82,7 +82,7 @@ chrome.alarms?.onAlarm.addListener(alarm => { if (alarm.name === 'guthon-compone
 chrome.runtime.onStartup?.addListener(() => { void reportComponent(); });
 void reportComponent();
 async function handleBridgeEvent(event, command) {
-  if (!['navigate', 'page-lifecycle'].includes(event)) return;
+  if (!['navigate', 'page-lifecycle','native-metadata'].includes(event)) return;
   const identity = await clientId();
   if (command.clientId !== identity || !Number.isInteger(command.tabId)
       || command.contextId !== `${identity}:${command.tabId}` || !publishedTabs.has(command.tabId)) return;
@@ -94,6 +94,18 @@ async function handleBridgeEvent(event, command) {
     if (!inspected?.ok) throw new Error('无法读取当前平台身份，请刷新页签');
     const route = await bridgeRequest('/routeWorkspace', {...inspected.data, pageOrigin: command.pageOrigin, workspaceKey: command.workspaceKey});
     if (!route.ok || route.workspaceKey !== command.workspaceKey) throw new Error('当前平台身份不属于目标工作区');
+    if (event === 'native-metadata') {
+      if(command.target?.type !== 'native-metadata' || route.workspace?.capabilities?.['svn.edit'] !== true) throw new Error('原生元数据命令未获工作区授权');
+      await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',files:['native-metadata.js']});
+      const results=await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',func:payload => runNativeMetadata(payload),
+        args:[{...command.target,expectedOrigin:command.pageOrigin,
+          dataSourceIds:[inspected.data.dataSourceId,...(inspected.data.dataSourceIds || [])].filter(Boolean),
+          systemIds:[inspected.data.systemId,...(inspected.data.systemIds || [])].filter(Boolean)}]});
+      if(!results?.[0]?.result)throw new Error('Native metadata receipt unavailable');
+      await bridgeRequest('/navigationResult',{requestId:command.requestId,clientId:identity,tabId:command.tabId,
+        workspaceKey:command.workspaceKey,ok:true,data:results[0].result});
+      return;
+    }
     if (event === 'page-lifecycle') {
       if (command.target?.type !== 'page-lifecycle') throw new Error('PAGE 生命周期命令类型不匹配');
       if (command.target.action !== 'inspect' && route.workspace?.capabilities?.['svn.edit'] !== true) throw new Error('当前工作区未授权 PAGE 平台写入');

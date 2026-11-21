@@ -94,6 +94,12 @@ class SvnBackendClient {
     return this.run(workspaceKey, args, undefined, options);
   }
 
+  cleanup(workspaceKey, workingCopyIds, options = {}) {
+    return this.run(workspaceKey, [
+      'cleanup', ...[...new Set(workingCopyIds)].flatMap((id) => ['--working-copy', id]),
+    ], undefined, options);
+  }
+
   refresh(workspaceKey, {
     sourcePath = '',
     workingCopyIds = [],

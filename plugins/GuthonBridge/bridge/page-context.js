@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const {metadataTarget} = require('./native-metadata');
 
 const WORKSPACE = /^(products|projects)\.[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 const CLIENT = /^[a-zA-Z0-9-]{16,80}$/;
@@ -99,14 +100,15 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
   }
   function dispatch(payload, lifecycle = false) {
     const context = get(payload.contextId, payload.workspaceKey);
-    const target = lifecycle ? lifecycleTarget(payload.target) : navigationTarget(payload.target);
+    const metadata = lifecycle === 'metadata';
+    const target = metadata ? metadataTarget(payload.target) : lifecycle ? lifecycleTarget(payload.target) : navigationTarget(payload.target);
     if (![...subscribers].some(s => s.clientId === context.clientId && !s.res.destroyed)) throw new Error('浏览器事件连接未就绪，请刷新平台页签');
     if (commands.size >= 64) throw new Error('浏览器定位请求过多，请等待完成');
     const item = {requestId: crypto.randomUUID(), contextId: context.contextId, clientId: context.clientId,
       tabId: context.tabId, workspaceKey: context.workspaceKey, pageOrigin: context.pageOrigin,
       target, state: 'PENDING', expiresAt: now() + (lifecycle ? 120000 : commandTtlMs)};
     commands.set(item.requestId, item);
-    emit(lifecycle ? 'page-lifecycle' : 'navigate', item, s => s.clientId === context.clientId);
+    emit(metadata ? 'native-metadata' : lifecycle ? 'page-lifecycle' : 'navigate', item, s => s.clientId === context.clientId);
     return {ok: true, requestId: item.requestId, state: item.state};
   }
   function result(payload) {
@@ -114,7 +116,7 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     const item = commands.get(payload.requestId);
     if (!item || item.workspaceKey !== payload.workspaceKey) throw new Error('定位请求已过期或不属于目标工作区；禁止自动重放');
     return {ok: true, requestId: item.requestId, state: item.state, message: item.message || '',
-      ...(item.target.type === 'page-lifecycle' ? {data: item.data || null} : {})};
+      ...(['page-lifecycle','native-metadata'].includes(item.target.type) ? {data: item.data || null} : {})};
   }
   function complete(payload) {
     expire();
@@ -125,6 +127,10 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     item.message = text(payload.message, 512);
     if (item.target.type === 'page-lifecycle' && payload.data && JSON.stringify(payload.data).length <= 32000) {
       item.data = Object.fromEntries(['state','action','page','sourceVersion','modules','systemIds','message','platformApplied']
+        .filter(key => payload.data[key] !== undefined).map(key => [key,payload.data[key]]));
+    }
+    if (item.target.type === 'native-metadata' && payload.data && JSON.stringify(payload.data).length <= 32000) {
+      item.data = Object.fromEntries(['state','action','field','snapshot','before','after','changed','message','platformApplied','pageId','sourceVersion','projectionCount','guidFlags','autoCompileRequested','savedVersion','runtimePath','scripts']
         .filter(key => payload.data[key] !== undefined).map(key => [key,payload.data[key]]));
     }
     emit('navigation-result', result(item), s => s.workspaceKey === item.workspaceKey);
@@ -143,7 +149,7 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     res.on('close', () => {clearInterval(heartbeat); subscribers.delete(subscriber);});
   }
   function dispose() {for (const s of subscribers) s.res.end(); subscribers.clear();}
-  return {publish, list, remove, get, navigate: payload => dispatch(payload), lifecycle: payload => dispatch(payload, true), result, complete, subscribe, expire, dispose};
+  return {publish, list, remove, get, navigate: payload => dispatch(payload), lifecycle: payload => dispatch(payload, true), metadata: payload => dispatch(payload,'metadata'), result, complete, subscribe, expire, dispose};
 }
 
 module.exports = {createPageContexts, snapshot, navigationTarget};

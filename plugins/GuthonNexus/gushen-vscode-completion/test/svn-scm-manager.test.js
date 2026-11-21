@@ -55,6 +55,25 @@ function workspace() {
   };
 }
 
+test('administrative locks have one recovery entry and directories cannot open file diffs', () => {
+  const manager = new SvnScmManager({ vscode: fakeVscode(), backend: {} });
+  const record = manager.ensure(workspace());
+  manager._applyStatus(record, {
+    changes: [{ path: 'datasources/0008/procedures', diffable: false }],
+    groups: { EXTERNAL_MODIFIED: [{ path: 'datasources/0008/procedures', item: 'normal', diffable: false, workingCopyId: 'datasources-0008' }] },
+    workingCopies: [{ id: 'datasources-0008', needsCleanup: true }],
+  });
+  const resources = record.groups.get('subsystem-flat-0008').resourceStates;
+  assert.equal(resources[0].command, undefined);
+  assert.equal(resources[0].contextValue, 'guthonSvn.NONFILE');
+  const lock = resources.find((item) => item.contextValue === 'guthonSvn.LOCKED');
+  assert.equal(lock.decorations.iconPath.id, 'lock');
+  assert.deepEqual(lock.command.arguments, [{ guthonWorkspaceKey: 'projects.demo', guthonWorkingCopyIds: ['datasources-0008'] }]);
+  assert.doesNotThrow(() => JSON.stringify(lock.command.arguments));
+  assert.equal(record.sourceControl.count, 1);
+  manager.dispose();
+});
+
 function inlineCommands(contextValue) {
   const manifest = require('../package.json');
   return manifest.contributes.menus['scm/resourceState/context'].filter((item) => {

@@ -8,7 +8,7 @@ function harness() {
   const calls = [];
   const state = {
     remoteChanges: [first, second], changes: [], shown: [], confirmation: undefined,
-    saved: true, localAfterSave: [],
+    saved: true, localAfterSave: [], workingCopies: [],
   };
   const deps = {
     workspace: { workspaceKey: 'products.demo' },
@@ -32,7 +32,7 @@ function harness() {
       async refreshRemote(workspace, options) {
         calls.push(['remote', workspace.workspaceKey, options]);
         state.shown = [...state.remoteChanges];
-        return { remoteChanges: state.remoteChanges, changes: state.changes };
+        return { remoteChanges: state.remoteChanges, changes: state.changes, workingCopies: state.workingCopies };
       },
       async refresh() {
         calls.push('local');
@@ -40,6 +40,10 @@ function harness() {
       },
     },
     backend: {
+      async cleanup(workspaceKey, ids) {
+        calls.push(['cleanup', workspaceKey, ids]);
+        state.workingCopies = state.workingCopies.filter((copy) => !ids.includes(copy.id));
+      },
       async refresh(workspaceKey, options) {
         calls.push(['update', workspaceKey, options]);
         state.remoteChanges = [];
@@ -113,6 +117,29 @@ test('no remote changes updates the display without asking to save or confirm', 
   assert.deepEqual(calls.map((call) => Array.isArray(call) ? call[0] : call), [
     'remote', 'workbench.view.scm', 'notice',
   ]);
+});
+
+test('no remote changes still cleans only the selected locked working copy and preserves edits', async () => {
+  const { deps, state, calls, first } = harness();
+  state.remoteChanges = [];
+  state.changes = [first];
+  state.workingCopies = [{ id: 'system-1', needsCleanup: true }, { id: 'datasource-1', needsCleanup: true }];
+  deps.workingCopyIds = ['system-1'];
+  await updateRemoteChanges(deps);
+  assert.deepEqual(calls.find((call) => call[0] === 'cleanup'), ['cleanup', 'products.demo', ['system-1']]);
+  assert.deepEqual(state.changes, [first]);
+  assert.equal(calls.includes('save'), false);
+  assert.equal(calls.some((call) => call[0] === 'update'), false);
+  assert.deepEqual(state.workingCopies, [{ id: 'datasource-1', needsCleanup: true }]);
+});
+
+test('failed cleanup stops before updating or saving documents', async () => {
+  const { deps, state, calls } = harness();
+  state.workingCopies = [{ id: 'system-1', needsCleanup: true }];
+  deps.backend.cleanup = async () => { throw new Error('SVN cleanup failed'); };
+  await assert.rejects(updateRemoteChanges(deps), /SVN cleanup failed/);
+  assert.equal(calls.includes('save'), false);
+  assert.equal(calls.some((call) => call[0] === 'update'), false);
 });
 
 test('cancelling document save after confirmation leaves remote changes available', async () => {

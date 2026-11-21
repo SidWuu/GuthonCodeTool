@@ -1350,8 +1350,12 @@
       if (!pageCode) {
         throw new Error("当前模块开发页面没有识别到页面编码");
       }
+      const systemIds = [...new Set(getAllVueInstances().map(vm => vm?.$store?.state?.modeDev?.systemId)
+        .filter(value => typeof value === 'string' && /^SYS-[A-Za-z0-9-]+$/.test(value)))];
       return {
         mode: "page-source",
+        systemId: systemIds.length === 1 ? systemIds[0] : "",
+        systemIds,
         dataSourceId: getDataSourceId(),
         pageId: pageCode,
         procedureId: pageCode,

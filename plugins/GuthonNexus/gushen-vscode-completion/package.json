@@ -347,9 +347,9 @@
         { "command": "gushenCompletion.openSvnConflictMerge", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.CONFLICT.text", "group": "inline@1" },
         { "command": "gushenCompletion.markSvnConflictResolved", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.CONFLICT.text", "group": "inline@2" },
         { "command": "gushenCompletion.updateSingleSvnChange", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.REMOTE", "group": "inline@1" },
-        { "command": "gushenCompletion.showSvnHistory", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState != guthonSvn.REMOTE", "group": "navigation@1" },
+        { "command": "gushenCompletion.showSvnHistory", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState =~ /^guthonSvn\\.(LOCAL_MODIFIED|EXTERNAL_MODIFIED|CONFLICT|UNTRACKED)(\\.|$)/", "group": "navigation@1" },
         { "command": "gushenCompletion.showSvnRawDiff", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState =~ /^guthonSvn\\.(LOCAL_MODIFIED|EXTERNAL_MODIFIED)\\.selectable$/", "group": "inline@1" },
-        { "command": "gushenCompletion.showSvnRawDiff", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState != guthonSvn.REMOTE", "group": "navigation@2" }
+        { "command": "gushenCompletion.showSvnRawDiff", "when": "scmProvider =~ /^guthon-svn-/ && scmResourceState =~ /^guthonSvn\\.(LOCAL_MODIFIED|EXTERNAL_MODIFIED|CONFLICT|UNTRACKED)(\\.|$)/", "group": "navigation@2" }
       ]
     }
   },

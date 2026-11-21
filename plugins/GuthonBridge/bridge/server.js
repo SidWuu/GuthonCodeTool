@@ -6,6 +6,7 @@ const path = require("path");
 const crypto = require("node:crypto");
 const {createPageContexts, snapshot} = require('./page-context');
 const pageContexts = createPageContexts();
+const {createMetadataJournal,metadataTarget} = require('./native-metadata');
 const { createBrowserUpdates } = require('./browser-updates');
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -20,6 +21,7 @@ if (!HUB_TOOL_HOME || !path.isAbsolute(HUB_TOOL_HOME)) {
   throw new Error("GUTHON_TOOL_HOME 必须是显式本地数据目录绝对路径");
 }
 const BRIDGE_STATE_DIR = path.join(HUB_TOOL_HOME, "var", "nexus", "bridge");
+const metadataJournal = createMetadataJournal(path.join(BRIDGE_STATE_DIR,'native-metadata'));
 const TOKEN_PATH = path.join(BRIDGE_STATE_DIR, "token");
 if (process.env.GUTHON_BRIDGE_EXPORT_ROOT && !path.isAbsolute(process.env.GUTHON_BRIDGE_EXPORT_ROOT)) throw new Error("导出目录配置必须是绝对路径");
 const configuredExportRoot = path.resolve(process.env.GUTHON_BRIDGE_EXPORT_ROOT || path.join(BRIDGE_STATE_DIR, "exports"));
@@ -42,7 +44,7 @@ const bridgeCode = fs.readFileSync(__filename,"utf8")
   .replace(/^\/\/ GENERATED FILE[^\n]*\n\/\/ Source:[^\n]*\n/,"")
   .replace(/^const TOOL_CLIENT_MODULE = .*;$/m, 'const TOOL_CLIENT_MODULE = "tool-process-client";');
 const toolClientFile = require.resolve(TOOL_CLIENT_MODULE);
-const libraryHashes = [require.resolve('./page-context'), require.resolve('./browser-updates'), toolClientFile, path.join(path.dirname(toolClientFile), 'workspace-scheduler.js'),
+const libraryHashes = [require.resolve('./page-context'), require.resolve('./browser-updates'), require.resolve('./native-metadata'), require.resolve('./native-step-registry'), toolClientFile, path.join(path.dirname(toolClientFile), 'workspace-scheduler.js'),
   path.join(path.dirname(toolClientFile), '../data/tool-command-metadata.json')]
   .map(file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'));
 const runtimeFingerprint = crypto.createHash("sha256").update(JSON.stringify([
@@ -536,12 +538,13 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return sendJson(res, 403, { ok: false, message: "不支持网页跨域调用" });
 
   const requestUrl = new URL(req.url, `http://127.0.0.1:${PORT}`);
-  if (req.method === 'GET' && ['/events', '/pageContext', '/navigationResult'].includes(requestUrl.pathname)) {
+  if (req.method === 'GET' && ['/events', '/pageContext', '/navigationResult', '/nativeMetadataResult'].includes(requestUrl.pathname)) {
     try {
       const params = Object.fromEntries(requestUrl.searchParams);
       if ([...requestUrl.searchParams.keys()].some(key => requestUrl.searchParams.getAll(key).length !== 1)) throw new Error('请求身份字段不能重复');
       if (requestUrl.pathname === '/events') return pageContexts.subscribe(res, params);
       if (requestUrl.pathname === '/pageContext') return sendJson(res, 200, {ok: true, contexts: pageContexts.list(params.workspaceKey)});
+      if (requestUrl.pathname === '/nativeMetadataResult') return sendJson(res,200,{ok:true,...metadataJournal.result(params.workspaceKey,params.idempotencyKey,pageContexts.result)});
       return sendJson(res, 200, pageContexts.result(params));
     } catch (error) { return sendJson(res, 400, {ok: false, message: error.message}); }
   }
@@ -567,7 +570,7 @@ const server = http.createServer(async (req, res) => {
     res.once('finish', complete); res.once('close', complete);
   }
 
-  if (req.method === 'POST' && ['/pageContext', '/removePageContext', '/navigate', '/pageLifecycle', '/navigationResult'].includes(req.url)) {
+  if (req.method === 'POST' && ['/pageContext', '/removePageContext', '/navigate', '/pageLifecycle', '/nativeMetadata', '/navigationResult'].includes(req.url)) {
     try {
       const payload = await readBody(req);
       if (req.url === '/pageContext') {
@@ -582,6 +585,16 @@ const server = http.createServer(async (req, res) => {
       const context = pageContexts.get(payload.contextId, payload.workspaceKey);
       const route = await resolveRequestWorkspace(context);
       if (!route.ok || route.workspaceKey !== context.workspaceKey) throw new Error('页面身份已不属于目标工作区，请刷新平台上下文');
+      if (req.url === '/nativeMetadata') {
+        if (route.workspace?.capabilities?.['svn.edit'] !== true) throw new Error('工作区未授权原生元数据维护');
+        const ids=[context.dataSourceId,...(context.dataSourceIds || [])];
+        if (!ids.includes(payload.target?.dataSourceId)) throw new Error('元数据目标不属于已选数据源');
+        if (['inspect-declared-step','run-declared-step'].includes(payload.target?.action)) {
+          payload.target=metadataTarget(payload.target);
+          if(payload.target.definition.workspaceKey!==context.workspaceKey || payload.target.definition.origin!==context.pageOrigin) throw new Error('Frozen native step belongs to another workspace or platform');
+        }
+        return sendJson(res,202,{ok:true,...metadataJournal.dispatch(payload,context,pageContexts.metadata)});
+      }
       if (req.url === '/pageLifecycle' && payload.target?.action !== 'inspect' && route.workspace?.capabilities?.['svn.edit'] !== true) throw new Error('工作区未授权 PAGE 平台写入');
       return sendJson(res, 202, req.url === '/pageLifecycle' ? pageContexts.lifecycle(payload) : pageContexts.navigate(payload));
     } catch (error) { return sendJson(res, 400, {ok: false, message: error.message}); }

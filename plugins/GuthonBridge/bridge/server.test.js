@@ -993,6 +993,7 @@ test("active PAGE identity wins over stale management navigation state", () => {
     isVisible: () => false,
     getActivePageTabCode: () => "PG-1234-5678",
     getCurrentPageCode: () => "PG-OLD",
+    getAllVueInstances: () => [{$store:{state:{modeDev:{systemId:'SYS-CURRENT'}}}}],
     getDataSourceId: () => "DS-1",
     isSystemScriptPage: () => false,
     isViewManagementPage: () => false,
@@ -1003,6 +1004,7 @@ test("active PAGE identity wins over stale management navigation state", () => {
   const result = context.inspectCurrentHubSource();
   assert.equal(result.mode, "page-source");
   assert.equal(result.pageId, "PG-1234-5678");
+  assert.equal(result.systemId,'SYS-CURRENT');
 });
 
 test("active procedure identity wins over stale module URL", () => {

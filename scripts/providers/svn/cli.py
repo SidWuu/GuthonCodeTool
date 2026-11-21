@@ -727,7 +727,9 @@ def _scm(command):
         raise SystemExit(f"svn {parsed.action} requires manifest-working-copies")
     from providers.svn.nexus import scm
 
-    if parsed.action == "scm-status":
+    if parsed.action == "cleanup":
+        result = scm.cleanup(workspace, working_copy_ids=parsed.working_copy, on_progress=_svn_progress)
+    elif parsed.action == "scm-status":
         result = scm.status(
             workspace,
             remote=parsed.remote,
@@ -836,7 +838,7 @@ ACTION_HANDLERS = {
     **dict.fromkeys(("fragments", "read", "read-batch", "write", "write-batch"), _documents),
     **dict.fromkeys(("catalog", "definition", "callers", "find", "context", "facts", "explain"), _queries),
     **dict.fromkeys(MAINTENANCE_ACTIONS, _maintenance),
-    **dict.fromkeys(("scm-status", "diff", "conflict", "resolve-conflict", "history",
+    **dict.fromkeys(("cleanup", "scm-status", "diff", "conflict", "resolve-conflict", "history",
                     "delivery-status", "revert-preview", "platform-save-preview", "revert",
                     "platform-save"), _scm),
     "reindex-file": _reindex_file,
