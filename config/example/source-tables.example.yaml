@@ -1,4 +1,5 @@
-# PAGE 和过程函数源码表字段映射模板，product_content_field 用于项目快照内的脚本继承标记。
+# 自定义主库源码字段映射的占位模板。新数据目录使用 guthon.example.json 中的默认映射。
+# product_content_field 用于项目快照内的脚本继承标记。
 # 源码类型与数据库表字段的映射集合。
 source_tables:
   # PAGE 源码映射。
@@ -95,7 +96,7 @@ source_tables:
     # 过程所属数据源字段，用于子系统范围过滤。
     data_source_id_field: DATA_SOURCE_KEY_FIELD
 
-  # 系统脚本源码映射。实际表名和字段名由内部配置提供，不提交公开仓库。
+  # 系统脚本源码映射。自定义主库请替换占位符。
   system_script:
     enabled: true
     system_table_name: SYSTEM_METADATA_TABLE

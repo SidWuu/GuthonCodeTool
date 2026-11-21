@@ -4,7 +4,7 @@
 
 新目录生成 `schemaVersion: 3` 的 `guthon.json`，包含 `workspaces`、`sync`、`datasource`、`databaseTesting`、`apiWorkspaces` 和 `sourceTables`。已有 API schema 2 保持版本与原文，不在加载时升级。完整的旧分类 YAML 可只读接入公共解析，包括 `source-tables.yaml` 字段映射；`setup` 核验已有旧配置后直接返回，不初始化 Git 或重写目录。旧 JSON schema 1、不支持的版本及统一 JSON 与活动 YAML 同时存在会报错，不自动回退或转换。凭据仍使用原引用。
 
-公开空配置样例见 [guthon.example.json](example/guthon.example.json)。以下名称是统一配置中的分区，不代表独立活动配置文件。
+公开配置样例见 [guthon.example.json](example/guthon.example.json)。新数据目录初始化使用样例中 PAGE、过程函数和系统脚本的默认字段映射。以下名称是统一配置中的分区，不代表独立活动配置文件。
 
 项目总览展示已登记的 API、SVN 与 DATABASE。各模式使用既有的授权和路径规则。SVN 优先读项目的 `svn.username`，缺省时沿用共享 `sync.svn.username`，并使用工作副本设置和授权清单。DATABASE 项目的主数据连接通过 `workspaces[workspaceKey].datasource` 绑定，系统凭据库通过 `credentialRef` 引用。DATABASE 从 `sourceTables` 或旧 `source-tables.yaml` 读取字段映射，从 `sync.sync` 和 `sync.rules` 读取增量与 Workcopy 保护设置。统一配置省略增量策略时，沿用 10 分钟回看窗口。完整更新在建立数据库连接和打开索引前检查 PAGE、过程函数与系统脚本的字段映射。配置格式升级和项目同步方式切换各有独立的验收条件。
 
@@ -28,7 +28,7 @@
 
 完整旧空间需要 `products.yaml`、`projects.yaml`、`sync.yaml`、`datasource.yaml`、`source-tables.yaml`。`database-testing.yaml` 若已配置，继续使用原文件。读取不会新增统一 JSON、运行记录或业务目录；同时存在活动统一 JSON 和任何旧配置文件时明确报 `CONFIG_AUTHORITY_CONFLICT`。旧 YAML 和 API schema 2 可使用离线配置升级命令。
 
-`sourceTables` 保存原 `source-tables.yaml` 中 `source_tables` 的内容，运行适配仍输出 `source_tables.source_tables`，供 DATABASE 执行保留原映射，不使用示例字段替换。
+升级旧配置时，`sourceTables` 保留原 `source-tables.yaml` 中的 `source_tables`。运行适配仍输出 `source_tables.source_tables` 供 DATABASE 调用。不同主库表结构需配置匹配的映射。
 
 
 ### 显式升级到 schema 3

@@ -128,12 +128,14 @@ def initialize(home, sync_text=None, *, workspace_name=None, team_source=None):
             return []
         if _legacy_files(home):
             return existing_legacy()
+        from guthon_tool import bundled_bytes
+
         if sync_text is None:
-            from guthon_tool import bundled_bytes
             sync_text=bundled_bytes('config/example/sync.example.yaml').decode('utf-8')
+        example = json.loads(bundled_bytes('config/example/guthon.example.json'), object_pairs_hook=_unique)
         value={'schemaVersion':SCHEMA_VERSION,'workspaces':{},'sync':_yaml(sync_text),
                'datasource':{'datasource':{}},'databaseTesting':{'schemaVersion':1,'connections':{},'expectedIdentities':{},'databaseTests':{}},'apiWorkspaces':{}}
-        value['sourceTables'] = {}
+        value['sourceTables'] = example['sourceTables']
         if workspace_name not in (None, 'var'):
             value['workspaceDirectory'] = workspace_name
         initialize_space(home, directory=workspace_name or 'var', team_source=team_source)
