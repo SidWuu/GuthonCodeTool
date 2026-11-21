@@ -1207,39 +1207,51 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.changeWorkspaceSourceMode', async value => {
       const tool = configuredToolFromSettings();
       if (!tool) return;
-      let workspace, sourceMode;
+      const client = new ToolJsonClient({getTool:()=>tool,processClient});
+      const {changeWorkspaceSourceMode,upgradeLegacyConfiguration}=require('./workspace-source-mode');
+      let workspace,sourceMode;
       try {
-        workspace = await selectWorkspace(workspaceKeyFrom(value));
-        if (!workspace) return;
-        const config = await processClient.request(tool, 'configuration-info');
-        if (!Array.isArray(config.workspaceSourceModes) || config.workspaceSourceModes.length < 2) {
-          await vscode.window.showInformationMessage('请使用支持三种同步方式的后端及统一配置后，再修改项目同步方式');
+        workspace=await selectWorkspace(workspaceKeyFrom(value));
+        if(!workspace)return;
+        const config=await client.run('','configuration-info');
+        const currentMode=workspace.sourceMode || 'api';
+        const legacyConfig=config.mode==='legacy' && ['svn','database'].includes(currentMode);
+        const allowed=legacyConfig?['api']:config.workspaceSourceModes;
+        if(!Array.isArray(allowed) || !allowed.some(mode=>mode!==currentMode)) {
+          return vscode.window.showInformationMessage('请先将配置升级到支持三种同步方式的版本');
+        }
+        sourceMode=await pickWorkspaceSourceMode(vscode.window,allowed,currentMode);
+        if(!sourceMode)return;
+        const assertReady=async()=>{
+          if(configuredToolFromSettings()?.toolHome!==tool.toolHome)throw new Error('数据目录已切换，请重新选择项目');
+          if(activeToolRuns.size || applicationUpdateRunning)throw new Error('请等待当前工具操作完成后再切换');
+          assertWorkspaceSaved(vscode,workspace,apiServices.editorState,legacyProjects);
+          if(apiServices.editorState.workspaces.has(workspace.workspaceKey))await apiServices.editorState.flush(workspace.workspaceKey);
+        };
+        if(legacyConfig) {
+          const offlineClient=new ToolJsonClient({getTool:()=>tool});
+          if(!await upgradeLegacyConfiguration({vscode,client:offlineClient,workspace,assertReady}))return;
+          workspaceRegistry.invalidate();
+          workspace=await selectWorkspace(workspace.workspaceKey);
+          if(!workspace)return;
+        }
+        const result=await changeWorkspaceSourceMode({vscode,workspace,sourceMode,assertReady,
+          request:payload=>client.run('',TOOL_COMMANDS.workspaceSourceMode,[],payload)});
+        if(!result?.changed) {
+          if(legacyConfig)await refreshLocalWorkspaceViews();
           return;
         }
-        const currentMode = workspace.sourceMode || 'api';
-        sourceMode = await pickWorkspaceSourceMode(vscode.window, config.workspaceSourceModes, currentMode);
-        if (!sourceMode) return;
-        const confirmed = await vscode.window.showWarningMessage(
-          `将「${workspace.name}」的同步方式从 ${currentMode.toUpperCase()} 改为 ${sourceMode.toUpperCase()}？`,
-          { modal: true, detail: '尚无源码、索引或操作历史时可直接修改。切换后按所选方式配置连接和范围，原 API 设置可在切回时复用。' }, '确认修改');
-        if (confirmed !== '确认修改') return;
-        if(configuredToolFromSettings()?.toolHome!==tool.toolHome)throw new Error('数据目录已切换，请重新选择项目');
-        assertWorkspaceSaved(vscode,workspace,apiServices.editorState,legacyProjects);
-        if (apiServices.editorState.workspaces.has(workspace.workspaceKey)) {
-          await apiServices.editorState.flush(workspace.workspaceKey);
+        apiServices.editorState.workspaces.delete(workspace.workspaceKey);
+        await refreshLocalWorkspaceViews();
+        if(result.retained?.length) {
+          return vscode.window.showWarningMessage(`已切换到 API。以下旧文件未能移入废纸篓，可在确认后手动清理：\n${result.retained.join('\n')}`,{modal:true});
         }
-        const result = await processClient.request(tool, TOOL_COMMANDS.workspaceSourceMode, [], '', {
-          workspaceKey: workspace.workspaceKey, expectedMode: currentMode, sourceMode,
-        });
-        if (result.changed) {
-          apiServices.editorState.workspaces.delete(workspace.workspaceKey);
-          await refreshLocalWorkspaceViews();
-          await vscode.window.showInformationMessage(`「${workspace.name}」的同步方式已改为 ${sourceMode.toUpperCase()}`);
-        }
-      } catch (error) {
-        if (error.code === 'WORKSPACE_MODE_MIGRATION_REQUIRED' && workspace?.sourceMode === 'svn' && sourceMode === 'api') {
+        return vscode.window.showInformationMessage(`「${workspace.name}」的同步方式已改为 ${sourceMode.toUpperCase()}${result.trashPaths ? '。请重新登录、选择范围，再点击“更新源码”。' : ''}`);
+      } catch(error) {
+        if (['WORKSPACE_MODE_MIGRATION_REQUIRED','WORKSPACE_API_RESET_PATH_INVALID'].includes(error.code)
+            && workspace?.sourceMode === 'svn' && sourceMode === 'api') {
           const action = '复制迁移预检命令';
-          const chosen = await vscode.window.showWarningMessage('该 SVN 项目需要先核对原工作副本与交付记录，再进行 SVN 到 API 的迁移。', action);
+          const chosen = await vscode.window.showWarningMessage(error.message, action);
           if (chosen === action) {
             const powershell = process.platform === 'win32';
             const quote = value => powershell ? "'" + value.replaceAll("'", "''") + "'" : "'" + value.replaceAll("'", "'\\''") + "'";

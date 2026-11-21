@@ -99,10 +99,15 @@ def _has_source_state(workspace):
 def change_source_mode(home, payload, gusen_hub):
     from common import config_store
 
-    if not isinstance(payload, dict) or set(payload) != {"workspaceKey", "expectedMode", "sourceMode"}:
+    required = {"workspaceKey", "expectedMode", "sourceMode"}
+    if not isinstance(payload, dict) or not required <= payload.keys() or payload.keys() - required - {"checkOnly", "planId"}:
         raise ValueError("修改同步方式需要明确的项目、原同步方式和目标同步方式")
     key = validate_workspace_key(payload["workspaceKey"])
     expected_mode, mode = payload["expectedMode"], payload["sourceMode"]
+    check_only = payload.get("checkOnly", False)
+    plan_id = payload.get("planId")
+    if type(check_only) is not bool or "planId" in payload and not isinstance(plan_id, str):
+        raise ValueError("同步方式预检参数无效")
     if any(not isinstance(value, str) or value not in SOURCE_MODES for value in (expected_mode, mode)):
         raise ValueError("请选择有效的同步方式")
     with file_lock(home / "config/.configuration.lock"):
@@ -123,10 +128,17 @@ def change_source_mode(home, payload, gusen_hub):
         )
         source_fields = {"svn", "datasource", "systems", "include"}
         svn_setup_fields = {"url", "username", "scope", "credential_ref", "managed_scope_selection"}
-        if (set(record) - {"name", "directory", "aliases", "sourceMode"} - source_fields
-                or set(record.get("svn") or {}) - svn_setup_fields):
-            raise migrate_error
-        if _has_source_state(workspace):
+        requires_migration = (set(record) - {"name", "directory", "aliases", "sourceMode"} - source_fields
+                              or set(record.get("svn") or {}) - svn_setup_fields or _has_source_state(workspace))
+        can_reset = mode == "api" and expected_mode in {"svn", "database"}
+        if can_reset:
+            from common.workspace_api_reset import reset_to_api
+
+            reset = reset_to_api(home, workspace, document, gusen_hub, check_only=check_only,
+                                 confirmed_plan=plan_id, required=bool(requires_migration))
+            if reset is not None:
+                return reset
+        if requires_migration or plan_id is not None:
             raise migrate_error
 
         record["sourceMode"] = mode
@@ -134,7 +146,12 @@ def change_source_mode(home, payload, gusen_hub):
             record.pop(field, None)
         updated = gusen_hub.resolve_workspace(config_store.resolve_document(home, document), key)
         if _has_source_state(updated):
+            if can_reset and check_only:
+                return reset_to_api(home, workspace, config_store.read(home), gusen_hub,
+                                    check_only=True, confirmed_plan=None)
             raise migrate_error
+        if check_only:
+            return {"ok": True, "workspaceKey": key, "sourceMode": mode, "requiresReset": False}
 
         if expected_mode == "api" and (workspace["contextDir"] / "api/editors.json").is_file():
             from providers.api.editor_state import assert_writable

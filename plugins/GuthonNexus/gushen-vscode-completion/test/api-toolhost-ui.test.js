@@ -96,6 +96,86 @@ test('ToolHost previews each project directory and unregisters only after it is 
   } finally {await client.stop();client.dispose();}
 });
 
+test('ToolHost resets legacy SVN and DATABASE source while preserving project identity and docs', {skip:!fs.existsSync(python) && 'repository Python environment unavailable'},async t=>{
+  const home=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'nexus-legacy-api-')));
+  t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+  const toolEntry=path.join(scripts,'guthon_tool.py');
+  const cli=(command,args)=>spawnSync(python,[toolEntry,command,'--home',home,'--',...args],{encoding:'utf8'});
+  const configDir=path.join(home,'config');
+  fs.mkdirSync(configDir);
+  const configFile=(name,value)=>fs.writeFileSync(path.join(configDir,name),JSON.stringify(value));
+  configFile('products.yaml',{products:{}});
+  configFile('projects.yaml',{projects:{old:{name:'示例',source_mode:'svn',svn:{repository_url:'https://svn.fixture.invalid/repo',username:'fixture'}}}});
+  configFile('sync.yaml',{sync:{},rules:{}});
+  configFile('datasource.yaml',{datasource:{}});
+  configFile('source-tables.yaml',{source_tables:{}});
+  const root=path.join(home,'var','workspace','PRJ 示例');
+  const checkout=path.join(home,'var','checkout','old');
+  const docs=path.join(root,'docs','notes.md');
+  const write=(target,value)=>{fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,value);};
+  write(path.join(checkout,'source.gss'),'old');
+  write(path.join(root,'context','index.db'),'index');
+  write(path.join(root,'context','source-mode.json'),JSON.stringify({version:1,workspaceKey:'projects.old',sourceMode:'svn'}));
+  write(path.join(root,'runtime','trace.log'),'runtime');
+  write(docs,'keep');
+  const configurationPlan=cli('configuration-upgrade',['plan']);
+  assert.equal(configurationPlan.status,0,configurationPlan.stderr);
+  const {planId}=JSON.parse(configurationPlan.stdout);
+  const upgraded=cli('configuration-upgrade',['apply','--offline','--confirm',planId]);
+  assert.equal(upgraded.status,0,upgraded.stderr);
+  const client=new ToolProcessClient();
+  const tool={mode:'source-development',toolPath:python,toolEntry,toolHome:home};
+  const modeRequest=payload=>client.request(tool,'workspace-source-mode',[],'',payload);
+  try {
+    const created=await client.request(tool,'workspace-create',[],'',{id:'db',name:'数据库',sourceMode:'database'});
+    const dbRoot=created.workspace.root;
+    write(path.join(dbRoot,'source','readonly','page.xml'),'source');
+    write(path.join(dbRoot,'source','workcopy','page.xml'),'workcopy');
+    write(path.join(dbRoot,'database','schema','table.json'),'export');
+    write(path.join(dbRoot,'context','index.db'),'index');
+    write(path.join(dbRoot,'docs','notes.md'),'keep db');
+    for (const [key,expectedMode,projectRoot,oldPaths] of [
+      ['projects.old','svn',root,[checkout,path.join(root,'context'),path.join(root,'runtime')]],
+      ['db','database',dbRoot,[path.join(dbRoot,'source','readonly'),path.join(dbRoot,'source','workcopy'),
+        path.join(dbRoot,'database'),path.join(dbRoot,'context')]],
+    ]) {
+      const request={workspaceKey:key,expectedMode,sourceMode:'api'};
+      const preview=await modeRequest({...request,checkOnly:true});
+      assert.equal(preview.requiresReset,true);
+      assert.equal(preview.docsPath,path.join(projectRoot,'docs'));
+      for(const old of oldPaths){assert.ok(preview.paths.includes(old));assert.ok(fs.existsSync(old));}
+      await assert.rejects(modeRequest(request),{code:'WORKSPACE_MODE_MIGRATION_REQUIRED'});
+      await assert.rejects(modeRequest({...request,planId:'stale'}),{code:'WORKSPACE_API_RESET_STALE'});
+      assert.ok(oldPaths.every(old=>fs.existsSync(old)));
+      if(expectedMode==='database') {
+        // Simulate interruption after staging the directories, before publishing the new registration.
+        for(const original of preview.paths.filter(target=>fs.existsSync(target))) {
+          const staged=path.join(path.dirname(original),`.${path.basename(original)}.guthon-api-${preview.planId.slice(0,16)}`);
+          fs.renameSync(original,staged);
+        }
+        const retry=await modeRequest({...request,checkOnly:true});
+        assert.equal(retry.requiresReset,true);
+        assert.equal(retry.planId,preview.planId);
+      }
+      const result=await modeRequest({...request,planId:preview.planId});
+      assert.equal(result.changed,true);
+      assert.equal(result.sourceMode,'api');
+      assert.ok(oldPaths.every(old=>!fs.existsSync(old)));
+      assert.equal(result.trashPaths.length,oldPaths.length+(expectedMode==='database'?1:0));
+      assert.ok(result.trashPaths.every(old=>fs.statSync(old).isDirectory()));
+      const status=await client.request(tool,'api',['status','--stdin'],key,{summaryOnly:true});
+      assert.equal(status.checkoutPath,path.join(projectRoot,'checkout'));
+      assert.equal(status.settings.serverUrl,'');
+      assert.equal(status.index.ready,false);
+    }
+    assert.equal(fs.readFileSync(docs,'utf8'),'keep');
+    assert.equal(fs.readFileSync(path.join(dbRoot,'docs','notes.md'),'utf8'),'keep db');
+    const registry=await client.request(tool,'workspaces');
+    assert.equal(registry.workspaces.find(item=>item.workspaceKey==='projects.old').displayName,'PRJ 示例');
+    assert.ok(registry.workspaces.every(item=>item.sourceMode==='api'));
+  } finally {await client.stop();client.dispose();}
+});
+
 const bootstrap=String.raw`
 import json,os,sys
 from pathlib import Path
