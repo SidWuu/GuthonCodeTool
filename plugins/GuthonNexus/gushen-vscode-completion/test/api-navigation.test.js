@@ -11,6 +11,27 @@ test('locator links keep exact project and path identity and reject malformed li
   assert.throws(()=>sourceLink('projects.demo','../other'),/路径/);
   assert.throws(()=>parseSourceLink({authority:parsed.host,path:parsed.pathname,query:'workspaceKey=projects.demo&path=a&path=b'}),/字段/);
 });
+test('MCP configuration uses the explicit product or project selected in the action menu',async()=>{
+  const {createApiNavigation}=require('../src/api/navigation');
+  const registered=new Map(),selected=[];
+  const disposable={dispose(){}};
+  const vscode={
+    commands:{registerCommand:(name,fn)=>(registered.set(name,fn),disposable)},
+    window:{showErrorMessage:async message=>assert.fail(message)},
+    workspace:{textDocuments:[],onDidOpenTextDocument:()=>disposable,onDidChangeTextDocument:()=>disposable,onDidCloseTextDocument:()=>disposable},
+    languages:{createDiagnosticCollection:()=>({set(){},delete(){},dispose(){}}),registerCompletionItemProvider:()=>disposable},
+  };
+  const api={editorState:{workspaces:new Map()},sourceTree:{},run:async()=>{}};
+  const nav=createApiNavigation({vscode,context:{subscriptions:[]},api,selectWorkspace:async key=>{selected.push(key);},
+    getTool:()=>assert.fail('Cancelled selection must stop the wizard'),bridge:{}});
+  try {
+    const command=registered.get('gushenCompletion.generateMcpConfiguration');
+    await command('products.sample');
+    await command({workspaceKey:'projects.sample'});
+    await command('gushenCompletion.projectDetails');
+    assert.deepEqual(selected,['products.sample','projects.sample','']);
+  } finally {nav.dispose();}
+});
 test('PAGE ID locator opens the page manager instead of an arbitrary indexed script fragment',async()=>{
   const {createApiNavigation}=require('../src/api/navigation'),commands=new Map(),calls=[],disposable={dispose(){}};
   const vscode={commands:{registerCommand:(name,handler)=>(commands.set(name,handler),disposable),executeCommand:async(...args)=>calls.push(args)},

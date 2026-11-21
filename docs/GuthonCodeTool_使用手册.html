@@ -122,7 +122,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
     <span class="eyebrow"><span class="eyebrow-dot"></span>macOS M1 及后续型号 &amp; Windows</span>
     <h1>GuthonCodeTool<br>使用手册</h1>
     <p>按步骤完成安装、接入工作区、编辑和提交源码。需要了解完整能力与技术限制时查全功能说明；遇到疑问或故障时查问题解决中心。</p>
-    <div class="hero-meta"><span>安装</span><span>Nexus API 项目</span><span>Bridge 网页辅助</span><span>API MCP</span><span>团队治理</span></div>
+    <div class="hero-meta"><span>安装</span><span>Nexus API 项目</span><span>Bridge 网页辅助</span><span>源码 MCP</span><span>团队治理</span></div>
     <div class="hero-actions">
       <a class="btn btn-primary" href="#1-安装">开始安装</a>
       <a class="btn btn-ghost" href="GuthonCodeTool_QA.html">问题解决中心</a>
@@ -153,7 +153,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <a class="toc-link toc-sub" href="#4-1-安装-chrome-扩展">4.1 安装 Chrome 扩展</a>
 <a class="toc-link toc-sub" href="#4-2-启动与验证">4.2 启动与配对</a>
 <a class="toc-link toc-sub" href="#4-3-使用网页辅助">4.3 使用网页辅助</a>
-<a class="toc-link" href="#5-mcp">5. API MCP（按需）</a>
+<a class="toc-link" href="#5-mcp">5. 源码 MCP（按需）</a>
 <a class="toc-link toc-sub" href="#5-1-准备索引">5.1 准备索引</a>
 <a class="toc-link toc-sub" href="#5-2-配置客户端">5.2 配置客户端</a>
 <a class="toc-link toc-sub" href="#codex-mcp-setup">Codex 的 MCP 配置与切换</a>
@@ -177,7 +177,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <article class="overview-card"><div class="overview-number">02</div><h3>Nexus</h3><p>创建项目后配置 API 地址与拉取范围。</p></article>
 <article class="overview-card"><div class="overview-number">03</div><h3>guthon-team</h3><p>安装规范、Linter、Hook，并检查治理状态。</p></article>
 <article class="overview-card"><div class="overview-number">04</div><h3>Bridge</h3><p>连接 Chrome 与 Nexus，按需使用网页辅助能力。</p></article>
-<article class="overview-card"><div class="overview-number">05</div><h3>API MCP</h3><p>让 AI 客户端按项目查询源码并受控修改本地文件。</p></article>
+<article class="overview-card"><div class="overview-number">05</div><h3>源码 MCP</h3><p>让 AI 客户端按项目查询源码并受控修改本地文件。</p></article>
 <article class="overview-card"><div class="overview-number">06</div><h3>日常工作流</h3><p>按项目完成拉取、编辑、检查和上传。</p></article>
 <article class="overview-card"><div class="overview-number">07</div><h3>迁移与检查</h3><p>迁移或删除工作区，检查首次使用结果。</p></article>
 </div>
@@ -358,21 +358,18 @@ python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据
 </section>
 
 <section class="wiki-section">
-<h2 id="5-mcp">5. API MCP（按需）</h2>
-<h3 id="5-1-准备索引">5.1 准备索引</h3><p>先配置目标 API 项目、选择范围并拉取源码，确认该工作区索引可用。结果只覆盖已拉取范围。</p><h3 id="5-2-配置客户端">5.2 配置客户端</h3>
-<p><strong>CodeBuddy、Trae、VS Code：</strong>在新 <code>var/</code> 根打开的 Nexus 窗口中，先选中目标项目，再从“当前项目 → … → 配置 MCP”选择客户端及能力范围，查看配置差异后确认合并。向导按当前打开目录分别写入 <code>.mcp.json</code>、<code>.trae/mcp.json</code> 或 <code>.vscode/mcp.json</code>，保留其他服务及注释，并备份已有文件；它只更新本工具的 <code>guthon-api</code> 条目，不自动停用旧 SVN 服务。</p>
+<h2 id="5-mcp">5. 源码 MCP（按需）</h2>
+<h3 id="5-1-准备索引">5.1 准备索引</h3><p>选择 API、SVN 或 DATABASE 工作区，按该模式同步源码并确认索引可用。返回内容覆盖当前工作区已同步范围。</p>
+<h3 id="5-2-配置客户端">5.2 配置客户端</h3>
+<p><strong>CodeBuddy、Trae、VS Code：</strong>选中产品或项目，从 Nexus 的“当前项目 → … → 配置 MCP”选择客户端，再选择“仅查询”“允许受控本地修改”或“完整 MCP 能力”。需要平台工具时选择“完整 MCP 能力”。核对预览中的配置位置和能力范围，再合并 <code>guthon-source-helper</code>。向导显示所选工作区的同步方式和可用工具数。</p>
 <h4 id="codex-mcp-setup">Codex 的 MCP 配置与切换</h4>
-<p>当前 Nexus 向导不提供 Codex 选项，CodeBuddy 的 <code>.mcp.json</code> 不能代替 Codex 原生 MCP 配置。在终端先用 <code>codex mcp get guthon-api</code> 核对已有条目。确认要切换该条目后，以新的后端入口和数据目录注册；下面是<strong>发行应用</strong>的只读接入示例：</p>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>codex mcp add guthon-api -- "&lt;API 后端启动文件绝对路径&gt;" mcp --home "&lt;当前项目所在的本地数据目录&gt;" -- --stdio --read-only
-codex mcp get guthon-api</code></pre></div>
-<p>替换尖括号占位符后执行。该命令写入当前 Codex 用户的全局 MCP 配置，同名 <code>add</code> 会更新该条目，使用这份配置的任务会受影响；先核对要切换的服务，保留其他仍在使用的服务。macOS 使用应用目录中的实际启动文件，Windows 使用 EXE。开发模式和 pyz 调试模式需要完整的 Python 与入口文件组合，例如：</p>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>codex mcp add guthon-api -- "&lt;Python 绝对路径&gt;" "&lt;guthon_tool.py 或 pyz 绝对路径&gt;" mcp --home "&lt;当前项目所在的本地数据目录&gt;" -- --stdio --read-only</code></pre></div>
-<p>日后需要受控修改或平台操作时，先确认授权与所需能力，再调整只读配置；本地保存和平台上传分别确认。</p>
+<p>Codex 使用原生 MCP 配置。运行下列命令注册发行应用的只读入口，将占位符替换成实际启动文件和本地数据目录。开发或 pyz 模式在启动文件位置提供 Python 及脚本或 pyz 路径。</p>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>codex mcp add guthon-source-helper -- "&lt;后端启动文件绝对路径&gt;" mcp --home "&lt;本地数据目录&gt;" -- --stdio --provider auto --read-only
+codex mcp get guthon-source-helper</code></pre></div>
+<p>有本地编辑授权时可省略 <code>--read-only</code>，并按客户端流程审查、信任相应的 Guard Hook。需要沿用旧入口的在线工作流时，另行配置其<a href="GuthonCodeTool_全功能说明.html#9-1-入口与能力">平台工具启动选项</a>。</p>
 <h4 id="mcp-switch-check">重连并确认切换结果</h4>
-<p><strong>CodeBuddy IDE 的项目 MCP 还需审批：</strong>从命令面板打开“腾讯云代码助手 CodeBuddy: MCP 市场”，在“我的 MCP”中找到项目 <code>guthon-api</code>。如显示“待审批”，先核对来源为新 var 的 <code>.mcp.json</code>，命令及 <code>--home</code> 属于新 API 入口和目录；隔离测试可选“仅本次允许”，正式环境按团队策略审查信任范围。确认该条目显示工具数量后，再新建对话执行一次实际回读。不要批准与本次切换无关的其他服务。</p>
-<p>保存配置后按客户端支持的方式重连 MCP，必要时新建任务或重启客户端。先确认发现的是 <code>guthon-api</code> 的 API 工具，再明确指定新工作区 key 读取一个已拉取对象，核对内容和目录。仍在使用的旧服务保留，只停用当前客户端中已经失效的旧 SVN 接线；保留其他 MCP 服务配置。</p>
-<p>向导的“后端探测发现工具”独立于客户端的项目 MCP 审批状态。工具发现、本地源码读取和在线只读查询是不同检查。在线查询还需对应项目的 Nexus 窗口保持打开且已登录；仅发现工具不表示平台连接通过，本地源码读取也不要求平台登录。</p>
-<h3 id="5-3-查询与排错">5.3 查询与受控修改</h3><p>使用明确 workspaceKey 和对象路径查询源码、调用方或 PAGE 字段。修改单个文件时先获取租约并预览候选，确认后写入并回读；跨文件修改时让 AI 先汇总各文件的修改并预览，核对全部对象后再应用，检查每项结果。需要上传时另行执行。响应未知先查询原操作，不重复提交。工具名与参数见<a href="GuthonCodeTool_全功能说明.html#9-guthon-api-mcp">API MCP 参考</a>。</p>
+<p>CodeBuddy 在“我的 MCP”审查并批准项目 <code>guthon-source-helper</code>。重连客户端并新建对话，传入实际 <code>workspaceKey</code> 查询同步方式和可用工具，再回读一个已同步对象。向导的后端探测独立于客户端审批状态。</p>
+<h3 id="5-3-查询与排错">5.3 查询与受控修改</h3><p>让 Agent 核对 <code>workspaceKey</code> 及对象身份，使用对应的 API、SVN 或 DATABASE 工具预览、保存并回读。完成后检查对应文件或脚本片段。API 与 SVN 的提交或上传另行执行。详细能力见<a href="GuthonCodeTool_全功能说明.html#9-guthon-api-mcp">源码 MCP 参考</a>。</p>
 </section>
 
 <section class="wiki-section">

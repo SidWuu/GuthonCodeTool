@@ -20,8 +20,13 @@ def run(command: list[str], *, input_text: str | None = None) -> str:
     return result.stdout.strip()
 
 
-def mcp_tools(command: list[str], home: str, *, read_only: bool) -> list[dict]:
-    args = [*command, "mcp", "--stdio", *(["--read-only"] if read_only else []), "--home", home]
+def mcp_tools(command: list[str], home: str, *, read_only: bool, provider: str = "api",
+              platform: bool = False) -> list[dict]:
+    args = [*command, "mcp", "--home", home, "--", "--stdio", "--provider", provider]
+    if read_only:
+        args.append("--read-only")
+    if platform:
+        args.append("--enable-platform-tools")
     messages = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2025-11-25", "capabilities": {},
@@ -37,11 +42,21 @@ def mcp_tools(command: list[str], home: str, *, read_only: bool) -> list[dict]:
     if initialized.get("protocolVersion") != "2025-11-25":
         raise RuntimeError("MCP protocol negotiation did not return 2025-11-25")
     tools = by_id.get(2, {}).get("result", {}).get("tools")
-    from providers.api.mcp_server import TOOLS, WRITE_TOOLS
-    registered = TOOLS + WRITE_TOOLS
-    expected = sum(bool(tool["annotations"]["readOnlyHint"]) for tool in registered) if read_only else len(registered)
-    if not isinstance(tools, list) or len(tools) != expected:
-        raise RuntimeError(f"MCP tool count: expected {expected}, received {len(tools) if isinstance(tools, list) else 'none'}")
+    if provider == "auto":
+        from providers.source_helper import SourceHelperMcpServer
+
+        if initialized.get("serverInfo", {}).get("name") != "guthon-source-helper":
+            raise RuntimeError("MCP auto provider did not identify as guthon-source-helper")
+        expected = {tool["name"] for tool in SourceHelperMcpServer(
+            home, "smoke", enable_writes=not read_only, enable_platform_tools=platform
+        ).tools}
+    else:
+        from providers.api.mcp_server import TOOLS, WRITE_TOOLS
+
+        expected = {tool["name"] for tool in TOOLS + WRITE_TOOLS
+                    if not read_only or tool["annotations"]["readOnlyHint"]}
+    if not isinstance(tools, list) or {tool["name"] for tool in tools} != expected:
+        raise RuntimeError(f"MCP {provider} tool inventory does not match the registered contract")
     if read_only and any(not item.get("annotations", {}).get("readOnlyHint") for item in tools):
         raise RuntimeError("Read-only MCP exposed a write tool")
     return tools
@@ -109,7 +124,17 @@ def main() -> int:
         check_doctor(command, home)
         all_tools = mcp_tools(command, home, read_only=False)
         readonly_tools = mcp_tools(command, home, read_only=True)
-    print(f"PASS: {version['version']} · self-test · doctor resources · MCP {len(all_tools)}/{len(readonly_tools)} tools · temporary toolHome")
+        routed_tools = mcp_tools(command, home, read_only=False, provider="auto")
+        routed_readonly = mcp_tools(command, home, read_only=True, provider="auto")
+        routed_platform = mcp_tools(command, home, read_only=False, provider="auto", platform=True)
+        if {tool["name"] for tool in all_tools} != {
+            tool["name"].removeprefix("api_") for tool in routed_platform if tool["name"].startswith("api_")
+        }:
+            raise RuntimeError("guthon-source-helper does not cover the fixed API tool set")
+    print(f"PASS: {version['version']} · self-test · doctor resources · "
+          f"API MCP {len(all_tools)}/{len(readonly_tools)} tools · "
+          f"guthon-source-helper {len(routed_tools)} local / {len(routed_readonly)} read-only / "
+          f"{len(routed_platform)} platform-enabled tools · temporary toolHome")
     return 0
 
 

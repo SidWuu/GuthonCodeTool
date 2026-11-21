@@ -338,6 +338,7 @@ WRITE_TOOLS = [
             "confirm",
         ],
         write=True,
+        destructive=True,
         open_world=True,
     ),
     _tool(

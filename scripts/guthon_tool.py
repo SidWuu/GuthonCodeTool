@@ -1111,10 +1111,13 @@ def main(argv=None) -> int:
             parser.error("mcp uses its own protocol; output formatting is unavailable")
         mcp_parser = argparse.ArgumentParser(prog="guthon_tool.py mcp")
         mcp_parser.add_argument("--stdio", action="store_true", required=True)
-        mcp_parser.add_argument("--provider", choices=["api", "svn", "database"])
+        mcp_parser.add_argument("--provider", choices=["auto", "api", "svn", "database"],
+                                help="auto routes guthon-source-helper by each request's workspaceKey")
         access = mcp_parser.add_mutually_exclusive_group()
         access.add_argument("--read-only", action="store_true")
         access.add_argument("--enable-page-write", action="store_true")
+        access.add_argument("--enable-platform-tools", action="store_true",
+                            help="enable the existing platform workflows for the auto provider")
         options = mcp_parser.parse_args(extra_args)
         if args.workspace:
             parser.error("MCP tools require an explicit workspaceKey per request")
@@ -1126,6 +1129,12 @@ def main(argv=None) -> int:
                 (home / "config" / name).is_file() for name in config_store.LEGACY_SECTIONS.values()
             )
             provider = "svn" if legacy_only else "api"
+        if provider == "auto":
+            from providers.source_helper import serve_stdio as serve_mcp_stdio
+            return serve_mcp_stdio(home, application_version(), enable_writes=not options.read_only,
+                                   enable_platform_tools=options.enable_platform_tools)
+        if options.enable_platform_tools:
+            mcp_parser.error("--enable-platform-tools requires --provider auto")
         if provider == "svn":
             from providers.svn.nexus.mcp_server import serve_stdio as serve_mcp_stdio
         elif provider == "database":

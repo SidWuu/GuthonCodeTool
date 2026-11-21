@@ -39,7 +39,7 @@ def _page(text, source_id):
     return projected, data, double_encoded
 
 
-def run(workspace, config, action, payload):
+def run(workspace, config, action, payload, *, include_write_artifacts=False):
     if not isinstance(payload, dict):
         raise ValueError("需要明确的 DATABASE 源码身份")
     record_id, source_id, source_path = (payload.get(key) for key in ("recordId", "sourceId", "sourcePath"))
@@ -138,6 +138,8 @@ def run(workspace, config, action, payload):
         candidate_hash = _digest(encoded)
         if action == "edit-preview":
             return {**result, "candidateSourceHash": candidate_hash}
+        if "candidateSourceHash" in payload and payload["candidateSourceHash"] != candidate_hash:
+            raise ValueError("保存内容与 Workcopy 预览哈希不一致")
         if candidate_hash == source_hash:
             return result
         metadata = {**dict(row), "workspaceKey": workspace["workspaceKey"]}
@@ -149,11 +151,13 @@ def run(workspace, config, action, payload):
             previous = hub._work_copy_metadata(folder)
             if previous.get("workspaceKey") != workspace["workspaceKey"] or previous.get("source_id") != source_id:
                 raise ValueError("工作副本元数据与打开的对象不一致")
+        protected_artifacts = set()
         if folder.exists():
             if _digest(_bytes(target if existing else source)) != source_hash:
                 raise ValueError("保存前源码发生变化，请重新核对")
             if not archive.exists():
                 hub._write_work_copy_metadata(folder, metadata, source.parent, "mirror")
+                protected_artifacts.add(archive)
             atomic_bytes(target, encoded)
             new_paths = {target} if not existing else set()
         else:
@@ -167,5 +171,12 @@ def run(workspace, config, action, payload):
                     raise ValueError("保存前源码或工作副本发生变化，请重新核对")
                 os.rename(staged, folder)
             new_paths = {file for file in folder.rglob("*") if file.is_file()}
+            protected_artifacts = {file for file in new_paths - {target}
+                                   if file.name in {hub.WORK_COPY_META_FILE, "meta.json", "raw.json"}}
+        if include_write_artifacts:
+            result["writeArtifacts"] = [
+                {"path": str(file), "sourceHash": _digest(file.read_bytes())}
+                for file in sorted(protected_artifacts)
+            ]
     hub._auto_add_work_copy(config, folder, new_paths)
     return {**result, "sourceHash": candidate_hash, "workcopy": True, "path": str(target)}

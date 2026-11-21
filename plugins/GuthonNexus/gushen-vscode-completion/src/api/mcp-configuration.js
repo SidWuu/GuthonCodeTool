@@ -8,15 +8,24 @@ const {toolArguments}=require('../tool-runtime');
 const CLIENTS=[{label:'CodeBuddy',file:'.mcp.json',key:'mcpServers'},
   {label:'Trae',file:'.trae/mcp.json',key:'mcpServers'},
   {label:'VS Code',file:'.vscode/mcp.json',key:'servers'}];
+const SERVER_NAME='guthon-source-helper';
+const ACCESS_LEVELS=[
+  {label:'仅查询',readOnly:true},
+  {label:'允许受控本地修改',readOnly:false},
+  {label:'完整 MCP 能力',description:'受控本地修改与可用的平台工具',readOnly:false,enablePlatformTools:true},
+];
 
-function configurationText(original,client,tool,readOnly=true,provider='api') {
-  if(!['api','svn','database'].includes(provider))throw new Error('不支持的 MCP 源码模式');
+function configurationText(original,client,tool,readOnly=true,enablePlatformTools=false) {
+  if(readOnly && enablePlatformTools)throw new Error('只读配置不能启用平台工具');
   const errors=[];
   const document=jsonc.parse(original || '{}',errors,{allowTrailingComma:true});
   if(errors.length || !document || typeof document!=='object' || Array.isArray(document))throw new Error('已有 MCP 配置无效，请先修复 JSON/JSONC');
   if(document[client.key]!==undefined && (!document[client.key] || typeof document[client.key]!=='object' || Array.isArray(document[client.key])))throw new Error('已有 MCP 服务列表不是对象');
-  const server={type:'stdio',command:tool.toolPath,args:toolArguments(tool,'mcp',['--stdio',...(provider==='api'?[]:['--provider',provider]),...(readOnly || provider==='database'?['--read-only']:[])])};
-  return {server,text:jsonc.applyEdits(original || '{}\n',jsonc.modify(original || '{}\n',[client.key,'guthon-'+provider],server,
+  const args=['--stdio','--provider','auto'];
+  if(readOnly)args.push('--read-only');
+  if(enablePlatformTools)args.push('--enable-platform-tools');
+  const server={type:'stdio',command:tool.toolPath,args:toolArguments(tool,'mcp',args)};
+  return {server,text:jsonc.applyEdits(original || '{}\n',jsonc.modify(original || '{}\n',[client.key,SERVER_NAME],server,
     {formattingOptions:{insertSpaces:true,tabSize:2,eol:original.includes('\r\n')?'\r\n':'\n'}}))};
 }
 function probeMcp(server,workspaceKey,spawnProcess=spawn) {
@@ -34,16 +43,21 @@ function probeMcp(server,workspaceKey,spawnProcess=spawn) {
         const messages=stdout.trim().split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line));
         const discovered=messages.find(message=>message.id===2)?.result?.tools;
         if(!Array.isArray(discovered))throw new Error('MCP 未返回工具清单');
-        const online=messages.find(message=>message.id===3)?.result;
-        resolve({tools:discovered.length,online:online && !online.isError,
-          onlineError:online?.isError ? online.structuredContent?.error?.message || '在线查询失败，请登录对应 Nexus 项目后重试' : undefined});
+        const selected=messages.find(message=>message.id===3)?.result?.structuredContent;
+        if(workspaceKey && (!selected?.ok || selected.workspaceKey!==workspaceKey
+          || !['api','svn','database'].includes(selected.data?.sourceMode) || !Array.isArray(selected.data?.tools))) {
+          throw new Error(selected?.error?.message || 'MCP 未确认指定工作区');
+        }
+        resolve({tools:discovered.length,sourceMode:selected?.data?.sourceMode,
+          workspaceTools:selected?.data?.tools.length,platformTools:selected?.data?.platformTools,
+          reason:selected?.data?.reason});
       }catch(error){reject(error);}
     });
     for(const request of [
       {jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'nexus-connection-check',version:'1'}}},
       {jsonrpc:'2.0',method:'notifications/initialized'},
       {jsonrpc:'2.0',id:2,method:'tools/list'},
-      ...(workspaceKey?[{jsonrpc:'2.0',id:3,method:'tools/call',params:{name:'get_platform_system_menu',arguments:{workspaceKey,offset:0,maxChars:1000}}}]:[]),
+      ...(workspaceKey?[{jsonrpc:'2.0',id:3,method:'tools/call',params:{name:'get_workspace_source_capabilities',arguments:{workspaceKey}}}]:[]),
     ])child.stdin.write(JSON.stringify(request)+'\n');
     child.stdin.end();
   });
@@ -53,31 +67,36 @@ function configurationFolder(vscode,workspace,tool) {
   const normalize=value=>process.platform==='win32'?value.toLowerCase():value;
   return (vscode.workspace.workspaceFolders || []).find(folder=>folder.uri.scheme==='file' && roots.some(root=>normalize(root)===normalize(path.resolve(folder.uri.fsPath))));
 }
-async function generateConfiguration({vscode,getTool,selectWorkspace,probe=probeMcp}) {
-  const workspace=await selectWorkspace('');if(!workspace)return;
+async function generateConfiguration({vscode,getTool,selectWorkspace,workspaceKey='',probe=probeMcp}) {
+  const workspace=await selectWorkspace(workspaceKey);if(!workspace)return;
   const tool=await getTool();if(!tool)throw new Error('请先选择实际运行入口和本地数据目录');
   const folder=configurationFolder(vscode,workspace,tool);
   if(!folder)throw new Error('请在当前窗口打开本地数据目录的 var、工作区目录或 checkout');
   const client=await vscode.window.showQuickPick(CLIENTS,{title:'选择 MCP 客户端'});if(!client)return;
-  const provider=workspace.sourceMode || 'api';
-  const access=provider==='database'?{readOnly:true}:await vscode.window.showQuickPick([{label:'仅查询',readOnly:true},{label:'允许受控本地修改及已确认的平台操作',readOnly:false}],{title:'选择 MCP 能力范围'});if(!access)return;
+  const access=await vscode.window.showQuickPick(ACCESS_LEVELS,{title:'选择 MCP 能力范围'});if(!access)return;
   const file=path.join(folder.uri.fsPath,client.file),original=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'';
-  const result=configurationText(original,client,tool,access.readOnly,provider);
+  const result=configurationText(original,client,tool,access.readOnly,access.enablePlatformTools);
+  const checked=await probe(result.server,workspace.workspaceKey);
+  if(checked.sourceMode!==workspace.sourceMode)throw new Error('MCP 探测到的同步方式与所选工作区不一致');
+  if(access.enablePlatformTools && checked.sourceMode!=='database' && !checked.reason && checked.platformTools!==true) {
+    throw new Error('当前后端未在所选工作区启用平台工具，请检查后端版本');
+  }
   const before=await vscode.workspace.openTextDocument({language:'jsonc',content:original || '{}'});
   const after=await vscode.workspace.openTextDocument({language:'jsonc',content:result.text});
   await vscode.commands.executeCommand('vscode.diff',before.uri,after.uri,`${client.label} MCP 配置预览`);
-  if(await vscode.window.showWarningMessage('将预览的 Guthon MCP 服务合并到当前打开目录的配置？',{modal:true,detail:client.file},'合并配置')!=='合并配置')return;
+  if(await vscode.window.showWarningMessage('将预览的 Guthon MCP 服务合并到当前打开目录的配置？',{
+    modal:true,detail:`${client.file}\n能力范围：${access.label}`,
+  },'合并配置')!=='合并配置')return;
   if((fs.existsSync(file)?fs.readFileSync(file,'utf8'):'')!==original)throw new Error('审阅期间配置发生变化，请重新生成');
   if(result.text!==original) {
     fs.mkdirSync(path.dirname(file),{recursive:true});
     if(original)fs.writeFileSync(file+'.backup-'+crypto.randomUUID(),original,{flag:'wx',mode:0o600});
     const temporary=file+'.'+crypto.randomUUID()+'.tmp';fs.writeFileSync(temporary,result.text,{flag:'wx',mode:0o600});fs.renameSync(temporary,file);
   }
-  const checked=await probe(result.server,provider==='api'?workspace.workspaceKey:'');
   const clientCheck = client.label === 'CodeBuddy'
-    ? `请在 CodeBuddy 的 MCP 页面审查并批准项目 guthon-${provider} 服务，再在新对话中回读确认`
+    ? `请在 CodeBuddy 的 MCP 页面审查并批准项目 ${SERVER_NAME} 服务，再在新对话中回读确认`
     : '请在客户端完成服务信任或重连，再验证实际工具调用';
-  await vscode.window.showInformationMessage(`MCP 配置已保存；后端探测发现 ${checked.tools} 个工具。${clientCheck}。${provider!=='api'?'本地 MCP 工具发现通过':checked.online?'在线只读检查通过':'在线只读检查尚未通过：'+(checked.onlineError || '尚未验证')}`);
+  await vscode.window.showInformationMessage(`MCP 配置已保存。当前 ${checked.sourceMode.toUpperCase()} 工作区可用 ${checked.workspaceTools} 个工具。${checked.reason ? checked.reason+'。' : ''}${clientCheck}。`);
   return checked;
 }
 module.exports={CLIENTS,configurationText,probeMcp,configurationFolder,generateConfiguration};

@@ -65,8 +65,8 @@ test('MCP configuration preserves comments and other services, supports all runt
     {toolPath:'/tmp/python',toolEntry:'/tmp/tool.pyz',toolHome:'/tmp/home'}]) {
     const client={key:'mcpServers'},result=configurationText(original,client,tool,true);
     const parsed=jsonc.parse(result.text);assert.equal(parsed.mcpServers.other.command,'other');assert.match(result.text,/\/\/ keep/);
-    assert.equal(parsed.mcpServers['guthon-api'].command,tool.toolPath);
-    assert.ok(parsed.mcpServers['guthon-api'].args.includes('--read-only'));
+    assert.equal(parsed.mcpServers['guthon-source-helper'].command,tool.toolPath);
+    assert.ok(parsed.mcpServers['guthon-source-helper'].args.includes('--read-only'));
     assert.equal(configurationText(result.text,client,tool,true).text,result.text);
     assert.equal(result.text.includes('password'),false);
   }

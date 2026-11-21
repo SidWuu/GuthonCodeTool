@@ -6,6 +6,7 @@ const {registerEditorAssistance}=require('../source/editor-assistance');
 const {decodeIdentity,SCHEME,scriptType}=require('../source/virtual-fs');
 const {navigateInBrowser}=require('../source/browser-navigation');
 const {isWorkspaceKey}=require('../workspace-identity');
+const {workspaceKeyFrom}=require('./project-actions');
 const {filePath,identity:fromElement,sourceLabel}=require('./source-ui');
 const {readInheritance}=require('../source/inheritance');
 
@@ -285,7 +286,9 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge,
       const document=await vscode.workspace.openTextDocument(uri),location=await inheritanceDefinition(document);
       if(location)return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(location.uri),{preview:true});
     }),
-    vscode.commands.registerCommand('gushenCompletion.generateMcpConfiguration',()=>require('./mcp-configuration').generateConfiguration({vscode,getTool,selectWorkspace}).catch(error=>vscode.window.showErrorMessage(error.message))),
+    vscode.commands.registerCommand('gushenCompletion.generateMcpConfiguration',value=>
+      require('./mcp-configuration').generateConfiguration({vscode,getTool,selectWorkspace,workspaceKey:workspaceKeyFrom(value)})
+        .catch(error=>vscode.window.showErrorMessage(error.message))),
     ...['filterApiSources','clearApiSourceFilter','copyApiFileName','copyApiAbsolutePath','copyApiRelativePath','revealApiFileInOS'].map(name=>vscode.commands.registerCommand(`gushenCompletion.${name}`,execute(name))),
     vscode.commands.registerCommand('gushenCompletion.searchWorkspace',execute('searchWorkspace')),
     vscode.commands.registerCommand('gushenCompletion.searchCurrentApiWorkspace',execute('searchCurrentApiWorkspace')),
