@@ -251,13 +251,19 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       const selectedIds = all ? result.systems.map(x=>x.systemId) : selected.map(x=>x.systemId);
       const related = new Set(result.systems.filter(x=>selectedIds.includes(x.systemId)).map(x=>x.dataSourceId).filter(Boolean));
       if(!related.size)throw new Error('所选子系统缺少数据源关联，请先核对平台配置');
+      const settings={allSystems:all,systemIds:all ? []:selectedIds,dataSourceIds:[]};
+      if(current.hasSourceBaseline===false && current.index?.sizeBytes===0) {
+        const saved=await run(key,'configure',settings);
+        onUpdated?.();
+        await vscode.window.showInformationMessage('同步范围已保存。点击“更新源码”后开始拉取并建立索引。');
+        return saved;
+      }
       let pulled,refreshError,scopeError;
       try {
         await ui.ensureWorkspace(key);
         pulled=await withDeferredIndexEvents(key,async()=>{
           await editorState.flush(key);
-          return vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'更新所选范围的源码和索引',cancellable:false},()=>run(key,'scope-apply',{
-            settings:{allSystems:all,systemIds:all ? []:selectedIds,dataSourceIds:[]}}));
+          return vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'更新所选范围的源码和索引',cancellable:false},()=>run(key,'scope-apply',{settings}));
         });
       } catch(error) {scopeError=error;}
       ui.invalidate(key);ui.setIndexResult(key,pulled?.index);
@@ -440,7 +446,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
   if (vscode.workspace.registerTextDocumentContentProvider) {registrations.push(vscode.workspace.registerTextDocumentContentProvider('guthon-api-readonly',ui));registrations.push(vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME,quickDiff));}
   const viewId = 'gushenCompletion.sourceView';
   if (vscode.window.registerWebviewViewProvider) {
-    ui.treeView=new ViewTree({vscode,id:viewId,provider:ui,title:'当前项目源码',extensionPath:context.extensionPath});
+    ui.treeView=new ViewTree({vscode,id:viewId,provider:ui,title:'项目源码',extensionPath:context.extensionPath});
     registrations.push(ui.treeView);
   } else if (vscode.window.createTreeView) {
     ui.treeView = vscode.window.createTreeView(viewId, {treeDataProvider:ui,showCollapseAll:true});

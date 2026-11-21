@@ -122,6 +122,9 @@ def update_workspace_ignores(space):
         IGNORE_BEGIN,
         "/*/runtime/", "/*/context/",
         f"/{PROJECTS_DIRECTORY}/*/runtime/", f"/{PROJECTS_DIRECTORY}/*/context/",
+        f"/{PROJECTS_DIRECTORY}/**/checkout/",
+        f"/{PROJECTS_DIRECTORY}/**/readonly/",
+        f"/{PROJECTS_DIRECTORY}/**/database/",
         "/runtime/", "/nexus/", "/tools/", "/.guthon/", "/.codebuddy/settings.json",
         IGNORE_END,
     ])

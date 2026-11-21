@@ -428,7 +428,7 @@
       "guthon": [
         {"id":"gushenCompletion.projectOverview","name":"项目总览","type":"webview","initialSize":1},
         {"id":"gushenCompletion.projectDetails","name":"当前项目","type":"webview","initialSize":4},
-        {"id":"gushenCompletion.sourceView","name":"当前项目源码","type":"webview","initialSize":2}
+        {"id":"gushenCompletion.sourceView","name":"项目源码","type":"webview","initialSize":2}
       ]
     },
     "submenus": [

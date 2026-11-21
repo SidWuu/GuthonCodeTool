@@ -245,7 +245,7 @@ class ApiSourceUI {
     }
     this.projectMessage=message;
     if(this.treeView) {
-      this.treeView.title=workspace?`当前项目源码 · ${workspace.name || workspace.displayName}`:'当前项目源码';
+      this.treeView.title=workspace?`项目源码 · ${workspace.name || workspace.displayName}`:'项目源码';
       this.treeView.setScope?.(JSON.stringify([workspace?.workspaceKey,workspace?.root,workspace?.sourceMode]));
     }
     if(changed || this.treeView) this.refresh();

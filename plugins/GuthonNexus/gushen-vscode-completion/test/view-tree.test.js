@@ -15,12 +15,12 @@ test('source view reveal expands its original ancestors and dispatches context a
   const messages=[],calls=[];
   const disposable={dispose(){}};
   const vscode={window:{registerWebviewViewProvider:()=>disposable},commands:{executeCommand:async(...args)=>calls.push(args)}};
-  const tree=new ViewTree({vscode,id:'gushenCompletion.sourceView',provider,title:'当前项目源码',
+  const tree=new ViewTree({vscode,id:'gushenCompletion.sourceView',provider,title:'项目源码',
     extensionPath:path.resolve(__dirname,'..')});
   const webview={onDidReceiveMessage:()=>disposable,postMessage:async message=>messages.push(message)};
   const view={webview,onDidDispose(){},show:preserve=>calls.push(['show',preserve])};
   tree.resolveWebviewView(view);
-  tree.title='当前项目源码 · 项目甲';
+  tree.title='项目源码 · 项目甲';
   assert.equal(view.description,'项目甲');
   await tree.receive({type:'ready'});
   assert.deepEqual(messages.at(-1).rows.map(row=>row.label),['过程函数']);
@@ -43,7 +43,7 @@ test('source view reveal expands its original ancestors and dispatches context a
   tree.setScope('project-b');
   await tree.receive({type:'context',generation,id:reveal,command:'gushenCompletion.showApiReferences'});
   assert.equal(calls.length,3);
-  tree.title='当前项目源码';
+  tree.title='项目源码';
   assert.equal(view.description,undefined);
   tree.dispose();
 });

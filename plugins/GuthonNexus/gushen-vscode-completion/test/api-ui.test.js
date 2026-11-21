@@ -67,6 +67,28 @@ test('subsystem selection reads lightweight project settings',async t=>{
   await handlers.get('gushenCompletion.selectApiSystems')('projects.A');
   assert.deepEqual(summaries[0],{summaryOnly:true,changesOnly:true});assert.deepEqual(calls,[]);await api.dispose();
 });
+test('an initialized project without a source baseline saves its scope without pulling or indexing',async t=>{
+  const calls=[],messages=[],handlers=new Map();
+  mockStateClient(t,undefined,
+    async()=>({ok:true,checkoutPath:'/checkout',hasSourceBaseline:false,index:{ready:false,sizeBytes:0},
+      settings:{allSystems:false,systemIds:[],dataSourceIds:[]}}),
+    async(_tool,_command,args)=>{
+      assert.equal(args[0],'systems');
+      return {ok:true,systems:[{systemId:'A',systemName:'系统',dataSourceId:'D'}]};
+    });
+  const vscode={workspace:{textDocuments:[]},commands:{registerCommand:(name,handler)=>(handlers.set(name,handler),{dispose(){}})},
+    window:{showQuickPick:async items=>items.filter(x=>x.systemId==='A'),
+      showInformationMessage:async message=>messages.push(message),showErrorMessage:async message=>assert.fail(message)}};
+  const processClient={request:async(_tool,_command,args,_key,input)=>{
+    calls.push({action:args[0],input});return {ok:true,settings:input};
+  }};
+  const api=activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/fake',toolHome:'/data'}),processClient});
+  try {
+    await handlers.get('gushenCompletion.selectApiSystems')('projects.A');
+    assert.deepEqual(calls,[{action:'configure',input:{allSystems:false,systemIds:['A'],dataSourceIds:[]}}]);
+    assert.match(messages[0],/同步范围已保存.*更新源码/);
+  } finally {await api.dispose();}
+});
 function scopeFixture(t,{cancelAt,scopeFailure,scopeResult,statusFailure=false,partial=false,dirty=false,noIndex=false,watchEvents=false,viewScm=false}={}) {
   const events=[],errors=[],warnings=[],reports=[],handlers=new Map(),documents=dirty?[{uri:{scheme:'file',fsPath:'/checkout/systems/OLD/pages/main/P/p.xml'},isDirty:true,version:3}]:[];
   let picks=0,releaseScope,changeHandler;const settings={allSystems:false,systemIds:['OLD'],dataSourceIds:[],serverUrl:'https://fixture.invalid'};

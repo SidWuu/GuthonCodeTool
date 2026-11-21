@@ -201,7 +201,7 @@ test('Nexus presents project overview, current card and current source in order'
   assert.deepEqual(manifest.contributes.views.guthon.map(({id,name})=>({id,name})),[
     {id:'gushenCompletion.projectOverview',name:'项目总览'},
     {id:'gushenCompletion.projectDetails',name:'当前项目'},
-    {id:'gushenCompletion.sourceView',name:'当前项目源码'}]);
+    {id:'gushenCompletion.sourceView',name:'项目源码'}]);
   assert(!extension.includes('ToolTreeDataProvider'));assert(!extension.includes('gushenCompletion.toolView'));
   assert(manifest.contributes.commands.some(x=>x.command==='gushenCompletion.showProjectActions'));
   const commands=new Map(manifest.contributes.commands.map(x=>[x.command,x]));

@@ -146,6 +146,7 @@ def execute(workspace, action, payload):
             "settings": settings(workspace),
             "checkoutPath": str(workspace["providerSourceRoot"]),
             "workspaceRoot": str(workspace["root"]),
+            "hasSourceBaseline": store.path.is_file(),
             "files": [item for item in files if item["state"] != "CLEAN"]
             if changes_only else files,
             "summary": {

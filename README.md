@@ -17,7 +17,7 @@
 
 将 GuthonCodeTool 和 Nexus VSIX 放在上一级目录，在 IDE 打开自己新建的开发目录（默认可命名为 `var`），从 Nexus 初始化。配置生成在上一级，日常继续打开同一个开发目录。在 Nexus 添加项目时，目录创建在开发根的 `workspace/` 下。选择 API 项目并登录，再选同步范围，首次拉取同时建立索引。Codex 可打开具体项目目录，继承开发根的 `AGENTS.md`。需要浏览器辅助或团队治理时分别安装对应组件。
 
-当前分支已接入公共配置契约：保留 API schema 2，新增 schema 3，并可只读解析旧 SVN/DATABASE 分类 YAML，保留原 key、路径和字段映射。Nexus 已接入“项目总览＋当前项目卡片＋当前项目源码”和配置诊断。SVN/DATABASE 通过各自入口更新源码、查看变更和操作记录，旧配置加载保留原文。配置可离线预览、备份并显式升级至 schema 3。SVN 到 API 已接入源侧预检，候选下载与切换仍在实施。源码实现、已安装客户端、平台回读和业务运行是不同验证阶段。详见 [使用手册](docs/GuthonCodeTool_使用手册.html) 和 [全功能说明](docs/GuthonCodeTool_全功能说明.html)。
+当前分支已接入公共配置契约：保留 API schema 2，新增 schema 3，并可只读解析旧 SVN/DATABASE 分类 YAML，保留原 key、路径和字段映射。Nexus 已接入“项目总览＋当前项目卡片＋项目源码”和配置诊断。SVN/DATABASE 通过各自入口更新源码、查看变更和操作记录，旧配置加载保留原文。配置可离线预览、备份并显式升级至 schema 3。SVN 到 API 已接入源侧预检，候选下载与切换仍在实施。源码实现、已安装客户端、平台回读和业务运行是不同验证阶段。详见 [使用手册](docs/GuthonCodeTool_使用手册.html) 和 [全功能说明](docs/GuthonCodeTool_全功能说明.html)。
 
 ## 开发与维护
 
