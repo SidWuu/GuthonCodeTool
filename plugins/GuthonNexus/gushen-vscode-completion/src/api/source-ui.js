@@ -186,8 +186,9 @@ async function showReport(vscode,title,lines) {
 }
 
 class ApiSourceUI {
-  constructor({vscode, run, onUpdated, onStatus, editorState, onSourceChanged, onWorkspace, onOpenVirtual, onOpenModule, onModuleUpload, indexRecovery, reviewUpload=selectUploadFiles}) {
+  constructor({vscode, run, onUpdated, onStatus, editorState, onSourceChanged, onWorkspace, onOpenVirtual, onOpenModule, onModuleUpload, indexRecovery, canLoadMenu=()=>true, reviewUpload=selectUploadFiles}) {
     this.onStatus=onStatus;
+    this.canLoadMenu=canLoadMenu;
     this.vscode=vscode; this.run=run; this.reviewUpload=reviewUpload; this.onUpdated=onUpdated; this.editorState=editorState; this.onSourceChanged=onSourceChanged; this.onWorkspace=onWorkspace; this.onOpenVirtual=onOpenVirtual; this.indexRecovery=indexRecovery;this.onOpenModule=onOpenModule;this.onModuleUpload=onModuleUpload; this.scopeGeneration=0;this.watchers=new Map(); this.workspaces=new Map(); this.controls=new Map();this.scmGenerations=new Map();this.sourceChanges=new Map();
     this.diffProvider=new SourceDiffProvider(vscode,run);
     this.emitter = vscode.EventEmitter ? new vscode.EventEmitter() : undefined;
@@ -270,7 +271,12 @@ class ApiSourceUI {
       : sourceTreeIdentity(item.label,item.systemId || item.dataSourceId,item.label);
     const tree=new v.TreeItem(display.label, item.children || isPage ? v.TreeItemCollapsibleState.Collapsed : v.TreeItemCollapsibleState.None);
     if(display.code)tree.guthonCode=display.code;
-    if(item.kind==='message') {tree.tooltip=item.label;if(item.command) tree.command={command:item.command,title:item.label,arguments:[item.key]};return tree;}
+    if(item.kind==='message') {
+      tree.tooltip=item.label;
+      if(item.contextValue)tree.contextValue=item.contextValue;
+      if(item.command)tree.command={command:item.command,title:item.label,arguments:[item.key]};
+      return tree;
+    }
     if(item.kind==='fragment') {
       if(v.ThemeIcon)tree.iconPath=new v.ThemeIcon(item.target.fragmentType==='fields'?'symbol-field':'code',new v.ThemeColor('charts.blue'));
       tree.contextValue=item.target.fragmentType==='fields' ? 'guthonApi.fragment.fields' : 'guthonApi.fragment.script';tree.tooltip=item.target.jsonPointer;
@@ -368,12 +374,16 @@ class ApiSourceUI {
         this.indexDiagnostics.set(item.key,{complete:false,diagnosticCount:partial,diagnostics:diagnostics.slice(0,100),truncated:diagnostics.length>100});
       }
       const diagnostic=this.indexDiagnostics.get(item.key);const count=Math.max(partial,diagnostic?.diagnosticCount || 0);
-      if(count || diagnostic?.complete===false) root.children.push({kind:'message',label:`索引不完整${count ? `：${count} 个诊断` : ''}，点击查看`,key:item.key,parent:item,command:diagnostic ? 'gushenCompletion.showApiIndexDiagnostics' : 'gushenCompletion.reindexCalls'});
+      if(count || diagnostic?.complete===false) root.children.push({
+        kind:'message',contextValue:'guthonApi.indexIncomplete',
+        label:`索引不完整${count ? `：${count} 个诊断` : ''}，点击查看`,
+        key:item.key,parent:item,command:'gushenCompletion.showApiIndexDiagnostics',
+      });
       const recovery=this.indexRecovery?.(item.key);if(recovery?.paths.length) root.children.push({kind:'message',label:`${recovery.paths.length} 个源码文件等待索引更新，点击重试`,key:item.key,parent:item,command:'gushenCompletion.retryApiIndexFailures'});
       this.sourceNames.set(item.key,new Map(objects.map(object=>[object.referenceFields?.snapshotPath || object.path,sourceLabel(object)])));
       this.decorationEmitter?.fire();
       this.indexGenerations.set(item.key,generation);this.treeCache.set(item.key,root.children);
-      if(project?.systems?.length && !Array.isArray(project.menuTree) && !this.menuAttempts.has(item.key)) {
+      if(project?.systems?.length && !Array.isArray(project.menuTree) && !this.menuAttempts.has(item.key) && this.canLoadMenu()) {
         this.menuAttempts.add(item.key);const version=this.treeVersion;
         void this.run(item.key,'system-menu').then(result=>{
           const menu=Array.isArray(result.menu) ? result.menu : result.menu?.list;

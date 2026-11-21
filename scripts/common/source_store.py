@@ -22,15 +22,19 @@ def _restore(workspace, directory, journal):
         if not isinstance(backup_name, str) or not re.fullmatch(r"backup-\d+", backup_name):
             raise ValueError("Invalid source recovery backup; manual recovery required")
         backup = directory / backup_name
-        if target == root or not target.resolve().is_relative_to(root) or backup.is_symlink() or backup.parent.resolve() != directory.resolve():
+        safe_target = target.parent.resolve() / target.name
+        if target != safe_target or target == root or not target.is_relative_to(root) or backup.parent.resolve() != directory.resolve():
             raise ValueError("Invalid source recovery path; manual recovery required")
-        if backup.exists():
-            if target.exists():
+        if backup.is_symlink() and not entry.get("allowLink"):
+            raise ValueError("Invalid source recovery link; manual recovery required")
+        if backup.exists() or backup.is_symlink() or not entry["existed"]:
+            if target.is_symlink():
+                target.unlink()
+            elif target.exists():
                 shutil.rmtree(target)
+        if backup.exists() or backup.is_symlink():
             target.parent.mkdir(parents=True, exist_ok=True)
             backup.replace(target)
-        elif not entry["existed"] and target.exists():
-            shutil.rmtree(target)
 
 
 def recover(conn, workspace):
@@ -49,22 +53,25 @@ def recover(conn, workspace):
         shutil.rmtree(directory)
 
 
-def prepare_path(path):
+def prepare_path(path, *, allow_link=False):
     active = _ACTIVE.get()
     if active is None:
         return
-    path = Path(path).resolve()
+    path = Path(path)
+    path = path.parent.resolve() / path.name if allow_link else path.resolve()
     root = active["workspace"]["readonlyDir"].resolve()
     if path == root or not path.is_relative_to(root):
         raise ValueError("Source update path is outside the selected readonly mirror")
     if any(entry["target"] == str(path) for entry in active["journal"]["paths"]):
         return
     name = f"backup-{len(active['journal']['paths'])}"
-    entry = {"target": str(path), "backup": name, "existed": path.exists()}
+    entry = {"target": str(path), "backup": name, "existed": path.exists() or path.is_symlink()}
+    if allow_link:
+        entry["allowLink"] = True
     active["journal"]["paths"].append(entry)
     atomic_text(active["directory"] / "journal.json", json.dumps(active["journal"]))
-    if path.exists():
-        if path.is_symlink() or not path.is_dir():
+    if entry["existed"]:
+        if not (allow_link and path.is_symlink()) and (path.is_symlink() or not path.is_dir()):
             raise ValueError("Source mirror path must be a physical directory")
         path.replace(active["directory"] / name)
 
@@ -91,5 +98,6 @@ def source_transaction(conn, workspace):
             raise
         finally:
             _ACTIVE.reset(token)
-            if committed or not any((directory / entry["backup"]).exists() for entry in journal["paths"]):
+            if committed or not any((directory / entry["backup"]).exists() or (directory / entry["backup"]).is_symlink()
+                                    for entry in journal["paths"]):
                 shutil.rmtree(directory)

@@ -48,6 +48,7 @@
     "onCommand:gushenCompletion.openToolHome",
     "onCommand:gushenCompletion.editConfig",
     "onCommand:gushenCompletion.reindexCalls",
+    "onCommand:gushenCompletion.repairApiIndex",
     "onCommand:gushenCompletion.showProjectIndex",
     "onCommand:gushenCompletion.retryApiIndexFailures",
     "onCommand:gushenCompletion.exportMarkdown",
@@ -316,7 +317,8 @@
       {"command":"gushenCompletion.openToolHome","title":"Guthon Nexus: 打开本地数据目录","shortTitle":"打开本地数据目录"},
       {"command":"gushenCompletion.editConfig","title":"Guthon Nexus: 编辑配置文件"},
       {"command":"gushenCompletion.retryApiIndexFailures","title":"Guthon Nexus: 重试待更新索引"},
-      {"command":"gushenCompletion.reindexCalls","title":"Guthon Nexus: 重建索引"},
+      {"command":"gushenCompletion.reindexCalls","title":"Guthon Nexus: 重建索引","shortTitle":"重建索引"},
+      {"command":"gushenCompletion.repairApiIndex","title":"Guthon Nexus: 修复索引","shortTitle":"修复索引"},
       {"command":"gushenCompletion.exportMarkdown","title":"Guthon Nexus: 导出源码索引文档","shortTitle":"导出源码说明"},
       {"command":"gushenCompletion.exportSchema","title":"Guthon Nexus: 导出表结构","shortTitle":"导出表结构"},
       {"command":"gushenCompletion.exportBillTypes","title":"Guthon Nexus: 导出单据类型","shortTitle":"导出单据类型"},
@@ -451,6 +453,7 @@
     ],
     "menus": {
       "commandPalette": [
+        {"command":"gushenCompletion.repairApiIndex","when":"false"},
         {"command":"gushenCompletion.projectMenuOpenCheckout","when":"false"},
         {"command":"gushenCompletion.projectMenuSourceConnection","when":"false"},
         {"command":"gushenCompletion.projectMenuSourceScope","when":"false"},
@@ -508,6 +511,8 @@
       ],
       "view/item/context": [
         {"command":"gushenCompletion.deleteWorkspace","when":"view == gushenCompletion.projectOverview && viewItem == guthonProject.project.api","group":"9_manage@1"},
+        {"command":"gushenCompletion.reindexCalls","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.indexIncomplete","group":"index@1"},
+        {"command":"gushenCompletion.repairApiIndex","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.indexIncomplete","group":"index@2"},
         {"command":"gushenCompletion.openDatabaseWorkcopy","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonDatabase(WorkcopySource|Procedure)$/","group":"navigation@1"},
         {"command":"gushenCompletion.showDatabaseWorkcopyDiff","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonDatabase(WorkcopySource|Procedure)$/","group":"navigation@2"},
         {"command":"gushenCompletion.showDatabaseProcedureCallers","when":"view == gushenCompletion.sourceView && viewItem == guthonDatabaseProcedure","group":"navigation@3"},

@@ -93,6 +93,8 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     }
     return authentication;
   };
+  let sourceUpdate;
+  const sourceUpdateInProgress=()=>!!sourceUpdate;
   const invalidateStatus=key=>{lastStatus.delete(key);statusEpochs.set(key,(statusEpochs.get(key)||0)+1);};
   const run = async (key,action,input) => {
     if(action==='status') {
@@ -106,6 +108,9 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       statusRequests.set(requestKey,request);return request;
     }
     const current=await resolveRequestContext();
+    if(sourceUpdate && REMOTE_ACTIONS.has(action)) {
+      throw Object.assign(new Error('正在更新 API 源码和索引，请在更新完成后再执行此操作。'),{code:'API_SOURCE_UPDATE_RUNNING'});
+    }
     const sessionKey=JSON.stringify([current.lifecycle,current.identity,key]);
     const authentication=authenticationFor(current);
     const invoke=async()=>{
@@ -123,9 +128,13 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       if(action==='session')await assertRequestContext(current);
       if(output) {
         output.appendLine(`谷神 API · ${action} · ${key} · ${result.complete===false?'部分完成，请核对结果':'已返回处理结果'}${result.operationId ? ' · 操作编号 '+result.operationId : ''}`);
-        if(result.index)output.appendLine(`索引${result.index.complete?'完成':'未完成'} · 诊断 ${result.index.diagnosticCount ?? '未返回'} 项`);
+        if(result.index) {
+          const indexStatus=result.index.complete?'完成':result.index.indexGeneration?'已建立，部分源码待解析':'未完成';
+          output.appendLine(`索引${indexStatus} · 诊断 ${result.index.diagnosticCount ?? '未返回'} 项`);
+        }
       }
       if(action==='login'){ui.menuAttempts.delete(key);ui.invalidate(key);ui.refresh();}
+      if(action==='scope-save')invalidateStatus(key);
       if(action==='configure'){invalidateStatus(key);if(result.index){ui.invalidate(key);ui.setIndexResult(key,result.index);}}
       return result;
     }
@@ -135,6 +144,10 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       const pending=sessionRequests.get(sessionKey);if(pending) return pending;
       const request=invoke().finally(()=>{if(sessionRequests.get(sessionKey)===request) sessionRequests.delete(sessionKey);});
       sessionRequests.set(sessionKey,request);return request;
+    }
+    if(action==='pull' || action==='scope-apply') {
+      sourceUpdate=invoke();
+      try {return await sourceUpdate;} finally {sourceUpdate=undefined;}
     }
     return invoke();
   };
@@ -152,7 +165,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
   const closeEditorState=()=>closingEditorState ||= editorState.close().finally(()=>stateProcessClient.dispose());
   let pageEditor,virtualFs,virtualRegistration,sourceWatcher,selectWorkspace,inheritanceDecorations,moduleEditor,workspaceSyncGeneration=0;
   const deferredScopeEvents=new Map(),designerPanels=new Map();
-  const ui = new ApiSourceUI({vscode,run,onUpdated,onStatus,editorState,onOpenModule:(key,path)=>getModuleEditor().open(key,path),onModuleUpload:(key,paths)=>getModuleEditor().upload(key,paths),onWorkspace:(key,root)=>sourceWatcher.register(key,root),indexRecovery:key=>sourceWatcher.recovery(key),onOpenVirtual:async identity=>{getPageEditor();return virtualFs.openEditor(identity);},onSourceChanged:async(key,paths)=>{
+  const ui = new ApiSourceUI({vscode,run,onUpdated,onStatus,editorState,canLoadMenu:()=>!sourceUpdateInProgress(),onOpenModule:(key,path)=>getModuleEditor().open(key,path),onModuleUpload:(key,paths)=>getModuleEditor().upload(key,paths),onWorkspace:(key,root)=>sourceWatcher.register(key,root),indexRecovery:key=>sourceWatcher.recovery(key),onOpenVirtual:async identity=>{getPageEditor();return virtualFs.openEditor(identity);},onSourceChanged:async(key,paths)=>{
     try {
       virtualFs?.invalidate(key,paths);
       const deferred=deferredScopeEvents.get(key);
@@ -241,8 +254,9 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     selectApiSystems: async key => {
       const result = await run(key,'systems');
       const current = await readProjectSummary(key);
-      const items = [{label:'全部子系统',description:'明确选择后才拉取全部',systemId:'*',picked:current.settings.allSystems},
-        ...result.systems.map(s=>({label:s.systemName || s.systemId,description:s.systemId,systemId:s.systemId,picked:current.settings.systemIds.includes(s.systemId)}))];
+      const scope=current.pendingScope || current.settings;
+      const items = [{label:'全部子系统',description:'明确选择后才拉取全部',systemId:'*',picked:scope.allSystems},
+        ...result.systems.map(s=>({label:s.systemName || s.systemId,description:s.systemId,systemId:s.systemId,picked:scope.systemIds.includes(s.systemId)}))];
       const selected = await vscode.window.showQuickPick(items,{title:'选择需要拉取的子系统',canPickMany:true});
       if (!selected) return;
       if(!selected.length)throw new Error('请至少选择一个子系统');
@@ -252,45 +266,48 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       const related = new Set(result.systems.filter(x=>selectedIds.includes(x.systemId)).map(x=>x.dataSourceId).filter(Boolean));
       if(!related.size)throw new Error('所选子系统缺少数据源关联，请先核对平台配置');
       const settings={allSystems:all,systemIds:all ? []:selectedIds,dataSourceIds:[]};
-      if(current.hasSourceBaseline===false && current.index?.sizeBytes===0) {
-        const saved=await run(key,'configure',settings);
-        onUpdated?.();
-        await vscode.window.showInformationMessage('同步范围已保存。点击“更新源码”后开始拉取并建立索引。');
-        return saved;
-      }
+      const saved=await run(key,'scope-save',settings);
+      onUpdated?.();
+      await vscode.window.showInformationMessage('同步范围已保存。点击“更新源码”后开始拉取并更新索引。');
+      return saved;
+    },
+    pullApiSource: async key => {
+      if(sourceUpdateInProgress())return vscode.window.showInformationMessage('正在更新 API 源码和索引。');
+      const state=await ui.status(key);
+      const scopePending=!!state.pendingScope;
       let pulled,refreshError,scopeError;
       try {
-        await ui.ensureWorkspace(key);
+        if(!scopePending) assertClean(vscode,state.checkoutPath);
         pulled=await withDeferredIndexEvents(key,async()=>{
           await editorState.flush(key);
-          return vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'更新所选范围的源码和索引',cancellable:false},()=>run(key,'scope-apply',{settings}));
+          return vscode.window.withProgress({location:vscode.ProgressLocation.Notification,
+            title:scopePending?'更新所选范围的源码和索引':'通过 API 拉取当前范围源码',cancellable:false},()=>run(key,'pull'));
         });
-      } catch(error) {scopeError=error;}
-      ui.invalidate(key);ui.setIndexResult(key,pulled?.index);
+      } catch(error) {
+        if(!scopePending)throw error;
+        scopeError=error;
+      }
+      const scopeResult=pulled?.kind==='scope-apply';
+      if(scopeError || scopeResult)ui.invalidate(key);
+      ui.setIndexResult(key,pulled?.index);
       try {await ui.updateScm(key);} catch(error) {refreshError=error;}
       onUpdated?.();
       if(scopeError) {
         if(scopeError.code==='API_SCOPE_LOCAL_CHANGES') {
-          const detail=`${scopeError.message}\n\n保存到磁盘后源码仍可能属于本地修改。请先保存未保存文档，处理冲突，并按需上传、撤销或导出并妥善处理本地修改；未登记文件请先移出退出范围并保留。处理完成后重新选择子系统。${refreshError ? `\n\n状态刷新失败：${refreshError.message}` : ''}`;
-          const action=await vscode.window.showWarningMessage('退出范围存在未处理的本地内容，原范围未更改。',{modal:true,detail},'查看本地修改');
+          const detail=`${scopeError.message}\n\n请先保存未保存文档，处理冲突，并按需上传、撤销或导出本地修改。未登记文件请先移出退出范围并保留。处理完成后再次点击“更新源码”。${refreshError ? `\n\n状态刷新失败：${refreshError.message}` : ''}`;
+          const action=await vscode.window.showWarningMessage('退出范围存在未处理的本地内容，已保留这些文件。',{modal:true,detail},'查看本地修改');
           if(action==='查看本地修改')await vscode.commands.executeCommand('workbench.view.scm');
           return;
         }
         await vscode.window.showErrorMessage(`范围更新未完成${scopeError.code ? `（${scopeError.code}）` : ''}：${scopeError.message}；请核对当前范围和源码状态${refreshError ? `；状态刷新失败：${refreshError.message}` : ''}`);
         return;
       }
+      if(!scopeResult) {
+        if(refreshError)await vscode.window.showErrorMessage(`源码状态刷新失败：${refreshError.message}。拉取与索引结果见报告。`);
+        await showReport(vscode,'API 源码拉取结果',sourceSyncLines(key,pulled));return pulled;
+      }
       if(refreshError) await vscode.window.showErrorMessage(`${pulled.complete===true?'范围和源码已更新':'范围更新未完成'}，但状态刷新失败：${refreshError.message}`);
       await showReport(vscode,'API 范围更新结果',scopeReportLines(key,pulled));return pulled;
-    },
-    pullApiSource: async key => {
-      const state = await ui.status(key);
-      assertClean(vscode,state.checkoutPath);
-      await editorState.flush(key);
-      const result = await withDeferredIndexEvents(key,()=>vscode.window.withProgress(
-        {location:vscode.ProgressLocation.Notification,title:'通过 API 拉取当前范围源码',cancellable:false},()=>run(key,'pull')));
-      ui.setIndexResult(key,result.index);await ui.updateScm(key);onUpdated?.();
-      await showReport(vscode,'API 源码拉取结果',sourceSyncLines(key,result));
-
     },
     openApiCheckout: async key => {
       if(selectWorkspace && !await selectWorkspace(key,{switchWindow:true}))return;
@@ -481,6 +498,6 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     if(generation!==workspaceSyncGeneration)return;
     return Promise.all(visible.map(w=>ui.updateScm(typeof w==='string'?w:w.workspaceKey)));
   }
-  return {run,readProjectSummary,sourceTree:ui,editorState,inheritedRange:document=>virtualFs?.records.get(document.uri.toString())?.inherited,sourceUri:async(key,p)=>{const state=await ui.ensureWorkspace(key),source=await run(key,'read',{path:p});if(['METADATA_ONLY','IDENTITY_MISMATCH','SQL_ABSENT'].includes(source.contentState)) return ui.readonlyUri(key,p,source.content);if(source.metadata?.sourceType==='module-parameter'){getPageEditor();return uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:'module-parameter',jsonPointer:'/data',fragmentType:'json'});}if(source.metadata?.sourceType==='view' || isInlineInherited(key,p,source)){getPageEditor();const uri=uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:source.metadata.sourceType,jsonPointer:source.metadata.sourceType==='view'?'/viewSql':'',fragmentType:source.metadata.sourceType==='view'?'sql':source.metadata.sourceType==='system-script'?'js':'gss'});editorState.assertNoDirtyDocumentsExcept(key,p,uri);return uri;}return vscode.Uri.file(filePath(state.checkoutPath,p));},setSelectWorkspace:selector=>{selectWorkspace=selector;},openFragment:async target=>{await ui.ensureWorkspace(target.workspaceKey);getPageEditor();return virtualFs.open(target,{viewColumn:vscode.ViewColumn.Beside});},syncWorkspaces,refreshWorkspace:key=>ui.updateScm(key),retryIndex:key=>sourceWatcher.retry(key),markIndexed:(key,generation)=>sourceWatcher.markIndexed(key,generation),reset:async()=>{workspaceSyncGeneration++;requestLifecycle++;statusRequests.clear();sessionRequests.clear();statusEpochs.clear();lastStatus.clear();authentications.clear();await sourceWatcher.reset();await editorState.reset();await mcpSessionHost.close();mcpSessionHost=new (require('./mcp-session-host').McpSessionHost)({run});pageEditor?.dispose();if(pageEditor) await Promise.all([...pageEditor.pages.values()].map(session=>session.persistence).filter(Boolean));virtualRegistration?.dispose();inheritanceDecorations?.dispose();virtualFs?.dispose();pageEditor=virtualFs=virtualRegistration=inheritanceDecorations=moduleEditor=undefined;ui.clear();},dispose:async()=>{await mcpSessionHost.close();pageEditor?.dispose();await sourceWatcher.close();ui.dispose();try {await closeEditorState();} finally {statusProcessClient.dispose();try {await remoteProcessClient.stop();} finally {remoteProcessClient.dispose();}}}};
+  return {run,readProjectSummary,sourceUpdateInProgress,sourceTree:ui,editorState,inheritedRange:document=>virtualFs?.records.get(document.uri.toString())?.inherited,sourceUri:async(key,p)=>{const state=await ui.ensureWorkspace(key),source=await run(key,'read',{path:p});if(['METADATA_ONLY','IDENTITY_MISMATCH','SQL_ABSENT'].includes(source.contentState)) return ui.readonlyUri(key,p,source.content);if(source.metadata?.sourceType==='module-parameter'){getPageEditor();return uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:'module-parameter',jsonPointer:'/data',fragmentType:'json'});}if(source.metadata?.sourceType==='view' || isInlineInherited(key,p,source)){getPageEditor();const uri=uriFor(vscode,{workspaceKey:key,sourcePath:p,sourceType:source.metadata.sourceType,jsonPointer:source.metadata.sourceType==='view'?'/viewSql':'',fragmentType:source.metadata.sourceType==='view'?'sql':source.metadata.sourceType==='system-script'?'js':'gss'});editorState.assertNoDirtyDocumentsExcept(key,p,uri);return uri;}return vscode.Uri.file(filePath(state.checkoutPath,p));},setSelectWorkspace:selector=>{selectWorkspace=selector;},openFragment:async target=>{await ui.ensureWorkspace(target.workspaceKey);getPageEditor();return virtualFs.open(target,{viewColumn:vscode.ViewColumn.Beside});},syncWorkspaces,refreshWorkspace:key=>ui.updateScm(key),retryIndex:key=>sourceWatcher.retry(key),markIndexed:(key,generation)=>sourceWatcher.markIndexed(key,generation),reset:async()=>{workspaceSyncGeneration++;requestLifecycle++;statusRequests.clear();sessionRequests.clear();statusEpochs.clear();lastStatus.clear();authentications.clear();await sourceWatcher.reset();await editorState.reset();await mcpSessionHost.close();mcpSessionHost=new (require('./mcp-session-host').McpSessionHost)({run});pageEditor?.dispose();if(pageEditor) await Promise.all([...pageEditor.pages.values()].map(session=>session.persistence).filter(Boolean));virtualRegistration?.dispose();inheritanceDecorations?.dispose();virtualFs?.dispose();pageEditor=virtualFs=virtualRegistration=inheritanceDecorations=moduleEditor=undefined;ui.clear();},dispose:async()=>{await mcpSessionHost.close();pageEditor?.dispose();await sourceWatcher.close();ui.dispose();try {await closeEditorState();} finally {statusProcessClient.dispose();try {await remoteProcessClient.stop();} finally {remoteProcessClient.dispose();}}}};
 }
 module.exports={activateApi};

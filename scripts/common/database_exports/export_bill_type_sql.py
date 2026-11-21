@@ -172,6 +172,10 @@ def main(argv=None):
         data_source_ids = resolve_data_source_ids(
             conn, datasource_name, requested_data_source_ids
         )
+        index_sources = (
+            resolve_data_source_ids(conn, datasource_name)
+            if requested_data_source_ids else data_source_ids
+        )
         summary = export_bill_types(
             conn,
             output_dir,
@@ -183,9 +187,11 @@ def main(argv=None):
     payloads = []
     for path in sorted(output_dir.glob("*.json")):
         try:
-            payloads.append(json.loads(path.read_text(encoding="utf-8")))
+            payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        if isinstance(payload, dict) and str(payload.get("dataSourceId")) in index_sources:
+            payloads.append(payload)
     with gusen_hub.index_connection(
         workspace,
         action="billtype-index",

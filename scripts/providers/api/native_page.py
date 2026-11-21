@@ -226,7 +226,17 @@ def is_metadata_only(text, metadata, path):
     keys = ("systemId", "pageSubId", "pageId", "fileName")
     if any(not isinstance(metadata.get(key), str) or not metadata[key].strip() for key in keys):
         return False
-    if str(metadata.get("pageType", "")) in {"", "0"} or metadata.get("isInhert") not in (None, "", 0, "0"):
+    if str(metadata.get("pageType", "")) in {"", "0"}:
+        return False
+    inheritance = metadata.get("isInhert")
+    if inheritance in (1, "1"):
+        from .page_source import BATCH_EXPORT
+
+        # Inherited projects can export an empty child layer. Only recognize
+        # the unchanged batch representation, never infer a native edit model.
+        if metadata.get("pageSource") != BATCH_EXPORT:
+            return False
+    elif inheritance not in (None, "", 0, "0"):
         return False
     expected = page_source_path(metadata["systemId"], metadata["pageSubId"], metadata["pageId"], metadata["fileName"])
     if path != expected or hashlib.sha256(text.encode("utf-8")).hexdigest() != metadata.get("remoteHash"):

@@ -83,7 +83,8 @@ test('all three headers use native title actions with global and project submenu
     'gushenCompletion.openProjectDirectory','gushenCompletion.projectMenuOpenCheckout','gushenCompletion.generateMcpConfiguration',
     'gushenCompletion.migrateProjectDocs']);
   const wrappers=[...commands.keys()].filter(command=>command.startsWith('gushenCompletion.projectMenu'));
-  assert.deepEqual(contributes.menus.commandPalette.map(x=>x.command).sort(),[...wrappers,'gushenCompletion.exportApiChanges','gushenCompletion.importApiChanges'].sort());
+  assert.deepEqual(contributes.menus.commandPalette.map(x=>x.command).sort(),
+    [...wrappers,'gushenCompletion.exportApiChanges','gushenCompletion.importApiChanges','gushenCompletion.repairApiIndex'].sort());
   assert(contributes.menus.commandPalette.every(x=>x.when==='false'));assert.equal(commands.get('gushenCompletion.showProjectActions').title,'Guthon Nexus: 项目全部操作');
 });
 

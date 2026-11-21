@@ -61,16 +61,17 @@ test('subsystem selection reads lightweight project settings',async t=>{
   mockStateClient(t,undefined,async(_tool,_command,args,_key,input)=>{assert.equal(args[0],'status');summaries.push(input);return {ok:true,checkoutPath:'/checkout',settings:{allSystems:false,systemIds:['A'],dataSourceIds:[]}};},
     async(_tool,_command,args)=>args[0]==='systems'?{ok:true,systems:[{systemId:'A',systemName:'系统',dataSourceId:'D'}]}:args[0]==='data-sources'?{ok:true,dataSources:[]}:{ok:true,complete:true,downloadComplete:true,index:{complete:true,indexGeneration:'new'}});
   const vscode={ProgressLocation:{Notification:1},workspace:{textDocuments:[],openTextDocument:async value=>value},commands:{registerCommand:(name,handler)=>(handlers.set(name,handler),{dispose(){}})},
-    window:{showQuickPick:async items=>items.filter(x=>x.systemId==='A'),withProgress:async(_options,fn)=>fn(),showTextDocument:async()=>{},showErrorMessage:async message=>assert.fail(message)}};
+    window:{showQuickPick:async()=>undefined,showErrorMessage:async message=>assert.fail(message)}};
   const primary={request:async(_tool,_command,args,_key,input)=>(calls.push({action:args[0],input}),{ok:true})};
   const api=activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/fake',toolHome:'/data'}),processClient:primary});
   await handlers.get('gushenCompletion.selectApiSystems')('projects.A');
   assert.deepEqual(summaries[0],{summaryOnly:true,changesOnly:true});assert.deepEqual(calls,[]);await api.dispose();
 });
-test('an initialized project without a source baseline saves its scope without pulling or indexing',async t=>{
+test('new and initialized projects save scope without pulling or indexing',async t=>{
   const calls=[],messages=[],handlers=new Map();
+  let indexed=false;
   mockStateClient(t,undefined,
-    async()=>({ok:true,checkoutPath:'/checkout',hasSourceBaseline:false,index:{ready:false,sizeBytes:0},
+    async()=>({ok:true,checkoutPath:'/checkout',hasSourceBaseline:indexed,index:{ready:indexed,sizeBytes:indexed?4096:0},
       settings:{allSystems:false,systemIds:[],dataSourceIds:[]}}),
     async(_tool,_command,args)=>{
       assert.equal(args[0],'systems');
@@ -84,25 +85,32 @@ test('an initialized project without a source baseline saves its scope without p
   }};
   const api=activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/fake',toolHome:'/data'}),processClient});
   try {
-    await handlers.get('gushenCompletion.selectApiSystems')('projects.A');
-    assert.deepEqual(calls,[{action:'configure',input:{allSystems:false,systemIds:['A'],dataSourceIds:[]}}]);
-    assert.match(messages[0],/同步范围已保存.*更新源码/);
+    const select=handlers.get('gushenCompletion.selectApiSystems');
+    await select('projects.A');
+    indexed=true;
+    await select('projects.A');
+    const expected={action:'scope-save',input:{allSystems:false,systemIds:['A'],dataSourceIds:[]}};
+    assert.deepEqual(calls,[expected,expected]);
+    assert.equal(messages.length,2);
+    assert.ok(messages.every(message=>/同步范围已保存.*更新源码/.test(message)));
   } finally {await api.dispose();}
 });
 function scopeFixture(t,{cancelAt,scopeFailure,scopeResult,statusFailure=false,partial=false,dirty=false,noIndex=false,watchEvents=false,viewScm=false}={}) {
   const events=[],errors=[],warnings=[],reports=[],handlers=new Map(),documents=dirty?[{uri:{scheme:'file',fsPath:'/checkout/systems/OLD/pages/main/P/p.xml'},isDirty:true,version:3}]:[];
   let picks=0,releaseScope,changeHandler;const settings={allSystems:false,systemIds:['OLD'],dataSourceIds:[],serverUrl:'https://fixture.invalid'};
+  const pendingScope={allSystems:false,systemIds:['NEW'],dataSourceIds:[]};
   mockStateClient(t,({input})=>events.push({action:'editor-state',payload:input}),async(_tool,_command,_args,_key,input)=>{
-    events.push({action:input.summaryOnly?'summary':'status'});if(statusFailure && !input.summaryOnly)return {ok:false,error:{code:'STATUS_FAILED',message:'状态暂不可用'}};
-    return {ok:true,checkoutPath:'/checkout',settings,files:[],index:noIndex?{ready:false}:{ready:true,indexGeneration:'current'}};
+    events.push({action:input.summaryOnly?'summary':'status'});if(statusFailure && !input.summaryOnly && events.some(entry=>entry.action==='pull'))return {ok:false,error:{code:'STATUS_FAILED',message:'状态暂不可用'}};
+    return {ok:true,checkoutPath:'/checkout',settings,pendingScope,files:[],index:noIndex?{ready:false}:{ready:true,indexGeneration:'current'}};
   },async(_tool,_command,args,_key,input)=>{
     events.push({action:args[0],input});
     if(args[0]==='systems')return {ok:true,systems:[{systemId:'NEW',systemName:'新系统',dataSourceId:'D'}]};
     if(args[0]==='data-sources')return {ok:true,dataSources:[{dataSourceId:'EXTRA'}]};
-    if(args[0]==='scope-apply') {
+    if(args[0]==='pull') {
       const response=scopeFailure?{ok:false,error:{code:scopeFailure.code,message:scopeFailure.message}}:scopeResult || {ok:true,operationId:'scope-op',stage:partial?'PARTIAL':'COMPLETE',settingsSaved:true,complete:!partial,remoteDownloadComplete:true,downloadComplete:!partial,
         publication:{operationId:'publication-op',updated:['new.xml'],preserved:['existing.xml'],conflicts:partial?[{path:'conflict.xml',reason:'本地与远端均有修改'}]:[]},index:{complete:!partial,diagnosticCount:partial?1:0,indexGeneration:'pulled'}};
-      if(watchEvents)return new Promise(resolve=>{releaseScope=()=>resolve(response);});return response;
+      const result={kind:'scope-apply',...response};
+      if(watchEvents)return new Promise(resolve=>{releaseScope=()=>resolve(result);});return result;
     }
     throw Error(args[0]);
   });
@@ -116,92 +124,92 @@ function scopeFixture(t,{cancelAt,scopeFailure,scopeResult,statusFailure=false,p
   api.sourceTree.syncWorkspaces([{workspaceKey:'projects.A',checkoutPath:'/checkout'}]);
   return {api,events,errors,warnings,reports,handlers,pickCount:()=>picks,releaseScope:()=>releaseScope(),change:path=>changeHandler({fsPath:'/checkout/'+path})};
 }
-test('scope selection registers dirty buffers, applies scope once, and awaits final status refresh',async t=>{
-  const f=scopeFixture(t,{dirty:true});const result=await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');
-  const actions=f.events.map(x=>x.action),apply=actions.indexOf('scope-apply');
-  assert.equal(actions.filter(x=>x==='scope-apply').length,1);assert.ok(actions.indexOf('progress')<apply);
-  assert.deepEqual(f.events[apply].input,{settings:{allSystems:false,systemIds:['NEW'],dataSourceIds:[]}});
-  assert.equal(f.pickCount(),1);assert(!f.events.some(item=>item.action==='data-sources'));
+test('manual update applies the saved scope once and registers dirty buffers for backend protection',async t=>{
+  const f=scopeFixture(t,{dirty:true});const result=await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');
+  const actions=f.events.map(x=>x.action),apply=actions.indexOf('pull');
+  assert.equal(actions.filter(x=>x==='pull').length,1);assert.ok(actions.indexOf('progress')<apply);
+  assert.equal(f.events[apply].input,undefined);
+  assert.equal(f.pickCount(),0);assert(!f.events.some(item=>item.action==='data-sources'));
   assert.ok(f.events.slice(0,apply).some(x=>x.action==='editor-state' && x.payload.documents.some(d=>d.dirty && d.path.includes('/OLD/'))));
   assert.ok(actions.lastIndexOf('status')>apply);assert.ok(actions.lastIndexOf('card')>apply);assert.equal(result.complete,true);assert.match(f.reports[0],/总体结果：完成/);assert.deepEqual(f.errors,[]);await f.api.dispose();
 });
 test('cancelling the subsystem picker never applies the scope',async t=>{
   for(const cancelAt of [1]) {
     const f=scopeFixture(t,{cancelAt});await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');
-    assert.equal(f.events.some(x=>['configure','pull','scope-apply','editor-state'].includes(x.action)),false);assert.equal(f.reports.length,0);await f.api.dispose();t.mock.restoreAll();
+    assert.equal(f.events.some(x=>['scope-save','pull','scope-apply','editor-state'].includes(x.action)),false);assert.equal(f.reports.length,0);await f.api.dispose();t.mock.restoreAll();
   }
 });
 test('partial scope pull is reported accurately and still refreshes index and status',async t=>{
-  const f=scopeFixture(t,{partial:true});const result=await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');
+  const f=scopeFixture(t,{partial:true});const result=await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');
   assert.equal(result.complete,false);assert.equal(f.api.sourceTree.indexDiagnostics.get('projects.A').diagnosticCount,1);
-  assert.ok(f.events.findLastIndex(x=>x.action==='status')>f.events.findIndex(x=>x.action==='scope-apply'));assert.match(f.reports[0],/总体结果：未完成/);assert.match(f.reports[0],/索引诊断数量：1/);
+  assert.ok(f.events.findLastIndex(x=>x.action==='status')>f.events.findIndex(x=>x.action==='pull'));assert.match(f.reports[0],/总体结果：未完成/);assert.match(f.reports[0],/索引诊断数量：1/);
   assert.match(f.reports[0],/更新 1 个，保留 1 个，冲突 1 个/);assert.match(f.reports[0],/conflict\.xml/);assert.match(f.reports[0],/范围设置：已保存/);assert.deepEqual(f.errors,[]);await f.api.dispose();
 });
-test('scope selection performs the first pull when no index exists',async t=>{
-  const f=scopeFixture(t,{noIndex:true});const result=await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');
-  assert.equal(result.complete,true);assert.equal(f.events.filter(x=>x.action==='scope-apply').length,1);
-  assert.ok(f.events.findLastIndex(x=>x.action==='status')>f.events.findIndex(x=>x.action==='scope-apply'));assert.deepEqual(f.errors,[]);await f.api.dispose();
+test('manual update applies the first saved scope when no index exists',async t=>{
+  const f=scopeFixture(t,{noIndex:true});const result=await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');
+  assert.equal(result.complete,true);assert.equal(f.events.filter(x=>x.action==='pull').length,1);
+  assert.ok(f.events.findLastIndex(x=>x.action==='status')>f.events.findIndex(x=>x.action==='pull'));assert.deepEqual(f.errors,[]);await f.api.dispose();
 });
 test('failed scope apply reports its error without claiming whether settings were saved',async t=>{
-  const f=scopeFixture(t,{scopeFailure:{code:'API_SOURCE_STALE',message:'目标源码有未保存输入'}});await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');
-  assert.match(f.errors[0],/范围更新未完成.*API_SOURCE_STALE.*未保存/);assert.doesNotMatch(f.errors[0],/范围已保存/);assert.ok(f.events.findLastIndex(x=>x.action==='status')>f.events.findIndex(x=>x.action==='scope-apply'));assert.equal(f.reports.length,0);await f.api.dispose();
+  const f=scopeFixture(t,{scopeFailure:{code:'API_SOURCE_STALE',message:'目标源码有未保存输入'}});await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');
+  assert.match(f.errors[0],/范围更新未完成.*API_SOURCE_STALE.*未保存/);assert.doesNotMatch(f.errors[0],/范围已保存/);assert.ok(f.events.findLastIndex(x=>x.action==='status')>f.events.findIndex(x=>x.action==='pull'));assert.equal(f.reports.length,0);await f.api.dispose();
 });
 test('local changes block scope change with clear guidance and no automatic retry',async t=>{
-  const f=scopeFixture(t,{viewScm:true,scopeFailure:{code:'API_SCOPE_LOCAL_CHANGES',message:'退出范围存在本地更改：systems/OLD/pages/main/P/page.xml (MODIFIED)'}});await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');
-  assert.match(f.warnings[0].message,/原范围未更改/);assert.equal(f.warnings[0].options.modal,true);
-  assert.match(f.warnings[0].options.detail,/systems\/OLD\/pages\/main\/P\/page\.xml \(MODIFIED\)/);assert.match(f.warnings[0].options.detail,/保存到磁盘后源码仍可能属于本地修改/);
-  assert.match(f.warnings[0].options.detail,/上传、撤销或导出/);assert.match(f.warnings[0].options.detail,/未登记文件.*移出退出范围并保留/);assert.match(f.warnings[0].options.detail,/重新选择子系统/);
-  assert.equal(f.events.filter(x=>x.action==='scope-apply').length,1);assert.ok(f.events.some(x=>x.action==='workbench.view.scm'));assert.ok(f.events.findLastIndex(x=>x.action==='status')>f.events.findIndex(x=>x.action==='scope-apply'));await f.api.dispose();
+  const f=scopeFixture(t,{viewScm:true,scopeFailure:{code:'API_SCOPE_LOCAL_CHANGES',message:'退出范围存在本地更改：systems/OLD/pages/main/P/page.xml (MODIFIED)'}});await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');
+  assert.match(f.warnings[0].message,/已保留这些文件/);assert.equal(f.warnings[0].options.modal,true);
+  assert.match(f.warnings[0].options.detail,/systems\/OLD\/pages\/main\/P\/page\.xml \(MODIFIED\)/);
+  assert.match(f.warnings[0].options.detail,/上传、撤销或导出/);assert.match(f.warnings[0].options.detail,/未登记文件.*移出退出范围并保留/);assert.match(f.warnings[0].options.detail,/再次点击“更新源码”/);
+  assert.equal(f.events.filter(x=>x.action==='pull').length,1);assert.ok(f.events.some(x=>x.action==='workbench.view.scm'));assert.ok(f.events.findLastIndex(x=>x.action==='status')>f.events.findIndex(x=>x.action==='pull'));await f.api.dispose();
 });
 test('scope events are replayed after both successful and rejected publication',async t=>{
   for(const failed of [false,true]) {
     const f=scopeFixture(t,{watchEvents:true,...(failed?{scopeFailure:{code:'API_SCOPE_LOCAL_CHANGES',message:'存在本地更改'}}:{})});
-    const pending=f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');while(!f.events.some(x=>x.action==='scope-apply'))await new Promise(resolve=>setImmediate(resolve));
+    const pending=f.handlers.get('gushenCompletion.pullApiSource')('projects.A');while(!f.events.some(x=>x.action==='pull'))await new Promise(resolve=>setImmediate(resolve));
     const downloaded='systems/NEW/pages/main/PG/downloaded.xml',changed='systems/NEW/pages/main/PG/changed.xml';
     f.change(downloaded);f.change(changed);await new Promise(resolve=>setTimeout(resolve,350));assert.equal(f.events.some(x=>x.action==='index'),false);
     f.releaseScope();await pending;await new Promise(resolve=>setTimeout(resolve,400));const indexes=f.events.filter(x=>x.action==='index');
     assert.equal(indexes.length,2);assert.deepEqual(indexes[0].input,{paths:[downloaded,changed],checkOnly:true,compareIndex:true});
     assert.deepEqual(indexes[1].input.paths,[changed]);
-    if(failed)assert.match(f.warnings[0].message,/原范围未更改/);else assert.deepEqual(f.errors,[]);await f.api.dispose();t.mock.restoreAll();
+    if(failed)assert.match(f.warnings[0].message,/已保留这些文件/);else assert.deepEqual(f.errors,[]);await f.api.dispose();t.mock.restoreAll();
   }
 });
 test('post-save scope failure preserves backend message and refreshes current state',async t=>{
-  const f=scopeFixture(t,{scopeFailure:{code:'API_SCOPE_APPLY_PARTIAL',message:'范围可能已保存，索引尚未更新'}});await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');
-  assert.match(f.errors[0],/范围可能已保存.*索引尚未更新/);assert.equal(f.events.filter(x=>x.action==='scope-apply').length,1);assert.ok(f.events.some(x=>x.action==='status'));await f.api.dispose();
+  const f=scopeFixture(t,{scopeFailure:{code:'API_SCOPE_APPLY_PARTIAL',message:'范围可能已保存，索引尚未更新'}});await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');
+  assert.match(f.errors[0],/范围可能已保存.*索引尚未更新/);assert.equal(f.events.filter(x=>x.action==='pull').length,1);assert.ok(f.events.some(x=>x.action==='status'));await f.api.dispose();
 });
 test('a returned partial receipt shows exact stage, saved state, error and missing publication without inventing counts',async t=>{
   const f=scopeFixture(t,{scopeResult:{ok:true,operationId:'scope-123',stage:'PARTIAL',failedStage:'PUBLISHING',settingsSaved:true,complete:false,remoteDownloadComplete:true,downloadComplete:false,
     publicationState:'PARTIAL_OR_UNKNOWN',error:{code:'API_SOURCE_STALE',message:'发布前源码发生变化'}}});
-  const result=await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');
+  const result=await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');
   assert.equal(result.complete,false);assert.match(f.reports[0],/操作编号：scope-123/);assert.match(f.reports[0],/范围设置：已保存/);
   assert.match(f.reports[0],/失败阶段：PUBLISHING/);assert.match(f.reports[0],/API_SOURCE_STALE.*发布前源码发生变化/);
   assert.match(f.reports[0],/源码发布：PARTIAL_OR_UNKNOWN/);assert.match(f.reports[0],/索引结果：未返回/);assert.doesNotMatch(f.reports[0],/更新 0 个/);
   assert.match(f.reports[0],/平台源码读取：完成/);assert.match(f.reports[0],/本地发布与合并：未完成/);
-  assert.match(f.reports[0],/操作记录/);assert.ok(f.events.findLastIndex(x=>x.action==='status')>f.events.findIndex(x=>x.action==='scope-apply'));assert.deepEqual(f.errors,[]);await f.api.dispose();
+  assert.match(f.reports[0],/操作记录/);assert.ok(f.events.findLastIndex(x=>x.action==='status')>f.events.findIndex(x=>x.action==='pull'));assert.deepEqual(f.errors,[]);await f.api.dispose();
 });
 test('a partial receipt after publication reports the actual applied changes and index failure',async t=>{
   const f=scopeFixture(t,{scopeResult:{ok:true,operationId:'scope-456',stage:'PARTIAL',failedStage:'INDEXING',settingsSaved:true,complete:false,remoteDownloadComplete:true,downloadComplete:true,
     publicationState:'COMPLETE',publication:{operationId:'publish-1',updated:['a','b'],preserved:['c'],conflicts:[]},error:{code:'INDEX_FAILED',message:'索引不可用'}}});
-  await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');assert.match(f.reports[0],/发布操作编号：publish-1/);
+  await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');assert.match(f.reports[0],/发布操作编号：publish-1/);
   assert.match(f.reports[0],/更新 2 个，保留 1 个，冲突 0 个/);assert.match(f.reports[0],/INDEX_FAILED.*索引不可用/);assert.match(f.reports[0],/总体结果：未完成/);await f.api.dispose();
 });
 test('scope report displays confirmed cleanup count and backup without fabricating paths',async t=>{
   const f=scopeFixture(t,{scopeResult:{ok:true,operationId:'scope-clean',stage:'COMPLETE',settingsSaved:true,complete:true,remoteDownloadComplete:true,downloadComplete:true,
     publicationState:'COMPLETE',publication:{operationId:'publish-1',updated:['a'],preserved:[],conflicts:[]},index:{complete:true,diagnosticCount:0,indexGeneration:'new'},
     cleanup:{removedCount:101,removedPaths:['old/a.xml'],backupPath:'/fixture/backup',blocked:[],truncated:true}}});
-  await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');assert.match(f.reports[0],/已清理文件：101 个/);
+  await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');assert.match(f.reports[0],/已清理文件：101 个/);
   assert.match(f.reports[0],/备份位置：\/fixture\/backup/);assert.match(f.reports[0],/old\/a\.xml/);assert.match(f.reports[0],/文件列表已截断/);await f.api.dispose();
 });
 test('scope cleanup failure reports saved settings, confirmed removals, backup and blocked reason',async t=>{
   const f=scopeFixture(t,{scopeResult:{ok:true,operationId:'scope-partial',stage:'PARTIAL',failedStage:'CLEANUP',settingsSaved:true,complete:false,remoteDownloadComplete:true,downloadComplete:true,
     publicationState:'COMPLETE',publication:{operationId:'publish-1',updated:[],preserved:[],conflicts:[]},index:{complete:true,diagnosticCount:0,indexGeneration:'new'},
     error:{code:'API_SCOPE_LOCAL_CHANGES',message:'清理前出现未保存草稿'},cleanup:{removedCount:2,removedPaths:['old/a.xml','old/b.xml'],backupPath:'/fixture/backup',blocked:[{code:'API_SCOPE_LOCAL_CHANGES',message:'请处理未保存草稿'}]}}});
-  await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');assert.match(f.reports[0],/范围设置：已保存/);assert.match(f.reports[0],/失败阶段：CLEANUP/);
+  await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');assert.match(f.reports[0],/范围设置：已保存/);assert.match(f.reports[0],/失败阶段：CLEANUP/);
   assert.match(f.reports[0],/已清理文件：2 个/);assert.match(f.reports[0],/备份位置：\/fixture\/backup/);assert.match(f.reports[0],/请处理未保存草稿/);
   assert.doesNotMatch(f.reports[0],/原范围未更改/);await f.api.dispose();
 });
 test('partial scope result with a failed SCM refresh never claims source update completed',async t=>{
-  const f=scopeFixture(t,{partial:true,statusFailure:true});await f.handlers.get('gushenCompletion.selectApiSystems')('projects.A');
+  const f=scopeFixture(t,{partial:true,statusFailure:true});await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');
   assert.match(f.errors[0],/范围更新未完成.*状态刷新失败/);assert.doesNotMatch(f.errors[0],/范围和源码已更新/);assert.match(f.reports[0],/总体结果：未完成/);await f.api.dispose();
 });
 test('a status scan started before scope configuration cannot overwrite the new SCM status',async t=>{
@@ -289,6 +297,10 @@ test('editor state uses a separate write client while remote pull is pending and
   await api.editorState.add('projects.demo','/checkout');
   const pull=api.run('projects.demo','pull');
   await new Promise(resolve=>setImmediate(resolve));assert.ok(releasePull);
+  assert.equal(api.sourceUpdateInProgress(),true);
+  for(const action of ['pull','systems','session','system-menu']) {
+    await assert.rejects(api.run('projects.demo',action),{code:'API_SOURCE_UPDATE_RUNNING'});
+  }
   documents.push({uri:{scheme:'file',fsPath:'/checkout/a.gss'},isDirty:true,version:4});
   await api.editorState.flush('projects.demo');
   assert.equal(states.at(-1).input.documents[0].dirty,true);
@@ -297,7 +309,7 @@ test('editor state uses a separate write client while remote pull is pending and
   assert.equal(requestKind('api',states.at(-1).args),'write');
   assert.deepEqual(remoteCalls.map(call=>call.action),['pull']);assert.notEqual(remoteProcess,states.at(-1).client);
   const stateProcess=states.at(-1).client;
-  releasePull();await pull;await api.dispose();
+  releasePull();await pull;assert.equal(api.sourceUpdateInProgress(),false);await api.dispose();
   assert.equal(states.at(-1).input.close,true);assert.equal(states.at(-1).input.editorToken,'token');
   assert.equal(stateProcess.disposed,true);assert.equal(remoteProcess.disposed,true);
 });

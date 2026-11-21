@@ -37,12 +37,14 @@ function cardModel(workspace,status={},authentication={authenticated:true,sessio
   }
   const files=(status.files||[]).filter(file=>file.inScope!==false);
   const session=authentication.session||status.lastLogin;
+  const scope=status.pendingScope || status.settings;
+  const scopeLabel=scope.allSystems?'全部子系统':`${scope.systemIds.length} 个子系统`;
   return {sourceMode,authenticated:authentication.authenticated,pending:authentication.pending===true,key:workspace.workspaceKey,project:workspace.name||workspace.displayName||workspace.workspaceKey,
     version:session?.mainVersion?`${session.mainVersion}@${session.dateVersion}`:'登录后显示',
     address:status.settings.serverUrl||'',user:session?.userName||'',
-    scope:status.settings.allSystems?'全部子系统':`${status.settings.systemIds.length} 个子系统`,
+    scope:status.pendingScope?`${scopeLabel}（待更新）`:scopeLabel,
     sourceCount:status.summary?.sourceCount ?? files.length,changed:status.summaryComplete===false ? null : status.summary?.changedCount ?? files.filter(file=>file.state!=='CLEAN').length,
-    canPull:!!status.settings.serverUrl&&(status.settings.allSystems||status.settings.systemIds.length>0),
+    canPull:!!status.settings.serverUrl&&(scope.allSystems||scope.systemIds.length>0),
     canUpload:status.summaryComplete===false || (status.summary ? status.summary.uploadableCount>0 : files.some(file=>file.state==='MODIFIED'&&!file.readonly))};
 }
 function projectCardHtml(model,{nonce=crypto.randomBytes(18).toString('base64'),css='',form={}}={}) {
@@ -186,6 +188,7 @@ class ProjectCardProvider {
       this.currentKey=workspace?.workspaceKey;
       if(workspace)this.onSummary?.(workspace.workspaceKey,state);
       this.render(workspace,state,workspace ? this.authentication.get(workspace.workspaceKey)||{authenticated:false,pending:true} : undefined);
+      if(this.api.sourceUpdateInProgress?.())return;
       let authentication=workspace?await this.api.run(workspace.workspaceKey,'session'):undefined;
       if(generation!==this.generation||!this.view)return;
       const cached=workspace&&this.authentication.get(workspace.workspaceKey);
@@ -201,7 +204,7 @@ class ProjectCardProvider {
       this.form={...this.form,error:error.message};
       this.currentKey=state?workspace?.workspaceKey:undefined;
       const cached=workspace&&this.authentication.get(workspace.workspaceKey);
-      const pending=cached?.authenticated && ['TOOLHOST_QUEUE_TIMEOUT','API_CONNECTION_FAILED','TOOLHOST_TIMEOUT'].includes(error.code);
+      const pending=cached?.authenticated && ['API_SOURCE_UPDATE_RUNNING','TOOLHOST_QUEUE_TIMEOUT','API_CONNECTION_FAILED','TOOLHOST_TIMEOUT'].includes(error.code);
       this.render(state?workspace:undefined,state,pending?{...cached,pending:true}:{authenticated:false});
     }
   }

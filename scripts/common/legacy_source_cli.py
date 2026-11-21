@@ -77,9 +77,15 @@ def _database_progress(message: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [DATABASE] {message}", file=sys.stderr, flush=True)
 
 
-def _reindex_database_exports(hub, workspace):
+def _reindex_database_exports(hub, workspace, *, config=None):
     from common import database_source_exports
 
+    if config is not None:
+        scope = hub.resolve_system_scope(None, config, workspace["datasourceName"], workspace, allow_remote=False)
+        if not scope:
+            raise CommandError("DATABASE_SCOPE_METADATA_REQUIRED", "缺少项目子系统目录，请重新更新源码")
+        removed = database_source_exports.prune_outside_scope(workspace, scope)
+        _database_progress(f"退出范围的本地导出已清理 · {removed} 项")
     with closing(hub.connect_index_for_workspace(workspace, action="database-export-index")) as conn, conn:
         diagnostics = database_source_exports.rebuild(conn, workspace)
         count = conn.execute("SELECT COUNT(*) FROM database_source_export").fetchone()[0]
@@ -373,7 +379,7 @@ def _run(command, args, config, workspace):
             ("views", "导出视图", export_view_sql.main),
             ("systemScripts", "导出系统脚本", export_system_script_sql.main),
             ("billType", "导出单据类型", export_bill_type_sql.main),
-            ("sourceCatalog", "建立本地导出对象索引", lambda _: _reindex_database_exports(hub, workspace)),
+            ("sourceCatalog", "清理退出范围的导出并建立索引", lambda _: _reindex_database_exports(hub, workspace, config=config)),
         ]
         for index, (step, label, action) in enumerate(steps, 1):
             require_workspace_binding(workspace, workspace["workspaceBinding"])

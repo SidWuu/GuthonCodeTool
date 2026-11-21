@@ -1338,9 +1338,6 @@ def run_sync_once(args=None, on_progress=None, *, include_system_scripts=False):
         full_rebuild = parsed.full_rebuild
         state_key = "last_success_time"
         sync_from = "1970-01-01 00:00:00" if full_rebuild else _sync_from(conn, lookback, state_key)
-        if on_progress is not None:
-            window = "全量" if sync_from == "1970-01-01 00:00:00" else f"增量起点 {sync_from}"
-            on_progress(f"本次同步窗口 · {window}")
         stats = {
             "mode": "full-rebuild" if full_rebuild else "sync",
             "workspaceKey": workspace["workspaceKey"],
@@ -1387,7 +1384,7 @@ def run_sync_once(args=None, on_progress=None, *, include_system_scripts=False):
                 "deleted": stats.get("deleted", 0),
                 "failures": stats.get("failures", 0),
             },
-            payload={"sync_from": sync_from},
+            payload={"sync_from": stats["sync_from"]},
             result=stats,
             ok=not stats.get("failures"),
         )
@@ -2100,6 +2097,31 @@ def _sync_layer(conn, cfg, layer_cfg, layer, scope_id, project_id, sync_from, st
         system_scope = resolve_system_scope(remote, cfg, ds_name, workspace)
         if on_progress is not None:
             on_progress(f"同步范围 · {len(system_scope['system_ids'])} 个子系统，{len(system_scope['data_source_ids'])} 个数据源")
+        scope_state = json.dumps(system_scope, sort_keys=True, ensure_ascii=False)
+        previous_scope = conn.execute(
+            "SELECT state_value FROM gusen_sync_state WHERE state_key='database_source_scope'"
+        ).fetchone()
+        scope_changed = not previous_scope or previous_scope[0] != scope_state
+        write_scope = system_scope
+        if scope_changed:
+            sync_from = stats["sync_from"] = "1970-01-01 00:00:00"
+            if on_progress is not None:
+                on_progress("同步范围变化，按新范围读取全量源码并清理退出范围的只读副本")
+            aliases = _procedure_aliases(workspace["readonlyDir"], system_scope)
+            for link in workspace["readonlyDir"].glob("*/procedure"):
+                if not link.is_symlink() or link.parent.is_symlink() or link.resolve() == aliases.get(link):
+                    continue
+                relative = Path(os.readlink(link))
+                if len(relative.parts) == 3 and relative.parts[0] == ".." and relative.name == "procedure":
+                    prepare_path(link, allow_link=True)
+            for name in system_scope.get("system_name_by_data_source_id", {}).values():
+                primary = workspace["readonlyDir"] / path_part(name) / "procedure"
+                if primary.is_symlink() or primary.parent.is_symlink():
+                    raise CommandError("DATABASE_SCOPE_PATH_OCCUPIED", f"过程函数目录含未登记的链接：{primary}")
+            write_scope = {**system_scope, "system_link_names_by_data_source_id": {}}
+        if on_progress is not None:
+            window = "全量" if sync_from == "1970-01-01 00:00:00" else f"增量起点 {sync_from}"
+            on_progress(f"本次同步窗口 · {window}")
         page_query, page_params = _scoped_sql(page_sql(table_cfg, rules), system_scope, "system", table_cfg)
         inventory_query, inventory_params = _scoped_sql(page_inventory_sql(table_cfg), system_scope, "system", table_cfg)
         proc_query, proc_params = _scoped_sql(proc_sql(table_cfg, rules), system_scope, "data_source", table_cfg)
@@ -2121,7 +2143,7 @@ def _sync_layer(conn, cfg, layer_cfg, layer, scope_id, project_id, sync_from, st
                     if _included(layer_cfg, row):
                         if row["source_table"] == PAGE_SOURCE_TYPE:
                             row["model_path"] = model_paths.get(_str(row.get("model_id")))
-                        if upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scope, force=force, workspace=workspace):
+                        if upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, write_scope, force=force, workspace=workspace):
                             stats["changed"] += 1
                     if on_progress is not None and processed % 200 == 0 and processed < len(rows):
                         on_progress(f"{category}本地处理 · {processed}/{len(rows)}，更新 {stats['changed']-changed} 项")
@@ -2132,6 +2154,18 @@ def _sync_layer(conn, cfg, layer_cfg, layer, scope_id, project_id, sync_from, st
             cur.execute(inventory_query, inventory_params)
             current_page_ids = {row["source_id"] for row in cur.fetchall() if _included(layer_cfg, row)}
         stats["deleted"] = stats.get("deleted", 0) + reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids, workspace)
+        if scope_changed:
+            stats["deleted"] += _prune_procedures(conn, workspace, system_scope["data_source_ids"])
+            for link, target in aliases.items():
+                if not target.is_dir() or (link.is_symlink() and link.resolve() == target):
+                    continue
+                if link.exists() and (not link.is_dir() or any(link.iterdir())):
+                    raise CommandError("DATABASE_SCOPE_PATH_OCCUPIED", f"共享过程函数目录含未登记的本地文件：{link}")
+                prepare_path(link, allow_link=True)
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to(os.path.relpath(target, link.parent), target_is_directory=True)
+            conn.execute("INSERT OR REPLACE INTO gusen_sync_state(state_key,state_value) VALUES(?,?)",
+                         ("database_source_scope", scope_state))
         if on_progress is not None:
             on_progress("发布本地只读源码和增量索引")
     return stats
@@ -2200,8 +2234,8 @@ def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scop
         INSERT OR REPLACE INTO gusen_source_record(
             source_layer, scope_id, project_id, source_table, source_id, source_alias_id, fun_id,
             source_name, version_mac, update_time, check_out_user_id, check_out_date, check_in_date,
-            change_key, local_path, status, indexed_time
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            change_key, local_path, status, indexed_time, system_id, data_source_id
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             layer,
@@ -2221,6 +2255,8 @@ def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scop
             _indexed_path(local_path),
             status,
             indexed_time,
+            _str(row.get("system_id")),
+            _str(row.get("data_source_id")),
         ),
     )
     source_record = conn.execute(
@@ -2287,15 +2323,43 @@ def reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids,
     ).fetchall()
     stale = [row for row in rows if row["source_id"] not in current_page_ids]
     for row in stale:
-        if row["local_path"]:
-            remove_source_path(ROOT / row["local_path"], workspace)
         identity = (layer, scope_id, project_id, PAGE_SOURCE_TYPE, row["source_id"], "")
-        _delete_call_index(conn, identity)
-        conn.execute(
-            "DELETE FROM gusen_source_record WHERE source_layer=? AND scope_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?",
-            identity,
-        )
+        target = ROOT / row["local_path"] if row["local_path"] else None
+        _remove_indexed_database_source(conn, identity, target, workspace)
     return len(stale)
+
+
+def _remove_indexed_database_source(conn, identity, target, workspace):
+    if target is not None:
+        remove_source_path(target, workspace)
+    _delete_call_index(conn, identity)
+    conn.execute(
+        """DELETE FROM gusen_source_record WHERE source_layer=? AND scope_id=? AND project_id=?
+           AND source_table=? AND source_id=? AND fun_id=?""", identity,
+    )
+
+
+def _prune_procedures(conn, workspace, data_source_ids):
+    allowed = set(data_source_ids)
+    scope = (workspace["layer"], workspace["scopeId"], workspace["projectId"], PROCEDURE_SOURCE_TYPE)
+    rows = conn.execute(
+        """SELECT source_id, fun_id, local_path, data_source_id FROM gusen_source_record
+           WHERE source_layer=? AND scope_id=? AND project_id=? AND source_table=?""", scope,
+    ).fetchall()
+    removed = 0
+    root = workspace["readonlyDir"].resolve()
+    for row in rows:
+        target = ROOT / row["local_path"] if row["local_path"] else None
+        identifier = row["data_source_id"]
+        if not identifier and target and target.is_dir():
+            metadata = target / "meta.json"
+            if metadata.resolve().is_relative_to(root) and metadata.is_file():
+                identifier = _str(json.loads(metadata.read_text(encoding="utf-8")).get("data_source_id"))
+        if not identifier or identifier in allowed:
+            continue
+        _remove_indexed_database_source(conn, (*scope, row["source_id"], row["fun_id"]), target, workspace)
+        removed += 1
+    return removed
 
 
 def readonly_layer_root(layer, scope_id, project_id, layer_cfg, workspace=None):
@@ -3152,12 +3216,23 @@ def _source_alias_id(row):
     return _str(_row_value(row, "source_alias_id")) or _str(_row_value(row, "source_id"))
 
 
+def _procedure_aliases(root, scope):
+    return {
+        root / path_part(name) / "procedure": root / path_part(primary) / "procedure"
+        for identifier, primary in scope.get("system_name_by_data_source_id", {}).items()
+        for name in scope.get("system_link_names_by_data_source_id", {}).get(identifier, [])
+        if path_part(name) != path_part(primary)
+    }
+
+
 def _link_shared_procedure_dirs(layer_root, system_name, row, scope):
     link_names = scope.get("system_link_names_by_data_source_id", {}).get(_str(row.get("data_source_id")), [])
     target = layer_root / path_part(system_name) / "procedure"
     for link_name in link_names:
         link = layer_root / path_part(link_name) / "procedure"
         if link == target:
+            continue
+        if link.is_symlink() and link.resolve() == target:
             continue
         link.parent.mkdir(parents=True, exist_ok=True)
         if link.is_symlink():

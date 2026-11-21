@@ -16,6 +16,44 @@ FIELDS = {
     "allSystems",
     "includeProjectFiles",
 }
+SCOPE_FIELDS = {"allSystems", "systemIds", "dataSourceIds"}
+
+
+def _pending_scope_path(workspace):
+    return api_paths(workspace)[0] / "pending-scope.json"
+
+
+def pending_scope(workspace, current):
+    try:
+        value = json.loads(_pending_scope_path(workspace).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    return value["settings"] if value["serverUrl"] == current["serverUrl"] else None
+
+
+def validate_scope_selection(selected, current):
+    if not isinstance(selected, dict) or not SCOPE_FIELDS <= selected.keys() or selected.keys() - SCOPE_FIELDS - {"includeProjectFiles"}:
+        raise ApiError("API_INPUT_INVALID", "范围同步只接受子系统和数据源设置")
+    return validate({"includeProjectFiles": current["includeProjectFiles"], **selected})
+
+
+def save_scope(workspace, selected):
+    with configuration_lock(workspace):
+        current = settings(workspace)
+        selected = validate_scope_selection(selected, current)
+        if not selected["allSystems"] and not selected["systemIds"]:
+            raise ApiError("API_INPUT_INVALID", "请至少选择一个子系统")
+        if not current["serverUrl"]:
+            raise ApiError("API_CONFIG_REQUIRED", "请先配置 API 项目地址")
+        atomic_text(_pending_scope_path(workspace), json.dumps({
+            "serverUrl": current["serverUrl"],
+            "settings": selected,
+        }, ensure_ascii=False) + "\n")
+        return {"pendingScope": selected}
+
+
+def clear_pending_scope(workspace):
+    _pending_scope_path(workspace).unlink(missing_ok=True)
 
 
 def api_paths(workspace):
@@ -159,6 +197,8 @@ def _configure(workspace, payload):
                 directory / "config.json",
                 json.dumps(value, ensure_ascii=False, indent=2) + "\n",
             )
+        if value["serverUrl"] != previous["serverUrl"]:
+            clear_pending_scope(workspace)
     if not (directory / "baseline.db").exists():
         atomic_text(
             directory / "identity.json",

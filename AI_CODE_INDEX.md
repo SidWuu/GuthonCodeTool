@@ -28,7 +28,7 @@ runtimeVar                   = <toolHome>/<workspaceDirectory>  私有谷神工�
 | SVN / DATABASE 登录、源码连接与范围 | `scripts/common/workspace_source_settings.py`、`scripts/common/workspace_source_scope.py`、`plugins/GuthonNexus/gushen-vscode-completion/src/project-source-settings.js` | `scripts/common/svn_workspace_config.py`、`scripts/providers/svn/group_inference.py`（目录名称匹配）、`plugins/GuthonNexus/gushen-vscode-completion/src/legacy-project.js` | `tests/test_workspace_source_settings.py` |
 | 工作区路由与解析 | `scripts/common/workspace_registry.py`、`scripts/common/workspace_sources.py`、`scripts/common/workspace_selection.py` | `scripts/common/workspace_config.py`、`scripts/guthon_tool.py` | `tests/test_unified_workspace.py` |
 | API 批量源码与 PAGE 原生模型 | `scripts/providers/api/download.py`（按子系统分页）、`scripts/providers/api/page_source.py`（只读导出和原生基线）、`scripts/providers/api/store.py`（保护本地修改） | `scripts/providers/api/sync.py`（范围和精确更新）、`plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js`（编辑前按页加载） | `tests/test_api_native_source.py` |
-| API 增量索引与查询 | `scripts/providers/api/index.py` | `scripts/providers/api/store.py`、`scripts/providers/api/mcp_server.py`、`plugins/GuthonNexus/gushen-vscode-completion/src/api/source-watcher.js`（文件事件与当前索引核对） | `tests/test_api_source.py` |
+| API 增量索引与查询 | `scripts/providers/api/index.py`（`api index-repair` 重试当前索引中的诊断项） | `scripts/providers/api/store.py`、`scripts/providers/api/mcp_server.py`、`plugins/GuthonNexus/gushen-vscode-completion/src/api/source-watcher.js`（文件事件与当前索引核对） | `tests/test_api_source.py` |
 | API 原请求关闭 | `scripts/providers/api/source_requests.py`（串行关闭未开始的幂等请求，不撤销已登记操作） | `scripts/providers/api/documents.py`、`scripts/providers/api/source_batch.py`、`scripts/providers/api/mcp_server.py` | `tests/test_api_request_closure.py` |
 | API 跨文件受控修改 | `scripts/providers/api/source_batch.py`（计划、预检、写入与原文恢复） | `scripts/providers/api/documents.py`、`scripts/providers/api/store.py`、`scripts/providers/api/cli.py`、`scripts/providers/api/mcp_server.py` | `tests/test_api_source_batch.py`、`tests/test_api_followup.py` |
 | API 整页生命周期 | `scripts/providers/api/page_lifecycle.py`（Bridge 平台上下文、新建/复制/删除及原回执核对） | `plugins/GuthonBridge/extension/page-lifecycle.js`、`plugins/GuthonBridge/bridge/server.js`、`scripts/providers/api/mcp_server.py` | `tests/test_api_page_lifecycle.py` |
@@ -87,8 +87,8 @@ runtimeVar                   = <toolHome>/<workspaceDirectory>  私有谷神工�
 | 模块 | 职责 |
 |---|---|
 | `scripts/common/config_store.py` | 单一配置源、保留旧目录读取，以及预览/确认/备份式配置迁移；不自动迁移真实目录。 |
-| `scripts/providers/api/client.py`、`workspace.py` | API 会话实时核验、只读请求登录恢复、验证码、HTTPS 信任、项目配置、范围及目录名称缓存；后端凭据摘要仅驻留内存。 |
-| `scripts/providers/api/download.py`、`store.py`、`sync.py` | 按范围下载、范围变更预检与备份清理编排、基线与冲突、上传前合并和平台回读。 |
+| `scripts/providers/api/client.py`、`workspace.py` | API 会话实时核验、只读请求登录恢复、验证码、HTTPS 信任、项目配置、待应用范围及目录名称缓存；后端凭据摘要仅驻留内存。 |
+| `scripts/providers/api/download.py`、`store.py`、`sync.py` | 按范围下载、应用待同步范围、退出范围预检与备份清理、基线与冲突、上传前合并和平台回读。 |
 | `scripts/providers/api/page_source.py` | 结构化 PAGE 的原生 bean/version 读取、版本绑定的基线复用、本地无损 XML 表示、原生 JSON 保存和独立回读；导出 XML 不作保存输入。 |
 | `scripts/providers/api/cli.py`、`index.py`、`mcp_server.py` | CLI、索引、按精确源码查询页面/函数使用位置、查询时从已索引源码头和元数据派生过程函数签名及受控 MCP 接口。 |
 | `plugins/GuthonNexus/gushen-vscode-completion/src/api/login-store.js` | 按 toolHome、workspaceKey 和平台地址隔离的 API 登录信息本地加密存储；由 Nexus 负责保存和恢复。 |

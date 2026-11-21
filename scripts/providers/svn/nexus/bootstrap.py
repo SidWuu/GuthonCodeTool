@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import tempfile
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
+from xml.etree import ElementTree
 
-from providers.svn.checkout import resolve_configured_scope, run_remote_svn
+from common.command_errors import CommandError
+from common.persistence import atomic_bytes
+from providers.svn.checkout import resolve_configured_scope, run_remote_svn, run_svn
 from providers.svn.scope_import import (
     ImportResult,
     build_manifest_from_config,
@@ -336,3 +342,110 @@ def import_scope(workspace: dict, *, accept_scope_change: bool = False) -> dict:
     summary["source"] = source
     summary["configPath"] = str(config_path)
     return summary
+
+
+def _check_retiring_copy(entry):
+    from .workspace import _validate_existing
+
+    _validate_existing(entry)
+    report = run_svn(["status", "--xml", "--no-ignore", "--", str(entry.root)])
+    for status in ElementTree.fromstring(report.stdout).iter("wc-status"):
+        if (status.get("item") not in {"none", "normal"}
+                or status.get("props", "none") not in {"none", "normal"}
+                or any(status.get(flag) == "true" for flag in
+                       ("switched", "copied", "tree-conflicted", "wc-locked"))):
+            raise CommandError("SVN_SCOPE_LOCAL_CHANGES",
+                               f"退出范围的 SVN 工作副本有本地变更或未登记文件，请先处理后再更新源码：{entry.local_subdir}")
+
+
+def apply_saved_scope(workspace, *, merge_local=False, on_progress=None):
+    """Replace changed working copies only after the new checkouts are ready."""
+    from common.workspace_registry import require_workspace_binding
+    from . import workspace as copies
+
+    if not (workspace.get("config", {}).get("svn") or {}).get("managed_scope_selection"):
+        return None
+    script_path, manifest_path, config_path = _paths(workspace)
+    if not manifest_path.is_file():
+        return None
+    proposed, _ = _build_workspace_manifest(workspace, script_path, config_path)
+    previous = load_authorized_scope(workspace)
+    previous_data = manifest_path.read_bytes()
+    if json.loads(previous_data)["entries"] == proposed.manifest["entries"]:
+        return None
+
+    checkout = workspace["checkoutPath"]
+    checkout.parent.mkdir(parents=True, exist_ok=True)
+    scratch = Path(tempfile.mkdtemp(prefix=".guthon-svn-scope-", dir=checkout.parent))
+    retired, installed = [], []
+    manifest_changed = False
+    try:
+        proposal_path = scratch / "scope.json"
+        write_manifest(proposal_path, proposed)
+        target = load_authorized_scope({**workspace, "svn": {**workspace["svn"], "scopeManifestPath": proposal_path}})
+        if any(entry.root != checkout / entry.local_subdir for entry in (*previous.entries, *target.entries)):
+            raise CommandError("SVN_SCOPE_PATH_INVALID", "SVN 同步范围内存在符号链接，请核对工作副本路径")
+        old_by_location = {(entry.local_subdir, entry.url): entry for entry in previous.entries}
+        target_locations = {(entry.local_subdir, entry.url) for entry in target.entries}
+        retiring = [entry for location, entry in old_by_location.items()
+                    if location not in target_locations and entry.root.exists()]
+        for entry in retiring:
+            _check_retiring_copy(entry)
+        staged = []
+        retained = []
+        for entry in target.entries:
+            old = old_by_location.get((entry.local_subdir, entry.url))
+            if old and (old.root / ".svn").is_dir():
+                retained.append(old.id)
+                continue
+            if on_progress:
+                on_progress(f"SVN 范围更新｜检出 {entry.local_subdir}")
+            staging = scratch / "new" / entry.id
+            copies._checkout_entry(workspace, replace(entry, root=staging))
+            staged.append((staging, entry.root))
+
+        if retained:
+            copies.refresh(workspace, merge_local=merge_local, working_copy_ids=retained, on_progress=on_progress)
+        require_workspace_binding(workspace, workspace["workspaceBinding"])
+        for entry in retiring:
+            _check_retiring_copy(entry)
+        for entry in retiring:
+            backup = scratch / "old" / entry.id
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            entry.root.rename(backup)
+            retired.append((entry.root, backup))
+            for parent in entry.root.parents:
+                if parent == checkout.parent:
+                    break
+                if any(parent.iterdir()):
+                    break
+                parent.rmdir()
+        for staging, dest in staged:
+            if dest.exists():
+                if not dest.is_dir() or any(dest.iterdir()):
+                    raise CommandError("SVN_SCOPE_PATH_OCCUPIED", f"新范围路径含未登记文件：{dest}")
+                dest.rmdir()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            staging.rename(dest)
+            installed.append((staging, dest))
+        marker = workspace["contextDir"] / "svn-scope-reindex.pending"
+        marker.touch()
+        write_manifest(manifest_path, proposed, replace=True)
+        manifest_changed = True
+        result = copies.initialize(workspace, on_progress=on_progress)
+    except BaseException:
+        if manifest_changed:
+            atomic_bytes(manifest_path, previous_data)
+        for staging, dest in reversed(installed):
+            dest.rename(staging)
+            for parent in dest.parents:
+                if parent == checkout.parent or any(parent.iterdir()):
+                    break
+                parent.rmdir()
+        for original, backup in reversed(retired):
+            original.parent.mkdir(parents=True, exist_ok=True)
+            backup.rename(original)
+        shutil.rmtree(scratch)
+        raise
+    shutil.rmtree(scratch)
+    return {**result, "action": "updated-scope", "removedWorkingCopies": len(retired)}

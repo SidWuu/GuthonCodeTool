@@ -353,6 +353,10 @@
       "kind": "write",
       "timeoutMs": 1800000
     },
+    "scope-save": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
     "scope-apply": {
       "kind": "write",
       "timeoutMs": 1800000
@@ -394,6 +398,11 @@
       "timeoutMs": 120000
     },
     "index": {
+      "kind": "write",
+      "timeoutMs": 1800000,
+      "cancellable": true
+    },
+    "index-repair": {
       "kind": "write",
       "timeoutMs": 1800000,
       "cancellable": true

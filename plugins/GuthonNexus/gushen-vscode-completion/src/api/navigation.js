@@ -242,7 +242,28 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge,
     collapseAllSourceNodes:()=>ui.treeView?.collapseAll?.(),
     refreshAllApiSources:async()=>{const workspace=await selectWorkspace('');if(workspace) return ui.updateScm(workspace.workspaceKey);},
     retryApiIndexFailures:async value=>{const workspace=await selectWorkspace(typeof value==='string'?value:value?.guthonWorkspaceKey || '');if(!workspace)return;const result=await api.retryIndex(workspace.workspaceKey);ui.refresh();return vscode.window.showInformationMessage(result.attempted ? `已更新 ${result.attempted} 个待处理源码文件` : '没有待更新的源码文件');},
-    reindexCalls:async value=>{const workspace=await selectWorkspace(typeof value==='string'?value:value?.guthonWorkspaceKey || '');if(!workspace)return;if(workspace.sourceMode && workspace.sourceMode!=='api' && legacyAction)return legacyAction(workspace,'reindex');const result=await run(workspace.workspaceKey,'index',{});ui.setIndexResult(workspace.workspaceKey,result);if(result.complete===true) await api.markIndexed(workspace.workspaceKey,result.indexGeneration);return vscode.window.showInformationMessage(`索引已更新：${result.objects ?? result.updatedPaths?.length ?? 0} 个对象${result.complete===false?'，存在待处理项':''}`);},
+    reindexCalls:async value=>{
+      const key=typeof value==='string'?value:value?.guthonWorkspaceKey || value?.key || '';
+      const workspace=await selectWorkspace(key);
+      if(!workspace)return;
+      if(workspace.sourceMode && workspace.sourceMode!=='api' && legacyAction)return legacyAction(workspace,'reindex');
+      const result=await run(workspace.workspaceKey,'index',{});
+      ui.setIndexResult(workspace.workspaceKey,result);
+      if(result.complete===true)await api.markIndexed(workspace.workspaceKey,result.indexGeneration);
+      return vscode.window.showInformationMessage(`索引已更新：${result.objects ?? result.updatedPaths?.length ?? 0} 个对象${result.complete===false?'，存在待处理项':''}`);
+    },
+    repairApiIndex:async value=>{
+      const {key}=fromElement(value);
+      const workspace=await selectWorkspace(key);
+      if(!workspace)return;
+      if(workspace.sourceMode!=='api')throw new Error('请从 API 项目的索引诊断行执行修复');
+      const result=await run(workspace.workspaceKey,'index-repair');
+      ui.setIndexResult(workspace.workspaceKey,result);
+      const attempted=result.updatedPaths.length;
+      return vscode.window.showInformationMessage(attempted
+        ? `已检查 ${attempted} 个索引项，剩余 ${result.diagnosticCount} 项诊断`
+        : '当前索引没有待修复项');
+    },
     showApiInheritance:async value=>{
       const {key,path:p,result:source}=await selectedObject(value);const target=value.target || value;
       if(String(source.metadata?.isInhert)==='0' && !/@?inherit\s*\(/.test(source.content)) return vscode.window.showInformationMessage('无继承源码');
@@ -288,6 +309,7 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge,
     vscode.commands.registerCommand('gushenCompletion.collapseAllSourceNodes',execute('collapseAllSourceNodes')),
     vscode.commands.registerCommand('gushenCompletion.refreshAllApiSources',execute('refreshAllApiSources')),
     vscode.commands.registerCommand('gushenCompletion.reindexCalls',execute('reindexCalls')),
+    vscode.commands.registerCommand('gushenCompletion.repairApiIndex',execute('repairApiIndex')),
     vscode.commands.registerCommand('gushenCompletion.retryApiIndexFailures',execute('retryApiIndexFailures')),
     vscode.commands.registerCommand('gushenCompletion.showApiInheritance',execute('showApiInheritance')),
     vscode.commands.registerCommand('gushenCompletion.copyApiLocatorLink',execute('copyApiLocatorLink')),

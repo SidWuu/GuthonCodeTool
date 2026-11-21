@@ -129,11 +129,6 @@ def save(workspace, item, selected, *, grouped=False):
         previous = workspace["systemMappings"]
         if set(previous) == set(selected):
             return False
-        if (not previous or set(previous) - set(selected)) and (
-            workspace["indexPath"].is_file()
-            or any(any(path.is_file() for path in root["path"].rglob("*")) for root in workspace["sourceRoots"])
-        ):
-            raise CommandError("DATABASE_SCOPE_ALREADY_BOUND", "现有源码已建立，同步范围只能扩展；缩小范围需先迁移现有源码")
         found = _database_systems(workspace, selected)
         if set(selected) - found.keys():
             raise CommandError("DATABASE_SCOPE_STALE", "选择的子系统已不在主数据中，请重新选择")
@@ -156,13 +151,12 @@ def save(workspace, item, selected, *, grouped=False):
         return False
     if "." in selected and len(selected) != 1:
         raise ValueError("请选择整个仓库，或选择具体目录")
-    if (svn["scopeManifestPath"] and svn["scopeManifestPath"].is_file()
-        or svn.get("scopeConfigExplicit")
-        or any((root["path"] / ".svn").is_dir() for root in workspace["sourceRoots"])):
-        raise CommandError("SVN_SCOPE_ALREADY_BOUND", "已有 SVN 授权清单或工作副本，请通过范围迁移流程调整")
+    if svn.get("scopeConfigExplicit") or not svn.get("scopeManifestConvention"):
+        raise CommandError("SVN_SCOPE_ALREADY_BOUND", "此项目使用专用 SVN 授权配置，请通过原配置调整范围")
     if not grouped and set(selected) - set(_svn_directories(workspace)):
         raise CommandError("SVN_SCOPE_STALE", "目录已不在当前可读范围，请重新选择")
     values = item.setdefault("svn", {})
+    values["managed_scope_selection"] = True
     if selected == ["."]:
         values.pop("scope", None)
         values.pop("entries", None)

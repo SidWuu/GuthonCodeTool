@@ -170,12 +170,16 @@ def _lifecycle(command):
             gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
     elif parsed.action == 'init':
         if manifest_layout:
+            from providers.svn.nexus.bootstrap import apply_saved_scope
             from providers.svn.nexus import workspace as nexus_workspace
 
-            result = nexus_workspace.initialize(workspace)
+            with checkout.operation_lock(workspace, "initialize-and-index", blocking=True):
+                result = apply_saved_scope(workspace, on_progress=_svn_progress) or nexus_workspace.initialize(workspace)
+                result["reindex"] = _reindex_svn(gusen_hub, config, workspace)
+                (workspace["contextDir"] / "svn-scope-reindex.pending").unlink(missing_ok=True)
         else:
             result = checkout.initialize(workspace, gusen_hub.CONFIG_DIR, bootstrap)
-        result["reindex"] = _reindex_svn(gusen_hub, config, workspace)
+            result["reindex"] = _reindex_svn(gusen_hub, config, workspace)
         gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
     elif parsed.action in {"refresh","refresh-node"}:
         node_paths = None
@@ -191,10 +195,14 @@ def _lifecycle(command):
         if not manifest_layout and parsed.path:
             raise SystemExit("svn refresh --path requires manifest-working-copies")
         with checkout.operation_lock(workspace, "refresh-and-index", blocking=True):
+            full_update = parsed.action == "refresh" and not parsed.path and not parsed.working_copy
+            scope_reindex = workspace["contextDir"] / "svn-scope-reindex.pending"
             if manifest_layout:
+                from providers.svn.nexus.bootstrap import apply_saved_scope
                 from providers.svn.nexus import workspace as nexus_workspace
 
-                result = nexus_workspace.refresh(
+                applied = apply_saved_scope(workspace, merge_local=parsed.merge_local, on_progress=_svn_progress) if full_update else None
+                result = applied or nexus_workspace.refresh(
                     workspace,
                     merge_local=parsed.merge_local,
                     working_copy_ids=parsed.working_copy,
@@ -218,9 +226,11 @@ def _lifecycle(command):
                     result,
                     on_progress=_svn_progress,
                 )
-                if manifest_layout
+                if manifest_layout and not (full_update and scope_reindex.is_file())
                 else _reindex_svn(gusen_hub, config, workspace, on_progress=_svn_progress)
             )
+            if manifest_layout and full_update:
+                scope_reindex.unlink(missing_ok=True)
             gusen_hub.update_workspace_state(config, workspace, "source", "SUCCESS")
     elif parsed.action == 'status':
         checkout.require_capability(workspace, "status")

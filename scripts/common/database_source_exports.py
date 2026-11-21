@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 
 from common.database_exports._export_common import sanitize_name
 from common.source_format import decode_source
@@ -11,6 +12,12 @@ from common.source_text_search import MAX_BODY_CHARS
 TYPES = ("table", "view", "system-script", "bill-type")
 MAX_EXPORT_BYTES = 8 * 1024 * 1024
 OBJECT_COLUMNS = "export_key, source_type, source_id, source_name, folder, local_path, json_pointer"
+EXPORT_PATTERNS = {
+    "table": "*/*.json",
+    "view": "*/*.sql",
+    "system-script": "*/scripts/*/source.*",
+    "bill-type": "*.json",
+}
 
 
 def _roots(workspace):
@@ -36,6 +43,64 @@ def _text(target):
     if len(raw) > MAX_EXPORT_BYTES:
         raise ValueError("本地导出文件超过解析上限")
     return decode_source(raw)[0]
+
+
+def prune_outside_scope(workspace, scope):
+    """Remove generated exports with a recognized owner outside the new scope."""
+    systems = set(scope["system_ids"])
+    data_sources = set(scope["data_source_ids"])
+    if not systems or not data_sources:
+        raise ValueError("缺少可核对的 DATABASE 同步范围，未清理本地导出")
+    removed = 0
+    for source_type, root in _roots(workspace).items():
+        for candidate in sorted(root.glob(EXPORT_PATTERNS[source_type])):
+            relative = candidate.relative_to(root)
+            target = _file(workspace, source_type, relative)
+            if not target:
+                continue
+            companion = None
+            if source_type == "view":
+                folder = relative.parts[0]
+                if any(folder.startswith(f"{sanitize_name(value)}_") for value in data_sources):
+                    continue
+                # Legacy view exports have no identity sidecar. The generated folder
+                # carries the numeric data-source code before the system name.
+                if not re.fullmatch(r"[0-9]+_.+", folder):
+                    continue
+            else:
+                if source_type == "system-script":
+                    companion = _file(workspace, source_type, relative.parent / "meta.json")
+                    if not companion:
+                        continue
+                try:
+                    meta = json.loads(_text(companion or target))
+                except (ValueError, UnicodeError):
+                    continue
+                if not isinstance(meta, dict):
+                    continue
+                if source_type == "system-script":
+                    if (not meta.get("systemId") or not meta.get("scriptType")
+                            or meta.get("sourceFile") != target.name or str(meta["systemId"]) in systems):
+                        continue
+                else:
+                    identifier = str(meta.get("dataSourceId") or "")
+                    if not identifier or identifier in data_sources:
+                        continue
+                    if source_type == "table" and not meta.get("tableId"):
+                        continue
+                    if source_type == "bill-type" and not (
+                        isinstance(meta.get("billTypes"), list) and target.name.startswith(f"{sanitize_name(identifier)} ")
+                    ):
+                        continue
+            target.unlink()
+            if companion:
+                companion.unlink()
+            removed += 1
+            for parent in target.parents:
+                if parent == root or any(parent.iterdir()):
+                    break
+                parent.rmdir()
+    return removed
 
 
 def _objects(workspace, source_type, target, relative):
@@ -76,9 +141,7 @@ def rebuild(conn, workspace):
     conn.execute("DELETE FROM database_source_export")
     errors = []
     for source_type, root in _roots(workspace).items():
-        pattern = {"table": "*/*.json", "view": "*/*.sql", "system-script": "*/scripts/*/source.*",
-                   "bill-type": "*.json"}[source_type]
-        for candidate in sorted(root.glob(pattern)):
+        for candidate in sorted(root.glob(EXPORT_PATTERNS[source_type])):
             relative = candidate.relative_to(root)
             target = _file(workspace, source_type, relative)
             if not target:

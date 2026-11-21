@@ -390,15 +390,54 @@ test('PAGE source tree expands into exact script and fields JSON fragments',asyn
   assert.equal(f.ui.getTreeItem(one[1]).command.command,'gushenCompletion.openApiFragment');assert.equal(f.ui.getParent(one[1]),page);
 });
 
-test('persisted error report excludes recognized metadata-only source notices',async()=>{
-  const f=fixture(),reports=[];
+test('the index diagnostic row opens the report and routes full rebuild and incremental repair separately',async()=>{
+  const {createApiNavigation}=require('../src/api/navigation'),{ViewTree}=require('../src/view-tree');
+  const f=fixture(),reports=[],menus=[],calls=[],notices=[],commands=new Map(),disposable={dispose(){}};
+  const key='products.A';
+  f.vscode.TreeItem=class{constructor(label,state){this.label=label;this.collapsibleState=state;}};
+  f.vscode.TreeItemCollapsibleState={Collapsed:1,None:0};
+  f.vscode.window.registerWebviewViewProvider=()=>disposable;
+  f.vscode.window.showErrorMessage=message=>assert.fail(message);
+  f.vscode.window.showInformationMessage=message=>notices.push(message);
+  f.vscode.workspace.onDidOpenTextDocument=f.vscode.workspace.onDidCloseTextDocument=()=>disposable;
+  f.vscode.languages={createDiagnosticCollection:()=>disposable,registerCompletionItemProvider:()=>disposable};
+  f.vscode.commands={
+    registerCommand:(name,fn)=>(commands.set(name,fn),disposable),
+    executeCommand:(name,...args)=>commands.get(name)(...args),
+  };
+  commands.set('gushenCompletion.showApiIndexDiagnostics',key=>f.ui.showIndexDiagnostics(key));
   f.ui.run=async()=>({indexGeneration:'g',partialSourceCount:1,objects:[
     {path:'systems/S/min.xml',sourceType:'page',status:'OK',diagnostic:'API_PAGE_MINIMAL_SOURCE'},
     {path:'systems/S/conflict.xml',sourceType:'page',status:'PARTIAL',diagnostic:'API_PAGE_IDENTITY_MISMATCH'}]});
   f.vscode.workspace.openTextDocument=async data=>(reports.push(data.content),data);
-  f.ui.syncWorkspaces([{workspaceKey:'products.A',checkoutPath:'/checkout'}]);
-  await f.ui.getChildren();await f.ui.showIndexDiagnostics('products.A');
-  assert.match(reports[0],/API_PAGE_IDENTITY_MISMATCH/);assert(!reports[0].includes('API_PAGE_MINIMAL_SOURCE'));
+  f.ui.syncWorkspaces([{workspaceKey:key,checkoutPath:'/checkout'}]);
+  const api={sourceTree:f.ui,editorState:{workspaces:new Map()},
+    run:async(...args)=>{
+      calls.push(args);
+      return args[1]==='index-repair'
+        ? {complete:false,updatedPaths:['systems/S/conflict.xml'],diagnosticCount:1,indexGeneration:'repaired'}
+        : {complete:true,objects:2,indexGeneration:'rebuilt'};
+    },
+    markIndexed:async(...args)=>calls.push(args)};
+  const nav=createApiNavigation({vscode:f.vscode,context:{subscriptions:[]},api,
+    selectWorkspace:async requested=>{assert.equal(requested,key);return {workspaceKey:key,sourceMode:'api'};}});
+  const tree=new ViewTree({vscode:f.vscode,id:'gushenCompletion.sourceView',provider:f.ui,title:'项目源码',extensionPath:require('node:path').resolve(__dirname,'..')});
+  tree.resolveWebviewView({onDidDispose(){},webview:{onDidReceiveMessage:()=>disposable,postMessage:async message=>menus.push(message)}});
+  try {
+    await tree.receive({type:'ready'});
+    const {generation,rows}=menus.at(-1);
+    const {id}=rows.find(row=>row.label.startsWith('索引不完整'));
+    await tree.receive({type:'open',generation,id});
+    assert.match(reports[0],/API_PAGE_IDENTITY_MISMATCH/);
+    assert(!reports[0].includes('API_PAGE_MINIMAL_SOURCE'));
+    await tree.receive({type:'menu',generation,id});
+    const {items}=menus.at(-1);
+    assert.deepEqual(items.map(item=>item.label),['重建索引','修复索引']);
+    await tree.receive({type:'context',generation,id,command:items[1].command});
+    await tree.receive({type:'context',generation,id,command:items[0].command});
+    assert.deepEqual(calls,[[key,'index-repair'],[key,'index',{}],[key,'rebuilt']]);
+    assert.match(notices[0],/检查 1 个索引项，剩余 1 项诊断/);
+  } finally {tree.dispose();nav.dispose();}
 });
 
 test('procedure layout retains package identity, signature and physical refresh scope',()=>{

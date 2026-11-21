@@ -17,7 +17,7 @@ from . import page_source
 from .download import download, download_prefixes, fetch_object, files_from_item, records, BASE
 from .editor_state import assert_writable, _live
 from .store import ApiStore, digest
-from .workspace import settings, save_project, active_scope, api_paths, configure, configuration_lock, in_scope, validate, client_for, project_metadata
+from .workspace import settings, save_project, active_scope, api_paths, configure, configuration_lock, in_scope, client_for, project_metadata, pending_scope, clear_pending_scope, validate_scope_selection
 
 
 def _dirty_paths(workspace):
@@ -204,6 +204,9 @@ def _publish_and_index(workspace, store, files, scope, *, authoritative, on_publ
 
 
 def pull(workspace, client):
+    selected = pending_scope(workspace, settings(workspace))
+    if selected is not None:
+        return scope_apply(workspace, client, {"settings": selected}, apply_pending=True)
     directory, _ = api_paths(workspace)
     with file_lock(directory / "sync.lock"):
         store = ApiStore(workspace)
@@ -219,15 +222,14 @@ def pull(workspace, client):
         return _publish_and_index(workspace, store, files, scope, authoritative=True)
 
 
-def scope_apply(workspace, client, payload):
+def scope_apply(workspace, client, payload, *, apply_pending=False):
     if not isinstance(payload, dict) or set(payload) != {"settings"}:
         raise ApiError("API_INPUT_INVALID", "范围同步需要 settings 对象")
-    selected = payload["settings"]
-    required = {"allSystems", "systemIds", "dataSourceIds"}
-    if not isinstance(selected, dict) or not required <= set(selected) or set(selected) - required - {"includeProjectFiles"}:
-        raise ApiError("API_INPUT_INVALID", "范围同步只接受子系统和数据源设置")
     before = settings(workspace)
-    proposed = validate({**before, **selected})
+    selected = validate_scope_selection(payload["settings"], before)
+    if apply_pending and pending_scope(workspace, before) != selected:
+        raise ApiError("API_SCOPE_STALE", "同步范围已变化，请重新点击更新源码")
+    proposed = {**before, **selected}
     store = ApiStore(workspace)
     target_snapshot, excluded, metadata_complete = _scope_snapshot(workspace, store, proposed)
     if client is None:
@@ -242,6 +244,8 @@ def scope_apply(workspace, client, payload):
     with configuration_lock(workspace), file_lock(directory / "sync.lock"), file_lock(directory / "source.lock"):
         if settings(workspace) != before:
             raise ApiError("API_SCOPE_STALE", "下载期间项目设置已变化，请重新选择范围")
+        if apply_pending and pending_scope(workspace, before) != selected:
+            raise ApiError("API_SCOPE_STALE", "下载期间同步范围已变化，请重新点击更新源码")
         store = ApiStore(workspace)
         target_current, excluded_current, metadata_now = _scope_snapshot(workspace, store, proposed)
         if target_current != target_snapshot or excluded_current != excluded or metadata_now != metadata_complete:
@@ -318,6 +322,10 @@ def scope_apply(workspace, client, payload):
                 operation['removedPaths'] = operation['cleanup']['removedPaths']
                 operation['cleanup']['truncated'] = operation['cleanup']['removedCount'] > len(operation['cleanup']['removedPaths'])
         store._receipt(operation)
+        if (apply_pending and operation["settingsSaved"] and operation["downloadComplete"]
+                and (operation["index"] or {}).get("indexGeneration")
+                and not operation["cleanup"]["blocked"] and not operation.get("error")):
+            clear_pending_scope(workspace)
         return operation
 
 

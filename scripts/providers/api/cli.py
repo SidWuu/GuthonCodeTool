@@ -10,6 +10,8 @@ from .workspace import (
     configuration_lock,
     settings,
     configure,
+    pending_scope,
+    save_scope,
     client_for,
     save_project,
     project_metadata,
@@ -30,6 +32,7 @@ ACTIONS = (
     "systems",
     "data-sources",
     "pull",
+    "scope-save",
     "scope-apply",
     "refresh",
     "status",
@@ -47,6 +50,7 @@ ACTIONS = (
     "upload",
     "sync-database",
     "index",
+    "index-repair",
     "search",
     "context",
     "callers",
@@ -117,6 +121,8 @@ def execute(workspace, action, payload):
                         + str(error),
                     ) from error
             return result
+    if action == "scope-save":
+        return save_scope(workspace, payload)
     if action == "logout":
         if payload:
             raise ApiError("API_INPUT_INVALID", "退出登录输入含未知字段")
@@ -142,8 +148,10 @@ def execute(workspace, action, payload):
                 index_state["indexGeneration"] = connection.execute(
                     "SELECT state_value FROM gusen_sync_state WHERE state_key='generation'"
                 ).fetchone()[0]
+        configured = settings(workspace)
         return {
-            "settings": settings(workspace),
+            "settings": configured,
+            "pendingScope": pending_scope(workspace, configured),
             "checkoutPath": str(workspace["providerSourceRoot"]),
             "workspaceRoot": str(workspace["root"]),
             "hasSourceBaseline": store.path.is_file(),
@@ -188,6 +196,12 @@ def execute(workspace, action, payload):
     if action == "index-health":
         from .index import health
         return health(workspace)
+    if action == "index-repair":
+        from .index import update
+
+        if payload:
+            raise ApiError("API_INPUT_INVALID", "修复索引无需指定路径")
+        return update(workspace, repair_partial=True)
     if action == "table-references":
         from .query_operations import table_references
         return table_references(workspace, payload.get("tableName"), payload.get("columnName", ""), payload.get("limit", 20), payload.get("offset", 0), payload.get("graph", False))

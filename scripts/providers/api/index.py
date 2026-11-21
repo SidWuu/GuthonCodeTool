@@ -716,54 +716,77 @@ def rebuild(workspace):
     }
 
 
-def update(workspace, paths):
-    """Atomically refresh explicit files, keeping unaffected indexed facts intact."""
-    if not isinstance(paths, list) or any(
-        not isinstance(path, str) or not path for path in paths
-    ):
-        raise ValueError("paths must be a list of checkout-relative paths")
-    paths = list(dict.fromkeys(paths))
+def update(workspace, paths=None, *, repair_partial=False):
+    """Refresh explicit paths or retry incomplete records in the current index."""
     dest = Path(workspace["indexPath"])
-    if not dest.is_file():
-        return rebuild(workspace)
-    with closing(sqlite3.connect(dest.resolve().as_uri() + "?mode=ro", uri=True)) as previous:
-        upgrade = previous.execute("SELECT 1 FROM sqlite_master WHERE name='api_reference_object'").fetchone() is None
-    if upgrade:
-        return rebuild(workspace)
+    if not repair_partial:
+        if not isinstance(paths, list) or any(
+            not isinstance(path, str) or not path for path in paths
+        ):
+            raise ValueError("paths must be a list of checkout-relative paths")
+        paths = list(dict.fromkeys(paths))
+        if not dest.is_file():
+            return rebuild(workspace)
+        with closing(sqlite3.connect(dest.resolve().as_uri() + "?mode=ro", uri=True)) as previous:
+            upgrade = previous.execute("SELECT 1 FROM sqlite_master WHERE name='api_reference_object'").fetchone() is None
+        if upgrade:
+            return rebuild(workspace)
     generation = uuid.uuid4().hex
     with file_lock(Path(workspace["contextDir"]) / "api" / "index.lock"):
         store = ApiStore(workspace)
         scope_fingerprint = _scope_fingerprint(workspace)
-        bill_fingerprint = _bill_routes_fingerprint(workspace)
-        if paths:
-            with closing(_connection(workspace, check_scope=False)) as original:
-                unchanged = _unchanged_update(workspace, store, original, paths, scope_fingerprint, bill_fingerprint)
-            if unchanged is not None:
-                return unchanged
+        if repair_partial:
+            status = health(workspace)
+            if not status["ready"]:
+                raise ApiError(status["errorCode"], "当前索引无法增量修复，请先重建索引")
+            with closing(_connection(workspace)) as original:
+                old = {
+                    row["source_path"]: row
+                    for row in original.execute(
+                        "SELECT record_id,source_path FROM gusen_source_record WHERE status<>'OK' ORDER BY source_path"
+                    )
+                }
+                paths = list(old)
+                if not paths:
+                    current = original.execute(
+                        "SELECT state_value FROM gusen_sync_state WHERE state_key='generation'"
+                    ).fetchone()[0]
+                    return {"workspaceKey": workspace["workspaceKey"], "indexGeneration": current,
+                            "updatedPaths": [], "unchanged": True, "complete": True,
+                            "diagnosticCount": 0, "diagnostics": [], "truncated": False}
+        else:
+            bill_fingerprint = _bill_routes_fingerprint(workspace)
+            if paths:
+                with closing(_connection(workspace, check_scope=False)) as original:
+                    unchanged = _unchanged_update(workspace, store, original, paths, scope_fingerprint, bill_fingerprint)
+                if unchanged is not None:
+                    return unchanged
         fd, tmp_name = tempfile.mkstemp(
             prefix=".api-index-", suffix=".db", dir=dest.parent
         )
         os.close(fd)
         tmp = Path(tmp_name)
         try:
-            active = set(store.paths())
+            active = set(paths) if repair_partial else set(store.paths())
             with (
-                closing(_connection(workspace, check_scope=False)) as original,
+                closing(_connection(workspace, check_scope=repair_partial)) as original,
                 closing(sqlite3.connect(tmp)) as conn,
             ):
                 original.backup(conn)
-                _reference_catalog(conn)
                 conn.row_factory = sqlite3.Row
-                old = {
-                    row["source_path"]: row
-                    for row in conn.execute(
-                        "SELECT record_id,source_path FROM gusen_source_record"
-                    )
-                }
-                targets = set(paths) | (set(old) - active) | (active - set(old))
-                previous_scope=conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='scopeFingerprint'").fetchone()
-                if previous_scope is None or previous_scope[0]!=scope_fingerprint:
-                    targets.update(set(CONFIGS)&active)
+                targets = set(paths)
+                if not repair_partial:
+                    _reference_catalog(conn)
+                    old = {
+                        row["source_path"]: row
+                        for row in conn.execute("SELECT record_id,source_path FROM gusen_source_record")
+                    }
+                    targets.update(set(old) ^ active)
+                    previous_scope = conn.execute(
+                        "SELECT state_value FROM gusen_sync_state WHERE state_key='scopeFingerprint'"
+                    ).fetchone()
+                    if previous_scope is None or previous_scope[0] != scope_fingerprint:
+                        targets.update(set(CONFIGS) & active)
                 for path in sorted(targets):
                     checkpoint()
                     row = old.get(path)
@@ -797,7 +820,7 @@ def update(workspace, paths):
                         else:
                             _clear_record(conn, row)
                         continue
-                    if path not in active and item["metadata"].get("remoteDeleted"):
+                    if item["metadata"].get("remoteDeleted") and (repair_partial or path not in active):
                         if row is not None:
                             _clear_record(conn, row)
                         continue
@@ -812,14 +835,21 @@ def update(workspace, paths):
                     "UPDATE gusen_sync_state SET state_value=? WHERE state_key='generation'",
                     (generation,),
                 )
-                conn.execute(
-                    "INSERT OR REPLACE INTO gusen_sync_state VALUES('scopeFingerprint',?)",
-                    (scope_fingerprint,),
-                )
-                bill_count, bill_status = _refresh_bill_routes(conn, workspace)
-                if _bill_routes_fingerprint(workspace) != bill_fingerprint:
-                    raise ApiError("API_BILL_EXPORT_STALE", "单据导出在索引更新期间变化，请重试")
-                conn.execute("INSERT OR REPLACE INTO gusen_sync_state VALUES('billRoutesFingerprint',?)", (bill_fingerprint,))
+                if repair_partial:
+                    bill_count = conn.execute("SELECT COUNT(*) FROM gusen_bill_route WHERE source_record_id=0").fetchone()[0]
+                    state = conn.execute(
+                        "SELECT state_value FROM gusen_sync_state WHERE state_key='billRouteStatus'"
+                    ).fetchone()
+                    bill_status = state[0] if state else "UNAVAILABLE"
+                else:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO gusen_sync_state VALUES('scopeFingerprint',?)",
+                        (scope_fingerprint,),
+                    )
+                    bill_count, bill_status = _refresh_bill_routes(conn, workspace)
+                    if _bill_routes_fingerprint(workspace) != bill_fingerprint:
+                        raise ApiError("API_BILL_EXPORT_STALE", "单据导出在索引更新期间变化，请重试")
+                    conn.execute("INSERT OR REPLACE INTO gusen_sync_state VALUES('billRoutesFingerprint',?)", (bill_fingerprint,))
                 if _scope_fingerprint(workspace) != scope_fingerprint:
                     raise ApiError(
                         "API_INDEX_SCOPE_STALE",
