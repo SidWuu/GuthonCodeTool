@@ -58,7 +58,7 @@ class ProjectOverview {
     }
     if(row.kind==='project') {
       const w=row.workspace,summary=this.summaries.get(key),mode=(w.sourceMode || 'api').toUpperCase();
-      item.contextValue='guthonProject.project.'+mode.toLowerCase();
+      if(w.configuration?.format!=='legacy-yaml')item.contextValue='guthonProject.project.'+mode.toLowerCase();
       const state=summary?.conflict?'有冲突':summary?.changed!=null?`${summary.changed} 修改`:w.executionReady===false?'此版本未接入': w.status==='FAILED'?'同步失败': '状态待检查';
       item.description=`${mode} · ${state}`;
       item.tooltip=[label,key,mode,w.root,w.index?.path].filter(Boolean).join('\n');

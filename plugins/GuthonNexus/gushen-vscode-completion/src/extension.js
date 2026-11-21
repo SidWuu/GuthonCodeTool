@@ -709,6 +709,7 @@ function activate(context) {
   const assistantClient = new ToolJsonClient({getTool:async()=>configuredToolFromSettings(),processClient});
   const selectWorkspace = (workspaceKey,options) => selection.select(workspaceKey || '',options);
   const {workspaceKeyFrom,projectMenuHandler,projectToolHandler,projectDiagnosisHandler}=require('./api/project-actions');
+  const {assertWorkspaceSaved,deleteWorkspace}=require('./workspace-delete');
   const selectedToolCommand = command => projectToolHandler({vscode,selectWorkspace,runTool,command});
   const projectMenu = command => projectMenuHandler({vscode,selectWorkspace,command});
   const projectAction=require('./api/project-actions');
@@ -1201,8 +1202,10 @@ function activate(context) {
         if (!sourceMode) return;
         const confirmed = await vscode.window.showWarningMessage(
           `将「${workspace.name}」的同步方式从 ${currentMode.toUpperCase()} 改为 ${sourceMode.toUpperCase()}？`,
-          { modal: true, detail: '可直接修改尚未接入的项目。已有来源配置、源码或历史时，SVN 转 API 需先完成迁移预检。' }, '确认修改');
+          { modal: true, detail: '尚无源码、索引或操作历史时可直接修改。切换后按所选方式配置连接和范围，原 API 设置可在切回时复用。' }, '确认修改');
         if (confirmed !== '确认修改') return;
+        if(configuredToolFromSettings()?.toolHome!==tool.toolHome)throw new Error('数据目录已切换，请重新选择项目');
+        assertWorkspaceSaved(vscode,workspace,apiServices.editorState,legacyProjects);
         if (apiServices.editorState.workspaces.has(workspace.workspaceKey)) {
           await apiServices.editorState.flush(workspace.workspaceKey);
         }
@@ -1230,34 +1233,23 @@ function activate(context) {
       }
     }),
     vscode.commands.registerCommand('gushenCompletion.deleteWorkspace', async (workspaceValue) => {
+      const tool=configuredToolFromSettings();
+      if(!tool)return;
       let workspace;
       try {workspace=await selectWorkspace(workspaceKeyFrom(workspaceValue));}
       catch(error) {return vscode.window.showErrorMessage(`无法选择项目：${error.message}`);}
       if(!workspace)return;
-      const workspaceKey=workspace.workspaceKey;
-      let plan;
-      try {
-        const state=await apiServices.sourceTree.status(workspaceKey);
-        await apiServices.editorState.flush(workspaceKey);
-        const registered=apiServices.editorState.workspaces.get(workspaceKey);
-        if(apiServices.editorState.documents(workspaceKey,registered).some(item=>item.dirty)) throw new Error('该项目有未保存的编辑器或页面草稿，请先处理');
-        plan=await assistantClient.run('',TOOL_COMMANDS.workspaceDelete,[],{checkOnly:true,workspaceKey});
-        if(plan.workspaceKey!==workspaceKey || !Array.isArray(plan.paths) || plan.paths.some(p=>typeof p!=='string' || !path.isAbsolute(p))) throw new Error('删除预览身份或路径无效');
-      } catch(error) {return vscode.window.showErrorMessage(`无法读取删除范围：${error.message}`);}
-      const confirmed=await vscode.window.showWarningMessage(
-        `确认删除 ${plan.displayName}（${workspaceKey}）？\n\n${plan.paths.join('\n')}\n\n目录将移入系统废纸篓，本地源码修改也会一并移走。`,{modal:true},'确认删除');
-      if(confirmed!=='确认删除') return false;
-      try {
-        await apiServices.editorState.flush(workspaceKey);
-        const registered=apiServices.editorState.workspaces.get(workspaceKey);
-        if(apiServices.editorState.documents(workspaceKey,registered).some(item=>item.dirty)) throw new Error('确认后出现未保存的编辑器或页面草稿');
-        for(const target of plan.paths) if(fs.existsSync(target)) await vscode.workspace.fs.delete(vscode.Uri.file(target),{recursive:true,useTrash:true});
-      } catch(error) {return vscode.window.showErrorMessage(`删除已停止：${error.message}。配置尚未删除，已移入废纸篓的目录可恢复。`);}
-      try {await assistantClient.run('',TOOL_COMMANDS.workspaceDelete,[],{checkOnly:false,workspaceKey});}
-      catch(error) {return vscode.window.showErrorMessage(`目录已移入废纸篓，但配置删除失败：${error.message}。`);}
-      refreshToolData();
-      await refreshApiWorkspaces();
-      return vscode.window.showInformationMessage(`已删除 ${plan.displayName}，相关目录可从系统废纸篓恢复。`);
+      const client=new ToolJsonClient({getTool:()=>tool,processClient});
+      return deleteWorkspace({vscode,workspace,
+        request:payload=>client.run('',TOOL_COMMANDS.workspaceDelete,[],payload),
+        assertSaved:()=>assertWorkspaceSaved(vscode,workspace,apiServices.editorState,legacyProjects),
+        assertTool:()=>{
+          if(configuredToolFromSettings()?.toolHome!==tool.toolHome)throw new Error('数据目录已切换，请重新预览删除范围');
+        },
+        refresh:async()=>{
+          apiServices.editorState.workspaces.delete(workspace.workspaceKey);
+          await refreshLocalWorkspaceViews();
+        }});
     }),
     vscode.commands.registerCommand('gushenCompletion.configureDatabaseDiagnosis', async (workspaceKey) => {
       if (typeof workspaceKey !== 'string' || !workspaceKey) {

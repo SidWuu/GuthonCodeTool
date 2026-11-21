@@ -53,10 +53,11 @@ test('context commands preserve the API layout condition and project capabilitie
   const source=contextCommands('gushenCompletion.sourceView','guthonApi.category.procedures',vscode).map(action=>action.command);
   assert(source.includes('gushenCompletion.showApiProcedureFlat'));
   assert(!source.includes('gushenCompletion.showApiProcedureTree'));
-  const overview=contextCommands('gushenCompletion.projectOverview','guthonProject.project.svn',vscode).map(action=>action.command);
-  assert.deepEqual(overview,[]);
-  assert.deepEqual(contextCommands('gushenCompletion.projectOverview','guthonProject.project.api',vscode).map(action=>action.command),
-    ['gushenCompletion.deleteWorkspace']);
+  for(const mode of ['api','svn','database']) {
+    assert.deepEqual(contextCommands('gushenCompletion.projectOverview','guthonProject.project.'+mode,vscode).map(action=>action.command),
+      ['gushenCompletion.deleteWorkspace']);
+  }
+  assert.deepEqual(contextCommands('gushenCompletion.projectOverview','guthonProject.project',vscode),[]);
 });
 
 test('the webview renders a distinct icon for each API source module separately from its expand arrow',()=>{

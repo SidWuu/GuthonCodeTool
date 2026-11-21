@@ -554,6 +554,7 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     watcher.dispose();scopedScm.dispose();catalog.dispose();virtualFs.dispose();inheritedSource.dispose();
   }});
   return { action, login, sync, children, treeItem, openLocal, openWorkcopy:databaseTree.workcopy,
+    hasUnsavedDrafts:workspace=>!!pageEditors.get(workspace.sourceMode)?.hasUnsavedDrafts(workspace.workspaceKey,getTool()?.toolHome),
     databaseCallers:databaseTree.callers, editSvnPage,locate, virtualFs, diff, conflict,updateNode,updateRemote,showInheritance,
     review, update, openSvnChange, resolveConflict,
     history:async (workspace, sourcePath) => report((await backend.history(workspace.workspaceKey,sourcePath)).xml,'xml') };

@@ -111,7 +111,7 @@ runtimeVar                   = <toolHome>/<workspaceDirectory>  私有谷神工�
 |---|---|
 | `scripts/guthon_tool.py` | 统一 CLI、`--home` 契约、命令编排、子命令 parser 构建器与帮助自省、`self-test`。 |
 | `scripts/common/gusen_hub.py` | 显式 toolHome、工作区解析、索引连接和共享工具。 |
-| `scripts/common/workspace_config.py` | 在开发根 `workspace/` 下登记新项目，管理同步方式和登记删除。 |
+| `scripts/common/workspace_config.py` | 在开发根 `workspace/` 下登记新项目，管理同步方式、项目目录删除预览和登记移除，Nexus 废纸篓确认见 `plugins/GuthonNexus/gushen-vscode-completion/src/workspace-delete.js`。 |
 | `scripts/common/workspace_layout.py` | 初始化 var Git 根、根规则入口和受管忽略块，校验工作区目录名。 |
 | `scripts/common/workspace_assistant.py` | 工作区摘要、就绪状态与助手输出。 |
 | `scripts/common/index_bulk.py` | 在完整重建事务内暂停逐行检索索引触发器，批量构建并恢复；失败回滚数据和触发器。 |

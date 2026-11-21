@@ -9,6 +9,7 @@ const {SCHEME, decodeIdentity, fragmentIdentity, pageDisplayName, scriptType} = 
 
 const escape = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const pageKey = identity => JSON.stringify([identity.workspaceKey, identity.sourcePath || identity.path]);
+const hasUnsavedDraft = session => !!(session.draft.operations().length || session.pending || session.nativeRecovery);
 const RAW_SOURCE_STATES = new Set(['METADATA_ONLY','IDENTITY_MISMATCH','BATCH_EXPORT']);
 
 class PageEditorController {
@@ -211,7 +212,7 @@ class PageEditorController {
     }
   }
   publish(session) {
-    const dirty = !!(session.draft.operations().length || session.pending || session.nativeRecovery);
+    const dirty = hasUnsavedDraft(session);
     const draftSignature=JSON.stringify([dirty,session.draft.version]);
     if(session.draftSignature!==draftSignature) {
       session.draftSignature=draftSignature; session.draftRegistrationError=null;
@@ -563,6 +564,10 @@ class PageEditorController {
       if (session.blocked) throw new Error(session.blocked);
       if (session.draft.operations().length) await this.save(session);
     }
+  }
+  hasUnsavedDrafts(workspaceKey, home) {
+    return [...this.pages.values()].some(session =>
+      session.identity.workspaceKey === workspaceKey && session.identity.home === home && hasUnsavedDraft(session));
   }
   dispose() {
     if(this.disposed) return;

@@ -510,7 +510,7 @@
         {"command":"gushenCompletion.projectMenuSvnRemote","when":"gushenCompletion.currentSvnHasWorkingCopies","group":"1_svn@2"}
       ],
       "view/item/context": [
-        {"command":"gushenCompletion.deleteWorkspace","when":"view == gushenCompletion.projectOverview && viewItem == guthonProject.project.api","group":"9_manage@1"},
+        {"command":"gushenCompletion.deleteWorkspace","when":"view == gushenCompletion.projectOverview && viewItem =~ /^guthonProject\\.project\\.(api|database|svn)$/","group":"9_manage@1"},
         {"command":"gushenCompletion.reindexCalls","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.indexIncomplete","group":"index@1"},
         {"command":"gushenCompletion.repairApiIndex","when":"view == gushenCompletion.sourceView && viewItem == guthonApi.indexIncomplete","group":"index@2"},
         {"command":"gushenCompletion.openDatabaseWorkcopy","when":"view == gushenCompletion.sourceView && viewItem =~ /^guthonDatabase(WorkcopySource|Procedure)$/","group":"navigation@1"},

@@ -102,7 +102,7 @@ test('diagnostic selection clears the actionable and persisted key without retar
 });
 
 
-test('project right-click menus attach to the matching provider and keep removal scoped to API',()=>{
+test('project right-click offers only deletion in all three unified providers',()=>{
   const {workspaceKeyFrom}=require('../src/api/project-actions');
   const view=new ProjectOverview({vscode});view.setSnapshot(snapshot(),'ws_api');
   const contexts=view.getChildren().filter(row=>row.kind==='project').map(row=>view.getTreeItem(row).contextValue);
@@ -112,5 +112,9 @@ test('project right-click menus attach to the matching provider and keep removal
   const manifest=require('../package.json');
   const menu=manifest.contributes.menus['view/item/context'].filter(item=>item.when.includes('view == gushenCompletion.projectOverview'));
   assert.deepEqual(menu.map(item=>item.command),['gushenCompletion.deleteWorkspace']);
-  assert.match(menu.find(item=>item.command==='gushenCompletion.deleteWorkspace').when,/guthonProject\.project\.api$/);
+  const {contextCommands}=require('../src/view-tree');
+  for(const context of contexts)assert.deepEqual(contextCommands('gushenCompletion.projectOverview',context,vscode).map(item=>item.command),
+    ['gushenCompletion.deleteWorkspace']);
+  const legacy={kind:'project',key:'old',workspace:{name:'旧登记',sourceMode:'svn',configuration:{format:'legacy-yaml'}}};
+  assert.deepEqual(contextCommands('gushenCompletion.projectOverview',view.getTreeItem(legacy).contextValue,vscode),[]);
 });

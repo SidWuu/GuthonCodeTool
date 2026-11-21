@@ -30,17 +30,69 @@ test('ToolHost registers all providers and changes only the targeted unused proj
     const change=(expectedMode,sourceMode)=>client.request(tool,'workspace-source-mode',[],'',{workspaceKey:'api',expectedMode,sourceMode});
     await assert.rejects(change('api','svn'),{code:'API_EDITOR_DIRTY'});
     await api({pid:process.pid,editorToken:draft.editorToken,documents:[]});
+    const apiRun=(action,input)=>client.request(tool,'api',[action,'--stdin'],'api',input);
+    await apiRun('configure',{serverUrl:'https://fixture.invalid'});
+    await apiRun('scope-save',{allSystems:false,systemIds:['SYS'],dataSourceIds:[]});
+    const root=path.join(home,'var','workspace','api');
+    fs.writeFileSync(path.join(root,'docs','notes.md'),'keep');
     for (const [expectedMode,sourceMode] of [['api','svn'],['svn','database'],['database','api']]) {
+      if(expectedMode==='svn') {
+        const cfg=path.join(home,'config','guthon.json');
+        const saved=JSON.parse(fs.readFileSync(cfg,'utf8'));
+        saved.workspaces.api.svn={url:'https://svn.fixture.invalid/repo',username:'fixture',scope:['systems/SYS']};
+        fs.writeFileSync(cfg,JSON.stringify(saved));
+      }
       assert.deepEqual(await change(expectedMode,sourceMode),{ok:true,changed:true,workspaceKey:'api',sourceMode});
       const registry=await client.request(tool,'workspaces');
       assert.deepEqual(Object.fromEntries(registry.workspaces.map(w=>[w.workspaceKey,w.sourceMode])),{
         api:sourceMode,svn:'svn',database:'database',
       });
     }
+    const configured=await apiRun('status',{summaryOnly:true});
+    assert.equal(configured.settings.serverUrl,'https://fixture.invalid');
+    assert.deepEqual(configured.pendingScope.systemIds,['SYS']);
+    assert.equal(fs.readFileSync(path.join(root,'docs','notes.md'),'utf8'),'keep');
     await assert.rejects(change('svn','api'),{code:'WORKSPACE_SOURCE_MODE_STALE'});
     await api({pid:process.pid,editorToken:draft.editorToken,documents:[],close:true});
     fs.writeFileSync(path.join(home,'var','workspace','api','checkout','source.gss'),'existing source');
     await assert.rejects(change('api','svn'),{code:'WORKSPACE_MODE_MIGRATION_REQUIRED'});
+  } finally {await client.stop();client.dispose();}
+});
+
+test('ToolHost previews each project directory and unregisters only after it is moved', {skip:!fs.existsSync(python) && 'repository Python environment unavailable'},async t=>{
+  const home=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'nexus-delete-toolhost-')));
+  t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+  const toolEntry=path.join(scripts,'guthon_tool.py');
+  const setup=spawnSync(python,[toolEntry,'setup','--home',home],{encoding:'utf8'});
+  assert.equal(setup.status,0,setup.stderr);
+  const tool={mode:'source-development',toolPath:python,toolEntry,toolHome:home};
+  const client=new ToolProcessClient();
+  try {
+    const create=(id,sourceMode)=>client.request(tool,'workspace-create',[],'',{id,name:id,sourceMode});
+    for(const mode of ['api','svn','database'])await create(mode,mode);
+    await create('retained','api');
+    for(const mode of ['api','svn','database']) {
+      const request=payload=>client.request(tool,'workspace-delete',[],'',{workspaceKey:mode,...payload});
+      if(mode==='api') {
+        const editor=input=>client.request(tool,'api',['editor-state','--stdin'],mode,{pid:process.pid,...input});
+        const state=await editor({documents:[{path:'dirty.gss',dirty:true}]});
+        await assert.rejects(request({checkOnly:true}),{code:'API_EDITOR_DIRTY'});
+        await editor({documents:[],editorToken:state.editorToken,close:true});
+      }
+      const plan=await request({checkOnly:true});
+      const root=path.join(home,'var','workspace',mode);
+      assert.deepEqual(plan.paths,[root]);
+      assert.deepEqual(plan.retainedPaths,[]);
+      await assert.rejects(request({checkOnly:true,planId:'wrong'}),{code:'WORKSPACE_DELETE_PLAN_STALE'});
+      await assert.rejects(request({checkOnly:false,planId:plan.planId}),/移入废纸篓/);
+      const moved=path.join(home,'trash-'+mode);
+      fs.writeFileSync(path.join(root,'docs','notes.md'),mode);
+      fs.renameSync(root,moved);
+      assert.equal((await request({checkOnly:false,planId:plan.planId})).removed,true);
+      assert.equal(fs.readFileSync(path.join(moved,'docs','notes.md'),'utf8'),mode);
+    }
+    const registry=await client.request(tool,'workspaces');
+    assert.deepEqual(registry.workspaces.map(w=>w.workspaceKey),['retained']);
   } finally {await client.stop();client.dispose();}
 });
 

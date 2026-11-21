@@ -1,5 +1,7 @@
 """Manage project registrations in the unified configuration."""
 from __future__ import annotations
+import hashlib
+import json
 import uuid
 from pathlib import Path
 
@@ -78,9 +80,12 @@ def create_workspace(home, payload, gusen_hub):
 
 def _has_source_state(workspace):
     context = workspace["contextDir"]
-    # A new API project is registered with Nexus as soon as its card is visible.
-    # Empty editor registrations and operation locks do not constitute source history.
-    transient = {context / name for name in ("api/editors.json", "api/editors.lock", ".svn-operation.lock")}
+    # Connecting and browsing the scope can write local metadata before any pull.
+    transient = {context / name for name in (
+        ".svn-operation.lock", "api/editors.json", "api/editors.lock",
+        "api/configuration.lock", "api/identity.json", "api/last-login.json",
+        "api/project.json", "api/project.lock", "api/menu-tree.json", "api/pending-scope.json",
+    )}
     paths = {context, workspace["runtimeDir"], *(entry["path"] for entry in workspace["sourceRoots"])}
     if workspace["sourceMode"] == "database":
         paths.add(workspace["databaseDir"])
@@ -114,14 +119,19 @@ def change_source_mode(home, payload, gusen_hub):
         record = document["workspaces"][key]
         migrate_error = CommandError(
             "WORKSPACE_MODE_MIGRATION_REQUIRED",
-            "项目已有来源配置、源码、索引或操作记录，无法直接修改同步方式",
+            "项目已有源码、索引、操作记录或专用路径配置，无法直接修改同步方式",
         )
-        if set(record) - {"name", "directory", "aliases", "sourceMode"} or key in document["apiWorkspaces"]:
+        source_fields = {"svn", "datasource", "systems", "include"}
+        svn_setup_fields = {"url", "username", "scope", "credential_ref", "managed_scope_selection"}
+        if (set(record) - {"name", "directory", "aliases", "sourceMode"} - source_fields
+                or set(record.get("svn") or {}) - svn_setup_fields):
             raise migrate_error
         if _has_source_state(workspace):
             raise migrate_error
 
         record["sourceMode"] = mode
+        for field in source_fields:
+            record.pop(field, None)
         updated = gusen_hub.resolve_workspace(config_store.resolve_document(home, document), key)
         if _has_source_state(updated):
             raise migrate_error
@@ -136,25 +146,46 @@ def change_source_mode(home, payload, gusen_hub):
 
 
 def delete_workspace_config(home, payload, gusen_hub):
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or set(payload) - {"workspaceKey", "checkOnly", "planId"}:
         raise SystemExit("workspace-delete input must be an object")
     key = validate_workspace_key(payload.get("workspaceKey"))
+    check_only = payload.get("checkOnly", True)
+    if type(check_only) is not bool:
+        raise ValueError("checkOnly 必须为布尔值")
     from common import config_store
+    from common.runtime_paths import tool_source_root
+    from common.workspace_layout import RESERVED
     if not config_store.unified(home):
         raise SystemExit('旧配置当前仅支持公共解析，不自动改写或删除登记')
     with file_lock(home / "config/.configuration.lock"):
         config = gusen_hub.load_config()
         workspace = gusen_hub.resolve_workspace(config, key)
-        if workspace['sourceMode'] != 'api':
-            raise SystemExit('旧 provider 的登记管理尚未接线，不删除其源码或配置')
-        if payload.get("checkOnly", True):
+        root = workspace["root"]
+        space = workspace["spaceRoot"]
+        explicit_root = workspace["config"].get("root")
+        protected = [home / "config", home / "docs", home / "GuthonCodeTool", tool_source_root(),
+                     *(space / name for name in RESERVED | {"checkout"})]
+        if (root in {space, space / PROJECTS_DIRECTORY} or root in space.parents
+                or (explicit_root and Path(explicit_root).expanduser().is_symlink())
+                or any(root.is_relative_to(path) or path.is_relative_to(root) for path in protected)):
+            raise CommandError("WORKSPACE_DELETE_PATH_INVALID", "项目目录与共享目录重叠或使用了符号链接，无法自动移入废纸篓")
+        retained = sorted({str(workspace[name]) for name in ("providerSourceRoot", "contextDir", "runtimeDir", "docsDir")
+                           if not workspace[name].is_relative_to(root)})
+        document = config_store.read(home)
+        binding = [key, str(root), retained, document["workspaces"][key], document["apiWorkspaces"].get(key)]
+        plan_id = hashlib.sha256(json.dumps(binding, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        if payload.get("planId", plan_id) != plan_id:
+            raise CommandError("WORKSPACE_DELETE_PLAN_STALE", "项目路径或登记已变化，请重新预览删除范围")
+        if check_only:
+            if workspace["sourceMode"] == "api" and (workspace["contextDir"] / "api/editors.json").is_file():
+                from providers.api.editor_state import assert_writable
+
+                assert_writable(workspace, None)
             return {"ok": True, "workspaceKey": key, "displayName": workspace["displayName"],
-                    "paths": [str(workspace["root"])], "checkOnly": True}
-        if workspace["root"].exists():
+                    "paths": [str(root)], "retainedPaths": retained, "planId": plan_id, "checkOnly": True}
+        if root.exists():
             raise SystemExit("请先将已确认的工作区目录移入废纸篓，再删除配置")
-        from common import config_store
-        def remove(document):
-            document["workspaces"].pop(key)
-            document["apiWorkspaces"].pop(key, None)
-        config_store.mutate(home, remove)
+        document["workspaces"].pop(key)
+        document["apiWorkspaces"].pop(key, None)
+        config_store.write(home, document)
     return {"ok": True, "workspaceKey": key, "removed": True}
