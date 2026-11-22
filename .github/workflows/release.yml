@@ -184,6 +184,7 @@ jobs:
         run: |
           release_version=$(tr -d '[:space:]' < ../../../VERSION)
           printf '{\n  "version": "%s"\n}\n' "$release_version" > tool-version.json
+          npm ci
           node --test --test-concurrency=4 test/*.test.js
           npm run check
           npm run build:bridge
