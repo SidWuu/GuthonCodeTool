@@ -82,7 +82,8 @@ def initialize_space(home, *, existing=False, directory="var", team_source=None)
     space.mkdir(parents=True, exist_ok=True)
     if not (space / ".git").exists():
         subprocess.run(["git", "init", "--quiet", str(space)], check=True, capture_output=True)
-    actual = subprocess.run(["git", "-C", str(space), "rev-parse", "--show-toplevel"], check=True, capture_output=True, text=True)
+    actual = subprocess.run(["git", "-C", str(space), "rev-parse", "--show-toplevel"],
+                            check=True, capture_output=True, encoding="utf-8")
     if Path(actual.stdout.strip()).resolve() != space:
         raise ValueError("开发目录必须是独立 Git 工作空间根")
     if not previous_governance:

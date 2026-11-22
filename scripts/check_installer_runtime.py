@@ -24,7 +24,12 @@ def check(payload):
     execute(["-c", "print('中文路径与输出校验')"])
     with tempfile.TemporaryDirectory(prefix="guthon-runtime-check-") as directory:
         workspace = Path(directory) / "中文临时工作区"
-        subprocess.run([str(payload / 'tool/GuthonCodeTool.exe'), 'setup', '--home', str(workspace)], check=True, capture_output=True)
+        setup = subprocess.run(
+            [str(payload / "tool/GuthonCodeTool.exe"), "setup", "--home", str(workspace), "--no-team-sync"],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        if setup.returncode:
+            raise RuntimeError(f"中文路径初始化失败（退出码 {setup.returncode}）\n{setup.stderr.strip()}")
     verify_payload(payload)
     print(json.dumps({"ok": True, "bundleId": manifest["bundleId"], "checks": "isolated-python,engine,tool-setup,utf8"}))
 
