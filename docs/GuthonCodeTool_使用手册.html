@@ -162,10 +162,10 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <a class="toc-link toc-sub" href="#project-details">当前项目卡片</a>
 <a class="toc-link toc-sub" href="#nexus-more-menus">标题栏更多功能</a>
 <a class="toc-link" href="#3-guthon-team">3. guthon-team</a>
-<a class="toc-link toc-sub" href="#3-1-安装治理插件">3.1 安装治理插件</a>
-<a class="toc-link toc-sub" href="#3-2-信任-hook">3.2 信任 Hook</a>
-<a class="toc-link toc-sub" href="#3-3-初始化并检查">3.3 初始化并检查</a>
-<a class="toc-link toc-sub" href="#3-4-手动与无-hook-安装">3.4 手动与无 Hook 安装</a>
+<a class="toc-link toc-sub" href="#3-1-安装治理插件">3.1 从插件市场安装</a>
+<a class="toc-link toc-sub" href="#3-2-信任-hook">3.2 新对话自动安装</a>
+<a class="toc-link toc-sub" href="#3-3-初始化并检查">3.3 确认生效</a>
+<a class="toc-link toc-sub" href="#3-4-手动与无-hook-安装">3.4 手动补救与无 Hook 安装</a>
 <a class="toc-link" href="#4-bridge">4. Bridge 网页辅助</a>
 <a class="toc-link toc-sub" href="#4-1-安装-chrome-扩展">4.1 安装 Chrome 扩展</a>
 <a class="toc-link toc-sub" href="#4-2-启动与验证">4.2 启动与配对</a>
@@ -335,93 +335,93 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="3-guthon-team">3. guthon-team</h2>
-<h3 id="3-1-安装治理插件">3.1 安装治理插件</h3>
-<p>Nexus 初始化会同步工作区规则和本地开发门禁。需要在 Agent 执行工具或结束轮次时自动检查，再安装 <code>guthon-guard</code> 并完成 Hook 信任。</p>
-<h4>第一次连接内网 Git</h4>
+<p>Nexus 初始化会把团队规则和本地开发门禁同步到工作区。需要 Agent 在新对话中自动准备和检查工作区时，在对应客户端安装团队市场里的 <code>guthon-guard</code>，然后审阅并信任 Hook。</p>
+
+<h3 id="3-1-安装治理插件">3.1 从插件市场安装</h3>
+<p>从公司网络或 VPN 访问团队市场。首次添加时使用团队提供的 Marketplace 地址和个人仓库权限。Windows 可先按<a href="GuthonCodeTool_Windows安装步骤.html#one-click-team">首次连接授权</a>完成 Git 认证。</p>
+
+<h4 id="guthon-codex-market">Codex 安装</h4>
 <ol>
-<li>连接公司内网或 VPN，确认终端中可以运行 <code>git --version</code> 和 <code>python3 --version</code>。</li>
-<li>查看本机是否已有 SSH 公钥。macOS/Linux 执行 <code>ls ~/.ssh/*.pub</code>；Windows PowerShell 执行 <code>Get-ChildItem $env:USERPROFILE\.ssh\*.pub</code>。</li>
-<li>如果没有公钥，在终端执行 <code>ssh-keygen -t ed25519</code> 并按提示保存。如果默认文件已经存在，不要覆盖仍在使用的密钥。</li>
-<li>复制对应 <code>.pub</code> 文件的完整内容。macOS/Linux 可执行 <code>cat ~/.ssh/id_ed25519.pub</code>；Windows PowerShell 可执行 <code>Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub</code>。实际文件名不同时按真实路径调整。没有 <code>.pub</code> 后缀的私钥必须只保存在本机，不能上传或发送。</li>
-<li>使用自己的账号登录团队内部发布的 <code>&lt;内网 Git Web 地址&gt;</code>，进入“用户设置 → SSH / GPG 公钥”，点击“增加密钥”，填写设备标题并粘贴公钥。</li>
-<li>执行下面的只读命令。首次出现主机指纹时，先与团队公布的指纹核对；无法核对时不要直接确认。</li>
+<li>在 Codex 桌面端打开插件目录，切换到团队市场 <code>guthon-team</code>，安装并启用 <code>guthon-guard</code>。</li>
+<li>列表中没有团队市场，或正在使用 Codex CLI 时，查看<a href="#guthon-manual-codex-market">首次登记市场与 CLI 安装</a>。</li>
+<li>安装后按<a href="#3-2-信任-hook">信任 Hook 并新建对话</a>操作。</li>
 </ol>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>git ls-remote "&lt;团队 Marketplace SSH 地址&gt;" HEAD</code></pre></div>
-<p>看到一行提交哈希和 <code>HEAD</code> 表示连接成功。若提示 <code>Permission denied (publickey)</code>，先检查公钥是否添加到了当前登录的个人账号；公钥正确但仍无权访问时，再联系管理员检查账号或仓库权限。</p>
-<h4>Codex 安装</h4>
+
+<h4 id="guthon-codebuddy-market">CodeBuddy IDE 图形化安装</h4>
 <ol>
-<li>在终端添加团队 Marketplace。添加市场与安装插件是两个独立步骤，两条命令都要执行：</li>
+<li>用 CodeBuddy IDE 打开 Guthon 开发根。在 CodeBuddy 面板进入「插件 → 插件市场」。</li>
+<li>第一次安装时点击「＋」打开「添加插件源」，填入团队提供的 CodeBuddy 市场地址并提交。市场列表已有 <code>guthon-team</code> 时，直接选择它。</li>
+<li>在 <code>guthon-team</code> 找到 <code>guthon-guard</code>，点安装。日常使用可选「安装（用户）」，需要限定在当前项目时选「安装（项目）」。</li>
+<li>确认插件显示已安装。通过命令面板执行「开发人员: 重新加载窗口」，再打开新对话并核对 Hook 状态。</li>
 </ol>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codex plugin marketplace add "&lt;团队 Marketplace SSH 地址&gt;" --ref main</code></pre></div>
-<ol start="2">
-<li>安装团队治理插件：</li>
+<p>下面是 CodeBuddy IDE 的市场操作实拍。点击截图可放大。</p>
+<div class="manual-shots">
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：CodeBuddy 插件市场的添加插件源对话框"><img src="windows-install-images/36-codebuddy-add-source.jpg" width="2880" height="1700" alt="CodeBuddy 插件市场的添加插件源对话框" loading="lazy"></button><figcaption>① 打开市场的「＋」，添加团队插件源。</figcaption></figure>
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：CodeBuddy 市场中的 guthon-team 和 guthon-guard 条目"><img src="windows-install-images/48-codebuddy-guthon-market.jpg" width="2880" height="1700" alt="CodeBuddy 市场中的 guthon-team 和 guthon-guard 条目" loading="lazy"></button><figcaption>② 选择「guthon-team」，找到「guthon-guard」。</figcaption></figure>
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：guthon-guard 安装菜单中的用户和项目范围"><img src="windows-install-images/49-codebuddy-guthon-install-scope.jpg" width="2880" height="1700" alt="guthon-guard 安装菜单中的用户和项目范围" loading="lazy"></button><figcaption>③ 选择安装范围，日常使用可选「安装（用户）」。</figcaption></figure>
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：CodeBuddy 插件管理中已安装的 guthon-guard"><img src="windows-install-images/51-codebuddy-guthon-my-installed.jpg" width="2880" height="1700" alt="CodeBuddy 插件管理中已安装的 guthon-guard" loading="lazy"></button><figcaption>④ 确认插件已安装，再重载窗口并新建对话。</figcaption></figure>
+</div>
+<p>带自定义端口的内网 SSH 市场需要 CodeBuddy 可识别的地址。团队若提供 SSH 主机别名，按原样填入；添加失败时看<a href="#guthon-manual-git">内网连接补救</a>。使用 CodeBuddy Code CLI 的用户可查看<a href="#guthon-manual-codebuddy">CLI 安装</a>。</p>
+
+<h3 id="3-2-信任-hook">3.2 信任 Hook 并新建对话自动安装</h3>
+<ol>
+<li>在 Codex 桌面端从输入区的「审阅 Hook」或「设置 → Hooks」进入审阅。Codex CLI 使用 <code>/hooks</code>。CodeBuddy IDE 按宿主提示打开插件或 Hook 审阅入口。</li>
+<li>核对 Hook 来自团队市场里的 <code>guthon-guard</code>，审阅实际命令后点击信任。插件更新后如再次提示审阅，按同样步骤确认。</li>
+<li>在已用 Nexus 初始化或接入的开发根（默认 <code>var/</code>）或其中已登记的项目目录发起一个新的本地 Codex 对话。</li>
+<li>新对话的 <code>SessionStart</code> 会识别 Guthon 工作区，并自动安装或更新团队规则、API 方法索引和本地 Linter。开发根本身是 Git 根且配置无冲突时，也会安装 Git pre-commit。文件已经就绪时，可能没有重复安装提示。</li>
 </ol>
+<p>首次自动安装如果更新了 <code>AGENTS.md</code>，再新建一次对话，让 Codex 从启动阶段读取最新入口。Codex 的审阅入口及事件定义见<a href="https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks">Hooks 官方说明</a>。</p>
+
+<h3 id="3-3-初始化并检查">3.3 确认安装和 Hook 已生效</h3>
+<ul>
+<li>核对插件在当前客户端已启用，并且新对话打开的是正确的工作区。查看工作区根的 <code>AGENTS.md</code>、适用的 <code>rules/</code> 或 <code>docs/</code> 规范目录和 <code>tools/guthon-lint</code>。</li>
+<li>新对话中看到自动安装或更新提示后，核对入口文件。如规则原本已就绪，可在对话中请 Agent 检查当前工作区治理状态，只查看，不修改。需要确认 Hook 本次确已执行时，核对客户端记录或 <code>.guthon/hook-runtime.json</code> 中对应新对话时间的 <code>SessionStart</code> 回执。</li>
+<li>如提示人工文件冲突或使用其他 Git Hook 路径，保留已有文件，并按提示核对冲突。已有 <code>CODEBUDDY.md</code> 的项目也应确认客户端实际读取了开发根规则。</li>
+</ul>
+<p>安装成功、客户端读取规则和 Hook 执行分别检查。更多排查见<a href="GuthonCodeTool_QA.html?category=%E5%9B%A2%E9%98%9F%E8%A7%84%E8%8C%83">团队规范问答</a>。</p>
+
+<h3 id="3-4-手动与无-hook-安装">3.4 手动补救与无 Hook 安装</h3>
+<p>工作区缺少规则或 Linter 时，先在 Nexus 点「项目总览 → … → 工具设置 → 团队规则同步」。按需填写团队提供的仓库地址。遇到 Git 认证提示，选择「在终端认证并同步」，等 Nexus 提示成功后返回目标目录新建对话。</p>
+
+<h4 id="guthon-manual-codex-market">首次登记 Codex 市场与 CLI 安装</h4>
+<details>
+<summary>展开命令</summary>
+<p>尚未登记团队市场时，执行一次市场注册，再回到桌面端插件目录安装。</p>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codex plugin marketplace add "&lt;团队 Marketplace Git 地址&gt;" --ref main</code></pre></div>
+<p>直接使用 Codex CLI 时，登记市场后执行安装命令。</p>
 <div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codex plugin add guthon-guard@guthon-team</code></pre></div>
-<ol start="3">
-<li>如果提示已存在同名 Marketplace，先确认现有来源是否正确。只有确认是旧来源或错误来源时，才移除后重新添加；不要直接覆盖未知配置。</li>
-</ol>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>codex plugin marketplace remove guthon-team
-codex plugin marketplace add "&lt;团队 Marketplace SSH 地址&gt;" --ref main
-codex plugin add guthon-guard@guthon-team</code></pre></div>
-<h4>CodeBuddy 安装</h4>
-<p><strong>CodeBuddy IDE：</strong>在插件管理入口添加团队 Marketplace 并安装 <code>guthon-guard@guthon-team</code>。安装或更新后，从命令面板执行“开发人员: 重新加载窗口”，再新建对话。</p>
-<p><strong>CodeBuddy Code（命令行）：</strong>在 CLI 的交互输入框中依次执行以下命令。IDE 的普通聊天输入不执行这些 CLI 命令：</p>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>/plugin marketplace add &lt;团队 Marketplace SSH 地址&gt;
+<p>若已有同名市场，先在市场列表核对来源。确认登记的是旧地址后，再移除同名登记并重新添加。</p>
+</details>
+
+<h4 id="guthon-manual-git">内网连接补救</h4>
+<details>
+<summary>展开 Git 认证与 SSH 设置</summary>
+<p>首次访问需要个人仓库权限与网络连通。用 SSH 时，在团队 Git 网站的个人设置登记本机公钥，私钥留在本机。首次看到主机指纹时，与团队提供的指纹核对。</p>
+<p>如果 CodeBuddy 的「添加插件源」不接受团队提供的 <code>ssh://</code> 地址或需要自定义端口，可配置 SSH 主机别名。macOS 使用 <code>~/.ssh/config</code>，Windows 使用 <code>%USERPROFILE%\.ssh\config</code>。将下面的主机、端口替换为团队提供的值，再把插件源填为 <code>git@guthon-git:&lt;团队仓库路径&gt;</code>。</p>
+<div class="code-wrap"><span class="code-lang">ssh config</span><button class="copy-btn" type="button">复制</button><pre><code>Host guthon-git
+  HostName &lt;团队 Git 主机&gt;
+  User git
+  Port &lt;团队 SSH 端口&gt;</code></pre></div>
+<p>有需要时用 <code>git ls-remote "&lt;团队 Marketplace Git 地址&gt;" HEAD</code> 核对仓库读取权限。已有同名市场时先核对来源，使用团队确认的最新地址。</p>
+</details>
+
+<h4 id="guthon-manual-codebuddy">CodeBuddy Code CLI 安装</h4>
+<details>
+<summary>展开命令</summary>
+<p>在 CodeBuddy Code 的交互输入框依次执行：</p>
+<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>/plugin marketplace add &lt;团队 Marketplace Git 地址&gt;
 /plugin install guthon-guard@guthon-team --scope user
 /reload-plugins</code></pre></div>
-<p>如果只希望当前项目使用，可将 <code>--scope user</code> 改为 <code>--scope project</code>。市场添加成功但插件未安装时，规范和 Hook 仍不会生效。</p>
+</details>
 
-<h3 id="3-2-信任-hook">3.2 信任 Hook</h3>
-<ol>
-<li>重新打开使用的客户端，进入其插件或 Hook 的审阅与信任入口；Codex 和 CodeBuddy Code CLI 可在交互输入框使用 <code>/hooks</code>。CodeBuddy IDE 按宿主提供的入口操作。</li>
-<li>找到 <code>guthon-guard</code> 提供的 Hook，展开查看实际命令和插件来源。</li>
-<li>确认来源属于团队 Marketplace 后，将该 Hook 设为信任。</li>
-<li>关闭当前任务，再从目标 <code>var/</code> 或业务子目录打开新任务，才能触发受信任的 <code>SessionStart</code>。</li>
-</ol>
-<p>插件已安装、插件已启用、Hook 已信任、Hook 已实际执行是四个不同状态。必须完成后续工作区状态检查，不能只看到插件名称就认为治理已经生效。</p>
-
-<h3 id="3-3-初始化并检查">3.3 初始化并检查</h3>
-<ol>
-<li>确认 GuthonCodeTool 已设置本地数据目录，并且其中已经存在 <code>var/</code>。不要仅为安装治理而执行 <code>git init</code>。</li>
-<li>CodeBuddy 打开 <code>&lt;本地数据目录&gt;/var</code>；Codex 可打开具体项目目录，新项目位于 <code>var/workspace/&lt;项目目录&gt;</code>。读取开发根的规则并核对目标。</li>
-<li>确认 Nexus 已提示同步成功，或按<a href="#3-4-手动与无-hook-安装">手动与无 Hook 安装</a>补齐现有工作空间的规范。启用了 Agent Hook 时，可在新任务中单独确认其运行。</li>
-</ol>
-<p>治理初始化通过后，检查根 <code>AGENTS.md</code>、选定规范目录、<code>.guthon</code> 配置、API 索引及本地 Linter。已有根 <code>rules/</code> 时使用它，否则沿用根 <code>docs/</code>，团队插件不创建 <code>rules/</code>；人工文件冲突会停止更新。只有 <code>var/</code> 本身是 Git 根且没有冲突的 Git Hook 配置时，才安装 Git pre-commit。初始化如更新了规则入口，再新建一次对话并核对客户端实际加载的规则；已有 <code>CODEBUDDY.md</code> 时保留人工内容，检查其是否遮蔽了根 <code>AGENTS.md</code>。</p>
-
-<h4>检查治理状态</h4>
-<ol>
-<li>已安装插件时，可以在新任务中输入以下提示词检查插件所带的规范和门禁：</li>
-</ol>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>使用 $guthon-bootstrap 检查当前工作区治理状态，只查看，不修改</code></pre></div>
-<p>预期看到 <code>STATUS state=ready</code>。当前 Codex 使用 Skill，不要输入 <code>/guthon-guard:guthon-init</code>；该命令不会在 Codex 注册。CodeBuddy 可在输入框执行 <code>/guthon-guard:guthon-init status</code>。</p>
-<ol start="2">
-<li>如果 <code>var/</code> 使用 Git，在 <code>var/</code> 或其子目录的终端检查 Git Hook；非 Git 工作区跳过本步：</li>
-</ol>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>git config --get core.hooksPath</code></pre></div>
-<p>预期输出 <code>.githooks</code>。如果输出其他路径，不要覆盖；这说明工作区已经使用其他 Hook，需要由维护人员确认整合方式。</p>
-<ol start="3">
-<li>需要手工确认本地 Linter 入口时，在 <code>var/</code> 根查看帮助；macOS/Linux 使用下列入口，Windows PowerShell 使用 <code>.\tools\guthon-lint.cmd --help</code>：</li>
-</ol>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>tools/guthon-lint --help</code></pre></div>
-<p>帮助输出仅确认入口可用。实际源码检查按所选规范根中的“谷神源码写入门禁”执行：API 受控保存后核对回读与具体内容；普通文件的 Git 变更集合检查使用其适用范围。治理状态 ready、入口可运行和源码内容检查通过分别确认。</p>
-<ol start="4">
-<li>如果初始化更新了 <code>AGENTS.md</code>，再打开一次新任务，确保 Codex 从启动阶段加载最新版规则。</li>
-</ol>
-
-<h3 id="3-4-手动与无-hook-安装">3.4 手动与无 Hook 安装</h3>
-<p>要更新当前工作空间的规则和开发门禁，在“项目总览 → … → 工具设置”点击“团队规则同步”。若提示输入仓库地址，请填写团队提供的 Git 克隆地址。等待 Nexus 提示“团队规则和开发门禁已同步”。如提示需要 Git 认证，选择“在终端认证并同步”，按 Git 提示输入凭据。终端显示 <code>"governance": "ready"</code> 即完成。已有团队 SSH 地址时，可选择“更换仓库地址”直接重试。首次初始化若通过终端完成，回到 Nexus 连接该数据目录。</p>
-<p>也可运行 GuthonCodeTool 的 <code>setup --home "&lt;本地数据目录&gt;" --team-source "&lt;团队内网 Git 地址&gt;"</code> 重新同步。看到 <code>"governance": "ready"</code> 后，检查开发根规则和 Linter 入口。</p>
-<p>Hook 未信任、宿主不支持 <code>SessionStart</code> 或自动识别失败时，在目标 <code>var/</code> 工作区或其子目录打开 Codex，先预览计划：</p>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>使用 $guthon-bootstrap 初始化当前 Guthon 工作区，先执行 dry-run，只展示计划</code></pre></div>
-<p>确认目标 <code>var/</code> 和文件清单正确、没有冲突后，再输入：</p>
-<div class="code-wrap"><span class="code-lang">text</span><button class="copy-btn" type="button">复制</button><pre><code>使用 $guthon-bootstrap 初始化当前 Guthon 工作区</code></pre></div>
-<p>只安装 AGENTS、规范、API 索引和 Linter，不配置 Git pre-commit 时，在请求中增加 <code>--no-git-hook</code>；非 Git 工作区必须使用这一模式。遇到 <code>CONFLICT</code> 时先逐个检查冲突文件，不要直接使用 <code>--force</code>；确需替换时，安装器会先将旧文件备份到 <code>.guthon/backups/bootstrap-&lt;时间戳&gt;/</code>。</p>
-<p>没有 Marketplace 或 Hook 的宿主，应使用团队随 <code>guthon-guard</code> 发布物提供的自包含安装器，不要为此克隆完整团队仓库。安装器的 <code>--workspace</code> 必须明确指向 <code>var/</code>；如果它位于 Git 仓库中，则还必须是该 Git 根：</p>
-<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据目录/var"
-
-# 只安装基础能力，不配置 Git pre-commit
-python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据目录/var" --no-git-hook</code></pre></div>
-<p>安装后重新打开任务并检查状态。规范、Linter、Hook 与 Git 检查的职责见<a href="GuthonCodeTool_全功能说明.html#10-guthon-team">团队治理说明</a>；安装冲突或 Hook 未运行时查<a href="GuthonCodeTool_QA.html?category=%E5%9B%A2%E9%98%9F%E8%A7%84%E8%8C%83">团队规范问题解答</a>。</p>
+<h4 id="guthon-manual-no-hook">已有插件但自动初始化未完成</h4>
+<details>
+<summary>展开手动初始化和无 Hook 入口</summary>
+<p>先检查 Hook 信任和新对话所在目录。若自动识别失败或宿主不支持 <code>SessionStart</code>，在 Codex 对话中要求「使用 <code>$guthon-bootstrap</code> 初始化当前 Guthon 工作区，先 dry-run 只展示计划」。确认目录和文件清单后，再要求应用。只需规则和 Linter 时，在请求中注明 <code>--no-git-hook</code>。</p>
+<p>没有插件市场或 Hook 的宿主，可使用团队发布的自包含安装器，指定目标开发根。非 Git 工作区使用以下命令保留无 Git Hook 模式。</p>
+<div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" type="button">复制</button><pre><code>python3 guthon-guard/scripts/guthon_workspace.py init --workspace "/本地数据目录/var" --no-git-hook</code></pre></div>
+<p>完成后新建对话并<a href="#3-3-初始化并检查">确认生效</a>。适用条件和门禁职责见<a href="GuthonCodeTool_全功能说明.html#10-guthon-team">团队治理说明</a>。</p>
+</details>
 
 </section>
 
