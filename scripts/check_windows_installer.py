@@ -29,9 +29,11 @@ def check(executable):
         if (home / 'var/.guthon/config.json').exists() or any((home / 'var').glob('*/checkout/*')):
             raise SystemExit('Installer crossed the plugin/business boundary')
         config = json.loads((home / 'Guthon.code-workspace').read_text(encoding='utf-8'))
-        if not config['settings'].get('gushenCompletion.autoStartBridge'):
-            raise SystemExit('Installed workspace lacks Bridge auto-start')
-        print(json.dumps({'ok': True, 'version': report['version'], 'checks': 'compiled-setup,dependencies,nexus,empty-business-home,managed-bridge'}))
+        if config['settings'].get('gushenCompletion.autoStartBridge') is not False:
+            raise SystemExit('Installed workspace must keep Bridge opt-in')
+        if (home / 'var/.mcp.json').exists():
+            raise SystemExit('Installer unexpectedly configured a source MCP for a workspace without projects')
+        print(json.dumps({'ok': True, 'version': report['version'], 'checks': 'compiled-setup,dependencies,nexus,empty-business-home,opt-in-bridge'}))
         uninstall = application / 'unins000.exe'
         if uninstall.exists():
             subprocess.run([str(uninstall), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], check=True, timeout=120)
