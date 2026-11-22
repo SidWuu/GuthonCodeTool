@@ -97,6 +97,21 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 .toolbar{position:fixed;z-index:90;right:18px;bottom:18px;display:flex;flex-direction:column;gap:9px}
 .round-btn{width:42px;height:42px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);cursor:pointer;font-size:16px}
 .round-btn:hover{color:var(--primary);transform:translateY(-1px)}
+.manual-shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:14px 0 24px;align-items:start}
+.manual-shot{min-width:0;margin:14px 0 22px}
+.manual-shots .manual-shot{margin:0}
+.manual-shot-button{display:block;width:100%;padding:0;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:var(--surface);cursor:zoom-in}
+.manual-shot-button:focus-visible{outline:2px solid var(--primary);outline-offset:3px}
+.manual-shot img{display:block;width:100%;height:auto}
+.manual-shot figcaption{margin-top:7px;color:var(--muted);font-size:13px;line-height:1.5}
+.manual-shot-viewer{box-sizing:border-box;width:min(1280px,calc(100vw - 28px));max-height:calc(100vh - 28px);padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text)}
+.manual-shot-viewer::backdrop{background:rgba(0,0,0,.7)}
+.manual-shot-viewer header{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px}
+.manual-shot-viewer button{color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 11px;cursor:pointer;white-space:nowrap}
+.manual-shot-viewer div{overflow:auto;max-height:calc(100vh - 100px)}
+.manual-shot-viewer img{display:block;width:100%;height:auto;min-width:var(--manual-preview-width,380px)}
+@media(max-width:680px){.manual-shots{grid-template-columns:minmax(0,1fr);gap:14px}}
+@media print{.manual-shot{break-inside:avoid}.manual-shot-viewer{display:none!important}}
 .mobile-menu{display:none}
 .footer{max-width:1380px;margin:auto;padding:0 24px 42px;text-align:center;color:var(--muted);font-size:13px}
 .no-result{padding:12px;color:var(--muted);font-size:13px;display:none}
@@ -145,6 +160,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <a class="toc-link toc-sub" href="#api-source-preview">同步范围与源码更新</a>
 <a class="toc-link toc-sub" href="#2-4-驾驶舱与工作区管理">2.2 切换和管理项目</a>
 <a class="toc-link toc-sub" href="#project-details">当前项目卡片</a>
+<a class="toc-link toc-sub" href="#nexus-more-menus">标题栏更多功能</a>
 <a class="toc-link" href="#3-guthon-team">3. guthon-team</a>
 <a class="toc-link toc-sub" href="#3-1-安装治理插件">3.1 安装治理插件</a>
 <a class="toc-link toc-sub" href="#3-2-信任-hook">3.2 信任 Hook</a>
@@ -257,6 +273,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="2-nexus">2. Nexus</h2>
+<p>以下截图实拍于 VS Code 的「PRD 期现产品」。点击截图可放大。平台地址、账号及内部编码已遮盖。</p>
 
 <h3 id="2-1-创建产品或项目">2.1 添加项目并登录</h3>
 <ol>
@@ -264,6 +281,10 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>选择 API、SVN 或 DATABASE。新项目登记在开发根的 <code>workspace/</code> 下。点击总览中的项目行打开“当前项目”卡片。</li>
 <li>在卡片填写对应来源，点击“登录”。</li>
 </ol>
+<div class="manual-shots">
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：项目总览新增项目时的项目名称输入框"><img src="nexus-manual-images/add-name.png" width="1210" height="127" alt="项目总览新增项目时的项目名称输入框" loading="lazy"></button><figcaption>点击「项目总览」标题栏的「＋」，输入项目名称。</figcaption></figure>
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：选择项目同步方式面板，包含 API、SVN 和 DATABASE"><img src="nexus-manual-images/add-mode.png" width="1210" height="287" alt="选择项目同步方式面板，包含 API、SVN 和 DATABASE" loading="lazy"></button><figcaption>输入名称后，选择项目对应的同步方式。</figcaption></figure>
+</div>
 <ul>
 <li><strong>API</strong>填写谷神开发平台地址、账号和密码，按提示填写验证码。希望后端重启后恢复会话时勾选“保存密码”。升级后如需继续使用以前保存的账号，可在此重新登录。</li>
 <li><strong>SVN</strong>填写有权访问的 SVN 仓库地址、用户名和密码。需要先安装 SVN 客户端时，可从“环境检查”确认。</li>
@@ -276,11 +297,16 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <li>保存选择，再手动点击“更新源码”。首次选择和之后调整范围都按此顺序。查看“输出 → GuthonCodeTool”的进度，再到“项目源码”浏览结果。</li>
 <li>缩小范围时，“更新源码”会清理退出范围内的同步副本。API 或 SVN 提示有本地修改、草稿或冲突时，先处理提示中的文件，再点击“更新源码”。DATABASE 的 Workcopy 保留。</li>
 </ol>
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：API 的子系统多选列表和确定按钮"><img src="nexus-manual-images/scope.png" width="1205" height="347" alt="API 的子系统多选列表和确定按钮" loading="lazy"></button><figcaption>API 示例。勾选所需子系统并点「确定」，随后回到卡片点「更新源码」。</figcaption></figure>
 <p>只更新一部分源码时，在“项目源码”右键相应节点，选择“同步此节点源码”。共享数据源、退出范围清理和异常处理见<a href="GuthonCodeTool_全功能说明.html#source-sync-reference">范围参考</a>。</p>
 <h3 id="2-4-驾驶舱与工作区管理">2.2 切换和管理项目</h3>
 <p>从上到下查看“项目总览”“当前项目”和“项目源码”。点击项目行同步切换卡片和源码树。总览筛选只影响列表，已打开的编辑器和草稿继续属于原项目。</p>
 <h4 id="project-details">当前项目卡片</h4>
 <p>从卡片查看同步范围、源码数量和本地修改，使用搜索源码、本地修改、操作记录、同步范围、索引管理和环境检查。</p>
+<div class="manual-shots">
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：PRD 期现产品的项目总览、当前项目卡片和项目源码分类"><img src="nexus-manual-images/panels-filtered.png" width="905" height="1388" alt="PRD 期现产品的项目总览、当前项目卡片和项目源码分类" loading="lazy"></button><figcaption>选中项目后，卡片上方可更新源码，下方可打开同步范围、索引管理和其他常用操作。</figcaption></figure>
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：索引管理包含重建索引、查看索引诊断和重试待更新文件"><img src="nexus-manual-images/index.png" width="1210" height="287" alt="索引管理包含重建索引、查看索引诊断和重试待更新文件" loading="lazy"></button><figcaption>从卡片点「索引管理」打开实际选项。</figcaption></figure>
+</div>
 <ul>
 <li>看本次拉取和索引结果时，打开“操作记录”或 GuthonCodeTool 输出。SVN 首次签出中断后，可在原项目重新点击“更新源码”。如仍失败，查看<a href="GuthonCodeTool_QA.html?q=E120106">SVN 签出中断问答</a>。</li>
 <li>需要重新解析全部本地源码时，在“索引管理”选择“重建索引”。API 源码树出现“索引不完整”时，左键查看诊断，右键选择“修复索引”重试有诊断的项，或选择“重建索引”做全量重建。另有“等待索引更新”提示时，可点击提示重试该批文件。</li>
@@ -289,6 +315,20 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h4 id="project-settings-guide">项目设置</h4>
 <p>从“当前项目 → … → 项目设置”配置源码连接、查看项目配置或修改同步方式。尚无源码、索引或操作记录的项目可以直接换模式。已有源码的 SVN 或 DATABASE 项目可<a href="#reset-legacy-source-to-api">切换到 API 并重新拉取</a>。API 退出登录前，先保存并关闭打开的在线页面编辑器，再在同一菜单选择“退出登录”。</p>
 <p>在项目总览右键选择“删除工作区”。先保存项目文件和页面草稿，核对目录预览，再确认移入废纸篓并移除登记。删除当前项目后，卡片和源码树会清空，可回到总览选择其他项目。</p>
+<h4 id="nexus-more-menus">标题栏更多功能</h4>
+<p>点击相应面板标题栏右侧的「…」。带右箭头的菜单项可展开，截图中的「项目设置」和「源码工具」以 API 项目为例。</p>
+<h5>项目总览</h5>
+<div class="manual-shots">
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：项目总览更多菜单及展开的工具设置，包括选择运行方式、切换和打开本地数据目录、团队规则同步"><img src="nexus-manual-images/overview-tools.png" width="1370" height="317" alt="项目总览更多菜单及展开的工具设置，包括选择运行方式、切换和打开本地数据目录、团队规则同步" loading="lazy"></button><figcaption>展开「工具设置」可切换运行方式、管理数据目录及同步团队规则。一级菜单可启动浏览器增强。</figcaption></figure>
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：项目总览更多菜单及展开的检查更新，包括选择更新来源和回退功能"><img src="nexus-manual-images/overview-updates.png" width="1370" height="418" alt="项目总览更多菜单及展开的检查更新，包括选择更新来源和回退功能" loading="lazy"></button><figcaption>展开「检查更新」可检查工具或官方补全、切换更新来源和回退组件。</figcaption></figure>
+</div>
+<h5>当前项目</h5>
+<div class="manual-shots">
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：当前项目更多菜单及项目设置，显示配置源码连接、同步范围、项目配置和修改同步方式"><img src="nexus-manual-images/project-settings.png" width="1370" height="574" alt="当前项目更多菜单及项目设置，显示配置源码连接、同步范围、项目配置和修改同步方式" loading="lazy"></button><figcaption>一级菜单提供打开目录、查看工作区源码、配置 MCP 和从原目录迁移。展开「项目设置」可配置连接、范围及同步方式。</figcaption></figure>
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：当前项目更多菜单及源码工具，显示同步模块参数和官方参考资料"><img src="nexus-manual-images/project-source-tools.png" width="1370" height="512" alt="当前项目更多菜单及源码工具，显示同步模块参数和官方参考资料" loading="lazy"></button><figcaption>API 项目展开「源码工具」可同步模块参数与官方参考资料。</figcaption></figure>
+</div>
+<h5>项目源码</h5>
+<figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：项目源码更多菜单，包含导出源码说明及展开或收起所选节点"><img src="nexus-manual-images/source-more.png" width="1270" height="226" alt="项目源码更多菜单，包含导出源码说明及展开或收起所选节点" loading="lazy"></button><figcaption>从源码视图标题栏可导出源码说明。选中节点后，也可从此菜单展开或收起该节点。</figcaption></figure>
 <h4 id="agent-workspace-selection">选择 AI 任务目标</h4>
 <p>在 Agent 会话中明确指定项目名称或 <code>workspaceKey</code>，同名项目用 key 区分。使用源码 MCP 时先查询这个 key 对应的源码工具组。CodeBuddy 可继续打开开发根，Codex 可打开具体项目目录。</p>
 </section>
@@ -466,7 +506,21 @@ codex mcp get guthon-source-helper</code></pre></div>
   <button class="round-btn" id="backTop" type="button" title="返回顶部" aria-label="返回顶部">↑</button>
 </div>
 <footer class="footer">GuthonCodeTool 使用手册 · macOS M1 及后续型号与 Windows 共用</footer>
+<dialog class="manual-shot-viewer" id="manualShotViewer" aria-labelledby="manualShotTitle">
+<header><strong id="manualShotTitle">操作截图</strong><form method="dialog"><button type="submit">关闭</button></form></header>
+<div><img alt=""></div>
+</dialog>
 <script>
+const manualShotViewer=document.getElementById('manualShotViewer');
+const manualShotImage=manualShotViewer.querySelector('img');
+document.querySelectorAll('.manual-shot-button').forEach(button=>button.addEventListener('click',()=>{
+  const shot=button.querySelector('img');
+  manualShotImage.src=shot.currentSrc || shot.src;
+  manualShotImage.alt=shot.alt;
+  manualShotImage.style.setProperty('--manual-preview-width',Math.min(Number(shot.getAttribute('width')),720)+'px');
+  document.getElementById('manualShotTitle').textContent=shot.alt;
+  manualShotViewer.showModal();
+}));
 const root=document.documentElement;
 const savedTheme=localStorage.getItem("guthon-wiki-theme");
 if(savedTheme)root.dataset.theme=savedTheme;
