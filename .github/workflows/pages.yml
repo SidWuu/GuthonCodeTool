@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "docs/GuthonCodeTool_*.html"
+      - "docs/nexus-manual-images/**"
       - "docs/windows-install-images/**"
       - "README.md"
       - "scripts/check_public_docs.mjs"
@@ -49,6 +50,7 @@ jobs:
           cp "docs/GuthonCodeTool_QA.html" "_site/GuthonCodeTool_QA.html"
           cp "docs/GuthonCodeTool_全功能说明.html" "_site/GuthonCodeTool_全功能说明.html"
           cp "docs/GuthonCodeTool_Windows安装步骤.html" "_site/GuthonCodeTool_Windows安装步骤.html"
+          cp -R "docs/nexus-manual-images" "_site/nexus-manual-images"
           cp -R "docs/windows-install-images" "_site/windows-install-images"
           touch "_site/.nojekyll"
           test -s "_site/index.html"

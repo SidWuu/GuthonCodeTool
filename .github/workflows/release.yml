@@ -167,13 +167,24 @@ jobs:
         with:
           node-version: "22"
 
+      - uses: actions/setup-python@v6
+        if: needs.plan.outputs.nexus == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Set up Nexus integration test environment
+        if: needs.plan.outputs.nexus == 'true'
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r scripts/python-requirements.txt
+
       - name: Test and package Guthon Nexus
         if: needs.plan.outputs.nexus == 'true'
         working-directory: plugins/GuthonNexus/gushen-vscode-completion
         run: |
           release_version=$(tr -d '[:space:]' < ../../../VERSION)
           printf '{\n  "version": "%s"\n}\n' "$release_version" > tool-version.json
-          npm test
+          node --test --test-concurrency=4 test/*.test.js
           npm run check
           npm run build:bridge
           node ../../../scripts/check_nexus_commands.mjs
@@ -388,7 +399,7 @@ jobs:
             echo "- macOS M1 及后续型号应用：\`GuthonCodeTool-macos-arm64.zip\`"
             echo "- Python 调试脚本：\`GuthonCodeTool-python.pyz\`（需自备符合要求的 Python 环境）"
             echo "- Python 调试依赖：\`GuthonCodeTool-python-requirements.txt\`"
-            echo "- Guthon Nexus（DATABASE/SVN 双模式）：\`guthon-nexus-vscode.vsix\`"
+            echo "- Guthon Nexus（API/SVN/DATABASE 三种同步方式）：\`guthon-nexus-vscode.vsix\`"
             echo "- Guthon Bridge：\`GuthonCodeTool-chrome.zip\`"
             echo "- Guthon Testing Skill：\`guthon-testing.zip\`（解压到 Codex Skills 目录）"
             echo "- 应用自动更新校验：\`GuthonCodeTool-checksums.txt\`"
