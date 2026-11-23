@@ -6,6 +6,7 @@ const path=require('node:path');
 const {spawnSync}=require('node:child_process');
 const {ApiPageVirtualFs,uriFor}=require('../src/source/virtual-fs');
 const {ApiEditorState}=require('../src/api/editor-state');
+const {ApiSourceUI}=require('../src/api/source-ui');
 
 const repo=path.resolve(__dirname,'../../../..');
 const python=path.join(repo,'.venv','bin','python');
@@ -25,13 +26,15 @@ from common.workspace_config import create_workspace
 from common import gusen_hub
 from providers.api import workspace, index
 from providers.api.store import ApiStore
-from providers.api.download import source_file
+from providers.api.download import script_files, source_file
 obj=json.load(sys.stdin)
 guthon_tool.setup_config(home)
 create_workspace(home,{'id':'api-fixture','name':'API fixture'},gusen_hub)
 w=gusen_hub.resolve_workspace(gusen_hub.load_config(),'api-fixture')
 workspace.configure(w,{'serverUrl':'https://fixture.invalid','systemIds':['A'],'dataSourceIds':['DS']})
-workspace.save_project(w,[{'systemId':'A','dataSourceId':'DS'}],[{'dataSourceId':'DS'}])
+workspace.save_project(w,[{'systemId':'A','dataSourceId':'DS'}],[{'dataSourceId':'DS'}],
+    menu_tree=[{'systemId':'A','menus':[{'id':'svc','name':'服务菜单','isDir':0,
+        'pages':[{'pageId':'PG-SVC','pageSubId':'main'}]}]}])
 page_meta={'systemId':'A','pageId':'PG-SYNTH','pageSubId':'main','pageType':3,'fileName':'page.xml'}
 proc_meta={'dataSourceId':'DS','subPath':'pkg','procedureId':'P','funId':'save'}
 json_fields_meta={'systemId':'A','pageId':'PG-J','pageSubId':'main','pageType':1,'fileName':'fields.json'}
@@ -44,6 +47,7 @@ files=[source_file(obj['pagePath'],obj['xml'],'page',page_meta),
  source_file(obj['parentPath'],obj['parent'],'procedure-inherit',proc_meta,True),
  source_file(obj['servicePath'],obj['project'],'page',svc_meta),
  source_file(obj['serviceParentPath'],obj['parent'],'page-inherit',svc_meta,True)]
+files.extend(script_files({'systemId':'A','scriptType':'init','script':obj['project'],'prodScript':obj['parent']}))
 if obj.get('viewPath'):
  files.append(source_file(obj['viewPath'],obj['viewXml'],'view',{'dataSourceId':'DS','viewId':'V_SYNTH'}))
 ApiStore(w).publish(files); index.rebuild(w)
@@ -81,6 +85,27 @@ function fixture(t,options={}) {
   const virtualFs=new ApiPageVirtualFs({vscode,run,editorState});
   return {home,pagePath,procPath,parentPath,servicePath,serviceParentPath,jsonPagePath,jsonFieldsPath,viewPath,viewXml,project,parent,checkoutPath:setup.checkoutPath,run,calls,docs,vscode,editorState,virtualFs};
 }
+test('project source tree shows one node per inherited object and keeps the readonly product source accessible', {skip:!pythonAvailable && 'repository Python environment unavailable'},async t=>{
+  const f=fixture(t),key='api-fixture';
+  const ui=new ApiSourceUI({vscode:f.vscode,run:f.run});
+  t.after(()=>{ui.dispose();f.virtualFs.dispose();});
+  ui.syncWorkspaces([{workspaceKey:key,sourceMode:'api',checkoutPath:f.checkoutPath}]);
+  const tree=await ui.getChildren();
+  const menu=tree.find(node=>node.category==='pages').children[0].children.find(node=>node.label==='服务菜单');
+  assert.deepEqual(menu.children.map(node=>node.object.path),[f.servicePath]);
+
+  const sourcePaths=nodes=>nodes.flatMap(node=>node.object ? [node.object.path] : sourcePaths(node.children || []));
+  const scriptPath='systems/A/system-script/init.js',scriptParentPath='systems/A/system-script/init.inherit.js';
+  assert.deepEqual(sourcePaths(tree).sort(),[f.servicePath,f.pagePath,f.jsonPagePath,f.jsonFieldsPath,f.procPath,scriptPath].sort());
+  for(const [path,parentPath] of [[f.servicePath,f.serviceParentPath],[f.procPath,f.parentPath],[scriptPath,scriptParentPath]]) {
+    const projection=await f.run(key,'inheritance',{path});
+    assert.equal(projection.parentPath,parentPath);
+    assert.match(projection.effective,/parent\(\)/);
+    const original=await f.run(key,'read',{path:parentPath});
+    assert.equal(original.readonly,true);
+    assert.equal(original.content,f.parent);
+  }
+});
 test('native XML view SQL editor saves through real backend and retains SQL baseline', {skip:!pythonAvailable && 'repository Python environment unavailable'},async t=>{
   const {ApiQuickDiff}=require('../src/source/quick-diff'),f=fixture(t,{includeView:true}),key='api-fixture';await f.editorState.add(key,f.checkoutPath);
   const uri=uriFor(f.vscode,{workspaceKey:key,sourceType:'view',sourcePath:f.viewPath,jsonPointer:'/viewSql',fragmentType:'sql'});

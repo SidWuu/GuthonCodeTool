@@ -34,7 +34,9 @@ test('unique workspace tab navigates without picker; multiple tabs require expli
   assert.equal(cancelled.calls.some(call => call.route === '/navigate'), false);
 });
 test('no tab and failed receipt report actionable error, never replay commands', async () => {
-  await assert.rejects(() => navigateInBrowser(fixture([]).options), /未找到/);
+  const missing = fixture([]);
+  await assert.rejects(() => navigateInBrowser(missing.options), /在浏览器定位过程函数.*未找到.*已配对/);
+  assert.equal(missing.calls.some(call => call.route === '/navigate'), false);
   const f = fixture([{contextId: 'context-a', workspaceKey: identity.workspaceKey}]);
   const original = f.options.bridge.request;
   f.options.bridge.request = async (home, route, body) => route.startsWith('/navigationResult?')

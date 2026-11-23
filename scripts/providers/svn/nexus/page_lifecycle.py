@@ -7,14 +7,12 @@ never replay a possibly accepted mutation after a timeout or lost receipt.
 from __future__ import annotations
 
 import hashlib
-import http.client
 import json
 import re
 import time
 import uuid
-from urllib.parse import urlencode
 
-from common.runtime_paths import workspace_root
+from common.bridge_page_session import BridgePageSession, BridgeSessionError, PAGE_ACTIONS
 from providers.svn.checkout import atomic_json, operation_lock, require_capability
 from .manifest import load_authorized_scope
 
@@ -26,67 +24,16 @@ def _digest(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _request(home, port, path, body=None):
-    if type(port) is not int or not 1 <= port <= 65535:
-        raise ValueError("Invalid local Bridge port")
-    token = (workspace_root(home) / "nexus/bridge/token").read_text().strip()
-    if not re.fullmatch(r"[a-f0-9]{64}", token):
-        raise ValueError("Bridge pairing token is invalid; start Bridge in Nexus")
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-    try:
-        headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
-        connection.request("POST" if body is not None else "GET", path,
-                           body=json.dumps(body).encode() if body is not None else None, headers=headers)
-        response = connection.getresponse()
-        raw = response.read(131073)
-        if len(raw) > 131072:
-            raise ValueError("Bridge response exceeds PAGE lifecycle budget")
-        data = json.loads(raw)
-        if response.status not in {200, 202} or not data.get("ok"):
-            raise ValueError(str(data.get("message") or "Bridge rejected PAGE lifecycle request")[:512])
-        return data
-    finally:
-        connection.close()
-
-
-def _context(workspace, home, port, context_id):
-    result = _request(home, port, "/pageContext?" + urlencode({"workspaceKey": workspace["workspaceKey"]}))
-    contexts = [item for item in result.get("contexts", []) if item.get("workspaceKey") == workspace["workspaceKey"]]
-    if context_id:
-        contexts = [item for item in contexts if item.get("contextId") == context_id]
-    if len(contexts) != 1:
-        raise ValueError("Select exactly one paired platform context using get_page_lifecycle_context")
-    return contexts[0]
-
-
-def _dispatch(workspace, home, port, context_id, target):
-    return _request(home, port, "/pageLifecycle", {"workspaceKey": workspace["workspaceKey"],
-        "contextId": context_id, "target": target})["requestId"]
-
-
-def _receipt(workspace, home, port, request_id, wait_seconds=20):
-    deadline = time.monotonic() + wait_seconds
-    while True:
-        result = _request(home, port, "/navigationResult?" + urlencode({"workspaceKey": workspace["workspaceKey"], "requestId": request_id}))
-        if result["state"] != "PENDING":
-            if result["state"] != "SUCCEEDED" or not isinstance(result.get("data"), dict):
-                return {"state": "UNKNOWN", "message": result.get("message") or "Platform receipt unavailable; do not replay"}
-            return result["data"]
-        if time.monotonic() >= deadline:
-            return {"state": "PENDING", "message": "Wait for the original receipt; do not replay"}
-        time.sleep(0.2)
-
-
-def context(workspace, home, *, context_id="", page_id="", bridge_port=17361):
+def context(workspace, home, *, context_id="", page_id="", bridge_port=17361,
+            operation="读取平台 PAGE 上下文"):
     require_capability(workspace, "browse")
-    result = _request(home, bridge_port, "/pageContext?" + urlencode({"workspaceKey": workspace["workspaceKey"]}))
-    contexts = result.get("contexts", [])
-    if not context_id and len(contexts) != 1:
-        return {"workspaceKey": workspace["workspaceKey"], "contexts": contexts, "selectionRequired": True}
-    selected = _context(workspace, home, bridge_port, context_id)
-    request_id = _dispatch(workspace, home, bridge_port, selected["contextId"], {"action": "inspect", "pageId": page_id})
+    bridge = BridgePageSession(home, workspace["workspaceKey"], bridge_port, operation)
+    selected = bridge.context(context_id)
+    if selected.get("selectionRequired"):
+        return selected
+    request_id = bridge.dispatch(selected["contextId"], {"action": "inspect", "pageId": page_id})
     return {"workspaceKey": workspace["workspaceKey"], "contextId": selected["contextId"],
-            "pageOrigin": selected["pageOrigin"], **_receipt(workspace, home, bridge_port, request_id)}
+            "pageOrigin": selected["pageOrigin"], **bridge.receipt(request_id)}
 
 
 def _lease_path(workspace, edit_token):
@@ -104,9 +51,12 @@ def open_edit(workspace, home, *, action, properties=None, page_id="", context_i
         raise ValueError("The platform allocates a new PAGE ID; create cannot reuse pageId")
     if not isinstance(properties or {}, dict) or len(json.dumps(properties or {})) > 10000:
         raise ValueError("PAGE properties must be a bounded object")
-    current = context(workspace, home, context_id=context_id, page_id=page_id, bridge_port=bridge_port)
+    operation = f"准备{PAGE_ACTIONS[action]}"
+    current = context(workspace, home, context_id=context_id, page_id=page_id, bridge_port=bridge_port, operation=operation)
+    if current.get("selectionRequired"):
+        raise ValueError(f"“{operation}”需要选择一个当前工作区的谷神页签，请先查询平台 PAGE 上下文。")
     if current.get("state") != "SUCCEEDED":
-        raise ValueError("Platform PAGE metadata is unavailable; select a live paired context")
+        raise ValueError(f"“{operation}”无法读取平台 PAGE 元数据。{current.get('message', '')}")
     if action == "delete" and current.get("page", {}).get("isProduct"):
         raise ValueError("Product PAGE cannot be deleted")
     properties = properties or {}
@@ -194,7 +144,8 @@ def apply(workspace, home, *, edit_token, candidate_hash, idempotency_key):
         lease = json.loads(_lease_path(workspace, edit_token).read_text())
         if lease.get("operationId"):
             raise ValueError("PAGE lifecycle lease was already consumed; inspect " + lease["operationId"])
-        selected = _context(workspace, home, lease["bridgePort"], lease["contextId"])
+        bridge = BridgePageSession(home, workspace["workspaceKey"], lease["bridgePort"], PAGE_ACTIONS[lease["target"]["action"]])
+        selected = bridge.context(lease["contextId"])
         if selected["pageOrigin"] != lease["pageOrigin"]:
             raise ValueError("Platform origin changed after preview")
         record = {"version": 1, "operationId": PREFIX + path.stem, "workspaceKey": workspace["workspaceKey"],
@@ -204,12 +155,14 @@ def apply(workspace, home, *, edit_token, candidate_hash, idempotency_key):
         atomic_json(_lease_path(workspace, edit_token), lease)
         atomic_json(path, record)
         try:
-            request_id = _dispatch(workspace, home, lease["bridgePort"], lease["contextId"], lease["target"])
+            request_id = bridge.dispatch(lease["contextId"], lease["target"])
             record.update(state="PENDING", requestId=request_id)
             atomic_json(path, record)
-            receipt = _receipt(workspace, home, lease["bridgePort"], request_id)
+            receipt = bridge.receipt(request_id)
             record.update(state=receipt["state"], receipt=receipt)
-        except (OSError, ValueError, http.client.HTTPException):
+        except BridgeSessionError as error:
+            record.update(state="UNKNOWN", receipt=error.unknown_receipt())
+        except (OSError, ValueError):
             record.update(state="UNKNOWN", receipt={"message": "Dispatch or receipt interrupted; inspect platform before any further write"})
         atomic_json(path, record)
         return status(workspace, idempotency_key=idempotency_key)
@@ -223,9 +176,13 @@ def resume(workspace, home, *, operation_id):
         if record.get("workspaceKey") != workspace["workspaceKey"]:
             raise ValueError("PAGE lifecycle workspace mismatch")
         if record.get("requestId") and record["state"] in {"PENDING", "UNKNOWN"}:
+            operation = f"核对{PAGE_ACTIONS[record['target']['action']]} 的原回执"
             try:
-                receipt = _receipt(workspace, home, record["bridgePort"], record["requestId"])
-            except (OSError, ValueError, http.client.HTTPException):
+                bridge = BridgePageSession(home, workspace["workspaceKey"], record["bridgePort"], operation)
+                receipt = bridge.receipt(record["requestId"])
+            except BridgeSessionError as error:
+                receipt = error.unknown_receipt()
+            except (OSError, ValueError):
                 receipt = {"state": "UNKNOWN", "message": "Original receipt unavailable; reconcile platform state without replaying"}
             record.update(state=receipt["state"], receipt=receipt)
             atomic_json(path, record)

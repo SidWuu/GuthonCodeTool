@@ -322,6 +322,9 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
   Object.assign(handlers, {
     refreshApiSourceView: async key => {ui.menuAttempts.delete(key);ui.invalidate(key);await ui.updateScm(key);onUpdated?.();},
     refreshApiScm: async key => ui.updateScm(key),
+    manageApiScmChanges: async key => ui.manageScmChanges(key),
+    uploadStagedApiSources: async key => ui.uploadStaged(key),
+    showApiOriginalPath: async (key,p) => ui.showOriginalPath(key,p),
     refreshApiObject: async (key,p,value) => ui.refreshScope(typeof value==='string' ? {workspaceKey:key,path:p} : value),
     showApiIndexDiagnostics: async key => ui.showIndexDiagnostics(key),
     openApiSource: async (key,p,value) => ui.open(key,p,false,{lineNumber:value?.lineNumber}),
@@ -397,7 +400,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     editApiPage: async (key,p,value) => handlers.openApiPageEditor(key,p,value),
   });
   if(vscode.window.registerCustomEditorProvider)require('./page-custom-editor').registerPageEditor({vscode,context,ui,getController:getPageEditor});
-  const pathCommands=new Set(['editModuleParameter','previewModuleParameter','openApiSource','previewApiSource','openApiOriginalSource','showApiDiff','revertApiSource','uploadApiSource','openApiDesigner','openApiFragment','openApiFieldCollection','openApiPageEditor','editApiPage','refreshApiObject','resolveApiConflict','syncApiDatabase','createApiFunction']);
+  const pathCommands=new Set(['editModuleParameter','previewModuleParameter','openApiSource','previewApiSource','openApiOriginalSource','showApiDiff','showApiOriginalPath','revertApiSource','uploadApiSource','openApiDesigner','openApiFragment','openApiFieldCollection','openApiPageEditor','editApiPage','refreshApiObject','resolveApiConflict','syncApiDatabase','createApiFunction']);
   const execute = name => async (value,sourcePath)=>{
     try {
       if (!value && selectWorkspace) value=(await selectWorkspace(''))?.workspaceKey;
@@ -427,6 +430,9 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     vscode.commands.registerCommand('gushenCompletion.showApiStatus',execute('showApiStatus')),
     vscode.commands.registerCommand('gushenCompletion.refreshApiSourceView',execute('refreshApiSourceView')),
     vscode.commands.registerCommand('gushenCompletion.refreshApiScm',execute('refreshApiScm')),
+    vscode.commands.registerCommand('gushenCompletion.manageApiScmChanges',execute('manageApiScmChanges')),
+    vscode.commands.registerCommand('gushenCompletion.uploadStagedApiSources',execute('uploadStagedApiSources')),
+    vscode.commands.registerCommand('gushenCompletion.showApiOriginalPath',execute('showApiOriginalPath')),
     vscode.commands.registerCommand('gushenCompletion.refreshApiObject',execute('refreshApiObject')),
     vscode.commands.registerCommand('gushenCompletion.showApiIndexDiagnostics',execute('showApiIndexDiagnostics')),
     vscode.commands.registerCommand('gushenCompletion.openApiSource',execute('openApiSource')),

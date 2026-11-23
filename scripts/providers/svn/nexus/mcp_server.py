@@ -8,6 +8,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from common.bridge_page_session import BridgeSessionError
 from common.legacy_source import IndexRebuildRequired
 from common.runtime_paths import runtime_home_context
 
@@ -946,10 +947,13 @@ class PageMcpServer:
             ))
         except (OSError, ValueError, SystemExit) as error:
             code = "INVALID_ARGUMENT" if isinstance(error, ValueError) else "SOURCE_UNAVAILABLE"
+            next_action = "Verify the explicit workspace and local SVN index"
+            if isinstance(error, BridgeSessionError):
+                code, next_action = error.code, error.next_action
             envelope = {"ok": False, "apiVersion": "v1", "error": {
                 "code": code, "stage": name, "retryable": False,
                 "message": str(error) or "Configured workspace or authorized source is unavailable",
-                "nextAction": "Verify the explicit workspace and local SVN index",
+                "nextAction": next_action,
             }}
             return _response(request_id, result=_result(
                 envelope, error=True, structured=self.protocol_version in STRUCTURED_RESULT_VERSIONS,

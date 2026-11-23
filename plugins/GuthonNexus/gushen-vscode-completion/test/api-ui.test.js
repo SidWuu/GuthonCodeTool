@@ -242,9 +242,22 @@ test('a status scan started before pull cannot leave the project card with stale
 test('manifest exposes API source navigation, PAGE management and SCM actions',()=>{
   const manifest=require('../package.json'),views=manifest.contributes.views.guthon.map(x=>x.id);
   assert.deepEqual(views,['gushenCompletion.projectOverview','gushenCompletion.projectDetails','gushenCompletion.sourceView']);
-  const tree=manifest.contributes.menus['view/item/context'].map(x=>x.command),scm=manifest.contributes.menus['scm/resourceState/context'].map(x=>x.command);
+  const tree=manifest.contributes.menus['view/item/context'].map(x=>x.command);
+  const scm=manifest.contributes.menus['scm/resourceState/context'];
   for(const command of ['gushenCompletion.openApiPageEditor','gushenCompletion.showApiPageNodes','gushenCompletion.showApiReferences']) assert.ok(tree.includes(command));
-  for(const command of ['gushenCompletion.showApiDiff','gushenCompletion.revertApiSource','gushenCompletion.uploadApiSource','gushenCompletion.resolveApiConflict']) assert.ok(scm.includes(command));
+  const apiActions=scm.filter(item=>item.when.includes('guthon-api-'));
+  for(const action of ['openApiSource','showApiDiff','showApiOriginalPath','revertApiSource','uploadApiSource','resolveApiConflict']) {
+    assert.ok(apiActions.some(item=>item.command===`gushenCompletion.${action}`));
+  }
+  for(const item of apiActions) assert.doesNotMatch(item.group,/^inline(?:@|$)/,item.command);
+  const apiGroupActions=manifest.contributes.menus['scm/resourceGroup/context'].filter(item=>item.when.includes('guthon-api-'));
+  assert.deepEqual(apiGroupActions.map(item=>item.command),[
+    'gushenCompletion.manageApiScmChanges','gushenCompletion.uploadStagedApiSources',
+  ]);
+  for(const item of apiGroupActions) {
+    assert.match(item.group,/^inline@/);
+    assert.match(item.when,/scmResourceGroup == changes/);
+  }
   for(const command of ['gushenCompletion.openSvnDocument','gushenCompletion.saveSvnToGuthon']) assert(manifest.contributes.commands.some(item=>item.command===command));
   assert(!manifest.contributes.commands.some(x=>x.command.includes('selectWorkspaceSourceMode')));
 });

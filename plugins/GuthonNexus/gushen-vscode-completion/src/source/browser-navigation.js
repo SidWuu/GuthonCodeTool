@@ -15,12 +15,18 @@ function browserTarget(identity) {
 async function navigateInBrowser({vscode, bridge, tool, identity, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms))}) {
   const target = browserTarget(identity);
   if (!tool) throw new Error('请先配置 Guthon 工具工作空间');
-  bridge.start(tool);
-  await bridge.waitForReady(tool.toolHome);
+  const operation = target.type === 'page' ? '在浏览器定位 PAGE' : '在浏览器定位过程函数';
   const params = new URLSearchParams({workspaceKey: identity.workspaceKey});
-  const result = await bridge.request(tool.toolHome, `/pageContext?${params}`);
+  let result;
+  try {
+    bridge.start(tool);
+    await bridge.waitForReady(tool.toolHome);
+    result = await bridge.request(tool.toolHome, `/pageContext?${params}`);
+  } catch (error) {
+    throw new Error(`“${operation}”需要浏览器会话。${error.message}`, {cause: error});
+  }
   const contexts = (result.contexts || []).filter(item => item.workspaceKey === identity.workspaceKey);
-  if (!contexts.length) throw new Error('未找到此工作区的平台页签；请打开平台并在 Bridge 弹窗选择工作区、配置配对令牌');
+  if (!contexts.length) throw new Error(`“${operation}”需要浏览器会话。未找到当前工作区的谷神页签。请确认 Chrome 的 GuthonBridge 已配对，再打开并登录该页签。`);
   const context = contexts.length === 1 ? contexts[0] : (await vscode.window.showQuickPick(
     contexts.map(item => ({label: item.selectedTab?.label || item.pageId || `${item.procedureKeyword || ''}.${item.funId || ''}`,
       description: item.pageOrigin, detail: `${item.workspaceKey} · 页签 ${item.tabId}`, context: item})),

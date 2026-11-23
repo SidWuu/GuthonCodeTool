@@ -977,6 +977,8 @@ class ApiMcpServer:
                     "message": str(error),
                 },
             }
+            if next_action := getattr(error, "next_action", None):
+                envelope["error"]["nextAction"] = next_action
             mutation = getattr(error, "mutation", None)
             if mutation is None and not invocation_started and tool["name"] in {"write_document", "apply_source_batch", "recover_source_batch"}:
                 mutation = invocation_attempt(tool["name"], args)

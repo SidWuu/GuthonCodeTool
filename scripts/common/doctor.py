@@ -11,7 +11,6 @@ import hashlib
 import uuid
 import zipfile
 from pathlib import Path
-import urllib.error
 import urllib.request
 
 from common import gusen_hub
@@ -74,7 +73,7 @@ def _database_requirements(workspaces):
     return engines, credential_required, credential_optional
 
 
-def run_checks(bridge_port=17361, *, workspace_key=""):
+def run_checks(bridge_port=None, *, workspace_key=""):
     checks = []
     checks.append(
         result(
@@ -167,15 +166,16 @@ def run_checks(bridge_port=17361, *, workspace_key=""):
     except (OSError, KeyError, ValueError, TypeError) as error:
         checks.append(result("vscode-data", "FAIL", str(error), code="VSCODE_DATA_INVALID", action="runtime", required=True))
 
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{bridge_port}/health", timeout=0.5) as response:
-            payload = json.load(response)
-        if not isinstance(payload, dict):
-            raise ValueError("Bridge 健康响应必须为对象，请核对端口和运行版本")
-        status = "PASS" if response.status == 200 and payload.get("ok") is True else "FAIL"
-        checks.append(result("bridge", status, f"127.0.0.1:{bridge_port}", code="BRIDGE_HEALTH", action="bridge", required=False))
-    except (OSError, ValueError, urllib.error.URLError) as error:
-        checks.append(result("bridge", "WARN", f"not running on 127.0.0.1:{bridge_port}: {error}", code="BRIDGE_OFFLINE", action="bridge", required=False))
+    if bridge_port is not None:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{bridge_port}/health", timeout=0.5) as response:
+                payload = json.load(response)
+                available = response.status == 200 and isinstance(payload, dict) and payload.get("ok") is True
+        except (OSError, ValueError):
+            available = False
+        checks.append(result("bridge", "PASS" if available else "SKIP",
+                             f"127.0.0.1:{bridge_port}" if available else f"浏览器增强不可用（127.0.0.1:{bridge_port}）",
+                             code="BRIDGE_HEALTH" if available else "BRIDGE_OFFLINE", required=False))
 
     return checks
 
@@ -213,7 +213,7 @@ def diagnostic_bundle(checks, directory, *, workspace_key=""):
 
 def main(argv=None, *, workspace_key=""):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bridge-port", type=int, default=17361)
+    parser.add_argument("--bridge-port", type=int, help="also probe the optional browser enhancement service on this port")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--report", action="store_true", help="return a completed local-check report; inspect health and summary for check failures")
     parser.add_argument("--self-test", action="store_true")

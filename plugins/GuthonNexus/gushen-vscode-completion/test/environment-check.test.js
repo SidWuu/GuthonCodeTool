@@ -7,7 +7,7 @@ const failure = {name: 'database-readonly', status: 'FAIL', required: true, mess
 
 function fixture(value, select) {
   const calls = [];
-  return {calls, options: {workspaceKey: value.workspaceKey || '', bridgePort: 17369,
+  return {calls, options: {workspaceKey: value.workspaceKey || '',
     client: {async run(...args) {calls.push({request: args}); return value;}},
     vscode: {ProgressLocation: {Window: 1}, commands: {async executeCommand(...args) {calls.push({command: args});}},
       workspace: {async openTextDocument(document) {calls.push({document}); return document;}},
@@ -22,10 +22,23 @@ test('failed checks remain visible despite successful report execution and Markd
   assert.equal(content.includes('<script>'), false); assert.equal(content.includes('](command:'), false);
 });
 
-test('a scoped report uses the same explicit workspace and configured Bridge port', async () => {
+test('a scoped report checks the explicit workspace without requesting Bridge status', async () => {
   const f = fixture(report([failure], 'products.demo'), items => items[0]); await showEnvironmentCheck(f.options);
-  assert.deepEqual(f.calls[0].request, ['products.demo', 'doctor', ['--report', '--bridge-port', '17369']]);
+  assert.deepEqual(f.calls[0].request, ['products.demo', 'doctor', ['--report']]);
   assert.match(f.calls[1].document.content, /products.demo/); assert.match(f.calls[1].document.content, /需处理/);
+});
+
+test('an optional Bridge warning from the backend cannot appear or offer a pairing action', async () => {
+  const runtime = {name: 'python', status: 'PASS', message: 'ready', required: true};
+  const bridge = {name: 'bridge', status: 'WARN', message: 'offline', action: 'bridge', required: false};
+  const f = fixture(report([runtime, bridge]), items => {
+    assert.equal(items.length, 2);
+    return items[0];
+  });
+  await showEnvironmentCheck(f.options);
+  assert.match(f.calls[1].document.content, /需留意 0/);
+  assert.doesNotMatch(f.calls[1].document.content, /Bridge|offline/);
+  assert.equal(f.calls.some(call => call.command), false);
 });
 
 test('an actionable failure invokes only its owned command without automatically installing anything', async () => {

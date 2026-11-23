@@ -22,6 +22,8 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 TRUST = ROOT / "plugins/GuthonNexus/gushen-vscode-completion/data/release-trust.json"
 KEYCHAIN_SERVICE = "GuthonCodeTool.ReleaseMirror"
+GITHUB_MIRROR_SOURCE = "SidWuu/GuthonCodeTool"
+GITEE_MIRROR_TARGET = "sidwu/GuthonCodeTool"
 MAX_ASSET_BYTES = 512 * 1024 * 1024
 METADATA_BYTES = 4 * 1024 * 1024
 EXPECTED_ASSETS = frozenset((
@@ -41,6 +43,10 @@ class MirrorError(Exception):
 
 
 class TransferError(MirrorError):
+    pass
+
+
+class AttachmentQuotaError(TransferError):
     pass
 
 
@@ -200,7 +206,11 @@ class GiteeClient:
         if method != "GET" and not url.startswith(self.api + "/"):
             raise MirrorError("写入请求必须属于指定 Gitee 仓库 API")
         config = []
-        if method != "GET":
+        if url.startswith(self.api + "/") and (
+            method == "DELETE" or (method == "GET" and self.token)
+        ):
+            config.append("header = " + curl_quote("Authorization: Bearer " + validate_token(self.token)))
+        elif method != "GET":
             field_option = "data-urlencode" if method == "PATCH" else "form-string"
             config.append(field_option + " = " + curl_quote("access_token=" + validate_token(self.token)))
             for name, value in (fields or {}).items():
@@ -267,6 +277,13 @@ class GiteeClient:
                 if status == 404 and allow_missing:
                     return None
                 if not 200 <= status < 300:
+                    if status == 400 and upload is not None:
+                        try:
+                            message = json.loads(target.read_bytes()).get("message", "")
+                        except (ValueError, AttributeError):
+                            message = ""
+                        if isinstance(message, str) and "文件大小已超出仓库附件配额" in message:
+                            raise AttachmentQuotaError("Gitee 仓库附件配额不足")
                     raise TransferError(f"Gitee API 请求失败（HTTP {status}）")
                 try:
                     body = json.loads(target.read_bytes())
@@ -295,17 +312,65 @@ class GiteeClient:
         url = asset.get("browser_download_url")
         if not isinstance(url, str) or not url.startswith(f"https://gitee.com/{self.repository}/releases/download/"):
             raise MirrorError("Gitee 附件地址与目标仓库不一致")
+        return self._download_hash(url, name=file.name, size=file.stat().st_size)
+
+    def _download_hash(self, url: str, *, name: str, size: int) -> str:
         target = self.work / "download-verification"
         for attempt in range(3):
             try:
-                status = self.transfer(url, target, limit=file.stat().st_size, download=True)
-                if status != 200 or target.stat().st_size != file.stat().st_size:
-                    raise TransferError(f"附件下载失败或大小不一致：{file.name}")
+                status = self.transfer(url, target, limit=size, download=True)
+                if status != 200 or target.stat().st_size != size:
+                    raise TransferError(f"附件下载失败或大小不一致：{name}")
                 return file_hash(target)
             except TransferError:
                 if attempt == 2:
                     raise
                 time.sleep(2 * (attempt + 1))
+
+    def list_releases(self):
+        seen = set()
+        for page in range(1, 101):
+            rows = self.json_request(f"/releases?per_page=100&page={page}")
+            if not isinstance(rows, list):
+                raise MirrorError("Gitee 发行列表格式无效")
+            for release in rows:
+                tag = release.get("tag_name") if isinstance(release, dict) else None
+                release_id = release.get("id") if tag else None
+                if (not isinstance(tag, str) or type(release_id) is not int or release_id <= 0
+                        or tag in seen or not isinstance(release.get("assets"), list)):
+                    raise MirrorError("Gitee 发行列表存在无效或重复记录")
+                seen.add(tag)
+                yield release
+            if len(rows) < 100:
+                return
+        raise MirrorError("Gitee 发行列表超出可安全核对范围")
+
+    def attachments(self, release_id: int) -> dict[str, dict]:
+        rows = self.json_request(f"/releases/{release_id}/attach_files")
+        if not isinstance(rows, list):
+            raise MirrorError("Gitee 发行附件列表格式无效")
+        attachments = {}
+        ids = set()
+        for row in rows:
+            name = row.get("name") if isinstance(row, dict) else None
+            attachment_id, size = (row.get("id"), row.get("size")) if name else (None, None)
+            if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}", name)
+                    or name in attachments or type(attachment_id) is not int or attachment_id <= 0
+                    or attachment_id in ids or type(size) is not int or not 0 < size <= MAX_ASSET_BYTES):
+                raise MirrorError("Gitee 发行附件存在无效或重复标识")
+            ids.add(attachment_id)
+            attachments[name] = row
+        return attachments
+
+    def archived_hash(self, release_id: int, attachment: dict) -> str:
+        url = f"{self.api}/releases/{release_id}/attach_files/{attachment['id']}/download"
+        return self._download_hash(url, name=attachment["name"], size=attachment["size"])
+
+    def delete_attachment(self, release_id: int, attachment_id: int) -> None:
+        url = f"{self.api}/releases/{release_id}/attach_files/{attachment_id}"
+        result = self.transfer(url, self.work / "delete-response", method="DELETE")
+        if result not in (200, 204):
+            raise TransferError(f"Gitee 删除附件失败（HTTP {result}）")
 
 
 def asset_map(release: dict) -> dict[str, dict]:
@@ -321,8 +386,103 @@ def asset_map(release: dict) -> dict[str, dict]:
     return result
 
 
+def version_key(tag: str) -> tuple[int, int, int]:
+    major, minor, patch = validate_tag(tag)[1:].split(".")
+    return int(major), int(minor), int(patch)
+
+
+def github_attachment_digests(repository: str, tag: str, attachments: dict[str, dict]) -> dict[str, str]:
+    release = json.loads(run_command(["gh", "api", f"repos/{repository}/releases/tags/{tag}"]))
+    if release.get("tag_name") != tag or release.get("draft") is not False or release.get("prerelease") is not False:
+        raise MirrorError(f"GitHub {tag} 缺少对应的正式发行备份")
+    backups = {asset["name"]: asset for asset in release["assets"]}
+    digests = {}
+    for name, attachment in attachments.items():
+        backup = backups.get(name, {})
+        digest = backup.get("digest") or ""
+        if backup.get("size") != attachment["size"] or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise MirrorError(f"GitHub {tag} 缺少可核验的附件备份：{name}")
+        digests[name] = digest.removeprefix("sha256:")
+    return digests
+
+
+def gitee_tags(repository: str) -> dict[str, str]:
+    output = run_command(["git", "ls-remote", "--refs", "--tags", f"https://gitee.com/{repository}.git"])
+    return {ref.removeprefix("refs/tags/"): commit for commit, ref in (
+        line.split("\t", 1) for line in output.splitlines()
+    )}
+
+
+def prune_attachments(client: GiteeClient, github: str, target: str, *,
+                      before: str | None = None, bytes_needed: int = 0) -> None:
+    if (github, client.repository) != (GITHUB_MIRROR_SOURCE, GITEE_MIRROR_TARGET):
+        raise MirrorError("附件清理仅适用于已配置的 GuthonCodeTool 镜像")
+    if before is not None and version_key(before) > version_key(target):
+        raise MirrorError("清理截止版本不能晚于目标发行")
+    releases = sorted((release for release in client.list_releases()
+                       if release.get("prerelease") is False and not release.get("draft")
+                       and re.fullmatch(r"v\d+\.\d+\.\d+", release["tag_name"])),
+                      key=lambda release: version_key(release["tag_name"]))
+    complete = [release["tag_name"] for release in releases if frozenset(asset_map(release)) in ASSET_SETS]
+    protected = {target, *complete[-2:]}
+    cutoff = version_key(before or target)
+    plan = []
+    planned_bytes = 0
+    for release in releases:
+        tag = release["tag_name"]
+        if version_key(tag) >= cutoff:
+            break
+        if tag in protected:
+            continue
+        names = [asset["name"] for asset in release["assets"]
+                 if asset.get("browser_download_url", "").startswith(f"https://gitee.com/{client.repository}/releases/download/")]
+        if not names:
+            continue
+        attachments = client.attachments(release["id"])
+        if sorted(attachments) != sorted(names):
+            raise MirrorError(f"Gitee {tag} 附件清单发生变化，请重新同步")
+        digests = github_attachment_digests(github, tag, attachments)
+        plan.append((tag, release["id"], attachments, digests))
+        planned_bytes += sum(attachment["size"] for attachment in attachments.values())
+        if before is None and planned_bytes >= bytes_needed:
+            break
+    if planned_bytes < bytes_needed:
+        raise MirrorError(f"可核验的旧发行附件只有 {planned_bytes} 字节，低于待补的 {bytes_needed} 字节")
+    if not plan:
+        log("已授权范围内没有待清理的发行附件")
+        return
+
+    tags = gitee_tags(client.repository)
+    tag_names = {target, *(tag for tag, *_ in plan)}
+    if not tag_names <= tags.keys():
+        raise MirrorError("Gitee 缺少目标或旧发行的 Git 标签")
+    log(f"清理计划 · {len(plan)} 个旧发行 · {sum(len(assets) for _, _, assets, _ in plan)} 个附件 · {planned_bytes} 字节")
+    for tag, release_id, attachments, digests in plan:
+        current = client.release(tag)
+        if current is None or current["id"] != release_id or client.attachments(release_id) != attachments:
+            raise MirrorError(f"Gitee {tag} 发行或附件标识已变化")
+        for name, attachment in sorted(attachments.items()):
+            log(f"核验旧附件与 GitHub 备份 · {tag} · {name}")
+            if client.archived_hash(release_id, attachment) != digests[name]:
+                raise MirrorError(f"Gitee {tag} 附件与 GitHub 备份 SHA-256 不一致：{name}")
+        for name, attachment in sorted(attachments.items()):
+            try:
+                client.delete_attachment(release_id, attachment["id"])
+            except TransferError:
+                result = client.attachments(release_id)
+                if name in result:
+                    raise
+            log(f"已清理 Gitee 旧附件 · {tag} · {name} · {attachment['size']} 字节")
+        if client.attachments(release_id):
+            raise MirrorError(f"Gitee {tag} 附件清理后的回读非空")
+    retained = gitee_tags(client.repository)
+    if any(retained.get(tag) != tags[tag] for tag in tag_names):
+        raise MirrorError("清理后 Git 标签核验失败")
+    log(f"旧附件清理已回读核验 · {planned_bytes} 字节 · Git 标签保留")
+
+
 def mirror(client: GiteeClient, tag: str, directory: Path, hashes: dict[str, str], notes: str,
-           *, verify_only: bool = False) -> None:
+           *, verify_only: bool = False, quota_cleanup=None) -> None:
     release = client.release(tag)
     if release is None:
         if verify_only:
@@ -369,6 +529,12 @@ def mirror(client: GiteeClient, tag: str, directory: Path, hashes: dict[str, str
             log(f"上传 {name}（{file.stat().st_size} 字节，第 {attempt + 1}/2 次）")
             try:
                 client.json_request(f"/releases/{release['id']}/attach_files", method="POST", upload=file)
+            except AttachmentQuotaError:
+                if quota_cleanup is None or attempt != 0:
+                    raise
+                missing = hashes.keys() - asset_map(release).keys()
+                quota_cleanup(sum((directory / asset).stat().st_size for asset in missing))
+                quota_cleanup = None
             except TransferError:
                 log("上传结果未确认；重新查询并下载核验后，才决定是否补传")
             time.sleep(2)
@@ -385,10 +551,11 @@ def mirror(client: GiteeClient, tag: str, directory: Path, hashes: dict[str, str
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", help="稳定发行标签，例如 v0.3.1")
-    parser.add_argument("--github-repo", default="SidWuu/GuthonCodeTool")
-    parser.add_argument("--gitee-repo", default="sidwu/GuthonCodeTool")
+    parser.add_argument("--github-repo", default=GITHUB_MIRROR_SOURCE)
+    parser.add_argument("--gitee-repo", default=GITEE_MIRROR_TARGET)
     parser.add_argument("--configure-token", action="store_true", help="交互输入令牌并保存到系统钥匙串")
     parser.add_argument("--verify-only", action="store_true", help="只读下载验收，不需要令牌，不写入 Gitee")
+    parser.add_argument("--prune-before", metavar="TAG", help="同步前清理早于指定标签的旧发行附件，保留发行和 Git 标签")
     parser.add_argument("--release-dir", type=Path, help="使用已下载的正式签名附件目录（CI）")
     parser.add_argument("--notes-file", type=Path, help="与指定版本匹配的发行说明（CI）")
     args = parser.parse_args(argv)
@@ -396,13 +563,15 @@ def main(argv: list[str] | None = None) -> int:
         github = validate_repository(args.github_repo)
         gitee = validate_repository(args.gitee_repo)
         if args.configure_token:
-            if args.tag or args.verify_only or args.release_dir or args.notes_file:
+            if args.tag or args.verify_only or args.release_dir or args.notes_file or args.prune_before:
                 raise MirrorError("令牌配置需单独执行，不同时同步发行")
             configure_token(gitee)
             return 0
         if not args.tag:
             raise MirrorError("请显式指定 --tag，不自动选择或创建版本")
         tag = validate_tag(args.tag)
+        if args.prune_before and args.verify_only:
+            raise MirrorError("只读验收不能清理旧发行附件")
         for program in ("node", "curl", "gh"):
             if program == "gh" and args.release_dir and args.notes_file:
                 continue
@@ -445,7 +614,15 @@ def main(argv: list[str] | None = None) -> int:
             if not notes.strip() or len(notes.encode()) > METADATA_BYTES:
                 raise MirrorError("指定发行说明为空或过大")
             log(f"目标 Gitee {gitee} · {'只读验收' if args.verify_only else '核验后补传'}")
-            mirror(GiteeClient(gitee, work, token), tag, directory, hashes, notes, verify_only=args.verify_only)
+            client = GiteeClient(gitee, work, token)
+            if args.prune_before:
+                prune_attachments(client, github, tag, before=args.prune_before)
+            auto_cleanup = (not args.verify_only and not args.prune_before
+                            and (github, gitee) == (GITHUB_MIRROR_SOURCE, GITEE_MIRROR_TARGET))
+            def recover_quota(bytes_needed):
+                prune_attachments(client, github, tag, bytes_needed=bytes_needed)
+            mirror(client, tag, directory, hashes, notes, verify_only=args.verify_only,
+                   quota_cleanup=recover_quota if auto_cleanup else None)
         return 0
     except (MirrorError, OSError, ValueError) as error:
         # Arbitrary child/keyring errors are deliberately excluded from output.

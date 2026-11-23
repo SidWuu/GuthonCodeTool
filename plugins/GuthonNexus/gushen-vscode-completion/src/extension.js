@@ -1337,12 +1337,11 @@ function activate(context) {
         if (!tool) return;
         const signature = () => {
           const settings = vscode.workspace.getConfiguration('gushenCompletion');
-          return JSON.stringify(['executionMode', 'toolHome', 'toolPath', 'developmentRoot', 'scriptPythonPath', 'scriptToolPath', 'bridgePort']
+          return JSON.stringify(['executionMode', 'toolHome', 'toolPath', 'developmentRoot', 'scriptPythonPath', 'scriptToolPath']
             .map(key => settings.get(key, '')));
         };
         const runtime = signature(), {showEnvironmentCheck} = require('./environment-check');
         return await showEnvironmentCheck({vscode, workspaceKey,
-          bridgePort: vscode.workspace.getConfiguration('gushenCompletion').get('bridgePort', 17361),
           client: new ToolJsonClient({getTool: async () => tool, processClient}),
           isCurrent: () => signature() === runtime});
       } catch (error) { return vscode.window.showErrorMessage(`环境检查未完成：${error.message}`); }

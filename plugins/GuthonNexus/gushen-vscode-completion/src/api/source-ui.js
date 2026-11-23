@@ -7,6 +7,16 @@ const {filterChildren}=require('./tree-filter');
 const {SourceDiffProvider}=require('./source-diff');
 const {MODULE_STYLES,SOURCE_CATEGORIES,sourceTreeIcon,sourceTreeIdentity,datasourceTreeName,compareDatasourceIds}=require('../source/tree-styles');
 
+const INHERITED_COMPANION_TYPES=new Set(['page-inherit','procedure-inherit','system-script-inherit']);
+const API_UPLOAD_TYPES={page:'页面',procedure:'过程函数',table:'表',view:'视图','system-script':'系统脚本'};
+
+function isLocalModification(change) {
+  return change.inScope!==false && change.state==='MODIFIED' && !change.readonly;
+}
+function canStage(change) {
+  return isLocalModification(change) && Object.hasOwn(API_UPLOAD_TYPES,change.sourceType) && !!change.sourceHash;
+}
+
 function filePath(root, sourcePath) {
   if (typeof sourcePath !== 'string' || !sourcePath || sourcePath.includes('\\') || sourcePath.split('/').some(p => !p || p === '.' || p === '..')) throw new Error('无效的源码路径');
   const result = path.resolve(root, sourcePath);
@@ -36,6 +46,20 @@ function identity(value, sourcePath) {
     return {key:query.get('workspaceKey') || uri.authority, path:query.get('path')};
   }
   throw new Error('请选择 API 源码');
+}
+
+function scmFilename({path:sourcePath,sourceType,metadata={}}) {
+  const extension=path.posix.extname(sourcePath);
+  let candidates=[];
+  if(sourceType==='page') {
+    const isService=String(metadata.pageType)==='0' || extension.toLowerCase()==='.gss';
+    candidates=isService ? [metadata.pageAliasId] : [metadata.pageName,metadata.title];
+  } else if(sourceType==='procedure') {
+    candidates=[metadata.funId];
+  }
+  const name=candidates.find(value=>typeof value==='string' && value.trim())?.trim().replace(/[\\/]+/g,' · ');
+  if(!name) return path.posix.basename(sourcePath);
+  return name.toLowerCase().endsWith(extension.toLowerCase()) ? name : name+extension;
 }
 
 function sourceLabel(object,{signature=false}={}) {
@@ -95,6 +119,7 @@ function buildCatalogTree(key, workspace, objects, project={}, options={}) {
     parent.children.push({label,key,object,order:platformOrder,sortKey:String(object.funId || object.sourceId || filename).toLowerCase(),parent:parent===root?workspace:parent});
   };
   for(const object of objects) {
+    if(INHERITED_COMPANION_TYPES.has(object.sourceType)) continue;
     filePath('/api-root',object.path);
     const parts=object.path.split('/');
     if(object.sourceType==='module-parameter' && object.referenceFields?.snapshotPath) {
@@ -163,6 +188,37 @@ function buildCatalogTree(key, workspace, objects, project={}, options={}) {
   sort(root);return root.children;
 }
 
+function scmResourcePaths(key, changes, project, options) {
+  const paths=new Map(),counts=new Map();
+  const visit=(nodes,parents=[])=>{
+    for(const node of nodes) {
+      if(node.children) {
+        const label=String(node.label).replace(/[\\/]+/g,' · ');
+        const rawPageDirectory=node.sourcePrefix?.split('/');
+        const showLabel=rawPageDirectory?.[2]!=='pages' || rawPageDirectory.length<4;
+        visit(node.children,showLabel ? [...parents,label] : parents);
+      } else if(node.object) {
+        const sourcePath=node.object.referenceFields?.snapshotPath || node.object.path;
+        if(paths.has(sourcePath)) continue;
+        const file=path.posix.join('/',...parents,scmFilename(node.object));
+        paths.set(sourcePath,file);
+        counts.set(file,(counts.get(file)||0)+1);
+      }
+    }
+  };
+  visit(buildCatalogTree(key,{},changes,project,options));
+  for(const change of changes) {
+    const sourcePath=change.path,resourcePath=paths.get(sourcePath);
+    if(!resourcePath) paths.set(sourcePath,'/'+scmFilename(change));
+    else if(counts.get(resourcePath)>1) {
+      // Native SCM tree mode keys files by URI path, without the query.
+      const folder=change.metadata?.pageId || path.posix.basename(sourcePath);
+      paths.set(sourcePath,path.posix.join(path.posix.dirname(resourcePath),String(folder).replace(/[\\/]+/g,' · '),path.posix.basename(resourcePath)));
+    }
+  }
+  return paths;
+}
+
 function sourceSyncLines(key,result) {
   const state=value=>value===true?'完成':value===false?'未完成':'未返回';
   const index=result.index || {}, diagnostics=index.diagnostics || [];
@@ -194,6 +250,7 @@ class ApiSourceUI {
     this.emitter = vscode.EventEmitter ? new vscode.EventEmitter() : undefined;
     this.onDidChangeTreeData = this.emitter?.event;
     this.filters=new Map();this.sourceNames=new Map();
+    this.scmProjects=new Map();this.stagedChanges=new Map();this.stagedUploads=new Set();
     this.decorationEmitter=vscode.EventEmitter ? new vscode.EventEmitter() : undefined;
     this.onDidChangeFileDecorations=this.decorationEmitter?.event;
     this.readonlyDocuments=new Map();this.rootItems=null;this.treeCache=new Map();this.treeLoads=new Map();this.treeEpoch=new Map();this.indexGenerations=new Map();this.indexDiagnostics=new Map();this.menuAttempts=new Set();this.treeVersion=0;
@@ -211,7 +268,7 @@ class ApiSourceUI {
       if(!previous || previous.checkoutPath!==next.checkoutPath || previous.displayName!==next.displayName) changed=true;
       this.workspaces.set(key,next);
     }
-    for (const key of this.workspaces.keys()) if (!keys.has(key)) {changed=true;this.workspaces.delete(key);this.invalidate(key);this.menuAttempts.delete(key);this.scmGenerations.set(key,(this.scmGenerations.get(key)||0)+1);this.controls.get(key)?.control.dispose();this.controls.delete(key);this.sourceChanges.delete(key);this.watchers.get(key)?.dispose();this.watchers.delete(key);}
+    for (const key of this.workspaces.keys()) if (!keys.has(key)) {changed=true;this.workspaces.delete(key);this.invalidate(key);this.menuAttempts.delete(key);this.scmGenerations.set(key,(this.scmGenerations.get(key)||0)+1);this.controls.get(key)?.control.dispose();this.controls.delete(key);this.sourceChanges.delete(key);this.stagedChanges.delete(key);this.watchers.get(key)?.dispose();this.watchers.delete(key);}
     if(changed) {this.invalidate();this.rootItems=null;this.emitter?.fire();}
   }
   setSelectedWorkspace(key) {
@@ -258,7 +315,7 @@ class ApiSourceUI {
   }
   track(key) {if (!this.workspaces.has(key)) {this.workspaces.set(key,{workspaceKey:key});this.invalidate();this.rootItems=null;}}
   refresh() {this.emitter?.fire();}
-  invalidate(key) {if(key){this.treeCache.delete(key);this.treeEpoch.set(key,(this.treeEpoch.get(key)||0)+1);}else for(const k of this.workspaces.keys())this.invalidate(k);this.treeVersion++;}
+  invalidate(key) {if(key){this.treeCache.delete(key);this.scmProjects.delete(key);this.treeEpoch.set(key,(this.treeEpoch.get(key)||0)+1);}else for(const k of this.workspaces.keys())this.invalidate(k);this.treeVersion++;}
   getTreeItem(item) {
     if(item.kind?.startsWith("legacy-"))return this.legacyProvider?.treeItem(item) || new this.vscode.TreeItem(item.label || "旧项目源码");
     const v=this.vscode;
@@ -368,6 +425,7 @@ class ApiSourceUI {
         offset=result.nextOffset;
       }
       const current=replacement();if(current!==undefined)return current;
+      if(project) this.scmProjects.set(item.key,{generation,project});
       const root={children:buildCatalogTree(item.key,item,objects,project,{order:treeOrder,procedureLayout})};
       if(partial && !this.indexDiagnostics.has(item.key)) {
         const diagnostics=objects.filter(object=>object.diagnostic && object.status!=='OK').map(object=>({path:object.path,code:object.diagnostic}));
@@ -383,13 +441,17 @@ class ApiSourceUI {
       this.sourceNames.set(item.key,new Map(objects.map(object=>[object.referenceFields?.snapshotPath || object.path,sourceLabel(object)])));
       this.decorationEmitter?.fire();
       this.indexGenerations.set(item.key,generation);this.treeCache.set(item.key,root.children);
+      if(project && this.controls.get(item.key)?.control.count) void this.updateScm(item.key).catch(error=>this.vscode.window.showErrorMessage(`无法刷新源码管理：${error.message}`));
       if(project?.systems?.length && !Array.isArray(project.menuTree) && !this.menuAttempts.has(item.key) && this.canLoadMenu()) {
         this.menuAttempts.add(item.key);const version=this.treeVersion;
         void this.run(item.key,'system-menu').then(result=>{
           const menu=Array.isArray(result.menu) ? result.menu : result.menu?.list;
           if(this.disposed || version!==this.treeVersion || !Array.isArray(menu)) return;
           const messages=root.children.filter(child=>child.kind==='message');
-          this.treeCache.set(item.key,[...buildCatalogTree(item.key,item,objects,{...project,menuTree:menu},{order:treeOrder,procedureLayout}),...messages]);this.emitter?.fire();
+          const withMenu={...project,menuTree:menu};
+          this.scmProjects.set(item.key,{generation,project:withMenu});
+          this.treeCache.set(item.key,[...buildCatalogTree(item.key,item,objects,withMenu,{order:treeOrder,procedureLayout}),...messages]);this.emitter?.fire();
+          if(this.controls.get(item.key)?.control.count) void this.updateScm(item.key).catch(error=>this.vscode.window.showErrorMessage(`无法刷新源码管理：${error.message}`));
         }).catch(error=>{
           if(this.disposed || version!==this.treeVersion || ['API_LOGIN_REQUIRED','API_LOGIN_RESTORE_FAILED'].includes(error.code)) return;
           const items=this.treeCache.get(item.key);if(!items)return;
@@ -484,6 +546,10 @@ class ApiSourceUI {
       ...(line>=0?{selection:new this.vscode.Range(line,0,line,0)}:{})});
   }
   provideTextDocumentContent(uri) {const query=new URLSearchParams(uri.query || '');return this.readonlyDocuments.get(JSON.stringify([query.get('workspaceKey') || uri.authority,query.get('path') || uri.path.slice(1),query.get('revision') || ''])) || ''; }
+  stagedFiles(key, checkoutPath) {
+    const stage=this.stagedChanges.get(key);
+    return stage?.checkoutPath===checkoutPath ? stage.files : undefined;
+  }
   async updateScm(key) {
     const generation=(this.scmGenerations.get(key)||0)+1;this.scmGenerations.set(key,generation);
     const state=await this.status(key); const vscode=this.vscode;
@@ -492,28 +558,60 @@ class ApiSourceUI {
     await vscode.commands?.executeCommand?.('setContext','gushenCompletion.hasUnknownUpload',state.unverifiedUploadCount>0);
     if(this.disposed || this.scmGenerations.get(key)!==generation || this.selectedWorkspaceKey!==undefined && this.selectedWorkspaceKey!==key) return state;
     if (!vscode.scm) return state;
+    const changes=(state.files || []).filter(x=>x.inScope!==false && x.state!=='CLEAN');
+    const indexGeneration=state.index?.indexGeneration;
+    let project=this.scmProjects.get(key);
+    if(changes.length && state.index?.ready && indexGeneration && project?.generation!==indexGeneration) {
+      try {
+        const first=await this.run(key,'catalog',{limit:1,offset:0});
+        if(first.indexGeneration===indexGeneration) project={generation:indexGeneration,project:first.project};
+      } catch(error) {
+        if(!['API_INDEX_REQUIRED','API_INDEX_SCOPE_STALE','API_INDEX_INVALID'].includes(error.code)) throw error;
+      }
+      if(this.disposed || this.scmGenerations.get(key)!==generation || this.selectedWorkspaceKey!==undefined && this.selectedWorkspaceKey!==key) return state;
+      if(this.scmProjects.get(key)?.generation===indexGeneration) project=this.scmProjects.get(key);
+      else if(project?.generation===indexGeneration) this.scmProjects.set(key,project);
+    }
+    const config=vscode.workspace.getConfiguration?.('gushenCompletion');
+    const resourcePaths=scmResourcePaths(key,changes,project?.project,{
+      order:config?.get?.('sourceTreeOrder','platform'),procedureLayout:config?.get?.('procedureTreeLayout','tree'),
+    });
+    const workspace=this.workspaces.get(key);
+    const label=`${workspace?.displayName || workspace?.name || key} · 谷神 API 源码`;
     let record=this.controls.get(key);
-    if (!record) {
-      const control=vscode.scm.createSourceControl(`guthon-api-${key}`,`${key} · 谷神 API 源码`);
+    if (record?.control.label!==label) {
+      // SourceControl labels are read-only, so a project rename requires a new instance.
+      record?.control.dispose();
+      const control=vscode.scm.createSourceControl(`guthon-api-${key}`,label);
       control.guthonWorkspaceKey=key;
       if(this.quickDiff) control.quickDiffProvider=this.quickDiff;
+      const stagedGroup=control.createResourceGroup('staged','暂存区');stagedGroup.hideWhenEmpty=true;stagedGroup.guthonWorkspaceKey=key;
       const group=control.createResourceGroup('changes','本地变更'); group.hideWhenEmpty=false; group.guthonWorkspaceKey=key;
-      record={control,group};this.controls.set(key,record);
+      record={control,group,stagedGroup};this.controls.set(key,record);
     }
-    const changes=(state.files || []).filter(x=>x.inScope!==false && x.state !== 'CLEAN');
-    const signature=JSON.stringify(changes.map(x=>[x.path,x.state,!!x.readonly,x.sourceHash,x.baseHash]));
+    const staged=this.stagedFiles(key,state.checkoutPath);
+    if(staged?.size) {
+      const changed=new Set(changes.map(change=>change.path));
+      for(const p of staged.keys()) if(!changed.has(p)) staged.delete(p);
+    }
+    const signature=JSON.stringify(changes.map(x=>[x.path,resourcePaths.get(x.path),x.state,!!x.readonly,x.sourceHash,x.baseHash,staged?.get(x.path)]));
     if(record.signature===signature) return state;
     record.signature=signature;
     const sourceChanges=new Map();
     const priority={CONFLICT:3,REMOTE_DELETED:2,MISSING:2,MODIFIED:1};
     for(const change of changes) {const parts=change.path.split('/');for(let i=1;i<=parts.length;i++){const p=parts.slice(0,i).join('/');if(!sourceChanges.has(p) || (priority[change.state] || 0)>(priority[sourceChanges.get(p)] || 0)) sourceChanges.set(p,change.state);}}
     this.sourceChanges.set(key,sourceChanges);this.decorationEmitter?.fire();
-    record.group.resourceStates=changes.map(change=>{
-      const uri=vscode.Uri.from({scheme:'guthon-api-change',authority:key,path:'/'+path.posix.basename(change.path),query:new URLSearchParams({workspaceKey:key,path:change.path}).toString()});
-      return {resourceUri:uri,contextValue:change.state==='CONFLICT' ? 'guthonApi.conflict' : change.readonly ? 'guthonApi.readonlyChange' : change.state==='MODIFIED' ? 'guthonApi.change' : 'guthonApi.unavailable',
+    const localRows=[],stagedRows=[];
+    for(const change of changes) {
+      const stagedHash=staged?.get(change.path);
+      const uri=vscode.Uri.from({scheme:'guthon-api-change',authority:key,path:resourcePaths.get(change.path),query:new URLSearchParams({workspaceKey:key,path:change.path}).toString()});
+      const row={resourceUri:uri,contextValue:change.state==='CONFLICT' ? 'guthonApi.conflict' : change.readonly ? 'guthonApi.readonlyChange' : change.state==='MODIFIED' ? 'guthonApi.change' : 'guthonApi.unavailable',
         command:{command:'gushenCompletion.showApiDiff',title:'查看差异',arguments:[{workspaceKey:key,path:change.path}]},
-        decorations:{tooltip:`${change.path} · ${change.state}`}};
-    });
+        decorations:{tooltip:[change.state,stagedHash && stagedHash!==change.sourceHash ? '源码已变化，请重新暂存' : ''].filter(Boolean).join(' · ')}};
+      (stagedHash ? stagedRows : localRows).push(row);
+    }
+    record.group.resourceStates=localRows;
+    record.stagedGroup.resourceStates=stagedRows;
     record.control.count=changes.length; this.refresh();return state;
   }
   provideFileDecoration(uri) {
@@ -539,7 +637,61 @@ class ApiSourceUI {
       void this.vscode.window.showWarningMessage(value.message);
     }
   }
-  async revert(key, sourcePaths) {
+  scmScope(key, checkoutPath, selectionVersion, scopeGeneration) {
+    if(this.disposed || this.scopeGeneration!==scopeGeneration || this.selectionVersion!==selectionVersion
+      || this.selectedWorkspaceKey!==undefined && this.selectedWorkspaceKey!==key
+      || this.workspaces.get(key)?.checkoutPath!==checkoutPath) throw new Error('当前项目已切换，请重新选择 API 源码');
+  }
+  async manageScmChanges(key) {
+    const {selectionVersion,scopeGeneration}=this;
+    const state=await this.status(key);
+    const checkScope=()=>this.scmScope(key,state.checkoutPath,selectionVersion,scopeGeneration);
+    checkScope();
+    const window=this.vscode.window,staged=this.stagedFiles(key,state.checkoutPath);
+    const action=await window.showQuickPick([
+      {label:'暂存源码',id:'stage',description:'选择要上传的文件或更新已暂存版本'},
+      ...(staged?.size ? [{label:'取消暂存',id:'unstage',description:'将选择的文件移回本地变更'}] : []),
+      {label:'还原本地修改',id:'revert',description:'将选择的文件恢复到本地同步基线'},
+    ],{title:'暂存／还原 API 本地变更'});
+    if(!action) return;
+    checkScope();
+    const changes=(state.files || []).filter(change=>action.id==='stage' ? canStage(change)
+      : action.id==='unstage' ? staged?.has(change.path) : isLocalModification(change));
+    if(!changes.length) return window.showInformationMessage(
+      action.id==='stage' ? '没有可暂存的 API 源码，模块参数请使用单独的上传入口' : '没有可处理的 API 源码');
+    const selected=await window.showQuickPick(changes.map(change=>({
+      label:scmFilename(change),detail:change.path,description:staged?.has(change.path) ? '已暂存' : undefined,change,
+    })),{title:action.label,canPickMany:true,matchOnDetail:true});
+    if(!selected?.length) return;
+    checkScope();
+    if(this.stagedUploads.has(key)) throw new Error('正在处理当前项目的暂存上传，请等本次操作完成');
+    const paths=selected.map(item=>item.change.path);
+    if(action.id==='revert') return this.revert(key,paths,checkScope);
+    const files=this.stagedFiles(key,state.checkoutPath) || new Map();
+    if(action.id==='unstage') for(const p of paths) files.delete(p);
+    else {
+      assertClean(this.vscode,state.checkoutPath,paths);
+      for(const p of paths) this.editorState?.assertNoConflictingDrafts(key,p);
+      for(const {change} of selected) files.set(change.path,change.sourceHash);
+    }
+    this.stagedChanges.set(key,{checkoutPath:state.checkoutPath,files});
+    await this.updateScm(key);
+  }
+  async uploadStaged(key) {
+    if(this.stagedUploads.has(key)) throw new Error('正在处理当前项目的暂存上传，请等本次操作完成');
+    this.stagedUploads.add(key);
+    try {return await this.upload(key,undefined,{stagedOnly:true});}
+    finally {this.stagedUploads.delete(key);}
+  }
+  async showOriginalPath(key, sourcePath) {
+    const {checkoutPath}=await this.ensureWorkspace(key);
+    const absolute=filePath(checkoutPath,sourcePath);
+    const answer=await this.vscode.window.showInformationMessage('API 源码原始路径',{
+      modal:true,detail:`相对路径：${sourcePath}\n绝对路径：${absolute}`,
+    },'复制相对路径','复制绝对路径');
+    if(answer) await this.vscode.env.clipboard.writeText(answer==='复制相对路径' ? sourcePath : absolute);
+  }
+  async revert(key, sourcePaths, checkScope) {
     const paths=[...new Set(Array.isArray(sourcePaths) ? sourcePaths : [sourcePaths])];
     if(!paths.length || paths.some(p=>!p)) throw new Error('请选择要还原的源码');
     const state=await this.status(key);assertClean(this.vscode,state.checkoutPath,paths);
@@ -549,6 +701,7 @@ class ApiSourceUI {
     if(answer!=='还原') return;
     assertClean(this.vscode,state.checkoutPath,paths);await this.editorState?.flush(key);
     for(const p of paths) if((await this.run(key,'read',{path:p})).sourceHash!==expectedHashes[p]) throw new Error(`确认后源码已变化，请重新核对：${p}`);
+    checkScope?.();
     const results=[];let failure;
     for(const p of paths) {
       try {const result=await this.run(key,'revert',{path:p,expectedHash:expectedHashes[p]});results.push({path:p,stage:'LOCAL_WRITE_VERIFIED',operationId:result.operationId});}
@@ -559,12 +712,22 @@ class ApiSourceUI {
       ...paths.filter(p=>!done.has(p)).map(p=>`- ${JSON.stringify(p)}：未执行`),'','如结果未确认，请先核对操作历史和本地文件。']);
     await this.updateScm(key);this.onUpdated?.();if(failure) throw failure;return results;
   }
-  async upload(key, paths) {
+  async upload(key, paths, {stagedOnly=false}={}) {
+    const {selectionVersion,scopeGeneration}=this;
     const state=await this.status(key);
-    let chosen=paths?.length ? [...new Set(paths)] : (state.files || []).filter(x=>x.inScope!==false && x.state === 'MODIFIED' && !x.readonly).map(x=>x.path);
+    const staged=stagedOnly ? new Map(this.stagedFiles(key,state.checkoutPath)) : undefined;
+    let chosen=staged ? [...staged.keys()] : paths?.length ? [...new Set(paths)] : (state.files || []).filter(isLocalModification).map(x=>x.path);
+    if(staged) {
+      this.scmScope(key,state.checkoutPath,selectionVersion,scopeGeneration);
+      if(!chosen.length) return this.vscode.window.showInformationMessage('暂存区为空，请先暂存要上传的 API 源码');
+      if(chosen.length>200) throw new Error('一次最多上传 200 个源码，请取消暂存部分文件后重试');
+      const current=new Map((state.files || []).filter(canStage).map(change=>[change.path,change.sourceHash]));
+      const outdated=chosen.find(p=>current.get(p)!==staged.get(p));
+      if(outdated) throw new Error(`暂存源码已变化或不可上传，请检查并重新暂存：${outdated}`);
+    }
     if (!chosen.length) {await this.vscode.window.showInformationMessage('没有可上传的源码修改');return;}
     const modules=[];
-    for(const path of chosen)if((await this.run(key,'read',{path})).metadata?.sourceType==='module-parameter')modules.push(path);
+    if(!staged) for(const path of chosen)if((await this.run(key,'read',{path})).metadata?.sourceType==='module-parameter')modules.push(path);
     if(modules.length) {
       if(modules.length<chosen.length) {
         const choice=await this.vscode.window.showQuickPick([{label:`模块参数 (${modules.length})`,module:true},{label:`其他源码 (${chosen.length-modules.length})`,module:false}],{title:'选择本次上传范围'});
@@ -575,31 +738,48 @@ class ApiSourceUI {
       return this.onModuleUpload(key,modules);
     }
     const snapshots=new Map(),entries=[];
-    const types={page:'页面',procedure:'过程函数',table:'表',view:'视图','system-script':'系统脚本'};
     for (const p of chosen) {
       const result=await this.run(key,'read',{path:p});
       if(result.readonly) throw new Error(`只读源码不能上传：${p}`);
+      if(staged && (result.sourceHash!==staged.get(p) || !Object.hasOwn(API_UPLOAD_TYPES,result.metadata?.sourceType))) {
+        throw new Error(`暂存源码已变化或不可上传，请检查并重新暂存：${p}`);
+      }
       snapshots.set(p,result.sourceHash);
-      entries.push({path:p,name:result.name || p,type:types[result.metadata?.sourceType] || '源码',state:'本地修改'});
+      entries.push({path:p,name:result.name || p,type:API_UPLOAD_TYPES[result.metadata?.sourceType] || '源码',state:'本地修改'});
     }
-    const reviewed=await this.reviewUpload(this.vscode,entries,p=>this.diff(key,p,snapshots.get(p)));
-    if(!reviewed?.length) return;
-    if(reviewed.some(p=>!snapshots.has(p))) throw new Error('上传选择不属于本次审阅清单');
-    chosen=[...new Set(reviewed)];
+    if(!staged) {
+      const reviewed=await this.reviewUpload(this.vscode,entries,p=>this.diff(key,p,snapshots.get(p)));
+      if(!reviewed?.length) return;
+      if(reviewed.some(p=>!snapshots.has(p))) throw new Error('上传选择不属于本次审阅清单');
+      chosen=[...new Set(reviewed)];
+    }
     assertClean(this.vscode,state.checkoutPath,chosen);
     for(const p of chosen) this.editorState?.assertNoConflictingDrafts(key,p);
     const expectedHashes=Object.fromEntries(chosen.map(p=>[p,snapshots.get(p)]));
-    const answer=await this.vscode.window.showWarningMessage(`上传 ${chosen.length} 个已审阅的源码文件到谷神？`,{modal:true,detail:chosen.join('\n')},'上传');
+    const project=this.workspaces.get(key);
+    const target=staged ? `${project?.displayName || project?.name || key} 暂存区中的全部 ${chosen.length} 个文件` : `${chosen.length} 个已审阅的源码文件`;
+    const answer=await this.vscode.window.showWarningMessage(`上传 ${target} 到谷神？`,{modal:true,detail:chosen.join('\n')},'上传');
     if (answer !== '上传') return;
     assertClean(this.vscode,state.checkoutPath,chosen);
     await this.editorState?.flush(key);
     for(const p of chosen) if((await this.run(key,'read',{path:p})).sourceHash!==expectedHashes[p]) throw new Error(`确认后源码已变化，请重新核对：${p}`);
+    if(staged) {
+      this.scmScope(key,state.checkoutPath,selectionVersion,scopeGeneration);
+      const latest=this.stagedFiles(key,state.checkoutPath);
+      if(latest?.size!==staged.size || chosen.some(p=>latest.get(p)!==staged.get(p))) throw new Error('暂存区已变化，请重新确认');
+    }
     let result;
     try {result=await this.run(key,'upload',{paths:chosen,confirm:true,expectedHashes});}
     catch(error) {
       await showReport(this.vscode,'API 上传结果',['请求未取得完整回执，请先查看操作历史并核对平台状态，勿直接重试。', '', `错误：${error.message}`]);throw error;
     }
     const results=result.results || [], completed=new Set(results.map(x=>x.path));
+    if(staged) {
+      const latest=this.stagedFiles(key,state.checkoutPath);
+      for(const {path:p,stage} of results) {
+        if(latest && latest.get(p)===staged.get(p) && staged.has(p) && ['REMOTE_READBACK_VERIFIED','UNCHANGED','ALREADY_REMOTE'].includes(stage)) latest.delete(p);
+      }
+    }
     const lines=[`工作区：${key}`,`操作编号：${result.operationId || '未返回'}`,`总体状态：${result.stage || '未返回'}`,`完成：${result.complete===true ? '是' : '否'}`,'',
       ...results.map(x=>`- ${JSON.stringify(x.path)}：${x.stage || '未知'}${x.code ? `（${x.code}）` : ''}${x.message ? `：${x.message}` : ''}${x.sourceNormalized===true && x.stage==='REMOTE_READBACK_VERIFIED' ? '；平台已格式化或补全源码，回读结果已同步到本地源码' : ''}`),
       ...chosen.filter(p=>!completed.has(p)).map(p=>`- ${JSON.stringify(p)}：未执行`),
@@ -748,7 +928,7 @@ class ApiSourceUI {
     await showReport(this.vscode,'API 冲突处理结果',[`对象：${sourcePath}`,`本地源码 SHA-256：${result.sourceHash || '未返回'}`,`操作编号：${result.operationId || '未返回'}`,'','此操作未上传谷神。']);
     await this.updateScm(key);this.onUpdated?.();return result;
   }
-  clear(){this.treeView?.setScope?.(undefined);this.scopeGeneration++;for(const [key,generation] of this.scmGenerations)this.scmGenerations.set(key,generation+1);this.invalidate();this.treeCache.clear();this.treeLoads.clear();this.indexGenerations.clear();this.rootItems=null;for(const {control,refreshTimer} of this.controls.values()) {clearTimeout(refreshTimer);control.dispose();}this.controls.clear();this.sourceChanges.clear();for(const watcher of this.watchers.values()) watcher.dispose();this.watchers.clear();this.readonlyDocuments.clear();this.indexDiagnostics.clear();this.menuAttempts.clear();this.workspaces.clear();this.sourceNames.clear();this.filters.clear();this.decorationEmitter?.fire();this.refresh();}
+  clear(){this.treeView?.setScope?.(undefined);this.scopeGeneration++;for(const [key,generation] of this.scmGenerations)this.scmGenerations.set(key,generation+1);this.invalidate();this.treeCache.clear();this.treeLoads.clear();this.indexGenerations.clear();this.rootItems=null;for(const {control,refreshTimer} of this.controls.values()) {clearTimeout(refreshTimer);control.dispose();}this.controls.clear();this.sourceChanges.clear();this.stagedChanges.clear();this.scmProjects.clear();for(const watcher of this.watchers.values()) watcher.dispose();this.watchers.clear();this.readonlyDocuments.clear();this.indexDiagnostics.clear();this.menuAttempts.clear();this.workspaces.clear();this.sourceNames.clear();this.filters.clear();this.decorationEmitter?.fire();this.refresh();}
   dispose(){if(this.disposed)return;this.disposed=true;this.clear();this.diffProvider.dispose();this.configurationListener?.dispose();this.emitter?.dispose();this.decorationEmitter?.dispose();}
 }
 module.exports={ApiSourceUI,assertClean,buildCatalogTree,dirtyDocuments,filePath,identity,showReport,sourceLabel,sourceSyncLines};

@@ -1,15 +1,15 @@
 const {isWorkspaceKey} = require('./workspace-identity');
 
 const labels = {python: 'Python 运行环境', config: '工作区配置', 'database-config': '数据库能力配置',
-  'database-readonly': '本地数据库依赖', 'vscode-data': '补全与帮助资源', bridge: 'Guthon Bridge'};
+  'database-readonly': '本地数据库依赖', 'vscode-data': '补全与帮助资源'};
 const statuses = {PASS: '通过', WARN: '需留意', FAIL: '需处理', SKIP: '本次未使用'};
 const icons = {PASS: 'pass', WARN: 'warning', FAIL: 'error', SKIP: 'circle-slash'};
 const actions = {
   setup: {label: '设置工作空间', command: 'gushenCompletion.setupTool'},
   runtime: {label: '核对运行入口', command: 'gushenCompletion.selectExecutionMode'},
-  bridge: {label: '启动 Guthon Bridge', command: 'gushenCompletion.startBridge'},
 };
 const markdown = value => String(value ?? '').replace(/[\\`*_\[\]<>|()]/g, '\\$&').replace(/[\r\n]+/g, ' ');
+const reportHealth = summary => summary.FAIL ? 'FAIL' : summary.WARN ? 'WARN' : 'PASS';
 
 function checkedReport(report, workspaceKey) {
   if (report?.ok !== true || report.coverage !== 'LOCAL_DEPENDENCIES_ONLY' || report.workspaceKey !== (workspaceKey || null)
@@ -22,9 +22,10 @@ function checkedReport(report, workspaceKey) {
       throw new Error('环境检查报告包含无效检查项');
     names.add(check.name); summary[check.status]++;
   }
-  const health = summary.FAIL ? 'FAIL' : summary.WARN ? 'WARN' : 'PASS';
-  if (report.health !== health) throw new Error('环境检查总状态与检查项不一致');
-  return {...report, summary, health};
+  if (report.health !== reportHealth(summary)) throw new Error('环境检查总状态与检查项不一致');
+  const bridge = report.checks.find(check => check.name === 'bridge');
+  if (bridge) summary[bridge.status]--;
+  return {...report, checks: report.checks.filter(check => check.name !== 'bridge'), summary, health: reportHealth(summary)};
 }
 
 function environmentReportMarkdown(report, workspaceKey = '') {
@@ -42,10 +43,11 @@ function environmentReportMarkdown(report, workspaceKey = '') {
   return lines.join('\n');
 }
 
-async function showEnvironmentCheck({vscode, client, workspaceKey = '', bridgePort = 17361, isCurrent = () => true}) {
+async function showEnvironmentCheck({vscode, client, workspaceKey = '', isCurrent = () => true}) {
   if (workspaceKey && !isWorkspaceKey(workspaceKey)) throw new Error('环境检查需要有效 workspaceKey');
-  const report = checkedReport(await vscode.window.withProgress({location: vscode.ProgressLocation.Window,
-    title: '检查本地环境', cancellable: false}, () => client.run(workspaceKey, 'doctor', ['--report', '--bridge-port', String(bridgePort)])), workspaceKey);
+  const rawReport = await vscode.window.withProgress({location: vscode.ProgressLocation.Window,
+    title: '检查本地环境', cancellable: false}, () => client.run(workspaceKey, 'doctor', ['--report']));
+  const report = checkedReport(rawReport, workspaceKey);
   if (!isCurrent()) throw new Error('运行入口或数据目录已变化，请重新执行环境检查');
   const rank = {FAIL: 0, WARN: 1, PASS: 2, SKIP: 3};
   const selected = await vscode.window.showQuickPick([
@@ -66,7 +68,7 @@ async function showEnvironmentCheck({vscode, client, workspaceKey = '', bridgePo
       return vscode.commands.executeCommand('gushenCompletion.configureProject',workspaceKey);
     }
   }
-  const document = await vscode.workspace.openTextDocument({language: 'markdown', content: environmentReportMarkdown(report, workspaceKey)});
+  const document = await vscode.workspace.openTextDocument({language: 'markdown', content: environmentReportMarkdown(rawReport, workspaceKey)});
   return vscode.window.showTextDocument(document, {preview: true});
 }
 

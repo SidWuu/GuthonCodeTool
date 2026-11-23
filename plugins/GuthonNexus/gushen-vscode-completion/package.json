@@ -2,7 +2,7 @@
   "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon API workspace, source management, database diagnostics, completions, hover documentation, and source navigation.",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,
@@ -72,6 +72,9 @@
     "onCommand:gushenCompletion.showApiStatus",
     "onCommand:gushenCompletion.refreshApiSourceView",
     "onCommand:gushenCompletion.refreshApiScm",
+    "onCommand:gushenCompletion.manageApiScmChanges",
+    "onCommand:gushenCompletion.uploadStagedApiSources",
+    "onCommand:gushenCompletion.showApiOriginalPath",
     "onCommand:gushenCompletion.openApiSource",
     "onCommand:gushenCompletion.openApiOriginalSource",
     "onCommand:gushenCompletion.previewApiSource",
@@ -329,6 +332,9 @@
       {"command":"gushenCompletion.refreshToolView","title":"Guthon Nexus: 刷新项目状态","shortTitle":"刷新项目状态","icon":"$(refresh)"},
       {"command":"gushenCompletion.refreshApiSourceView","title":"Guthon Nexus: 刷新指定 API 项目源码"},
       {"command":"gushenCompletion.refreshApiScm","title":"Guthon Nexus: 更新源码状态","shortTitle":"更新","icon":"$(refresh)"},
+      {"command":"gushenCompletion.manageApiScmChanges","title":"Guthon Nexus: 暂存／还原本地变更","shortTitle":"暂存／还原","icon":"$(list-selection)"},
+      {"command":"gushenCompletion.uploadStagedApiSources","title":"Guthon Nexus: 上传暂存区全部源码","shortTitle":"上传暂存","icon":"$(cloud-upload)"},
+      {"command":"gushenCompletion.showApiOriginalPath","title":"Guthon Nexus: 查看原始路径","shortTitle":"查看原始路径"},
       {"command":"gushenCompletion.openApiOriginalSource","title":"Guthon Nexus: 打开原始源码"},
       {"command":"gushenCompletion.openApiSource","title":"Guthon Nexus: 打开 API 源码"},
       {"command":"gushenCompletion.previewApiSource","title":"Guthon Nexus: 预览原始源码"},
@@ -589,7 +595,9 @@
         {"command":"gushenCompletion.revertApiQuickDiffChange","when":"originalResourceScheme == guthon-api-diff","group":"navigation@1"}
       ],
       "scm/resourceGroup/context": [
-        {"command":"gushenCompletion.updateAllSvnChanges","when":"scmProvider =~ /^guthon-svn-/","group":"inline@1"}
+        {"command":"gushenCompletion.updateAllSvnChanges","when":"scmProvider =~ /^guthon-svn-/","group":"inline@1"},
+        {"command":"gushenCompletion.manageApiScmChanges","when":"scmProvider =~ /^guthon-api-/ && scmResourceGroup == changes","group":"inline@1"},
+        {"command":"gushenCompletion.uploadStagedApiSources","when":"scmProvider =~ /^guthon-api-/ && scmResourceGroup == changes","group":"inline@2"}
       ],
       "scm/resourceState/context": [
         {"command":"gushenCompletion.updateAllSvnChanges","when":"scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.LOCKED","group":"inline@1"},
@@ -602,11 +610,12 @@
         {"command":"gushenCompletion.showSvnHistory","when":"scmProvider =~ /^guthon-svn-/ && scmResourceState =~ /^guthonSvn\\.(LOCAL_MODIFIED|EXTERNAL_MODIFIED|CONFLICT|UNTRACKED)(\\.|$)/","group":"navigation@1"},
         {"command":"gushenCompletion.showSvnRawDiff","when":"scmProvider =~ /^guthon-svn-/ && scmResourceState =~ /^guthonSvn\\.(LOCAL_MODIFIED|EXTERNAL_MODIFIED)\\.selectable$/","group":"inline@1"},
         {"command":"gushenCompletion.showSvnRawDiff","when":"scmProvider =~ /^guthon-svn-/ && scmResourceState =~ /^guthonSvn\\.(LOCAL_MODIFIED|EXTERNAL_MODIFIED|CONFLICT|UNTRACKED)(\\.|$)/","group":"navigation@2"},
-        {"command":"gushenCompletion.openApiSource","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.change","group":"inline@0"},
-        {"command":"gushenCompletion.showApiDiff","when":"scmProvider =~ /^guthon-api-/","group":"inline@1"},
-        {"command":"gushenCompletion.revertApiSource","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.change","group":"inline@2"},
-        {"command":"gushenCompletion.uploadApiSource","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.change","group":"inline@3"},
-        {"command":"gushenCompletion.resolveApiConflict","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.conflict","group":"inline@2"}
+        {"command":"gushenCompletion.openApiSource","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.change","group":"navigation@1"},
+        {"command":"gushenCompletion.showApiDiff","when":"scmProvider =~ /^guthon-api-/","group":"navigation@2"},
+        {"command":"gushenCompletion.showApiOriginalPath","when":"scmProvider =~ /^guthon-api-/","group":"navigation@3"},
+        {"command":"gushenCompletion.revertApiSource","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.change","group":"modification@1"},
+        {"command":"gushenCompletion.uploadApiSource","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.change","group":"modification@2"},
+        {"command":"gushenCompletion.resolveApiConflict","when":"scmProvider =~ /^guthon-api-/ && scmResourceState == guthonApi.conflict","group":"modification@1"}
       ],
       "gushenCompletion.toolSettings": [
         {"command":"gushenCompletion.selectExecutionMode","group":"settings@1"},

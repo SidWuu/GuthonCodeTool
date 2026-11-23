@@ -1,10 +1,191 @@
 const test=require('node:test');const assert=require('node:assert/strict');const {ApiSourceUI,identity}=require('../src/api/source-ui');
-function fixture(run){const controls=[];const vscode={workspace:{textDocuments:[]},Uri:{from:x=>x},scm:{createSourceControl:(id,label)=>{const control={id,label,count:0,createResourceGroup:()=>control.group={resourceStates:[]},dispose(){this.disposed=true;}};controls.push(control);return control;}}};return {ui:new ApiSourceUI({vscode,run}),controls};}
+const {posix}=require('node:path');
+function fixture(run) {
+ const controls=[],vscode={workspace:{textDocuments:[]},Uri:{from:x=>x},scm:{
+  createSourceControl(id,label) {
+   const control={id,label,count:0,groups:{},createResourceGroup(groupId,groupLabel) {
+    const group={id:groupId,label:groupLabel,resourceStates:[]};
+    this.groups[groupId]=group;
+    if(groupId==='changes') this.group=group;
+    return group;
+   },dispose(){this.disposed=true;}};
+   controls.push(control);
+   return control;
+  },
+ }};
+ return {ui:new ApiSourceUI({vscode,run}),controls};
+}
 test('API SCM exposes in-scope modifications, conflicts and noneditable states with exact paths',async()=>{
- const f=fixture(async()=>({checkoutPath:'/checkout',files:[{path:'a',state:'MODIFIED'},{path:'b',state:'CONFLICT'},{path:'c',state:'MISSING'},{path:'readonly-conflict',state:'CONFLICT',readonly:true},{path:'d',state:'CLEAN'},{path:'e',state:'MODIFIED',inScope:false}]}));
+ const f=fixture(async()=>({checkoutPath:'/checkout',files:[{path:'pkg/a.gss',state:'MODIFIED'},{path:'b',state:'CONFLICT'},{path:'c',state:'MISSING'},{path:'readonly-conflict',state:'CONFLICT',readonly:true},{path:'d',state:'CLEAN'},{path:'e',state:'MODIFIED',inScope:false}]}));
  f.ui.syncWorkspaces([{workspaceKey:'projects.demo',sourceMode:'api'}]);await f.ui.updateScm('projects.demo');
  const c=f.controls[0];assert.equal(c.count,4);assert.deepEqual(c.group.resourceStates.map(x=>x.contextValue),['guthonApi.change','guthonApi.conflict','guthonApi.unavailable','guthonApi.conflict']);
- assert.equal(new URLSearchParams(c.group.resourceStates[0].resourceUri.query).get('path'),'a');f.ui.dispose();assert.equal(c.disposed,true);
+ const change=c.group.resourceStates[0];
+ assert.equal(posix.basename(change.resourceUri.path),'a.gss');
+ assert.deepEqual(identity(change),{key:'projects.demo',path:'pkg/a.gss'});
+ assert.equal(change.command.command,'gushenCompletion.showApiDiff');
+ assert.deepEqual(change.command.arguments,[{workspaceKey:'projects.demo',path:'pkg/a.gss'}]);
+ f.ui.dispose();assert.equal(c.disposed,true);
+});
+test('API SCM labels pages in Chinese and uses English identities for services and procedures',async t=>{
+ const key='ws_demo';
+ const files=[
+  {path:'systems/A/pages/main/PG-1/PG-1.xml',sourceType:'page',metadata:{pageType:1,pageName:'采购/审核',title:'采购申请'}},
+  {path:'systems/A/pages/main/PG-2/PG-2.xml',sourceType:'page',metadata:{pageType:1,title:'采购/审核'}},
+  {path:'systems/A/pages/main/PG-3/PG-3.xml',sourceType:'page',metadata:{pageType:1,pageAliasId:'order'}},
+  {path:'systems/A/pages/main/PG-4/legacy.gss',sourceType:'page',metadata:{pageType:'0',pageName:'同步组织',pageAliasId:'com.demo.syncOrganization'}},
+  {path:'systems/A/pages/main/PG-5/com.demo.legacy.gss',sourceType:'page',metadata:{pageName:'旧服务'}},
+  {path:'datasources/D/procedures/com/demo/old.gss',sourceType:'procedure',metadata:{funId:'processOrder',funName:'处理采购单'}},
+ ].map(file=>({...file,state:'MODIFIED',sourceHash:'hash',baseHash:'base'}));
+ const project={
+  systems:[{systemId:'A',systemName:'采购系统'}],dataSources:[{dataSourceId:'D',dataSourceName:'公用数据'}],
+  menuTree:[{systemId:'A',menus:[{id:'review',name:'采购审核',isDir:0,pages:[
+   {pageId:'PG-1',pageSubId:'main'},{pageId:'PG-2',pageSubId:'main'},
+  ]}]}],
+ };
+ let catalogCalls=0;
+ const f=fixture(async(_key,action)=>{
+  if(action==='catalog') {catalogCalls++;return {indexGeneration:'g1',project};}
+  assert.equal(action,'status');
+  return {checkoutPath:'/checkout',files,index:{ready:true,indexGeneration:'g1'}};
+ });
+ t.after(()=>f.ui.dispose());
+ f.ui.syncWorkspaces([key]);
+ await f.ui.updateScm(key);
+ const group=f.controls[0].group;
+ assert.deepEqual(group.resourceStates.map(row=>posix.basename(row.resourceUri.path)),[
+  '采购 · 审核.xml','采购 · 审核.xml','PG-3.xml','com.demo.syncOrganization.gss','com.demo.legacy.gss','processOrder.gss',
+ ]);
+ assert.notEqual(group.resourceStates[0].resourceUri.path,group.resourceStates[1].resourceUri.path);
+ assert.match(group.resourceStates[0].resourceUri.path,/^\/页面\/采购系统\/采购审核\//);
+ assert.equal(group.resourceStates[2].resourceUri.path,'/页面/采购系统/PG-3.xml');
+ assert.equal(group.resourceStates[5].resourceUri.path,'/过程函数/公用数据/com/demo/processOrder.gss');
+ assert.deepEqual(group.resourceStates.map(identity),files.map(file=>({key,path:file.path})));
+
+ files[0].metadata.pageName='采购复核';
+ await f.ui.updateScm(key);
+ assert.equal(catalogCalls,1);
+ assert.equal(posix.basename(group.resourceStates[0].resourceUri.path),'采购复核.xml');
+ assert.deepEqual(group.resourceStates[0].command.arguments,[{workspaceKey:key,path:files[0].path}]);
+});
+test('original path menu displays the physical checkout path and copies the requested form',async t=>{
+ const key='ws_demo',sourcePath='systems/A/pages/main/PG-1/PG-1.xml';
+ const f=fixture(async()=>assert.fail('a registered checkout already supplies the root'));
+ t.after(()=>f.ui.dispose());
+ f.ui.syncWorkspaces([{workspaceKey:key,checkoutPath:'/checkout'}]);
+ let copied;
+ f.ui.vscode.env={clipboard:{writeText:async value=>{copied=value;}}};
+ f.ui.vscode.window={showInformationMessage:async(title,options,relative,absolute)=>{
+  assert.equal(title,'API 源码原始路径');assert.equal(options.modal,true);
+  assert.match(options.detail,/绝对路径：\/checkout\/systems\/A\//);
+  assert.equal(relative,'复制相对路径');
+  return absolute;
+ }};
+ await f.ui.showOriginalPath(key,sourcePath);
+ assert.equal(copied,'/checkout/'+sourcePath);
+});
+test('API SCM stages exact files, confirms the entire queue and retains files without successful receipts',async t=>{
+ const key='ws_demo',files=['a.gss','b.gss','c.gss','param.json'].map(p=>({
+  path:p,state:'MODIFIED',sourceHash:'hash-'+p,sourceType:p==='param.json'?'module-parameter':'procedure',
+ }));
+ const uploads=[],confirms=[];
+ const f=fixture(async(_key,action,input)=>{
+  if(action==='status') return {checkoutPath:'/checkout',files};
+  if(action==='read') {
+   const file=files.find(row=>row.path===input.path);
+   return {sourceHash:file.sourceHash,metadata:{sourceType:file.sourceType}};
+  }
+  if(action==='upload') {
+   uploads.push(input);
+   files[0].state='CLEAN';
+   return {stage:'PARTIAL',results:[{path:'a.gss',stage:'REMOTE_READBACK_VERIFIED'},{path:'b.gss',stage:'FAILED'}]};
+  }
+  assert.fail(action);
+ });
+ t.after(()=>f.ui.dispose());
+ f.ui.syncWorkspaces([{workspaceKey:key,name:'项目甲'}]);
+ let actionId='stage',answer;
+ f.ui.vscode.workspace.openTextDocument=async options=>options;
+ f.ui.vscode.window={
+  showTextDocument:async()=>{},
+  showQuickPick:async(items,{canPickMany})=>canPickMany
+   ? (assert(!items.some(item=>item.label==='param.json')),items.filter(item=>item.label!=='c.gss'))
+   : items.find(item=>item.id===actionId),
+  showWarningMessage:async(message,options)=>{confirms.push({message,...options});return answer;},
+ };
+ f.ui.reviewUpload=async()=>assert.fail('staged upload already has an exact file selection');
+ await f.ui.manageScmChanges(key);
+ const {changes,staged}=f.controls[0].groups;
+ assert.deepEqual(changes.resourceStates.map(row=>identity(row).path),['c.gss','param.json']);
+ assert.deepEqual(staged.resourceStates.map(row=>identity(row).path),['a.gss','b.gss']);
+ await f.ui.uploadStaged(key);
+ assert.equal(uploads.length,0);
+ assert.equal(confirms[0].detail,'a.gss\nb.gss');
+ assert.match(confirms[0].message,/项目甲 暂存区中的全部 2 个文件/);
+ assert.equal(confirms[0].modal,true);
+
+ answer='上传';
+ files[1].sourceHash='new-b';
+ await assert.rejects(f.ui.uploadStaged(key),/重新暂存：b.gss/);
+ assert.equal(uploads.length,0);
+ await f.ui.manageScmChanges(key);
+ await f.ui.uploadStaged(key);
+ assert.deepEqual(uploads,[{paths:['a.gss','b.gss'],confirm:true,expectedHashes:{'a.gss':'hash-a.gss','b.gss':'new-b'}}]);
+ assert.deepEqual(staged.resourceStates.map(row=>identity(row).path),['b.gss']);
+
+ actionId='unstage';
+ await f.ui.manageScmChanges(key);
+ assert.deepEqual(staged.resourceStates,[]);
+ assert.deepEqual(changes.resourceStates.map(row=>identity(row).path),['b.gss','c.gss','param.json']);
+});
+test('API SCM group restore only changes explicitly confirmed files in the original project',async t=>{
+ const key='ws_demo',file={path:'a.gss',state:'MODIFIED',sourceHash:'hash-a',sourceType:'procedure'};
+ const reverts=[];
+ const f=fixture(async(_key,action,input)=>{
+  if(action==='status') return {checkoutPath:'/checkout',files:[file]};
+  if(action==='read') return {sourceHash:file.sourceHash};
+  if(action==='revert') {reverts.push(input);file.state='CLEAN';return {operationId:'revert1'};}
+  assert.fail(action);
+ });
+ t.after(()=>f.ui.dispose());
+ f.ui.syncWorkspaces([key,'ws_other']);
+ f.ui.setSelectedWorkspace(key);
+ f.ui.vscode.workspace.openTextDocument=async options=>options;
+ let confirmation=()=>undefined;
+ f.ui.vscode.window={
+  showTextDocument:async()=>{},
+  showQuickPick:async(items,{canPickMany})=>canPickMany ? items : items.find(item=>item.id==='revert'),
+  showWarningMessage:async(_message,options)=>{assert.equal(options.modal,true);return confirmation();},
+ };
+ await f.ui.manageScmChanges(key);
+ assert.deepEqual(reverts,[]);
+
+ confirmation=()=>{f.ui.setSelectedWorkspace('ws_other');return '还原';};
+ await assert.rejects(f.ui.manageScmChanges(key),/当前项目已切换/);
+ assert.deepEqual(reverts,[]);
+
+ f.ui.setSelectedWorkspace(key);
+ confirmation=()=> '还原';
+ await f.ui.manageScmChanges(key);
+ assert.deepEqual(reverts,[{path:'a.gss',expectedHash:'hash-a'}]);
+});
+test('API SCM uses the registered project name and refreshes its label with a stable provider identity',async t=>{
+ const key='ws_demo',checkoutPath='/checkout';
+ const f=fixture(async()=>({checkoutPath,files:[{path:'a.gss',state:'MODIFIED'}]}));
+ t.after(()=>f.ui.dispose());
+ f.ui.syncWorkspaces([{workspaceKey:key,sourceMode:'api',checkoutPath,name:'供应链项目'}]);
+ await f.ui.updateScm(key);
+ assert.equal(f.controls[0].label,'供应链项目 · 谷神 API 源码');
+ assert.equal(f.controls[0].id,'guthon-api-ws_demo');
+ await f.ui.updateScm(key);
+ assert.equal(f.controls.length,1);
+
+ f.ui.syncWorkspaces([{workspaceKey:key,sourceMode:'api',checkoutPath,name:'供应链项目',displayName:'供应链开发项目'}]);
+ await f.ui.updateScm(key);
+ assert.equal(f.controls.length,2);
+ assert.equal(f.controls[0].disposed,true);
+ assert.equal(f.controls[1].label,'供应链开发项目 · 谷神 API 源码');
+ assert.equal(f.controls[1].id,f.controls[0].id);
+ assert.deepEqual(identity(f.controls[1].group.resourceStates[0]),{key,path:'a.gss'});
 });
 test('SCM preserves the exact workspace key when a URI authority is lowercased',async()=>{
  const f=fixture(async()=>({checkoutPath:'/checkout',files:[{path:'a.gss',state:'MODIFIED'}]}));

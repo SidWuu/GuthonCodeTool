@@ -85,7 +85,7 @@ if ($actual.ToLower() -ne $expected.ToLower()) { throw '安装器校验不匹配
 <li>CodeBuddy 已安装并登录，工作目录已信任。</li>
 <li>同版后端与 Nexus 就绪，Nexus 能启动工具并读取本地数据目录。</li>
 <li>团队规范同步通过，开发根已有规则和 Linter。需要 Agent 自动检查时，另在新聊天中确认 Hook 运行。</li>
-<li>需要网页辅助时，如使用浏览器增强，Chrome 加载正确扩展目录、Bridge 服务已配对且连接检查通过。</li>
+<li>按需完成浏览器增强配置。在安装助手点击“检查浏览器连接”，确认 Chrome 扩展加载和配对成功。详见<a href="#one-click-bridge">首次加载和配对步骤</a>。</li>
 </ul>
 <p>使用统一安装器时，以安装助手的检查结果为准。采用手动安装时，分别核对上述结果。业务连接、项目源码索引、Git 提交时的检查结果、API 上传和平台运行按实际任务另行检查。</p>
 </section>
@@ -107,7 +107,7 @@ if ($actual.ToLower() -ne $expected.ToLower()) { throw '安装器校验不匹配
 <li><a href="GuthonCodeTool_QA.html?q=Bridge">Chrome 扩展与 Bridge 配对问题</a></li>
 </ul>
 </section>
-<footer>Windows 安装步骤 · 最后更新 2026-11-21 · 点击图片可放大；分享时请保留 HTML 与截图文件同一目录。</footer>
+<footer>Windows 安装步骤 · 最后更新 2026-11-23 · 点击图片可放大；分享时请保留 HTML 与截图文件同一目录。</footer>
 
 </main></div><dialog id="viewer"><button type="button" onclick="this.parentElement.close()">关闭</button><img alt="放大的实机截图"></dialog><div class="toolbar"><button type="button" id="themeToggle" aria-label="切换深色主题">☾ 主题</button></div><script>const viewer=document.getElementById('viewer');document.querySelectorAll('figure img').forEach(img=>img.addEventListener('click',()=>{viewer.querySelector('img').src=img.src;viewer.querySelector('img').alt=img.alt;viewer.showModal()}));viewer.addEventListener('click',e=>{if(e.target===viewer)viewer.close()});
 const tocLinks=[...document.querySelectorAll('.toc-link')],sections=[...document.querySelectorAll('.main section')],search=document.getElementById('tocSearch');search.addEventListener('input',()=>{const q=search.value.trim().toLowerCase();let visible=0;tocLinks.forEach(a=>{const match=a.textContent.toLowerCase().includes(q)||document.querySelector(a.getAttribute('href')).textContent.toLowerCase().includes(q);a.style.display=match?'':'none';visible+=match?1:0});document.getElementById('noResult').style.display=visible?'none':'block'});document.addEventListener('keydown',e=>{if(e.key==='/'&&document.activeElement!==search&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();search.focus()}});const observer=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){tocLinks.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id))}})},{rootMargin:'-10% 0px -75% 0px'});sections.forEach(s=>observer.observe(s));const progress=document.getElementById('progress');window.addEventListener('scroll',()=>{const max=document.documentElement.scrollHeight-innerHeight;progress.style.width=(max?scrollY/max*100:0)+'%'},{passive:true});const themeToggle=document.getElementById('themeToggle');themeToggle.addEventListener('click',()=>{const dark=document.documentElement.getAttribute('data-theme')==='dark';document.documentElement.setAttribute('data-theme',dark?'light':'dark');themeToggle.textContent=dark?'☾ 主题':'☀ 主题'});</script></body></html>
