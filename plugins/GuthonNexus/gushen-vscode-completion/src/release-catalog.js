@@ -40,6 +40,11 @@ function validateCatalog(catalog, release, checksums) {
   for (const item of [tool, nexus, bridge]) normalizeVersion(item?.version);
   if (tool.version !== release.version || nexus.id !== NEXUS_ID || bridge.protocolVersion !== 2
       || tool.pythonMinimum !== '3.12') throw new Error('三组件身份或更新协议不受支持');
+  for (const component of [nexus, bridge]) {
+    if (component.buildId !== undefined && !/^sha256:[a-f0-9]{64}$/.test(component.buildId)) {
+      throw new Error('三组件发行清单中的构建标识无效');
+    }
+  }
   for (const name of releaseAssetNames(release)) {
     const item = catalog.assets[name];
     if (!item || !Number.isSafeInteger(item.size) || item.size < 1 || item.size > 256 * 1024 * 1024

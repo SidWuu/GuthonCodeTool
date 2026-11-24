@@ -304,7 +304,7 @@ printf '%s' '{"input":"/absolute/private/changes.json","apply":true,"planHash":"
 <table><thead><tr><th>入口</th><th>功能</th><th>范围与限制</th></tr></thead><tbody>
 <tr><td>源码视图标题菜单</td><td>导出源码说明</td><td>导出当前项目的源码目录和调用索引。</td></tr>
 <tr><td>表、视图、系统脚本分类及对应对象右键</td><td>导出表结构、视图或系统脚本</td><td>传递选中的数据源、子系统或对象；资料位于独立导出目录，不读取业务数据。</td></tr>
-<tr><td>单据类型分类、数据源及条目右键</td><td>导出单据类型</td><td>使用另行配置的数据库连接导出完整定义，按选中数据源和编码筛选；只读 Markdown 不等同完整定义。</td></tr>
+<tr><td>单据类型分类、数据源及条目右键</td><td>导出单据类型</td><td>使用项目配置的数据库连接导出完整定义，支持按数据源和编码筛选。按编码导出时合并返回条目并保留同一数据源的其他定义。DATABASE 默认写入 <code>database/billtype/</code>，已有 <code>docs/exports/billtype/</code> 资料仍可读取和重建索引，同名资料以新目录为准。API 默认写入 <code>docs/exports/billtype/</code>。</td></tr>
 <tr><td>页面与过程函数右键</td><td>查看使用位置</td><td>列出当前索引识别的静态调用；支持打开对应源码位置，动态引用及范围外源码需另行核验。</td></tr>
 <tr><td>源码分类、包、系统目录或文件右键</td><td>更新指定 API 源码</td><td>目录按物理范围读取官方分页列表，可发现新文件并保留本地修改；精确页面更新核对该页面的原生模型和版本。对象路径迁移时停止并提示，避免重复源码。</td></tr>
 <tr><td>顶层过程函数分类右键</td><td>列表平铺、树形结构</td><td>切换过程包组织方式，原始路径不变；数据源、过程包和函数节点不提供此切换。</td></tr>
@@ -374,6 +374,7 @@ printf '%s' '{"input":"/absolute/private/changes.json","apply":true,"planHash":"
 <p>正式发行面向 macOS Apple Silicon 和 Windows x64，不提供 Intel Mac 包。根目录 <code>VERSION</code> 是统一版本来源；GitHub Actions 构建两平台应用、Python zipapp、依赖清单、VSIX、Chrome 扩展、Skill、checksum 及签名元数据。发布说明按私有模板准备，不把私有草稿提交到公开仓库；CI 使用经检查可公开的提交说明或手动传入正文。</p>
 <p>更新仅允许 HTTPS 和受约束重定向，下载与哈希流式处理，核对 API digest、checksum 和实际文件。Nexus 从 <code>data/release-trust.json</code> 加载固定 Ed25519 公钥（当前 key ID 为 <code>guthon-release-20261004</code>），员工无需配置。签名缺失、伪造或哈希不一致时阻止新候选执行，保留已有安装；维护者的本机 <code>globalStorage/release-trust.json</code> 信任文件只能增加明确公钥，不可替换已有 key ID 或放宽包内强制策略。后端没有配置公钥的独立校验路径须明确报告“签名未验证”，不能冒充 Nexus 强制验签。</p>
 <p>签名 CI 使用 <code>GUTHON_RELEASE_SIGNING_PRIVATE_KEY</code> 与 <code>GUTHON_RELEASE_SIGNING_KEY_ID</code>，私钥与包内公钥不匹配、或强制策略所需密钥缺失时拒绝发行。签名覆盖应用、pyz、VSIX、Chrome 扩展和 Skill；<code>scripts/verify_release.mjs</code> 可用从可信渠道取得的公钥离线验收。首次安装仍需可信分发渠道，发行签名不等同于 macOS/Windows 系统代码签名，也不能证明程序无漏洞。</p>
+<p>发行清单包含 Nexus 与 Chrome Bridge 的构建标识。同一组件版本有新构建时，支持该清单的 Nexus 会提示更新。Nexus 重载及托管 Chrome 重载后分别核对实际运行的构建；较旧的发行清单沿用版本比较。</p>
 <p>Gitee 镜像与 GitHub 发行独立同步：<code>scripts/sync_release_to_gitee.py --tag &lt;tag&gt;</code> 先验签，补传缺失附件，再逐项下载核验 SHA-256。中断后可按同一标签继续。默认镜像遇到附件配额不足时会按保留规则清理已核验备份的旧附件，已清理的附件仍可从对应 GitHub Release 下载。令牌保存于系统钥匙串；维护流程和备用工作流见 <a href="https://github.com/SidWuu/GuthonCodeTool/blob/main/docs/RELEASE_MIRROR.md">镜像同步说明</a>，Windows 构建入口见 <a href="https://github.com/SidWuu/GuthonCodeTool/blob/main/docs/UNIFIED_INSTALLER.md">统一安装器构建说明</a>。</p>
 <h3 id="11-2-验证边界">11.2 验证边界</h3>
 <table class="comparison-table">
@@ -389,9 +390,9 @@ printf '%s' '{"input":"/absolute/private/changes.json","apply":true,"planHash":"
 </tbody>
 </table>
 <h4 id="maintainer-validation">维护者验证入口</h4>
-<p>按实际改动选择相关检查；Python 测试位于本地忽略的 <code>tests/</code>。源码级回归从仓库根执行，CLI 自检使用新建临时 toolHome，不把源码仓库根当运行数据目录：</p>
+<p>合并前工作流运行 <code>tests/ci/</code> 中随仓库分发的 Python 回归、Nexus 与 Bridge 测试，以及发行入口冒烟和文档检查。源码级回归从仓库根执行，CLI 自检使用新建临时 toolHome。</p>
 <div class="code-wrap"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyCode(this)">复制</button><pre><code>.venv/bin/python scripts/guthon_tool.py self-test --home &quot;$(mktemp -d)&quot;
-PYTHONPATH=scripts .venv/bin/python -m unittest discover -s tests
+PYTHONPATH=scripts .venv/bin/python -m unittest discover -s tests/ci -v
 .venv/bin/python scripts/check_ai_code_index.py
 node scripts/check_public_docs.mjs
 npm --prefix plugins/GuthonBridge test

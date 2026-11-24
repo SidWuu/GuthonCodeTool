@@ -15,7 +15,8 @@ temp/
 build/
 dist/
 /*.spec
-tests/
+tests/*
+!tests/ci/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -36,6 +37,6 @@ release/
 *.part
 # 本地开发安装包只留在磁盘，正式安装包通过 Release 分发。
 *.vsix
-# 测试只放在本地忽略的 tests/；scripts/ 下不得新增测试文件
+# 共享 Python 回归放在 tests/ci/，其余 tests/ 文件仅供本地使用。
 scripts/**/test_*.py
 .codex/

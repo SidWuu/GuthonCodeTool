@@ -8,6 +8,20 @@ from common import gusen_hub
 from common.persistence import atomic_text, file_lock
 
 
+def bill_type_output_dir(workspace):
+    if workspace["sourceMode"] == "database":
+        return workspace["databaseDir"] / "billtype"
+    return legacy_bill_type_dir(workspace)
+
+
+def legacy_bill_type_dir(workspace):
+    return workspace["docsDir"] / "exports" / "billtype"
+
+
+def bill_type_export_lock(directory):
+    return file_lock(Path(directory) / ".billtype.lock")
+
+
 def normalize_values(value):
     if not value:
         return []

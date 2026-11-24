@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import re
 
-from common.database_exports._export_common import sanitize_name
+from common.database_exports._export_common import bill_type_output_dir, legacy_bill_type_dir, sanitize_name
 from common.source_format import decode_source
 from common.source_text_search import MAX_BODY_CHARS
 
@@ -25,16 +25,26 @@ def _roots(workspace):
         "table": workspace["databaseDir"] / "schema",
         "view": workspace["databaseDir"] / "views",
         "system-script": workspace["readonlyDir"],
-        "bill-type": workspace["docsDir"] / "exports" / "billtype",
+        "bill-type": bill_type_output_dir(workspace),
     }
 
 
 def _file(workspace, source_type, relative):
     root = _roots(workspace)[source_type]
-    target = root / relative
-    if target.resolve() != target or not target.is_relative_to(root) or not target.is_file():
-        return None
-    return target
+    roots = (root, legacy_bill_type_dir(workspace)) if source_type == "bill-type" else (root,)
+    for directory in roots:
+        target = directory / relative
+        if target.resolve() == target and target.is_relative_to(directory) and target.is_file():
+            return target
+    return None
+
+
+def bill_type_files(workspace):
+    """One current file per export path, falling back to the pre-upgrade location."""
+    root = bill_type_output_dir(workspace)
+    names = {file.name for directory in (root, legacy_bill_type_dir(workspace))
+             for file in directory.glob(EXPORT_PATTERNS["bill-type"])}
+    return [target for name in sorted(names) if (target := _file(workspace, "bill-type", Path(name)))]
 
 
 def _text(target):
@@ -52,11 +62,12 @@ def prune_outside_scope(workspace, scope):
     if not systems or not data_sources:
         raise ValueError("缺少可核对的 DATABASE 同步范围，未清理本地导出")
     removed = 0
-    for source_type, root in _roots(workspace).items():
+    roots = [*_roots(workspace).items(), ("bill-type", legacy_bill_type_dir(workspace))]
+    for source_type, root in roots:
         for candidate in sorted(root.glob(EXPORT_PATTERNS[source_type])):
             relative = candidate.relative_to(root)
-            target = _file(workspace, source_type, relative)
-            if not target:
+            target = candidate
+            if target.resolve() != target or not target.is_relative_to(root) or not target.is_file():
                 continue
             companion = None
             if source_type == "view":
@@ -133,16 +144,24 @@ def _objects(workspace, source_type, target, relative):
                     yield row["billTypeCode"], row.get("billTypeName"), group, f"/billTypes/{index}", json.dumps(row, indent=2, ensure_ascii=False)
 
 
-def rebuild(conn, workspace):
+def rebuild(conn, workspace, *, source_type=None):
     conn.execute("""CREATE TABLE IF NOT EXISTS database_source_export (
         export_key TEXT PRIMARY KEY, source_type TEXT NOT NULL, source_id TEXT NOT NULL,
         source_name TEXT NOT NULL, folder TEXT NOT NULL, local_path TEXT NOT NULL,
         json_pointer TEXT NOT NULL, body TEXT NOT NULL)""")
-    conn.execute("DELETE FROM database_source_export")
+    roots = _roots(workspace)
+    if source_type is not None:
+        roots = {source_type: roots[source_type]}
+        conn.execute("DELETE FROM database_source_export WHERE source_type=?", (source_type,))
+    else:
+        conn.execute("DELETE FROM database_source_export")
     errors = []
-    for source_type, root in _roots(workspace).items():
-        for candidate in sorted(root.glob(EXPORT_PATTERNS[source_type])):
-            relative = candidate.relative_to(root)
+    for source_type, root in roots.items():
+        if source_type == "bill-type":
+            candidates = (Path(target.name) for target in bill_type_files(workspace))
+        else:
+            candidates = (target.relative_to(root) for target in sorted(root.glob(EXPORT_PATTERNS[source_type])))
+        for relative in candidates:
             target = _file(workspace, source_type, relative)
             if not target:
                 continue

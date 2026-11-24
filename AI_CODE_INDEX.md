@@ -2,7 +2,7 @@
 
 导航索引，不是规范来源：规则见 `AGENTS.md`，用户文档见 `README.md` 与 `docs/`，行为事实以源码和测试为准。
 
-维护 GuthonCodeTool 时先读本文件定位模块，只打开任务相关的少量文件；索引不足时才扩大搜索范围。修改模块职责、入口、目录名或主要调用关系后同步更新本文件，并执行 `python scripts/check_ai_code_index.py` 校验引用的路径仍然存在（`tests/` 是本地忽略目录，缺失时只跳过）。
+维护 GuthonCodeTool 时先读本文件定位模块，只打开任务相关的少量文件；索引不足时才扩大搜索范围。修改模块职责、入口、目录名或主要调用关系后同步更新本文件，并执行 `python scripts/check_ai_code_index.py` 校验引用的路径仍然存在。`tests/ci/` 由仓库分发并参与合并前检查，其余本地测试引用缺失时可跳过。
 
 ## Runtime roots
 
@@ -37,6 +37,7 @@ runtimeVar                   = <toolHome>/<workspaceDirectory>  私有谷神工�
 | API 源代码管理 | `plugins/GuthonNexus/gushen-vscode-completion/src/api/source-ui.js`（源码树路径投影、会话暂存、确认后上传） | `plugins/GuthonNexus/gushen-vscode-completion/src/api/activate.js`、`plugins/GuthonNexus/gushen-vscode-completion/package.json`（命令与原生组菜单） | `plugins/GuthonNexus/gushen-vscode-completion/test/api-scm.test.js` |
 | API 批量读取与表引用 | `scripts/providers/api/query_operations.py`（总正文预算、逐项错误与显式映射） | `scripts/providers/api/index.py`、`scripts/providers/api/mcp_server.py`、`scripts/providers/api/cli.py` | `tests/test_api_followup.py` |
 | API 项目导出与独立单据类型导出 | `scripts/providers/api/exports.py`、`scripts/common/database_exports/export_bill_type_sql.py` | `scripts/guthon_tool.py`、`scripts/common/database_readonly.py` | `tests/test_api_source.py` |
+| DATABASE 单据类型升级与定向导出 | `scripts/common/database_source_exports.py`（旧目录回读、索引）、`scripts/common/database_exports/export_bill_type_sql.py`（按编码合并） | `scripts/common/database_node_sync.py`（树节点更新复用同一导出） | `tests/ci/test_provider_regressions.py` |
 | Bridge 页面定位与上下文 | `plugins/GuthonBridge/bridge/page-context.js`、`plugins/GuthonBridge/extension/nexus-locator.js` | `plugins/GuthonBridge/extension/background.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/source/browser-navigation.js` | `plugins/GuthonBridge/bridge/page-context.test.js` |
 | 工作空间初始化与团队规范同步 | `scripts/common/workspace_layout.py`、`scripts/common/team_governance.py` | `scripts/common/config_store.py`、`scripts/guthon_tool.py`（setup）、`plugins/GuthonNexus/gushen-vscode-completion/src/onboarding.js`（Windows 首次配置）、`plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`（Nexus 初始化及手动同步） | `tests/test_unified_workspace.py`、`plugins/GuthonNexus/gushen-vscode-completion/test/setup-runtime-selection.test.js` |
 | 工作区助手/状态摘要 | `scripts/common/workspace_assistant.py` | `scripts/common/gusen_hub.py` | `tests/test_workspace_assistant_features.py` |
@@ -53,7 +54,7 @@ runtimeVar                   = <toolHome>/<workspaceDirectory>  私有谷神工�
 | Nexus UI 命令 | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js` | `plugins/GuthonNexus/gushen-vscode-completion/package.json` | `plugins/GuthonNexus/gushen-vscode-completion/test/rules.test.js` |
 | Bridge 服务端与持久异步任务 | `plugins/GuthonBridge/bridge/server.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/bridge-process.js` | `plugins/GuthonBridge/bridge/server.test.js` |
 | 原生平台接口与回读 | `plugins/GuthonBridge/bridge/native-metadata.js`（身份绑定、持久请求及回执） | `plugins/GuthonBridge/bridge/native-step-registry.js`（显式冻结的服务步骤）、`plugins/GuthonBridge/bridge/native-source-plan.js`（显式冻结的开发函数、MCP登记及隐藏保存字段）、`plugins/GuthonBridge/bridge/page-context.js`、`plugins/GuthonBridge/bridge/server.js`、`plugins/GuthonBridge/extension/native-metadata.js`、`plugins/GuthonBridge/extension/background.js` | `plugins/GuthonBridge/bridge/native-metadata.test.js`、`plugins/GuthonBridge/bridge/native-step-registry.test.js`、`plugins/GuthonBridge/bridge/native-source-plan.test.js`、`plugins/GuthonBridge/extension/native-metadata.test.js`、`plugins/GuthonBridge/bridge/navigation-server.test.js` |
-| 发行构建 | `scripts/build_guthon_tool.py`（macOS 与 Windows 单文件） | `.github/workflows/release.yml`、`GuthonCodeTool.spec` | `tests/test_build_guthon_tool.py` |
+| 发行构建 | `scripts/build_guthon_tool.py`（macOS 与 Windows 单文件） | `.github/workflows/release.yml`、`GuthonCodeTool.spec` | `tests/ci/test_build_guthon_tool_layout.py` |
 | Windows 统一安装器与官方依赖下载 | `scripts/installer/engine.py` | `scripts/build_windows_installer.py`、`scripts/build_installer_components.py`、`scripts/fetch_installer_inputs.py`、`scripts/common/installer_downloads.py`（构建/运行时共享的固定 HTTPS 下载与校验）、`scripts/check_installer_runtime.py`、`scripts/check_windows_installer.py`、`installer/windows/GuthonCodeSetup.iss`、`.github/workflows/build-installer.yml` | `tests/test_windows_installer.py` |
 | Nexus API 补全合并与重载去重 | `plugins/GuthonNexus/gushen-vscode-completion/src/api-completion.js` | `plugins/GuthonNexus/gushen-vscode-completion/src/extension.js`、`plugins/GuthonNexus/gushen-vscode-completion/src/api/platform-reference.js` | `plugins/GuthonNexus/gushen-vscode-completion/test/api-completion.test.js` |
 | 谷神 API 补全数据 | `scripts/sync_guthon_api.mjs` | `plugins/GuthonNexus/gushen-vscode-completion/scripts/build-data.mjs` | 两个脚本的 `--self-test` |
@@ -214,10 +215,13 @@ Bridge `plugins/GuthonBridge/extension/task-client.js`、`background.js` 和 `ta
 
 ## Validation
 
+`.github/workflows/regression.yml` 的 `Regression gate` 在 PR 和合并队列中从干净检出执行。Python 使用 `tests/ci/` 下随仓库分发的临时工作区夹具，覆盖 API、SVN、DATABASE 的共享路由及常用源码操作；本地历史测试可按需单独运行。
+
 首次从源码验证 Nexus 时，在插件目录先执行 `npm install --omit=dev --ignore-scripts --no-audit --no-fund`，确保运行时 JSONC 解析依赖和许可证可供标准打包与本地更新使用。
 
 ```bash
 python scripts/check_ai_code_index.py
+PYTHONPATH=scripts .venv/bin/python -m unittest discover -s tests/ci -v
 PYTHONPATH=scripts .venv/bin/python -m unittest discover -s tests
 .venv/bin/python scripts/guthon_tool.py self-test --home "$(mktemp -d)"
 node scripts/sync_guthon_api.mjs --self-test

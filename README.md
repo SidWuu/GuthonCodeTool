@@ -26,6 +26,12 @@
 - [Windows 安装器构建](docs/UNIFIED_INSTALLER.md) · [发行镜像维护](docs/RELEASE_MIRROR.md) · [API 迁移功能矩阵](docs/api-sync/feature-matrix.json)
 - 谷神业务开发从私有工作区的 `AGENTS.md` 进入；数据库排查与验证参见 [Guthon Testing Skill](skills/guthon-testing/SKILL.md)。
 
+### 合并前回归
+
+[Pre-merge 工作流](.github/workflows/regression.yml) 在 PR 与合并队列运行 `Regression gate`。保护目标分支时，将该任务设置为必需状态检查。工作流运行公开 Python 回归集、源码和 zipapp 冒烟、Nexus 与 Bridge 测试，以及生成资源和文档校验。
+
+本地从仓库根运行 `PYTHONPATH=scripts .venv/bin/python -m unittest discover -s tests/ci -v`。测试需要 Git、`svn` 和 `svnadmin`，使用临时数据目录、本地 SVN 仓库和模拟数据库响应。其他 `tests/` 内容保留为本机历史测试，可独立运行调查旧行为。共享回归用例放在 `tests/ci/`，使用可从干净检出重建的夹具。
+
 ## 文档
 
 - [在线文档](https://sidwuu.github.io/GuthonCodeTool/)

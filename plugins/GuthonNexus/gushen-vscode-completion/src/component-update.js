@@ -57,7 +57,7 @@ function managedChrome(root) {
   const manifest = readJson(path.join(directory, 'manifest.json'));
   if (!manifest?.version || marker.version !== manifest.version) throw new Error('Chrome 托管文件版本不一致');
   compareVersions(manifest.version, manifest.version);
-  return { directory, version: manifest.version, installId: marker.installId, status: '已托管' };
+  return { directory, version: manifest.version, installId: marker.installId, sourceBuildId: marker.sourceBuildId, status: '已托管' };
 }
 
 function updatePlan(catalog, current) {
@@ -70,11 +70,13 @@ function updatePlan(catalog, current) {
     target: catalog.components.bridge.version, unknown: !current.chromeVersion,
     update: Boolean(current.chromeVersion && compareVersions(catalog.components.bridge.version, current.chromeVersion) > 0),
     bootstrap: !current.chromeVersion };
-  if (catalog.local) {
-    nexus.codeChanged = nexus.target === nexus.current && catalog.components.nexus.buildId !== current.nexusBuildId;
-    if (nexus.codeChanged) { nexus.update = true; nexus.status = '本地源码有改动'; }
-    chrome.codeChanged = chrome.target === chrome.current && catalog.components.bridge.buildId !== current.chromeBuildId;
-    if (chrome.codeChanged) { chrome.update = true; chrome.status = '本地源码有改动'; }
+  for (const [item, buildId] of [[nexus, current.nexusBuildId], [chrome, current.chromeBuildId]]) {
+    const targetBuild = catalog.components[item.id].buildId;
+    if (item.target === item.current && targetBuild && targetBuild !== buildId && (buildId || catalog.local)) {
+      item.codeChanged = true;
+      item.update = true;
+      item.status = catalog.local ? '本地源码有改动' : '同版本有新构建';
+    }
   }
   if (tool.current && compareVersions(tool.target, tool.current) < 0) tool.status = '当前版本较新';
   if (current.mode === 'source-development') tool.status = '工具源码由开发者管理';
@@ -149,9 +151,14 @@ async function prepareUpdate(verified, plan, root, { downloader = downloadAsset,
       const originalSettings = path.join(previous.directory, 'host-settings.js');
       const rules = importedHosts || (previous.version ? hostSettings(fs.readFileSync(originalSettings, 'utf8')) : hostSettings(fs.readFileSync(path.join(chromeStage, 'host-settings.js'), 'utf8')));
       fs.writeFileSync(path.join(chromeStage, 'host-settings.js'), 'globalThis.GuthonBridgeHostSettings = ' + JSON.stringify(rules, null, 2) + ';\n');
+      const buildId = verified.catalog.components.bridge.buildId;
+      if (buildId) {
+        const background = path.join(chromeStage, 'background.js');
+        fs.writeFileSync(background, 'globalThis.GuthonBridgeSourceBuildId = ' + JSON.stringify(buildId) + ';\n' + fs.readFileSync(background, 'utf8'));
+      }
       saveJson(path.join(chromeStage, 'managed-install.json'), { schemaVersion: 1,
         installId: previous.installId || crypto.randomUUID(), version: manifest.version,
-        sourceBuildId: verified.catalog.components.bridge.buildId,
+        sourceBuildId: buildId,
         archiveSha256: verified.catalog.assets[ASSETS.bridge].sha256 });
     }
     if (mode === 'script' && files[ASSETS.script]) {
@@ -178,7 +185,8 @@ async function applyUpdate(prepared, root, { mode, platform = process.platform, 
   const { verified, files, plan } = prepared;
   const record = { schemaVersion: 1, operationId: crypto.randomUUID(), release: verified.release, phase: 'APPLYING',
     startedAt: new Date().toISOString(), completed: [], pendingReload: false,
-    nexusVersion: verified.catalog.components.nexus.version, previousBackend };
+    nexusVersion: verified.catalog.components.nexus.version,
+    nexusBuildId: verified.catalog.components.nexus.buildId, previousBackend };
   const journal = path.join(root, 'operation.json');
   saveJson(journal, record);
   try {
@@ -233,7 +241,7 @@ async function applyUpdate(prepared, root, { mode, platform = process.platform, 
   }
 }
 
-function interruptedUpdate(root, loadedNexusVersion) {
+function interruptedUpdate(root, loadedNexusVersion, loadedNexusBuildId) {
   const record = readJson(path.join(root, 'operation.json'));
   if (!record) return undefined;
   // An interrupted directory swap can be restored using only our exact owned paths.
@@ -245,7 +253,9 @@ function interruptedUpdate(root, loadedNexusVersion) {
     if (fs.existsSync(item.backup) && fs.lstatSync(item.backup).isSymbolicLink()) throw new Error('更新备份不能是链接');
     if (!fs.existsSync(item.directory) && fs.existsSync(item.backup)) fs.renameSync(item.backup, item.directory);
   }
-  if (loadedNexusVersion && record.nexusVersion && compareVersions(loadedNexusVersion, record.nexusVersion) >= 0
+  if (loadedNexusVersion && record.nexusVersion
+      && (compareVersions(loadedNexusVersion, record.nexusVersion) > 0
+          || (loadedNexusVersion === record.nexusVersion && (!record.nexusBuildId || record.nexusBuildId === loadedNexusBuildId)))
       && ['INSTALLING_NEXUS', 'INSTALLED'].includes(record.phase)) {
     record.phase = 'INSTALLED'; record.pendingReload = false;
     if (!record.completed.includes('nexus')) record.completed.push('nexus');
