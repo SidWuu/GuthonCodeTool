@@ -51,6 +51,26 @@ test('version planning is independent; source checkout is never updated and newe
   assert.ok(plan.every(item => !item.update));
   assert.equal(plan[0].status, '工具源码由开发者管理');
 });
+test('a signed same-version component replacement is recognized and confirmed by build', async t => {
+  const previous = 'sha256:' + 'a'.repeat(64);
+  const builds = { nexus: 'sha256:' + 'b'.repeat(64), bridge: 'sha256:' + 'c'.repeat(64) };
+  const f = fixture(t, { builds }), verified = await f.signed();
+  const old = { mode: 'packaged', toolVersion: '0.4.0', nexusVersion: '2.5.0', nexusBuildId: previous,
+    chromeVersion: '0.4.0', chromeBuildId: previous };
+  const plan = updatePlan(verified.catalog, old);
+  assert.deepEqual(plan.filter(row => row.update).map(row => row.id), ['nexus', 'bridge']);
+  assert.ok(updatePlan(verified.catalog, { ...old, nexusVersion: '2.6.0', chromeVersion: '0.5.0' }).every(row => !row.update));
+  const prepared = await prepareUpdate(verified, plan, f.root, { downloader: f.downloader });
+  const result = await applyUpdate(prepared, f.root, { mode: 'packaged', installNexus: async () => {} });
+  assert.equal(result.pendingReload, true);
+  assert.equal(interruptedUpdate(f.root, '2.5.0', previous).pendingReload, true);
+  assert.equal(interruptedUpdate(f.root, '2.5.0', builds.nexus).pendingReload, false);
+  const chrome = managedChrome(f.root);
+  assert.equal(chrome.sourceBuildId, builds.bridge);
+  assert.match(fs.readFileSync(path.join(chrome.directory, 'background.js'), 'utf8'), new RegExp(builds.bridge));
+  assert.ok(updatePlan(verified.catalog, { ...old, nexusBuildId: builds.nexus, chromeBuildId: builds.bridge }).every(row => !row.update));
+  assert.ok(updatePlan(fixture(t).catalog, old).every(row => !row.update));
+});
 test('ZIP traversal, symlink and case-collision inputs are rejected before extraction', t => {
   const f = fixture(t);
   for (const [entries, modes] of [[{ '../escape': 'x' }, {}], [{ 'extension/a': 'x', 'extension/A': 'y' }, {}], [{ 'extension/link': 'outside' }, { 'extension/link': 0xa1ff }]]) {
@@ -94,15 +114,22 @@ test('Chrome host rules and installation identity survive replacement', async t 
   assert.equal(managedChrome(f.root).installId, id);
   assert.deepEqual(hostSettings(fs.readFileSync(path.join(original, 'host-settings.js'), 'utf8')), customized);
 });
-test('debug pyz and matching requirements are prepared and probed without running pip', async t => {
+test('debug updates prepare the new pyz and dependencies before switching both runtime paths', async t => {
   const f = fixture(t); const plan = updatePlan(f.catalog, { ...f.current, mode: 'script', nexusVersion: '2.5.0', chromeVersion: '0.4.0' });
-  let probe;
+  let provisioned;
   const prepared = await prepareUpdate(await f.signed(), plan, f.root, { mode: 'script', pythonPath: '/fixture/python', downloader: f.downloader,
-    scriptProbe: async runtime => { probe = runtime; return { version: '0.4.0', missingProviders: ['oracledb'] }; } });
-  assert.equal(probe.toolPath, '/fixture/python');
-  assert.equal(path.basename(probe.toolEntry), ASSETS.script);
+    scriptPrepare: async (toolEntry, options) => {
+      assert.equal(options.pythonPath, '/fixture/python');
+      provisioned = { mode: 'script', toolEntry, toolPath: '/fixture/.venv/python' };
+      return { version: '0.4.0', runtime: provisioned };
+    } });
+  assert.equal(path.basename(provisioned.toolEntry), ASSETS.script);
   assert.ok(fs.existsSync(path.join(prepared.scriptDirectory, ASSETS.requirements)));
-  assert.deepEqual(prepared.missingProviders, ['oracledb']);
+  const result = await applyUpdate(prepared, f.root, { mode: 'script', switchBackend: async backend => {
+    assert.deepEqual(backend, { ...provisioned, version: '0.4.0' });
+    return { mode: 'script' };
+  } });
+  assert.deepEqual(result.completed, ['tool']);
 });
 test('interrupted directory swap restores its owned backup and rejects injected paths', t => {
   const f = fixture(t), parent = path.join(f.root, 'chrome'), backup = path.join(parent, '.backup-fixture');
@@ -129,5 +156,7 @@ for (const legacyMac of [false, true]) test(`release catalog builder reads packa
   const built = JSON.parse(fs.readFileSync(path.join(assets, CATALOG_ASSET)));
   assert.equal(built.components.nexus.version, '2.5.0');
   assert.equal(built.components.bridge.protocolVersion, 2);
+  assert.match(built.components.nexus.buildId, /^sha256:[a-f0-9]{64}$/);
+  assert.match(built.components.bridge.buildId, /^sha256:[a-f0-9]{64}$/);
   assert.deepEqual(built.assets, f.catalog.assets);
 });

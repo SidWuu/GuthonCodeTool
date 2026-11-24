@@ -40,7 +40,7 @@ function host(t, f, loadedVersion = '2.4.0', profile = loadedVersion, options = 
     bridge, processClient: { stop: async () => {} },
     getTool: () => ({ mode: 'packaged', toolPath: backend, toolHome: home }),
     processRunner: async () => ({ stdout: '{"version":"0.4.0"}' }),
-    loadedVersion, isBusy: () => false, setBusy: value => busy.push(value), refresh() {}, treeView: tree,
+    loadedVersion, loadedBuildId: options.loadedBuildId, isBusy: () => false, setBusy: value => busy.push(value), refresh() {}, treeView: tree,
     fetchRelease: async () => { requests++; return f.release; }, verify: async () => f.signed(),
   });
   t.after(() => center.dispose());
@@ -120,4 +120,28 @@ test('host replacement leaves no data locks and the new host reconciles its own 
   const next = host(t, f, '2.5.0', 'same-profile');
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(readJson(path.join(next.storage, 'nexus-install.json')).phase, 'ACTIVE');
+});
+test('same-version online Nexus changes wait for the installed build to load', async t => {
+  const before = 'sha256:' + 'a'.repeat(64), target = 'sha256:' + 'b'.repeat(64);
+  const f = fixture(t, { builds: { nexus: target } });
+  const h = host(t, f, '2.5.0', 'same-version', { loadedBuildId: before });
+  const https = require('node:https'), { PassThrough } = require('node:stream'), original = https.get;
+  https.get = (url, _options, respond) => {
+    const stream = new PassThrough(); stream.statusCode = 200; stream.headers = {};
+    queueMicrotask(() => { respond(stream); stream.end(f.data[new URL(url).pathname.slice(1)]); });
+    return { setTimeout() {}, on() {}, destroy() {} };
+  };
+  t.after(() => { https.get = original; });
+  await h.center.check(true);
+  assert.equal(h.center.snapshot.rows.find(row => row.id === 'nexus').status, '同版本有新构建');
+  await h.center.open();
+  assert.equal(h.center.snapshot.pending, true);
+  await h.center.open();
+  assert.equal(h.commands.filter(command => command === 'workbench.extensions.installExtension').length, 1);
+  assert.ok(h.messages.includes('更新已安装，等待重新加载窗口'));
+  h.center.dispose();
+  const next = host(t, f, '2.5.0', 'same-version', { loadedBuildId: target });
+  await next.center.check(true);
+  assert.equal(next.center.snapshot.pending, false);
+  assert.equal(next.center.snapshot.rows.find(row => row.id === 'nexus').update, false);
 });

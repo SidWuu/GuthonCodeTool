@@ -130,15 +130,16 @@ test('writes packaged and development runtime descriptors for AI tools', () => {
 
 test('selecting development mode always asks for the source directory', () => {
   assert.deepEqual(runtimeSelectionOptions('packaged'), {
-    probeScript: true, probePackaged: true,
+    probePackaged: true,
     selectScript: false, selectPackaged: false, selectDevelopment: false,
   });
   for (const mode of ['source-development', 'development']) {
     assert.equal(runtimeSelectionOptions(mode).selectDevelopment, true, mode);
   }
   assert.equal(runtimeSelectionOptions('script').selectDevelopment, false);
+  assert.equal(runtimeSelectionOptions('script').selectScript, true);
   assert.deepEqual(runtimeSelectionOptions('packaged', true), {
-    probeScript: true, probePackaged: true,
+    probePackaged: true,
     selectScript: true, selectPackaged: true, selectDevelopment: true,
   });
   // 命令必须复用该选项，否则仍会沿用旧的 developmentRoot 而不弹目录选择。

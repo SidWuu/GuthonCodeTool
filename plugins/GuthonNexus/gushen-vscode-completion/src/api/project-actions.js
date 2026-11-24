@@ -1,5 +1,7 @@
 async function showProjectActions({vscode,getWorkspaces,bridge}) {
-  const workspaces=await getWorkspaces();
+  let workspaces, projectsUnavailable=false;
+  try {workspaces=await getWorkspaces();}
+  catch {workspaces=[];projectsUnavailable=true;}
   const project=workspaces.length===1 ? workspaces[0] : undefined;
   const item=(label,command,{project=false,description='',args=[]}={})=>({label,command,project,description,args});
   const groups={
@@ -34,8 +36,12 @@ async function showProjectActions({vscode,getWorkspaces,bridge}) {
     : [item('设置本地数据目录','setupTool')];
   const browser=bridge.isRunning()?item('停止浏览器增强','stopBridge'):item('启动浏览器增强','startBridge');
   const choices=[{label:'常用',kind:vscode.QuickPickItemKind.Separator},...common,browser,
-    ...Object.entries(groups).flatMap(([label,items])=>[{label,kind:vscode.QuickPickItemKind.Separator},...items])];
-  const selected=await vscode.window.showQuickPick(choices,{title:project ? `${project.name || project.displayName} · 项目全部操作` : '项目全部操作',placeHolder:'搜索项目操作、检查与设置',matchOnDescription:true});
+    ...Object.entries(groups).flatMap(([label,items])=>{
+      const available=projectsUnavailable ? items.filter(action=>!action.project) : items;
+      return available.length ? [{label,kind:vscode.QuickPickItemKind.Separator},...available] : [];
+    })];
+  const selected=await vscode.window.showQuickPick(choices,{title:project ? `${project.name || project.displayName} · 项目全部操作` : '项目全部操作',
+    placeHolder:projectsUnavailable ? '当前后端无法读取项目，可切换运行方式或重新连接数据目录' : '搜索项目操作、检查与设置',matchOnDescription:true});
   if(!selected || selected.kind===vscode.QuickPickItemKind.Separator)return;
   let workspace=project;
   if(selected.project && !workspace) {

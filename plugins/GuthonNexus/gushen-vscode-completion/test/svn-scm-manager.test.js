@@ -68,6 +68,7 @@ test('administrative locks have one recovery entry and directories cannot open f
   assert.equal(resources[0].contextValue, 'guthonSvn.NONFILE');
   const lock = resources.find((item) => item.contextValue === 'guthonSvn.LOCKED');
   assert.equal(lock.decorations.iconPath.id, 'lock');
+  assert.equal(new URLSearchParams(lock.resourceUri.query).get('workingCopyId'), 'datasources-0008');
   assert.deepEqual(lock.command.arguments, [{ guthonWorkspaceKey: 'projects.demo', guthonWorkingCopyIds: ['datasources-0008'] }]);
   assert.doesNotThrow(() => JSON.stringify(lock.command.arguments));
   assert.equal(record.sourceControl.count, 1);
@@ -85,6 +86,19 @@ function inlineCommands(contextValue) {
     return equal && equal[1] === contextValue;
   }).map((item) => item.command);
 }
+
+test('all SVN SCM inline actions declare theme icons so titles do not occupy the file row', () => {
+  const { menus, commands } = require('../package.json').contributes;
+  for (const [menu, primary] of [['scm/title', 'navigation@'], ['scm/resourceGroup/context', 'inline@'], ['scm/resourceState/context', 'inline@']]) {
+    const svnActions = menus[menu].filter(item => item.group.startsWith(primary) && item.when.includes('/^guthon-svn-/'));
+    if (menu !== 'scm/resourceState/context') assert.deepEqual(svnActions.map(item => item.command), [
+      'gushenCompletion.updateAllSvnChanges', 'gushenCompletion.revertSvnChanges', 'gushenCompletion.saveSvnToGuthon',
+    ]);
+    for (const action of svnActions) {
+      assert.match(commands.find(command => command.command === action.command)?.icon || '', /^\$\([a-z-]+\)$/, action.command);
+    }
+  }
+});
 
 test('subset and empty status refreshes preserve other registered repositories', async () => {
   const calls = [];
@@ -412,7 +426,7 @@ for (const state of ['LOCAL_MODIFIED', 'EXTERNAL_MODIFIED']) {
       const commands = inlineCommands(resource.contextValue);
       assert.ok(commands.includes('gushenCompletion.saveSelectedSvnNexusChanges'));
       assert.ok(commands.includes('gushenCompletion.revertSingleSvnChange'));
-      assert.ok(commands.includes(indexed ? 'gushenCompletion.openSvnChangeInNexus' : 'gushenCompletion.showSvnRawDiff'));
+      assert.ok(commands.includes(indexed ? 'gushenCompletion.openSvnChangeInNexus' : 'gushenCompletion.showSvnDiff'));
       assert.equal(commands.includes('gushenCompletion.updateSingleSvnChange'), false);
       manager.dispose();
     });

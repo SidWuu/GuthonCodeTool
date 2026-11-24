@@ -1,5 +1,5 @@
 """Refresh the exact DATABASE category, directory, or indexed object selected in Nexus."""
-from contextlib import closing
+from contextlib import closing, nullcontext
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -84,6 +84,7 @@ def _sync_sources(workspace,config,kind,groups,record_id,datasource_name,datasou
 def _sync_exports(workspace,config,kind,groups,export_key,datasource_name,datasource,progress):
     from providers.database import export_system_script_sql as scripts, export_table_schema_sql as tables, export_view_sql as views
     from common.database_exports import export_bill_type_sql as bills
+    from common.database_exports._export_common import bill_type_export_lock, legacy_bill_type_dir
 
     root = exports._roots(workspace)[kind]
     filter_ids = set()
@@ -129,30 +130,29 @@ def _sync_exports(workspace,config,kind,groups,export_key,datasource_name,dataso
             raise ValueError("导出节点超出当前同步范围")
         selected=sorted(filter_ids or ids)
         selected_codes=[code] if code else None
-        if kind=="table":
+        if kind=="bill-type":
+            if root.resolve() != root:
+                raise ValueError("导出路径超出对应目录")
+            result = bills.export_bill_types(remote, root, selected, selected_codes,
+                                             legacy_dir=legacy_bill_type_dir(workspace), generated=False)
+            changed = result["exported_data_source_count"]
+        elif kind=="table":
             tables.export_table_schema(remote,stage,selected,selected_codes)
         elif kind=="view":
             views.export_views(remote,stage,selected,selected_codes,config=config)
         elif kind=="system-script":
             scripts.export_system_scripts(remote,output_dir=stage,system_ids=selected,
                                           data_source_ids=scope["data_source_ids"],script_types=selected_codes,config=config)
-        else:
-            bills.export_bill_types(remote,stage,selected,selected_codes)
-        changed=0
-        for path in stage.rglob("*"):
-            if not path.is_file() or path.name in {"table_metadata.json","export_summary.json"}:
-                continue
-            target=root/path.relative_to(stage)
-            if target.resolve()!=target or not target.is_relative_to(root):
-                raise ValueError("导出路径超出对应目录")
-            if kind=="bill-type" and code and target.is_file():
-                old,new = (json.loads(exports._text(file)) for file in (target,path))
-                old["billTypes"]=[bill for bill in old["billTypes"] if bill.get("billTypeCode")!=code]+new["billTypes"]
-                old["billTypes"].sort(key=lambda bill: str(bill.get("billTypeCode") or ""))
-                atomic_text(target,json.dumps(old,ensure_ascii=False,indent=2)+"\n")
-            else:
+        if kind != "bill-type":
+            changed = 0
+            for path in stage.rglob("*"):
+                if not path.is_file() or path.name in {"table_metadata.json", "export_summary.json"}:
+                    continue
+                target = root / path.relative_to(stage)
+                if target.resolve() != target or not target.is_relative_to(root):
+                    raise ValueError("导出路径超出对应目录")
                 atomic_bytes(target,path.read_bytes())
-            changed+=1
+                changed += 1
         if kind=="table" and (stage/"table_metadata.json").is_file():
             target=root/"table_metadata.json"
             if target.resolve()!=target:
@@ -166,11 +166,12 @@ def _sync_exports(workspace,config,kind,groups,export_key,datasource_name,dataso
             atomic_text(target,json.dumps(combined,ensure_ascii=False,indent=2)+"\n")
         if code and not changed:
             raise ValueError("当前导出对象已不在可同步范围")
-    with closing(hub.connect_index_for_workspace(workspace,action="database-export-index")) as conn, conn:
+    export_lock = bill_type_export_lock(root) if kind == "bill-type" else nullcontext()
+    with export_lock, closing(hub.connect_index_for_workspace(workspace, action="database-export-index")) as conn, conn:
         diagnostics=exports.rebuild(conn,workspace)
         if kind=="bill-type":
             from common import source_facts
-            source_facts.replace_workspace_bill_routes(conn,[json.loads(exports._text(path))
-                for path in root.glob("*.json") if path.resolve()==path])
+            source_facts.replace_workspace_bill_routes(conn, [json.loads(exports._text(path))
+                for path in exports.bill_type_files(workspace)])
     progress(f"节点资料已更新 · {changed} 个文件 · {len(diagnostics)} 项本地索引诊断")
     return {"changed":changed,"diagnostics":diagnostics[:20]}

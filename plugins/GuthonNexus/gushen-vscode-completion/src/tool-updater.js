@@ -221,7 +221,7 @@ async function withUpdateLock(storageRoot, action) {
   } finally { fs.rmSync(lockPath, { recursive: true, force: true }); }
 }
 
-function runProcess(command, args, options = {}) {
+function runProcess(command, args, { timeoutMs = 120000, ...options } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { shell: false, ...options });
     let stdout = '';
@@ -231,7 +231,7 @@ function runProcess(command, args, options = {}) {
     const deadline = setTimeout(() => {
       processFailure = new Error('更新应用验证超时');
       child.kill('SIGKILL');
-    }, 120000);
+    }, timeoutMs);
     const collect = (data, stream) => {
       bytes += data.length;
       if (bytes > MAX_METADATA_BYTES) { processFailure = new Error('更新应用验证输出超过限制'); child.kill('SIGKILL'); return; }

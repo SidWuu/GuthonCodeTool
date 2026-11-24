@@ -23,11 +23,11 @@ const { promptDatabaseDiagnosis } = require('./database-config');
 const { ToolJsonClient } = require('./tool-json-client');
 const { createBridgeProcess, resolveBridgeScript } = require('./bridge-process');
 const {
-  normalizeExecutionMode, runtimeSelectionOptions, resolveDevelopmentRuntime, resolvePackagedTool, resolveScriptRuntime, initializationRuntimeInDirectory,
+  normalizeExecutionMode, runtimeSelectionOptions, resolveDevelopmentRuntime, resolvePackagedTool, packagedToolInDirectory, resolveScriptRuntime, initializationRuntimeInDirectory,
   writeRuntimeDescriptor, runtimeConfigurationTarget, installedSetupReport, installedToolEnvironment, toolArguments,
 } = require('./tool-runtime');
 const { ToolProcessClient } = require('./tool-process-client');
-const { probeScriptRuntime } = require('./script-runtime');
+const { prepareScriptRuntime } = require('./script-runtime');
 const { createUpdateCenter } = require('./update-center');
 const { createOnboarding } = require('./onboarding');
 const { workspaceTeamSource, openTeamSyncTerminal } = require('./onboarding-team');
@@ -265,64 +265,38 @@ async function configuredRuntime(config, mode, options = {}) {
     }
     return { runtime, configuration: { developmentRoot } };
   } else if (mode === 'script') {
-    let pythonPath = config.get('scriptPythonPath', '');
+    const pythonPath = config.get('scriptPythonPath', '');
     let scriptPath = config.get('scriptToolPath', '');
-    async function selectScriptFiles() {
-      const python = await vscode.window.showOpenDialog({
-        canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
-        title: '选择本地 Python 可执行文件',
-      });
-      if (!python) return false;
-      pythonPath = python[0].fsPath;
+    if (!options.prepareScript) {
+      try {
+        return { runtime: resolveScriptRuntime(pythonPath, scriptPath), configuration: {} };
+      } catch (error) {
+        vscode.window.showErrorMessage(`调试环境不可用：${error.message}。请通过“选择运行方式”重新选择调试脚本。`);
+        return undefined;
+      }
+    }
+    if (options.selectScript || !scriptPath || !fs.existsSync(scriptPath)) {
       const script = await vscode.window.showOpenDialog({
         canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
         filters: { 'GuthonCodeTool 调试脚本': ['pyz'] },
         title: '选择 GuthonCodeTool-python.pyz',
       });
-      if (!script) return false;
+      if (!script?.length) return undefined;
       scriptPath = script[0].fsPath;
-      return true;
     }
-    if (options.selectScript && !await selectScriptFiles()) return undefined;
     try {
-      runtime = resolveScriptRuntime(pythonPath, scriptPath);
+      const { runtime } = await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification, title: '准备 GuthonCodeTool 调试环境',
+      }, progress => prepareScriptRuntime(scriptPath, {
+        storageRoot: options.scriptStorageRoot, pythonPath, onProgress: message => progress.report({ message }),
+      }));
+      return { runtime, configuration: { scriptPythonPath: runtime.toolPath, scriptToolPath: runtime.toolEntry } };
     } catch (error) {
-      if (options.selectScript) {
-        vscode.window.showErrorMessage(error.message);
-        return undefined;
-      }
-      if (!await selectScriptFiles()) return undefined;
-      try {
-        runtime = resolveScriptRuntime(pythonPath, scriptPath);
-      } catch (error) {
-        vscode.window.showErrorMessage(error.message);
-        return undefined;
-      }
+      vscode.window.showErrorMessage(`无法准备调试环境：${error.message}`);
+      return undefined;
     }
-    if (options.probeScript) {
-      let probe;
-      try {
-        probe = await probeScriptRuntime(runtime);
-      } catch (error) {
-        const choice = await vscode.window.showErrorMessage(
-          `调试环境不可用：${error.message}`, '重新选择 Python 和脚本'
-        );
-        if (choice === '重新选择 Python 和脚本' && !options.selectScript) {
-          return configuredRuntime(config, mode, { ...options, selectScript: true });
-        }
-        return undefined;
-      }
-      if (probe.missingProviders.length) {
-        const chosen = await vscode.window.showWarningMessage(
-          `调试脚本 ${probe.version} 的核心功能可用，但部分功能依赖缺失：${probe.missingProviders.join('；')}`,
-          { modal: true }, '继续使用核心功能'
-        );
-        if (chosen !== '继续使用核心功能') return undefined;
-      }
-    }
-    return { runtime, configuration: { scriptPythonPath: pythonPath, scriptToolPath: scriptPath } };
   } else {
-    let toolPath = resolvePackagedTool(config.get('toolPath', ''));
+    let toolPath = resolvePackagedTool(options.packagedPath || config.get('toolPath', ''));
     let selectPackaged = options.selectPackaged || !toolPath;
     if (!selectPackaged && options.probePackaged) {
       try {
@@ -343,7 +317,7 @@ async function configuredRuntime(config, mode, options = {}) {
       if (!selected) return undefined;
       const candidate = resolvePackagedTool(selected[0].fsPath);
       if (!candidate) {
-        vscode.window.showErrorMessage('请选择 GuthonCodeTool 可执行文件：Windows 选择 EXE，macOS 选择 GuthonCodeTool 文件');
+        vscode.window.showErrorMessage(`所选路径下没有可用的 GuthonCodeTool 可执行文件：${selected[0].fsPath}。Windows 请选择 EXE，macOS 请选择解压后的 GuthonCodeTool。`);
         return undefined;
       }
       toolPath = candidate;
@@ -358,30 +332,30 @@ async function configuredRuntime(config, mode, options = {}) {
   }
 }
 
-async function initializationRuntime(config, directory) {
+async function pickExecutionMode(currentMode, entryOnly = false) {
+  const modes = [
+    { label: '发行模式', description: '调用打包的 GuthonCodeTool 应用', value: 'packaged' },
+    { label: '开发模式', description: '使用源码和仓库的 .venv', value: 'source-development' },
+    { label: '调试模式', description: '选择 Release 的 pyz，自动准备隔离的 Python 运行环境', value: 'script' },
+  ];
+  return entryOnly
+    ? modes.find(item => item.value === currentMode)
+    : vscode.window.showQuickPick(modes, { title: '选择 Guthon Nexus 运行模式' });
+}
+
+async function initializationRuntime(config, directory, scriptStorageRoot, reuseSelection) {
   const preferredMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
-  const pythonPath = config.get('scriptPythonPath', '');
-  let selection = initializationRuntimeInDirectory(directory, preferredMode, pythonPath);
+  const selection = reuseSelection ? undefined : initializationRuntimeInDirectory(directory, preferredMode);
   if (!selection) {
-    const folders = await vscode.window.showOpenDialog({
-      defaultUri: vscode.Uri.file(directory),
-      canSelectFiles: false, canSelectFolders: true, canSelectMany: false,
-      title: '选择 GuthonCodeTool 运行目录',
+    const mode = reuseSelection ? preferredMode : (await pickExecutionMode(preferredMode))?.value;
+    if (!mode) return undefined;
+    const selected = await configuredRuntime(config, mode, {
+      selectPackaged: !reuseSelection, selectDevelopment: !reuseSelection, selectScript: !reuseSelection,
+      probePackaged: true, prepareScript: true, scriptStorageRoot,
     });
-    if (!folders?.length) return undefined;
-    const runtimeDirectory = folders[0].fsPath;
-    selection = initializationRuntimeInDirectory(runtimeDirectory, preferredMode, pythonPath);
-    if (!selection) {
-      await vscode.window.showErrorMessage(`所选运行目录缺少可用的 GuthonCodeTool：${runtimeDirectory}`);
-      return undefined;
-    }
+    return selected && { ...selected, configuration: { ...selected.configuration, executionMode: mode } };
   }
   const { runtime } = selection;
-  if (runtime.mode === 'script') {
-    const selected = await configuredRuntime({ get: (key, fallback) => selection.configuration[key] ?? config.get(key, fallback) },
-      runtime.mode, { probeScript: true });
-    return selected && { ...selected, configuration: { ...selected.configuration, executionMode: runtime.mode } };
-  }
   if (runtime.mode === 'packaged') {
     try {
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: '正在检查 GuthonCodeTool' },
@@ -396,9 +370,13 @@ async function initializationRuntime(config, directory) {
 
 async function applyRuntimeSelection(config, selection, scope) {
   for (const [key, value] of Object.entries(selection.configuration)) {
-    const current = scope === vscode.ConfigurationTarget.Workspace ? config.inspect?.(key)?.workspaceValue : config.get(key, '');
+    const targets = vscode.ConfigurationTarget;
+    const configuredScope = runtimeConfigurationTarget(config, key, targets);
+    const target = scope === targets.Workspace && configuredScope === targets.WorkspaceFolder
+      ? configuredScope : scope ?? configuredScope;
+    const current = target === targets.Workspace ? config.inspect?.(key)?.workspaceValue : config.get(key, '');
     if (current !== value) {
-      await config.update(key, value, scope ?? runtimeConfigurationTarget(config, key, vscode.ConfigurationTarget));
+      await config.update(key, value, target);
     }
   }
 }
@@ -783,6 +761,15 @@ function activate(context) {
       } catch (error) { return vscode.window.showErrorMessage(error.message); }
     };
   }
+  const reviewSvnFile = action => svnAction((service, workspace, sourcePath, _remote, params) => {
+    if (!sourcePath) return;
+    const workingCopyId = params.get('workingCopyId');
+    return service.review(workspace, action, { sourcePath, workingCopyIds: workingCopyId ? [workingCopyId] : undefined });
+  });
+  const reviewSvnChanges = action => svnAction((service, workspace, _path, _remote, _params, value) => {
+    if (action === 'platform-save' && value?.guthonWorkingCopyIds === undefined) return service.action(workspace, 'upload');
+    return service.review(workspace, action, { workingCopyIds: value?.guthonWorkingCopyIds, scopeLabel: value?.guthonLabel });
+  });
   const toolCommands = [
     vscode.commands.registerCommand('gushenCompletion.openSvnDocument', async target => {
       try {
@@ -825,19 +812,22 @@ function activate(context) {
       try { return await loadLegacyProjects().openLocal(item); }
       catch (error) { return vscode.window.showErrorMessage(error.message); }
     }),
-    vscode.commands.registerCommand('gushenCompletion.saveSvnToGuthon', svnAction((service, workspace) => service.action(workspace, 'upload'))),
-    vscode.commands.registerCommand('gushenCompletion.showSvnDiff', svnAction((service, workspace, sourcePath, remote) => service.diff(workspace, sourcePath, remote))),
+    vscode.commands.registerCommand('gushenCompletion.saveSvnToGuthon', reviewSvnChanges('platform-save')),
+    vscode.commands.registerCommand('gushenCompletion.revertSvnChanges', reviewSvnChanges('revert')),
+    vscode.commands.registerCommand('gushenCompletion.showSvnDiff', svnAction((service, workspace, sourcePath, remote) => service.diff(workspace, sourcePath, { remote }))),
     vscode.commands.registerCommand('gushenCompletion.openSvnConflictMerge', svnAction((service, workspace, sourcePath) => service.conflict(workspace, sourcePath))),
     vscode.commands.registerCommand('gushenCompletion.openSvnChangeInNexus', svnAction((service, w, path, _remote, params) => service.openSvnChange(w,path,params))),
-    vscode.commands.registerCommand('gushenCompletion.revertSingleSvnChange', svnAction((service, w, path) => path && service.review(w,"revert",path))),
-    vscode.commands.registerCommand('gushenCompletion.saveSelectedSvnNexusChanges', svnAction((service, w, path) => path && service.review(w,"platform-save",path))),
+    vscode.commands.registerCommand('gushenCompletion.revertSingleSvnChange', reviewSvnFile('revert')),
+    vscode.commands.registerCommand('gushenCompletion.saveSelectedSvnNexusChanges', reviewSvnFile('platform-save')),
     vscode.commands.registerCommand('gushenCompletion.markSvnConflictResolved', svnAction((service, w, path) => path && service.resolveConflict(w,path))),
-    vscode.commands.registerCommand('gushenCompletion.updateAllSvnChanges',svnAction((service,w,_path,_remote,params,value)=>
-      service.updateRemote(w,'',value?.guthonWorkingCopyIds || [params.get('workingCopyId')].filter(Boolean)))),
+    vscode.commands.registerCommand('gushenCompletion.updateAllSvnChanges', svnAction((service, workspace, _path, _remote, params, value) => {
+      const workingCopyId = params.get('workingCopyId');
+      return service.updateRemote(workspace, '', value?.guthonWorkingCopyIds ?? (workingCopyId ? [workingCopyId] : undefined));
+    })),
     vscode.commands.registerCommand('gushenCompletion.updateSingleSvnChange',svnAction((service,w,path,_remote,params)=>
       path && service.updateRemote(w,path,[params.get('workingCopyId')].filter(Boolean)))),
     vscode.commands.registerCommand('gushenCompletion.showSvnHistory', svnAction((service, w, path) => path && service.history(w,path))),
-    vscode.commands.registerCommand('gushenCompletion.showSvnRawDiff', svnAction((service, w, path) => path && service.diff(w,path))),
+    vscode.commands.registerCommand('gushenCompletion.showSvnRawDiff', svnAction((service, w, path) => path && service.diff(w,path,{raw:true}))),
     vscode.commands.registerCommand('gushenCompletion.searchProjects',()=>projectOverview.provider.search()),
     vscode.commands.registerCommand('gushenCompletion.refreshProjects',async()=>{workspaceRegistry.invalidate();await refreshApiWorkspaces();}),
     vscode.commands.registerCommand('gushenCompletion.openProjectConfiguration',async(value='')=>{
@@ -922,24 +912,23 @@ function activate(context) {
       const selectEntry=value===true;
       const config = vscode.workspace.getConfiguration('gushenCompletion');
       const currentMode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
-      const modes = [
-        { label: '发行模式', description: '调用打包的 GuthonCodeTool 应用', value: 'packaged' },
-        { label: '开发模式', description: '使用 clone 仓库中的 .venv 和源码，选中后指定源码目录', value: 'source-development' },
-        { label: '调试模式', description: '使用本地 Python 和 Release 单文件 .pyz', value: 'script' },
-      ];
-      const selected = selectEntry
-        ? modes.find((item) => item.value === currentMode)
-        : await vscode.window.showQuickPick(modes, { title: '选择 Guthon Nexus 运行模式' });
+      const selected = await pickExecutionMode(currentMode, selectEntry);
       if (!selected) return;
-      const selection = await configuredRuntime(config, selected.value, runtimeSelectionOptions(selected.value, selectEntry));
+      const folders = localWorkspaceFolders();
+      const toolHome = windowToolHome(config, folders);
+      const selectingPackagedForWindow = !selectEntry && selected.value === 'packaged' && (!toolHome || currentMode !== 'packaged');
+      const directory = selectingPackagedForWindow ? toolHome || workspaceSetupCard(folders, toolHome).directory : '';
+      const packagedPath = directory && packagedToolInDirectory(directory);
+      const selection = await configuredRuntime(config, selected.value, {
+        ...runtimeSelectionOptions(selected.value, selectEntry),
+        ...(selectingPackagedForWindow ? { packagedPath, selectPackaged: !packagedPath } : {}),
+        prepareScript: true, scriptStorageRoot: context.globalStorageUri.fsPath,
+      });
       if (!selection) return;
-      await applyRuntimeSelection(config, selection);
       const runtime = selection.runtime;
+      if (!selectEntry) selection.configuration.executionMode = runtime.mode;
+      await applyRuntimeSelection(config, selection, folders?.length ? vscode.ConfigurationTarget.Workspace : undefined);
       await processClient.stop();
-      if (!selectEntry) {
-        await config.update('executionMode', selected.value, runtimeConfigurationTarget(config, 'executionMode', vscode.ConfigurationTarget));
-      }
-      const toolHome = windowToolHome(config, localWorkspaceFolders());
       if (toolHome) writeRuntimeDescriptor({ ...runtime, toolHome });
       if (toolHome && bridge.isRunning()) await bridge.restart({ ...runtime, toolHome });
       refreshToolData();
@@ -1082,10 +1071,10 @@ function activate(context) {
       }
       if (!setup) return;
       if (setup.mode === 'refresh') return refreshLocalWorkspaceViews();
-      const mode = normalizeExecutionMode(config.get('executionMode', 'packaged'));
-      const selected = setup.mode === 'setup' && setup.workspaceDirectory
-        ? await initializationRuntime(config, setup.toolHome)
-        : await configuredRuntime(config, mode, runtimeSelectionOptions(mode, true));
+      const binding = config.inspect?.('executionMode');
+      const reuseSelection = setup.workspaceDirectory &&
+        (binding?.workspaceFolderValue !== undefined || binding?.workspaceValue !== undefined);
+      const selected = await initializationRuntime(config, setup.toolHome, context.globalStorageUri?.fsPath, reuseSelection);
       if (!selected) return;
       const tool = { ...selected.runtime, toolHome: setup.toolHome, env: installedToolEnvironment(setup.toolHome) };
       let workspaces;

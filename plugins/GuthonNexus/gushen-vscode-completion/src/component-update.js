@@ -6,7 +6,7 @@ const { ASSETS, NEXUS_ID } = require('./release-catalog');
 const { readArchive, archiveJson, extractArchive } = require('./update-archive');
 const { compareVersions, assetNameFor, downloadAsset, sha256Stream, request,
   runProcess, installRelease, withUpdateLock } = require('./tool-updater');
-const { probeScriptRuntime } = require('./script-runtime');
+const { prepareScriptRuntime } = require('./script-runtime');
 
 function updateRoot(home) {
   if (!home || !path.isAbsolute(home)) throw new Error('请先设置明确的本地数据目录');
@@ -57,7 +57,7 @@ function managedChrome(root) {
   const manifest = readJson(path.join(directory, 'manifest.json'));
   if (!manifest?.version || marker.version !== manifest.version) throw new Error('Chrome 托管文件版本不一致');
   compareVersions(manifest.version, manifest.version);
-  return { directory, version: manifest.version, installId: marker.installId, status: '已托管' };
+  return { directory, version: manifest.version, installId: marker.installId, sourceBuildId: marker.sourceBuildId, status: '已托管' };
 }
 
 function updatePlan(catalog, current) {
@@ -70,11 +70,13 @@ function updatePlan(catalog, current) {
     target: catalog.components.bridge.version, unknown: !current.chromeVersion,
     update: Boolean(current.chromeVersion && compareVersions(catalog.components.bridge.version, current.chromeVersion) > 0),
     bootstrap: !current.chromeVersion };
-  if (catalog.local) {
-    nexus.codeChanged = nexus.target === nexus.current && catalog.components.nexus.buildId !== current.nexusBuildId;
-    if (nexus.codeChanged) { nexus.update = true; nexus.status = '本地源码有改动'; }
-    chrome.codeChanged = chrome.target === chrome.current && catalog.components.bridge.buildId !== current.chromeBuildId;
-    if (chrome.codeChanged) { chrome.update = true; chrome.status = '本地源码有改动'; }
+  for (const [item, buildId] of [[nexus, current.nexusBuildId], [chrome, current.chromeBuildId]]) {
+    const targetBuild = catalog.components[item.id].buildId;
+    if (item.target === item.current && targetBuild && targetBuild !== buildId && (buildId || catalog.local)) {
+      item.codeChanged = true;
+      item.update = true;
+      item.status = catalog.local ? '本地源码有改动' : '同版本有新构建';
+    }
   }
   if (tool.current && compareVersions(tool.target, tool.current) < 0) tool.status = '当前版本较新';
   if (current.mode === 'source-development') tool.status = '工具源码由开发者管理';
@@ -105,7 +107,7 @@ function hostSettings(source) {
 
 async function prepareUpdate(verified, plan, root, { downloader = downloadAsset, onProgress = () => {},
   mode = 'packaged', pythonPath, importedHosts, platform = process.platform, arch = process.arch,
-  processRunner = runProcess, scriptProbe = probeScriptRuntime } = {}) {
+  processRunner = runProcess, scriptStorageRoot = root, scriptPrepare = prepareScriptRuntime } = {}) {
   const selected = plan.filter(item => item.update || item.bootstrap);
   const names = new Set();
   for (const item of selected) {
@@ -131,7 +133,7 @@ async function prepareUpdate(verified, plan, root, { downloader = downloadAsset,
     }
     files[name] = target;
   }
-  let chromeStage, scriptDirectory, missingProviders = [];
+  let chromeStage, scriptDirectory, scriptRuntime;
   try {
     if (files[ASSETS.nexus]) {
       const entries = readArchive(files[ASSETS.nexus]);
@@ -149,23 +151,29 @@ async function prepareUpdate(verified, plan, root, { downloader = downloadAsset,
       const originalSettings = path.join(previous.directory, 'host-settings.js');
       const rules = importedHosts || (previous.version ? hostSettings(fs.readFileSync(originalSettings, 'utf8')) : hostSettings(fs.readFileSync(path.join(chromeStage, 'host-settings.js'), 'utf8')));
       fs.writeFileSync(path.join(chromeStage, 'host-settings.js'), 'globalThis.GuthonBridgeHostSettings = ' + JSON.stringify(rules, null, 2) + ';\n');
+      const buildId = verified.catalog.components.bridge.buildId;
+      if (buildId) {
+        const background = path.join(chromeStage, 'background.js');
+        fs.writeFileSync(background, 'globalThis.GuthonBridgeSourceBuildId = ' + JSON.stringify(buildId) + ';\n' + fs.readFileSync(background, 'utf8'));
+      }
       saveJson(path.join(chromeStage, 'managed-install.json'), { schemaVersion: 1,
         installId: previous.installId || crypto.randomUUID(), version: manifest.version,
-        sourceBuildId: verified.catalog.components.bridge.buildId,
+        sourceBuildId: buildId,
         archiveSha256: verified.catalog.assets[ASSETS.bridge].sha256 });
     }
     if (mode === 'script' && files[ASSETS.script]) {
-      if (!pythonPath) throw new Error('调试模式未配置 Python');
       scriptDirectory = path.join(root, 'scripts', verified.release.version + '-' + crypto.randomUUID());
       ownedDirectory(root, 'scripts', path.basename(scriptDirectory));
       for (const name of [ASSETS.script, ASSETS.requirements]) fs.copyFileSync(files[name], path.join(scriptDirectory, name));
       fs.writeFileSync(path.join(scriptDirectory, 'GuthonCodeTool-checksums.txt'), verified.checksumsBytes);
       fs.writeFileSync(path.join(scriptDirectory, 'GuthonCodeTool-checksums.signature.json'), verified.signatureBytes);
-      const probe = await scriptProbe({ mode: 'script', toolPath: pythonPath, toolEntry: path.join(scriptDirectory, ASSETS.script) });
-      if (probe.version !== verified.catalog.components.tool.version) throw new Error('调试脚本版本不一致');
-      missingProviders = probe.missingProviders;
+      const prepared = await scriptPrepare(path.join(scriptDirectory, ASSETS.script), {
+        storageRoot: scriptStorageRoot, pythonPath, onProgress,
+      });
+      if (prepared.version !== verified.catalog.components.tool.version) throw new Error('调试脚本版本不一致');
+      scriptRuntime = prepared.runtime;
     }
-    return { verified, plan, files, chromeStage, scriptDirectory, processRunner, missingProviders };
+    return { verified, plan, files, chromeStage, scriptDirectory, scriptRuntime, processRunner };
   } catch (error) {
     if (chromeStage) fs.rmSync(chromeStage, { recursive: true, force: true });
     if (scriptDirectory) fs.rmSync(scriptDirectory, { recursive: true, force: true });
@@ -178,13 +186,14 @@ async function applyUpdate(prepared, root, { mode, platform = process.platform, 
   const { verified, files, plan } = prepared;
   const record = { schemaVersion: 1, operationId: crypto.randomUUID(), release: verified.release, phase: 'APPLYING',
     startedAt: new Date().toISOString(), completed: [], pendingReload: false,
-    nexusVersion: verified.catalog.components.nexus.version, previousBackend };
+    nexusVersion: verified.catalog.components.nexus.version,
+    nexusBuildId: verified.catalog.components.nexus.buildId, previousBackend };
   const journal = path.join(root, 'operation.json');
   saveJson(journal, record);
   try {
     if (plan.find(item => item.id === 'tool')?.update) {
       let backend;
-      if (mode === 'script') backend = { mode, toolEntry: path.join(prepared.scriptDirectory, ASSETS.script), version: verified.catalog.components.tool.version };
+      if (mode === 'script') backend = { ...prepared.scriptRuntime, version: verified.catalog.components.tool.version };
       else {
         const downloader = async (_, target) => { const source = files[assetNameFor(platform, arch, verified.release)]; fs.copyFileSync(source, target); return fs.statSync(target).size; };
         const requester = async url => {
@@ -233,7 +242,7 @@ async function applyUpdate(prepared, root, { mode, platform = process.platform, 
   }
 }
 
-function interruptedUpdate(root, loadedNexusVersion) {
+function interruptedUpdate(root, loadedNexusVersion, loadedNexusBuildId) {
   const record = readJson(path.join(root, 'operation.json'));
   if (!record) return undefined;
   // An interrupted directory swap can be restored using only our exact owned paths.
@@ -245,7 +254,9 @@ function interruptedUpdate(root, loadedNexusVersion) {
     if (fs.existsSync(item.backup) && fs.lstatSync(item.backup).isSymbolicLink()) throw new Error('更新备份不能是链接');
     if (!fs.existsSync(item.directory) && fs.existsSync(item.backup)) fs.renameSync(item.backup, item.directory);
   }
-  if (loadedNexusVersion && record.nexusVersion && compareVersions(loadedNexusVersion, record.nexusVersion) >= 0
+  if (loadedNexusVersion && record.nexusVersion
+      && (compareVersions(loadedNexusVersion, record.nexusVersion) > 0
+          || (loadedNexusVersion === record.nexusVersion && (!record.nexusBuildId || record.nexusBuildId === loadedNexusBuildId)))
       && ['INSTALLING_NEXUS', 'INSTALLED'].includes(record.phase)) {
     record.phase = 'INSTALLED'; record.pendingReload = false;
     if (!record.completed.includes('nexus')) record.completed.push('nexus');

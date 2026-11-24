@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import quote
 
-from common.page_projection import extract_page_fields, extract_page_scripts
+from common.page_projection import extract_page_scripts, pointer_parts, pointer_value
 from providers.svn.checkout import (
     atomic_json,
     file_hash,
@@ -72,34 +72,47 @@ def _format_commit_error(error: BaseException) -> str:
 
 
 def _page_projection(text: str) -> str:
-    """Render PAGE JSON as stable script/SQL/field sections for human diffing."""
+    """Show decoded script lines and keep the rest of the PAGE definition visible."""
 
-    data = json.loads(text)
+    def unique_properties(pairs):
+        value = dict(pairs)
+        if len(value) != len(pairs):
+            raise ValueError("PAGE JSON has duplicate properties")
+        return value
+
+    data = json.loads(text, object_pairs_hook=unique_properties)
     if isinstance(data, str):
-        data = json.loads(data)
+        data = json.loads(data, object_pairs_hook=unique_properties)
     if not isinstance(data, dict):
         raise ValueError("PAGE JSON root must be an object")
     sections = ["# PAGE 可读源码"]
-    for field in extract_page_scripts(data):
+    for field in extract_page_scripts(data, include_empty_inherited=True):
         script_type = "GSS" if field.script_type == "vm" else field.script_type.upper()
+        language = {"vm": "guthon-gss", "js": "javascript", "sql": "sql"}.get(field.script_type, "")
+        fence = "`" * max(3, 1 + max(map(len, re.findall(r"`+", field.original_value)), default=0))
         sections.extend(
             [
                 "",
                 f"## {script_type} · {field.display_name}",
                 f"@json-pointer {field.json_pointer}",
+                fence + language,
                 field.original_value,
+                fence,
             ]
         )
-    for field in extract_page_fields(data):
-        sections.extend(
-            [
-                "",
-                f"## 字段 · {field['label']}",
-                f"@json-pointer {field['json_pointer']}",
-                field["content"],
-            ]
-        )
-    return "\n".join(sections).rstrip() + "\n"
+        parent = pointer_value(data, field.json_pointer.rsplit("/", 1)[0])
+        parent[pointer_parts(field.json_pointer)[-1]] = "见脚本区"
+    sections.extend(["", "## 页面定义", "```json", json.dumps(data, ensure_ascii=False, indent=2), "```"])
+    return "\n".join(sections) + "\n"
+
+
+def _readable_page_pair(entry: ScopeEntry, relative: str, before: str, after: str) -> tuple[str, str]:
+    if not relative.lower().endswith(".json") or source_category(entry, relative) != "pages":
+        return "", ""
+    try:
+        return _page_projection(before) if before else "", _page_projection(after) if after else ""
+    except (TypeError, ValueError, RecursionError):
+        return "", ""
 
 
 def _catalog_by_path(workspace: dict) -> dict[str, dict]:
@@ -478,15 +491,7 @@ def diff(workspace: dict, *, logical_path: str, remote=False) -> dict:
                 remote_bytes = remote_result.stdout
             local_content = decode_source(local_bytes)[0]
             remote_content = decode_source(remote_bytes)[0]
-            readable_local = ""
-            readable_remote = ""
-            if path.suffix.lower() == ".json" and source_category(entry, relative) == "pages":
-                try:
-                    readable_local = _page_projection(local_content) if local_content else ""
-                    readable_remote = _page_projection(remote_content) if remote_content else ""
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    readable_local = ""
-                    readable_remote = ""
+            readable_local, readable_remote = _readable_page_pair(entry, relative, local_content, remote_content)
             output = "".join(
                 difflib.unified_diff(
                     local_content.splitlines(keepends=True),
@@ -522,15 +527,7 @@ def diff(workspace: dict, *, logical_path: str, remote=False) -> dict:
         working_bytes = path.read_bytes()
     base_content = decode_source(base_bytes)[0]
     working_content = decode_source(working_bytes)[0]
-    readable_base = ""
-    readable_working = ""
-    if path.suffix.lower() == ".json" and source_category(entry, relative) == "pages":
-        try:
-            readable_base = _page_projection(base_content)
-            readable_working = _page_projection(working_content)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            readable_base = ""
-            readable_working = ""
+    readable_base, readable_working = _readable_page_pair(entry, relative, base_content, working_content)
     output = "".join(
         difflib.unified_diff(
             base_content.splitlines(keepends=True),

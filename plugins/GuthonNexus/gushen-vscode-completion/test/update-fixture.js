@@ -20,7 +20,7 @@ function zip(files, modes = {}) {
 }
 const rules = { protocols: ['https:'], ipRanges: [], domainSuffixes: ['dev.example.com'], pathPrefixes: ['/guthon/'] };
 
-function fixture(t, { legacyMac = false } = {}) {
+function fixture(t, { legacyMac = false, builds } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-components-')); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const key = crypto.generateKeyPairSync('ed25519');
   const trustFile = path.join(root, 'trust.json');
@@ -40,6 +40,10 @@ function fixture(t, { legacyMac = false } = {}) {
   const catalog = { schemaVersion: 1, releaseVersion: '0.4.0', channel: 'stable',
     components: { tool: { version: '0.4.0', pythonMinimum: '3.12' }, nexus: { version: '2.5.0', id: NEXUS_ID, vscodeEngine: '^1.75.0' }, bridge: { version: '0.4.0', protocolVersion: 2 } },
     assets: Object.fromEntries(Object.entries(data).map(([name, bytes]) => [name, { size: bytes.length, sha256: hash(bytes) }])) };
+  if (builds) {
+    catalog.components.nexus.buildId = builds.nexus;
+    catalog.components.bridge.buildId = builds.bridge;
+  }
   data[CATALOG_ASSET] = Buffer.from(JSON.stringify(catalog));
   const sums = Buffer.from(Object.entries(data).map(([name, bytes]) => hash(bytes) + '  ' + name + '\n').join(''));
   const signature = { schemaVersion: 1, algorithm: 'ed25519', version: '0.4.0', keyId: 'fixture', signature: crypto.sign(null, signingPayload('0.4.0', sums), key.privateKey).toString('base64') };

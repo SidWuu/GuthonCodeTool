@@ -20,9 +20,8 @@ function normalizeExecutionMode(mode) {
 // 开发模式每次都让用户明确选择源码目录，避免沿用已失效或非当前分支的 developmentRoot。
 function runtimeSelectionOptions(mode, reselectEntry = false) {
   return {
-    probeScript: true,
     probePackaged: true,
-    selectScript: reselectEntry,
+    selectScript: reselectEntry || normalizeExecutionMode(mode) === 'script',
     selectPackaged: reselectEntry,
     selectDevelopment: reselectEntry || normalizeExecutionMode(mode) === 'source-development',
   };
@@ -92,7 +91,7 @@ function resolveScriptRuntime(pythonPath, scriptPath) {
   return { mode: 'script', toolPath: pythonPath, toolEntry: scriptPath };
 }
 
-function initializationRuntimeInDirectory(directory, preferredMode, pythonPath) {
+function initializationRuntimeInDirectory(directory, preferredMode) {
   const application = packagedToolInDirectory(directory);
   if (application) {
     return { runtime: { mode: 'packaged', toolPath: application }, configuration: { executionMode: 'packaged', toolPath: application } };
@@ -105,13 +104,6 @@ function initializationRuntimeInDirectory(directory, preferredMode, pythonPath) 
         return { runtime, configuration: { executionMode: runtime.mode, developmentRoot } };
       } catch { /* Try the next supported layout. */ }
     }
-  }
-  if (preferredMode === 'script') {
-    const scriptToolPath = path.join(directory, 'GuthonCodeTool-python.pyz');
-    try {
-      const runtime = resolveScriptRuntime(pythonPath, scriptToolPath);
-      return { runtime, configuration: { executionMode: runtime.mode, scriptPythonPath: pythonPath, scriptToolPath } };
-    } catch { /* The selected directory has no supported script runtime. */ }
   }
 }
 

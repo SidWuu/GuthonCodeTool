@@ -1052,18 +1052,26 @@ def search(workspace, query, limit=20, offset=0):
     _bound(limit, offset)
     query = _query(query)
     with closing(_connection(workspace)) as conn:
+        # Sort and page the matching rows before loading excerpt text. In
+        # particular, name matches can include every fragment of a large PAGE.
         rows = conn.execute(
-            """SELECT c.*,substr(coalesce(nullif(c.referenceFields,''),b.content,''),
-              max(1,instr(lower(coalesce(nullif(c.referenceFields,''),b.content,'')),lower(?))-80),240) AS excerpt,
-              coalesce(b.json_pointer,'') AS jsonPointer
-            FROM api_source_catalog c LEFT JOIN gusen_source_record s ON s.source_path=c.path
-            LEFT JOIN source_body_content b ON b.source_record_id=s.record_id
-            WHERE instr(lower(c.path || ' ' || c.name || ' ' || c.alias || ' ' || c.funId || ' ' || c.referenceFields),lower(?))>0
-               OR instr(lower(coalesce(b.content,'')),lower(?))>0 AND c.referenceId=''
-            ORDER BY c.path,c.dataSourceId,c.sourceId,c.lineNumber,b.json_pointer LIMIT ? OFFSET ?""",
-            (query, query, query, limit + 1, offset),
+            """WITH page AS (
+              SELECT c.*, coalesce(b.json_pointer,'') AS jsonPointer, b.body_id
+              FROM api_source_catalog c LEFT JOIN gusen_source_record s ON s.source_path=c.path
+              LEFT JOIN source_body_content b ON b.source_record_id=s.record_id
+              WHERE instr(lower(c.path || ' ' || c.name || ' ' || c.alias || ' ' || c.funId || ' ' || c.referenceFields),lower(:query))>0
+                 OR (c.referenceId='' AND instr(lower(coalesce(b.content,'')),lower(:query))>0)
+              ORDER BY c.path,c.dataSourceId,c.sourceId,c.lineNumber,b.json_pointer LIMIT :limit OFFSET :offset
+            )
+            SELECT page.*,substr(coalesce(nullif(page.referenceFields,''),body.content,''),
+              max(1,instr(lower(coalesce(nullif(page.referenceFields,''),body.content,'')),lower(:query))-80),240) AS excerpt
+            FROM page LEFT JOIN source_body_content body ON body.body_id=page.body_id
+            ORDER BY page.path,page.dataSourceId,page.sourceId,page.lineNumber,body.json_pointer""",
+            {"query": query, "limit": limit + 1, "offset": offset},
         ).fetchall()
         result = _result(workspace, conn, rows, limit, offset, "hits")
+        for hit in result["hits"]:
+            del hit["body_id"]
         partial = conn.execute(
             "SELECT COUNT(*) FROM source_body_content WHERE indexed_chars<total_chars"
         ).fetchone()[0]

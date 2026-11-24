@@ -205,6 +205,133 @@ test('legacy project service sends updates to SVN or DATABASE while keeping the 
   } finally {for(const subscription of subscriptions)subscription.dispose();}
 });
 
+test('SVN review opens both snapshots with PAGE projection, raw override, and remote orientation', async () => {
+  const { registerLegacyProjects } = require('../src/legacy-project');
+  const subscriptions = [];
+  const comparisons = [];
+  class EventEmitter { constructor() { this.event = () => ({ dispose() {} }); } fire() {} dispose() {} }
+  const workspaceKey = 'projects.demo';
+  const sourcePath = 'systems/SYS/pages/PG.json';
+  const baseContent = '{"script":"if (a \\u0026\\u0026 b)\\n  return true;"}';
+  const workingContent = '{"script":"if (a && b)\\n  return false;"}';
+  const readableBaseContent = 'if (a && b)\n  return true;';
+  const readableWorkingContent = 'if (a && b)\n  return false;';
+  let response = { ok: true, workspaceKey, path: sourcePath,
+    baseContent, workingContent, readableBaseContent, readableWorkingContent, diff: 'unified patch' };
+  let provider;
+  const legacy = registerLegacyProjects({
+    vscode: {
+      EventEmitter, Uri: { from: value => value }, window: {},
+      workspace: { textDocuments: [], registerTextDocumentContentProvider(scheme, candidate) {
+        if (scheme === 'guthon-svn-review-diff') provider = candidate;
+        return { dispose() {} };
+      } },
+      commands: { async executeCommand(command, left, right) {
+        assert.equal(command, 'vscode.diff');
+        assert.equal(left.scheme, 'guthon-svn-review-diff');
+        assert.equal(right.scheme, left.scheme);
+        comparisons.push({ left, right, contents: [left, right].map(uri => provider.provideTextDocumentContent(uri)) });
+      } },
+    },
+    context: { subscriptions }, getTool: () => ({ toolHome: '/fixture' }), sourceTree: { refresh() {} },
+    processClient: { async request(_tool, command, args, key) {
+      assert.equal(key, workspaceKey);
+      assert.equal(command, 'svn');
+      assert.deepEqual(args, ['diff', '--path', sourcePath, ...(response.comparison === 'remote' ? ['--remote'] : [])]);
+      return response;
+    } },
+  });
+  try {
+    await legacy.diff({ workspaceKey }, sourcePath);
+    await legacy.diff({ workspaceKey }, sourcePath, { raw: true });
+    // A failed projection on either populated side displays the raw pair.
+    response = { ...response, readableWorkingContent: '' };
+    await legacy.diff({ workspaceKey }, sourcePath);
+    // Remote removal compares the saved working copy with an empty HEAD side.
+    response = { ok: true, workspaceKey, path: sourcePath, comparison: 'remote',
+      localContent: workingContent, remoteContent: '', readableLocalContent: readableWorkingContent, readableRemoteContent: '' };
+    await legacy.diff({ workspaceKey }, sourcePath, { remote: true });
+    assert.deepEqual(comparisons.map(value => value.contents), [
+      [readableBaseContent, readableWorkingContent], [baseContent, workingContent],
+      [baseContent, workingContent], [readableWorkingContent, ''],
+    ]);
+    assert.match(comparisons[0].left.path, /SVN BASE\.md$/);
+    assert.match(comparisons[1].right.path, /工作副本\.json$/);
+    assert.match(comparisons[3].right.path, /SVN HEAD\.md$/);
+    assert.equal(provider.writeFile, undefined);
+  } finally { for (const subscription of subscriptions) subscription.dispose(); }
+});
+
+test('SVN review skips the picker for one file and scopes batch candidates to the requested group', async () => {
+  const { registerLegacyProjects } = require('../src/legacy-project');
+  class EventEmitter { constructor() { this.event = () => ({ dispose() {} }); } fire() {} dispose() {} }
+  const subscriptions = [], requests = [], picks = [], confirmations = [], diffTabs = [];
+  const workspace = { workspaceKey: 'projects.demo', displayName: 'Demo', checkoutLayout: 'manifest-working-copies' };
+  const candidates = [
+    { id: 'target', path: 'pages/target.json', workingCopyId: 'trade' },
+    { id: 'nearby', path: 'pages/nearby.json', workingCopyId: 'trade' },
+    { id: 'other', path: 'pages/other.json', workingCopyId: 'shared' },
+  ];
+  let accept = true;
+  const legacy = registerLegacyProjects({
+    vscode: { EventEmitter, Uri: { from: value => value },
+      workspace: { textDocuments: [], registerTextDocumentContentProvider: () => ({ dispose() {} }),
+        openTextDocument: async document => document },
+      commands: { async executeCommand(command, _before, _after, title) {
+        assert.equal(command, 'vscode.diff');
+        diffTabs.push(title);
+      } },
+      window: {
+        showInformationMessage: () => {}, showTextDocument: async () => {},
+        showQuickPick: async (items, options) => { picks.push({ items, options }); return items.slice(-1); },
+        showInputBox: async () => 'fixture message',
+        showWarningMessage: async (title, options, action) => { confirmations.push({ title, options }); return accept ? action : undefined; },
+      },
+    },
+    context: { subscriptions }, getTool: () => ({ toolHome: '/fixture' }), sourceTree: { refresh() {} },
+    refreshProjects: async () => {},
+    processClient: { async request(_tool, command, args, key, input) {
+      assert.equal(command, 'svn');
+      assert.equal(key, workspace.workspaceKey);
+      requests.push({ args, input });
+      if (args[0] === 'scm-session') return { ok: true, sessionId: 'session' };
+      if (args[0].endsWith('-preview')) return { ok: true, sessionId: 'session', selectionToken: 'token', candidates };
+      if (args[0] === 'diff') return { ok: true, workspaceKey: key, path: args[2], baseContent: 'old', workingContent: 'new' };
+      return { ok: true };
+    } },
+  });
+  const writes = () => requests.filter(({ args }) => ['revert', 'platform-save'].includes(args[0]));
+  try {
+    for (const action of ['revert', 'platform-save']) {
+      await legacy.review(workspace, action, { sourcePath: candidates[0].path, workingCopyIds: ['trade'] });
+      assert.deepEqual(writes().at(-1).args, [action, '--session', 'session', '--selection-token', 'token', '--candidate', 'target']);
+      assert.equal(confirmations.at(-1).options.detail, candidates[0].path);
+      assert.match(diffTabs.at(-1), /pages\/target\.json/);
+    }
+    assert.deepEqual(writes()[1].input, { message: 'fixture message' });
+    assert.equal(picks.length, 0);
+    accept = false;
+    await legacy.review(workspace, 'revert', { sourcePath: candidates[0].path });
+    assert.equal(writes().length, 2);
+    assert.equal(picks.length, 0);
+
+    accept = true;
+    await legacy.review(workspace, 'platform-save', { workingCopyIds: ['trade'], scopeLabel: '贸易系统' });
+    assert.deepEqual(picks[0].items.map(({ item }) => item.id), ['target', 'nearby']);
+    assert.match(picks[0].options.title, /贸易系统/);
+    assert.deepEqual(requests.filter(({ args }) => args[0] === 'platform-save-preview').at(-1).args,
+      ['platform-save-preview', '--session', 'session', '--working-copy', 'trade']);
+    assert.deepEqual(writes().at(-1).args.slice(-2), ['--candidate', 'nearby']);
+    await legacy.review(workspace, 'revert');
+    assert.deepEqual(picks[1].items.map(({ item }) => item.id), ['target', 'nearby', 'other']);
+
+    const requestCount = requests.length;
+    await legacy.review(workspace, 'revert', { workingCopyIds: [] });
+    await legacy.updateRemote({ ...workspace, sourceMode: 'svn' }, '', []);
+    assert.equal(requests.length, requestCount);
+  } finally { for (const subscription of subscriptions) subscription.dispose(); }
+});
+
 test('project settings route DATABASE and SVN credentials to the selected source provider', async () => {
   const {registerLegacyProjects}=require('../src/legacy-project');
   class Emitter {constructor(){this.event=()=>({dispose(){}});}fire(){}dispose(){}}

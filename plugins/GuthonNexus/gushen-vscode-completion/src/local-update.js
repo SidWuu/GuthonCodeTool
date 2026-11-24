@@ -75,8 +75,6 @@ async function prepareLocalUpdate(local, plan, root, { pythonPath, importedHosts
     if (plan.find(item => item.id === 'bridge')?.update || plan.find(item => item.id === 'bridge')?.bootstrap) {
       if (!pythonPath) throw new Error('开发模式需要已配置的 .venv Python 来构建 Chrome ZIP');
       write(local.chromeFiles, path.join(work, 'extension'));
-      const background = path.join(work, 'extension', 'background.js');
-      fs.writeFileSync(background, 'globalThis.GuthonBridgeSourceBuildId = ' + JSON.stringify(local.catalog.components.bridge.buildId) + ';\n' + local.chromeFiles.get('background.js').toString('utf8'));
       artifacts[ASSETS.bridge] = path.join(work, ASSETS.bridge);
       onProgress('从本地源码快照构建 Chrome 扩展');
       await processRunner(pythonPath, ['-m', 'zipfile', '-c', artifacts[ASSETS.bridge], 'extension'], { cwd: work });

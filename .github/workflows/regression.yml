@@ -1,0 +1,61 @@
+name: Pre-merge
+
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: Regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Prepare Python and SVN
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y subversion
+          python -m venv .venv
+          .venv/bin/python -m pip install -r scripts/python-requirements.txt
+      - name: Check changes, commands, and documentation
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          git diff --check "$BASE_SHA" HEAD
+          .venv/bin/python scripts/check_ai_code_index.py
+          node scripts/check_nexus_commands.mjs
+          node scripts/check_public_docs.mjs
+      - name: Run Python provider regressions
+        env:
+          PYTHONPATH: scripts
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: .venv/bin/python -m unittest discover -s tests/ci -v
+      - name: Smoke-check source CLI and zipapp
+        run: |
+          .venv/bin/python scripts/check_release_smoke.py --entry scripts/guthon_tool.py
+          .venv/bin/python scripts/build_script_tool.py --output "$RUNNER_TEMP/GuthonCodeTool-python.pyz"
+          .venv/bin/python scripts/check_release_smoke.py --entry "$RUNNER_TEMP/GuthonCodeTool-python.pyz"
+          .venv/bin/python scripts/check_toolhost.py .venv/bin/python "$RUNNER_TEMP/GuthonCodeTool-python.pyz"
+      - name: Run Nexus regressions
+        working-directory: plugins/GuthonNexus/gushen-vscode-completion
+        run: |
+          npm ci
+          npm run build:bridge
+          git diff --exit-code -- bridge data/tool-command-metadata.json
+          node --test --test-concurrency=4 test/*.test.js
+      - name: Run Bridge regressions
+        working-directory: plugins/GuthonBridge
+        run: npm test

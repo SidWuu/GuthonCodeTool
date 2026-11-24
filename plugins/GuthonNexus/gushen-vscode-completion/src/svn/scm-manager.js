@@ -131,7 +131,7 @@ class SvnScmManager {
       title: '保存到谷神',
       arguments: [workspace.workspaceKey],
     };
-    this._syncGroups(record, workspace.sourceControlGroups || []);
+    this._syncGroups(record, workspace.sourceControlGroups || [], record.status?.workingCopies || workspace.workingCopies);
   }
 
   _syncGroups(record, definitions, workingCopies = []) {
@@ -245,7 +245,7 @@ class SvnScmManager {
           scheme: 'guthon-svn-change',
           authority: record.workspace.workspaceKey,
           path: `/${workingCopy.id} · SVN 工作副本锁`,
-          query: 'placeholder=locked',
+          query: new URLSearchParams({ placeholder: 'locked', workingCopyId: workingCopy.id }).toString(),
         }),
         contextValue: 'guthonSvn.LOCKED',
         command: {

@@ -98,3 +98,24 @@ test('closing during a read prevents late results and subsequent queued requests
   assert.equal(calls, 1);
   assert.deepEqual(f.picker.items, []);
 });
+
+test('a changed index cannot mix pages and retry starts again at the first page', async () => {
+  const f = quickPickFixture(), offsets = [];
+  const pending = showWorkspaceSearch({vscode: f.vscode, title: 'search', value: 'save',
+    search: async (_query, offset) => {
+      offsets.push(offset);
+      const indexGeneration = offsets.length === 1 ? 'old' : 'new';
+      return {items: [{...item, label: indexGeneration}], indexGeneration, nextOffset: offset ? null : 100};
+    }});
+  await waitFor(() => f.picker.items.length === 2 && !f.picker.busy);
+  f.accept(1);
+  await waitFor(() => offsets.length === 2 && !f.picker.busy);
+  assert.match(f.picker.placeholder, /索引已变化/);
+  assert.equal(f.picker.items[0].label, 'old');
+  f.accept();
+  await waitFor(() => offsets.length === 3 && !f.picker.busy);
+  assert.deepEqual(offsets, [0, 100, 0]);
+  assert.equal(f.picker.items[0].label, 'new');
+  f.hide();
+  assert.equal(await pending, undefined);
+});

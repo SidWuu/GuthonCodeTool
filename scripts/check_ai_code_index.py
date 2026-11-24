@@ -48,7 +48,7 @@ def classify(index_file: Path, root: Path, strict: bool = False) -> dict[str, li
     for value in referenced_paths(text):
         if (root / value).exists():
             continue
-        if not strict and value.startswith(OPTIONAL_PREFIXES):
+        if not strict and value.startswith(OPTIONAL_PREFIXES) and not value.startswith("tests/ci/"):
             skipped.append(value)
         else:
             stale.append(value)

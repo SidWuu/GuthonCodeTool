@@ -6,6 +6,7 @@ const { SvnScmManager } = require('./svn/scm-manager');
 const { SvnVirtualFileSystem, SCHEME, fragmentIdentity,decodeIdentity } = require('./svn/virtual-fs');
 const { SvnSourceWatcher } = require('./svn/source-watcher');
 const { updateRemoteChanges } = require('./svn/remote-update');
+const { ReadonlyDiffEditor } = require('./source/readonly-diff-editor');
 const {SvnInheritanceView,SCHEME:SVN_INHERITANCE_SCHEME}=require('./svn/inheritance-view');
 const { showPullHistory } = require('./pull-history-view');
 const { createDatabaseSourceTree } = require('./database-source-tree');
@@ -30,6 +31,7 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     onStatus?.(key, status, workspace);
   } });
   const documentHomes = new Map();
+  const svnDiffEditor = new ReadonlyDiffEditor(vscode, 'guthon-svn-review-diff');
   const inheritedSource=new SvnInheritanceView({vscode,backend});
   const virtualFs = new SvnVirtualFileSystem({ vscode, backend, onLoaded(uri) {
     if (!documentHomes.has(uri.toString())) documentHomes.set(uri.toString(), getTool()?.toolHome);
@@ -203,48 +205,76 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
       }
       const operation = await vscode.window.showQuickPick(operations, { title: choice.item.path });
       if (operation?.value === 'diff') return diff(workspace, choice.item.path);
-      if (operation?.value === 'revert') return review(workspace, 'revert',choice.item.path);
+      if (operation?.value === 'revert') return review(workspace, 'revert', { sourcePath: choice.item.path });
       if (operation?.value === 'resolve') return resolveConflict(workspace, choice.item.path);
       return;
     }
     return report((await backend.run(workspace.workspaceKey, ['status', '--diff'])).status.diff || '', 'diff');
   }
 
-  async function diff(workspace, sourcePath, remote=false) {
+  async function diff(workspace, sourcePath, { remote = false, raw = false } = {}) {
     if (!sourcePath) throw new Error('请选择一个 SVN 变更文件');
     const difference = await backend.diff(workspace.workspaceKey, sourcePath, remote);
-    return report(difference.diff || difference.svnDiff || JSON.stringify(difference, null, 2), 'diff');
+    const [before, after, readableBefore, readableAfter] = remote
+      ? [difference.localContent, difference.remoteContent, difference.readableLocalContent, difference.readableRemoteContent]
+      : [difference.baseContent, difference.workingContent, difference.readableBaseContent, difference.readableWorkingContent];
+    if (difference.workspaceKey !== workspace.workspaceKey || difference.path !== sourcePath
+      || typeof before !== 'string' || typeof after !== 'string') {
+      throw new Error('SVN 差异响应与当前文件不一致或缺少源码');
+    }
+    const readable = !raw && readableBefore !== readableAfter
+      && typeof readableBefore === 'string' && (readableBefore !== '' || before === '')
+      && typeof readableAfter === 'string' && (readableAfter !== '' || after === '');
+    const extension = readable ? '.md' : (path.posix.extname(sourcePath) || '.txt');
+    const beforeLabel = remote ? '工作副本' : 'SVN BASE';
+    const afterLabel = remote ? 'SVN HEAD' : '工作副本';
+    await svnDiffEditor.show(readable ? readableBefore : before, readable ? readableAfter : after, {
+      beforeName: `${beforeLabel}${extension}`,
+      afterName: `${afterLabel}${extension}`,
+      title: `${sourcePath} · ${readable ? 'PAGE 可读差异' : 'SVN 原始差异'} · ${beforeLabel} ↔ ${afterLabel}`,
+      editorOptions: { preview: false },
+    });
   }
 
-  async function review(workspace, action, sourcePath) {
+  async function review(workspace, action, { sourcePath, workingCopyIds, scopeLabel } = {}) {
     const key = workspace.workspaceKey;
     const toolHome = getTool()?.toolHome;
+    if (workingCopyIds?.length === 0) return vscode.window.showInformationMessage('当前 SVN 分组没有工作副本');
     const dirty = (vscode.workspace.textDocuments || []).some(doc => doc.isDirty &&
       (doc.uri.scheme === SCHEME && doc.uri.authority === key || doc.uri.scheme === 'file' &&
         workspace.sourceRoots?.some(root => within(root.path, doc.uri.fsPath))));
     if (dirty) throw new Error('请先保存当前 SVN 项目的草稿，再审阅文件');
     const session = await backend.run(key, ['scm-session']);
-    const preview = await backend.preview(key, action, session.sessionId);
-    const candidates = (preview.candidates || []).filter(item => !sourcePath || item.path === sourcePath);
+    const preview = await backend.preview(key, action, session.sessionId, { workingCopyIds });
+    let candidates = (preview.candidates || []).filter(item =>
+      (!sourcePath || item.path === sourcePath) && (!workingCopyIds || workingCopyIds.includes(item.workingCopyId)));
     if (preview.blockers?.length || preview.pendingDeliveries?.length) {
       await report({ blockers:preview.blockers, pendingDeliveries:preview.pendingDeliveries });
       if (preview.pendingDeliveries?.length) throw new Error('存在待核对的 SVN 提交记录，请先查看操作记录');
     }
     if (!candidates.length) return vscode.window.showInformationMessage('当前没有符合条件的 SVN 文件');
-    const choices = await vscode.window.showQuickPick(candidates.map(item => ({
-      label:item.path, description:item.workingCopyId, item,
-    })), { canPickMany:true, title:action === 'platform-save' ? '选择本次提交到 SVN 的文件' : '选择本次撤销的文件' });
-    if (!choices?.length) return;
-    for (const choice of choices) await diff(workspace, choice.item.path);
-    const ids = choices.map(choice => choice.item.id);
-    const confirmation = action === 'platform-save' ? '提交 SVN' : '撤销所选修改';
+    const scope = scopeLabel ? `${workspace.displayName} · ${scopeLabel}` : workspace.displayName;
+    if (sourcePath) {
+      if (candidates.length !== 1) throw new Error('所选路径对应多个 SVN 候选，请刷新后重试');
+    } else {
+      const task = action === 'platform-save' ? '选择本次提交到 SVN 的文件' : '选择本次撤回的文件';
+      const choices = await vscode.window.showQuickPick(candidates.map(item => ({
+        label: item.path, description: item.workingCopyId, item,
+      })), { canPickMany: true, title: `${scope} · ${task}` });
+      if (!choices?.length) return;
+      candidates = choices.map(choice => choice.item);
+    }
+    for (const candidate of candidates) await diff(workspace, candidate.path);
+    const ids = candidates.map(candidate => candidate.id);
+    const confirmation = action === 'platform-save' ? '提交 SVN' : '撤回修改';
     let message;
     if (action === 'platform-save') {
       message = await vscode.window.showInputBox({title:'输入 SVN 提交说明',validateInput:value=>value.trim()?'':'请输入提交说明'});
       if (!message?.trim()) return;
     }
     if (await vscode.window.showWarningMessage(
-      `${workspace.displayName}：${confirmation} ${ids.length} 个文件`, { modal:true }, confirmation) !== confirmation) return;
+      `${scope} · ${confirmation} ${ids.length} 个文件`,
+      { modal: true, detail: sourcePath }, confirmation) !== confirmation) return;
     if (toolHome !== getTool()?.toolHome) throw new Error('数据目录已切换，请重新审阅 SVN 修改');
     const result = action === 'platform-save'
       ? await backend.platformSave(key, preview, ids, message)
@@ -325,6 +355,7 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
 
   async function updateRemote(workspace, sourcePath, workingCopyIds) {
     if(!manifest(workspace)) throw new Error('当前 SVN 项目没有工作副本远端检查能力');
+    if (workingCopyIds?.length === 0) return vscode.window.showInformationMessage('当前 SVN 分组没有工作副本');
     const key=workspace.workspaceKey;
     const output=getOutput();
     output.show(true);
@@ -551,7 +582,7 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     svnCodeSaved?.dispose();
     for(const editor of pageEditors.values())editor.dispose();
     databaseRegistration?.dispose();databaseEditor?.dispose();
-    watcher.dispose();scopedScm.dispose();catalog.dispose();virtualFs.dispose();inheritedSource.dispose();
+    watcher.dispose();scopedScm.dispose();catalog.dispose();virtualFs.dispose();inheritedSource.dispose();svnDiffEditor.dispose();
   }});
   return { action, login, sync, children, treeItem, openLocal, openWorkcopy:databaseTree.workcopy,
     hasUnsavedDrafts:workspace=>!!pageEditors.get(workspace.sourceMode)?.hasUnsavedDrafts(workspace.workspaceKey,getTool()?.toolHome),

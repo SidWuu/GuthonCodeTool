@@ -123,32 +123,33 @@ jobs:
       - name: Build application
         run: python scripts/build_guthon_tool.py
 
-      - name: Test packaged application
+      - name: Test packaged Windows application
+        if: runner.os == 'Windows'
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            ./dist/GuthonCodeTool.exe self-test --home "$RUNNER_TEMP/guthon-self-test"
-            python scripts/check_toolhost.py ./dist/GuthonCodeTool.exe
-            python scripts/check_release_smoke.py --entry dist/GuthonCodeTool.exe
-          else
-            ./dist/GuthonCodeTool/GuthonCodeTool self-test --home "$RUNNER_TEMP/guthon-self-test"
-            python scripts/check_toolhost.py ./dist/GuthonCodeTool/GuthonCodeTool
-            python scripts/check_release_smoke.py --entry dist/GuthonCodeTool/GuthonCodeTool
-          fi
+          ./dist/GuthonCodeTool.exe self-test --home "$RUNNER_TEMP/guthon-self-test"
+          python scripts/check_toolhost.py ./dist/GuthonCodeTool.exe
+          python scripts/check_release_smoke.py --entry dist/GuthonCodeTool.exe
 
       - name: Prepare Windows application
         if: runner.os == 'Windows'
         shell: pwsh
         run: Copy-Item dist/GuthonCodeTool.exe "${{ matrix.asset }}"
 
-      - name: Prepare macOS application
+      - name: Package and test the macOS download
         if: runner.os == 'macOS'
+        shell: bash
         run: |
-          # onedir layout: the archive root holds the launcher plus its _internal runtime.
-          (cd dist && ditto --norsrc -c -k GuthonCodeTool "$GITHUB_WORKSPACE/${{ matrix.asset }}")
-          entries=$(unzip -Z -1 "${{ matrix.asset }}")
-          grep -qx 'GuthonCodeTool' <<< "$entries"
-          grep -q '^_internal/' <<< "$entries"
+          test -f dist/GuthonCodeTool
+          (cd dist && zip "$GITHUB_WORKSPACE/${{ matrix.asset }}" GuthonCodeTool)
+          test "$(unzip -Z -1 "${{ matrix.asset }}")" = GuthonCodeTool
+          smoke_dir=$(mktemp -d "$RUNNER_TEMP/guthon-macos-download.XXXXXX")
+          ditto -x -k "${{ matrix.asset }}" "$smoke_dir"
+          executable="$smoke_dir/GuthonCodeTool"
+          test -f "$executable" && test -x "$executable"
+          test "$(lipo -archs "$executable")" = arm64
+          python scripts/check_toolhost.py "$executable"
+          python scripts/check_release_smoke.py --entry "$executable"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -398,8 +399,7 @@ jobs:
             echo
             echo "- Windows x64 应用：\`GuthonCodeTool-windows-x64.exe\`"
             echo "- macOS M1 及后续型号应用：\`GuthonCodeTool-macos-arm64.zip\`"
-            echo "- Python 调试脚本：\`GuthonCodeTool-python.pyz\`（需自备符合要求的 Python 环境）"
-            echo "- Python 调试依赖：\`GuthonCodeTool-python-requirements.txt\`"
+            echo "- Python 调试模式：将 pyz、依赖清单、校验文件及签名放在同一目录。在 Nexus 选择 pyz，由本机 Python 3.12+ 自动准备隔离环境。"
             echo "- Guthon Nexus（API/SVN/DATABASE 三种同步方式）：\`guthon-nexus-vscode.vsix\`"
             echo "- Guthon Bridge：\`GuthonCodeTool-chrome.zip\`"
             echo "- Guthon Testing Skill：\`guthon-testing.zip\`（解压到 Codex Skills 目录）"

@@ -63,26 +63,34 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
       try { clients = (await bridge.request(config().get('toolHome'), '/components')).clients || []; }
       catch { /* Pre-bootstrap services do not implement the component protocol. */ }
     }
-    const chromeBuildId = source() === 'local' && chrome.version ? packageFingerprint(chromeFiles(chrome.directory), new Set(['host-settings.js'])) : undefined;
+    const chromeBuildId = chrome.version
+      ? packageFingerprint(chromeFiles(chrome.directory), new Set(['host-settings.js'])) : undefined;
     return { tool, toolVersion, mode: mode(), nexusVersion: loadedVersion, nexusBuildId: loadedBuildId,
       chromeVersion: chrome.version, chromeBuildId, chrome, clients };
+  }
+  function markNexusReloadPending(rows, target, operation) {
+    if (operation?.phase === 'INSTALLED' && operation.version === target.version
+        && operation.buildId === target.buildId
+        && (loadedVersion !== target.version || (target.buildId && loadedBuildId !== target.buildId))) {
+      const row = rows.find(item => item.id === 'nexus'); row.update = false; row.status = '已安装，待重新加载窗口';
+      return true;
+    }
+    return false;
   }
   async function refreshSnapshot(signed, checkedAt) {
     const actual = await current();
     // Quiet checks observe progress only; recovery runs under the installation lock.
-    const operation = readJson(nexusStateFile);
     const rows = updatePlan(signed.catalog, actual);
-    if (operation?.phase === 'INSTALLED'
-        && operation.version === signed.catalog.components.nexus.version
-        && (!signed.catalog.local || operation.buildId === signed.catalog.components.nexus.buildId)
-        && (loadedVersion !== operation.version || (signed.catalog.local && loadedBuildId !== operation.buildId))) {
-      const row = rows.find(item => item.id === 'nexus'); row.update = false; row.status = '已安装，待重新加载窗口';
-    }
+    markNexusReloadPending(rows, signed.catalog.components.nexus, readJson(nexusStateFile));
     const browser = rows.find(item => item.id === 'bridge');
     const relevant = actual.clients.filter(item => item.installId && item.installId === actual.chrome?.installId);
-    browser.status = browser.codeChanged ? '本地源码有改动' : browser.bootstrap ? '首次托管需在 Chrome 加载固定目录'
-      : relevant.length ? relevant.every(item => item.version === browser.current) ? '运行版本已核对' : '运行版本与托管版本不同，等待核对'
-        : '已托管，运行版本未连接';
+    if (!browser.status) {
+      const build = actual.chrome?.sourceBuildId;
+      const running = relevant.every(item => item.version === browser.current && (!build || item.sourceBuildId === build));
+      browser.status = browser.bootstrap ? '首次托管需在 Chrome 加载固定目录'
+        : relevant.length ? (running ? '运行版本已核对' : '运行版本或构建与托管文件不同，等待核对')
+          : '已托管，运行版本未连接';
+    }
     snapshot = { rows, current: { toolVersion: actual.toolVersion }, source: source(),
       releaseVersion: signed.release.version, checkedAt: new Date(checkedAt).toISOString(),
       info: signed.origin === 'local' ? '开发模式使用本地源码：' + signed.sourceRoot : undefined,
@@ -179,7 +187,7 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
         if (alive) throw new Error('Nexus 安装正在执行或等待核验，请先重新加载窗口');
       }
       const result = await withUpdateLock(directory, () => withUpdateLock(context.globalStorageUri.fsPath, async () => {
-        const record = interruptedUpdate(directory, loadedVersion);
+        const record = interruptedUpdate(directory, loadedVersion, loadedBuildId);
         const local = mode() === 'source-development' ? readLocal(config().get('developmentRoot', '')) : undefined;
         let release = local ? local.release : await fetchRelease(source());
         if (!local && record && ['PARTIAL', 'APPLYING', 'INSTALLING_NEXUS', 'READY_NEXUS'].includes(record.phase) && record.release?.version
@@ -193,11 +201,7 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
         if (initialIdentity !== configurationIdentity()) throw new Error('更新配置已改变，请重新检查');
         if (!supportsEditor(verified.catalog.components.nexus.vscodeEngine, vscode.version)) throw new Error('当前编辑器版本不满足 Nexus 更新要求，请先升级编辑器');
         const actual = await current(), plan = updatePlan(verified.catalog, actual);
-        if (native?.phase === 'INSTALLED' && native.version === verified.catalog.components.nexus.version
-            && (!local || native.buildId === verified.catalog.components.nexus.buildId)) {
-          const row = plan.find(item => item.id === 'nexus');
-          if (loadedVersion !== row.target || (local && loadedBuildId !== native.buildId)) { row.update = false; row.status = '已安装，待重新加载窗口'; }
-        }
+        const nexusReloadPending = markNexusReloadPending(plan, verified.catalog.components.nexus, native);
         const identity = configurationIdentity();
         const selected = plan.filter(item => item.update || item.bootstrap);
         if (plan.find(item => item.id === 'nexus')?.update) {
@@ -205,7 +209,7 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
           if (!available.includes('workbench.extensions.installExtension')) throw new Error('编辑器不支持自动安装 VSIX，请先手动升级 Nexus');
         }
         if (!selected.length) {
-          const message = record?.pendingReload && actual.nexusVersion !== verified.catalog.components.nexus.version ? '更新已安装，等待重新加载窗口' : '三项组件已是当前发行版本';
+          const message = nexusReloadPending ? '更新已安装，等待重新加载窗口' : '三项组件已是当前发行版本';
           const choice = await vscode.window.showInformationMessage(message, '重新加载窗口', 'Chrome 管理指引');
           if (choice === '重新加载窗口') await vscode.commands.executeCommand('workbench.action.reloadWindow');
           if (choice === 'Chrome 管理指引') await browserGuide(actual.chrome.directory);
@@ -234,12 +238,8 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
         prepared = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: '准备 Guthon 组件更新', cancellable: false },
           progress => local ? prepareLocal(local, plan, directory, { pythonPath: actual.tool?.toolPath, importedHosts,
             onProgress: message => progress.report({ message }) }) : prepareUpdate(verified, plan, directory, { mode: mode(), pythonPath: actual.tool?.toolPath,
+            scriptStorageRoot: context.globalStorageUri.fsPath,
             importedHosts, onProgress: message => progress.report({ message }) }));
-        if (prepared.missingProviders.length) {
-          const choice = await vscode.window.showWarningMessage('Python 缺少可选数据库依赖：' + prepared.missingProviders.join('；'),
-            { modal: true, detail: '同批 requirements 已保存；当前可继续使用核心功能。请在所选 Python 环境中按需安装依赖，不会自动修改全局环境。' }, '继续使用核心功能');
-          if (choice !== '继续使用核心功能') return;
-        }
         if (identity !== configurationIdentity()) throw new Error('运行配置已改变，请重新检查更新');
         if (isBusy()) throw new Error('当前工具或源码操作正在执行，附件已缓存，请完成后再更新');
         setBusy(true); busyClaimed = true;
@@ -252,14 +252,26 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
         await processClient.stop();
         const result = await applyUpdate(prepared, directory, {
           mode: mode(),
-          previousBackend: { mode: mode(), toolPath: config().get('toolPath', ''), scriptToolPath: config().get('scriptToolPath', ''), version: actual.toolVersion },
+          previousBackend: { mode: mode(), toolPath: config().get('toolPath', ''), scriptToolPath: config().get('scriptToolPath', ''),
+            scriptPythonPath: config().get('scriptPythonPath', ''), version: actual.toolVersion },
           deferNexus: true,
           trustStorageRoot: context.globalStorageUri.fsPath,
           installNexus: file => vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(file)),
           switchBackend: async backend => {
-            const previous = { mode: mode(), toolPath: config().get('toolPath', ''), scriptToolPath: config().get('scriptToolPath', ''), version: actual.toolVersion };
+            const previous = { mode: mode(), toolPath: config().get('toolPath', ''), scriptToolPath: config().get('scriptToolPath', ''),
+              scriptPythonPath: config().get('scriptPythonPath', ''), version: actual.toolVersion };
             const state = readUpdateState(context.globalStorageUri.fsPath);
-            if (mode() === 'script') await config().update('scriptToolPath', backend.toolEntry, runtimeConfigurationTarget(config(), 'scriptToolPath', vscode.ConfigurationTarget));
+            if (mode() === 'script') {
+              const settings = config();
+              const pythonTarget = runtimeConfigurationTarget(settings, 'scriptPythonPath', vscode.ConfigurationTarget);
+              await settings.update('scriptPythonPath', backend.toolPath, pythonTarget);
+              try {
+                await settings.update('scriptToolPath', backend.toolEntry, runtimeConfigurationTarget(settings, 'scriptToolPath', vscode.ConfigurationTarget));
+              } catch (error) {
+                await settings.update('scriptPythonPath', previous.scriptPythonPath, pythonTarget);
+                throw error;
+              }
+            }
             else {
               writeUpdateState(context.globalStorageUri.fsPath, { activeVersion: backend.version, activePath: backend.toolPath,
                 previousVersion: actual.toolVersion, previousPath: previous.toolPath, source: source(), sha256: backend.sha256, updatedAt: new Date().toISOString() });
