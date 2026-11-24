@@ -115,6 +115,7 @@ class SvnWorkspaceTest(WorkspaceCase):
         self.assertEqual(original, local["baseContent"])
         self.assertIn("return false;", local["readableWorkingContent"])
         self.assertEqual(88, json.loads(local["workingContent"])["buttons"][0]["width"])
+        self.assertIn('"width": 88', local["readableWorkingContent"])
         remote = self.home / "second-checkout"
         subprocess.run(["svn", "checkout", url, remote], check=True, capture_output=True)
         (remote / relative).write_text(original.replace("true;", "null;"), encoding="utf-8")

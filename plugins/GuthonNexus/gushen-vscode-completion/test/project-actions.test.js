@@ -21,6 +21,16 @@ test('keyboard fallback respects project selection and cancellation',async()=>{
   assert.equal(menus.length,2);assert(menus[0].some(x=>x.label==='选择运行方式'));assert.deepEqual(calls,[['gushenCompletion.reindexCalls','projects.B']]);
   cancel=true;await showProjectActions({vscode,getWorkspaces:async()=>items,bridge:{isRunning:()=>false}});assert.equal(calls.length,1);
 });
+test('runtime settings remain reachable when the current backend fails to load projects',async()=>{
+  const calls=[];
+  const vscode={QuickPickItemKind:{Separator:-1},window:{showQuickPick:async(items,options)=>{
+    assert.match(options.placeHolder,/无法读取项目/);
+    assert(!items.some(item=>item.project));
+    return items.find(item=>item.command==='selectExecutionMode');
+  }},commands:{executeCommand:async(...args)=>calls.push(args)}};
+  await showProjectActions({vscode,getWorkspaces:async()=>{throw new Error('debug runtime failed');},bridge:{isRunning:()=>false}});
+  assert.deepEqual(calls,[['gushenCompletion.selectExecutionMode']]);
+});
 test('native project menu and export handlers resolve the current project and preserve explicit identities',async()=>{
   const selected=[],commands=[],tools=[],errors=[];let cancel=false;
   const vscode={commands:{executeCommand:async(...args)=>commands.push(args)},window:{showErrorMessage:async message=>errors.push(message)}};

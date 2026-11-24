@@ -217,7 +217,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
   <a href="https://gitee.com/sidwu/GuthonCodeTool/releases" target="_blank" rel="noopener">Gitee Releases</a>
   ，在同一个版本下载：</p>
 <ul>
-<li>macOS M1 及后续型号：单文件 <code>GuthonCodeTool</code></li>
+<li>macOS M1 及后续型号：<code>GuthonCodeTool-macos-arm64.zip</code>，解压得到单文件 <code>GuthonCodeTool</code></li>
 <li>Windows x64：<code>GuthonCodeTool-windows-x64.exe</code></li>
 <li>VS Code 双模式扩展 Guthon Nexus：<code>guthon-nexus-vscode.vsix</code></li>
 <li>Chrome 扩展 Guthon Bridge：<code>GuthonCodeTool-chrome.zip</code></li>
@@ -235,7 +235,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h4>macOS</h4>
 <ol>
 <li>确认 Mac 为 M1 或后续型号：可在“关于本机”中查看。</li>
-<li>将下载的单文件 <code>GuthonCodeTool</code> 放到开发目录的上一级。</li>
+<li>解压下载的 ZIP，将其中的 <code>GuthonCodeTool</code> 放到开发目录的上一级。</li>
 <li>在当前开发目录点击“初始化此文件夹”，Nexus 会在上一级自动识别 <code>GuthonCodeTool</code>。</li>
 <li>如果启动文件没有执行权限，在终端执行：</li>
 </ol>
@@ -261,12 +261,18 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <ol>
 <li>已连接的窗口可从“项目总览 → … → 工具设置 → 切换本地数据目录”更换目录。刷新项目总览可重新读取已登记项目。</li>
 <li>从当前开发目录初始化时，卡片会列出开发目录及其上一级数据目录。接入已有工作空间时，通过“连接已有数据目录”选择包含 <code>config/</code> 的上一级目录。每个数据目录绑定一个开发根，已有绑定继续使用原路径。</li>
-<li>点击“初始化此文件夹”后，Nexus 自动检查上一级的 <code>GuthonCodeTool</code> 或 Windows EXE，检查通过即进入初始化确认。上一级找不到可用的运行文件时，会让你选择后端所在的运行目录，数据仍写入开发目录的上一级。已有工作区可从“项目总览 → … → 工具设置”手动更换运行入口。初始化取消时保留原设置，成功后才保存当前工作区的关联。</li>
+<li>点击“初始化此文件夹”，Nexus 会检查开发目录上一级的 <code>GuthonCodeTool</code> 或 Windows EXE。如果还没有选定入口、上一级也没有运行文件，先选运行方式，再按提示选择对应入口。使用发行模式时，macOS 选择解压后的 <code>GuthonCodeTool</code>，Windows 选择 EXE。初始化成功后，当前工作区会关联上一级数据目录。</li>
 <li>确认信任当前目录并连接公司网络。按提示输入团队提供的 Git 克隆地址。首次访问按<a href="#3-1-安装治理插件">内网 Git 接入步骤</a>开通权限。等待 Nexus 显示“工作区已初始化，团队规则和开发门禁已同步”。此时即可在根目录查看 <code>AGENTS.md</code>、<code>rules/</code> 和 <code>tools/guthon-lint</code>。</li>
 <li>初始化后留在当前开发目录，点击“立即添加”，或在“项目总览”点击“添加项目”。日常继续打开这个目录。</li>
 </ol>
 <p>切换到另一个文件夹时，Nexus 会核对当前文件夹与全局数据目录的归属。当前窗口若明确连接另一个位置的数据目录，该连接保存在这个窗口的工作区设置中。</p>
-<p>普通用户使用“发行模式”；需要源码开发或 Python 调试时，按<a href="GuthonCodeTool_全功能说明.html#3-3-命令与运行描述">运行模式说明</a>选择对应入口。在另一 IDE 中继续使用同一工作空间时，连接原来的本地数据目录。</p>
+<p id="switch-execution-mode">从“项目总览 → … → 工具设置 → 选择运行方式”切换当前工作区的运行方式。切换到“发行模式”时，核对当前数据目录中的应用，或按提示选择解压后的可执行文件。需要调试 pyz 时按下节操作。源码开发的入口见<a href="GuthonCodeTool_全功能说明.html#3-3-命令与运行描述">运行模式参考</a>。在另一 IDE 中继续使用同一工作空间时，连接原来的本地数据目录。</p>
+<h4 id="setup-script-mode">初始化调试模式</h4>
+<ol>
+<li>确认本机装有与 Nexus 架构相同的 64 位 Python 3.12 或更新版本。Intel Mac 使用 x86_64 Python。首次准备依赖时需要联网。</li>
+<li>从同一个正式发行版下载以下四个文件并放在同一目录：<code>GuthonCodeTool-python.pyz</code>、<code>GuthonCodeTool-python-requirements.txt</code>、<code>GuthonCodeTool-checksums.txt</code> 和 <code>GuthonCodeTool-checksums.signature.json</code>。</li>
+<li>在“项目总览 → … → 工具设置 → 选择运行方式”选择“调试模式”，只选择 <code>GuthonCodeTool-python.pyz</code>。Nexus 会校验附件、创建隔离环境并安装依赖。等待“已切换为调试模式”后继续操作。</li>
+</ol>
 <p>新工作空间初始化完成后，项目总览为空。团队规则和开发门禁已同步到开发根，可用“项目总览 → … → 工具设置 → 团队规则同步”手动更新。接下来<a href="#2-1-创建产品或项目">添加项目</a>。</p>
 
 </section>
@@ -302,7 +308,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h3 id="2-4-驾驶舱与工作区管理">2.2 切换和管理项目</h3>
 <p>从上到下查看“项目总览”“当前项目”和“项目源码”。点击项目行同步切换卡片和源码树。总览筛选只影响列表，已打开的编辑器和草稿继续属于原项目。</p>
 <h4 id="project-details">当前项目卡片</h4>
-<p>从卡片查看同步范围、源码数量和本地修改，使用搜索源码、本地修改、操作记录、同步范围、索引管理和环境检查。</p>
+<p>从卡片查看同步范围、源码数量和本地修改，使用搜索源码、本地修改、操作记录、同步范围、索引管理和环境检查。API 项目的源码搜索先显示首批结果，选择列表末尾的“加载更多结果”可继续查看；修改关键词会重新搜索。</p>
 <div class="manual-shots">
 <figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：PRD 期现产品的项目总览、当前项目卡片和项目源码分类"><img src="nexus-manual-images/panels-filtered.png" width="905" height="1388" alt="PRD 期现产品的项目总览、当前项目卡片和项目源码分类" loading="lazy"></button><figcaption>选中项目后，卡片上方可更新源码，下方可打开同步范围、索引管理和其他常用操作。</figcaption></figure>
 <figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：索引管理包含重建索引、查看索引诊断和重试待更新文件"><img src="nexus-manual-images/index.png" width="1210" height="287" alt="索引管理包含重建索引、查看索引诊断和重试待更新文件" loading="lazy"></button><figcaption>从卡片点「索引管理」打开实际选项。</figcaption></figure>
@@ -427,7 +433,8 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="4-bridge">4. Bridge 网页辅助</h2>
-<h3 id="4-1-安装-chrome-扩展">4.1 安装 Chrome 扩展</h3><p>需要网页辅助时加载 GuthonBridge 扩展；Windows 首次加载见<a href="GuthonCodeTool_Windows安装步骤.html#one-click-bridge">安装步骤</a>。日常源码同步、编辑和检查可以直接在 Nexus 完成。需要已登录页签的操作会指明当前动作；按下节完成配对后继续。</p><h3 id="4-2-启动与验证">4.2 启动与配对</h3><ol><li>更换本地数据目录前，在持有旧 Bridge 服务的 Nexus 窗口点击“项目总览 → … → 停止浏览器增强”，等待停止；同一端口不能同时监听两套数据目录。端口仍被占用时，按<a href="GuthonCodeTool_QA.html?q=EADDRINUSE">端口占用问答</a>核对原窗口和进程。</li><li>在目标数据目录对应的 Nexus 窗口点击“项目总览 → … → 启动浏览器增强”（命令面板名称为“Guthon Nexus: 启动 Guthon Bridge”），等待启动成功，再点击“复制配对令牌”。</li><li>在 Chrome 扩展弹窗的配对设置中填写与 Nexus 相同的端口、粘贴配对令牌，点击“保存并连接”。确认显示“Bridge 配对成功”；默认导出目录应属于当前本地数据目录，若使用自定义导出目录则核对已配置的位置。</li><li>更新或重新加载 Chrome 扩展后，先保存平台编辑再刷新平台页面；执行一次所需的只读定位，核对返回工作区与对象。</li></ol><h3 id="4-3-使用网页辅助">4.3 使用网页辅助</h3><p>在受支持页面使用字段复制、列表滚动、标签排序及对象定位；选择当前 PAGE 或过程函数后可发送到 Nexus。定向刷新需要唯一对象，表、视图和系统脚本每次选择一个。单据类型源码不通过 API 定向刷新；独立只读导出另按数据库目标使用。</p><h4 id="bridge-tab-sort">标签排序</h4><p>拖动平台标签可调整已支持标签栏的顺序；上层按平台地址保存，下层只在当前页面会话保留。</p>
+<h3 id="4-1-安装-chrome-扩展">4.1 安装 Chrome 扩展</h3><p>需要网页辅助时加载 GuthonBridge 扩展；Windows 首次加载见<a href="GuthonCodeTool_Windows安装步骤.html#one-click-bridge">安装步骤</a>。日常源码同步、编辑和检查可以直接在 Nexus 完成。需要已登录页签的操作会指明当前动作；按下节完成配对后继续。</p><h3 id="4-2-启动与验证">4.2 启动与配对</h3><ol><li>更换本地数据目录前，在持有旧 Bridge 服务的 Nexus 窗口点击“项目总览 → … → 停止浏览器增强”，等待停止；同一端口不能同时监听两套数据目录。端口仍被占用时，按<a href="GuthonCodeTool_QA.html?q=EADDRINUSE">端口占用问答</a>核对原窗口和进程。</li><li>在目标数据目录对应的 Nexus 窗口点击“项目总览 → … → 启动浏览器增强”（命令面板名称为“Guthon Nexus: 启动 Guthon Bridge”），等待启动成功，再点击“复制配对令牌”。</li><li>在 Chrome 扩展弹窗的配对设置中填写与 Nexus 相同的端口、粘贴配对令牌，点击“保存并连接”。确认显示“Bridge 配对成功”；默认导出目录应属于当前本地数据目录，若使用自定义导出目录则核对已配置的位置。</li><li>更新或重新加载 Chrome 扩展后，先保存平台编辑再刷新平台页面；执行一次所需的只读定位，核对返回工作区与对象。</li></ol><h3 id="4-3-使用网页辅助">4.3 使用网页辅助</h3>
+<p>在受支持的谷神页面，可以复制字段、滚动列表和<span id="bridge-tab-sort">拖动标签排序</span>。与 Nexus 配对后，可定位当前 PAGE 或过程函数，并按需定向刷新 API 源码。适用范围见<a href="GuthonCodeTool_全功能说明.html#8-1-页面能力">Bridge 功能说明</a>。</p>
 </section>
 
 <section class="wiki-section">
@@ -469,8 +476,8 @@ codex mcp get guthon-source-helper</code></pre></div>
 <li>上传后核对逐项回执与平台回读，再按业务要求到谷神平台提交、编译和运行验证。结果未知时先查询原操作记录并核对平台。</li>
 </ol>
 <p>在“暂存／还原”中，选择“取消暂存”会把文件移回“本地变更”，选择“还原本地修改”会在确认后恢复到本地同步基线。模块参数使用独立的预览上传入口。支持的文件类型和暂存限制见<a href="GuthonCodeTool_全功能说明.html#api-scm-staging">API 暂存参考</a>。</p></li>
-<li><strong>SVN</strong>在“本地修改”核对差异。清单模式可从“提交 SVN”勾选文件并审阅提交，再从操作记录查看回执。按项目流程另行核对谷神平台生效。已同步公共源码时可浏览单据类型和下拉组件，继承过程函数可从右键查看父层源码。</li>
-<li><strong>DATABASE</strong>从源码树打开页面或过程函数。首次保存会在 <code>source/workcopy/</code> 建立对应工作副本，之后保存更新同一副本。点击卡片上的“查看工作副本”核对改动和交付材料，按原项目流程回写平台。</li>
+<li><strong>SVN</strong>在“源代码管理”中选择当前项目的“谷神 SVN 源码变更”，点击文件，在左右两栏核对修改。PAGE 脚本按行展开，核对原文时右键选“查看 SVN 原始差异”。点击文件右侧的撤回或提交图标，直接审阅当前文件并确认。子系统右侧的图标用于操作该组，“更改”标题栏的图标用于当前 SVN 项目。点击更新后确认远端变更范围，批量撤回或提交前勾选文件。提交时填写说明，完成后从操作记录查看回执，并按项目流程核对谷神平台生效。已同步公共源码时可浏览单据类型和下拉组件，继承过程函数可从右键查看父层源码。<a href="GuthonCodeTool_全功能说明.html#svn-source-diff">SVN 差异与操作范围</a></li>
+<li><strong>DATABASE</strong>从源码树打开页面或过程函数。首次保存会在 <code>source/workcopy/</code> 建立对应工作副本，之后保存更新同一副本。点击卡片上的“查看工作副本”核对改动和交付材料，按原项目流程回写平台。执行“导出单据类型”后，在项目的 <code>database/billtype/</code> 查看 JSON，也可在源码树浏览已索引的单据类型。</li>
 </ul>
 <p>平台表或视图的结构同步会执行 DDL，按提示确认并单独核验结果。</p>
 <p>单击源码树中的页面名称打开本地编辑器，通过左侧箭头展开脚本、SQL、字段或按钮。API 结构化 PAGE 的悬停说明如果显示“批量下载 XML · 只读”，点击该页的“编辑页面”会为它加载原生模型；可右键“打开原始源码”查看批量下载的 XML。顶层“过程函数”分类右键可切换“列表平铺”和“树形结构”；数据源、过程包和函数节点没有此切换。函数节点左侧显示业务名称，右侧较小字号显示函数编码及可解析的签名，确认启用返回值时显示返回表达式，例如 <code>[return $result]</code>；无法可靠确定表达式时显示 <code>[return 无]</code>；<code>()</code> 表示确认无参数，<code>(无)</code> 表示无法可靠确定参数。格式及来源见<a href="GuthonCodeTool_全功能说明.html#project-details">过程函数展示说明</a>。页面或过程函数右键选择“查看使用位置”可打开已索引的引用。新建函数从目标过程包右键进入，核对名称和选项后确认创建。</p><p>更新或上传期间打开“输出”，选择“GuthonCodeTool”，查看实际执行步骤和耗时；结果未知时从操作记录核对原编号。</p><h4 id="source-filter">过滤和定位源码</h4><p>点击源码树标题栏的过滤按钮，输入名称、编码或相对路径；匹配项及父目录会保留。清除过滤后恢复完整目录，过滤不改变拉取范围或上传集合。源码树右键可复制文件名、绝对路径、相对路径，或在系统文件管理器显示所属物理文件；原生资源管理器同步显示本地修改、冲突和名称提示。</p><p>在过程函数或服务组件原文的 <code>@inherit()</code> 上悬停可查看说明，按 Ctrl/Cmd 点击打开只读产品源码。继承已展开的代码标签提供“打开只读产品源码”入口；本地函数声明和调用可悬停查看紧邻注释。全局事务过程调用也支持定义跳转。</p><h4 id="local-page-editor">编辑 PAGE</h4><ol><li>在源码树右键目标页面，选择“编辑页面”；也可从资源管理器右键“用本地页面编辑器打开”，或在“重新打开方式”选择谷神本地页面编辑器。两种入口使用同一份页面草稿。已同步源码可离线编辑，无需登录平台。</li><li>编辑字段或代码，按需撤销、恢复和比较，然后保存并确认源代码管理中的本地差异。</li><li>需要使用官方在线设计器时，登录当前 API 项目并点击“在线编辑器”。如有未保存草稿，须先成功保存到本地；保存失败时处理提示后再打开。无需下载、导入或配置设计器资源缓存。</li><li>本地或在线编辑器的保存都只写入本地；需要提交到平台时，确认保存完成且没有后续修改，关闭在线编辑器，再使用“上传代码”，核对回读结果并到平台验证。</li></ol><p>如提示源码已变化，先保留当前编辑并比较原文件。服务组件或不支持设计的页面使用源码入口；能力与限制见<a href="GuthonCodeTool_全功能说明.html#page-local-editor">PAGE 编辑参考</a>。</p><h4 id="view-sql-edit">编辑视图 SQL</h4><p>在当前项目源码树中打开视图，直接编辑 SQL 并保存；保存结果写回同一份视图源码。需要查看完整定义时使用“原始源码”入口。上传后若平台格式化或补充字段，核对更新后的本地差异；同步数据库结构仍需单独执行并确认。</p><p>源码树按页面、过程函数、表、视图、系统脚本、模块参数及已同步的单据类型、下拉组件和开发参考分类，再使用系统名称、菜单及数据源组织，可直接打开页面、过程函数和视图。仅含元数据的 PAGE 或没有 SQL 节点的视图默认展示原文；需要编辑原始定义时，右键选择“打开原始源码”。身份冲突或继承原文保持只读。</p><h4 id="module-parameter-edit">编辑、预览和上传模块参数</h4><p>在“源码工具”选择“同步模块参数”，或从模块参数分类右键同步，先取得所选子系统的参数清单；按子系统展开后点击参数，联网加载该条详情并打开 data JSON 编辑器。可按编码或名称查找条目；参数内容以已加载的详情为准。需要查看模板和其他元数据时，右键打开原始源码，完整原文保持只读。</p><ol><li>在 data 编辑器修改所需参数；模板和对象身份不在编辑范围内。</li><li>从参数右键选择“预览模块参数差异”，核对平台基线与当前输入；按 Ctrl+S（macOS 为 ⌘S）仅保存到本地，完成后检查源代码管理差异。</li><li>需要同步到平台时，右键选择“预览并上传模块参数”，或使用上传代码入口选择模块参数范围。核对已打开的目标、差异及是否需要签出，再点击“确认上传”；关闭或取消提示不会上传。</li><li>查看上传回读结果。需要时工具会普通签出，但不强制覆盖他人的签出、不自动签入。结果未知时从操作记录核对原编号，不直接重试；平台最终签入仍在原生平台完成。</li></ol><p>平台参数或模板已变化、存在未保存输入、他人签出或旧操作待核对时，先保留本地输入并按提示处理。差异较长被截断时，应通过参数差异预览或源代码管理核对完整内容。详细边界见<a href="GuthonCodeTool_全功能说明.html#module-parameter-reference">模块参数参考</a>。</p><p>展开单据类型的数据源或下拉组件列表，点击条目可查看原文对应行；搜索可使用编码、名称和关联表。需要更新时，在条目或相应分组上选择“更新指定 API 源码”，完成后重新查看结果。导出时右键对应分类、数据源或对象；导出源码说明从源码视图标题菜单进入。单据类型完整定义导出需要数据库连接。选择开发参考分类的右键入口，再选择 API、页面结构或事件分组，查看当前项目的说明与示例；属性说明可在属性标签上悬停查看。资料缺失时先从“项目设置 → 配置官方参考资料”启用，再从“源码工具”选择“同步官方参考资料”；不同的本地内容会保留，处理方式见<a href="GuthonCodeTool_QA.html">参考资料问答</a>。</p><h4 id="local-page-edit">保存页面修改</h4><p>页面编辑器保存到本地后，检查源代码管理差异；结构化页面的上传使用原生源码并独立回读，源码条目悬停可查看来源。原文来源待核验时先刷新并审阅差异；尚无原生源码版本的页面先在平台初始化，再重新同步。未保存代码或外部修改冲突应先保留并处理。需要直接整理字段或按钮集合时，使用“浏览 PAGE 代码节点”中的集合 JSON 编辑入口。项目过程函数展开继承源码时会在保存前核对父层；父层变化后重新展开。</p><h4 id="local-page-resources">检查在线编辑器连接</h4><p>打开在线编辑器时，确认已登录当前 API 项目并能连接其平台地址。连接或草稿保存问题见<a href="GuthonCodeTool_QA.html">页面编辑器问答</a>。</p><h4 id="local-page-compare">比较修改并到平台验收</h4><p>在本地修改或上传审阅中打开 PAGE 差异；可读差异展示页面内容变化，若需要核对格式或键顺序，选择“查看原始源码对比”。区分平台基线与本地已保存内容，以及本地文件与窗口草稿；存在冲突先处理再继续上传。平台效果按实际页面和业务过程验证。</p>

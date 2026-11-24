@@ -6,7 +6,7 @@ const { ASSETS, NEXUS_ID } = require('./release-catalog');
 const { readArchive, archiveJson, extractArchive } = require('./update-archive');
 const { compareVersions, assetNameFor, downloadAsset, sha256Stream, request,
   runProcess, installRelease, withUpdateLock } = require('./tool-updater');
-const { probeScriptRuntime } = require('./script-runtime');
+const { prepareScriptRuntime } = require('./script-runtime');
 
 function updateRoot(home) {
   if (!home || !path.isAbsolute(home)) throw new Error('请先设置明确的本地数据目录');
@@ -107,7 +107,7 @@ function hostSettings(source) {
 
 async function prepareUpdate(verified, plan, root, { downloader = downloadAsset, onProgress = () => {},
   mode = 'packaged', pythonPath, importedHosts, platform = process.platform, arch = process.arch,
-  processRunner = runProcess, scriptProbe = probeScriptRuntime } = {}) {
+  processRunner = runProcess, scriptStorageRoot = root, scriptPrepare = prepareScriptRuntime } = {}) {
   const selected = plan.filter(item => item.update || item.bootstrap);
   const names = new Set();
   for (const item of selected) {
@@ -133,7 +133,7 @@ async function prepareUpdate(verified, plan, root, { downloader = downloadAsset,
     }
     files[name] = target;
   }
-  let chromeStage, scriptDirectory, missingProviders = [];
+  let chromeStage, scriptDirectory, scriptRuntime;
   try {
     if (files[ASSETS.nexus]) {
       const entries = readArchive(files[ASSETS.nexus]);
@@ -162,17 +162,18 @@ async function prepareUpdate(verified, plan, root, { downloader = downloadAsset,
         archiveSha256: verified.catalog.assets[ASSETS.bridge].sha256 });
     }
     if (mode === 'script' && files[ASSETS.script]) {
-      if (!pythonPath) throw new Error('调试模式未配置 Python');
       scriptDirectory = path.join(root, 'scripts', verified.release.version + '-' + crypto.randomUUID());
       ownedDirectory(root, 'scripts', path.basename(scriptDirectory));
       for (const name of [ASSETS.script, ASSETS.requirements]) fs.copyFileSync(files[name], path.join(scriptDirectory, name));
       fs.writeFileSync(path.join(scriptDirectory, 'GuthonCodeTool-checksums.txt'), verified.checksumsBytes);
       fs.writeFileSync(path.join(scriptDirectory, 'GuthonCodeTool-checksums.signature.json'), verified.signatureBytes);
-      const probe = await scriptProbe({ mode: 'script', toolPath: pythonPath, toolEntry: path.join(scriptDirectory, ASSETS.script) });
-      if (probe.version !== verified.catalog.components.tool.version) throw new Error('调试脚本版本不一致');
-      missingProviders = probe.missingProviders;
+      const prepared = await scriptPrepare(path.join(scriptDirectory, ASSETS.script), {
+        storageRoot: scriptStorageRoot, pythonPath, onProgress,
+      });
+      if (prepared.version !== verified.catalog.components.tool.version) throw new Error('调试脚本版本不一致');
+      scriptRuntime = prepared.runtime;
     }
-    return { verified, plan, files, chromeStage, scriptDirectory, processRunner, missingProviders };
+    return { verified, plan, files, chromeStage, scriptDirectory, scriptRuntime, processRunner };
   } catch (error) {
     if (chromeStage) fs.rmSync(chromeStage, { recursive: true, force: true });
     if (scriptDirectory) fs.rmSync(scriptDirectory, { recursive: true, force: true });
@@ -192,7 +193,7 @@ async function applyUpdate(prepared, root, { mode, platform = process.platform, 
   try {
     if (plan.find(item => item.id === 'tool')?.update) {
       let backend;
-      if (mode === 'script') backend = { mode, toolEntry: path.join(prepared.scriptDirectory, ASSETS.script), version: verified.catalog.components.tool.version };
+      if (mode === 'script') backend = { ...prepared.scriptRuntime, version: verified.catalog.components.tool.version };
       else {
         const downloader = async (_, target) => { const source = files[assetNameFor(platform, arch, verified.release)]; fs.copyFileSync(source, target); return fs.statSync(target).size; };
         const requester = async url => {

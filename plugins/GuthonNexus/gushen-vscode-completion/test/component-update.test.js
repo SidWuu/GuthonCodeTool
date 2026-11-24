@@ -114,15 +114,22 @@ test('Chrome host rules and installation identity survive replacement', async t 
   assert.equal(managedChrome(f.root).installId, id);
   assert.deepEqual(hostSettings(fs.readFileSync(path.join(original, 'host-settings.js'), 'utf8')), customized);
 });
-test('debug pyz and matching requirements are prepared and probed without running pip', async t => {
+test('debug updates prepare the new pyz and dependencies before switching both runtime paths', async t => {
   const f = fixture(t); const plan = updatePlan(f.catalog, { ...f.current, mode: 'script', nexusVersion: '2.5.0', chromeVersion: '0.4.0' });
-  let probe;
+  let provisioned;
   const prepared = await prepareUpdate(await f.signed(), plan, f.root, { mode: 'script', pythonPath: '/fixture/python', downloader: f.downloader,
-    scriptProbe: async runtime => { probe = runtime; return { version: '0.4.0', missingProviders: ['oracledb'] }; } });
-  assert.equal(probe.toolPath, '/fixture/python');
-  assert.equal(path.basename(probe.toolEntry), ASSETS.script);
+    scriptPrepare: async (toolEntry, options) => {
+      assert.equal(options.pythonPath, '/fixture/python');
+      provisioned = { mode: 'script', toolEntry, toolPath: '/fixture/.venv/python' };
+      return { version: '0.4.0', runtime: provisioned };
+    } });
+  assert.equal(path.basename(provisioned.toolEntry), ASSETS.script);
   assert.ok(fs.existsSync(path.join(prepared.scriptDirectory, ASSETS.requirements)));
-  assert.deepEqual(prepared.missingProviders, ['oracledb']);
+  const result = await applyUpdate(prepared, f.root, { mode: 'script', switchBackend: async backend => {
+    assert.deepEqual(backend, { ...provisioned, version: '0.4.0' });
+    return { mode: 'script' };
+  } });
+  assert.deepEqual(result.completed, ['tool']);
 });
 test('interrupted directory swap restores its owned backup and rejects injected paths', t => {
   const f = fixture(t), parent = path.join(f.root, 'chrome'), backup = path.join(parent, '.backup-fixture');

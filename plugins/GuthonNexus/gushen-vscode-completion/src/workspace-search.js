@@ -17,7 +17,9 @@ function showWorkspaceSearch({vscode, title, search, value = '', sourceOnly = fa
   picker.value = value;
 
   return new Promise(resolve => {
+    const moreItem = {label: '$(chevron-down) 加载更多结果', alwaysShow: true};
     let closed = false, timer, running = false, requested, generation = 0, readyGeneration = -1, failed = false;
+    let nextPage;
     const subscriptions = [];
     function finish(result) {
       if (closed) return;
@@ -33,13 +35,25 @@ function showWorkspaceSearch({vscode, title, search, value = '', sourceOnly = fa
       requested = undefined;
       running = true;
       try {
-        const result = await search(request.query);
+        const result = await search(request.query, request.offset);
         if (closed || generation !== request.generation) return;
+        if (request.offset && result.indexGeneration !== request.indexGeneration) {
+          throw new Error('搜索期间索引已变化，请重新查询');
+        }
+        const {nextOffset, indexGeneration} = result;
+        if (nextOffset != null && (!Number.isInteger(nextOffset) || nextOffset <= request.offset || !indexGeneration)) {
+          throw new Error('搜索分页无效');
+        }
         const items = sourceOnly ? (result.items || []).filter(item => item.kind === 'source') : result.items;
         // The backend matches indexed identities and evidence, which may not occur in a row's display text.
-        picker.items = searchPickItems({items}).map(item => ({...item, alwaysShow: true, buttons}));
-        picker.title = `${title} · ${picker.items.length} 条结果${result.truncated ? ' · 结果已截断，请细化关键词' : ''}`;
-        picker.placeholder = picker.items.length ? hint : '未找到本地索引结果，请调整关键词或检查工作区索引';
+        const rows = searchPickItems({items}).map(item => ({...item, alwaysShow: true, buttons}));
+        const loaded = request.offset ? [...picker.items.filter(row => row !== moreItem), ...rows] : rows;
+        nextPage = nextOffset == null ? undefined : {...request, offset: nextOffset, indexGeneration};
+        picker.sortByLabel = !request.offset && !nextPage;
+        picker.items = nextPage ? [...loaded, moreItem] : loaded;
+        if (request.offset && rows.length) picker.activeItems = [rows[0]];
+        picker.title = `${title} · ${loaded.length} 条结果${nextPage ? ' · 还有更多' : ''}${result.truncated ? ' · 结果已截断，请细化关键词' : ''}`;
+        picker.placeholder = loaded.length || nextPage ? hint : '未找到本地索引结果，请调整关键词或检查工作区索引';
         readyGeneration = request.generation;
       } catch (error) {
         if (closed || generation !== request.generation) return;
@@ -60,16 +74,23 @@ function showWorkspaceSearch({vscode, title, search, value = '', sourceOnly = fa
       generation++;
       failed = false;
       readyGeneration = -1;
+      nextPage = undefined;
       picker.items = [];
       picker.title = title;
       picker.placeholder = hint;
       const query = input.trim();
-      requested = query ? {query, generation} : undefined;
+      requested = query ? {query, generation, offset: 0} : undefined;
       picker.busy = Boolean(query);
       if (requested) timer = setTimeout(() => { timer = undefined; void run(); }, delay);
     }
     function choose(row, action) {
       if (closed || picker.busy || readyGeneration !== generation || !picker.items.includes(row)) return;
+      if (row === moreItem) {
+        requested = nextPage;
+        picker.busy = true;
+        void run();
+        return;
+      }
       finish({item: row.item, action});
     }
     subscriptions.push(

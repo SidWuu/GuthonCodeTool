@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,7 +11,7 @@ from check_release_smoke import resolve_entry
 
 
 class PackagingLayoutTest(unittest.TestCase):
-    def test_builder_requests_the_platform_layout_and_keeps_build_identity(self):
+    def test_builder_requests_a_standalone_executable_and_keeps_build_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             with (patch.dict("os.environ", {"GUTHON_BUILD_OUTPUT_ROOT": str(root)}),
@@ -20,8 +19,8 @@ class PackagingLayoutTest(unittest.TestCase):
                   patch.object(build_guthon_tool.subprocess, "run") as package):
                 self.assertEqual(0, build_guthon_tool.main())
             invocation = package.call_args.args[0]
-            expected = "--onedir" if sys.platform == "darwin" else "--onefile"
-            self.assertEqual([expected], [flag for flag in invocation if flag in {"--onedir", "--onefile"}])
+            self.assertIn("--onefile", invocation)
+            self.assertNotIn("--onedir", invocation)
             self.assertEqual(str(root / "dist"), invocation[invocation.index("--distpath") + 1])
             self.assertIn(str(root / "BUILD_INFO.json"), "\n".join(invocation))
             identity = json.loads((root / "BUILD_INFO.json").read_text(encoding="utf-8"))

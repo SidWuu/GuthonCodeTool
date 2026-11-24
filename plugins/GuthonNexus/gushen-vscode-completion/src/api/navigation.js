@@ -101,9 +101,12 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge,
     const workspace=await selectWorkspace(key);if(!workspace) return;
     if(!exportOnly && workspace.sourceMode && workspace.sourceMode!=='api' && legacyAction)return legacyAction(workspace,'search');
     const selected=await showWorkspaceSearch({vscode,title:`搜索当前项目 · ${workspace.displayName}`,
-      defaultAction:exportOnly?'context-file':'open',search:async query=>{
-        const result=await allPages(run,workspace.workspaceKey,'search',{query},'hits');
-        return {truncated:result.truncated,items:result.items.map(hit=>({kind:'source',label:sourceLabel(hit) || hit.path,
+      defaultAction:exportOnly?'context-file':'open',search:async (query,offset)=>{
+        const result=await run(workspace.workspaceKey,'search',{query,limit:100,offset});
+        const {nextOffset,indexGeneration}=result;
+        return {nextOffset,indexGeneration,
+          truncated:!!(result.partialSourceCount || result.partialBodyCount || (nextOffset==null && result.truncated)),
+          items:result.hits.map(hit=>({kind:'source',label:sourceLabel(hit) || hit.path,
           description:hit.path,detail:hit.excerpt || hit.jsonPointer || '',identity:{...hit,sourcePath:hit.path}}))};
       }});
     if(!selected) return;

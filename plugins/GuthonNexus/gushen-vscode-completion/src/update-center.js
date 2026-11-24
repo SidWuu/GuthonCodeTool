@@ -238,12 +238,8 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
         prepared = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: '准备 Guthon 组件更新', cancellable: false },
           progress => local ? prepareLocal(local, plan, directory, { pythonPath: actual.tool?.toolPath, importedHosts,
             onProgress: message => progress.report({ message }) }) : prepareUpdate(verified, plan, directory, { mode: mode(), pythonPath: actual.tool?.toolPath,
+            scriptStorageRoot: context.globalStorageUri.fsPath,
             importedHosts, onProgress: message => progress.report({ message }) }));
-        if (prepared.missingProviders.length) {
-          const choice = await vscode.window.showWarningMessage('Python 缺少可选数据库依赖：' + prepared.missingProviders.join('；'),
-            { modal: true, detail: '同批 requirements 已保存；当前可继续使用核心功能。请在所选 Python 环境中按需安装依赖，不会自动修改全局环境。' }, '继续使用核心功能');
-          if (choice !== '继续使用核心功能') return;
-        }
         if (identity !== configurationIdentity()) throw new Error('运行配置已改变，请重新检查更新');
         if (isBusy()) throw new Error('当前工具或源码操作正在执行，附件已缓存，请完成后再更新');
         setBusy(true); busyClaimed = true;
@@ -256,14 +252,26 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
         await processClient.stop();
         const result = await applyUpdate(prepared, directory, {
           mode: mode(),
-          previousBackend: { mode: mode(), toolPath: config().get('toolPath', ''), scriptToolPath: config().get('scriptToolPath', ''), version: actual.toolVersion },
+          previousBackend: { mode: mode(), toolPath: config().get('toolPath', ''), scriptToolPath: config().get('scriptToolPath', ''),
+            scriptPythonPath: config().get('scriptPythonPath', ''), version: actual.toolVersion },
           deferNexus: true,
           trustStorageRoot: context.globalStorageUri.fsPath,
           installNexus: file => vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(file)),
           switchBackend: async backend => {
-            const previous = { mode: mode(), toolPath: config().get('toolPath', ''), scriptToolPath: config().get('scriptToolPath', ''), version: actual.toolVersion };
+            const previous = { mode: mode(), toolPath: config().get('toolPath', ''), scriptToolPath: config().get('scriptToolPath', ''),
+              scriptPythonPath: config().get('scriptPythonPath', ''), version: actual.toolVersion };
             const state = readUpdateState(context.globalStorageUri.fsPath);
-            if (mode() === 'script') await config().update('scriptToolPath', backend.toolEntry, runtimeConfigurationTarget(config(), 'scriptToolPath', vscode.ConfigurationTarget));
+            if (mode() === 'script') {
+              const settings = config();
+              const pythonTarget = runtimeConfigurationTarget(settings, 'scriptPythonPath', vscode.ConfigurationTarget);
+              await settings.update('scriptPythonPath', backend.toolPath, pythonTarget);
+              try {
+                await settings.update('scriptToolPath', backend.toolEntry, runtimeConfigurationTarget(settings, 'scriptToolPath', vscode.ConfigurationTarget));
+              } catch (error) {
+                await settings.update('scriptPythonPath', previous.scriptPythonPath, pythonTarget);
+                throw error;
+              }
+            }
             else {
               writeUpdateState(context.globalStorageUri.fsPath, { activeVersion: backend.version, activePath: backend.toolPath,
                 previousVersion: actual.toolVersion, previousPath: previous.toolPath, source: source(), sha256: backend.sha256, updatedAt: new Date().toISOString() });
