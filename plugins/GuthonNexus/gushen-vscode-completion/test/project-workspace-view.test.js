@@ -205,7 +205,7 @@ test('legacy project service sends updates to SVN or DATABASE while keeping the 
   } finally {for(const subscription of subscriptions)subscription.dispose();}
 });
 
-test('SVN review opens both snapshots with PAGE projection, raw override, and remote orientation', async () => {
+test('explicit SVN comparison opens both snapshots with PAGE projection, raw override, and remote orientation', async () => {
   const { registerLegacyProjects } = require('../src/legacy-project');
   const subscriptions = [];
   const comparisons = [];
@@ -262,7 +262,7 @@ test('SVN review opens both snapshots with PAGE projection, raw override, and re
   } finally { for (const subscription of subscriptions) subscription.dispose(); }
 });
 
-test('SVN review skips the picker for one file and scopes batch candidates to the requested group', async () => {
+test('SVN submission lists selected paths without opening differences and retains scoped review', async () => {
   const { registerLegacyProjects } = require('../src/legacy-project');
   class EventEmitter { constructor() { this.event = () => ({ dispose() {} }); } fire() {} dispose() {} }
   const subscriptions = [], requests = [], picks = [], confirmations = [], diffTabs = [];
@@ -273,6 +273,7 @@ test('SVN review skips the picker for one file and scopes batch candidates to th
     { id: 'other', path: 'pages/other.json', workingCopyId: 'shared' },
   ];
   let accept = true;
+  let selectGroup = false;
   const legacy = registerLegacyProjects({
     vscode: { EventEmitter, Uri: { from: value => value },
       workspace: { textDocuments: [], registerTextDocumentContentProvider: () => ({ dispose() {} }),
@@ -283,7 +284,7 @@ test('SVN review skips the picker for one file and scopes batch candidates to th
       } },
       window: {
         showInformationMessage: () => {}, showTextDocument: async () => {},
-        showQuickPick: async (items, options) => { picks.push({ items, options }); return items.slice(-1); },
+        showQuickPick: async (items, options) => { picks.push({ items, options }); return selectGroup ? items : items.slice(-1); },
         showInputBox: async () => 'fixture message',
         showWarningMessage: async (title, options, action) => { confirmations.push({ title, options }); return accept ? action : undefined; },
       },
@@ -303,10 +304,11 @@ test('SVN review skips the picker for one file and scopes batch candidates to th
   const writes = () => requests.filter(({ args }) => ['revert', 'platform-save'].includes(args[0]));
   try {
     for (const action of ['revert', 'platform-save']) {
+      const previousDiffs = diffTabs.length;
       await legacy.review(workspace, action, { sourcePath: candidates[0].path, workingCopyIds: ['trade'] });
       assert.deepEqual(writes().at(-1).args, [action, '--session', 'session', '--selection-token', 'token', '--candidate', 'target']);
       assert.equal(confirmations.at(-1).options.detail, candidates[0].path);
-      assert.match(diffTabs.at(-1), /pages\/target\.json/);
+      assert.equal(diffTabs.length, previousDiffs + Number(action === 'revert'));
     }
     assert.deepEqual(writes()[1].input, { message: 'fixture message' });
     assert.equal(picks.length, 0);
@@ -316,12 +318,17 @@ test('SVN review skips the picker for one file and scopes batch candidates to th
     assert.equal(picks.length, 0);
 
     accept = true;
+    selectGroup = true;
+    const previousDiffs = diffTabs.length;
     await legacy.review(workspace, 'platform-save', { workingCopyIds: ['trade'], scopeLabel: '贸易系统' });
     assert.deepEqual(picks[0].items.map(({ item }) => item.id), ['target', 'nearby']);
     assert.match(picks[0].options.title, /贸易系统/);
     assert.deepEqual(requests.filter(({ args }) => args[0] === 'platform-save-preview').at(-1).args,
       ['platform-save-preview', '--session', 'session', '--working-copy', 'trade']);
-    assert.deepEqual(writes().at(-1).args.slice(-2), ['--candidate', 'nearby']);
+    assert.deepEqual(writes().at(-1).args.slice(-4), ['--candidate', 'target', '--candidate', 'nearby']);
+    assert.equal(confirmations.at(-1).options.detail, 'pages/target.json\npages/nearby.json');
+    assert.equal(diffTabs.length, previousDiffs);
+    selectGroup = false;
     await legacy.review(workspace, 'revert');
     assert.deepEqual(picks[1].items.map(({ item }) => item.id), ['target', 'nearby', 'other']);
 
@@ -330,6 +337,41 @@ test('SVN review skips the picker for one file and scopes batch candidates to th
     await legacy.updateRemote({ ...workspace, sourceMode: 'svn' }, '', []);
     assert.equal(requests.length, requestCount);
   } finally { for (const subscription of subscriptions) subscription.dispose(); }
+});
+
+test('DATABASE Workcopy delivery opens the checklist and opens the difference only when selected', async t => {
+  const { registerLegacyProjects } = require('../src/legacy-project');
+  class EventEmitter { constructor() { this.event = () => ({ dispose() {} }); } fire() {} dispose() {} }
+  const workspace = { workspaceKey: 'projects.db', displayName: 'Fixture', sourceMode: 'database', workcopyDir: '/fixture/workcopy' };
+  const target = workspace.workcopyDir + '/service';
+  const subscriptions = [], calls = [], opened = [];
+  const selections = ['package', 'diff'];
+  const legacy = registerLegacyProjects({
+    vscode: { EventEmitter, Uri: { file: fsPath => ({ fsPath }) },
+      workspace: { textDocuments: [], openTextDocument: async uri => uri },
+      window: {
+        showOpenDialog: async () => [{ fsPath: target }],
+        showQuickPick: async items => {
+          const action = selections.shift();
+          return items.find(item => item.action === action);
+        },
+        showTextDocument: async document => opened.push(document.fsPath),
+        showErrorMessage: assert.fail,
+      } },
+    context: { subscriptions }, getTool: () => ({ toolHome: '/fixture' }), sourceTree: { refresh() {} },
+    processClient: { async request(_tool, command, args, key) {
+      calls.push({ command, args, key });
+      return { ok: true, output: target + (args[0] === 'package' ? '/delivery.md' : '/diff.md') };
+    } },
+  });
+  t.after(() => subscriptions.forEach(subscription => subscription.dispose()));
+  await legacy.action(workspace, 'upload');
+  assert.deepEqual(opened, [target + '/delivery.md']);
+  await legacy.action(workspace, 'changes');
+  assert.deepEqual(opened, [target + '/delivery.md', target + '/diff.md']);
+  assert.deepEqual(calls.map(({ command, args, key }) => [command, args[0], key]), [
+    ['workcopy', 'package', workspace.workspaceKey], ['workcopy', 'diff', workspace.workspaceKey],
+  ]);
 });
 
 test('project settings route DATABASE and SVN credentials to the selected source provider', async () => {

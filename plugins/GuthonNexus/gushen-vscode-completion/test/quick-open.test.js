@@ -1,10 +1,15 @@
 const test=require('node:test');const assert=require('node:assert/strict');const {createApiNavigation}=require('../src/api/navigation');
 const {quickPickFixture,waitFor}=require('./quick-pick-fixture');
-test('quick open shows the first API page immediately and fetches more only on demand',async()=>{
+test('API quick open keeps the keyword and restarts pagination for the selected type',async()=>{
   const calls=[],commands=new Map(),dispose={dispose(){}};let uriHandler;
   const f=quickPickFixture();
   const vscode={...f.vscode,commands:{registerCommand:(id,fn)=>(commands.set(id,fn),dispose)},env:{clipboard:{writeText:async()=>{}}},
-    window:{...f.vscode.window,registerUriHandler:fn=>(uriHandler=fn,dispose)},
+    window:{...f.vscode.window,registerUriHandler:fn=>(uriHandler=fn,dispose),showQuickPick:async(items,options)=>{
+      assert.equal(options.title,'筛选源码类型');
+      assert.deepEqual(items.slice(0,5).map(item=>item.label),['全部类型','页面','过程函数','表','视图']);
+      f.hide();
+      return items.find(item=>item.sourceType==='procedure');
+    }},
     workspace:{textDocuments:[],onDidOpenTextDocument:()=>dispose,onDidChangeTextDocument:()=>dispose,onDidCloseTextDocument:()=>dispose},
     languages:{createDiagnosticCollection:()=>({set(){},delete(){},dispose(){}}),registerCompletionItemProvider:()=>dispose}};
   const api={editorState:{workspaces:new Map()},sourceTree:{open:async(key,p)=>calls.push({key,path:p})},run:async(key,action,input)=>{
@@ -23,6 +28,14 @@ test('quick open shows the first API page immediately and fetches more only on d
   f.accept(1);
   await waitFor(()=>!f.picker.busy);
   assert.deepEqual(calls[1],{key:'projects.demo',action:'search',input:{query:'save',limit:100,offset:100}});
+  f.titleButton();
+  await waitFor(()=>f.picker.shown && !f.picker.busy && calls.length===3);
+  assert.equal(f.picker.value,'save');
+  assert.match(f.picker.title,/过程函数 · 1 条结果/);
+  assert.deepEqual(calls[2],{key:'projects.demo',action:'search',input:{query:'save',sourceType:'procedure',limit:100,offset:0}});
+  f.accept(1);
+  await waitFor(()=>!f.picker.busy);
+  assert.deepEqual(calls[3],{key:'projects.demo',action:'search',input:{query:'save',sourceType:'procedure',limit:100,offset:100}});
   assert.deepEqual(f.picker.items.map(item=>item.description),['a/save.gss','b/save.gss']);
   f.accept(1);
   await pending;

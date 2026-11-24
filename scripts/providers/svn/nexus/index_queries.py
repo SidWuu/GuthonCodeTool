@@ -574,18 +574,20 @@ def callers(workspace: dict, *, alias: str, fun_id: str, limit=100, continuation
     }
 
 
-def find(workspace: dict, *, keyword: str, limit: int = 10) -> dict:
+def find(workspace: dict, *, keyword: str, limit: int = 10, source_type: str = "") -> dict:
     with _connection(workspace) as connection:
         rows = gusen_hub.find_source_candidates(
             connection,
             workspace["scopeId"],
             keyword,
             limit,
+            source_type=source_type,
         )
         total = connection.execute(
             "SELECT COUNT(*) FROM gusen_source_record WHERE scope_id=? AND source_table NOT IN ('procedure-inherit','page-inherit') "
+            "AND (?='' OR source_table=?) "
             "AND (source_id LIKE ? OR source_alias_id LIKE ? OR fun_id LIKE ? OR source_name LIKE ?)",
-            (workspace["scopeId"], *([f"%{keyword.strip()}%"] * 4)),
+            (workspace["scopeId"], source_type, source_type, *([f"%{keyword.strip()}%"] * 4)),
         ).fetchone()[0]
     return {
         "ok": True,

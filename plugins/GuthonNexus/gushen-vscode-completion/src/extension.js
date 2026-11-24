@@ -209,10 +209,6 @@ function createProvider(context, loadReferences = async () => []) {
   };
 }
 
-function createDefinitionProvider(resolveDefinition = async()=>undefined) {
-  return {provideDefinition:(document,position)=>resolveDefinition(document,position)};
-}
-
 function createHoverProvider(context) {
 
   return {
@@ -562,11 +558,6 @@ function activate(context) {
     provider,
     '.'
   );
-  let apiNavigation;
-  const definitionDisposable = vscode.languages.registerDefinitionProvider(
-    createDocumentSelector(['java','guthon-gss','javascript','sql'], ['file','untitled','guthon-api-edit']),
-    createDefinitionProvider((document,position)=>apiNavigation?.definition(document,position))
-  );
   const hoverDisposable = vscode.languages.registerHoverProvider(
     selector,
     createHoverProvider(context)
@@ -745,8 +736,9 @@ function activate(context) {
     }
   }));
   apiServices.setSelectWorkspace(selectWorkspace);
-  apiNavigation=require('./api/navigation').createApiNavigation({vscode,context,api:apiServices,selectWorkspace,getTool:configuredToolFromSettings,bridge,
+  require('./api/navigation').createApiNavigation({vscode,context,api:apiServices,selectWorkspace,getWorkspaces:allWorkspaces,getTool:configuredToolFromSettings,bridge,
     locateLegacy:(workspace,identity)=>loadLegacyProjects().locate(workspace,identity),
+    legacyDefinitions:(workspace,target,document)=>loadLegacyProjects().procedureDefinitionUris(workspace,target,document),
     legacyAction:(workspace,action)=>loadLegacyProjects().action(workspace,action)});
   void refreshApiWorkspaces().catch(error=>vscode.window.showErrorMessage(`API 工作区初始化失败：${error.message}`));
   function svnAction(action) {
@@ -855,6 +847,7 @@ function activate(context) {
     vscode.commands.registerCommand('gushenCompletion.projectMenuSourceScope',sourceMenuAction('scope','selectApiSystems')),
     vscode.commands.registerCommand('gushenCompletion.projectMenuConfigureDatabaseDiagnosis',projectMenu('configureDatabaseDiagnosis')),
     vscode.commands.registerCommand('gushenCompletion.projectMenuReferenceSettings',projectMenu('configureReferenceAssets')),
+    vscode.commands.registerCommand('gushenCompletion.projectMenuCheckSystemMenu',projectMenu('showApiSystemMenu')),
     vscode.commands.registerCommand('gushenCompletion.projectMenuSyncModuleParameters',projectMenu('syncModuleParameters')),
     vscode.commands.registerCommand('gushenCompletion.projectMenuSyncPlatformReferences',projectMenu('syncPlatformReferences')),
     vscode.commands.registerCommand('gushenCompletion.projectMenuLogout',projectMenu('logoutApiSource')),
@@ -1382,7 +1375,6 @@ function activate(context) {
   });
   context.subscriptions.push(
     disposable,
-    definitionDisposable,
     hoverDisposable,
     projectCard,
     projectOverview,
@@ -1402,7 +1394,6 @@ async function deactivate() {const api=activeApiServices;activeApiServices=undef
 
 module.exports = {
   activate,
-  createDefinitionProvider,
   createHoverProvider,
   createProvider,
   deactivate,

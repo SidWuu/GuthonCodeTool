@@ -15,6 +15,8 @@ from common import database_source_exports, gusen_hub, legacy_source
 from common.database_exports._export_common import bill_type_output_dir, legacy_bill_type_dir
 from common.database_exports import export_bill_type_sql as exporter
 from common.runtime_paths import runtime_home_context
+from common.workspace_selection import select_workspace
+from providers.api import sync as api_sync
 from providers.api.client import ApiError
 from providers.api.download import SourceFile
 from providers.api.store import ApiStore
@@ -45,6 +47,52 @@ class WorkspaceCase(unittest.TestCase):
         key = "fixture-" + mode
         self.tool("workspace-create", payload={"id": key, "name": "验收 " + mode, "sourceMode": mode})
         return gusen_hub.resolve_workspace(gusen_hub.load_config(), key)
+
+
+class WorkspaceSelectionTest(WorkspaceCase):
+    def test_prompt_requires_a_bounded_project_mention(self):
+        current = self.register("database")
+        self.tool("workspace-create", payload={"id": "shipping", "name": "北川项目", "aliases": ["航运"], "sourceMode": "api"})
+        config = gusen_hub.load_config()
+        for prompt in ("仅整理跨境航运费率说明和设计稿", "修改航运中心的费率说明", "调整航运查询服务的规则说明",
+                       "目标是完成资料整理，背景涉及跨境航运费率"):
+            with self.subTest(prompt=prompt):
+                routed = select_workspace(config, path=current["root"], prompt=prompt)
+                self.assertEqual(current["workspaceKey"], routed.get("workspaceKey"), routed)
+                unbound = select_workspace(config, path=self.home / "var", prompt=prompt)
+                self.assertEqual("WORKSPACE_AMBIGUOUS", unbound["error"]["code"])
+        for prompt in ("修改航运的配置", "在航运项目中修复配置", "修改【航运】的配置", "修改北川项目的配置",
+                       "/guthon-use 航运", "切换到航运", "目标工作区为航运"):
+            with self.subTest(prompt=prompt):
+                routed = select_workspace(config, prompt=prompt)
+                self.assertEqual("shipping", routed.get("workspaceKey"), routed)
+        for prompt in ("修改航运的配置和验收 database 的策略", "参考航运的配置"):
+            self.assertFalse(select_workspace(config, prompt=prompt)["ok"])
+
+    def test_postposed_reference_keeps_the_registered_project_target(self):
+        current = self.register("api")
+        reference = self.register("database")
+        config = gusen_hub.load_config()
+        name = reference["name"]
+        for prompt in (
+            f"这种方式已经在【{name}】中开发过且经过验证，可以参考进行开发。先生成开发计划文档。",
+            f"【{name}】仅供参考，先写开发计划。",
+            f"开发{current['name']}。这种方式已在【{name}】中实现，可直接借鉴。",
+        ):
+            with self.subTest(prompt=prompt):
+                from_project = select_workspace(config, prompt=prompt, path=current["root"])
+                self.assertEqual(current["workspaceKey"], from_project.get("workspaceKey"), from_project)
+                followup = select_workspace(config, prompt="按计划开始实现", path=current["root"],
+                                            current_workspace=from_project["workspaceKey"])
+                self.assertEqual(current["workspaceKey"], followup["workspaceKey"])
+        no_project = select_workspace(config, prompt=f"这个做法在【{name}】中实现过，可以参考。", path=self.home / "var")
+        self.assertFalse(no_project["ok"])
+        explicit_target = select_workspace(config, prompt=f"在【{name}】中修改验证过的逻辑，可以参考既有规则。",
+                                           path=current["root"])
+        self.assertEqual(reference["workspaceKey"], explicit_target["workspaceKey"])
+        new_work = select_workspace(config, prompt=f"在【{name}】中实现，可以参考{current['name']}。",
+                                    path=current["root"])
+        self.assertEqual(reference["workspaceKey"], new_work["workspaceKey"])
 
 
 class ApiWorkspaceTest(WorkspaceCase):
@@ -86,6 +134,99 @@ class ApiWorkspaceTest(WorkspaceCase):
         restored = self.tool("api", key=key, args=["revert"], payload={"path": path, "expectedHash": receipt["sourceHash"]})
         self.assertEqual(base, restored["content"])
 
+    def test_upload_remark_is_recorded_by_the_confirmed_operation(self):
+        workspace = self.register("api")
+        key = workspace["workspaceKey"]
+        self.tool("api", key=key, args=["configure"], payload={"serverUrl": "https://fixture.invalid/guthon/",
+            "systemIds": ["S1"], "dataSourceIds": ["D1"], "allSystems": False})
+        path = "datasources/D1/procedures/audit/hello.gss"
+        ApiStore(workspace).publish([SourceFile(path, "#return('baseline')\n", "procedure", {
+            "dataSourceId": "D1", "procedureId": "P1", "procedureAliasId": "audit", "funId": "hello",
+        })])
+        with self.assertRaisesRegex(ApiError, "备注必须为文本"):
+            api_sync.upload(workspace, object(), {"paths": [path], "confirm": True, "remark": ["invalid"]})
+        result = api_sync.upload(workspace, object(), {
+            "paths": [path], "confirm": True, "remark": "  核对回执\n第二行  ",
+        })
+        self.assertTrue(result["complete"])
+        self.assertEqual("UNCHANGED", result["results"][0]["stage"])
+        receipt = self.tool("api", key=key, args=["operation"], payload={"operationId": result["operationId"]})
+        self.assertEqual("核对回执\n第二行", receipt["remark"])
+
+class SourceSearchTypeTest(WorkspaceCase):
+    def test_api_filters_before_paging_and_keeps_metadata_and_body_matches(self):
+        workspace = self.register("api")
+        key = workspace["workspaceKey"]
+        self.tool("api", key=key, args=["configure"], payload={"serverUrl": "https://fixture.invalid/guthon/",
+            "systemIds": ["S1"], "dataSourceIds": ["D1"], "allSystems": False})
+        ApiStore(workspace).publish([
+            SourceFile("datasources/D1/procedures/audit/check.gss", "#return('needle')", "procedure",
+                       {"dataSourceId": "D1", "procedureId": "P1", "procedureAliasId": "audit", "funId": "check"}),
+            SourceFile("datasources/D1/tables/only_name.json", '{"tableId":"only_name"}', "table",
+                       {"dataSourceId": "D1", "tableId": "only_name", "tableName": "needle table"}),
+            SourceFile("datasources/D1/tables/raw_content.json", '{"tableId":"raw_content","remark":"needle"}', "table",
+                       {"dataSourceId": "D1", "tableId": "raw_content"}),
+        ])
+        self.tool("api", key=key, args=["index"])
+        query = {"query": "needle", "limit": 1}
+        unfiltered = self.tool("api", key=key, args=["search"], payload=query)
+        self.assertEqual("procedure", unfiltered["hits"][0]["sourceType"])
+        table_query = {**query, "sourceType": "table"}
+        first = self.tool("api", key=key, args=["search"], payload=table_query)
+        self.assertEqual(["only_name"], [hit["sourceId"] for hit in first["hits"]])
+        self.assertEqual(1, first["nextOffset"])
+        last = self.tool("api", key=key, args=["search"], payload={**table_query, "offset": first["nextOffset"]})
+        self.assertEqual(["raw_content"], [hit["sourceId"] for hit in last["hits"]])
+        self.assertIsNone(last["nextOffset"])
+
+    def test_svn_filters_both_candidates_and_the_truncation_count(self):
+        workspace = self.register("svn")
+        key = workspace["workspaceKey"]
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+            conn.executemany(
+                """INSERT INTO gusen_source_record (
+                    source_layer,scope_id,provider,source_table,source_id,source_alias_id,source_name,change_key,status,indexed_time
+                ) VALUES ('project',?,'svn',?,?,?,?,'','OK','')""",
+                [(workspace["scopeId"], "procedure", f"P{i}", f"alias{i}", f"needle {i:02}") for i in range(11)]
+                + [(workspace["scopeId"], "table", "needle_table", "needle_table", "needle table")],
+            )
+        args = ["find", "--keyword=needle", "--limit", "10"]
+        unfiltered = self.tool("svn", key=key, args=args)
+        self.assertTrue(unfiltered["truncated"])
+        filtered = self.tool("svn", key=key, args=[*args, "--source-type", "table"])
+        self.assertEqual(["needle_table"], [hit["source_id"] for hit in filtered["candidates"]])
+        self.assertEqual(1, filtered["totalCandidates"])
+        self.assertFalse(filtered["truncated"])
+
+    def test_database_filters_source_records_fragments_and_exports(self):
+        workspace = self.register("database")
+        key = workspace["workspaceKey"]
+        table = workspace["databaseDir"] / "schema" / "fixture" / "needle_table.json"
+        view = workspace["databaseDir"] / "views" / "fixture" / "needle_view.sql"
+        for target, raw in (
+            (table, '{"tableId":"needle_table","tableName":"needle table"}'), (view, "SELECT 'needle';"),
+        ):
+            target.parent.mkdir(parents=True)
+            target.write_text(raw, encoding="utf-8")
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+            for source_id, name, script in (
+                ("PG-NAME", "needle page", "return true;"), ("PG-BODY", "other page", "return 'needle';"),
+            ):
+                row = {"source_table": "page", "source_id": source_id, "fun_id": "", "source_alias_id": source_id,
+                       "source_name": name, "source_content": json.dumps({"pageId": source_id, "compScript": script}),
+                       "system_id": "SYS-FIXTURE"}
+                legacy_source.upsert_source(conn, row, "project", workspace["scopeId"],
+                                            workspace["projectId"], {}, {}, workspace=workspace)
+            self.assertEqual([], database_source_exports.rebuild(conn, workspace))
+        args = ["search", "--keyword=needle"]
+        all_hits = self.tool("legacy-source", key=key, args=args)["items"]
+        self.assertEqual({"page", "table", "view"}, {hit["sourceType"] for hit in all_hits})
+        pages = self.tool("legacy-source", key=key, args=[*args, "--type", "page"])["items"]
+        self.assertEqual({("page", "PG-NAME", ""), ("page", "PG-BODY", "/compScript")},
+                         {(hit["sourceType"], hit["sourceId"], hit["pointer"]) for hit in pages})
+        tables = self.tool("legacy-source", key=key, args=[*args, "--type", "table"])["items"]
+        self.assertEqual([("table", "needle_table")], [(hit["sourceType"], hit["sourceId"]) for hit in tables])
+
 
 class SvnWorkspaceTest(WorkspaceCase):
     def test_local_and_remote_page_diffs_keep_working_copy_intact(self):
@@ -124,6 +265,52 @@ class SvnWorkspaceTest(WorkspaceCase):
         self.assertEqual(modified, compared["localContent"])
         self.assertIn("return null;", compared["readableRemoteContent"])
         self.assertEqual(modified, page.read_text(encoding="utf-8"))
+
+
+class DatabasePageEditorTest(WorkspaceCase):
+    def test_default_editor_uses_page_type_and_saves_service_script_to_workcopy(self):
+        workspace = self.register("database")
+        key = workspace["workspaceKey"]
+        service = {"pageId": "PG-SERVICE", "pageType": "0", "compScript": "#return('old')", "runInTran": 1}
+        page = {"pageId": "PG-FORM", "pageType": 1, "compScript": "#return('ordinary page')", "views": []}
+        legacy_page = {"pageId": "PG-LEGACY", "views": []}
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+            for source in (service, page, legacy_page):
+                raw = json.dumps(source)
+                if source is service:
+                    raw = json.dumps(raw)
+                row = {"source_table": "page", "source_id": source["pageId"], "fun_id": "",
+                       "source_alias_id": source["pageId"], "source_name": source["pageId"],
+                       "source_content": raw, "system_id": "SYS-FIXTURE"}
+                legacy_source.upsert_source(conn, row, "project", workspace["scopeId"],
+                                            workspace["projectId"], {}, {}, workspace=workspace)
+        catalog = self.tool("legacy-source", key=key, args=["catalog", "--type", "page"])
+        identities = {item["sourceId"]: {field: item[field] for field in ("recordId", "sourceId", "sourcePath")}
+                      for item in catalog["items"]}
+        for source in (service, page, legacy_page):
+            identity = identities[source["pageId"]]
+            target = self.tool("legacy-source", key=key, args=["edit-read"],
+                               payload={**identity, "resolveDefaultFragment": True})
+            if source is service:
+                self.assertEqual({"pointer": "/compScript", "language": "guthon-gss"}, target["defaultFragment"])
+            else:
+                self.assertIsNone(target["defaultFragment"])
+                design = self.tool("legacy-source", key=key, args=["edit-read"], payload={**identity, "design": True})
+                self.assertEqual(source["pageId"], design["model"]["pageId"])
+
+        identity = identities[service["pageId"]]
+        readonly = workspace["readonlyDir"] / identity["sourcePath"]
+        original = readonly.read_bytes()
+        fragment = {**identity, "pointer": "/compScript"}
+        opened = self.tool("legacy-source", key=key, args=["edit-read"], payload=fragment)
+        self.assertEqual(service["compScript"], opened["content"])
+        changed = "#return('new')"
+        self.tool("legacy-source", key=key, args=["edit-save"],
+                  payload={**fragment, "sourceHash": opened["sourceHash"], "content": changed})
+        self.assertEqual(changed, self.tool("legacy-source", key=key, args=["edit-read"], payload=fragment)["content"])
+        saved = workspace["workcopyDir"] / identity["sourcePath"]
+        self.assertEqual({**service, "compScript": changed}, json.loads(json.loads(saved.read_text(encoding="utf-8"))))
+        self.assertEqual(original, readonly.read_bytes())
 
 
 class BillExportTests(WorkspaceCase):

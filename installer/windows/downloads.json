@@ -6,20 +6,6 @@
   },
   "prerequisites": [
     {
-      "id": "codebuddy",
-      "type": "exe",
-      "elevate": false,
-      "url": "https://codebuddy-1328495429.cos.accelerate.myqcloud.com/aiide/win32-x64-user/CodeBuddy-win32-x64-user-4.12.1.39217423-757a5b2f.exe",
-      "sha256": "3fb09b0c6aef06e42b38c63571dd6118d6301cbcd075568c9620c7597e43d911",
-      "args": [
-        "/SP-",
-        "/VERYSILENT",
-        "/SUPPRESSMSGBOXES",
-        "/NORESTART",
-        "/mergetasks=!runcode"
-      ]
-    },
-    {
       "id": "git",
       "type": "exe",
       "elevate": false,

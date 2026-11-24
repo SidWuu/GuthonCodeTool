@@ -15,6 +15,10 @@ import sys
 sys.dont_write_bytecode = True
 from common.persistence import atomic_text, file_lock
 from common.installer_downloads import fetch
+if __package__:
+    from .ide import IDE_DOWNLOAD_URL, NO_IDE, PRODUCTS, find_ides
+else:
+    from ide import IDE_DOWNLOAD_URL, NO_IDE, PRODUCTS, find_ides
 
 NEXUS_ID = "gushen-local.guthon-nexus-vscode"
 MISSING = object()
@@ -88,7 +92,7 @@ def validate_download(item):
     from urllib.parse import urlsplit
 
     if (set(item) != {"id", "type", "elevate", "url", "sha256", "args"}
-            or item["id"] not in {"codebuddy", "git"}
+            or item["id"] != "git"
             or item["type"] not in {"exe", "msi"}
             or not isinstance(item["elevate"], bool)
             or not isinstance(item["args"], list) or not item["args"]
@@ -135,10 +139,13 @@ def merge_managed(current, desired, previous, location=""):
 
 
 def run(command, label, *, env=None, data=None):
-    if Path(command[0]).name.lower() in ("python.exe", "pythonw.exe"):
+    if Path(command[0]).name.lower() == "python.exe":
         command = [command[0], "-X", "utf8", "-B", *command[1:]]
-    completed = subprocess.run(command, input=data, capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", env=env, timeout=1800)
+    try:
+        completed = subprocess.run(command, input=data, capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", env=env, timeout=1800)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise SetupError(f"{label}失败（{type(error).__name__}），请检查对应工具后重试") from error
     if completed.returncode:
         # Do not persist external command output: it may contain local configuration.
         raise SetupError(f"{label}失败（退出码 {completed.returncode}），请在对应工具中检查后重试")
@@ -211,22 +218,6 @@ def find_program(name):
     return next((p for p in program_candidates(name) if p.is_file()), None)
 
 
-def find_ide(explicit=None):
-    folders = []
-    if explicit:
-        folders.append(Path(explicit))
-    for key in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
-        if base := os.environ.get(key):
-            for prefix in ("", "Programs"):
-                folders.extend(Path(base) / prefix / name for name in ("CodeBuddy", "CodeBuddy CN", "CodeBuddyCN"))
-    for root in folders:
-        executable = root / "CodeBuddy.exe"
-        cli = root / "resources/app/out/cli.js"
-        if executable.is_file() and cli.is_file():
-            return executable, cli
-    return None
-
-
 def private_runtime(root, manifest):
     destination = Path(os.environ["LOCALAPPDATA"]) / "Guthon/runtimes" / manifest["bundleId"]
     for relative, checksum in manifest["files"].items():
@@ -243,10 +234,11 @@ def private_runtime(root, manifest):
 
 
 class Installer:
-    def __init__(self, payload, home, ide=None, runner=run, marketplace=None):
+    def __init__(self, payload, home, ide=None, runner=run, marketplace=None, *, selected_ides=None):
         self.payload = Path(payload).resolve()
         self.home = Path(home).resolve()
         self.ide_root = ide
+        self.selected_ides = selected_ides
         self.marketplace = marketplace
         self.runner = runner
         self.report_path = self.home / "var/nexus/setup-result.json"
@@ -268,7 +260,7 @@ class Installer:
     def execute(self, command, label, **kwargs):
         return self.runner([str(p) for p in command], label, env=self.env, **kwargs)
 
-    def configuration(self, manifest):
+    def configuration(self, manifest, source):
         workspace = {
             "folders": [{"path": "var"}],
             "settings": {"gushenCompletion.executionMode": "packaged",
@@ -278,11 +270,14 @@ class Installer:
                          "gushenCompletion.autoStartBridge": False},
         }
         settings = {
-            "extraKnownMarketplaces": {"guthon-team": {"source": {"source": "git", "url": marketplace_url(self.marketplace or manifest["marketplaceUrl"])}}},
-            "enabledPlugins": {"guthon-guard@guthon-team": True},
             "env": {"GUTHON_PYTHON": str(Path(os.environ['LOCALAPPDATA']) / 'Guthon/runtimes' / manifest['bundleId'] / 'python.exe'),
                     "PATH": os.pathsep.join(dict.fromkeys(self.env.get('PATH', '').split(os.pathsep)))},
         }
+        if source:
+            settings.update(
+                extraKnownMarketplaces={"guthon-team": {"source": {"source": "git", "url": source}}},
+                enabledPlugins={"guthon-guard@guthon-team": True},
+            )
         desired = {"Guthon.code-workspace": workspace, "var/.codebuddy/settings.json": settings}
         previous = read_json(self.lock_path) if self.lock_path.exists() else {}
         plans = {}
@@ -312,36 +307,40 @@ class Installer:
         with file_lock(self.home / "var/nexus/.setup.lock", timeout=1):
             try:
                 self.step("检查已有配置")
-                desired, _ = self.configuration(manifest)
+                ides = find_ides(self.ide_root)
+                if not ides:
+                    raise SetupError(NO_IDE)
+                selected = self.selected_ides if self.selected_ides is not None else [next(iter(ides))]
+                if not selected or any(product not in ides for product in selected):
+                    raise SetupError("所选 IDE 已不可用，请重新运行安装器并检查选择")
+                source = (self.marketplace or manifest.get("marketplaceUrl", "")).strip()
+                if source:
+                    source = marketplace_url(source)
+                self.configuration(manifest, source)
                 python = self.payload / "runtime/python.exe"
                 self.execute([python, "-c", "import sys; assert sys.version_info >= (3, 12)"], "Python 自检")
                 self.env["GUTHON_PYTHON"] = str(python)
                 self.complete()
-                for name in ("codebuddy", "git"):
-                    self.step("准备 " + name)
-                    detected = find_ide(self.ide_root) if name == "codebuddy" else find_program(name)
-                    if not detected:
-                        prerequisite = next((p for p in manifest["prerequisites"] if p["id"] == name), None)
-                        if not prerequisite:
-                            raise SetupError("本包未包含 " + name + "，请使用完整安装包或先安装该组件")
-                        self.step("下载并校验 " + name if "url" in prerequisite else "安装 " + name)
-                        source = prerequisite_file(self.payload, prerequisite)
-                        command = (["msiexec.exe", "/i", source] if source.suffix.lower() == ".msi" else [source])
-                        install_package([*command, *prerequisite["args"]], name + " 安装", prerequisite["elevate"])
-                        detected = find_ide(self.ide_root) if name == "codebuddy" else find_program(name)
-                    if not detected:
-                        raise SetupError(name + " 安装后未找到入口，请检查安装位置并重试")
-                    if name == "codebuddy":
-                        self.ide = detected
-                        cli_env = {**self.env, "ELECTRON_RUN_AS_NODE": "1"}
-                        self.runner([str(p) for p in detected] + ["--list-extensions"], "IDE CLI 验证", env=cli_env)
-                    else:
-                        self.report["programs"][name] = str(detected.resolve())
-                        self.execute([detected, "--version"], name + " 自检")
-                        self.env["PATH"] = str(detected.parent) + os.pathsep + self.env.get("PATH", "")
-                        if name == "git" and (detected.parent.parent / "usr/bin").is_dir():
-                            self.env["PATH"] = str(detected.parent.parent / "usr/bin") + os.pathsep + self.env["PATH"]
-                    self.complete()
+                self.step("准备 Git")
+                git = find_program("git")
+                if not git:
+                    prerequisite = next((p for p in manifest["prerequisites"] if p["id"] == "git"), None)
+                    if not prerequisite:
+                        raise SetupError("本包未包含 Git，请先安装 Git 后重试")
+                    self.step("下载并校验 Git" if "url" in prerequisite else "安装 Git")
+                    package = prerequisite_file(self.payload, prerequisite)
+                    command = ["msiexec.exe", "/i", package] if package.suffix.lower() == ".msi" else [package]
+                    install_package([*command, *prerequisite["args"]], "Git 安装", prerequisite["elevate"])
+                    git = find_program("git")
+                if not git:
+                    raise SetupError("Git 安装后未找到入口，请检查安装位置并重试")
+                self.report["programs"]["git"] = str(git.resolve())
+                self.execute([git, "--version"], "Git 自检")
+                git_folders = [str(git.parent)]
+                if (tools := git.parent.parent / "usr/bin").is_dir():
+                    git_folders.insert(0, str(tools))
+                self.env["PATH"] = os.pathsep.join([*git_folders, self.env.get("PATH", "")])
+                self.complete()
                 tool = self.payload / "tool/GuthonCodeTool.exe"
                 self.step("初始化 GuthonCodeTool")
                 version = self.execute([tool, "version"], "后端版本检查")
@@ -349,19 +348,34 @@ class Installer:
                     raise SetupError("后端版本与安装包不一致")
                 self.execute([tool, "setup", "--home", self.home, "--no-team-sync"], "准备开发目录")
                 self.complete()
-                self.step("安装 Nexus")
                 cli_env = {**self.env, "ELECTRON_RUN_AS_NODE": "1"}
-                cli = [str(p) for p in self.ide]
-                self.runner([*cli, "--install-extension", str(self.payload / "nexus.vsix"), "--force"], "Nexus 安装", env=cli_env)
-                listing = self.runner([*cli, "--list-extensions", "--show-versions"], "Nexus 安装验证", env=cli_env)
+                cli_env.pop("VSCODE_DEV", None)
                 expected = f"{NEXUS_ID}@{manifest['nexusVersion']}"
-                if expected.lower() not in listing.lower().splitlines():
-                    raise SetupError("IDE 尚未确认目标 Nexus 版本已安装")
-                self.complete()
-                self.step("配置开发入口")
+                self.report["ides"] = []
+                failures = []
+                for product in dict.fromkeys(selected):
+                    name = PRODUCTS[product].name
+                    self.step(f"在 {name} 安装 Nexus")
+                    executable, cli_script = ides[product]
+                    cli = [str(executable), str(cli_script)]
+                    try:
+                        self.runner([*cli, "--install-extension", str(self.payload / "nexus.vsix"), "--force"],
+                                    f"{name} Nexus 安装", env=cli_env)
+                        listing = self.runner([*cli, "--list-extensions", "--show-versions"],
+                                              f"{name} Nexus 安装验证", env=cli_env)
+                        if expected.lower() not in {line.strip().lower() for line in listing.splitlines()}:
+                            raise SetupError(f"{name} 尚未确认目标 Nexus 版本已安装")
+                    except SetupError as error:
+                        failures.append(str(error))
+                        continue
+                    self.report["ides"].append({"id": product, "name": name, "executable": str(executable)})
+                    self.complete()
+                if failures:
+                    raise SetupError("；".join(failures))
+                self.step("配置 Guthon 工作区")
                 self.install_bridge()
                 # Re-read to catch manual changes made while component installation ran.
-                desired, plans = self.configuration(manifest)
+                desired, plans = self.configuration(manifest, source)
                 for relative, value in plans.items():
                     write_json(self.home / relative, value)
                 write_json(self.lock_path, desired)
@@ -374,14 +388,21 @@ class Installer:
                 self.report["state"] = "environment-ready"
                 from datetime import datetime, timezone
                 self.report["installedAt"] = datetime.now(timezone.utc).isoformat()
-                self.report["marketplaceUrl"] = marketplace_url(self.marketplace or manifest["marketplaceUrl"])
                 self.report["tutorialPath"] = str(self.payload / "docs/GuthonCodeTool_Windows安装步骤.html")
-                self.report["guardMinimumVersion"] = "0.5.0"
-                self.report["actions"] += [
-                    "在 CodeBuddy 登录并信任 Guthon 工作区，按向导授权内网仓库并同步团队规范和开发门禁。",
-                    "如需 Agent 生命周期检查，再从市场安装 guthon-guard 并确认 Hook 运行。",
-                    "完成一次性配置后，在 CodeBuddy 中直接使用 GuthonNexus；需要网页增强时再配对 Chrome 的 Bridge。",
-                ]
+                self.report["actions"].append(
+                    f"在已安装 Nexus 的 IDE 中，从文件菜单打开工作区 {self.home / 'Guthon.code-workspace'}。"
+                    "按提示信任工作区，再从活动栏进入 Guthon Nexus，完成一次性配置。"
+                )
+                if source:
+                    self.report["marketplaceUrl"] = source
+                    self.report["guardMinimumVersion"] = "0.5.0"
+                    self.report["actions"].extend([
+                        "按向导授权内网仓库并同步团队规范和开发门禁。",
+                        "如需 Agent 生命周期检查，再从市场安装 guthon-guard 并确认 Hook 运行。",
+                    ])
+                else:
+                    self.report["actions"].append("可以先完成安装确认，再将部门提供的规则放入开发目录。")
+                self.report["actions"].append("需要网页增强时，可在安装配置助手中配对 Chrome Bridge。")
                 write_json(self.report_path, self.report)
                 self.write_result_page()
             except Exception as error:
@@ -427,28 +448,18 @@ class Installer:
     def write_result_page(self):
         import html
         body = "".join("<li>" + html.escape(a) + "</li>" for a in self.report["actions"])
+        installed = "、".join(html.escape(ide["name"]) for ide in self.report.get("ides", []))
+        if installed:
+            body = f"<li>已验证 Nexus 的 IDE：{installed}。</li>" + body
         error = html.escape(self.report.get("error", ""))
         title = "基础组件已准备，请完成一次性安装确认" if self.report["state"] == "environment-ready" else "安装未完成，可修复后重新运行"
-        tutorial = '''<h2>需要手动安装时</h2><ol>
-<li>CodeBuddy：从 <a href="https://www.codebuddy.cn/downloads/">官网</a>下载 Windows x64 版本，运行安装程序并登录个人账号。</li>
+        tutorial = f'''<h2>需要手动安装时</h2><ol>
+<li>没有可用 IDE 时，前往 <a href="{IDE_DOWNLOAD_URL}">CodeBuddy 国内版官网</a>下载并安装 Windows 版。</li>
 <li>Git：从 <a href="https://gitforwindows.org/">Git for Windows 官网</a>安装，保留命令行工具选项。</li>
-<li>若使用离线依赖安装包，可从安装目录的 prerequisites 子目录找到已校验的安装文件。</li>
-<li>完成后重新运行 GuthonCodeSetup.exe。安装成功后双击桌面入口，在 Nexus 向导继续完成 Git 仓库权限、插件信任和 Chrome 首次扩展加载。</li></ol>'''
+<li>若使用离线依赖安装包，可从安装载荷的 prerequisites 子目录找到已校验的 Git 安装文件。</li>
+<li>完成手动安装后重新运行 GuthonCodeSetup.exe。</li></ol>'''
         page = f'<!doctype html><meta charset="utf-8"><title>Guthon 安装结果</title><style>body{{font:18px sans-serif;max-width:800px;margin:60px auto;line-height:1.8}}li{{margin:12px 0}}</style><h1>{title}</h1><p>{error}</p><ul>{body}</ul>{tutorial}<p>重新运行同一安装包会复查已安装组件；保留已有数据和人工修改。不会自动提交或发布源码。</p>'
         atomic_text(self.report_path.with_suffix(".html"), page)
-
-    def launch(self):
-        if not self.report_path.exists() or read_json(self.report_path).get("state") != "environment-ready":
-            raise SetupError("环境安装尚未完成，请重新运行安装包并查看结果")
-        ide = find_ide(self.ide_root)
-        if not ide:
-            raise SetupError("没有找到 CodeBuddy，请重新运行安装器")
-        if program := find_program("git"):
-            self.env["PATH"] = str(program.parent) + os.pathsep + self.env.get("PATH", "")
-            if (program.parent.parent / "usr/bin").is_dir():
-                self.env["PATH"] = str(program.parent.parent / "usr/bin") + os.pathsep + self.env["PATH"]
-        self.env["GUTHON_PYTHON"] = str(self.payload / "runtime/python.exe")
-        subprocess.Popen([str(ide[0]), str(self.home / "Guthon.code-workspace")], env=self.env)
 
 
 def main():
@@ -456,22 +467,17 @@ def main():
     parser.add_argument("--payload", required=True, type=Path)
     parser.add_argument("--home", required=True, type=Path)
     parser.add_argument("--ide-root", type=Path)
+    parser.add_argument("--ides")
     parser.add_argument("--marketplace-url")
-    parser.add_argument("--launch-only", action="store_true")
     args = parser.parse_args()
     try:
-        installer = Installer(args.payload, args.home, args.ide_root, marketplace=args.marketplace_url)
-        if args.launch_only:
-            installer.launch()
-        else:
-            installer.install()
+        installer = Installer(args.payload, args.home, args.ide_root, marketplace=args.marketplace_url,
+                              selected_ides=args.ides.split(",") if args.ides is not None else None)
+        installer.install()
         return 0
     except Exception as error:
         if sys.stderr:
             print(str(error), file=sys.stderr)
-        elif os.name == "nt":
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(None, str(error), "Guthon", 0x10)
         return 1
 
 

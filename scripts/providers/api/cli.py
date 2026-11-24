@@ -366,7 +366,7 @@ def execute(workspace, action, payload):
             return {**result, "objects": result.get("items", result.get("objects", [])),
                     **({"project": {k: project[k] for k in ("systems", "dataSources", "menuTree") if k in project}} if project is not None else {})}
         if action == "search":
-            return index.search(workspace, payload.get("query"), limit, offset)
+            return index.search(workspace, payload.get("query"), limit, offset, source_type=payload.get("sourceType", ""))
         if action == "context":
             return index.context(workspace, payload.get("path"), limit, offset)
         if action == "callers":

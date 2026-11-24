@@ -11,59 +11,59 @@
 <div class="layout"><aside class="sidebar"><div class="side-head"><div class="side-title"><strong>使用目录</strong><span class="chapter-count">7 个章节</span></div><input class="search" id="tocSearch" type="search" placeholder="搜索章节…（按 / 聚焦）" aria-label="搜索章节"></div><nav class="toc" id="toc"><a class="toc-link" href="#one-click" data-title="一、一键安装配置">一、一键安装配置</a><a class="toc-link" href="#status" data-title="安装完成后的检查项">安装完成后的检查项</a><a class="toc-link" href="#prepare" data-title="二、手动创建与信任目录">二、手动创建与信任目录</a><a class="toc-link" href="#nexus" data-title="三、手动安装 Nexus">三、手动安装 Nexus</a><a class="toc-link" href="#team" data-title="四、手动安装团队插件">四、手动安装团队插件</a><a class="toc-link" href="#accept" data-title="五、安装完成检查">五、安装完成检查</a><a class="toc-link" href="#gme" data-title="六、安装后接入工作区">六、安装后接入工作区</a><a class="toc-link" href="#trouble" data-title="七、安装问题入口">七、安装问题入口</a></nav><div class="no-result" id="noResult">没有匹配的章节</div></aside><main class="main">
 <section id="one-click">
 <h2>一、一键安装配置</h2>
-<p>Windows 用户使用 GuthonCodeSetup 安装 GuthonCodeTool、GuthonNexus 和 GuthonBridge，并由向导接入内网 guthon-team 插件市场。个人登录、服务器信任与 Chrome 首次扩展加载需要本人确认，向导会提供操作入口。</p>
-<div class="notice"><strong>推荐阅读路线：</strong><p>优先使用 GuthonCodeSetup。完成本章安装及首次配置向导后，<strong>无需重复第二至第四章</strong>的手动安装和工具初始化；这些章节用于单独安装或修复。第六章是后续在 GuthonNexus 接入业务工作区的参考，按工作需要使用。</p><p>个人账号登录、工作区／插件信任和内网仓库授权按本章完成；Chrome 首次扩展加载仅在需要网页增强时进行。安装完成后按<a href="#accept">第五章检查</a>核对；业务接入见<a href="#gme">第六章</a>，安装问题见<a href="#trouble">第七章</a>。</p></div>
+<p>Windows 用户使用 GuthonCodeSetup 安装 GuthonCodeTool、GuthonNexus 和 GuthonBridge。安装时可以选择一个或多个本机 IDE。首次打开 Guthon 工作区时确认信任。团队规则和浏览器增强按需配置。</p>
+<div class="notice"><strong>推荐阅读路线：</strong><p>优先使用 GuthonCodeSetup。完成本章安装及首次配置向导后，<strong>无需重复第二至第四章</strong>的手动安装和工具初始化；这些章节用于单独安装或修复。第六章是后续在 GuthonNexus 接入业务工作区的参考，按工作需要使用。</p><p>个人账号登录和工作区信任按本章完成。需要团队同步时再授权内网仓库，需要网页增强时再加载 Chrome 扩展。安装完成后按<a href="#accept">第五章检查</a>核对；业务接入见<a href="#gme">第六章</a>，安装问题见<a href="#trouble">第七章</a>。</p></div>
 <h3 id="one-click-download">1.1 从 GitHub Release 下载哪些文件</h3>
-<p>打开 <a href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">GitHub Releases</a>，进入同一个版本的 <strong>Assets（发行附件）</strong>。安装器内置后端、Nexus、Bridge 和所需 Python；复用已有 CodeBuddy、Git，缺失工具按提示联网下载。下载失败可重新运行。先下载下表文件。</p>
+<p>打开 <a href="https://github.com/SidWuu/GuthonCodeTool/releases" target="_blank" rel="noopener">GitHub Releases</a>，进入同一个版本的 <strong>Assets（发行附件）</strong>。安装器内置后端、Nexus、Bridge 和所需 Python。缺少 Git 时按提示联网安装。先下载下表文件。</p>
 <div class="table-scroll"><table><thead><tr><th>文件</th><th>是否需要</th><th>用途</th></tr></thead><tbody>
 <tr><td><code>GuthonCodeSetup.exe</code></td><td>必需</td><td>统一 Windows x64 安装与首次配置入口。</td></tr>
 <tr><td><code>GuthonCodeSetup.sha256</code></td><td>必需</td><td>同一发行版安装器的 SHA-256 校验文件。</td></tr>
 <tr><td><code>guthon-testing.zip</code></td><td>按需</td><td>仅在需要独立安装数据库排查 Skill 的 Agent 中使用；按对应 Agent 的 Skill 安装方式配置。</td></tr>
 </tbody></table></div>
-<p>使用统一安装器时，GuthonCodeTool-windows-x64.exe、guthon-nexus-vscode.vsix 和 GuthonCodeTool-chrome.zip 已包含在套件中。安装助手连接团队内网 Git 仓库后同步规则和开发门禁。</p>
+<p>使用统一安装器时，GuthonCodeTool-windows-x64.exe、guthon-nexus-vscode.vsix 和 GuthonCodeTool-chrome.zip 已包含在套件中。有团队 Git 地址时，可在安装助手中授权并同步。</p>
 <details><summary>安装前核对下载文件</summary><p>将安装器和同版校验文件放在同一目录，在 PowerShell 执行：</p><pre><code>$expected = ((Get-Content .\GuthonCodeSetup.sha256 -Raw).Trim() -split '\s+')[0]
 $actual = (Get-FileHash .\GuthonCodeSetup.exe -Algorithm SHA256).Hash
 if ($actual.ToLower() -ne $expected.ToLower()) { throw '安装器校验不匹配，请重新下载' }</code></pre><p>摘要匹配用于检查文件完整性；下载来源和正式发行签名仍需按团队分发说明核对。</p></details>
 <details><summary>手动安装或单独修复时下载哪些文件（可选）</summary><p>仅在采用第二至第四章手动流程或单独修复组件时，在同一个 Release 下载以下文件：</p><ul>
 <li><code>GuthonCodeTool-windows-x64.exe</code>：后端应用。</li>
-<li><code>guthon-nexus-vscode.vsix</code>：CodeBuddy 中的 Nexus 扩展。</li>
+<li><code>guthon-nexus-vscode.vsix</code>：GuthonNexus 扩展。</li>
 <li><code>GuthonCodeTool-chrome.zip</code>：Chrome 的 Bridge 扩展。</li>
 <li><code>GuthonCodeTool-checksums.txt</code>、<code>GuthonCodeTool-checksums.signature.json</code>、<code>GuthonCodeTool-release.json</code>：同版摘要、签名和组件清单，供离线核验和更新流程使用。</li>
 </ul><p>需要独立数据库排查 Skill 时再取 guthon-testing.zip。CodeBuddy、Git 从各自官网安装；团队插件仍从内网市场安装。</p></details>
 <h3 id="one-click-install">1.2 运行安装器并打开安装助手</h3><ol>
-<li>双击 <code>GuthonCodeSetup.exe</code>。选择用于配置、日志和后续工作数据的目录，通常使用默认值。公开包会询问团队提供的 guthon-team 内网 Git 克隆地址；可以填写或由团队通过 GUTHON_TEAM_MARKETPLACE_URL 预置。安装阶段不创建产品或项目。</li>
-<li>安装器准备 CodeBuddy、Git、GuthonCodeTool 和 GuthonNexus。系统要求安装授权或重启时按提示完成；重启后重新运行同一个安装包。</li>
-<li>双击桌面“开始 Guthon 开发”。首次在 CodeBuddy 登录个人账号，并信任当前工作区。</li>
-<li>CodeBuddy 会打开“Guthon 安装配置助手”，用于确认工具、同步团队规范，以及按需配置 Agent Hook 和 Chrome Bridge。可以点击“继续下一步”。</li>
+<li>双击 <code>GuthonCodeSetup.exe</code>，在“选择 IDE”勾选要安装 GuthonNexus 的编辑器。可多选已检测到的 VS Code、CodeBuddy 国内版或国际版、Trae、Qoder。若提示未检测到 IDE，点击“打开 CodeBuddy 国内版官网”，安装 Windows 版后重新运行 GuthonCodeSetup。</li>
+<li>选择工作数据目录，通常使用默认值。公开包的“团队插件市场”地址可留空。团队提供地址时可填写，或由团队通过 <code>GUTHON_TEAM_MARKETPLACE_URL</code> 预置。</li>
+<li>点击“安装”，等待安装器把 GuthonNexus 安装到所有勾选的 IDE，完成后查看安装结果。若系统要求为 Git 安装授权或重启，按提示操作，重启后重新运行同一个安装包。</li>
+<li>打开已安装 GuthonNexus 的 IDE，从“文件”菜单打开工作数据目录下的 <code>Guthon.code-workspace</code>。完成页的“查看安装结果”也会列出完整路径。按 IDE 提示登录并信任工作区，再从活动栏打开 <strong>Guthon Nexus</strong>，在安装配置助手中检查运行环境。</li>
 </ol><p class="notice">检查标准：GuthonCodeTool 与 GuthonNexus 卡片显示通过。无需自己安装 Python 或配置系统环境变量。</p>
-<h3 id="one-click-team">1.3 同步团队规则和开发门禁</h3><ol>
+<h3 id="one-click-team">1.3 配置部门规则（按需）</h3><p>公开安装包的团队 Git 地址留空时，工具检查通过后即可点击“完成配置”。需要使用部门现有规则时，从助手点击“打开开发目录”，按部门说明把 <code>AGENTS.md</code>、<code>rules/</code> 等放在这里。安装前已放入的规则会保留。已配置团队 Git 地址时，按以下步骤同步：</p><ol>
 <li>连接公司网络或团队提供的 VPN。点“打开内网 Git 网站”，填写团队网站地址并登录；没有账号或没有仓库权限时，先联系管理员开通。</li>
 <li>如果市场使用 SSH 地址：点击“生成或复制 SSH 公钥”。向导保留已有密钥，只把公钥复制到剪贴板；到 Git 网站“用户设置 → SSH/GPG 公钥”新增并粘贴保存。私钥不上传、不发给别人。</li>
 <li>点击“首次连接授权”。终端提示服务器指纹时，先与团队提供的指纹核对，再确认信任。HTTPS 来源按终端或 Git 凭据管理器提示登录，跳过 SSH 公钥步骤。</li>
 <li>点击“同步团队规范”。仓库访问通过后，助手直接安装规则、Linter 和 Git pre-commit。此卡片显示通过后可以完成配置。</li>
 </ol>
 <p class="small">需要 Agent 生命周期检查时，按<a href="#team">手动安装团队插件</a>安装 guthon-guard 0.5.0 或更新版本，并用“检查 Hook 运行”核对实际触发。</p>
-<h3 id="one-click-bridge">1.4 在现有 Chrome 加载 GuthonBridge（可选）</h3><p>工具与团队规范就绪后可以完成安装，需要网页增强时继续本节。</p><ol>
+<h3 id="one-click-bridge">1.4 在现有 Chrome 加载 GuthonBridge（可选）</h3><p>需要网页增强时继续本节。</p><ol>
 <li>需要额外平台主机规则时可点“平台地址规则（按需）”；否则使用已配置的默认规则。此项不作为安装完成条件。</li>
 <li>点“打开 Chrome 扩展管理”，打开后启用右上角“开发者模式”。</li>
 <li>点向导“定位并复制扩展目录”。回到 Chrome 点击“加载已解压的扩展”，在文件夹选择器粘贴该目录并选择。</li>
 <li>在 Chrome 工具栏的扩展按钮中打开 GuthonBridge；可以将它固定到工具栏。</li>
 <li>回到向导点“复制配对令牌”。在 GuthonBridge 展开“本机 Bridge 配对”，粘贴令牌，点击“保存并连接”。令牌只用于你的本机，不发送给别人。</li>
-<li>点“检查浏览器连接”。工具与团队规范就绪后点“完成配置”；助手将提示后续在 CodeBuddy 使用 GuthonNexus，并关闭安装确认页面。</li>
+<li>点“检查浏览器连接”。基础检查和已配置的团队同步通过后，点“完成配置”。</li>
 </ol><p class="notice">检查标准：本地 Bridge 服务运行，当前托管扩展发出了认证连接心跳。扩展文件存在、或浏览器显示“已加载”，都不能单独替代此项检查。</p>
 <p class="small">已有 Chrome 的首次加载需要本人操作；安装器不修改浏览器策略。已经加载后改变平台地址，需要到扩展管理页重新加载 GuthonBridge。后续版本通过 Nexus 更新固定托管目录。</p>
 <h3 id="one-click-finish">1.5 完成安装，后续使用 GuthonNexus</h3>
-<p>GuthonCodeSetup 只负责从零安装必需工具、插件和基础环境。安装及一次性确认完成后，提示“后续打开 CodeBuddy，使用 GuthonNexus”。日常双击“开始 Guthon 开发”直接进入 CodeBuddy，安装助手不再弹出，已配置的 Bridge 服务自动启动。</p>
+<p>日常使用时，在任一已安装 Nexus 的 IDE 中打开 Guthon 工作区，从活动栏进入 <strong>Guthon Nexus</strong>。IDE 的“打开最近的项目”菜单可用于重新打开此前使用过的工作区。</p>
 <p>完成本页检查后，可按<a href="#gme">安装后接入工作区</a>继续连接 API、SVN 或 DATABASE 项目。</p>
 <h3 id="one-click-recover">1.6 自动安装失败时的手动恢复</h3><table><tr><th>现象</th><th>处理</th></tr>
-<tr><td>CodeBuddy / Git 自动安装失败</td><td>安装结果页会提供官网链接。也可在安装目录的 prerequisites 子目录双击对应离线安装程序；完成后重新运行 GuthonCodeSetup。</td></tr>
+<tr><td>Git 自动安装失败</td><td>按安装结果页的官网链接手动安装 Git，然后重新运行 GuthonCodeSetup。</td></tr>
 <tr><td>内网仓库访问失败</td><td>确认公司网络、账号仓库权限、公钥登记和首次服务器信任。到“首次连接授权”终端查看具体提示。</td></tr>
 <tr><td>插件已安装但 Hook 仍待完成</td><td>确认工作区与 Hook 信任，更新市场插件，重载插件并开始新聊天。当前市场需要包含支持向导回执的版本。</td></tr>
 <tr><td>Chrome 无法加载扩展</td><td>选择“定位并复制扩展目录”给出的完整目录，确认该目录直接包含 manifest.json。</td></tr>
 <tr><td>Chrome 开发者模式被公司策略禁用</td><td>由管理员按公司的扩展部署方式安装 GuthonBridge；向导不会绕过浏览器策略。安装后继续配对与连接检查。</td></tr>
-<tr><td>配对后没有连接</td><td>保持 CodeBuddy 窗口打开，重新复制本机令牌并保存连接；确认两边端口一致，然后再次检查。</td></tr>
+<tr><td>配对后没有连接</td><td>保持运行 Nexus 的 IDE 窗口打开，重新复制本机令牌并保存连接；确认两边端口一致，然后再次检查。</td></tr>
 <tr><td>发现人工配置冲突</td><td>保留原文件，请维护者合并；不要直接删除配置或强制覆盖。</td></tr>
-</table><p>官网下载：<a href="https://www.codebuddy.cn/downloads/">CodeBuddy</a> · <a href="https://gitforwindows.org/">Git</a> · <a href="https://www.google.com/chrome/">Chrome</a></p>
+</table><p>官网下载：<a href="https://www.codebuddy.cn/ide/">CodeBuddy 国内版</a> · <a href="https://gitforwindows.org/">Git</a> · <a href="https://www.google.com/chrome/">Chrome</a></p>
 <h3 id="status">安装完成后应看到什么</h3><p>以当前安装助手显示的工具和插件检查结果完成配置；网页辅助需要时再核对浏览器连接。需要接入项目时，继续查看<a href="#gme">安装后接入工作区</a>。截图仅说明按钮位置，版本和状态以本机界面为准。</p>
 </section>
 <section id="prepare"><h2>二、手动创建并信任工作区目录</h2><p class="small">本章为手动安装参考。已完成第一章工具及插件环境配置时可跳过；单独安装或修复时再使用。</p><div class="step"><div class="num">1</div><div class="step-body"><h3>新建目录并在 CodeBuddy 中信任 <span class="tag done">操作示例</span></h3><ol><li>手动配置时，在 <code>D:\Develop\GuthonWork</code> 中新建开发目录，例如 <code>var</code>，也可使用自定义目录名。</li><li>在 IDE 选择「文件 → 打开文件夹」，直接打开这个开发目录。出现工作区信任提示时核对目录。</li><li>把后端 EXE 放在本地数据目录，IDE 打开其中的开发目录。例如 <code>D:\Develop\GuthonWork\GuthonCodeTool-windows-x64.exe</code>、<code>D:\Develop\GuthonWork\var</code>。</li></ol><div class="shots"><figure><img src="windows-install-images/19-codebuddy-workspace-trust.jpg" alt="CodeBuddy 工作区信任提示"><figcaption>打开开发目录后确认工作区信任。</figcaption></figure><figure><img src="windows-install-images/20-codebuddy-workspace-trusted.jpg" alt="CodeBuddy 已信任工作区"><figcaption>工作区已信任。</figcaption></figure></div></div></div></section>
@@ -82,9 +82,9 @@ if ($actual.ToLower() -ne $expected.ToLower()) { throw '安装器校验不匹配
 </section>
 <section id="accept"><h2>五、安装完成检查</h2>
 <ul class="checks">
-<li>CodeBuddy 已安装并登录，工作目录已信任。</li>
+<li>已选 IDE 的扩展面板中可找到 GuthonNexus，Guthon 工作区已信任。</li>
 <li>同版后端与 Nexus 就绪，Nexus 能启动工具并读取本地数据目录。</li>
-<li>团队规范同步通过，开发根已有规则和 Linter。需要 Agent 自动检查时，另在新聊天中确认 Hook 运行。</li>
+<li>已配置团队 Git 地址时，确认规则和 Linter 已同步。使用部门手工规则时，按部门要求检查文件位置及客户端生效情况。需要 Agent 自动检查时，在新聊天中确认 Hook 运行。</li>
 <li>按需完成浏览器增强配置。在安装助手点击“检查浏览器连接”，确认 Chrome 扩展加载和配对成功。详见<a href="#one-click-bridge">首次加载和配对步骤</a>。</li>
 </ul>
 <p>使用统一安装器时，以安装助手的检查结果为准。采用手动安装时，分别核对上述结果。业务连接、项目源码索引、Git 提交时的检查结果、API 上传和平台运行按实际任务另行检查。</p>
@@ -107,7 +107,7 @@ if ($actual.ToLower() -ne $expected.ToLower()) { throw '安装器校验不匹配
 <li><a href="GuthonCodeTool_QA.html?q=Bridge">Chrome 扩展与 Bridge 配对问题</a></li>
 </ul>
 </section>
-<footer>Windows 安装步骤 · 最后更新 2026-11-23 · 点击图片可放大；分享时请保留 HTML 与截图文件同一目录。</footer>
+<footer>Windows 安装步骤 · 最后更新 2026-11-24 · 点击图片可放大；分享时请保留 HTML 与截图文件同一目录。</footer>
 
 </main></div><dialog id="viewer"><button type="button" onclick="this.parentElement.close()">关闭</button><img alt="放大的实机截图"></dialog><div class="toolbar"><button type="button" id="themeToggle" aria-label="切换深色主题">☾ 主题</button></div><script>const viewer=document.getElementById('viewer');document.querySelectorAll('figure img').forEach(img=>img.addEventListener('click',()=>{viewer.querySelector('img').src=img.src;viewer.querySelector('img').alt=img.alt;viewer.showModal()}));viewer.addEventListener('click',e=>{if(e.target===viewer)viewer.close()});
 const tocLinks=[...document.querySelectorAll('.toc-link')],sections=[...document.querySelectorAll('.main section')],search=document.getElementById('tocSearch');search.addEventListener('input',()=>{const q=search.value.trim().toLowerCase();let visible=0;tocLinks.forEach(a=>{const match=a.textContent.toLowerCase().includes(q)||document.querySelector(a.getAttribute('href')).textContent.toLowerCase().includes(q);a.style.display=match?'':'none';visible+=match?1:0});document.getElementById('noResult').style.display=visible?'none':'block'});document.addEventListener('keydown',e=>{if(e.key==='/'&&document.activeElement!==search&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();search.focus()}});const observer=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){tocLinks.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id))}})},{rootMargin:'-10% 0px -75% 0px'});sections.forEach(s=>observer.observe(s));const progress=document.getElementById('progress');window.addEventListener('scroll',()=>{const max=document.documentElement.scrollHeight-innerHeight;progress.style.width=(max?scrollY/max*100:0)+'%'},{passive:true});const themeToggle=document.getElementById('themeToggle');themeToggle.addEventListener('click',()=>{const dark=document.documentElement.getAttribute('data-theme')==='dark';document.documentElement.setAttribute('data-theme',dark?'light':'dark');themeToggle.textContent=dark?'☾ 主题':'☀ 主题'});</script></body></html>

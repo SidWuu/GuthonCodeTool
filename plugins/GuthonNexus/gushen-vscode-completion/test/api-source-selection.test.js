@@ -6,7 +6,7 @@ function fixture(run,execute=async()=>{}) {
   const controls=[];
   const vscode={workspace:{textDocuments:[]},commands:{executeCommand:execute},
     Uri:{from:x=>x},scm:{createSourceControl:(_id,label)=>{
-      const control={label,disposed:false,dispose(){this.disposed=true;},createResourceGroup(){return {};}};
+      const control={label,disposed:false,inputBox:{value:''},dispose(){this.disposed=true;},createResourceGroup(){return {};}};
       controls.push(control);return control;
     }}};
   const ui=new ApiSourceUI({vscode,run});

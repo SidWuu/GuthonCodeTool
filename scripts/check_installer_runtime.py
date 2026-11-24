@@ -23,6 +23,9 @@ def check(payload):
     execute([payload / "installer/engine.py", "--help"])
     execute(["-c", "print('中文路径与输出校验')"])
     with tempfile.TemporaryDirectory(prefix="guthon-runtime-check-") as directory:
+        scan = Path(directory) / "本机编辑器.txt"
+        execute([payload / "installer/ide.py", scan])
+        scan.read_text(encoding="utf-8-sig")
         workspace = Path(directory) / "中文临时工作区"
         setup = subprocess.run(
             [str(payload / "tool/GuthonCodeTool.exe"), "setup", "--home", str(workspace), "--no-team-sync"],

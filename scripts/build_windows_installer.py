@@ -107,7 +107,7 @@ def prepare(args, stage):
         raise ValueError("私有 Python ZIP 与维护者核定哈希不一致")
     unpack(args.python_zip, stage / "runtime")
     pth_files = list((stage / "runtime").glob("python3*._pth"))
-    if not all((stage / "runtime" / name).is_file() for name in ("python.exe", "pythonw.exe")) or len(pth_files) != 1:
+    if not (stage / "runtime/python.exe").is_file() or len(pth_files) != 1:
         raise ValueError("需要 CPython 3.12+ Windows x64 embeddable ZIP")
     match = re.fullmatch(r"python3(\d+)\._pth", pth_files[0].name)
     if not match or int(match[1]) < 12 or not pth_files[0].with_suffix(".zip").is_file():
@@ -119,7 +119,8 @@ def prepare(args, stage):
         raise ValueError("私有 Python 不是 Windows x64 可执行文件")
     pth_files[0].write_text(pth_files[0].with_suffix('.zip').name + "\n.\n../installer\n", encoding="ascii")
     (stage / "installer/common").mkdir(parents=True)
-    shutil.copy2(ROOT / "scripts/installer/engine.py", stage / "installer/engine.py")
+    for name in ("engine.py", "ide.py"):
+        shutil.copy2(ROOT / "scripts/installer" / name, stage / "installer" / name)
     shutil.copy2(ROOT / "scripts/common/persistence.py", stage / "installer/common/persistence.py")
     shutil.copy2(ROOT / "scripts/common/installer_downloads.py", stage / "installer/common/installer_downloads.py")
     package_windows_guide(stage)
@@ -135,8 +136,8 @@ def prepare(args, stage):
                 validate_download(item)
                 prerequisites.append(dict(item))
                 continue
-            if set(item) != {"id", "file", "sha256", "args", "elevate"} or item["id"] not in ("codebuddy", "git"):
-                raise ValueError("依赖仅允许 codebuddy、git")
+            if set(item) != {"id", "file", "sha256", "args", "elevate"} or item["id"] != "git":
+                raise ValueError("依赖仅允许 Git")
             source = Path(item["file"])
             if not source.is_absolute():
                 source = args.prerequisites.parent / source
@@ -150,8 +151,8 @@ def prepare(args, stage):
             shutil.copy2(source, stage / name)
             prerequisites.append({"id": item["id"], "file": name, "args": item["args"], "elevate": item["elevate"]})
     ids = [item["id"] for item in prerequisites]
-    if len(set(ids)) != len(ids) or (not args.existing_tools and set(ids) != {"codebuddy", "git"}):
-        raise ValueError("完整安装包必须包含 CodeBuddy、Git 两项；已有环境试用包需显式 --existing-tools")
+    if len(ids) > 1 or (not args.existing_tools and ids != ["git"]):
+        raise ValueError("完整安装包必须包含唯一的 Git 依赖；已有环境试用包需显式 --existing-tools")
     with zipfile.ZipFile(stage / "nexus.vsix") as archive:
         nexus = json.loads(archive.read("extension/package.json"))
         tool_version = json.loads(archive.read("extension/tool-version.json"))["version"]

@@ -171,6 +171,14 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
     if (choice === '打开托管目录') await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(directory));
     if (choice === '复制管理页地址') await vscode.env.clipboard.writeText('chrome://extensions');
   }
+  async function showUpdateError(prefix, error, suffix = '') {
+    const message = prefix + error.message;
+    if (error.code !== 'LOCAL_UPDATE_SOURCE_INCOMPLETE') return vscode.window.showErrorMessage(message + suffix);
+    const action = '选择运行方式';
+    if (await vscode.window.showErrorMessage(message, action) === action) {
+      return vscode.commands.executeCommand('gushenCompletion.selectExecutionMode');
+    }
+  }
   async function update() {
     if (updating) return vscode.window.showInformationMessage('组件更新正在执行，请稍候');
     updating = true;
@@ -319,7 +327,7 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
       const native = readJson(nexusStateFile);
       if (native?.phase === 'INSTALLING') saveJson(nexusStateFile, { ...native, phase: 'FAILED', error: error.message });
       if (disposed) return;
-      return vscode.window.showErrorMessage('组件更新未完成：' + error.message + '。已验证附件保留，可再次点击继续。');
+      return showUpdateError('组件更新未完成：', error, '。已验证附件保留，可再次点击继续。');
     } finally {
       if (prepared?.chromeStage && fs.existsSync(prepared.chromeStage)) fs.rmSync(prepared.chromeStage, { recursive: true, force: true });
       if (guard && bridge.isRunning()) await bridge.request(config().get('toolHome'), '/updateGuard', { action: 'release', id: guard.id }).catch(() => {});
@@ -336,7 +344,7 @@ function createUpdateCenter({ vscode, context, bridge, processClient, getTool,
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: '检查 Guthon 三组件更新', cancellable: false }, () => check(true));
       if (snapshot.unavailable) return vscode.window.showInformationMessage(snapshot.info);
       return await update();
-    } catch (error) { return vscode.window.showErrorMessage('检查更新失败：' + error.message); }
+    } catch (error) { return showUpdateError('检查更新失败：', error); }
   }
   const timer = setTimeout(() => { if (!disposed && config().get('autoCheckUpdates', true)) void check(); }, 3000);
   const restore = setTimeout(() => {

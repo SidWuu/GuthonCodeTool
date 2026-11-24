@@ -21,11 +21,19 @@ test('suite dependencies remain available to a pre-existing IDE without changing
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-environment-'));
   try {
     const git = path.join(home, 'Git', 'cmd', 'git.exe'), svn = path.join(home, 'SVN', 'bin', 'svn.exe');
-    for (const file of [git, svn]) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'fixture'); }
+    const bundleId = '0123456789abcdef0123';
+    const localAppData = path.join(home, 'LocalAppData');
+    const python = path.join(localAppData, 'Guthon', 'runtimes', bundleId, 'python.exe');
+    for (const file of [git, svn, python]) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, 'fixture');
+    }
     fs.mkdirSync(path.join(home, 'Git', 'usr', 'bin'), { recursive: true });
     fs.mkdirSync(path.join(home, 'var', 'nexus'), { recursive: true });
-    fs.writeFileSync(path.join(home, 'var', 'nexus', 'setup-result.json'), JSON.stringify({ state: 'environment-ready', programs: { git, svn } }));
-    const environment = installedToolEnvironment(home, { PATH: '/old/parent' });
+    fs.writeFileSync(path.join(home, 'var', 'nexus', 'setup-result.json'),
+      JSON.stringify({ state: 'environment-ready', bundleId, programs: { git, svn } }));
+    const environment = installedToolEnvironment(home, { LOCALAPPDATA: localAppData, PATH: '/old/parent' });
+    assert.equal(environment.GUTHON_PYTHON, python);
     assert.ok(environment.PATH.includes(path.dirname(git)));
     assert.equal(environment.PATH.includes(path.dirname(svn)),false);
     assert.ok(environment.PATH.endsWith('/old/parent'));

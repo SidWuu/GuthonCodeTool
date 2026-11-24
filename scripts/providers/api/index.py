@@ -1048,9 +1048,11 @@ def catalog(workspace, limit=100, offset=0):
         return _result(workspace, conn, rows, limit, offset, "objects")
 
 
-def search(workspace, query, limit=20, offset=0):
+def search(workspace, query, limit=20, offset=0, *, source_type=""):
     _bound(limit, offset)
     query = _query(query)
+    if not isinstance(source_type, str) or len(source_type) > 40:
+        raise ValueError("sourceType is invalid")
     with closing(_connection(workspace)) as conn:
         # Sort and page the matching rows before loading excerpt text. In
         # particular, name matches can include every fragment of a large PAGE.
@@ -1059,15 +1061,16 @@ def search(workspace, query, limit=20, offset=0):
               SELECT c.*, coalesce(b.json_pointer,'') AS jsonPointer, b.body_id
               FROM api_source_catalog c LEFT JOIN gusen_source_record s ON s.source_path=c.path
               LEFT JOIN source_body_content b ON b.source_record_id=s.record_id
-              WHERE instr(lower(c.path || ' ' || c.name || ' ' || c.alias || ' ' || c.funId || ' ' || c.referenceFields),lower(:query))>0
-                 OR (c.referenceId='' AND instr(lower(coalesce(b.content,'')),lower(:query))>0)
+              WHERE (:source_type='' OR c.sourceType=:source_type)
+                AND (instr(lower(c.path || ' ' || c.name || ' ' || c.alias || ' ' || c.funId || ' ' || c.referenceFields),lower(:query))>0
+                 OR (c.referenceId='' AND instr(lower(coalesce(b.content,'')),lower(:query))>0))
               ORDER BY c.path,c.dataSourceId,c.sourceId,c.lineNumber,b.json_pointer LIMIT :limit OFFSET :offset
             )
             SELECT page.*,substr(coalesce(nullif(page.referenceFields,''),body.content,''),
               max(1,instr(lower(coalesce(nullif(page.referenceFields,''),body.content,'')),lower(:query))-80),240) AS excerpt
             FROM page LEFT JOIN source_body_content body ON body.body_id=page.body_id
             ORDER BY page.path,page.dataSourceId,page.sourceId,page.lineNumber,body.json_pointer""",
-            {"query": query, "limit": limit + 1, "offset": offset},
+            {"query": query, "source_type": source_type, "limit": limit + 1, "offset": offset},
         ).fetchall()
         result = _result(workspace, conn, rows, limit, offset, "hits")
         for hit in result["hits"]:

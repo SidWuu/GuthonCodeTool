@@ -23,8 +23,8 @@ function fixture(t,dirty=false) {
     if(args[0]==='status')return {ok:true,checkoutPath:'/checkout/project',settings:{serverUrl:'https://project.invalid',systemIds:[],dataSourceIds:[],allSystems:false}};
     throw Error('Unexpected mutation');
   }};
-  activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/fake',toolHome:'/data'}),processClient,onUpdated(){}});
-  return {calls,handlers,errors,vscode};
+  const api=activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/fake',toolHome:'/data'}),processClient,onUpdated(){}});
+  return {calls,handlers,errors,vscode,api};
 }
 test('pull is blocked while a current checkout document is dirty',async t=>{
   const f=fixture(t,true);
@@ -35,6 +35,27 @@ test('pull is blocked while a current checkout document is dirty',async t=>{
 test('API command rejects a missing project before running any backend request',async t=>{
   const f=fixture(t);await f.handlers.get('gushenCompletion.loginApiSource')();
   assert.deepEqual(f.calls,[]);assert.match(f.errors[0],/具体 API 项目/);
+});
+test('SCM stage, restore and upload forward the entire file selection within one project',async t=>{
+  const f=fixture(t),key='projects.demo',calls=[];
+  t.after(()=>f.api.dispose());
+  const resource=(workspaceKey,path)=>({resourceUri:{scheme:'guthon-api-change',query:new URLSearchParams({workspaceKey,path}).toString()}});
+  const first=resource(key,'a.gss'),second=resource(key,'b.gss'),third=resource(key,'c.gss');
+  t.mock.method(f.api.sourceTree,'applyScmChangeAction',async(workspace,action,paths)=>{calls.push({workspace,action,paths});});
+  t.mock.method(f.api.sourceTree,'upload',async(workspace,paths)=>{calls.push({workspace,action:'upload',paths});});
+
+  const stage=f.handlers.get('gushenCompletion.stageApiScmChanges');
+  const revert=f.handlers.get('gushenCompletion.revertApiSource');
+  const upload=f.handlers.get('gushenCompletion.uploadApiSource');
+  await stage(first,second,third);
+  await revert(first,second,third);
+  await upload(first,second,third);
+  await upload(first,[first,second,third]);
+  assert.deepEqual(calls,['stage','revert','upload','upload'].map(action=>({workspace:key,action,paths:['a.gss','b.gss','c.gss']})));
+  for(const command of [stage,revert,upload]) await command(first,resource('projects.other','x.gss'));
+  assert.equal(calls.length,4);
+  assert.equal(f.errors.length,3);
+  for(const error of f.errors) assert.match(error,/同一项目/);
 });
 test('cancelled API address prompt does not change configuration',async t=>{
   const f=fixture(t);f.vscode.window.showInputBox=async()=>undefined;
@@ -218,7 +239,7 @@ test('a status scan started before scope configuration cannot overwrite the new 
     return {ok:true,checkoutPath:'/checkout',settings:{systemIds:['NEW']},files:[{path:'new.gss',state:'MODIFIED',inScope:true}]};});
   const primary={request:async(_tool,_command,args)=>{assert.equal(args[0],'configure');return {ok:true,index:{complete:true,indexGeneration:'new'}};}};
   const vscode={workspace:{textDocuments:[]},commands:{registerCommand:()=>({dispose(){}})},window:{showErrorMessage:async message=>assert.fail(message)},
-    Uri:{from:value=>value},scm:{createSourceControl:()=>{const control={createResourceGroup:()=>control.group={resourceStates:[]},dispose(){}};controls.push(control);return control;}}};
+    Uri:{from:value=>value},scm:{createSourceControl:()=>{const control={inputBox:{value:''},createResourceGroup:()=>control.group={resourceStates:[]},dispose(){}};controls.push(control);return control;}}};
   const api=activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/fake',toolHome:'/data'}),processClient:primary});
   api.sourceTree.syncWorkspaces([{workspaceKey:'projects.A',checkoutPath:'/checkout'}]);
   const old=api.sourceTree.updateScm('projects.A');await new Promise(resolve=>setImmediate(resolve));
@@ -249,15 +270,22 @@ test('manifest exposes API source navigation, PAGE management and SCM actions',(
   for(const action of ['openApiSource','showApiDiff','showApiOriginalPath','revertApiSource','uploadApiSource','resolveApiConflict']) {
     assert.ok(apiActions.some(item=>item.command===`gushenCompletion.${action}`));
   }
-  for(const item of apiActions) assert.doesNotMatch(item.group,/^inline(?:@|$)/,item.command);
-  const apiGroupActions=manifest.contributes.menus['scm/resourceGroup/context'].filter(item=>item.when.includes('guthon-api-'));
-  assert.deepEqual(apiGroupActions.map(item=>item.command),[
-    'gushenCompletion.manageApiScmChanges','gushenCompletion.uploadStagedApiSources',
-  ]);
-  for(const item of apiGroupActions) {
-    assert.match(item.group,/^inline@/);
-    assert.match(item.when,/scmResourceGroup == changes/);
+  const commandsForGroup=(menu,group)=>menu.filter(item=>item.group.startsWith('inline')
+    && (!item.when.includes('scmResourceGroup == ') || item.when.includes('scmResourceGroup == '+group)))
+    .map(item=>item.command.split('.').at(-1));
+  assert.deepEqual(commandsForGroup(apiActions,'staged'),['openApiOriginalSource','unstageApiSource']);
+  assert.deepEqual(commandsForGroup(apiActions,'changes'),['openApiOriginalSource','revertApiSource','stageApiScmChanges']);
+  for(const command of ['stageApiScmChanges','unstageApiSource']) {
+    assert.ok(apiActions.some(item=>item.command===`gushenCompletion.${command}` && item.group==='modification@1'));
   }
+  const apiGroupActions=manifest.contributes.menus['scm/resourceGroup/context'].filter(item=>item.when.includes('guthon-api-'));
+  assert.deepEqual(commandsForGroup(apiGroupActions,'staged'),['openApiScmGroupSources','unstageApiScmChanges']);
+  assert.deepEqual(commandsForGroup(apiGroupActions,'changes'),['openApiScmGroupSources','revertApiScmChanges','stageAllApiScmChanges']);
+  for(const item of [...apiGroupActions,...apiActions.filter(item=>item.group.startsWith('inline'))]) {
+    assert.match(manifest.contributes.commands.find(command=>command.command===item.command)?.icon || '',/^\$\(.+\)$/);
+  }
+  const uploads=manifest.contributes.menus['scm/title'].filter(item=>item.when.includes('guthon-api-') && item.command.includes('upload'));
+  assert.deepEqual(uploads.map(item=>item.command),['gushenCompletion.uploadStagedApiSources']);
   for(const command of ['gushenCompletion.openSvnDocument','gushenCompletion.saveSvnToGuthon']) assert(manifest.contributes.commands.some(item=>item.command===command));
   assert(!manifest.contributes.commands.some(x=>x.command.includes('selectWorkspaceSourceMode')));
 });

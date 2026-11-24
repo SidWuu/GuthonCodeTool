@@ -18,9 +18,10 @@ test('upload review keeps business labels and exact paths, opens diff, submits o
     {path:'b.json',name:'采购表',type:'表',state:'本地修改'}];
   const pending=selectUploadFiles(f.vscode,entries,async path=>f.opened.push(path));
   assert.equal(f.picker.items[0].label,'保存采购');assert.equal(f.picker.items[0].detail,'a.gss');
+  assert.deepEqual(f.opened,[]);
   await f.handlers.diff({item:f.picker.items[0]});assert.deepEqual(f.opened,['a.gss']);
   f.picker.selectedItems=[f.picker.items[1]];f.handlers.accept();
-  assert.deepEqual(await pending,['b.json']);assert.equal(f.picker.disposed,true);
+  assert.deepEqual(await pending,['b.json']);assert.deepEqual(f.opened,['a.gss']);assert.equal(f.picker.disposed,true);
 });
 test('cancelling review returns no upload selection',async()=>{
   const f=reviewFixture(),pending=selectUploadFiles(f.vscode,[],async()=>{});
@@ -29,7 +30,8 @@ test('cancelling review returns no upload selection',async()=>{
 test('global transaction targets and regular calls resolve the same exact function',()=>{
   for(const method of ['proc.invoke','proc.invokeWithGlobalTrans','thread.runFutureTaskWithGlobalTrans']) {
     const source=`$vs.${method}(\n 'demo.pkg', 'save', $x);`;
-    assert.deepEqual(procedureTargetAt(source,source.indexOf('save')+1),{alias:'demo.pkg',fun:'save'});
+    const start=source.indexOf('save');
+    assert.deepEqual(procedureTargetAt(source,start+1),{alias:'demo.pkg',fun:'save',start});
   }
   const source='$vs.proc.invokeWithGlobalTrans("demo.pkg", "save" + $suffix, $x);';
   assert.equal(procedureTargetAt(source,source.indexOf('save')+1),null);

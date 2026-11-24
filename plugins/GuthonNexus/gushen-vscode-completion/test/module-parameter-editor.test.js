@@ -29,22 +29,33 @@ test('uncertain local save keeps the editor guarded instead of resending',async(
  const f=fsFixture();await f.fs.readFile(f.uri);f.setFail(true);await assert.rejects(f.fs.writeFile(f.uri,Buffer.from('{"limit":2}')),/unknown/);
  await assert.rejects(f.fs.writeFile(f.uri,Buffer.from('{"limit":2}')),/未知/);assert.equal(f.calls.filter(x=>x.input.action==='save').length,1);
 });
-function uploadFixture(answer){
+function uploadFixture(...answers){
  const calls=[],reports=[],plan={planId:'id',planHash:'hash',items:[{path:'p',systemId:'A',configId:'C',name:'参数',diff:'-1\n+2',checkoutRequired:true}]};
- const vscode={window:{showWarningMessage:async(...args)=>{calls.push(['confirm',...args]);return answer;},showInformationMessage:async()=>{}}};
+ const vscode={window:{showWarningMessage:async(...args)=>{calls.push(['confirm',...args]);return answers.shift();},showInformationMessage:async()=>{}}};
  const ui={status:async()=>({files:[{path:'p',sourceType:'module-parameter',state:'MODIFIED'}]}),openReadonly:async(...args)=>reports.push(args),setIndexResult(){},updateScm:async()=>calls.push(['scm'])};
  const run=async(key,action,input)=>{calls.push([action,input]);if(input.action==='preview')return plan;return {operationId:'id',stage:'REMOTE_READBACK_VERIFIED',results:[{path:'p',stage:'REMOTE_READBACK_VERIFIED'}],index:{complete:true}};};
  const controller=new ModuleParameterEditor({vscode,ui,run,editorState:{flush:async()=>calls.push(['flush'])}});
  return {controller,calls,reports};
 }
-test('upload cancellation occurs after a concrete diff and causes no upload call',async()=>{
- const f=uploadFixture(undefined);await f.controller.upload('projects.A');assert.match(f.reports[0][2],/本次需签出后保存/);
+test('upload cancellation opens no difference and causes no upload call',async()=>{
+ const f=uploadFixture(undefined);await f.controller.upload('projects.A');
+ assert.equal(f.reports.length,0);
  assert.equal(f.calls.filter(x=>x[0]==='module-upload'&&x[1].action==='upload').length,0);
 });
 test('confirmed upload passes the exact preview binding and reports no check-in',async()=>{
  const f=uploadFixture('确认上传');await f.controller.upload('projects.A');
  const call=f.calls.find(x=>x[0]==='module-upload'&&x[1].action==='upload');assert.deepEqual(call[1],{action:'upload',planId:'id',planHash:'hash',confirm:true});
+ assert.equal(f.reports.length,1);
  assert.match(f.reports.at(-1)[2],/平台最终签入：未执行/);
+});
+test('viewing a requested upload difference returns to confirmation for the same plan',async()=>{
+ const f=uploadFixture('查看差异','确认上传');await f.controller.upload('projects.A');
+ assert.match(f.reports[0][1],/上传预览\.md$/);
+ assert.match(f.reports[0][2],/本次需签出后保存/);
+ assert.match(f.reports[0][2],/-1\n\+2/);
+ assert.deepEqual(f.calls.filter(([action])=>action==='module-upload').map(([,input])=>input.action),['preview','upload']);
+ assert.equal(f.calls.filter(([action])=>action==='confirm').length,2);
+ assert.equal(f.reports.length,2);
 });
 
 test('readonly original snapshots retain reviewed bytes when the module changes',()=>{
@@ -60,7 +71,7 @@ test('a rejected stale plan keeps its cause rather than claiming an unknown uplo
   return run(key,action,input);
  };
  await assert.rejects(f.controller.upload('projects.A'),/preview stale/);
- assert.equal(f.reports.length,1);assert(!f.reports.some(item=>item[2].includes('请求未取得完整回执')));
+ assert.equal(f.reports.length,0);
 });
 
 function lazyFixture(){

@@ -4,7 +4,7 @@ const {ToolProcessClient} = require('../tool-process-client');
 const {operationTimer} = require('../output-logging');
 const {ApiLoginStore}=require('./login-store');
 const {ApiAuthentication}=require('./authentication');
-const {ApiSourceUI,assertClean,identity,showReport,sourceSyncLines,filePath} = require('./source-ui');
+const {ApiSourceUI,READONLY_SCHEME,assertClean,identity,showReport,sourceSyncLines,filePath} = require('./source-ui');
 const {openDesigner} = require('./designer');
 const {ApiEditorState} = require('./editor-state');
 const {openProjectWorkspace} = require('./project-workspace');
@@ -322,16 +322,21 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
   Object.assign(handlers, {
     refreshApiSourceView: async key => {ui.menuAttempts.delete(key);ui.invalidate(key);await ui.updateScm(key);onUpdated?.();},
     refreshApiScm: async key => ui.updateScm(key),
-    manageApiScmChanges: async key => ui.manageScmChanges(key),
+    openApiScmGroupSources: async (key,_path,value) => ui.openScmGroupSources(key,value.id),
+    stageApiScmChanges: async (key,p) => ui.applyScmChangeAction(key,'stage',p),
+    stageAllApiScmChanges: async key => ui.applyScmChangeAction(key,'stage'),
+    unstageApiSource: async (key,p) => ui.applyScmChangeAction(key,'unstage',p),
+    unstageApiScmChanges: async key => ui.applyScmChangeAction(key,'unstage'),
+    revertApiScmChanges: async key => ui.applyScmChangeAction(key,'revert'),
     uploadStagedApiSources: async key => ui.uploadStaged(key),
     showApiOriginalPath: async (key,p) => ui.showOriginalPath(key,p),
     refreshApiObject: async (key,p,value) => ui.refreshScope(typeof value==='string' ? {workspaceKey:key,path:p} : value),
     showApiIndexDiagnostics: async key => ui.showIndexDiagnostics(key),
     openApiSource: async (key,p,value) => ui.open(key,p,false,{lineNumber:value?.lineNumber}),
     previewApiSource: async (key,p) => ui.open(key,p,true,{raw:true}),
-    openApiOriginalSource: async (key,p) => ui.open(key,p,false,{raw:true}),
+    openApiOriginalSource: async (key,p) => ui.openOriginalSources(key,p),
     showApiDiff: async (key,p) => ui.diff(key,p),
-    revertApiSource: async (key,p) => ui.revert(key,p),
+    revertApiSource: async (key,p) => ui.applyScmChangeAction(key,'revert',p),
     uploadApiSource: async (key,p) => ui.upload(key,Array.isArray(p) ? p : p ? [p] : undefined),
     openApiDesigner: async (key,p) => openDesigner({vscode,run,ui,key,sourcePath:p,onUpdated,editorState,panels:designerPanels,
       ensureWorkspace:async key=>{
@@ -400,8 +405,9 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     editApiPage: async (key,p,value) => handlers.openApiPageEditor(key,p,value),
   });
   if(vscode.window.registerCustomEditorProvider)require('./page-custom-editor').registerPageEditor({vscode,context,ui,getController:getPageEditor});
-  const pathCommands=new Set(['editModuleParameter','previewModuleParameter','openApiSource','previewApiSource','openApiOriginalSource','showApiDiff','showApiOriginalPath','revertApiSource','uploadApiSource','openApiDesigner','openApiFragment','openApiFieldCollection','openApiPageEditor','editApiPage','refreshApiObject','resolveApiConflict','syncApiDatabase','createApiFunction']);
-  const execute = name => async (value,sourcePath)=>{
+  const pathCommands=new Set(['editModuleParameter','previewModuleParameter','openApiSource','previewApiSource','openApiOriginalSource','showApiDiff','showApiOriginalPath','stageApiScmChanges','unstageApiSource','revertApiSource','uploadApiSource','openApiDesigner','openApiFragment','openApiFieldCollection','openApiPageEditor','editApiPage','refreshApiObject','resolveApiConflict','syncApiDatabase','createApiFunction']);
+  const batchCommands=new Set(['openApiOriginalSource','stageApiScmChanges','unstageApiSource','revertApiSource','uploadApiSource','uploadModuleParameters']);
+  const execute = name => async (value,sourcePath,...remaining)=>{
     try {
       if (!value && selectWorkspace) value=(await selectWorkspace(''))?.workspaceKey;
       if (!value) throw new Error('请从具体 API 项目执行操作');
@@ -409,12 +415,16 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       if (!key) throw new Error('请从具体 API 项目执行操作');
       if (pathCommands.has(name) && !['uploadApiSource','refreshApiObject','createApiFunction'].includes(name) && !objectPath) throw new Error('请选择 API 源码');
       let selected=objectPath;
-      if(['uploadApiSource','uploadModuleParameters','revertApiSource'].includes(name) && Array.isArray(sourcePath) && sourcePath.length) {
-        const entries=sourcePath.map(item=>identity(item));
-        if(entries.some(item=>item.key!==key || !item.path)) throw new Error('请选择同一项目内的源码');
-        selected=name==='uploadModuleParameters'
-          ? [...new Set([value,...sourcePath].map(item=>require('./module-parameter-editor').moduleParameterSelector(item)?.snapshotPath || identity(item).path))]
-          : [...new Set([objectPath,...entries.map(item=>item.path)].filter(Boolean))];
+      if(batchCommands.has(name)) {
+        // SCM passes positional resources, while custom tree menus pass a selection array.
+        const resources=sourcePath && typeof sourcePath==='object' ? [sourcePath,...remaining].flat() : remaining;
+        if(resources.length) {
+          const entries=resources.map(item=>identity(item));
+          if(!objectPath || entries.some(item=>item.key!==key || !item.path)) throw new Error('请选择同一项目内的源码');
+          selected=name==='uploadModuleParameters'
+            ? [...new Set([value,...resources].map(item=>require('./module-parameter-editor').moduleParameterSelector(item)?.snapshotPath || identity(item).path))]
+            : [...new Set([objectPath,...entries.map(item=>item.path)])];
+        }
       }
       ui.track(key);return await handlers[name](key,selected,value);
     } catch(error) {return vscode.window.showErrorMessage(`谷神 API：${error.message}`);}
@@ -430,7 +440,12 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     vscode.commands.registerCommand('gushenCompletion.showApiStatus',execute('showApiStatus')),
     vscode.commands.registerCommand('gushenCompletion.refreshApiSourceView',execute('refreshApiSourceView')),
     vscode.commands.registerCommand('gushenCompletion.refreshApiScm',execute('refreshApiScm')),
-    vscode.commands.registerCommand('gushenCompletion.manageApiScmChanges',execute('manageApiScmChanges')),
+    vscode.commands.registerCommand('gushenCompletion.openApiScmGroupSources',execute('openApiScmGroupSources')),
+    vscode.commands.registerCommand('gushenCompletion.stageApiScmChanges',execute('stageApiScmChanges')),
+    vscode.commands.registerCommand('gushenCompletion.stageAllApiScmChanges',execute('stageAllApiScmChanges')),
+    vscode.commands.registerCommand('gushenCompletion.unstageApiSource',execute('unstageApiSource')),
+    vscode.commands.registerCommand('gushenCompletion.unstageApiScmChanges',execute('unstageApiScmChanges')),
+    vscode.commands.registerCommand('gushenCompletion.revertApiScmChanges',execute('revertApiScmChanges')),
     vscode.commands.registerCommand('gushenCompletion.uploadStagedApiSources',execute('uploadStagedApiSources')),
     vscode.commands.registerCommand('gushenCompletion.showApiOriginalPath',execute('showApiOriginalPath')),
     vscode.commands.registerCommand('gushenCompletion.refreshApiObject',execute('refreshApiObject')),
@@ -466,7 +481,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     vscode.commands.registerCommand('gushenCompletion.rollbackOfficialUpdate',official(rollbackOfficialUpdate)),
     vscode.commands.registerCommand('gushenCompletion.revertApiQuickDiffChange',async(resourceUri,changes,changeIndex)=>{try{return await revertQuickDiffChange({vscode,provider:quickDiff,resourceUri,changes,changeIndex});}catch(error){return vscode.window.showErrorMessage(`API 差异：${error.message}`);}}),
   ];
-  if (vscode.workspace.registerTextDocumentContentProvider) {registrations.push(vscode.workspace.registerTextDocumentContentProvider('guthon-api-readonly',ui));registrations.push(vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME,quickDiff));}
+  if (vscode.workspace.registerTextDocumentContentProvider) {registrations.push(vscode.workspace.registerTextDocumentContentProvider(READONLY_SCHEME,ui));registrations.push(vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME,quickDiff));}
   const viewId = 'gushenCompletion.sourceView';
   if (vscode.window.registerWebviewViewProvider) {
     ui.treeView=new ViewTree({vscode,id:viewId,provider:ui,title:'项目源码',extensionPath:context.extensionPath});

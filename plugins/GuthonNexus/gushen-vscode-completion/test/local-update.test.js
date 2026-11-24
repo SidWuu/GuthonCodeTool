@@ -10,7 +10,7 @@ const { updatePlan, applyUpdate, managedChrome } = require('../src/component-upd
 const { createUpdateCenter } = require('../src/update-center');
 const { extensionBuildInfo } = require('../src/extension-build');
 const { readArchive } = require('../src/update-archive');
-const { ASSETS } = require('../src/release-catalog');
+const { ASSETS, NEXUS_ID } = require('../src/release-catalog');
 function fixture(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-local-update-')); t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const source = path.join(home, 'source'), nexus = path.join(source, 'plugins/GuthonNexus/gushen-vscode-completion'), chrome = path.join(source, 'plugins/GuthonBridge/extension');
@@ -54,6 +54,17 @@ test('local versions come from the explicit source tree; generated Bridge source
   assert.equal(fs.existsSync(path.join(f.nexus, 'bridge/server.js')), false);
   assert.deepEqual(fs.readFileSync(path.join(f.nexus, 'src/main.js')), before);
   assert.throws(() => localRelease(''), /developmentRoot/);
+});
+test('the repository Nexus manifest fits the development updater metadata budget', () => {
+  const sourceRoot = path.resolve(__dirname, '../../../..');
+  assert.equal(localRelease(sourceRoot).catalog.components.nexus.id, NEXUS_ID);
+});
+test('development checks reject an oversized normalized Nexus manifest before building', t => {
+  const f = fixture(t), manifestPath = path.join(f.nexus, 'package.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest.description = 'x'.repeat(256 * 1024);
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  assert.throws(() => localRelease(f.source), /元数据过大.*extension\/package\.json/);
 });
 test('same-version code changes are detected, while managed host settings are intentionally preserved', t => {
   const f = fixture(t), original = localRelease(f.source);
@@ -155,6 +166,38 @@ test('changing the source after inspection aborts local compilation', async t =>
   f.write('plugins/GuthonBridge/extension/background.js', 'changed after check');
   await assert.rejects(prepareLocalUpdate(local, updatePlan(local.catalog, { mode: 'source-development', nexusVersion: '2.4.0' }), path.join(f.home, 'updates'),
     { pythonPath: '/fixture/python', processRunner: () => assert.fail('must not build'), packager: '/fixture/vsce' }), /源码已改变/);
+});
+test('an incomplete development source reports the missing file and opens the runtime selector', async t => {
+  const f = fixture(t);
+  const missing = 'plugins/GuthonBridge/bridge/native-metadata.js';
+  fs.rmSync(path.join(f.source, missing));
+  assert.throws(() => localRelease(f.source), error => {
+    assert.equal(error.code, 'LOCAL_UPDATE_SOURCE_INCOMPLETE');
+    assert.equal(error.cause.code, 'ENOENT');
+    assert.ok(error.message.includes(fs.realpathSync(f.source)));
+    assert.ok(error.message.includes(path.normalize(missing)));
+    return true;
+  });
+  const values = { executionMode: 'source-development', developmentRoot: f.source, autoCheckUpdates: false };
+  const messages = [], commands = [];
+  const center = createUpdateCenter({
+    vscode: {
+      StatusBarAlignment: { Right: 1 }, ProgressLocation: { Notification: 1 }, env: {},
+      window: {
+        createStatusBarItem: () => ({ show() {}, dispose() {} }),
+        withProgress: (_options, action) => action(),
+        showErrorMessage: async (message, action) => { messages.push(message); return action; },
+      },
+      workspace: { getConfiguration: () => ({ get: (key, fallback) => values[key] ?? fallback }) },
+      commands: { executeCommand: async command => commands.push(command) },
+    },
+    context: { extensionPath: f.nexus, globalStorageUri: { fsPath: path.join(f.home, 'editor') } },
+    refresh() {}, fetchRelease: () => assert.fail('must not contact release sources'),
+  });
+  t.after(() => center.dispose());
+  await center.open();
+  assert.match(messages[0], /检查更新失败.*开发模式的源码目录不完整.*native-metadata\.js.*调试模式/);
+  assert.deepEqual(commands, ['gushenCompletion.selectExecutionMode']);
 });
 test('development-mode check never calls release providers and reports local code changes without a remote catalog', async t => {
   const f = fixture(t), values = { executionMode: 'source-development', developmentRoot: f.source, toolHome: f.home, autoCheckUpdates: false };

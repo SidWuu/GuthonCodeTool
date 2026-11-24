@@ -4,10 +4,13 @@ const {procedureTargetAt,serviceComponentTargetAt,localFunctionDefinitionAt,loca
 const {apiContext,exportAiContext}=require('../ai-context-export');
 const {registerEditorAssistance}=require('../source/editor-assistance');
 const {decodeIdentity,SCHEME,scriptType}=require('../source/virtual-fs');
+const {SCHEME:DATABASE_SCHEME}=require('../database-source-editor');
+const {SCHEME:SVN_SCHEME}=require('../svn/virtual-fs');
+const {createDocumentSelector}=require('../selector');
 const {navigateInBrowser}=require('../source/browser-navigation');
 const {isWorkspaceKey}=require('../workspace-identity');
 const {workspaceKeyFrom}=require('./project-actions');
-const {filePath,identity:fromElement,sourceLabel}=require('./source-ui');
+const {filePath,identity:fromElement,sourceLabel,READONLY_SCHEME}=require('./source-ui');
 const {readInheritance}=require('../source/inheritance');
 
 async function allPages(run,key,action,payload,listName) {
@@ -48,12 +51,32 @@ async function sourceTreeAction(vscode,tree,command) {
   if (!selected) return vscode.window.showInformationMessage('请先选择源码树节点');
   await tree.reveal(selected,{select:true,focus:true});return vscode.commands.executeCommand(command);
 }
-function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge,locateLegacy,legacyAction}) {
+function createApiNavigation({vscode,context,api,selectWorkspace,getWorkspaces,getTool,bridge,locateLegacy,legacyDefinitions,legacyAction}) {
   const {run,sourceTree:ui,editorState}=api;
   async function workspaceForDocument(document) {
     if(document?.uri?.scheme===SCHEME) return selectWorkspace(decodeIdentity(document.uri).workspaceKey);
     if(document?.uri?.scheme==='file') for(const [key,state] of editorState.workspaces) if(editorState.documentPath(key,state,document)) return selectWorkspace(key);
     return undefined;
+  }
+  async function workspaceForDefinition(document,home) {
+    const {scheme,authority,query,fsPath}=document.uri;
+    if (scheme==='file') {
+      if (!getWorkspaces) return workspaceForDocument(document);
+      const matches=(await getWorkspaces()).filter(workspace=>workspace.sourceRoots?.some(root=>{
+        if (!root.path) return false;
+        const relative=path.relative(root.path,fsPath);
+        return relative && relative!=='..' && !relative.startsWith('..'+path.sep) && !path.isAbsolute(relative);
+      }));
+      return matches.length===1 ? matches[0] : undefined;
+    }
+    const params=new URLSearchParams(query);
+    if (scheme===DATABASE_SCHEME && params.get('home')!==home) return;
+    const mode=scheme===SCHEME ? 'api' : scheme===DATABASE_SCHEME ? 'database' : scheme===SVN_SCHEME ? 'svn' : '';
+    const key=scheme===SCHEME ? decodeIdentity(document.uri).workspaceKey
+      : scheme===READONLY_SCHEME ? params.get('workspaceKey') : mode ? authority : '';
+    if (!isWorkspaceKey(key)) return;
+    const workspace=getWorkspaces ? (await getWorkspaces()).find(item=>item.workspaceKey===key) : await selectWorkspace(key);
+    if (workspace && (!mode || (workspace.sourceMode || 'api')===mode)) return workspace;
   }
   async function open(key,item) {
     const sourcePath=item.path || item.sourcePath;
@@ -100,9 +123,9 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge,
     let key=typeof value==='string' ? value : value?.workspaceKey || value?.guthonWorkspaceKey || value?.key || '';
     const workspace=await selectWorkspace(key);if(!workspace) return;
     if(!exportOnly && workspace.sourceMode && workspace.sourceMode!=='api' && legacyAction)return legacyAction(workspace,'search');
-    const selected=await showWorkspaceSearch({vscode,title:`搜索当前项目 · ${workspace.displayName}`,
-      defaultAction:exportOnly?'context-file':'open',search:async (query,offset)=>{
-        const result=await run(workspace.workspaceKey,'search',{query,limit:100,offset});
+    const selected=await showWorkspaceSearch({vscode,sourceMode:'api',title:`搜索当前项目 · ${workspace.displayName}`,
+      defaultAction:exportOnly?'context-file':'open',search:async (query,offset,sourceType)=>{
+        const result=await run(workspace.workspaceKey,'search',{query,limit:100,offset,...(sourceType?{sourceType}:{})});
         const {nextOffset,indexGeneration}=result;
         return {nextOffset,indexGeneration,
           truncated:!!(result.partialSourceCount || result.partialBodyCount || (nextOffset==null && result.truncated)),
@@ -215,17 +238,37 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge,
     if(!original.readonly || original.sourceHash!==parent.parentHash) throw new Error('产品层源码已变化或未确认为只读，请重新同步');
     return new vscode.Location(ui.readonlyUri(key,parent.parentPath,original.content),new vscode.Position(0,0));
   }
-  async function definition(document,position) {
+  async function definition(document,position,token) {
+    if (token?.isCancellationRequested) return;
     const content=document.getText(),offset=document.offsetAt(position);
     if(inheritCallAt(content,offset))return inheritanceDefinition(document);
     const local=localFunctionDefinitionAt(content,offset);
     if(local!=null) return new vscode.Location(document.uri,document.positionAt(local));
     const target=procedureTargetAt(content,offset),component=serviceComponentTargetAt(content,offset);if(!target && !component) return;
-    const workspace=await workspaceForDocument(document);if(!workspace) return;
-    const result=await allPages(run,workspace.workspaceKey,'search',{query:target?.fun || component.componentId},'hits');
-    const matches=result.items.filter(x=>target ? x.sourceType==='procedure' && x.alias===target.alias && x.funId===target.fun : x.sourceType==='page' && x.sourceId===component.componentId);
-    const unique=[...new Map(matches.map(x=>[x.path,x])).values()];const state=await ui.status(workspace.workspaceKey);
-    return Promise.all(unique.map(async x=>new vscode.Location(api.sourceUri ? await api.sourceUri(workspace.workspaceKey,x.path) : vscode.Uri.file(filePath(state.checkoutPath,x.path)),new vscode.Position(0,0))));
+    const version=document.version,home=getTool?.()?.toolHome;
+    const workspace=await workspaceForDefinition(document,home);
+    if (!workspace || token?.isCancellationRequested || home!==getTool?.()?.toolHome) return;
+    const {workspaceKey:key,sourceMode}=workspace;
+    let uris;
+    if (sourceMode && sourceMode!=='api') {
+      if (!target || !legacyDefinitions) return;
+      uris=await legacyDefinitions(workspace,{alias:target.alias,funId:target.fun},document);
+    } else {
+      const result=await findExactCandidates(run,key,target?'procedure':'page',
+        target ? `${target.alias} ${target.fun}` : component.componentId,
+        item=>target ? item.alias===target.alias && item.funId===target.fun : item.sourceId===component.componentId);
+      if (!result.items.length || token?.isCancellationRequested) return;
+      const checkoutPath=api.sourceUri ? undefined : (await ui.status(key)).checkoutPath;
+      uris=await Promise.all(result.items.map(item=>api.sourceUri
+        ? api.sourceUri(key,item.path) : vscode.Uri.file(filePath(checkoutPath,item.path))));
+    }
+    if (token?.isCancellationRequested || document.version!==version || home!==getTool?.()?.toolHome) return;
+    const start=(target || component).start,end=start+(target?.fun || component.componentId).length;
+    const originSelectionRange=new vscode.Range(document.positionAt(start),document.positionAt(end));
+    const targetRange=new vscode.Range(0,0,0,0);
+    return [...new Map(uris.map(uri=>[uri.toString(),uri])).values()].map(targetUri=>({
+      originSelectionRange,targetUri,targetRange,targetSelectionRange:targetRange,
+    }));
   }
   async function fileAction(value,action) {
     const {key,path:sourcePath}=await selectedObject(value);
@@ -334,7 +377,6 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge,
     procedureCandidates:async(doc,target)=>{const workspace=await workspaceForDocument(doc);if(!workspace)return {sources:[]};const found=await allPages(run,workspace.workspaceKey,'search',{query:target.keyword},'hits');return {truncated:found.truncated,sources:found.items.map(x=>({...x,sourceAliasId:x.alias,sourceName:x.name,status:'OK'}))};},
     pageFieldCandidates:async(doc,prefix)=>{const workspace=await workspaceForDocument(doc);if(!workspace)return {fields:[]};const found=await allPages(run,workspace.workspaceKey,'facts',{keyword:prefix},'facts');return {truncated:found.truncated,fields:found.items.filter(x=>x.kind==='field').map(x=>({fieldId:x.subject,label:x.evidence,collectionPointer:x.jsonPointer}))};},
   });
-  context.subscriptions.push(...registrations,assistance);
   function hover(document,position) {
     const source=document.getText(),offset=document.offsetAt(position);
     const info=localFunctionAt(source,offset);
@@ -352,6 +394,11 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getTool,bridge,
     }}));
   if(vscode.languages.registerHoverProvider)registrations.push(vscode.languages.registerHoverProvider(
     ['guthon-gss','java'].flatMap(language=>['file',SCHEME].map(scheme=>({scheme,language}))),{provideHover:hover}));
+  if(vscode.languages.registerDefinitionProvider)registrations.push(vscode.languages.registerDefinitionProvider(
+    createDocumentSelector(['java','guthon-gss','javascript','sql'],
+      ['file','untitled',SCHEME,READONLY_SCHEME,SVN_SCHEME,DATABASE_SCHEME]),
+    {provideDefinition:definition}));
+  context.subscriptions.push(...registrations,assistance);
   return {definition,hover,workspaceForDocument,search,dispose(){for(const item of registrations)item.dispose();assistance.dispose();}};
 }
 module.exports={allPages,findExactCandidates,sourceLink,parseSourceLink,sourceTreeAction,createApiNavigation};
