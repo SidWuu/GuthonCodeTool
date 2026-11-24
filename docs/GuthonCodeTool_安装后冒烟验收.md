@@ -46,7 +46,7 @@ python scripts/check_release_smoke.py --entry /path/to/GuthonCodeTool
 ## 统一安装器额外验收
 
 候选 GuthonCodeSetup 额外核验：Inno 编译、干净电脑依赖安装、无系统 Python、中文用户目录、
-内网授权后直接同步规范和门禁、可选的实际 SessionStart、MCP 握手、已有配置保护、中途失败后重试、桌面入口和卸载保留数据。
+内网授权后直接同步规范和门禁、可选的实际 SessionStart、MCP 握手、已有配置保护、中途失败后重试、在 IDE 中打开 Guthon 工作区并进入 Nexus、覆盖安装清理旧快捷方式、卸载保留数据。
 员工步骤见 [Windows 安装步骤第一章](GuthonCodeTool_Windows安装步骤.html#one-click)，
 维护者构建见 [统一安装器构建说明](UNIFIED_INSTALLER.md)。这些 Windows 实机检查尚未执行。
 

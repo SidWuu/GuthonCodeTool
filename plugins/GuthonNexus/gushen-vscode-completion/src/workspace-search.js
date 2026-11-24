@@ -1,8 +1,27 @@
 const {searchPickItems} = require('./workspace-assistant');
+const {MODULE_STYLES, SOURCE_CATEGORIES} = require('./source/tree-styles');
+
+const commonTypes = ['page', 'procedure', 'table', 'view', 'system-script'];
+const sourceTypesByMode = {
+  api: [...commonTypes, 'module-parameter', 'bill-type', 'dropdown', 'skill', 'public'],
+  svn: [...commonTypes, 'skill', 'public'],
+  database: [...commonTypes, 'bill-type'],
+};
 
 function showWorkspaceSearch({vscode, title, search, value = '', sourceOnly = false,
-  defaultAction = 'open', debounceMs = 200}) {
+  sourceMode, defaultAction = 'open', debounceMs = 200}) {
   const picker = vscode.window.createQuickPick();
+  const types = sourceTypesByMode[sourceMode];
+  const typeItems = types && [{label: '全部类型', sourceType: ''}, ...types.map(sourceType => ({
+    label: MODULE_STYLES[SOURCE_CATEGORIES[sourceType]].label, sourceType,
+  }))];
+  let selectedType = typeItems?.[0], filterButton, selectingType = false;
+  const searchTitle = () => selectedType ? `${title} · ${selectedType.label}` : title;
+  function updateFilterButton() {
+    filterButton = {iconPath: new vscode.ThemeIcon('filter'), tooltip: `筛选源码类型（当前：${selectedType.label}）`};
+    picker.buttons = [filterButton];
+  }
+  if (typeItems) updateFilterButton();
   const hint = sourceOnly ? '输入名称、路径、ID 或函数关键词；回车打开源码'
     : '输入源码名称、ID、函数或事实关键词；回车打开，右侧按钮生成 AI 上下文';
   const buttons = defaultAction === 'open' && !sourceOnly ? [
@@ -10,7 +29,7 @@ function showWorkspaceSearch({vscode, title, search, value = '', sourceOnly = fa
     {iconPath: new vscode.ThemeIcon('list-tree'), tooltip: '复制详细 AI 上下文', action: 'context-detailed'},
     {iconPath: new vscode.ThemeIcon('export'), tooltip: '导出 AI 上下文文件', action: 'context-file'},
   ] : [];
-  picker.title = title;
+  picker.title = searchTitle();
   picker.placeholder = hint;
   picker.matchOnDescription = true;
   picker.matchOnDetail = true;
@@ -35,7 +54,7 @@ function showWorkspaceSearch({vscode, title, search, value = '', sourceOnly = fa
       requested = undefined;
       running = true;
       try {
-        const result = await search(request.query, request.offset);
+        const result = await search(request.query, request.offset, request.sourceType);
         if (closed || generation !== request.generation) return;
         if (request.offset && result.indexGeneration !== request.indexGeneration) {
           throw new Error('搜索期间索引已变化，请重新查询');
@@ -52,13 +71,13 @@ function showWorkspaceSearch({vscode, title, search, value = '', sourceOnly = fa
         picker.sortByLabel = !request.offset && !nextPage;
         picker.items = nextPage ? [...loaded, moreItem] : loaded;
         if (request.offset && rows.length) picker.activeItems = [rows[0]];
-        picker.title = `${title} · ${loaded.length} 条结果${nextPage ? ' · 还有更多' : ''}${result.truncated ? ' · 结果已截断，请细化关键词' : ''}`;
+        picker.title = `${searchTitle()} · ${loaded.length} 条结果${nextPage ? ' · 还有更多' : ''}${result.truncated ? ' · 结果已截断，请细化关键词' : ''}`;
         picker.placeholder = loaded.length || nextPage ? hint : '未找到本地索引结果，请调整关键词或检查工作区索引';
         readyGeneration = request.generation;
       } catch (error) {
         if (closed || generation !== request.generation) return;
         failed = true;
-        picker.title = `${title} · 搜索失败`;
+        picker.title = `${searchTitle()} · 搜索失败`;
         picker.placeholder = `${error.message}；回车重试，或修改关键词`;
       } finally {
         running = false;
@@ -76,15 +95,33 @@ function showWorkspaceSearch({vscode, title, search, value = '', sourceOnly = fa
       readyGeneration = -1;
       nextPage = undefined;
       picker.items = [];
-      picker.title = title;
+      picker.title = searchTitle();
       picker.placeholder = hint;
       const query = input.trim();
-      requested = query ? {query, generation, offset: 0} : undefined;
+      requested = query ? {query, generation, offset: 0, sourceType: selectedType?.sourceType} : undefined;
       picker.busy = Boolean(query);
       if (requested) timer = setTimeout(() => { timer = undefined; void run(); }, delay);
     }
+    if (typeItems) subscriptions.push(picker.onDidTriggerButton(async button => {
+      if (closed || selectingType || button !== filterButton) return;
+      // Opening the type picker temporarily hides the search picker.
+      selectingType = true;
+      try {
+        const selected = await vscode.window.showQuickPick(typeItems.map(type => ({
+          ...type, description: type.sourceType === selectedType.sourceType ? '当前类型' : undefined,
+        })), {title: '筛选源码类型'});
+        if (selected && selected.sourceType !== selectedType.sourceType) {
+          selectedType = selected;
+          updateFilterButton();
+          schedule(picker.value, 0);
+        }
+      } finally {
+        selectingType = false;
+        picker.show();
+      }
+    }));
     function choose(row, action) {
-      if (closed || picker.busy || readyGeneration !== generation || !picker.items.includes(row)) return;
+      if (closed || selectingType || picker.busy || readyGeneration !== generation || !picker.items.includes(row)) return;
       if (row === moreItem) {
         requested = nextPage;
         picker.busy = true;
@@ -102,7 +139,7 @@ function showWorkspaceSearch({vscode, title, search, value = '', sourceOnly = fa
       picker.onDidTriggerItemButton(event => {
         if (buttons.includes(event.button)) choose(event.item, event.button.action);
       }),
-      picker.onDidHide(() => finish(undefined))
+      picker.onDidHide(() => { if (!selectingType) finish(undefined); })
     );
     picker.show();
     if (value.trim()) schedule(value, 0);

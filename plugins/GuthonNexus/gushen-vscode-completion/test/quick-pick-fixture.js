@@ -4,7 +4,7 @@ function quickPickFixture() {
   const handlers = new Map();
   const picker = {items: [], selectedItems: [], value: '', busy: false, disposed: false,
     show() { this.shown = true; }, dispose() { this.disposed = true; }};
-  for (const event of ['ChangeValue', 'Accept', 'TriggerItemButton', 'Hide']) {
+  for (const event of ['ChangeValue', 'Accept', 'TriggerButton', 'TriggerItemButton', 'Hide']) {
     handlers.set(event, new Set());
     picker['onDid' + event] = listener => {
       handlers.get(event).add(listener);
@@ -17,8 +17,9 @@ function quickPickFixture() {
     vscode: {ThemeIcon: class {constructor(id) {this.id = id;}}, window: {createQuickPick: () => picker}},
     input(value) { picker.value = value; emit('ChangeValue', value); },
     accept(index = 0) { picker.selectedItems = picker.items[index] ? [picker.items[index]] : []; emit('Accept'); },
+    titleButton(index = 0) { emit('TriggerButton', picker.buttons[index]); },
     button(index, action) { const item = picker.items[index]; emit('TriggerItemButton', {item, button: item.buttons.find(button => button.action === action)}); },
-    hide() { emit('Hide'); },
+    hide() { picker.shown = false; emit('Hide'); },
   };
 }
 

@@ -2,7 +2,7 @@ function serviceComponentTargetAt(source, offset) {
   const calls = /\$vs\.(?:proc|thread)\.runServiceComp\s*\(\s*(['"])([A-Za-z0-9_.-]{1,100})\1(?=\s*[,\)])/g;
   for (const match of source.matchAll(calls)) {
     const start = match.index + match[0].length - match[2].length - 1;
-    if (offset >= start && offset < start + match[2].length) return { componentId: match[2] };
+    if (offset >= start && offset < start + match[2].length) return { componentId: match[2], start };
   }
   return null;
 }
@@ -12,7 +12,7 @@ function procedureTargetAt(source, offset) {
   for (const match of source.matchAll(directCalls)) {
     const start = match.index + match[0].lastIndexOf(match[4]);
     if (offset >= start && offset <= start + match[4].length) {
-      return { alias: match[2], fun: match[4] };
+      return { alias: match[2], fun: match[4], start };
     }
   }
 
@@ -30,7 +30,7 @@ function procedureTargetAt(source, offset) {
         alias = binding[3];
       }
     }
-    return alias ? { alias, fun: call[2] } : null;
+    return alias ? { alias, fun: call[2], start } : null;
   }
   return null;
 }

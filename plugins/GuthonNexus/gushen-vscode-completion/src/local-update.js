@@ -3,19 +3,34 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { nexusFiles, chromeFiles, packageFingerprint, bridgeBundle } = require('./extension-package');
 const { ASSETS, NEXUS_ID } = require('./release-catalog');
+const { checkArchiveJsonSize } = require('./update-archive');
 const { normalizeVersion, runProcess, sha256Stream } = require('./tool-updater');
 const { prepareUpdate, ownedDirectory } = require('./component-update');
 
 function localRelease(developmentRoot) {
   if (!developmentRoot || !path.isAbsolute(developmentRoot)) throw new Error('开发模式需要明确的 developmentRoot 源码目录，不使用发行源回退');
-  const sourceRoot = fs.realpathSync(developmentRoot);
-  const nexusRoot = path.join(sourceRoot, 'plugins', 'GuthonNexus', 'gushen-vscode-completion');
-  const chromeRoot = path.join(sourceRoot, 'plugins', 'GuthonBridge', 'extension');
-  const version = normalizeVersion(fs.readFileSync(path.join(sourceRoot, 'VERSION'), 'utf8'));
-  const overrides = bridgeBundle(sourceRoot);
-  overrides.set('tool-version.json', Buffer.from(JSON.stringify({ version }, null, 2) + '\n'));
-  const nexus = nexusFiles(nexusRoot, overrides), chrome = chromeFiles(chromeRoot);
-  const packageInfo = JSON.parse(nexus.get('package.json').toString('utf8'));
+  let sourceRoot = developmentRoot;
+  let nexusRoot, version, nexus, chrome;
+  try {
+    sourceRoot = fs.realpathSync(developmentRoot);
+    nexusRoot = path.join(sourceRoot, 'plugins', 'GuthonNexus', 'gushen-vscode-completion');
+    const chromeRoot = path.join(sourceRoot, 'plugins', 'GuthonBridge', 'extension');
+    version = normalizeVersion(fs.readFileSync(path.join(sourceRoot, 'VERSION'), 'utf8'));
+    const overrides = bridgeBundle(sourceRoot);
+    overrides.set('tool-version.json', Buffer.from(JSON.stringify({ version }, null, 2) + '\n'));
+    nexus = nexusFiles(nexusRoot, overrides);
+    chrome = chromeFiles(chromeRoot);
+  } catch (error) {
+    if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+    const missing = path.relative(sourceRoot, error.path) || sourceRoot;
+    throw Object.assign(new Error(
+      `开发模式的源码目录不完整（${sourceRoot}），缺少 ${missing}。请选择完整的源码仓库；使用 Release 时请选择调试模式或发行模式。`,
+      { cause: error }
+    ), { code: 'LOCAL_UPDATE_SOURCE_INCOMPLETE' });
+  }
+  const nexusManifest = nexus.get('package.json');
+  checkArchiveJsonSize('extension/package.json', nexusManifest.length);
+  const packageInfo = JSON.parse(nexusManifest.toString('utf8'));
   const manifest = JSON.parse(chrome.get('manifest.json').toString('utf8'));
   if (packageInfo.publisher + '.' + packageInfo.name !== NEXUS_ID || manifest.name !== 'Guthon Bridge' || manifest.manifest_version !== 3) throw new Error('本地插件源码身份无效');
   normalizeVersion(packageInfo.version); normalizeVersion(manifest.version);

@@ -76,11 +76,13 @@ test('all three headers use native title actions with global and project submenu
   assert.deepEqual(commandsIn('projectSettings'),['projectMenuSourceConnection','projectMenuSvnLoginCache',
     'projectMenuSourceScope','projectMenuConfigureDatabaseDiagnosis','projectMenuReferenceSettings','configureProject',
     'changeWorkspaceSourceMode','projectMenuLogout']);
-  assert.deepEqual(commandsIn('projectSourceTools'),['projectMenuSyncModuleParameters','projectMenuSyncPlatformReferences',
+  assert.deepEqual(commandsIn('projectSourceTools'),['projectMenuCheckSystemMenu','projectMenuSyncModuleParameters','projectMenuSyncPlatformReferences',
     'projectMenuSvnScope','projectMenuSvnRemote']);
   assert.deepEqual(commandsIn('toolSettings'),['selectExecutionMode','setupTool','openToolHome','syncTeamRules']);
   assert.deepEqual(commandsIn('updateOptions'),['checkToolUpdate','checkOfficialUpdate','selectUpdateSource','rollbackOfficialUpdate','rollbackToolUpdate']);
   const commands=new Map(contributes.commands.map(x=>[x.command,x]));
+  assert.equal(commands.get('gushenCompletion.projectMenuCheckSystemMenu').shortTitle,'检查系统菜单结构');
+  assert.equal(contributes.menus['gushenCompletion.projectSourceTools'][0].when,'gushenCompletion.currentSourceIsApi');
   for(const item of items.filter(x=>x.command))assert(commands.get(item.command).shortTitle,item.command);
   for(const name of ['projectSettings','projectSourceTools','toolSettings','updateOptions']) {
     for(const child of contributes.menus['gushenCompletion.'+name]) {assert(!child.submenu);assert(commands.get(child.command).shortTitle,child.command);}
@@ -94,7 +96,8 @@ test('all three headers use native title actions with global and project submenu
     'gushenCompletion.migrateProjectDocs']);
   const wrappers=[...commands.keys()].filter(command=>command.startsWith('gushenCompletion.projectMenu'));
   assert.deepEqual(contributes.menus.commandPalette.map(x=>x.command).sort(),
-    [...wrappers,'gushenCompletion.exportApiChanges','gushenCompletion.importApiChanges','gushenCompletion.repairApiIndex'].sort());
+    [...wrappers,'gushenCompletion.exportApiChanges','gushenCompletion.importApiChanges','gushenCompletion.repairApiIndex',
+      'gushenCompletion.openApiScmGroupSources','gushenCompletion.stageApiScmChanges','gushenCompletion.unstageApiSource'].sort());
   assert(contributes.menus.commandPalette.every(x=>x.when==='false'));assert.equal(commands.get('gushenCompletion.showProjectActions').title,'Guthon Nexus: 项目全部操作');
 });
 

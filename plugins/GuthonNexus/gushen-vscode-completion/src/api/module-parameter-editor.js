@@ -56,13 +56,18 @@ class ModuleParameterEditor {
     if(!chosen.length)return this.vscode.window.showInformationMessage('没有待上传的模块参数修改');
     await this.editorState.flush(key);
     const plan=await this.run(key,'module-upload',{action:'preview',paths:chosen});
-    const lines=['# 模块参数上传预览','',`项目：${key}`,'仅保存参数内容；需要时普通签出，不强制覆盖、不自动签入。',''];
-    for(const item of plan.items)lines.push(`## ${item.systemId} / ${item.configId}`,item.name,
-      item.alreadyRemote?'平台内容已经一致，不重复保存。':item.checkoutRequired?'本次需签出后保存。':'当前用户已签出，核对后保存。',
-      '```diff',item.diff,'```',...(item.diffTruncated?['差异较长，以上内容已截断；请先通过参数差异预览或源代码管理核对完整修改。']:[]),'');
-    const id=crypto.randomUUID();await this.ui.openReadonly(key,`module-upload/${id}/上传预览.md`,lines.join('\n'));
-    const answer=await this.vscode.window.showWarningMessage(`请核对已打开的 ${chosen.length} 个模块参数差异，确认后上传（不签入）。`,{modal:false},'确认上传','取消');
-    if(answer!=='确认上传')return;
+    const checkoutCount=plan.items.filter(item=>item.checkoutRequired).length;
+    const prompt=`上传 ${plan.items.length} 个模块参数（不签入）？${checkoutCount ? `其中 ${checkoutCount} 个需要签出。` : ''}`;
+    for (;;) {
+      const answer=await this.vscode.window.showWarningMessage(prompt,{modal:false},'确认上传','查看差异','取消');
+      if(answer==='确认上传')break;
+      if(answer!=='查看差异')return;
+      const lines=['# 模块参数上传预览','',`项目：${key}`,'仅保存参数内容；需要时普通签出，不强制覆盖、不自动签入。',''];
+      for(const item of plan.items)lines.push(`## ${item.systemId} / ${item.configId}`,item.name,
+        item.alreadyRemote?'平台内容已经一致，不重复保存。':item.checkoutRequired?'本次需签出后保存。':'当前用户已签出，核对后保存。',
+        '```diff',item.diff,'```',...(item.diffTruncated?['差异较长，以上内容已截断；请先通过参数差异预览或源代码管理核对完整修改。']:[]),'');
+      await this.ui.openReadonly(key,`module-upload/${plan.planId}/上传预览.md`,lines.join('\n'));
+    }
     await this.editorState.flush(key);
     let result;
     try {result=await this.run(key,'module-upload',{action:'upload',planId:plan.planId,planHash:plan.planHash,confirm:true});}

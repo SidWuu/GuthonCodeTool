@@ -594,7 +594,7 @@ def _queries(command):
         if parsed.action == "find":
             if not parsed.keyword:
                 raise SystemExit("svn find requires --keyword")
-            result = index_queries.find(workspace, keyword=parsed.keyword, limit=parsed.limit)
+            result = index_queries.find(workspace, keyword=parsed.keyword, limit=parsed.limit, source_type=parsed.source_type or "")
         else:
             if not parsed.source_id:
                 raise SystemExit("svn context requires --source-id")

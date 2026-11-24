@@ -188,9 +188,11 @@ def read(workspace, record_id, *, limit=24000, pointer="", fragments=False, expo
     return result
 
 
-def search(workspace, keyword, *, limit=80):
+def search(workspace, keyword, *, limit=80, source_type=""):
     if not isinstance(keyword, str) or not 1 <= len(keyword.strip()) <= 256:
         raise ValueError("请输入 1–256 字符的源码关键词")
+    if source_type and source_type not in DATABASE_TYPES:
+        raise ValueError("Unsupported source category")
     keyword = keyword.strip()
     items = []
     visited = set()
@@ -198,9 +200,10 @@ def search(workspace, keyword, *, limit=80):
                  CASE WHEN position>0 THEN position-length(replace(substr(body,1,position-1),char(10),'')) END AS line"""
     with hub.index_connection(workspace, action="database-source-search") as conn:
         columns = ", ".join(f"s.{column.strip()}" for column in RECORD_COLUMNS.split(","))
-        params = {"scope": workspace["scopeId"], "keyword": keyword, "limit": limit + 1}
+        params = {"scope": workspace["scopeId"], "keyword": keyword, "limit": limit + 1, "source_type": source_type}
         rows = conn.execute(f"""SELECT {columns}, NULL AS pointer, NULL AS excerpt, NULL AS line
             FROM gusen_source_record s WHERE s.scope_id=:scope AND s.provider='database'
+            AND (:source_type='' OR s.source_table=:source_type)
             AND instr(lower(s.source_id || ' ' || s.source_alias_id || ' ' || s.fun_id || ' ' || coalesce(s.source_name,'')),lower(:keyword))>0
             ORDER BY s.record_id LIMIT :limit""", params).fetchall()
         bodies = conn.execute(f"""WITH hits AS (
@@ -208,13 +211,14 @@ def search(workspace, keyword, *, limit=80):
                    instr(lower(b.content),lower(:keyword)) AS position
             FROM source_body_content b JOIN gusen_source_record s ON s.record_id=b.source_record_id
             WHERE s.scope_id=:scope AND s.provider='database' AND s.status='OK' AND position>0
+            AND (:source_type='' OR s.source_table=:source_type)
             ORDER BY b.body_id LIMIT :limit)
             SELECT {RECORD_COLUMNS}, pointer, {excerpt} FROM hits""", params).fetchall() if conn.execute(
             "SELECT 1 FROM sqlite_master WHERE name='source_body_content'").fetchone() else []
         derived = conn.execute(f"""WITH hits AS (
             SELECT {exports.OBJECT_COLUMNS}, body, instr(lower(body),lower(:keyword)) AS position
-            FROM database_source_export WHERE position>0
-            OR instr(lower(source_id || ' ' || source_name || ' ' || folder),lower(:keyword))>0
+            FROM database_source_export WHERE (:source_type='' OR source_type=:source_type)
+            AND (position>0 OR instr(lower(source_id || ' ' || source_name || ' ' || folder),lower(:keyword))>0)
             ORDER BY folder,source_name,export_key LIMIT :limit)
             SELECT {exports.OBJECT_COLUMNS}, {excerpt} FROM hits""", params).fetchall() if exports.available(conn) else []
         for row in (*bodies, *rows, *derived):

@@ -56,6 +56,27 @@ test('API sorts scope groups by local datasource IDs before catalog position',()
   assert.deepEqual(categories.find(x=>x.category==='procedures').children.map(x=>x.dataSourceId),['1','2','10']);
   assert.deepEqual(categories.find(x=>x.category==='pages').children.map(x=>x.systemId),['s2','s1','s0']);
 });
+test('PAGE rows distinguish page and service component icons even when modified',()=>{
+  const f=fixture(),key='projects.a';
+  f.vscode.TreeItem=class {constructor(label,state){this.label=label;this.collapsibleState=state;}};
+  f.vscode.TreeItemCollapsibleState={Collapsed:1,None:0};
+  f.vscode.ThemeIcon=class {constructor(id,color){this.id=id;this.color=color;}};
+  f.vscode.ThemeColor=class {constructor(id){this.id=id;}};
+  const page={sourceType:'page',sourceId:'PG-1',path:'systems/A/pages/S/PG-1/page.xml',sourceFormat:'native-xml'};
+  const service={sourceType:'page',sourceId:'PG-2',path:'systems/A/pages/S/PG-2/query.GSS'};
+  const indexedService={sourceType:'page',sourceId:'PG-3',path:'systems/A/pages/S/PG-3/query.vm',sourceFormat:'script'};
+  const tree=object=>f.ui.getTreeItem({key,object});
+  assert.equal(tree(page).iconPath.id,'layout');
+  assert.equal(tree(service).iconPath.id,'symbol-event');
+  assert.equal(tree(indexedService).iconPath.id,'symbol-event');
+  assert.match(tree(service).tooltip,/服务组件/);
+  f.ui.sourceChanges.set(key,new Map([[page.path,'MODIFIED'],[service.path,'CONFLICT']]));
+  assert.equal(tree(page).iconPath.id,'layout');
+  assert.equal(tree(page).description,'有本地修改');
+  assert.equal(tree(service).iconPath.id,'symbol-event');
+  assert.equal(tree(service).iconPath.color.id,'editorError.foreground');
+  assert.equal(tree(service).description,'冲突');
+});
 test('opening a registered checkout uses exact backend read without rescanning all status',async()=>{
   const f=fixture(),calls=[];f.ui.syncWorkspaces([{workspaceKey:'projects.a',checkoutPath:'/checkout',sourceMode:'api'}]);
   f.ui.run=async(key,action,input)=>{calls.push({key,action,input});assert.equal(action,'read');return {path:input.path,metadata:{sourceType:'procedure'},readonly:false,content:'procedure()'};};

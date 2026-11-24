@@ -24,7 +24,7 @@ class DatabaseSourceEditor {
     const record=this.documents.get(document.uri.toString());
     return record?.identity.workspaceKey===identity.workspaceKey && record.identity.sourcePath===identity.sourcePath;
   }
-  async open(identity,options={}) {
+  async uriFor(identity) {
     const fragmentType=identity.sourceType==='procedure'?'gss':identity.fragmentType || 'json';
     const filename=documentFilename({...identity,fragmentType});
     const home=this.getTool()?.toolHome;
@@ -38,6 +38,10 @@ class DatabaseSourceEditor {
       try {record.value=await record.loading;}
       catch(error) {this.documents.delete(key);throw error;}
     }
+    return uri;
+  }
+  async open(identity,options={}) {
+    const uri=await this.uriFor(identity);
     const document=await this.vscode.workspace.openTextDocument(uri);
     const line=Number.isInteger(options.lineNumber) && options.lineNumber>0
       ? Math.min(options.lineNumber-1,document.lineCount-1) : -1;
@@ -75,10 +79,11 @@ class DatabaseSourceEditor {
   dispose(){this.closed?.dispose();this.saved?.dispose();this.change.dispose();this.documents.clear();}
 }
 
-function databaseEditIdentity(workspace,item) {
+function databaseEditIdentity(workspace,item,home) {
   return {workspaceKey:workspace.workspaceKey,root:workspace.root,sourcePath:item.record.sourcePath,
     sourceId:item.record.sourceId,sourceType:item.record.sourceType,sourceName:item.record.name,
-    recordId:item.record.recordId,documentName:item.label || item.record.name};
+    recordId:item.record.recordId,documentName:item.label || item.record.name || item.record.funId,
+    sourceMode:'database',home,workcopyDir:workspace.workcopyDir};
 }
 
 function ownsWorkcopyDocument(workspace,identity,document) {

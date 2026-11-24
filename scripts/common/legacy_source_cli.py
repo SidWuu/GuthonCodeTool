@@ -287,7 +287,7 @@ def _run(command, args, config, workspace):
             result = legacy_source_read.read(workspace, parsed.record_id, limit=200000, source_id=parsed.source_id,
                 pointer=parsed.pointer, export_key=parsed.export_key, fragments=parsed.action == "fragments")
         elif parsed.action == "search" and mode == "database":
-            result = legacy_source_read.search(workspace, parsed.keyword)
+            result = legacy_source_read.search(workspace, parsed.keyword, source_type=parsed.type)
         elif parsed.action == "search":
             raise ValueError("此查询需要 DATABASE 源码工作区")
         else:

@@ -3,7 +3,7 @@ const {posix}=require('node:path');
 function fixture(run) {
  const controls=[],vscode={workspace:{textDocuments:[]},Uri:{from:x=>x},scm:{
   createSourceControl(id,label) {
-   const control={id,label,count:0,groups:{},createResourceGroup(groupId,groupLabel) {
+   const control={id,label,count:0,inputBox:{value:''},groups:{},createResourceGroup(groupId,groupLabel) {
     const group={id:groupId,label:groupLabel,resourceStates:[]};
     this.groups[groupId]=group;
     if(groupId==='changes') this.group=group;
@@ -97,29 +97,35 @@ test('API SCM stages exact files, confirms the entire queue and retains files wi
   if(action==='upload') {
    uploads.push(input);
    files[0].state='CLEAN';
-   return {stage:'PARTIAL',results:[{path:'a.gss',stage:'REMOTE_READBACK_VERIFIED'},{path:'b.gss',stage:'FAILED'}]};
+   return {stage:'PARTIAL',remark:input.remark,results:[{path:'a.gss',stage:'REMOTE_READBACK_VERIFIED'},{path:'b.gss',stage:'FAILED'}]};
   }
   assert.fail(action);
  });
  t.after(()=>f.ui.dispose());
  f.ui.syncWorkspaces([{workspaceKey:key,name:'项目甲'}]);
- let actionId='stage',answer;
+ let answer;
  f.ui.vscode.workspace.openTextDocument=async options=>options;
  f.ui.vscode.window={
   showTextDocument:async()=>{},
-  showQuickPick:async(items,{canPickMany})=>canPickMany
-   ? (assert(!items.some(item=>item.label==='param.json')),items.filter(item=>item.label!=='c.gss'))
-   : items.find(item=>item.id===actionId),
+  showQuickPick:async()=>assert.fail('SCM scope already supplies the files'),
   showWarningMessage:async(message,options)=>{confirms.push({message,...options});return answer;},
  };
  f.ui.reviewUpload=async()=>assert.fail('staged upload already has an exact file selection');
- await f.ui.manageScmChanges(key);
+ await f.ui.applyScmChangeAction(key,'stage',['a.gss','b.gss']);
+ const {inputBox,acceptInputCommand}=f.controls[0];
+ assert.equal(inputBox.placeholder,'上传备注（可选）');
+ assert.deepEqual(acceptInputCommand,{command:'gushenCompletion.uploadStagedApiSources',title:'上传暂存',arguments:[key]});
+ inputBox.value='  修订后上传\n已审阅差异  ';
  const {changes,staged}=f.controls[0].groups;
  assert.deepEqual(changes.resourceStates.map(row=>identity(row).path),['c.gss','param.json']);
+ assert.deepEqual(changes.resourceStates.map(row=>row.contextValue),['guthonApi.change.stageable','guthonApi.change']);
  assert.deepEqual(staged.resourceStates.map(row=>identity(row).path),['a.gss','b.gss']);
+ await assert.rejects(f.ui.applyScmChangeAction(key,'stage',['c.gss','param.json']),/暂存源码：param.json/);
+ assert.deepEqual([...f.ui.stagedFiles(key,'/checkout').keys()],['a.gss','b.gss']);
  await f.ui.uploadStaged(key);
  assert.equal(uploads.length,0);
- assert.equal(confirms[0].detail,'a.gss\nb.gss');
+ assert.equal(confirms[0].detail,'a.gss\nb.gss\n\n上传备注（本地操作记录）\n修订后上传\n已审阅差异');
+ assert.equal(inputBox.value,'  修订后上传\n已审阅差异  ');
  assert.match(confirms[0].message,/项目甲 暂存区中的全部 2 个文件/);
  assert.equal(confirms[0].modal,true);
 
@@ -127,21 +133,23 @@ test('API SCM stages exact files, confirms the entire queue and retains files wi
  files[1].sourceHash='new-b';
  await assert.rejects(f.ui.uploadStaged(key),/重新暂存：b.gss/);
  assert.equal(uploads.length,0);
- await f.ui.manageScmChanges(key);
+ await f.ui.applyScmChangeAction(key,'stage','b.gss');
  await f.ui.uploadStaged(key);
- assert.deepEqual(uploads,[{paths:['a.gss','b.gss'],confirm:true,expectedHashes:{'a.gss':'hash-a.gss','b.gss':'new-b'}}]);
+ assert.deepEqual(uploads,[{paths:['a.gss','b.gss'],confirm:true,remark:'修订后上传\n已审阅差异',
+  expectedHashes:{'a.gss':'hash-a.gss','b.gss':'new-b'}}]);
+ assert.equal(inputBox.value,'  修订后上传\n已审阅差异  ');
  assert.deepEqual(staged.resourceStates.map(row=>identity(row).path),['b.gss']);
 
- actionId='unstage';
- await f.ui.manageScmChanges(key);
+ await f.ui.applyScmChangeAction(key,'unstage');
  assert.deepEqual(staged.resourceStates,[]);
  assert.deepEqual(changes.resourceStates.map(row=>identity(row).path),['b.gss','c.gss','param.json']);
 });
-test('API SCM group restore only changes explicitly confirmed files in the original project',async t=>{
- const key='ws_demo',file={path:'a.gss',state:'MODIFIED',sourceHash:'hash-a',sourceType:'procedure'};
+test('API SCM restore confirms the exact selected files in the original project',async t=>{
+ const key='ws_demo',files=['a','b','c'].map(name=>({path:name+'.gss',state:'MODIFIED',sourceHash:'hash-'+name,sourceType:'procedure'}));
  const reverts=[];
  const f=fixture(async(_key,action,input)=>{
-  if(action==='status') return {checkoutPath:'/checkout',files:[file]};
+  if(action==='status') return {checkoutPath:'/checkout',files};
+  const file=files.find(row=>row.path===input.path);
   if(action==='read') return {sourceHash:file.sourceHash};
   if(action==='revert') {reverts.push(input);file.state='CLEAN';return {operationId:'revert1'};}
   assert.fail(action);
@@ -149,24 +157,90 @@ test('API SCM group restore only changes explicitly confirmed files in the origi
  t.after(()=>f.ui.dispose());
  f.ui.syncWorkspaces([key,'ws_other']);
  f.ui.setSelectedWorkspace(key);
+ await f.ui.applyScmChangeAction(key,'stage','c.gss');
  f.ui.vscode.workspace.openTextDocument=async options=>options;
  let confirmation=()=>undefined;
  f.ui.vscode.window={
   showTextDocument:async()=>{},
-  showQuickPick:async(items,{canPickMany})=>canPickMany ? items : items.find(item=>item.id==='revert'),
-  showWarningMessage:async(_message,options)=>{assert.equal(options.modal,true);return confirmation();},
+  showQuickPick:async()=>assert.fail('SCM scope already supplies the files'),
+  showWarningMessage:async(message,options)=>{
+   assert.equal(options.modal,true);
+   assert.match(message,/a\.gss\nb\.gss$/);
+   return confirmation();
+  },
  };
- await f.ui.manageScmChanges(key);
+ await f.ui.applyScmChangeAction(key,'revert');
  assert.deepEqual(reverts,[]);
 
  confirmation=()=>{f.ui.setSelectedWorkspace('ws_other');return '还原';};
- await assert.rejects(f.ui.manageScmChanges(key),/当前项目已切换/);
+ await assert.rejects(f.ui.applyScmChangeAction(key,'revert'),/当前项目已切换/);
  assert.deepEqual(reverts,[]);
 
  f.ui.setSelectedWorkspace(key);
  confirmation=()=> '还原';
- await f.ui.manageScmChanges(key);
- assert.deepEqual(reverts,[{path:'a.gss',expectedHash:'hash-a'}]);
+ await f.ui.applyScmChangeAction(key,'revert',['a.gss','b.gss']);
+ assert.deepEqual(reverts,[{path:'a.gss',expectedHash:'hash-a'},{path:'b.gss',expectedHash:'hash-b'}]);
+ assert.deepEqual([...f.ui.stagedFiles(key,'/checkout').keys()],['c.gss']);
+});
+test('API SCM group actions use every eligible file in the indicated group',async t=>{
+ const key='projects.demo';
+ const files=[
+  ...['a.gss','b.gss','c.gss'].map(path=>({path,state:'MODIFIED',sourceHash:path,sourceType:'procedure'})),
+  {path:'param.json',state:'MODIFIED',sourceHash:'param',sourceType:'module-parameter'},
+  {path:'missing.xml',state:'MISSING',sourceType:'page'},
+ ];
+ const f=fixture(async()=>({checkoutPath:'/checkout',files}));
+ t.after(()=>f.ui.dispose());
+ f.ui.syncWorkspaces([key]);
+ f.ui.vscode.window={showQuickPick:async()=>assert.fail('group actions already have their file scope')};
+ const opened=[];
+ t.mock.method(f.ui,'open',async(workspace,path,preview,options)=>{opened.push(path);assert.deepEqual([workspace,preview,options],[key,false,{raw:true}]);});
+ await f.ui.applyScmChangeAction(key,'stage','a.gss');
+ await f.ui.openScmGroupSources(key,'staged');
+ assert.deepEqual(opened.splice(0),['a.gss']);
+ await f.ui.openScmGroupSources(key,'changes');
+ assert.deepEqual(opened.splice(0),['b.gss','c.gss','param.json']);
+
+ await f.ui.applyScmChangeAction(key,'stage');
+ const {changes,staged}=f.controls[0].groups;
+ assert.deepEqual(staged.resourceStates.map(row=>identity(row).path),['a.gss','b.gss','c.gss']);
+ assert.deepEqual(changes.resourceStates.map(row=>identity(row).path),['param.json','missing.xml']);
+ await f.ui.applyScmChangeAction(key,'unstage',['b.gss','c.gss']);
+ assert.deepEqual(staged.resourceStates.map(row=>identity(row).path),['a.gss']);
+ await f.ui.applyScmChangeAction(key,'unstage');
+ assert.deepEqual(staged.resourceStates,[]);
+});
+test('SCM remarks follow their project and only the successfully uploaded draft is cleared',async t=>{
+ const key='projects.demo',other='projects.other';
+ const f=fixture(async workspace=>({checkoutPath:'/checkout/'+workspace,files:[]}));
+ t.after(()=>f.ui.dispose());
+ f.ui.syncWorkspaces([key,other]);
+ f.ui.setSelectedWorkspace(key);
+ await f.ui.updateScm(key);
+ f.controls.at(-1).inputBox.value='本项目备注';
+ f.ui.setSelectedWorkspace(other);
+ await f.ui.updateScm(other);
+ assert.equal(f.controls.at(-1).inputBox.value,'');
+ f.ui.setSelectedWorkspace(key);
+ await f.ui.updateScm(key);
+ const {inputBox}=f.controls.at(-1);
+ assert.equal(inputBox.value,'本项目备注');
+ let editOnUpload=true,remarkRecorded=true;
+ t.mock.method(f.ui,'upload',async(workspace,_paths,options)=>{
+  assert.equal(workspace,key);
+  assert.deepEqual(options,{stagedOnly:true,remark:editOnUpload?'本项目备注':'下一批备注'});
+  if(editOnUpload) inputBox.value='下一批备注';
+  return {complete:true,...(remarkRecorded ? {remark:options.remark} : {})};
+ });
+ await f.ui.uploadStaged(key);
+ assert.equal(inputBox.value,'下一批备注');
+ editOnUpload=false;
+ remarkRecorded=false;
+ await f.ui.uploadStaged(key);
+ assert.equal(inputBox.value,'下一批备注');
+ remarkRecorded=true;
+ await f.ui.uploadStaged(key);
+ assert.equal(inputBox.value,'');
 });
 test('API SCM uses the registered project name and refreshes its label with a stable provider identity',async t=>{
  const key='ws_demo',checkoutPath='/checkout';

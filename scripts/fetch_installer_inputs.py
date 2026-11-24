@@ -19,26 +19,19 @@ def prepare(metadata, output, *, online=False):
         raise ValueError("Python 输入清单结构无效")
     print('Preparing official Python runtime', flush=True)
     fetch(spec["python"]["url"], spec["python"]["sha256"], output / "python.zip", limit=64 * 1024 * 1024)
-    prerequisites = []
-    ids = set()
-    for item in spec["prerequisites"]:
-        if (set(item) != {"id", "url", "sha256", "args", "elevate", "type"}
-                or item["id"] not in {"codebuddy", "git"} or item["id"] in ids
-                or item["type"] not in {"exe", "msi"}):
-            raise ValueError("依赖输入必须为唯一的 codebuddy、git 安装包")
-        validate_download(item)
-        ids.add(item["id"])
-        target = output / (item["id"] + "." + item["type"])
-        print('Preparing verified ' + item['id'], flush=True)
-        if online:
-            prerequisites.append(dict(item))
-        else:
-            fetch(item["url"], item["sha256"], target, limit=512 * 1024 * 1024)
-            prerequisites.append({"id": item["id"], "file": str(target.resolve()), "sha256": item["sha256"],
-                                  "args": item["args"], "elevate": item["elevate"]})
-    if ids != {"codebuddy", "git"}:
-        raise ValueError("完整安装包缺少必需的 CodeBuddy 或 Git 依赖")
-    write_json(output / "prerequisites.json", {"schemaVersion": 1, "prerequisites": prerequisites})
+    if len(spec["prerequisites"]) != 1:
+        raise ValueError("完整安装包必须包含唯一的 Git 依赖")
+    item, = spec["prerequisites"]
+    validate_download(item)
+    print('Preparing verified Git', flush=True)
+    if online:
+        prerequisite = item
+    else:
+        target = output / ("git." + item["type"])
+        fetch(item["url"], item["sha256"], target, limit=512 * 1024 * 1024)
+        prerequisite = {"id": "git", "file": str(target.resolve()), "sha256": item["sha256"],
+                        "args": item["args"], "elevate": item["elevate"]}
+    write_json(output / "prerequisites.json", {"schemaVersion": 1, "prerequisites": [prerequisite]})
     write_json(output / "inputs.json", spec)
 
 

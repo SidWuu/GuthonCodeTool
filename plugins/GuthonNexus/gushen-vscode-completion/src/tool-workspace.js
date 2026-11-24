@@ -130,7 +130,7 @@ function workspaceActions() {
     ['查看 API 操作历史','gushenCompletion.showApiHistory','history'],
     ['导出本地修改包','gushenCompletion.exportApiChanges','export'],
     ['预览并导入本地修改包','gushenCompletion.importApiChanges','import'],
-    ['查看系统菜单','gushenCompletion.showApiSystemMenu','list-tree'],
+    ['检查系统菜单结构','gushenCompletion.showApiSystemMenu','list-tree'],
   ],metadata:[
     ['配置数据库只读目标','gushenCompletion.configureDatabaseDiagnosis','database'],
     ['导出表结构','gushenCompletion.exportSchema','table'],

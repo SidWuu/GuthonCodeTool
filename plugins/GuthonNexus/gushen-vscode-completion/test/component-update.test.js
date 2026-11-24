@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { signingPayload } = require('../src/release-signature');
 const { verifiedRelease, ASSETS, CATALOG_ASSET, NEXUS_ID, ReleaseCatalogUnavailable } = require('../src/release-catalog');
-const { readArchive } = require('../src/update-archive');
+const { readArchive, archiveJson } = require('../src/update-archive');
 const { updateRoot, saveJson, managedChrome, updatePlan, hostSettings, prepareUpdate, applyUpdate, interruptedUpdate } = require('../src/component-update');
 const { localDay, needsDailyCheck, supportsEditor } = require('../src/update-center');
 
@@ -77,6 +77,21 @@ test('ZIP traversal, symlink and case-collision inputs are rejected before extra
     const file = path.join(f.root, 'bad.zip'); fs.writeFileSync(file, zip(entries, modes));
     assert.throws(() => readArchive(file), /不安全|重复/);
   }
+});
+test('VSIX manifests over 64 KiB can be read within their own metadata limit', t => {
+  const f = fixture(t);
+  const file = path.join(f.root, 'metadata.zip');
+  const data = JSON.stringify({ name: 'guthon-nexus-vscode', contributes: { text: 'a'.repeat(65 * 1024) } });
+  fs.writeFileSync(file, zip({
+    'extension/package.json': data,
+    'extension/manifest.json': data,
+    'too-large/extension/package.json': JSON.stringify({ text: 'a'.repeat(256 * 1024) }),
+  }));
+  const entries = readArchive(file);
+  assert.equal(archiveJson(entries, 'extension/package.json').name, 'guthon-nexus-vscode');
+  assert.throws(() => archiveJson(entries, 'extension/manifest.json'), /元数据过大.*manifest\.json/);
+  entries.set('extension/package.json', entries.get('too-large/extension/package.json'));
+  assert.throws(() => archiveJson(entries, 'extension/package.json'), /元数据过大.*package\.json/);
 });
 test('downloads and validates all assets before switching; Nexus installs last and partial steps can resume', async t => {
   const f = fixture(t); const verified = await f.signed();

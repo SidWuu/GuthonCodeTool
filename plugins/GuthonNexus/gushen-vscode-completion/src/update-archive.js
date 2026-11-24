@@ -2,6 +2,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
+const JSON_METADATA_LIMIT = 64 * 1024;
+const VSIX_MANIFEST_LIMIT = 256 * 1024;
+
 // Read the central directory before touching disk. VSIX and Chrome assets are
 // bounded ZIP files; ZIP64, encryption and links are deliberately unsupported.
 function readArchive(file, { maxBytes = 64 * 1024 * 1024, maxExpanded = 128 * 1024 * 1024 } = {}) {
@@ -51,9 +54,15 @@ function readArchive(file, { maxBytes = 64 * 1024 * 1024, maxExpanded = 128 * 10
   return entries;
 }
 
+function checkArchiveJsonSize(name, size) {
+  const limit = name === 'extension/package.json' ? VSIX_MANIFEST_LIMIT : JSON_METADATA_LIMIT;
+  if (size > limit) throw new Error(`更新包元数据过大：${name}（${size} 字节，上限 ${limit} 字节）`);
+}
+
 function archiveJson(entries, name) {
   const entry = entries.get(name);
-  if (!entry || entry.directory || entry.size > 65536) throw new Error('更新包缺少有效元数据：' + name);
+  if (!entry || entry.directory) throw new Error('更新包缺少有效元数据：' + name);
+  checkArchiveJsonSize(name, entry.size);
   return JSON.parse(entry.data().toString('utf8'));
 }
 
@@ -70,4 +79,4 @@ function extractArchive(entries, destination, prefix) {
     if (!entry.directory) fs.writeFileSync(target, entry.data(), { flag: 'wx', mode: 0o600 });
   }
 }
-module.exports = { readArchive, archiveJson, extractArchive };
+module.exports = { readArchive, archiveJson, checkArchiveJsonSize, extractArchive };

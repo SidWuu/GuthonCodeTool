@@ -145,9 +145,11 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
     return sourceTree.openReadonly(workspace.workspaceKey,previewPath,result.content,item.line);
   }
   async function search(workspace) {
-    const chosen=await showWorkspaceSearch({vscode,sourceOnly:true,title:`搜索当前项目 · ${workspace.displayName}`,
-      search:async text=>{
-        const result=await query(workspace,'search','--keyword='+text);
+    const chosen=await showWorkspaceSearch({vscode,sourceOnly:true,sourceMode:'database',title:`搜索当前项目 · ${workspace.displayName}`,
+      search:async (text,_offset,sourceType)=>{
+        const args=['search','--keyword='+text];
+        if(sourceType) args.push('--type',sourceType);
+        const result=await query(workspace,...args);
         return {...result,items:result.items.map(record=>({kind:'source',label:label(record),
           description:record.pointer || record.sourcePath,detail:record.excerpt,record}))};
       }});

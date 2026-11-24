@@ -139,11 +139,16 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     });
     return editor;
   }
-  function editDatabase(workspace,item) {
-    const identity={...databaseEditIdentity(workspace,item),sourceMode:'database',home:getTool()?.toolHome,workcopyDir:workspace.workcopyDir};
-    if(identity.sourceType==='page' && !item.pointer)return pageEditorFor('database').open(identity);
-    const fragmentType={json:'fields',sql:'sql',javascript:'js','guthon-gss':'gss'}[item.language];
-    return databaseCodeEditor().open({...identity,jsonPointer:item.pointer,fragmentType},{lineNumber:item.line});
+  async function editDatabase(workspace,item) {
+    const identity=databaseEditIdentity(workspace,item,getTool()?.toolHome);
+    let fragment=item;
+    if (identity.sourceType==='page' && !item.pointer) {
+      const {defaultFragment}=await databaseRequest(identity,'edit-read',{resolveDefaultFragment:true});
+      if (!defaultFragment) return pageEditorFor('database').open(identity);
+      fragment=defaultFragment;
+    }
+    const fragmentType={json:'fields',sql:'sql',javascript:'js','guthon-gss':'gss'}[fragment.language];
+    return databaseCodeEditor().open({...identity,jsonPointer:fragment.pointer,fragmentType},{lineNumber:item.line});
   }
   function editSvnPage(workspace,object) {
     const identity={...object,workspaceKey:workspace.workspaceKey,checkoutPath:workspace.checkoutPath,
@@ -264,7 +269,9 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
       if (!choices?.length) return;
       candidates = choices.map(choice => choice.item);
     }
-    for (const candidate of candidates) await diff(workspace, candidate.path);
+    if (action === 'revert') {
+      for (const candidate of candidates) await diff(workspace, candidate.path);
+    }
     const ids = candidates.map(candidate => candidate.id);
     const confirmation = action === 'platform-save' ? '提交 SVN' : '撤回修改';
     let message;
@@ -274,7 +281,7 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     }
     if (await vscode.window.showWarningMessage(
       `${scope} · ${confirmation} ${ids.length} 个文件`,
-      { modal: true, detail: sourcePath }, confirmation) !== confirmation) return;
+      { modal: true, detail: candidates.map(candidate => candidate.path).join('\n') }, confirmation) !== confirmation) return;
     if (toolHome !== getTool()?.toolHome) throw new Error('数据目录已切换，请重新审阅 SVN 修改');
     const result = action === 'platform-save'
       ? await backend.platformSave(key, preview, ids, message)
@@ -455,9 +462,11 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
       if (name === 'search') {
         if(workspace.sourceMode==='database')return await databaseTree.search(workspace);
         if(manifest(workspace)) {
-          const picked=await showWorkspaceSearch({vscode,sourceOnly:true,title:`搜索当前项目 · ${workspace.displayName}`,
-            search:async text=>{
-              const result=await backend.run(key,['find','--keyword='+text,'--limit','50']);
+          const picked=await showWorkspaceSearch({vscode,sourceOnly:true,sourceMode:'svn',title:`搜索当前项目 · ${workspace.displayName}`,
+            search:async (text,_offset,sourceType)=>{
+              const args=['find','--keyword='+text,'--limit','50'];
+              if(sourceType) args.push('--source-type',sourceType);
+              const result=await backend.run(key,args);
               return {truncated:result.truncated,items:result.candidates.map(item=>({kind:'source',label:item.source_name || item.fun_id || item.source_id,
                 description:item.source_path,object:{sourceType:item.source_table,sourceId:item.source_id,funId:item.fun_id,
                   workingCopyId:item.working_copy_id,sourcePath:item.source_path,sourceName:item.source_name}}))};
@@ -554,11 +563,34 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     return node;
   }
 
-  async function locate(workspace, identity) {
+  async function locateRecords(workspace, identity) {
     const args = identity.pageId ? ['--type','page','--source-id',identity.pageId]
       : ['--type','procedure','--alias',identity.alias,'--fun-id',identity.funId];
     const result = await run(workspace,'legacy-source',['locate',...args]);
-    const items = result.items || [];
+    return result.items || [];
+  }
+
+  async function procedureDefinitionUris(workspace, target, document) {
+    const home = getTool()?.toolHome;
+    if (!home || workspace.index?.ready === false
+      || document.uri.scheme === SCHEME && documentHomes.get(document.uri.toString()) !== home) return [];
+    const records = await locateRecords(workspace, target);
+    if (home !== getTool()?.toolHome) return [];
+    return Promise.all(records.map(async record => {
+      if (workspace.sourceMode === 'database' && workspace.capabilities?.['workcopy.open']) {
+        return databaseCodeEditor().uriFor(databaseEditIdentity(workspace, {record}, home));
+      }
+      if (manifest(workspace) && workspace.capabilities?.['svn.browse'] && record.workingCopyId) {
+        return virtualFs.uriFor(fragmentIdentity(workspace.workspaceKey, record));
+      }
+      const source = await run(workspace,'legacy-source',['read','--record-id',String(record.recordId),'--source-id='+record.sourceId]);
+      return sourceTree.readonlyUri(workspace.workspaceKey,
+        `${workspace.sourceMode}/${record.sourcePath}/${record.funId}.gss`,source.content);
+    }));
+  }
+
+  async function locate(workspace, identity) {
+    const items = await locateRecords(workspace, identity);
     if (!items.length) throw new Error('当前项目的本地索引没有该源码，请检查同步范围');
     const record = items.length === 1 ? items[0] : (await vscode.window.showQuickPick(
       items.map(item => ({label:item.name || item.sourceId, description:item.sourcePath, item})),
@@ -586,7 +618,7 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
   }});
   return { action, login, sync, children, treeItem, openLocal, openWorkcopy:databaseTree.workcopy,
     hasUnsavedDrafts:workspace=>!!pageEditors.get(workspace.sourceMode)?.hasUnsavedDrafts(workspace.workspaceKey,getTool()?.toolHome),
-    databaseCallers:databaseTree.callers, editSvnPage,locate, virtualFs, diff, conflict,updateNode,updateRemote,showInheritance,
+    databaseCallers:databaseTree.callers, editSvnPage,locate,procedureDefinitionUris, virtualFs, diff, conflict,updateNode,updateRemote,showInheritance,
     review, update, openSvnChange, resolveConflict,
     history:async (workspace, sourcePath) => report((await backend.history(workspace.workspaceKey,sourcePath)).xml,'xml') };
 }

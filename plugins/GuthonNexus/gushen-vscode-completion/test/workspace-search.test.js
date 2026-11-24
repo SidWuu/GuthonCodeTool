@@ -119,3 +119,38 @@ test('a changed index cannot mix pages and retry starts again at the first page'
   f.hide();
   assert.equal(await pending, undefined);
 });
+
+test('changing a type discards pending results and canceling keeps the current search', async () => {
+  const f = quickPickFixture(), types = [];
+  let release, nextType = 'table';
+  f.vscode.window.showQuickPick = async items => {
+    f.hide();
+    return items.find(item => item.sourceType === nextType);
+  };
+  const pending = showWorkspaceSearch({vscode: f.vscode, title: 'search', sourceMode: 'database', value: 'basic_user',
+    search: async (_query, _offset, type) => {
+      types.push(type);
+      if (types.length === 1) return new Promise(resolve => { release = resolve; });
+      return {items: [{...item, label: type || 'all'}]};
+    }});
+  await waitFor(() => release);
+  f.titleButton();
+  await waitFor(() => f.picker.shown && f.picker.title.endsWith('表'));
+  release({items: [item]});
+  await waitFor(() => !f.picker.busy);
+  assert.deepEqual(types, ['', 'table']);
+  assert.equal(f.picker.items[0].label, 'table');
+  nextType = undefined;
+  f.titleButton();
+  await waitFor(() => f.picker.shown);
+  assert.deepEqual(types, ['', 'table']);
+  assert.equal(f.picker.items[0].label, 'table');
+  nextType = '';
+  f.titleButton();
+  await waitFor(() => f.picker.shown && !f.picker.busy);
+  assert.deepEqual(types, ['', 'table', '']);
+  assert.equal(f.picker.value, 'basic_user');
+  assert.match(f.picker.title,/全部类型/);
+  f.accept();
+  assert.equal((await pending).item.label, 'all');
+});

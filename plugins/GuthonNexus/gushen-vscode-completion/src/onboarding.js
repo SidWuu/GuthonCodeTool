@@ -30,7 +30,7 @@ function readiness({ report, toolVersion, nexusVersion, governanceBundleId, hook
     && Number.isFinite(Date.parse(hook.observedAt)) && Date.parse(hook.observedAt) >= Date.parse(report.installedAt));
   const bridge = Boolean(chrome.installId && clients.some(item => item.installId === chrome.installId
     && item.version === chrome.version && item.protocolVersion === 2));
-  return { tool, governance, team, bridge, complete: tool && governance };
+  return { tool, governance, team, bridge, complete: tool && (!report.marketplaceUrl || governance) };
 }
 
 function escapeHtml(value) {
@@ -38,18 +38,23 @@ function escapeHtml(value) {
 }
 
 function page(snapshot, nonce) {
+  const source = snapshot.report?.marketplaceUrl;
   const cards = [
     ['tool', 'GuthonCodeTool 与 GuthonNexus', '运行入口已由安装器配置。检查当前后端和 Nexus 是否可用。', [['refresh', '检查运行环境']]],
-    ['governance', '同步团队规则和开发门禁', '先连接公司网络。首次使用需开通内网 Git 仓库权限。使用 SSH 时，将公钥添加到个人账号并核对服务器指纹，随后同步规则、Linter 和 Git pre-commit。', [['gitweb', '打开内网 Git 网站'], ['key', '生成或复制 SSH 公钥'], ['authorize', '首次连接授权'], ['repository', '同步团队规范']]],
-    ['team', 'Agent 生命周期检查（可选）', '需要在 CodeBuddy 对话中自动检查时，安装 guthon-guard，重载插件并在新聊天中确认 Hook 运行。', [['team', '打开插件市场'], ['reload', '复制重载插件命令'], ['refresh', '检查 Hook 运行']]],
+    ...(source ? [
+      ['governance', '同步团队规则和开发门禁', '先连接公司网络。首次使用需开通内网 Git 仓库权限。使用 SSH 时，将公钥添加到个人账号并核对服务器指纹，随后同步规则、Linter 和 Git pre-commit。', [['gitweb', '打开内网 Git 网站'], ['key', '生成或复制 SSH 公钥'], ['authorize', '首次连接授权'], ['repository', '同步团队规范']]],
+      ['team', 'Agent 生命周期检查（可选）', '需要在 CodeBuddy 对话中自动检查时，安装 guthon-guard，重载插件并在新聊天中确认 Hook 运行。', [['team', '打开插件市场'], ['reload', '复制重载插件命令'], ['refresh', '检查 Hook 运行']]],
+    ] : [
+      [null, '手动放入部门规则（可选）', '可以先完成基础安装。按部门说明，将规则文件放入开发目录，例如 AGENTS.md 和 rules/。', [['workspace', '打开开发目录']]],
+    ]),
     ['bridge', '浏览器增强：GuthonBridge（可选）', '日常源码同步、编辑和静态检查可以直接在 Nexus 完成。需要网页增强时首次加载：打开扩展管理页，启用开发者模式，点击“加载已解压的扩展”，选择向导提供的目录。然后在 GuthonBridge 的“本机 Bridge 配对”粘贴令牌，点击“保存并连接”。', [['hosts', '平台地址规则（按需）'], ['chrome', '打开 Chrome 扩展管理'], ['folder', '定位并复制扩展目录'], ['token', '复制配对令牌'], ['refresh', '检查浏览器连接']]],
   ];
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';"><style nonce="${nonce}">
 body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);max-width:900px;margin:30px auto;padding:0 24px;line-height:1.7}section{border:1px solid var(--vscode-panel-border);border-radius:10px;padding:18px;margin:16px 0}button{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:0;padding:9px 14px;margin:5px;border-radius:5px;cursor:pointer}h2{font-size:19px;margin:0}p{margin:12px 0}.error{color:var(--vscode-errorForeground)}.hint{opacity:.8}select{max-width:100%;padding:8px}</style></head><body>
-<h1>完成 Guthon 安装配置</h1><p>${snapshot.complete ? '工具和团队规范已就绪。后续在 CodeBuddy 中使用 GuthonNexus。' : '这是从零安装时的一次性确认。完成后关闭此助手，日常直接在 CodeBuddy 使用 GuthonNexus。'}</p>
-${snapshot.report?.marketplaceUrl ? `<p class="hint">团队插件来源：${escapeHtml(snapshot.report.marketplaceUrl)}</p>` : ''}
+<h1>完成 Guthon 安装配置</h1><p>${snapshot.complete ? (source ? '工具和团队规范已就绪。后续在当前 IDE 中使用 GuthonNexus。' : '基础工具已就绪。后续在当前 IDE 中使用 GuthonNexus。') : '这是从零安装时的一次性确认。完成后关闭此助手，日常直接在当前 IDE 使用 GuthonNexus。'}</p>
+${source ? `<p class="hint">团队插件来源：${escapeHtml(source)}</p>` : ''}
 ${snapshot.error ? `<p class="error">${escapeHtml(snapshot.error)}</p>` : ''}
-${cards.map(([id, title, help, buttons]) => `<section><h2>${snapshot[id] ? '✓' : '○'} ${title}</h2><p>${help}</p>${buttons.map(([action, label]) => `<button data-action="${action}">${label}</button>`).join('')}</section>`).join('')}
+${cards.map(([id, title, help, buttons]) => `<section><h2>${id ? (snapshot[id] ? '✓ ' : '○ ') : ''}${title}</h2><p>${help}</p>${buttons.map(([action, label]) => `<button data-action="${action}">${label}</button>`).join('')}</section>`).join('')}
 <button data-action="continue">${snapshot.complete ? '重新检查' : '继续下一步'}</button><button data-action="finish">完成配置</button><button data-action="tutorial">查看完整操作教程</button>
 <script nonce="${nonce}">const api=acquireVsCodeApi();document.querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('button').forEach(b=>b.disabled=true);api.postMessage({action:button.dataset.action});}));</script></body></html>`;
 }
@@ -65,7 +70,7 @@ function chromeExecutable(env = process.env) {
 
 function nextAction(status) {
   if (!status.tool) return 'refresh';
-  if (!status.governance) return 'repository';
+  if (status.report?.marketplaceUrl && !status.governance) return 'repository';
   return 'finish';
 }
 
@@ -114,8 +119,11 @@ function createOnboarding({ vscode, context, getTool, client, bridge, spawnProce
         const file = last.report?.tutorialPath;
         if (!file || path.basename(file) !== 'GuthonCodeTool_Windows安装步骤.html' || !fs.existsSync(file)) throw new Error('Windows 安装手册尚未就位，请重新运行安装器');
         await vscode.env.openExternal(vscode.Uri.file(file).with({ fragment: 'one-click' }));
+      } else if (name === 'workspace') {
+        await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(workspaceRoot(tool.toolHome)));
       } else if (name === 'repository') {
         const source = last.report?.marketplaceUrl;
+        if (!source) throw new Error('工作区未配置团队规则源');
         await repositoryCheck(source, undefined, tool.env);
         const result = await client.run('', 'setup', ['--team-source', source]);
         if (result.governance !== 'ready') throw new Error('后端未确认团队规范同步完成，请检查运行入口版本');
@@ -135,9 +143,10 @@ function createOnboarding({ vscode, context, getTool, client, bridge, spawnProce
         await vscode.env.clipboard.writeText(await publicKey());
         await vscode.window.showInformationMessage('仅 SSH 公钥已复制。到内网 Git 网站“用户设置 → SSH/GPG 公钥”粘贴保存；已有密钥会保留，私钥不会上传。');
       } else if (name === 'authorize') {
+        const command = authorizationCommand(last.report?.marketplaceUrl);
         const terminal = vscode.window.createTerminal({ name: 'Guthon 内网仓库首次连接', env: tool.env, ...(process.platform === 'win32' ? { shellPath: 'powershell.exe', shellArgs: ['-NoLogo', '-NoProfile'] } : {}) });
         terminal.show();
-        terminal.sendText(authorizationCommand(last.report?.marketplaceUrl));
+        terminal.sendText(command);
       } else if (name === 'team') {
         await vscode.commands.executeCommand('workbench.action.quickOpen', '>插件市场');
         await vscode.window.showInformationMessage('打开 CodeBuddy 插件市场，选择已配置的内网 guthon-team，确认安装 guthon-guard。重新加载插件并开始新聊天，再回到向导检查。');
@@ -193,7 +202,7 @@ function createOnboarding({ vscode, context, getTool, client, bridge, spawnProce
         saveJson(stateFile(tool.toolHome), { ...state, schemaVersion: 1,
           completedBundleId: current.report.bundleId, completedAt: new Date().toISOString() });
         panel?.dispose();
-        await vscode.window.showInformationMessage('安装和基础环境配置已完成。后续打开 CodeBuddy，使用 GuthonNexus 添加产品或项目并开展开发。');
+        await vscode.window.showInformationMessage('安装和基础环境配置已完成。后续可使用 GuthonNexus 添加产品或项目并开展开发。');
       } else if (name !== 'refresh') throw new Error('未知的安装配置操作');
       await refresh();
     } catch (error) {

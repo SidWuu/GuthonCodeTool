@@ -16,6 +16,18 @@ from common import gusen_hub as hub
 COMMAND = re.compile(r"^\s*(?:/(?:guthon-guard:)?guthon-use|\$(?:guthon-guard:)?guthon-use)(?:\s+|$)(.*)$", re.S)
 REFERENCE = re.compile(r"参考|参照|对照|借鉴|继承|来源|来自|基于|reference\b|refer to\b", re.I)
 ACTION = re.compile(r"修改|修复|实现|开发|调整|排查|查询|分析|定位|切换|选择|处理|目标|modify\b|fix\b|inspect\b|switch\b", re.I)
+MENTION_LEAD = re.compile(r"(?:在|对|针对|和|及|与|以及|或|修改|修复|实现|开发|调整|排查|查询|分析|定位|切换到|切换为|选择|处理|参考|参照|对照|借鉴)(?:项目|产品|工作区)?$")
+MENTION_TAIL = re.compile(
+    r"^(?:的|和|及|与|以及|或|且|作为参考|仅供参考|可供参考|"
+    r"(?:项目|产品|工作区|中|内|里)(?=$|[^\w]|的|中|内|里|修改|修复|实现|开发|调整|排查|查询))"
+)
+EXPLICIT_TARGET = re.compile(r"(?:切换(?:到|为)|目标(?:项目|产品|工作区)?\s*[：:是为]|switch\s+to)\s*$", re.I)
+REFERENCE_FOLLOWS = re.compile(r"(?:可?作为|可供|仅?供)(?:本次)?(?:参考|参照|对照|借鉴)|as (?:a )?reference\b", re.I)
+PRIOR_WORK_LOCATION = re.compile(r"(已(?:经)?|曾(?:经)?)?\s*在$")
+PRIOR_WORK_REFERENCE = re.compile(
+    r"(?:中|内|里)?\s*(?P<prior>已(?:经)?|曾(?:经)?)?(?:开发|实现|验证|使用|上线)(?P<completed>过)?"
+    r"[^，,。；;\n]*[，,。]\s*(?:可(?:以)?|可供|仅?供)(?:直接)?(?:参考|参照|对照|借鉴)"
+)
 
 
 def normalized(value):
@@ -102,8 +114,13 @@ def select_workspace(config, *, workspace_key="", name="", path=None,
             for label in [item["name"], item["displayName"], item["workspaceKey"], *item.get("aliases", [])]:
                 label = normalized(label)
                 for match in re.finditer(re.escape(label), text):
-                    if label.isascii() and ((match.start() and re.match(r"[A-Za-z0-9_.-]", text[match.start()-1]))
-                                           or match.end() < len(text) and re.match(r"[A-Za-z0-9_.-]", text[match.end()])):
+                    before, after = text[:match.start()], text[match.end():]
+                    if label.isascii():
+                        if re.search(r"[A-Za-z0-9_.-]$", before) or re.match(r"[A-Za-z0-9_.-]", after):
+                            continue
+                    elif ((re.search(r"\w$", before) and not MENTION_LEAD.search(before)
+                           and not EXPLICIT_TARGET.search(before))
+                          or (re.match(r"\w", after) and not MENTION_TAIL.match(after))):
                         continue
                     occurrences.append((match.start(), match.end(), item))
         # A full registered name wins over an alias contained in that same span.
@@ -111,10 +128,17 @@ def select_workspace(config, *, workspace_key="", name="", path=None,
             other[0] <= hit[0] and other[1] >= hit[1] and other[1]-other[0] > hit[1]-hit[0]
             for other in occurrences)]
         targets = {}
+        explicit_targets = set()
         for start, end, item in occurrences:
             prefix = re.split(r"[，,。；;\n]", text[:start])[-1]
-            if re.match(r"\s*(?:作为参考|供参考|仅供参考|as (?:a )?reference)", text[end:], re.I):
+            suffix = text[end:].lstrip(" \t】])”’》〉\"'`*")
+            if REFERENCE_FOLLOWS.match(suffix):
                 continue
+            location = PRIOR_WORK_LOCATION.search(prefix.rstrip(" \t【[(“‘《〈\"'`*"))
+            if location:
+                prior_work = PRIOR_WORK_REFERENCE.match(suffix)
+                if prior_work and (location[1] or prior_work["prior"] or prior_work["completed"]):
+                    continue
             references = list(REFERENCE.finditer(prefix))
             actions = list(ACTION.finditer(prefix))
             if references and (not actions or references[-1].start() >= actions[-1].start()):
@@ -122,12 +146,14 @@ def select_workspace(config, *, workspace_key="", name="", path=None,
             if re.search(r"不要|无需|不必|别修改|不是|非目标|do not\b", prefix):
                 continue
             targets[item["workspaceKey"]] = item
+            if EXPLICIT_TARGET.search(prefix.rstrip(" \t【[(“‘《〈\"'`*")):
+                explicit_targets.add(item["workspaceKey"])
         if len(targets) > 1:
             return failure("WORKSPACE_AMBIGUOUS", "Multiple task targets; select one explicitly", list(targets.values()))
         if targets:
             selected, source = next(iter(targets.values())), "prompt"
-            explicit = bool(re.search(r"切换(?:到|为)|目标(?:项目|产品|工作区)?\s*[：:是为]|switch\s+to\b", text))
-        elif re.search(r"(?:目标(?:项目|产品|工作区)?\s*[：:是为]|切换到)\s*\S", text):
+            explicit = selected["workspaceKey"] in explicit_targets
+        elif re.search(r"(?:目标(?:项目|产品|工作区)\s*[：:是为]|切换(?:到|为))\s*\S", text):
             return failure("WORKSPACE_NOT_FOUND", "Explicit target is not a registered name or alias")
     if selected and current_workspace and selected["workspaceKey"] != current_workspace and not explicit:
         return failure("WORKSPACE_CONFLICT", "Prompt target differs from the current conversation; use /guthon-use to switch", [selected])

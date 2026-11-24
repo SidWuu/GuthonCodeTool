@@ -490,6 +490,10 @@ def upload(workspace, client, payload):
         not isinstance(k, str) or not isinstance(v, str) for k, v in expected.items()
     ):
         raise ApiError("API_INPUT_INVALID", "expectedHashes必须为路径与哈希映射")
+    remark = payload.get("remark", "")
+    if not isinstance(remark, str):
+        raise ApiError("API_INPUT_INVALID", "上传备注必须为文本")
+    remark = remark.strip()
     if payload.get("confirm") is not True:
         raise ApiError(
             "API_CONFIRMATION_REQUIRED", "上传会修改开发平台，请确认本次上传对象"
@@ -501,6 +505,8 @@ def upload(workspace, client, payload):
         "stage": "PREPARED",
         "results": [],
     }
+    if remark:
+        operation["remark"] = remark
     store._receipt(operation)
     with file_lock(directory / "sync.lock"):
         assert_writable(workspace, paths)

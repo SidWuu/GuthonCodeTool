@@ -80,6 +80,12 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False):
             raise ValueError("源码已发生变化，请保留修改并重新打开后比较")
         if is_page:
             projected, data, wrapped = _page(text, source_id)
+            if action == "edit-read" and payload.get("resolveDefaultFragment") is True:
+                default_fragment = (
+                    {"pointer": "/compScript", "language": "guthon-gss"}
+                    if str(data.get("pageType")) == "0" else None
+                )
+                return {**result, "defaultFragment": default_fragment}
         if action == "edit-comparison":
             if not design or payload.get("sourceHash") != source_hash:
                 raise ValueError("PAGE 已变化，请重新打开后比较")

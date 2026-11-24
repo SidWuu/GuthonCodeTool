@@ -7,11 +7,13 @@ function at(source, word) {
 }
 
 test('resolves invoke and bound procedure calls at the method name', () => {
-  assert.deepEqual(at('$vs.proc.invoke("com.golden.demo", "saveData", $form);', 'saveData'), {
-    alias: 'com.golden.demo', fun: 'saveData',
+  const direct = '$vs.proc.invoke("com.golden.demo", "saveData", $form);';
+  const bound = "#set($proc=$vs.proc.find('com.golden.back'))\n$proc.updateBacknum($map);";
+  assert.deepEqual(at(direct, 'saveData'), {
+    alias: 'com.golden.demo', fun: 'saveData', start: direct.indexOf('saveData'),
   });
-  assert.deepEqual(at("#set($proc=$vs.proc.find('com.golden.back'))\n$proc.updateBacknum($map);", 'updateBacknum'), {
-    alias: 'com.golden.back', fun: 'updateBacknum',
+  assert.deepEqual(at(bound, 'updateBacknum'), {
+    alias: 'com.golden.back', fun: 'updateBacknum', start: bound.indexOf('updateBacknum'),
   });
   assert.equal(at('$vs.proc.invoke($alias, $fun, $form);', '$fun'), null);
 });
@@ -21,7 +23,7 @@ test('resolves literal thread procedure calls across lines and quote styles', ()
     for (const quote of ['"', "'"]) {
       const source = `$vs.thread.${method}(\n ${quote}com.golden.demo${quote},\n ${quote}saveData${quote}, $args);`;
       for (const offset of [source.indexOf('saveData'), source.indexOf('saveData') + 4]) {
-        assert.deepEqual(procedureTargetAt(source, offset), { alias: 'com.golden.demo', fun: 'saveData' });
+        assert.deepEqual(procedureTargetAt(source, offset), { alias: 'com.golden.demo', fun: 'saveData', start: source.indexOf('saveData') });
       }
       assert.equal(at(source, 'com.golden.demo'), null);
       assert.equal(at(source, '$args'), null);
@@ -43,7 +45,7 @@ test('does not guess dynamic thread targets or service component IDs', () => {
 
 test('uses the latest binding for a procedure variable', () => {
   const source = "#set($proc=$vs.proc.find('first'))\n#setup\n#set($proc=$vs.proc.find('second'))\n$proc.run();";
-  assert.deepEqual(at(source, 'run'), { alias: 'second', fun: 'run' });
+  assert.deepEqual(at(source, 'run'), { alias: 'second', fun: 'run', start: source.indexOf('run') });
 });
 
 test('resolves a procedure local function call to its #function declaration', () => {
@@ -59,7 +61,8 @@ test('service component calls locate only the complete static first argument', (
     for (const quote of ['"', "'"]) {
       const source = `$vs.${scope}.runServiceComp(\n ${quote}PG-DEMO-123${quote}, $args, true)`;
       for (const delta of [0, 3, 10]) {
-        assert.deepEqual(serviceComponentTargetAt(source, source.indexOf('PG-DEMO-123') + delta), { componentId: 'PG-DEMO-123' });
+        const start = source.indexOf('PG-DEMO-123');
+        assert.deepEqual(serviceComponentTargetAt(source, start + delta), { componentId: 'PG-DEMO-123', start });
       }
       assert.equal(serviceComponentTargetAt(source, source.indexOf('$args')), null);
       assert.equal(serviceComponentTargetAt(source, source.indexOf('runServiceComp')), null);
