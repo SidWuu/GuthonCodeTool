@@ -86,6 +86,14 @@ def atomic_bytes(path: Path, data: bytes):
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(name, path)
+        for delay in (0.05, 0.1, 0.2, 0.4, None):
+            try:
+                os.replace(name, path)
+                break
+            except PermissionError as error:
+                # Windows can reject replacement while a reader holds the destination open.
+                if delay is None or getattr(error, "winerror", None) not in {5, 32}:
+                    raise
+                time.sleep(delay)
     finally:
         Path(name).unlink(missing_ok=True)

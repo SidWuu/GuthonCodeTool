@@ -260,7 +260,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <p>首次使用 Nexus 时，先在本地数据目录下新建一个开发目录。目录可叫 <code>var</code>，也可用自己的名称。用 VS Code 或 CodeBuddy 直接打开这个开发目录，在 Nexus 点击“初始化此文件夹”。初始化需要 Git，会把当前打开的目录建为 Git 根，并在它的上一级生成配置。</p>
 <ol>
 <li>已连接的窗口可从“项目总览 → … → 工具设置 → 切换本地数据目录”更换目录。刷新项目总览可重新读取已登记项目。</li>
-<li>从当前开发目录初始化时，卡片会列出开发目录及其上一级数据目录。接入已有工作空间时，通过“连接已有数据目录”选择包含 <code>config/</code> 的上一级目录。每个数据目录绑定一个开发根，已有绑定继续使用原路径。</li>
+<li>从当前开发目录初始化时，卡片会列出开发目录及其上一级数据目录。接入已有工作空间时，通过“连接已有数据目录”选择包含 <code>config/</code> 的上一级目录。如果选中了已绑定的开发根，Nexus 会连接其上一级数据目录。每个数据目录绑定一个开发根，已有绑定继续使用原路径。</li>
 <li>点击“初始化此文件夹”，Nexus 会检查开发目录上一级的 <code>GuthonCodeTool</code> 或 Windows EXE。如果还没有选定入口、上一级也没有运行文件，先选运行方式，再按提示选择对应入口。使用发行模式时，macOS 选择解压后的 <code>GuthonCodeTool</code>，Windows 选择 EXE。初始化成功后，当前工作区会关联上一级数据目录。</li>
 <li>确认信任当前目录并连接公司网络。按提示输入团队提供的 Git 克隆地址。首次访问按<a href="#3-1-安装治理插件">内网 Git 接入步骤</a>开通权限。等待 Nexus 显示“工作区已初始化，团队规则和开发门禁已同步”。此时即可在根目录查看 <code>AGENTS.md</code>、<code>rules/</code> 和 <code>tools/guthon-lint</code>。</li>
 <li>初始化后留在当前开发目录，点击“立即添加”，或在“项目总览”点击“添加项目”。日常继续打开这个目录。</li>
@@ -300,7 +300,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h4 id="api-source-preview">选择同步范围并更新源码</h4>
 <ol>
 <li>登录后，在当前项目卡片点“同步范围”。API 选择全部或指定子系统，DATABASE 选择主库中的子系统。SVN 按数据源名称选择关联的子系统，“公共源码”和“开发建议”可单独选择。</li>
-<li>保存选择，再手动点击“更新源码”。首次选择和之后调整范围都按此顺序。查看“输出 → GuthonCodeTool”的进度，再到“项目源码”浏览结果。</li>
+<li>保存选择，再手动点击“更新源码”。首次选择和之后调整范围都按此顺序。在“输出 → GuthonCodeTool”查看进度。操作结束后，到“项目源码”浏览结果。</li>
 <li>缩小范围时，“更新源码”会清理退出范围内的同步副本。API 或 SVN 提示有本地修改、草稿或冲突时，先处理提示中的文件，再点击“更新源码”。DATABASE 的 Workcopy 保留。</li>
 </ol>
 <figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：API 的子系统多选列表和确定按钮"><img src="nexus-manual-images/scope.png" width="1205" height="347" alt="API 的子系统多选列表和确定按钮" loading="lazy"></button><figcaption>API 示例。勾选所需子系统并点「确定」，随后回到卡片点「更新源码」。</figcaption></figure>
@@ -317,7 +317,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <ul>
 <li>看本次拉取和索引结果时，打开“操作记录”或 GuthonCodeTool 输出。SVN 首次签出中断后，可在原项目重新点击“更新源码”。如仍失败，查看<a href="GuthonCodeTool_QA.html?q=E120106">SVN 签出中断问答</a>。</li>
 <li>需要重新解析全部本地源码时，在“索引管理”选择“重建索引”。API 源码树出现“索引不完整”时，左键查看诊断，右键选择“修复索引”重试有诊断的项，或选择“重建索引”做全量重建。另有“等待索引更新”提示时，可点击提示重试该批文件。</li>
-<li>出现“配置异常”时，从该项目的当前项目卡片进入“检查配置文件”，处理后刷新项目总览。</li>
+<li>出现“配置异常”时，先查看当前项目卡片的错误码。提示“状态扫描期间源码已变化”时，查看<a href="GuthonCodeTool_QA.html?q=状态扫描期间源码已变化">状态扫描问答</a>。卡片提示配置有误时，点“检查配置文件”，处理后刷新项目总览。</li>
 </ul>
 <h4 id="project-settings-guide">项目设置</h4>
 <p>从“当前项目 → … → 项目设置”配置源码连接、查看项目配置或修改同步方式。尚无源码、索引或操作记录的项目可以直接换模式。已有源码的 SVN 或 DATABASE 项目可<a href="#reset-legacy-source-to-api">切换到 API 并重新拉取</a>。API 退出登录前，先保存并关闭打开的在线页面编辑器，再在同一菜单选择“退出登录”。</p>
@@ -438,6 +438,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <h2 id="4-bridge">4. Bridge 网页辅助</h2>
 <h3 id="4-1-安装-chrome-扩展">4.1 安装 Chrome 扩展</h3><p>需要网页辅助时加载 GuthonBridge 扩展；Windows 首次加载见<a href="GuthonCodeTool_Windows安装步骤.html#one-click-bridge">安装步骤</a>。日常源码同步、编辑和检查可以直接在 Nexus 完成。需要已登录页签的操作会指明当前动作；按下节完成配对后继续。</p><h3 id="4-2-启动与验证">4.2 启动与配对</h3><ol><li>更换本地数据目录前，在持有旧 Bridge 服务的 Nexus 窗口点击“项目总览 → … → 停止浏览器增强”，等待停止；同一端口不能同时监听两套数据目录。端口仍被占用时，按<a href="GuthonCodeTool_QA.html?q=EADDRINUSE">端口占用问答</a>核对原窗口和进程。</li><li>在目标数据目录对应的 Nexus 窗口点击“项目总览 → … → 启动浏览器增强”（命令面板名称为“Guthon Nexus: 启动 Guthon Bridge”），等待启动成功，再点击“复制配对令牌”。</li><li>在 Chrome 扩展弹窗的配对设置中填写与 Nexus 相同的端口、粘贴配对令牌，点击“保存并连接”。确认显示“Bridge 配对成功”；默认导出目录应属于当前本地数据目录，若使用自定义导出目录则核对已配置的位置。</li><li>更新或重新加载 Chrome 扩展后，先保存平台编辑再刷新平台页面；执行一次所需的只读定位，核对返回工作区与对象。</li></ol><h3 id="4-3-使用网页辅助">4.3 使用网页辅助</h3>
 <p>在受支持的谷神页面，可以复制字段、滚动列表和<span id="bridge-tab-sort">拖动标签排序</span>。与 Nexus 配对后，可定位当前 PAGE 或过程函数，并按需定向刷新 API 源码。适用范围见<a href="GuthonCodeTool_全功能说明.html#8-1-页面能力">Bridge 功能说明</a>。</p>
+<p id="bridge-procedure-navigation">在模块开发的页面后台脚本中，按住 Ctrl（macOS 为 Cmd）点击可识别的过程函数调用。过程函数打开后，点击页面顶部浮条的“返回页面”，回到发起跳转的 PAGE。</p>
 </section>
 
 <section class="wiki-section">
@@ -473,6 +474,7 @@ codex mcp get guthon-source-helper</code></pre></div>
 <p>开始修改前，从总览选中项目，核对来源和同步范围。需要从远端更新时点击“更新源码”，或只同步目标节点。查看操作记录并处理冲突后开始编辑。</p>
 <ul>
 <li><strong>API</strong>
+<p id="api-source-conflict">如果更新后文件显示“冲突”，在“项目源码”中右键点击冲突文件，选择“处理 API 源码冲突”。在“源代码管理”的“谷神 API 源码”存储库中，也可直接点击冲突文件，或从右键选择同一命令。左侧是本地已保存的源码，右侧是同步记录的平台源码。核对后选择“保留本地内容”或“采用平台内容”并确认。如果要合并两边的改动，选择“打开原始源码手工合并”，保存后再打开冲突并选择“保留本地内容”。若提示页面来自批量下载 XML，先点击“更新此页面”，刷新后再检查冲突。处理完成后核对本地差异，按需上传。<a href="GuthonCodeTool_全功能说明.html#api-source-conflict">冲突处理参考</a></p>
 <ol>
 <li>保存改动后，在“源代码管理”选中当前项目的“谷神 API 源码”存储库。点击文件查看差异。右键选择“查看原始路径”，可以查看和复制原始的相对路径或绝对路径。</li>
 <li>在“本地变更”选中一个或多个已审阅的文件，点击所选文件行右侧的“+”，或右键选择“暂存 API 源码”。要暂存本组全部可上传源码，点击组标题右侧的“全部暂存”。文件会移到“暂存区”。</li>

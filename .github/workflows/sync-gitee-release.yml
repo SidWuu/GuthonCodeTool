@@ -1,6 +1,5 @@
 name: Sync Gitee Release
 
-# 备用手动镜像同步。日常优先使用维护者本机，避免 GitHub 托管节点到 Gitee 的慢链路。
 on:
   workflow_dispatch:
     inputs:
@@ -8,13 +7,19 @@ on:
         description: "要同步的签名发行标签，例如 v0.3.1"
         required: true
         type: string
+      source_sha:
+        description: "自动触发时校验发布来源提交；手动同步可留空"
+        required: false
+        type: string
+
+run-name: Gitee 镜像 · ${{ inputs.tag }}
 
 permissions:
   contents: read
 
 concurrency:
   group: gitee-release-mirror
-  cancel-in-progress: false
+  queue: max
 
 jobs:
   sync:
@@ -22,22 +27,38 @@ jobs:
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      GITEE_OWNER: ${{ vars.GITEE_OWNER }}
+      GITEE_REPO: ${{ vars.GITEE_REPO }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Verify and mirror signed release
+      - name: Sync signed release to Gitee
         env:
-          INPUT_TAG: ${{ inputs.tag }}
           GITEE_TOKEN: ${{ secrets.SYNCRELEASETOGITEE }}
-          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
-          GITEE_REPO: ${{ vars.GITEE_REPO }}
         run: |
           test -n "$GITEE_TOKEN" || { echo "::error::缺少 Secret SYNCRELEASETOGITEE"; exit 1; }
           test -n "$GITEE_OWNER" || { echo "::error::缺少变量 GITEE_OWNER"; exit 1; }
           test -n "$GITEE_REPO" || { echo "::error::缺少变量 GITEE_REPO"; exit 1; }
-          python scripts/sync_release_to_gitee.py --tag "$INPUT_TAG" --github-repo "$GITHUB_REPOSITORY" --gitee-repo "$GITEE_OWNER/$GITEE_REPO"
+          python scripts/sync_release_to_gitee.py --tag "$RELEASE_TAG" \
+            --github-repo "$GITHUB_REPOSITORY" --gitee-repo "$GITEE_OWNER/$GITEE_REPO" \
+            --expected-source-sha "$EXPECTED_SOURCE_SHA" --no-quota-cleanup
+      - name: Read back and verify all Gitee assets
+        run: |
+          python scripts/sync_release_to_gitee.py --tag "$RELEASE_TAG" \
+            --github-repo "$GITHUB_REPOSITORY" --gitee-repo "$GITEE_OWNER/$GITEE_REPO" \
+            --expected-source-sha "$EXPECTED_SOURCE_SHA" --verify-only
+          printf 'Gitee `%s` 的全部附件已重新下载并校验，发行说明与 GitHub 一致。\n' "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
+      - name: Report Gitee mirror failure
+        if: ${{ failure() }}
+        run: |
+          echo "::error title=Gitee 镜像失败::同步或回读校验失败，请查看镜像任务的失败步骤。"
+          echo "Gitee 镜像同步或回读校验失败。可重跑镜像任务，GitHub 发行由 Build Release 独立管理。" >> "$GITHUB_STEP_SUMMARY"

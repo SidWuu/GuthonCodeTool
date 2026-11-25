@@ -253,6 +253,14 @@ def execute(workspace, action, payload):
                 from .view_editor import is_metadata_only
                 if is_metadata_only(item["content"], item["metadata"], item["path"]):
                     return {**item, "storeReadonly": item["readonly"], "projectionReadonly": True, "sourceFormat": "view-no-sql", "contentState": "SQL_ABSENT", "identitySource": "SOURCE_AND_API_METADATA", "diagnostic": "API_VIEW_SQL_ABSENT"}
+            if payload.get("omitEditableContent") is True and not item["readonly"] and kind != "module-parameter":
+                # Nexus checks the original text for inline inheritance
+                # before choosing between the virtual editor and local file.
+                may_inherit = kind in {"procedure", "system-script"} or (
+                    kind == "page" and path.lower().endswith(".gss")
+                )
+                if not may_inherit or "inherit" not in item["content"]:
+                    item.pop("content")
             return item
         if action == "diff":
             if "view" in payload:
@@ -284,6 +292,7 @@ def execute(workspace, action, payload):
             payload.get("choice"),
             payload.get("expectedHash"),
             payload.get("content"),
+            expected_remote_hash=payload.get("expectedRemoteHash"),
             editor_token=payload.get("editorToken"),
         )
         from .index import update
@@ -542,8 +551,9 @@ def run(workspace, args):
 
         with operation(workspace["workspaceKey"], parsed.action):
             result = execute(workspace, parsed.action, payload)
-            state = "部分完成，请核对结果" if result.get("complete") is False else "已返回处理结果"
-            emit(state)
+            if parsed.action != "status":
+                state = "部分完成，请核对结果" if result.get("complete") is False else "已返回处理结果"
+                emit(state)
     except Exception as error:
         if publishes_source:
             from common import gusen_hub

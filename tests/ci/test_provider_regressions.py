@@ -10,17 +10,19 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import build_script_tool
 import guthon_tool
 from common import database_source_exports, gusen_hub, legacy_source
 from common.database_exports._export_common import bill_type_output_dir, legacy_bill_type_dir
 from common.database_exports import export_bill_type_sql as exporter
+from common.inheritance import SOURCE_CATALOG_VERSION
 from common.runtime_paths import runtime_home_context
 from common.workspace_selection import select_workspace
-from providers.api import sync as api_sync
+from providers.api import native_page, sync as api_sync
 from providers.api.client import ApiError
 from providers.api.download import SourceFile
 from providers.api.store import ApiStore
-from providers.svn.nexus.scm import diff
+from providers.svn.nexus import index_queries, scm
 
 
 class WorkspaceCase(unittest.TestCase):
@@ -96,6 +98,18 @@ class WorkspaceSelectionTest(WorkspaceCase):
 
 
 class ApiWorkspaceTest(WorkspaceCase):
+    def test_zipapp_in_data_directory_reads_registered_api_project(self):
+        workspace = self.register("api")
+        key = workspace["workspaceKey"]
+        archive = build_script_tool.build(self.home / "GuthonCodeTool-python.pyz")
+        result = subprocess.run(
+            [sys.executable, str(archive), "api", "--home", str(self.home),
+             "--workspace", key, "--", "status"],
+            cwd=self.home / "var", capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["workspaceKey"], key)
+
     def test_three_modes_keep_distinct_roots_and_explicit_routing(self):
         workspaces = [self.register(mode) for mode in ("api", "svn", "database")]
         listing = self.tool("workspaces")["workspaces"]
@@ -121,6 +135,15 @@ class ApiWorkspaceTest(WorkspaceCase):
         self.assertEqual([path], [hit["path"] for hit in hits])
         original = self.tool("api", key=key, args=["read"], payload={"path": path})
         self.assertEqual(base, original["content"])
+        open_info = self.tool("api", key=key, args=["read"], payload={"path": path, "omitEditableContent": True})
+        self.assertEqual({field: value for field, value in original.items() if field != "content"}, open_info)
+        source_file = workspace["providerSourceRoot"] / path
+        inherited = "return @inherit();\n"
+        source_file.write_text(inherited, encoding="utf-8")
+        self.assertEqual(inherited, self.tool("api", key=key, args=["read"], payload={
+            "path": path, "omitEditableContent": True,
+        })["content"])
+        source_file.write_text(base, encoding="utf-8")
         edited = base.replace("original", "updated")
         receipt = self.tool("api", key=key, args=["write"], payload={
             "path": path, "content": edited, "expectedHash": original["sourceHash"],
@@ -133,6 +156,41 @@ class ApiWorkspaceTest(WorkspaceCase):
         self.assertEqual(edited, (workspace["providerSourceRoot"] / path).read_text(encoding="utf-8"))
         restored = self.tool("api", key=key, args=["revert"], payload={"path": path, "expectedHash": receipt["sourceHash"]})
         self.assertEqual(base, restored["content"])
+
+    def test_page_conflict_rejects_a_new_platform_version_until_reviewed_again(self):
+        workspace = self.register("api")
+        key = workspace["workspaceKey"]
+        self.tool("api", key=key, args=["configure"], payload={
+            "serverUrl": "https://fixture.invalid/guthon/", "systemIds": ["S1"],
+            "dataSourceIds": [], "allSystems": False,
+        })
+        path = "systems/S1/pages/main/PG-test/PG-test.xml"
+        metadata = {"systemId": "S1", "pageId": "PG-test", "pageType": 1, "pageSource": "native-editor"}
+        store = ApiStore(workspace)
+        base = native_page.encode({"pageId": "PG-test", "title": "Original", "superScript": "original parent"})
+        local = base.replace("Original", "Locally edited")
+        remote = base.replace("Original", "Platform edit")
+        latest = remote.replace("Platform edit", "New platform edit").replace("original parent", "updated parent")
+        store.publish([SourceFile(path, base, "page", metadata)])
+        (store.root / path).write_text(local, encoding="utf-8")
+        self.assertFalse(store.publish([SourceFile(path, remote, "page", metadata)])["complete"])
+        review = self.tool("api", key=key, args=["conflict"], payload={"path": path})
+        self.assertFalse(store.publish([SourceFile(path, latest, "page", metadata)])["complete"])
+        resolution = {"path": path, "choice": "remote", "expectedHash": review["sourceHash"],
+                      "expectedRemoteHash": review["remoteHash"]}
+        with self.assertRaisesRegex(ApiError, "平台源码变化"):
+            self.tool("api", key=key, args=["resolve-conflict"], payload=resolution)
+        self.assertEqual(local, store.read(path)["content"])
+        self.assertEqual(base, store.baseline(path))
+        refreshed = self.tool("api", key=key, args=["conflict"], payload={"path": path})
+        resolution["expectedRemoteHash"] = refreshed["remoteHash"]
+        result = self.tool("api", key=key, args=["resolve-conflict"], payload=resolution)
+        self.assertEqual(latest, result["content"])
+        self.assertEqual(latest, store.baseline(path))
+        self.assertEqual("NOT_PERFORMED", result["uploadState"])
+        self.assertTrue(result["index"]["complete"])
+        with self.assertRaisesRegex(ApiError, "没有待解决"):
+            store.conflict(path)
 
     def test_upload_remark_is_recorded_by_the_confirmed_operation(self):
         workspace = self.register("api")
@@ -229,7 +287,7 @@ class SourceSearchTypeTest(WorkspaceCase):
 
 
 class SvnWorkspaceTest(WorkspaceCase):
-    def test_local_and_remote_page_diffs_keep_working_copy_intact(self):
+    def test_page_diff_revert_and_commit_validate_the_real_working_copy(self):
         workspace = self.register("svn")
         repository = self.home / "repository"
         seed = self.home / "seed"
@@ -247,12 +305,28 @@ class SvnWorkspaceTest(WorkspaceCase):
         # Use an authorized mount and real SVN working copies with no remote service.
         manifest = workspace["contextDir"] / "scope-fixture.json"
         manifest.write_text(json.dumps({"schemaVersion": 1, "workspaceKey": workspace["workspaceKey"],
-            "entries": [{"id": "root", "url": url, "category": "root", "localSubdir": "."}]}), encoding="utf-8")
+            "entries": [{"id": "root", "url": url, "category": "root", "localSubdir": ".", "writable": True}]}), encoding="utf-8")
         workspace["svn"].update(checkoutLayout="manifest-working-copies", scopeManifestPath=manifest, username="fixture")
-        workspace["capabilities"]["svn.status"] = True
+        workspace["capabilities"].update({"svn.status": True, "svn.revert": True, "svn.platform_save": True})
+        logical_path = relative.as_posix()
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+            conn.execute("INSERT INTO gusen_sync_state(state_key,state_value) VALUES (?,?)",
+                         ("source_catalog_parser_version", SOURCE_CATALOG_VERSION))
+            conn.executemany(
+                """INSERT INTO gusen_source_record (
+                    source_layer,scope_id,provider,source_table,source_id,source_alias_id,source_name,source_path,
+                    scope_entry_id,working_copy_id,system_id,change_key,status,indexed_time
+                ) VALUES ('project',?,'svn','page',?,?,?,?,'root','SYS','SYS','','OK','')""",
+                [(workspace["scopeId"], "PG", "PG", "示例页面", logical_path),
+                 (workspace["scopeId"], "PG-OTHER", "PG-OTHER", "其他页面", "systems/SYS/pages/PG-OTHER.json")],
+            )
         page = checkout / relative
         page.write_text(modified, encoding="utf-8")
-        local = diff(workspace, logical_path=relative.as_posix())
+        scoped = index_queries.catalog(workspace, paths_by_entry={"root": {logical_path}})
+        full = index_queries.catalog(workspace)
+        self.assertEqual([item for item in full["objects"] if item["sourcePath"] == logical_path], scoped["objects"])
+        self.assertEqual("示例页面", scm.status(workspace)["changes"][0]["treeLabel"])
+        local = scm.diff(workspace, logical_path=logical_path)
         self.assertEqual(original, local["baseContent"])
         self.assertIn("return false;", local["readableWorkingContent"])
         self.assertEqual(88, json.loads(local["workingContent"])["buttons"][0]["width"])
@@ -261,10 +335,34 @@ class SvnWorkspaceTest(WorkspaceCase):
         subprocess.run(["svn", "checkout", url, remote], check=True, capture_output=True)
         (remote / relative).write_text(original.replace("true;", "null;"), encoding="utf-8")
         subprocess.run(["svn", "commit", remote / relative, "-m", "fixture edit"], check=True, capture_output=True)
-        compared = diff(workspace, logical_path=relative.as_posix(), remote=True)
+        compared = scm.diff(workspace, logical_path=logical_path, remote=True)
         self.assertEqual(modified, compared["localContent"])
         self.assertIn("return null;", compared["readableRemoteContent"])
         self.assertEqual(modified, page.read_text(encoding="utf-8"))
+
+        session = scm.ensure_review_session(workspace)["sessionId"]
+        commit = scm.preview(workspace, action="platform-save", session_id=session)
+        with self.assertRaisesRegex(SystemExit, "out of date"):
+            scm.platform_save(workspace, session_id=session, selection_token=commit["selectionToken"],
+                              candidate_ids=[commit["candidates"][0]["id"]], message="fixture commit")
+        undo = scm.preview(workspace, action="revert", session_id=session)
+        undo_args = {"session_id": session, "selection_token": undo["selectionToken"],
+                     "candidate_ids": [undo["candidates"][0]["id"]]}
+        page.write_text(modified + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "changed after preview"):
+            scm.revert(workspace, **undo_args)
+        page.write_text(modified, encoding="utf-8")
+        self.assertEqual([logical_path], scm.revert(workspace, **undo_args)["files"])
+        self.assertEqual(original, page.read_text(encoding="utf-8"))
+
+        subprocess.run(["svn", "update", checkout], check=True, capture_output=True)
+        page.write_text(modified, encoding="utf-8")
+        commit = scm.preview(workspace, action="platform-save", session_id=session)
+        result = scm.platform_save(workspace, session_id=session, selection_token=commit["selectionToken"],
+                                   candidate_ids=[commit["candidates"][0]["id"]], message="fixture commit")
+        self.assertEqual("3", result["revision"])
+        self.assertEqual([logical_path], result["groups"][0]["files"])
+        self.assertEqual([], scm.status(workspace)["changes"])
 
 
 class DatabasePageEditorTest(WorkspaceCase):

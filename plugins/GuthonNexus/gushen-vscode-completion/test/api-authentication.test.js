@@ -23,6 +23,21 @@ test('failed automatic login is suppressed until an explicit successful login',a
   f.setFail(false);await f.auth.login('projects.demo',{userId:'fresh',password:'fresh-secret',remember:true});assert.equal((await f.auth.session('projects.demo')).authenticated,true);assert.deepEqual(f.saved(),{userId:'fresh',password:'fresh-secret'});
   assert.equal(f.calls.filter(x=>x.action==='login').at(-1).input.remember,undefined);
 });
+test('certificate failure during auto login preserves the connection diagnostic without retrying', async () => {
+  const f = fixture();
+  const invoke = f.auth.invoke;
+  const message = '谷神登录服务的证书校验失败，请更新后端或检查系统受信任证书';
+  let attempts = 0;
+  f.auth.invoke = async (key, action, input) => {
+    if (action !== 'login') return invoke(key, action, input);
+    attempts++;
+    throw Object.assign(new Error(message), { code: 'API_TLS_CERTIFICATE_ERROR' });
+  };
+  const first = await f.auth.session('projects.demo');
+  assert.deepEqual(first.error, { code: 'API_TLS_CERTIFICATE_ERROR', message });
+  assert.deepEqual(await f.auth.session('projects.demo'), first);
+  assert.equal(attempts, 1);
+});
 test('logout queues behind an in-flight restore then prevents future automatic login',async()=>{
   const f=fixture(),invoke=f.auth.invoke;let started,release;
   const loginStarted=new Promise(resolve=>{started=resolve;}),gate=new Promise(resolve=>{release=resolve;});
@@ -40,6 +55,7 @@ test('failed manual account change never silently restores the earlier saved acc
   await assert.rejects(f.auth.login('projects.demo',{userId:'other-account',password:'wrong',remember:true}));
   f.setFail(false);const value=await f.auth.session('projects.demo');
   assert.equal(value.authenticated,false);assert.equal(f.calls.filter(x=>x.action==='login').length,1);
+  assert.equal(value.error,undefined,'manual failure must not be replaced by a restore notice');
   assert.equal(f.saved().userId,'fixture-account');
 });
 test('credential-save failure reports a warning while preserving the successful in-memory login',async()=>{

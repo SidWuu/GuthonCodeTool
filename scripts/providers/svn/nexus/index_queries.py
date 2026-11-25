@@ -334,7 +334,7 @@ def _catalog_fragments(row: dict):
     return [{"scriptType": fixed[0], "jsonPointer": fixed[1], "label": ""}] if fixed else []
 
 
-def catalog(workspace: dict) -> dict:
+def catalog(workspace: dict, *, paths_by_entry: dict[str, set[str]] | None = None) -> dict:
     from common.source_tree_order import local_navigation_groups
     from .public_sources import reference_type
     scope = load_authorized_scope(workspace)
@@ -346,22 +346,34 @@ def catalog(workspace: dict) -> dict:
         ).fetchone()
         if not parser or parser[0] != SOURCE_CATALOG_VERSION:
             raise SystemExit("SVN source catalog requires a full local reindex")
-        rows = [
-            dict(row)
-            for row in connection.execute(
-                """
+        query = """
                 SELECT source_table, source_namespace, source_id, source_alias_id, fun_id, source_name, source_path,
                        local_path, working_copy_id, scope_entry_id, system_id, data_source_id, status
                 FROM gusen_source_record
                 WHERE provider='svn' AND source_table NOT IN ('procedure-inherit','page-inherit')
-                ORDER BY source_path
                 """
-            ).fetchall()
-        ]
+        if paths_by_entry is None:
+            rows = [dict(row) for row in connection.execute(query + " ORDER BY source_path")]
+            navigation_entries = scope.entries
+        else:
+            rows = []
+            for entry_id, paths in paths_by_entry.items():
+                ordered_paths = sorted(paths)
+                for offset in range(0, len(ordered_paths), 500):
+                    batch = ordered_paths[offset:offset + 500]
+                    placeholders = ",".join("?" for _ in batch)
+                    rows.extend(dict(row) for row in connection.execute(
+                        query + f" AND scope_entry_id=? AND source_path IN ({placeholders})",
+                        (entry_id, *batch),
+                    ))
+            rows.sort(key=lambda row: row["source_path"])
+            navigation_entries = [entries[entry_id] for entry_id in dict.fromkeys(
+                row["scope_entry_id"] for row in rows if row["scope_entry_id"] in entries
+            )]
     page_locations = {}
     procedure_locations = {}
     entry_names = {}
-    for entry in scope.entries:
+    for entry in navigation_entries:
         entry_names[entry.id] = _entry_name(entry)
         if entry.category in {"systems", "pages"}:
             page_locations[entry.id] = _page_index_locations(entry)
@@ -370,7 +382,7 @@ def catalog(workspace: dict) -> dict:
     objects = []
     counts = {}
     systems, data_sources = {}, {}
-    projected_names = {entry.local_subdir: entry_names[entry.id] for entry in scope.entries}
+    projected_names = {entry.local_subdir: entry_names[entry.id] for entry in navigation_entries}
     for row in rows:
         entry = entries.get(row.get("scope_entry_id") or "")
         if entry is None:

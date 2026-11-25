@@ -16,6 +16,7 @@ from .client import ApiError
 from . import page_source
 from .download import download, download_prefixes, fetch_object, files_from_item, records, BASE
 from .editor_state import assert_writable, _live
+from .progress import phase
 from .store import ApiStore, digest
 from .workspace import settings, save_project, active_scope, api_paths, configure, configuration_lock, in_scope, client_for, project_metadata, pending_scope, clear_pending_scope, validate_scope_selection
 
@@ -181,8 +182,10 @@ def _cleanup_excluded(workspace, store, operation, excluded):
                         parent = parent.parent
 
 
-def _publish_and_index(workspace, store, files, scope, *, authoritative, on_published=None):
+def _publish_and_index(workspace, store, files, scope, *, authoritative, on_published=None,
+                       reuse_unchanged=False):
     from .module_parameters import DIRECTORY_PATH, SOURCE_TYPE
+
     authoritative_types = None
     if any(item.path == DIRECTORY_PATH for item in files):
         authoritative_types = {item.kind for item in files}
@@ -191,13 +194,15 @@ def _publish_and_index(workspace, store, files, scope, *, authoritative, on_publ
                 authoritative_types.update(row[0] for row in conn.execute("SELECT DISTINCT json_extract(metadata,'$.sourceType') FROM source"))
         # Detail snapshots are an on-demand editing cache, not absent downloads.
         authoritative_types.discard(SOURCE_TYPE)
-    result = store.publish(files, scope=scope, authoritative=authoritative,
-                           authoritative_source_types=authoritative_types)
+    with phase("源码发布"):
+        result = store.publish(files, scope=scope, authoritative=authoritative,
+                               authoritative_source_types=authoritative_types, skip_unchanged=reuse_unchanged)
     if on_published is not None:
         on_published(result)
-    from .index import rebuild
+    from .index import rebuild, reconcile_pull
 
-    result["index"] = rebuild(workspace)
+    with phase("索引核对与更新"):
+        result["index"] = reconcile_pull(workspace) if reuse_unchanged else rebuild(workspace)
     result["downloadComplete"] = result["complete"]
     result["complete"] = result["complete"] and result["index"]["complete"]
     return {**result, "downloadedFiles": len(files), "checkoutPath": str(workspace["providerSourceRoot"])}
@@ -210,16 +215,20 @@ def pull(workspace, client):
     directory, _ = api_paths(workspace)
     with file_lock(directory / "sync.lock"):
         store = ApiStore(workspace)
-        files, scope = download(
-            client,
-            settings(workspace),
-            on_project=lambda systems, sources: save_project(
-                workspace, systems, sources
-            ),
-            page_store=store,
-        )
+        config = settings(workspace)
+        previous_scope = active_scope(workspace) if store.path.is_file() else None
+        with phase("远端源码下载"):
+            files, scope = download(
+                client,
+                config,
+                on_project=lambda systems, sources: save_project(workspace, systems, sources),
+                page_store=store,
+            )
         assert_writable(workspace, sorted(set(store.paths()) | {item.path for item in files}))
-        return _publish_and_index(workspace, store, files, scope, authoritative=True)
+        reuse_unchanged = (previous_scope is not None and previous_scope == active_scope(workspace)
+                           and config == settings(workspace) and pending_scope(workspace, config) is None)
+        return _publish_and_index(workspace, store, files, scope, authoritative=True,
+                                  reuse_unchanged=reuse_unchanged)
 
 
 def scope_apply(workspace, client, payload, *, apply_pending=False):

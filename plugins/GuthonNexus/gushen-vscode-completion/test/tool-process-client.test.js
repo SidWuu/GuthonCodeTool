@@ -30,7 +30,8 @@ test('reuses one ToolHost for consecutive requests and stops it on dispose', asy
   const client = new ToolProcessClient({
     spawnProcess: () => {
       starts += 1;
-      return spawn(process.execPath, ['-e', fakeHost], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const host = fakeHost.replace('protocolVersion:1', 'protocolVersion:1,version:"0.4.3"');
+      return spawn(process.execPath, ['-e', host], { stdio: ['pipe', 'pipe', 'pipe'] });
     },
   });
   const tool = { toolPath: '/unused', toolHome: '/unused-home' };
@@ -41,6 +42,7 @@ test('reuses one ToolHost for consecutive requests and stops it on dispose', asy
   ]);
   assert.deepEqual(results.map((result) => result.kind), ['read', 'read', 'write']);
   assert.equal(starts, 1);
+  assert.equal(client.backendVersion, '0.4.3');
   await client.stop();
   assert.equal(client.child, null);
 });

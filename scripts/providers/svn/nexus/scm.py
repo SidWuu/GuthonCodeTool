@@ -115,13 +115,16 @@ def _readable_page_pair(entry: ScopeEntry, relative: str, before: str, after: st
         return "", ""
 
 
-def _catalog_by_path(workspace: dict) -> dict[str, dict]:
-    if not workspace["indexPath"].is_file():
+def _catalog_by_path(workspace: dict, changes: list[dict]) -> dict[str, dict]:
+    if not changes or not workspace["indexPath"].is_file():
         return {}
+    paths_by_entry = {}
+    for change in changes:
+        paths_by_entry.setdefault(change["scopeEntryId"], set()).add(change["path"])
     try:
         from .index_queries import catalog
 
-        return {item["sourcePath"]: item for item in catalog(workspace)["objects"]}
+        return {item["sourcePath"]: item for item in catalog(workspace, paths_by_entry=paths_by_entry)["objects"]}
     except (OSError, sqlite3.Error, SystemExit):
         # SCM status remains available even when the derived index is missing or stale.
         return {}
@@ -150,21 +153,6 @@ def _logical_path(entry: ScopeEntry, relative: str) -> str:
 
 def _entry_and_path(workspace: dict, logical_path: str) -> tuple[ScopeEntry, Path, str]:
     return resolve_authorized_path(load_authorized_scope(workspace), logical_path)
-
-
-def _safe_session_change(change: dict, entry: ScopeEntry, session: dict) -> tuple[bool, str, dict]:
-    logical_path = _logical_path(entry, change["path"])
-    record = session["files"].get(logical_path) or {}
-    path = entry.root / change["path"]
-    safe = (
-        change.get("item") == "modified"
-        and change.get("properties") in {"", "normal", "none"}
-        and not any(change.get(key) for key in ("treeConflicted", "switched", "copied", "wcLocked"))
-        and path.is_file()
-        and record.get("state") in {"EDITING", "LOCAL_MODIFIED"}
-        and record.get("expectedCurrentHash") == file_hash(path)
-    )
-    return safe, logical_path, record
 
 
 def _text_conflict_artifacts(raw_changes: list[dict]) -> set[str]:
@@ -310,8 +298,6 @@ def status(
     changes = []
     remote_changes = []
     working_copies = []
-    _progress(on_progress, "SCM 状态｜读取 Nexus 索引元数据")
-    indexed = _catalog_by_path(workspace)
     total = len(entries)
     phase = "检查远程与本地状态" if remote else "检查本地状态"
     for index, entry in enumerate(entries, 1):
@@ -349,8 +335,9 @@ def status(
             ):
                 continue
             visible_local_count += 1
-            safe, logical_path, record = _safe_session_change(change, entry, session)
+            logical_path = _logical_path(entry, change["path"])
             path = entry.root / change["path"]
+            is_file = path.is_file()
             conflict_kind = (
                 "tree"
                 if change.get("treeConflicted")
@@ -362,21 +349,24 @@ def status(
             )
             conflicted = bool(conflict_kind)
             untracked = change.get("item") == "unversioned"
-            selectable = bool(
-                source_path_writable(entry, change["path"])
-                and not needs_cleanup
+            plain_file_edit = (
+                is_file
                 and change.get("item") == "modified"
                 and change.get("properties") in {"", "normal", "none"}
                 and not any(change.get(key) for key in ("treeConflicted", "switched", "copied", "wcLocked"))
-                and path.is_file()
             )
+            selectable = plain_file_edit and not needs_cleanup and source_path_writable(entry, change["path"])
+            record = session["files"].get(logical_path) or {}
+            has_edit_session = plain_file_edit and record.get("state") in {"EDITING", "LOCAL_MODIFIED"}
+            source_hash = file_hash(path) if selectable or has_edit_session else ""
+            session_managed = has_edit_session and record.get("expectedCurrentHash") == source_hash
             state = (
                 "CONFLICT"
                 if conflicted
                 else "UNTRACKED"
                 if untracked
                 else "LOCAL_MODIFIED"
-                if safe
+                if session_managed
                 else "EXTERNAL_MODIFIED"
             )
             changes.append(
@@ -389,11 +379,10 @@ def status(
                     "properties": change.get("properties") or "",
                     "state": state,
                     "conflictKind": conflict_kind,
-                    "sessionManaged": safe,
-                    "diffable": path.is_file(),
+                    "sessionManaged": session_managed,
+                    "diffable": is_file,
                     "selectable": selectable,
-                    "sourceHash": file_hash(path) if selectable else "",
-                    **_change_metadata(indexed, logical_path),
+                    "sourceHash": source_hash if selectable else "",
                 }
             )
         for change in current.get("remoteChanges") or []:
@@ -406,7 +395,6 @@ def status(
                     "path": logical_path,
                     "item": change.get("item") or "",
                     "properties": change.get("properties") or "",
-                    **_change_metadata(indexed, logical_path),
                 }
             )
         _progress(
@@ -414,6 +402,11 @@ def status(
             f"[{index}/{total}] {label}｜SCM 状态｜完成 · "
             f"本地 {visible_local_count} · 远程 {len(current.get('remoteChanges') or [])}",
         )
+    _progress(on_progress, "SCM 状态｜读取变更的 Nexus 索引元数据")
+    visible_changes = changes + remote_changes
+    indexed = _catalog_by_path(workspace, visible_changes)
+    for change in visible_changes:
+        change.update(_change_metadata(indexed, change["path"]))
     return {
         "ok": True,
         "workspaceKey": workspace["workspaceKey"],
@@ -841,7 +834,6 @@ def _load_selection(workspace: dict, *, action: str, session_id: str, token: str
 
 def _revalidate_selected(
     workspace: dict,
-    session: dict,
     selected: list[dict],
     *,
     require_remote_current: bool,
@@ -854,11 +846,11 @@ def _revalidate_selected(
     if entry is None:
         raise SystemExit("Selected SVN working copy is no longer authorized")
     label = scope_entry_label(workspace, entry)
-    current = svn_status(entry.root)
+    current = svn_scm_status_lightweight(entry.root)
     changes_by_path = {change["path"]: change for change in current.get("changes") or []}
     targets = []
     for candidate in selected:
-        candidate_entry, path, relative = _entry_and_path(workspace, candidate["path"])
+        candidate_entry, path, relative = resolve_authorized_path(scope, candidate["path"])
         change = changes_by_path.get(relative)
         safe = (
             candidate_entry.id == entry.id
@@ -940,7 +932,6 @@ def revert(
                 group,
                 *_revalidate_selected(
                     workspace,
-                    session,
                     group,
                     require_remote_current=False,
                     on_progress=on_progress,
@@ -1003,7 +994,6 @@ def platform_save(
                 group,
                 *_revalidate_selected(
                     workspace,
-                    session,
                     group,
                     require_remote_current=True,
                     on_progress=on_progress,
@@ -1046,7 +1036,7 @@ def platform_save(
                         os.unlink(message_path)
                     except FileNotFoundError:
                         pass
-                after = svn_status(entry.root)
+                after = svn_scm_status_lightweight(entry.root)
                 remaining = {change["path"] for change in after.get("changes") or []}
                 for target in targets:
                     relative = target.resolve().relative_to(entry.root.resolve()).as_posix()

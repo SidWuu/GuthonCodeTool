@@ -81,7 +81,7 @@ test('DATABASE source updates reveal live output and report each backend stage b
 function fixture(t, {cancel = false, confirmed = false, readError = false, setupMode = 'setup',
   workspaceDirectory, namedRootSupported = true, direct = false, localExecutable = false, badExecutable = false,
   preferredMode = 'packaged', workbenchTargetsNewHome = false, invalidFallback = false, cancelTeam = false,
-  unified = true, trusted = true, authAction} = {}) {
+  unified = true, trusted = true, authAction, selectedMode = 'packaged'} = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-runtime-selection-'));
   t.after(() => fs.rmSync(directory, {recursive:true, force:true}));
   const oldHome = path.join(directory, 'old-svn'), newHome = path.join(directory, 'new-api');
@@ -96,6 +96,7 @@ function fixture(t, {cancel = false, confirmed = false, readError = false, setup
   const sibling = path.join(newHome, executableName);
   const fallback = path.join(fallbackDir, executableName);
   const opened = direct ? path.join(newHome, workspaceDirectory || 'var') : oldHome;
+  const scriptPath = path.join(newHome, 'GuthonCodeTool-python.pyz');
   if (direct) {
     fs.mkdirSync(opened, { recursive: true });
     if (localExecutable) fs.writeFileSync(sibling, 'sibling application');
@@ -113,9 +114,10 @@ function fixture(t, {cancel = false, confirmed = false, readError = false, setup
     ConfigurationTarget:{Global:1,Workspace:2,WorkspaceFolder:3},Uri:{file:fsPath=>({fsPath})},ProgressLocation:{Window:10},
     window:{showOpenDialog:async options=>{
       pickerCalls++;assert.equal(options.canSelectFolders,false);
-      return cancel?undefined:[{fsPath:(direct || workspaceDirectory) ? fallback : apiTool}];
+      const file = selectedMode === 'script' ? scriptPath : (direct || workspaceDirectory) ? fallback : apiTool;
+      return cancel ? undefined : [{ fsPath: file }];
     },withProgress:async(_options,operation)=>operation(),
-      showQuickPick:async modes=>{modeChoices.push(modes.map(mode=>mode.value));return modes.find(mode=>mode.value==='packaged');},
+      showQuickPick:async modes=>{modeChoices.push(modes.map(mode=>mode.value));return modes.find(mode=>mode.value===selectedMode);},
       showErrorMessage:(message,...actions)=>{
         messages.push(message);
         return actions.includes(authAction) ? authAction : undefined;
@@ -124,6 +126,7 @@ function fixture(t, {cancel = false, confirmed = false, readError = false, setup
     path,fs,vscode,...runtime,windowToolHome,workspaceSetupCard,hasWorkspaceConfigFiles,
     context:{globalStorageUri:{fsPath:directory},globalState:{get:key=>savedSources.get(key),update:async(key,value)=>savedSources.set(key,value)}},
     configuredToolFromSettings:()=>({mode:'packaged',toolPath:apiTool,toolHome:newHome}),
+    prepareScriptRuntime: async file => ({ runtime: { mode: 'script', toolPath: apiTool, toolEntry: file } }),
     verifyExecutable:async file=>{probes.push(file);assert.ok(fs.existsSync(file));if(badExecutable)throw Error('fixture rejected');},
     prepareWorkspaceSetup:direct ? prepareWorkspaceSetup : async()=>({mode:setupMode,toolHome:newHome,workspaceDirectory}),
     workspaceTeamSource:async(_window,configured,edit)=>{
@@ -160,7 +163,7 @@ function fixture(t, {cancel = false, confirmed = false, readError = false, setup
   const selectModeEnd=source.indexOf("vscode.commands.registerCommand('gushenCompletion.restartDevelopmentToolHost',",selectModeStart);
   const switchMode=vm.runInNewContext(source.slice(selectModeStart,selectModeEnd).trim().replace(/,$/,''),context);
   return {handler,sync,switchMode,modeChoices,teamSourceSelections,configuredTool:context.module.exports.configuredTool,oldHome,newHome,oldTool,apiTool,values,local,writes,
-    invocations,probes,messages,sibling,fallback,opened,terminals,
+    invocations,probes,messages,sibling,fallback,opened,terminals,scriptPath,
     pickerCalls:()=>pickerCalls,assertOldDescriptor:()=>assert.deepEqual(fs.readFileSync(oldDescriptor),descriptorBefore)};
 }
 
@@ -320,6 +323,28 @@ test('an attached workspace can replace its broken debug mode without launching 
   assert.equal(tool.toolHome,f.newHome);
   assert.equal(f.local.scriptPythonPath,path.join(f.newHome,'missing-python'));
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.opened,'nexus/tool-runtime.json'),'utf8')).command,[f.sibling]);
+});
+
+test('debug mode reconnects a window whose saved home points at the opened var', async t => {
+  const f = fixture(t, { direct: true, preferredMode: 'script', selectedMode: 'script' });
+  fs.mkdirSync(path.join(f.newHome, 'config'));
+  const configPath = path.join(f.newHome, 'config/guthon.json');
+  const settings = '{"schemaVersion":3}';
+  fs.writeFileSync(configPath, settings);
+  f.local.toolHome = f.opened;
+
+  await f.switchMode();
+  assert.equal(fs.existsSync(path.join(f.opened, 'var')), false);
+
+  await f.handler();
+  assert.equal(f.local.toolHome, f.newHome);
+  assert.equal(f.invocations.length, 0, 'reconnection must not initialize a workspace');
+  assert.equal(fs.readFileSync(configPath, 'utf8'), settings);
+  const descriptor = JSON.parse(fs.readFileSync(path.join(f.opened, 'nexus/tool-runtime.json'), 'utf8'));
+  assert.equal(descriptor.home, f.newHome);
+  assert.equal(descriptor.workspaceRoot, f.opened);
+  assert.deepEqual(descriptor.command, [f.apiTool, f.scriptPath]);
+  assert.equal(fs.existsSync(path.join(f.opened, 'var')), false);
 });
 
 test('a broken neighboring executable reports its path and never starts setup or falls back to an old runtime',async t=>{

@@ -24,6 +24,9 @@ test('API SCM exposes in-scope modifications, conflicts and noneditable states w
  assert.deepEqual(identity(change),{key:'projects.demo',path:'pkg/a.gss'});
  assert.equal(change.command.command,'gushenCompletion.showApiDiff');
  assert.deepEqual(change.command.arguments,[{workspaceKey:'projects.demo',path:'pkg/a.gss'}]);
+ const conflict=c.group.resourceStates[1];
+ assert.equal(conflict.command.command,'gushenCompletion.resolveApiConflict');
+ assert.deepEqual(conflict.command.arguments,[{workspaceKey:'projects.demo',path:'b'}]);
  f.ui.dispose();assert.equal(c.disposed,true);
 });
 test('API SCM labels pages in Chinese and uses English identities for services and procedures',async t=>{
@@ -177,10 +180,38 @@ test('API SCM restore confirms the exact selected files in the original project'
  assert.deepEqual(reverts,[]);
 
  f.ui.setSelectedWorkspace(key);
+ confirmation=()=>{files[1].sourceHash='changed-b';return '还原';};
+ await assert.rejects(f.ui.applyScmChangeAction(key,'revert',['a.gss','b.gss']),/确认后源码已变化.*b\.gss/);
+ assert.deepEqual(reverts,[]);
+
+ files[1].sourceHash='hash-b';
  confirmation=()=> '还原';
  await f.ui.applyScmChangeAction(key,'revert',['a.gss','b.gss']);
  assert.deepEqual(reverts,[{path:'a.gss',expectedHash:'hash-a'},{path:'b.gss',expectedHash:'hash-b'}]);
  assert.deepEqual([...f.ui.stagedFiles(key,'/checkout').keys()],['c.gss']);
+});
+test('staging uses one current scan and yields to a newer SCM refresh',async t=>{
+ const key='projects.demo';
+ const changed={path:'demo.gss',state:'MODIFIED',sourceType:'procedure',sourceHash:'before'};
+ let scans=0,releaseStage,files=[changed];
+ const f=fixture(async(_key,action)=>{
+  assert.equal(action,'status');
+  scans++;
+  if(scans===2) return new Promise(resolve=>{releaseStage=()=>resolve({checkoutPath:'/checkout',files:[changed]});});
+  return {checkoutPath:'/checkout',files};
+ });
+ t.after(()=>f.ui.dispose());
+ f.ui.syncWorkspaces([key]);
+ await f.ui.applyScmChangeAction(key,'stage',changed.path);
+ assert.equal(scans,1);
+ const pending=f.ui.applyScmChangeAction(key,'stage',changed.path);
+ files=[{...changed,sourceHash:'after'}];
+ await f.ui.updateScm(key);
+ releaseStage();
+ await pending;
+ assert.equal(scans,4);
+ const row=f.controls[0].groups.staged.resourceStates[0];
+ assert.match(row.decorations.tooltip,/源码已变化，请重新暂存/);
 });
 test('API SCM group actions use every eligible file in the indicated group',async t=>{
  const key='projects.demo';
@@ -285,7 +316,14 @@ test('source tree marks modified files and propagates conflicts to parent folder
  f.ui.vscode.TreeItem=class{constructor(label,state){this.label=label;this.collapsibleState=state;}};f.ui.vscode.TreeItemCollapsibleState={Collapsed:1,None:0};f.ui.vscode.ThemeIcon=class{constructor(id,color){this.id=id;this.color=color;}};f.ui.vscode.ThemeColor=class{constructor(id){this.id=id;}};
  f.ui.syncWorkspaces(['projects.demo']);await f.ui.updateScm('projects.demo');const root=(await f.ui.getChildren()).find(x=>x.label==='其他源码'),systems=root.children[0],group=systems.children[0];
  assert.equal(f.ui.getTreeItem(systems).description,'冲突');assert.equal(f.ui.getTreeItem(group).description,'冲突');
- assert.equal(f.ui.getTreeItem(group.children.find(x=>x.object.path.endsWith('one.gss'))).description,'有本地修改');f.ui.dispose();
+ const modified=f.ui.getTreeItem(group.children.find(x=>x.object.path.endsWith('one.gss')));
+ const conflict=f.ui.getTreeItem(group.children.find(x=>x.object.path.endsWith('two.gss')));
+ assert.equal(modified.description,'有本地修改');
+ const {contextCommands}=require('../src/view-tree');
+ const menu=item=>contextCommands('gushenCompletion.sourceView',item.contextValue,f.ui.vscode).map(entry=>entry.command);
+ assert.deepEqual(menu(conflict),['gushenCompletion.resolveApiConflict',...menu(modified)]);
+ assert(!menu(f.ui.getTreeItem(group)).includes('gushenCompletion.resolveApiConflict'));
+ f.ui.dispose();
 });
 test('unchanged SCM refresh does not emit another tree refresh',async()=>{
  let events=0;const f=fixture(async()=>({checkoutPath:'/checkout',files:[{path:'a',state:'MODIFIED',sourceHash:'one',baseHash:'base'}]}));

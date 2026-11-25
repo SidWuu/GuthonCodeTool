@@ -555,6 +555,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gitee-repo", default=GITEE_MIRROR_TARGET)
     parser.add_argument("--configure-token", action="store_true", help="交互输入令牌并保存到系统钥匙串")
     parser.add_argument("--verify-only", action="store_true", help="只读下载验收，不需要令牌，不写入 Gitee")
+    parser.add_argument("--expected-source-sha", default="", help="核对 GitHub 发行说明中的发布来源提交（CI）")
+    parser.add_argument("--no-quota-cleanup", action="store_true", help="附件配额不足时报告失败，保留旧附件")
     parser.add_argument("--prune-before", metavar="TAG", help="同步前清理早于指定标签的旧发行附件，保留发行和 Git 标签")
     parser.add_argument("--release-dir", type=Path, help="使用已下载的正式签名附件目录（CI）")
     parser.add_argument("--notes-file", type=Path, help="与指定版本匹配的发行说明（CI）")
@@ -563,13 +565,16 @@ def main(argv: list[str] | None = None) -> int:
         github = validate_repository(args.github_repo)
         gitee = validate_repository(args.gitee_repo)
         if args.configure_token:
-            if args.tag or args.verify_only or args.release_dir or args.notes_file or args.prune_before:
+            if (args.tag or args.verify_only or args.expected_source_sha or args.no_quota_cleanup
+                    or args.release_dir or args.notes_file or args.prune_before):
                 raise MirrorError("令牌配置需单独执行，不同时同步发行")
             configure_token(gitee)
             return 0
         if not args.tag:
             raise MirrorError("请显式指定 --tag，不自动选择或创建版本")
         tag = validate_tag(args.tag)
+        if args.expected_source_sha and not re.fullmatch(r"[a-f0-9]{40}", args.expected_source_sha):
+            raise MirrorError("GitHub 发布来源提交必须为 40 位 SHA")
         if args.prune_before and args.verify_only:
             raise MirrorError("只读验收不能清理旧发行附件")
         for program in ("node", "curl", "gh"):
@@ -613,11 +618,15 @@ def main(argv: list[str] | None = None) -> int:
                 notes = run_command(["gh", "release", "view", tag, "--repo", github, "--json", "body", "--jq", ".body"]).strip()
             if not notes.strip() or len(notes.encode()) > METADATA_BYTES:
                 raise MirrorError("指定发行说明为空或过大")
+            if args.expected_source_sha and re.findall(
+                r"^<!-- guthon-release-source: ([a-f0-9]{40}) -->$", notes, re.M
+            ) != [args.expected_source_sha]:
+                raise MirrorError("GitHub 发行来源与触发镜像的提交不一致")
             log(f"目标 Gitee {gitee} · {'只读验收' if args.verify_only else '核验后补传'}")
             client = GiteeClient(gitee, work, token)
             if args.prune_before:
                 prune_attachments(client, github, tag, before=args.prune_before)
-            auto_cleanup = (not args.verify_only and not args.prune_before
+            auto_cleanup = (not args.verify_only and not args.prune_before and not args.no_quota_cleanup
                             and (github, gitee) == (GITHUB_MIRROR_SOURCE, GITEE_MIRROR_TARGET))
             def recover_quota(bytes_needed):
                 prune_attachments(client, github, tag, bytes_needed=bytes_needed)

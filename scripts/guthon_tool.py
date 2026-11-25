@@ -903,6 +903,7 @@ def serve_stdio(home: Path) -> int:
     # temporary file, while the protocol reader can still acknowledge cancel.
     import threading
     from common.toolhost_requests import ToolHostRequests
+    from providers.api.progress import output_to as api_progress_output
 
     protocol_output = os.fdopen(
         os.dup(sys.stdout.fileno()), "w", encoding="utf-8", buffering=1
@@ -982,7 +983,11 @@ def serve_stdio(home: Path) -> int:
                                 )
                                 code = 0
                             else:
-                                with request_control(control):
+                                with request_control(control), api_progress_output(
+                                    lambda message: reply({
+                                        "id": request_id, "type": "progress", "message": message,
+                                    })
+                                ):
                                     checkpoint()
                                     code = run(
                                         command, home, args, workspace_key or None

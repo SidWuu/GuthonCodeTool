@@ -434,17 +434,9 @@ jobs:
               --latest
           fi
 
-      - name: Report GitHub publication and local mirror command
+      - name: Report GitHub publication
         run: |
-          {
-            echo "GitHub $RELEASE_TAG 已发布；Gitee 镜像单独同步，不影响构建结果。"
-            echo
-            echo "在维护者本机执行："
-            echo
-            echo '```bash'
-            echo ".venv/bin/python scripts/sync_release_to_gitee.py --tag $RELEASE_TAG"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          printf 'GitHub `%s` 已发布。Gitee 镜像将在独立工作流中同步和回验。\n' "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
 
   refresh-components:
     needs: [plan, build-plugins]
@@ -518,3 +510,28 @@ jobs:
             exit 1
           fi
           echo "已替换 $RELEASE_TAG 的组件附件和签名元数据；未创建新版本，未重建应用或安装器。" >> "$GITHUB_STEP_SUMMARY"
+
+  dispatch-gitee-mirror:
+    needs: [plan, release, refresh-components]
+    if: >-
+      !cancelled() &&
+      (needs.release.result == 'success' || needs.refresh-components.result == 'success')
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - name: Dispatch independent Gitee mirror
+        run: |
+          mirror_workflow="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/workflows/sync-gitee-release.yml"
+          if gh workflow run sync-gitee-release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f "tag=$RELEASE_TAG" -f "source_sha=$GITHUB_SHA"; then
+            printf '已为 `%s` 触发 [Gitee 镜像同步和回验](%s)。\n' "$RELEASE_TAG" "$mirror_workflow" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning title=Gitee 镜像触发失败::GitHub 发行已完成，请单独重试 Gitee 镜像。"
+            printf 'Gitee 镜像触发失败。GitHub `%s` 已发布，可手动运行 [Sync Gitee Release](%s)。\n' "$RELEASE_TAG" "$mirror_workflow" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

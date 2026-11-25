@@ -7,7 +7,7 @@ function fixture() {
   const document={uri:{scheme:'file',fsPath:'/checkout/page.gss',toString:()=>'/checkout/page.gss'},isDirty:false,version:1,getText:()=>'{"pageId":"PG-1"}',positionAt:x=>x,save:async()=>true};
   const vscode={Uri:{file:p=>({scheme:'file',fsPath:p,toString:()=>p}),from:x=>x},ViewColumn:{Active:1},
     Range:class {constructor(a,b){this.start=a;this.end=b;}},WorkspaceEdit:class {replace(...args){this.args=args;}},
-    workspace:{textDocuments:[document],openTextDocument:async()=>document,onDidChangeTextDocument:f=>(events.changed=f,{dispose(){}}),applyEdit:async edit=>{changes.push(edit);document.version++;return true;}},
+    workspace:{textDocuments:[document],openTextDocument:async()=>document,registerTextDocumentContentProvider:()=>({dispose(){}}),onDidChangeTextDocument:f=>(events.changed=f,{dispose(){}}),applyEdit:async edit=>{changes.push(edit);document.version++;return true;}},
     window:{showTextDocument:async()=>{},showWarningMessage:async(...a)=>(warnings.push(a),'上传'),showInformationMessage:async()=>{},showErrorMessage:async x=>warnings.push(x),
       createWebviewPanel:()=>({webview:{html:'',postMessage:async()=>{},onDidReceiveMessage:f=>(events.message=f,{dispose(){}})},onDidDispose(){}})},
   };
@@ -79,8 +79,8 @@ test('PAGE rows distinguish page and service component icons even when modified'
 });
 test('opening a registered checkout uses exact backend read without rescanning all status',async()=>{
   const f=fixture(),calls=[];f.ui.syncWorkspaces([{workspaceKey:'projects.a',checkoutPath:'/checkout',sourceMode:'api'}]);
-  f.ui.run=async(key,action,input)=>{calls.push({key,action,input});assert.equal(action,'read');return {path:input.path,metadata:{sourceType:'procedure'},readonly:false,content:'procedure()'};};
-  await f.ui.open('projects.a','procedures/demo.gss');assert.deepEqual(calls,[{key:'projects.a',action:'read',input:{path:'procedures/demo.gss'}}]);
+  f.ui.run=async(key,action,input)=>{calls.push({key,action,input});assert.equal(action,'read');return {path:input.path,metadata:{sourceType:'procedure'},readonly:false};};
+  await f.ui.open('projects.a','procedures/demo.gss');assert.deepEqual(calls,[{key:'projects.a',action:'read',input:{path:'procedures/demo.gss',omitEditableContent:true}}]);
 });
 test('workspace status caches its authoritative checkout for later source opens',async()=>{
   const f=fixture(),calls=[];f.ui.run=async(_key,action,input)=>{calls.push(action);return action==='status'?{checkoutPath:'/checkout'}:{path:input.path,metadata:{sourceType:'procedure'},readonly:false,content:'body'};};
@@ -275,15 +275,48 @@ test('upload recovery selects a receipt and only calls verify-upload',async()=>{
   await f.ui.verifyUpload('projects.a');assert.deepEqual(calls.find(x=>x.action==='verify-upload').input,{operationId:'op'});
   assert.equal(calls.some(x=>x.action==='upload'),false);assert.match(reports[0],/重放上传：否/);
 });
-test('conflict resolution reviews local and remote, confirms and binds current hash',async()=>{
-  const f=fixture(),calls=[];f.vscode.workspace.openTextDocument=async data=>({uri:data});f.vscode.commands={executeCommand:async()=>{}};
+test('conflict resolution reviews read-only local and platform snapshots and binds both hashes',async()=>{
+  const f=fixture(),calls=[],diffs=[];f.vscode.commands={executeCommand:async(...args)=>diffs.push(args)};
   f.vscode.window.showQuickPick=async items=>items[0];f.vscode.window.showWarningMessage=async()=> '确认解决';
   f.ui.run=async(_key,action,input)=>{calls.push({action,input});if(action==='status')return {checkoutPath:'/checkout',files:[]};
     if(action==='conflict')return {path:'a',local:'local',remote:'remote',sourceHash:'lh',remoteHash:'rh'};
     if(action==='read')return {sourceHash:'lh',readonly:false};
     if(action==='resolve-conflict')return {sourceHash:'lh',operationId:'op'};throw Error(action);};
-  await f.ui.resolveConflict('projects.a','a');assert.deepEqual(calls.find(x=>x.action==='resolve-conflict').input,{path:'a',choice:'local',expectedHash:'lh'});
+  await f.ui.resolveConflict('projects.a','a');
+  const [command,left,right]=diffs[0];
+  assert.equal(command,'vscode.diff');
+  assert.equal(left.scheme,'guthon-api-review-diff');
+  assert.equal(right.scheme,left.scheme);
+  assert.equal(f.ui.diffProvider.provideTextDocumentContent(left),'local');
+  assert.equal(f.ui.diffProvider.provideTextDocumentContent(right),'remote');
+  assert.deepEqual(calls.find(x=>x.action==='resolve-conflict').input,{path:'a',choice:'local',expectedHash:'lh',expectedRemoteHash:'rh'});
   assert.equal(calls.some(x=>x.action==='upload'),false);
+});
+test('manual PAGE conflict editing opens the original file and keeps the conflict pending',async t=>{
+  const f=fixture(),key='projects.a',sourcePath='systems/S/pages/PG/PG.xml';
+  f.vscode.commands={executeCommand:async()=>{}};
+  f.vscode.window.showQuickPick=async items=>items.find(item=>item.choice==='edit');
+  t.mock.method(f.ui,'openOriginalSources',async(...args)=>assert.deepEqual(args,[key,sourcePath]));
+  f.ui.run=async(_key,action)=>{
+    if(action==='status')return {checkoutPath:'/checkout'};
+    if(action==='conflict')return {path:sourcePath,local:'local',remote:'remote',sourceHash:'lh',remoteHash:'rh'};
+    if(action==='read')return {sourceHash:'lh',readonly:false,metadata:{sourceType:'page'}};
+    assert.fail(action);
+  };
+  await f.ui.resolveConflict(key,sourcePath);
+  assert.equal(f.ui.openOriginalSources.mock.callCount(),1);
+});
+test('PAGE export conflict can refresh just the selected page before resolving',async t=>{
+  const f=fixture(),key='projects.a',sourcePath='systems/S/pages/PG/PG.xml';
+  t.mock.method(f.ui,'refreshScope',async target=>assert.deepEqual(target,{workspaceKey:key,path:sourcePath}));
+  f.vscode.window.showWarningMessage=async(_message,action)=>action;
+  f.ui.run=async(_key,action)=>{
+    if(action==='status')return {checkoutPath:'/checkout'};
+    if(action==='conflict')return {path:sourcePath,local:'local',remote:'export',sourceHash:'lh',remoteHash:'rh',metadata:{pageSource:'batch-export'}};
+    assert.fail(action);
+  };
+  await f.ui.resolveConflict(key,sourcePath);
+  assert.equal(f.ui.refreshScope.mock.callCount(),1);
 });
 test('database structure sync requires explicit confirmation and reports verification boundary',async()=>{
   const f=fixture(),calls=[],reports=[];f.vscode.workspace.openTextDocument=async data=>(reports.push(data.content),data);
@@ -375,7 +408,7 @@ test('readonly conflict offers only restoration of the remote original',async()=
     if(action==='conflict')return {path:'parent',local:'changed',remote:'original',sourceHash:'lh',remoteHash:'rh'};
     if(action==='read')return {sourceHash:'lh',readonly:true};if(action==='resolve-conflict')return {sourceHash:'rh',operationId:'op'};throw Error(action);};
   await f.ui.resolveConflict('projects.a','parent');assert.deepEqual(choices.map(x=>x.choice),['remote']);
-  assert.deepEqual(calls.find(x=>x.action==='resolve-conflict').input,{path:'parent',choice:'remote',expectedHash:'lh'});
+  assert.deepEqual(calls.find(x=>x.action==='resolve-conflict').input,{path:'parent',choice:'remote',expectedHash:'lh',expectedRemoteHash:'rh'});
   assert.equal(calls.some(x=>x.action==='upload'),false);
 });
 test('acknowledged but unread uploads appear in both history and verification without replay',async()=>{

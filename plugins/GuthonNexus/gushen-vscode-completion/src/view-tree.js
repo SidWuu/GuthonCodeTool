@@ -43,7 +43,7 @@ function contextCommands(viewId, contextValue, vscode) {
 function identity(element, item) {
   return JSON.stringify([item.id, element.key, element.workspaceKey, element.svnNode?.path,
     element.svnNode?.id, element.object?.path, element.sourcePrefix, element.target?.jsonPointer,
-    labels(item.label), item.contextValue]);
+    labels(item.label), element.object?.path ? undefined : item.contextValue]);
 }
 
 class ViewTree {

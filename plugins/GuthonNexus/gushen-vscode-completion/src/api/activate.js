@@ -17,6 +17,42 @@ const {checkOfficialUpdate,rollbackOfficialUpdate} = require('../official-update
 const {ViewTree}=require('../view-tree');
 const REMOTE_ACTIONS = new Set(['session','captcha','login','logout','systems','data-sources','designer-context','system-menu','pull','scope-apply','refresh','upload','verify-upload','sync-database','platform-request','create-function','reference-sync','module-parameters-sync','module-parameter-load','module-upload']);
 const LOGGED_ACTIONS = new Set(['pull','scope-apply','refresh','upload','verify-upload','create-function','module-parameters-sync','module-parameter-load','module-upload']);
+const MAX_LOGGED_INDEX_DIAGNOSTICS = 10;
+
+function logCode(value) {
+  return typeof value === 'string' && /^[A-Z][A-Z0-9_]{2,63}$/.test(value) ? value : undefined;
+}
+
+function runtimeDetails(tool, client) {
+  return `后端 ${client.backendVersion || '版本未返回'} · ${tool.mode || '运行方式未返回'} · ${process.platform}`;
+}
+
+function logApiResult(output, label, result) {
+  const index = result.index || result.publication?.index;
+  if (result.complete === false) {
+    const details = [];
+    if (logCode(result.stage)) details.push(`阶段 ${result.stage}`);
+    if (logCode(result.failedStage)) details.push(`失败阶段 ${result.failedStage}`);
+    if (logCode(result.error?.code)) details.push(result.error.code);
+    for (const [name, complete] of [['平台读取', result.remoteDownloadComplete], ['本地源码更新', result.downloadComplete]]) {
+      if (typeof complete === 'boolean') details.push(`${name}${complete ? '完成' : '未完成'}`);
+    }
+    if (details.length) output.appendLine(`${label} · ${details.join(' · ')}`);
+  }
+  if (!index) return;
+  const indexStatus = index.complete ? '完成' : index.indexGeneration ? '已建立，部分源码待解析' : '未完成';
+  output.appendLine(`${label} · 索引${indexStatus} · 诊断 ${index.diagnosticCount ?? '未返回'} 项`);
+  const diagnostics = Array.isArray(index.diagnostics) ? index.diagnostics : [];
+  const logged = diagnostics.slice(0, MAX_LOGGED_INDEX_DIAGNOSTICS);
+  for (const {path: sourcePath, code} of logged) {
+    // Indexed paths are relative to the checkout. Keep machine paths and raw messages out of support logs.
+    const relative = typeof sourcePath === 'string' && !/[:\\]/.test(sourcePath) && sourcePath.split('/').every(part => part && part !== '.' && part !== '..');
+    output.appendLine(`${label} · 索引诊断 · ${logCode(code) || '未知错误码'}${relative ? ` · ${JSON.stringify(sourcePath)}` : ''}`);
+  }
+  if (index.truncated || diagnostics.length > logged.length || index.diagnosticCount > logged.length) {
+    output.appendLine(`${label} · 完整索引诊断见操作结果`);
+  }
+}
 
 function scopeReportLines(key,result) {
   const state=value=>value===true?'完成':value===false?'未完成':'未返回';
@@ -101,9 +137,23 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       const current=await resolveRequestContext(),epoch=statusEpochs.get(key)||0;
       const requestKey=JSON.stringify([current.lifecycle,current.identity,key,input?.summaryOnly===true,epoch]);
       const pending=statusRequests.get(requestKey);if(pending)return pending;
-      const request=boundClient(current,statusProcessClient,'谷神 API 状态').run(key,'api',['status','--stdin'],{...input,changesOnly:true})
+      const elapsed = operationTimer();
+      let diagnostic;
+      const request=boundClient(current,statusProcessClient,'谷神 API 状态').run(key,'api',['status','--stdin'],{...input,changesOnly:true},{
+        onOutput: text => {
+          if (text.startsWith('[谷神 API] 状态扫描文件信息不一致 · ')) diagnostic = text.trimEnd();
+        },
+      })
         .then(async result=>{await assertRequestContext(current);if((statusEpochs.get(key)||0)!==epoch)return run(key,'status',input);if(!input?.summaryOnly){lastStatus.set(key,{identity:current.identity,result});onUpdated?.();}return result;},
-          async error=>{await assertRequestContext(current);if((statusEpochs.get(key)||0)!==epoch)return run(key,'status',input);throw error;})
+          async error=>{
+            await assertRequestContext(current);
+            if((statusEpochs.get(key)||0)!==epoch)return run(key,'status',input);
+            const output = getOutput?.();
+            const operation = input?.summaryOnly ? '项目摘要读取失败' : '本地源码状态扫描失败';
+            output?.appendLine(`谷神 API · status · ${key} · ${operation} · ${logCode(error.code) || 'COMMAND_FAILED'} · ${runtimeDetails(current.tool, statusProcessClient)} · 耗时 ${elapsed()}`);
+            if (diagnostic && error.code === 'API_SOURCE_STALE') output?.appendLine(diagnostic);
+            throw error;
+          })
         .finally(()=>{if(statusRequests.get(requestKey)===request) statusRequests.delete(requestKey);});
       statusRequests.set(requestKey,request);return request;
     }
@@ -115,7 +165,8 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     const authentication=authenticationFor(current);
     const invoke=async()=>{
       const output=LOGGED_ACTIONS.has(action) ? getOutput?.() : undefined, elapsed=operationTimer();
-      if(output) {output.show(true);output.appendLine(`谷神 API · ${action} · ${key} · 已提交执行`);}
+      const label = `谷神 API · ${action} · ${key}`;
+      if(output) {output.show(true);output.appendLine(`${label} · 已提交执行`);}
       if(['login','logout','configure'].includes(action))sessionRequests.delete(sessionKey);try {
       let result;
       if(action==='login') result=await authentication.login(key,input);
@@ -127,19 +178,16 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       }
       if(action==='session')await assertRequestContext(current);
       if(output) {
-        output.appendLine(`谷神 API · ${action} · ${key} · ${result.complete===false?'部分完成，请核对结果':'已返回处理结果'}${result.operationId ? ' · 操作编号 '+result.operationId : ''}`);
-        if(result.index) {
-          const indexStatus=result.index.complete?'完成':result.index.indexGeneration?'已建立，部分源码待解析':'未完成';
-          output.appendLine(`索引${indexStatus} · 诊断 ${result.index.diagnosticCount ?? '未返回'} 项`);
-        }
+        output.appendLine(`${label} · ${result.complete===false?'部分完成，请核对结果':'已返回处理结果'}${result.operationId ? ' · 操作编号 '+result.operationId : ''}`);
+        logApiResult(output, label, result);
       }
       if(action==='login'){ui.menuAttempts.delete(key);ui.invalidate(key);ui.refresh();}
-      if(action==='scope-save')invalidateStatus(key);
+      if(action==='scope-save' || action==='resolve-conflict')invalidateStatus(key);
       if(action==='configure'){invalidateStatus(key);if(result.index){ui.invalidate(key);ui.setIndexResult(key,result.index);}}
       return result;
     }
-    catch(error) {output?.appendLine(`谷神 API · ${action} · ${key} · 失败${error.code ? ' · '+error.code : ''}`);if(action==='configure' && error.code==='API_SCOPE_INDEX_REFRESH_REQUIRED')invalidateStatus(key);if(['API_LOGIN_REQUIRED','API_LOGIN_RESTORE_FAILED'].includes(error.code) && !['session','status'].includes(action)){sessionRequests.delete(sessionKey);onUpdated?.();}throw error;}
-    finally {output?.appendLine(`谷神 API · ${action} · ${key} · 耗时 ${elapsed()}`);if(action==='logout')onUpdated?.();if(action==='pull' || action==='scope-apply' || action==='reference-sync' || action==='module-parameters-sync' || action==='module-parameter-load' || (action==='module-upload' && input?.action!=='preview') || (action==='module-parameter' && input?.action==='save'))invalidateStatus(key);}};
+    catch(error) {output?.appendLine(`${label} · 失败 · ${logCode(error.code) || 'COMMAND_FAILED'}`);if(action==='configure' && error.code==='API_SCOPE_INDEX_REFRESH_REQUIRED')invalidateStatus(key);if(['API_LOGIN_REQUIRED','API_LOGIN_RESTORE_FAILED'].includes(error.code) && !['session','status'].includes(action)){sessionRequests.delete(sessionKey);onUpdated?.();}throw error;}
+    finally {output?.appendLine(`${label} · ${runtimeDetails(current.tool, REMOTE_ACTIONS.has(action) ? remoteProcessClient : processClient)} · 耗时 ${elapsed()}`);if(action==='logout')onUpdated?.();if(action==='pull' || action==='scope-apply' || action==='reference-sync' || action==='module-parameters-sync' || action==='module-parameter-load' || (action==='module-upload' && input?.action!=='preview') || (action==='module-parameter' && input?.action==='save'))invalidateStatus(key);}};
     if(action==='session') {
       const pending=sessionRequests.get(sessionKey);if(pending) return pending;
       const request=invoke().finally(()=>{if(sessionRequests.get(sessionKey)===request) sessionRequests.delete(sessionKey);});
@@ -273,7 +321,10 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     },
     pullApiSource: async key => {
       if(sourceUpdateInProgress())return vscode.window.showInformationMessage('正在更新 API 源码和索引。');
+      const statusElapsed = operationTimer();
       const state=await ui.status(key);
+      const output = getOutput?.();
+      output?.appendLine(`谷神 API · pull · ${key} · 拉取前状态检查 · 耗时 ${statusElapsed()}`);
       const scopePending=!!state.pendingScope;
       let pulled,refreshError,scopeError;
       try {
@@ -290,7 +341,9 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       const scopeResult=pulled?.kind==='scope-apply';
       if(scopeError || scopeResult)ui.invalidate(key);
       ui.setIndexResult(key,pulled?.index);
+      const scmElapsed = operationTimer();
       try {await ui.updateScm(key);} catch(error) {refreshError=error;}
+      finally {output?.appendLine(`谷神 API · pull · ${key} · 源代码管理刷新 · 耗时 ${scmElapsed()}`);}
       onUpdated?.();
       if(scopeError) {
         if(scopeError.code==='API_SCOPE_LOCAL_CHANGES') {
@@ -361,7 +414,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       return getPageEditor().open({workspaceKey:key,sourcePath:p,sourceType:'page',
         ...(value?.pendingNative?{pendingNative:true}:{}),sourceId:value?.object?.sourceId,sourceName:value?.sourceName || value?.object?.name});
     },
-    resolveApiConflict: async (key,p) => ui.resolveConflict(key,p),
+    resolveApiConflict: async (key,p,value) => ui.resolveConflict(key,value?.object?.referenceFields?.snapshotPath || p),
     syncApiDatabase: async (key,p) => ui.syncDatabase(key,p),
     createApiFunction: async (key,p,value) => ui.createFunction(key,value),
     showApiSystemMenu: async key => ui.systemMenu(key),

@@ -29,9 +29,15 @@ from common.persistence import file_lock
 from common.operation_control import checkpoint, publication_barrier
 from .client import ApiError
 from .content import source_name
+from .progress import emit as emit_progress
 from .store import ApiStore
 from .reference_assets import CONFIGS, config_objects, page_references
 from .workspace import active_scope, settings
+
+
+# Bump when source indexing or catalog projection changes require a fresh snapshot.
+_PULL_INDEX_VERSION = 1
+_PULL_INCREMENTAL_LIMIT = 200
 
 
 def _bound(limit, offset, maximum=100):
@@ -65,6 +71,22 @@ def _scope_fingerprint(workspace):
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _pull_catalog_fingerprint(workspace):
+    directory = Path(workspace["contextDir"]) / "api"
+    digest = hashlib.sha256(str(_PULL_INDEX_VERSION).encode())
+    for name in ("project.json", "menu-tree.json"):
+        target = directory / name
+        try:
+            content = target.read_bytes()
+        except FileNotFoundError:
+            content = None
+        except OSError:
+            # An unreadable presentation cache prevents index reuse.
+            return None
+        digest.update(b"\0" if content is None else b"\1" + hashlib.sha256(content).digest())
+    return digest.hexdigest()
 
 
 def _connection(workspace, *, check_scope=True):
@@ -649,12 +671,78 @@ def _unchanged_update(workspace, store, conn, paths, scope_fingerprint, bill_fin
             return None
     if _scope_fingerprint(workspace) != scope_fingerprint or _bill_routes_fingerprint(workspace) != bill_fingerprint:
         return None
+    return _reused_index_result(workspace, conn, states, len(rows))
+
+
+def _reused_index_result(workspace, conn, states, count):
     diagnostics = _diagnostics(conn)
     return {"workspaceKey": workspace["workspaceKey"], "indexGeneration": states["generation"],
-            "objects": len(rows), "updatedPaths": [], "unchanged": True,
+            "objects": count, "updatedPaths": [], "unchanged": True,
             "complete": not diagnostics, "diagnosticCount": len(diagnostics), "diagnostics": diagnostics[:100],
             "billRouteCount": conn.execute("SELECT COUNT(*) FROM gusen_bill_route WHERE source_record_id=0").fetchone()[0],
             "billRouteStatus": states.get("billRouteStatus", "UNAVAILABLE"), "truncated": len(diagnostics) > 100}
+
+
+def _pull_index_plan(workspace, conn):
+    states = dict(conn.execute("SELECT state_key,state_value FROM gusen_sync_state"))
+    scope = _scope_fingerprint(workspace)
+    bill_routes = _bill_routes_fingerprint(workspace)
+    catalog = _pull_catalog_fingerprint(workspace)
+    if (catalog is None or states.get("scopeFingerprint") != scope
+            or states.get("billRoutesFingerprint") != bill_routes
+            or states.get("pullCatalogFingerprint") != catalog):
+        return None
+
+    store = ApiStore(workspace)
+    rows = {row["source_path"]: row for row in conn.execute(
+        "SELECT source_path,source_hash,metadata_json,readonly,status,diagnostic FROM gusen_source_record"
+    )}
+    changed = set()
+    active_count = 0
+    for path, metadata, readonly, source_hash in store.index_inputs():
+        checkpoint()
+        active_count += 1
+        # Include external edits and unchanged remote files with changed local
+        # bytes or metadata. Publication's updatedFiles is not an index delta.
+        row = rows.pop(path, None)
+        if (row is None or row["source_hash"] != source_hash
+                or row["diagnostic"] == "API_SOURCE_MISSING"
+                or row["metadata_json"] != metadata
+                or bool(row["readonly"]) != (readonly or row["status"] == "PARTIAL")):
+            changed.add(path)
+            if len(changed) > _PULL_INCREMENTAL_LIMIT:
+                return None
+    changed.update(rows)
+    if (len(changed) > _PULL_INCREMENTAL_LIMIT
+            or _scope_fingerprint(workspace) != scope
+            or _bill_routes_fingerprint(workspace) != bill_routes
+            or _pull_catalog_fingerprint(workspace) != catalog):
+        return None
+    if changed:
+        return sorted(changed)
+    return _reused_index_result(workspace, conn, states, active_count)
+
+
+def reconcile_pull(workspace):
+    """Reuse an index only after verifying the full current checkout against it."""
+    with file_lock(Path(workspace["contextDir"]) / "api" / "index.lock"):
+        plan = None
+        if health(workspace)["ready"]:
+            try:
+                with closing(_connection(workspace, check_scope=False)) as current:
+                    plan = _pull_index_plan(workspace, current)
+            except sqlite3.DatabaseError:
+                # Rebuild the existing derived database if it cannot be read.
+                # If its source baseline is damaged, rebuild raises that error.
+                pass
+        if isinstance(plan, dict):
+            emit_progress("索引复用 · 源码及目录未变化")
+            return plan
+        if plan:
+            emit_progress(f"索引增量更新 · {len(plan)} 个路径")
+            return update(workspace, plan)
+        emit_progress("索引全量重建")
+        return rebuild(workspace)
 
 
 def rebuild(workspace):
@@ -672,6 +760,7 @@ def rebuild(workspace):
             store = ApiStore(workspace)
             scope_fingerprint = _scope_fingerprint(workspace)
             bill_fingerprint = _bill_routes_fingerprint(workspace)
+            catalog_fingerprint = _pull_catalog_fingerprint(workspace)
             paths = store.paths()
             with closing(sqlite3.connect(tmp)) as conn:
                 _setup(conn)
@@ -683,6 +772,7 @@ def rebuild(workspace):
                         ("scopeFingerprint", scope_fingerprint),
                         ("source_body_index_version", source_text_search.VERSION),
                         ("billRoutesFingerprint", bill_fingerprint),
+                        ("pullCatalogFingerprint", catalog_fingerprint or ""),
                     ],
                 )
                 for path in paths:

@@ -1097,14 +1097,16 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
     }
   };
   const dialogWrapper = {
+    style: { zIndex: "2001" },
     classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name) },
     __vue__: { $parent: owner }
   };
   const dialogMask = {
-    offsetWidth: 1,
-    classList: { add: (name) => maskClasses.add(name), remove: (name) => maskClasses.delete(name) }
+    style: { zIndex: "2000" },
+    classList: { toggle: (name, on) => on ? maskClasses.add(name) : maskClasses.delete(name) }
   };
   const editorElement = {
+    offsetWidth: 1,
     __vue__: { editor: { getValue: () => "unsaved" } },
     closest: () => dialogWrapper
   };
@@ -1116,13 +1118,26 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
       layout: () => { editorLayout = true; }
     } }
   };
-  context.document.createElement = (tag) => tag === "button" ? closeButton : bar;
+  owner.$el = { querySelectorAll: () => [restoredElement] };
+  let restoreClick;
+  context.document.createElement = (tag) => tag !== "button" ? bar : {
+    ...closeButton,
+    addEventListener(event, handler) {
+      if (this.className === "guthon-minimized-script-restore") restoreClick = handler;
+      else closeButton.addEventListener(event, handler);
+    }
+  };
   context.document.body = { appendChild() {} };
+  const moduleHash = "#/gdpaas/dev/modules";
+  const procedureHash = "#/gdpaas/dev/procedure_develop";
+  context.location.hash = moduleHash;
+  context.document.querySelector = () => null;
+  const router = { push: async () => { routedBack = true; context.location.hash = moduleHash; } };
   context.document.querySelectorAll = (selector) => {
-    if (selector === ".v-modal" || selector === ".guthon-minimized-script-mask") return [dialogMask];
-    if (selector === ".el-dialog__wrapper .script-editor") return [restoredElement];
+    if (selector === ".v-modal") return [dialogMask];
+    if (selector !== "*") return [];
     return [
-      { __vue__: { $router: { push: async () => { routedBack = true; } } } },
+      { __vue__: { $router: router } },
       { __vue__: owner }
     ];
   };
@@ -1133,6 +1148,7 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   assert.equal(maskClasses.has("guthon-minimized-script-mask"), true);
   dragStart({ button: 0, target: { closest: () => null }, clientX: 120, clientY: 20, preventDefault() {} });
   assert.equal(bar.style.transform, "none");
+  context.location.hash = procedureHash;
   await restore({ preventDefault() {}, stopPropagation() {} });
   await new Promise((resolve) => setTimeout(resolve));
   assert.equal(routedBack, true);
@@ -1156,6 +1172,7 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   };
   const buttonWrapper = {
     isConnected: true,
+    style: {},
     classList: { add: (name) => buttonClasses.add(name), remove: (name) => buttonClasses.delete(name) },
     querySelectorAll: () => [{
       offsetWidth: 1,
@@ -1193,6 +1210,33 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   closeBar({ preventDefault() {}, stopPropagation() {} });
   assert.equal(buttonEditorClosed, true);
   assert.equal(buttonClasses.size, 0);
+
+  // A script dialog with a different Vue owner must still release its own
+  // backdrop and offer a one-click return to the PAGE that opened it.
+  const pageId = "PG-1";
+  const pageTab = {
+    id: `tab-${pageId}`,
+    getBoundingClientRect: () => ({ width: 1, height: 1 }),
+    getAttribute: () => "false",
+    click: () => { selectedPage = pageId; }
+  };
+  let selectedPage;
+  context.document.querySelector = () => pageTab;
+  context.document.getElementById = id => id === pageTab.id ? pageTab : null;
+  context.getComputedStyle = element => ({ display: classes.size && element !== pageTab ? "none" : "block" });
+  dialogWrapper.__vue__ = undefined;
+  editorElement.isConnected = true;
+  editorElement.getBoundingClientRect = () => ({ width: 1, height: 1 });
+  routedBack = false;
+  window.GuthonProcedureNavigation.minimizeScriptEditor(editorElement, { fromNavigation: true });
+  assert.ok(classes.has("guthon-minimized-script-editor"));
+  assert.ok(maskClasses.has("guthon-minimized-script-mask"));
+  context.location.hash = procedureHash;
+  await restoreClick({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(routedBack, true);
+  assert.equal(selectedPage, pageId);
+  assert.equal(classes.size, 0);
+  assert.equal(maskClasses.size, 0);
   assert.equal(pageBridge.includes('document.addEventListener("contextmenu", onContextMenu, true)'), true);
   assert.equal(pageBridge.includes('document.addEventListener("mousemove", onProcedureTitleMove, true)'), true);
   assert.equal(fs.readFileSync(BRIDGE_CSS_PATH, "utf8").includes("::highlight(guthon-procedure-title-link)"), true);
@@ -1203,7 +1247,6 @@ test("page bridge resolves and opens native-modifier procedure targets", async (
   assert.equal(pageBridge.includes('icon.className = "el-dialog__close el-icon el-icon-minus"'), true);
   assert.equal(fs.readFileSync(BRIDGE_CSS_PATH, "utf8").includes(".el-dialog__wrapper .el-dialog__header .el-dialog__headerbtn.guthon-script-editor-minimize"), true);
   assert.equal(pageBridge.includes("const editor = editors.find(isVisible) || editors[0]"), true);
-  assert.equal(pageBridge.includes("buttonSetup && !minimizedScriptEditor.editorWasVisible"), true);
   assert.equal(pageBridge.includes("editor.onMouseMove?.("), true);
   assert.equal(fs.readFileSync(BRIDGE_CSS_PATH, "utf8").includes(".guthon-procedure-link"), true);
   assert.equal(pageBridge.includes("developVm.handleNodeClick(openNode)"), true);
