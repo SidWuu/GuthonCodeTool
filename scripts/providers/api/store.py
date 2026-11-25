@@ -9,6 +9,7 @@ import os
 from pathlib import Path, PurePosixPath
 import sqlite3
 import stat
+import sys
 import uuid
 from common.persistence import atomic_bytes, atomic_text, file_lock
 from .client import ApiError
@@ -16,6 +17,7 @@ from .content import source_name
 from .workspace import in_scope, settings, active_scope
 from .editor_state import assert_writable
 from .page_source import BATCH_EXPORT, ORIGIN
+from .progress import emit as emit_progress
 
 
 def digest(content):
@@ -241,6 +243,19 @@ class ApiStore:
 
     def read(self, path):
         item = self._record(path)
+        content, source_hash = self._read_source(path)
+        return {
+            "path": path,
+            "sourcePath": path,
+            "name": source_name(item["metadata"]),
+            "content": content,
+            "sourceHash": source_hash,
+            "metadata": item["metadata"],
+            "readonly": item["readonly"],
+            "baseHash": digest(item["baseContent"]),
+        }
+
+    def _read_source(self, path):
         target = self._path(path)
         if not target.is_file():
             raise ApiError("API_SOURCE_MISSING", "本地源码文件已不存在")
@@ -249,16 +264,19 @@ class ApiStore:
             content = raw.decode("utf-8")
         except UnicodeDecodeError as error:
             raise ApiError("API_SOURCE_ENCODING", "API源码必须保留UTF-8编码") from error
-        return {
-            "path": path,
-            "sourcePath": path,
-            "name": source_name(item["metadata"]),
-            "content": content,
-            "sourceHash": hashlib.sha256(raw).hexdigest(),
-            "metadata": item["metadata"],
-            "readonly": item["readonly"],
-            "baseHash": digest(item["baseContent"]),
-        }
+        return content, hashlib.sha256(raw).hexdigest()
+
+    def index_inputs(self):
+        """Read the active source metadata once, closing SQLite before reading files."""
+        self._verify_binding()
+        scope = active_scope(self.workspace)
+        with closing(sqlite3.connect(self.path)) as conn:
+            rows = conn.execute("SELECT path,metadata,readonly FROM source ORDER BY path").fetchall()
+        for path, raw_meta, readonly in rows:
+            meta = json.loads(raw_meta)
+            if not meta.get("remoteDeleted") and in_scope(self.workspace, path, meta, scope=scope):
+                _content, source_hash = self._read_source(path)
+                yield path, json.dumps(meta, ensure_ascii=False), bool(readonly), source_hash
 
     def status(self, *, use_cache=False):
         self._verify_binding()
@@ -348,10 +366,27 @@ class ApiStore:
                     if entry is not None and entry[:5] == marker:
                         current_hash = entry[5]
                     else:
-                        with open(target, "rb") as handle:
-                            raw = handle.read()
-                            final = os.fstat(handle.fileno())
-                        if fingerprint(final) != marker:
+                        try:
+                            with open(target, "rb") as handle:
+                                opened = fingerprint(os.fstat(handle.fileno()))
+                                raw = handle.read()
+                                closed = fingerprint(os.fstat(handle.fileno()))
+                            observed = fingerprint(os.lstat(target))
+                        except (FileNotFoundError, NotADirectoryError) as error:
+                            emit_progress(f"状态扫描文件信息不一致 · {self.workspace['workspaceKey']} · {json.dumps(path, ensure_ascii=False)} · 路径已消失")
+                            raise ApiError("API_SOURCE_STALE", "状态扫描期间源码已变化，请重试") from error
+                        # Windows path stats can report creation time as ctime while fstat reports change time.
+                        # Compare ctime only within the same API, while still detecting path replacement.
+                        checks = ((marker, observed), (opened, closed), (marker[:4], opened[:4]))
+                        if any(before != after for before, after in checks):
+                            fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+                            changed = [field for i, field in enumerate(fields)
+                                       if any(i < len(before) and before[i] != after[i] for before, after in checks)]
+                            emit_progress(
+                                f"状态扫描文件信息不一致 · {self.workspace['workspaceKey']} · "
+                                f"{json.dumps(path, ensure_ascii=False)} · 字段 {', '.join(changed)} · "
+                                f"Python {sys.version.split()[0]}"
+                            )
                             raise ApiError("API_SOURCE_STALE", "状态扫描期间源码已变化，请重试")
                         raw.decode("utf-8")
                         current_hash = hashlib.sha256(raw).hexdigest()
@@ -390,7 +425,7 @@ class ApiStore:
         return {**record, "local": item["content"], "sourceHash": item["sourceHash"]}
 
     def resolve_conflict(
-        self, path, choice, expected_hash, content=None, *, editor_token=None
+        self, path, choice, expected_hash, content=None, *, expected_remote_hash=None, editor_token=None
     ):
         with file_lock(self.directory / "source.lock"):
             record = self.conflict(path)
@@ -398,10 +433,12 @@ class ApiStore:
             assert_writable(self.workspace, [path], editor_token)
             if record["metadata"].get("pageSource") == BATCH_EXPORT:
                 raise ApiError("API_PAGE_NATIVE_BASE_REQUIRED", "请先更新这个 PAGE，取得原生模型后再处理冲突")
-            if current["readonly"] and choice != "remote":
+            if (current["readonly"] or record.get("readonly")) and choice != "remote":
                 raise ApiError("API_SOURCE_READONLY", "继承内容只能明确恢复远端原文")
             if current["sourceHash"] != expected_hash:
                 raise ApiError("API_SOURCE_STALE", "冲突选择后本地源码变化")
+            if expected_remote_hash is not None and record["remoteHash"] != expected_remote_hash:
+                raise ApiError("API_SOURCE_STALE", "冲突选择后平台源码变化，请重新比较")
             if choice == "local":
                 candidate = current["content"]
             elif choice == "remote":
@@ -412,7 +449,7 @@ class ApiStore:
                 raise ApiError("API_INPUT_INVALID", "冲突选择必须是local/remote/manual")
             from .content import validate_candidate
 
-            if current["metadata"].get("pageSource") == BATCH_EXPORT and record["metadata"].get("pageSource") == ORIGIN:
+            if choice == "remote" or (current["metadata"].get("pageSource") == BATCH_EXPORT and record["metadata"].get("pageSource") == ORIGIN):
                 validate_candidate(path, record["metadata"], record["remote"], candidate)
             else:
                 validate_candidate(path, current["metadata"], self.baseline(path), candidate)
@@ -538,18 +575,39 @@ class ApiStore:
         files = sorted(
             root.glob("*/record.json"), key=lambda p: p.stat().st_mtime_ns, reverse=True
         )
-        return [json.loads(p.read_text(encoding="utf-8")) for p in files[:limit]]
+        return [self._read_operation(path) for path in files[:limit]]
 
     def operation(self, identifier):
         if not isinstance(identifier, str) or not identifier.isalnum():
             raise ApiError("API_INPUT_INVALID", "操作编号无效")
-        return json.loads(
-            (self.directory / "operations" / identifier / "record.json").read_text(
-                encoding="utf-8"
-            )
-        )
+        return self._read_operation(self.directory / "operations" / identifier / "record.json")
 
-    def publish(self, files, *, scope=None, authoritative=False, uploaded_content=None, authoritative_source_types=None):
+    @staticmethod
+    def _read_operation(path):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if record.get("kind") != "refresh" or record.get("stage") != "PREPARED":
+            return record
+        try:
+            journal = path.with_name("publication.jsonl").open("rb")
+        except FileNotFoundError:
+            return record
+        with journal:
+            for line in journal:
+                if not line.endswith(b"\n"):
+                    # An active or interrupted writer may leave an incomplete final entry.
+                    break
+                event = json.loads(line)
+                if "applied" in event:
+                    record["applied"].append(event["applied"])
+                    record["current"] = None
+                elif "conflict" in event:
+                    record["conflicts"].append(event["conflict"])
+                else:
+                    record["current"] = event["current"]
+        return record
+
+    def publish(self, files, *, scope=None, authoritative=False, uploaded_content=None,
+                authoritative_source_types=None, skip_unchanged=False):
         self._verify_binding(create=True)
         self.directory.mkdir(parents=True, exist_ok=True)
         paths = [x.path for x in files]
@@ -568,12 +626,22 @@ class ApiStore:
         updated = []
         preserved = []
         deleted = []
+        journal_path = self.directory / "operations" / operation["operationId"] / "publication.jsonl"
+        progress_interval = max(100, (len(files) + 99) // 100)
         with file_lock(self.directory / "source.lock"):
-            with closing(sqlite3.connect(self.path)) as conn:
+            with closing(sqlite3.connect(self.path)) as conn, journal_path.open("ab") as journal:
+                def append_event(event, *, durable=True):
+                    journal.write((json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8"))
+                    if durable:
+                        journal.flush()
+                        os.fsync(journal.fileno())
+
                 conn.execute(
                     "CREATE TABLE IF NOT EXISTS source(path TEXT PRIMARY KEY,content TEXT NOT NULL,metadata TEXT NOT NULL,readonly INTEGER NOT NULL)"
                 )
-                for item in files:
+                for processed, item in enumerate(files):
+                    if processed % progress_interval == 0:
+                        emit_progress(f"源码发布进度 · {operation['operationId']} · {processed}/{len(files)} 个文件")
                     target = self._path(item.path)
                     meta = {
                         **item.metadata,
@@ -650,13 +718,13 @@ class ApiStore:
                                 ),
                             )
                             conn.commit()
-                        operation["conflicts"].append(
-                            {
-                                "path": item.path,
-                                "reason": "批量下载取得的是 PAGE 导出 XML，请更新指定页面以核对原生源码"
-                                if incoming_export else "本地和远端冲突，保留本地及共同基线",
-                            }
-                        )
+                        conflict = {
+                            "path": item.path,
+                            "reason": "批量下载取得的是 PAGE 导出 XML，请更新指定页面以核对原生源码"
+                            if incoming_export else "本地和远端冲突，保留本地及共同基线",
+                        }
+                        operation["conflicts"].append(conflict)
+                        append_event({"conflict": conflict})
                         continue
                     current = (
                         target.read_bytes().decode("utf-8")
@@ -665,6 +733,17 @@ class ApiStore:
                     )
                     if current != local:
                         raise ApiError("API_SOURCE_STALE", "更新发布前源码已变化")
+                    encoded_meta = json.dumps(meta, ensure_ascii=False)
+                    conflict_path = self._conflict_path(item.path)
+                    if (skip_unchanged and local == item.content
+                            and row == (item.content, encoded_meta, int(item.readonly))
+                            and not conflict_path.is_file()):
+                        assert_writable(self.workspace, [item.path])
+                        preserved.append(item.path)
+                        operation["applied"].append(item.path)
+                        operation["current"] = None
+                        append_event({"applied": item.path}, durable=False)
+                        continue
                     before = (
                         self.directory
                         / "operations"
@@ -683,7 +762,7 @@ class ApiStore:
                         "afterHash": digest(candidate),
                         "remoteHash": digest(item.content),
                     }
-                    self._receipt(operation)
+                    append_event({"current": operation["current"]})
                     assert_writable(self.workspace, [item.path])
                     if candidate != local:
                         if target.exists() and (item.readonly or row and row[2]):
@@ -697,7 +776,6 @@ class ApiStore:
                             mode = stat.S_IMODE(target.stat().st_mode)
                             target.chmod(0o400 if item.readonly else mode | stat.S_IWUSR)
                         preserved.append(item.path)
-                    conflict_path = self._conflict_path(item.path)
                     if conflict_path.is_file():
                         conflict_path.unlink()
                     conn.execute(
@@ -705,14 +783,16 @@ class ApiStore:
                         (
                             item.path,
                             item.content,
-                            json.dumps(meta, ensure_ascii=False),
+                            encoded_meta,
                             int(item.readonly),
                         ),
                     )
                     conn.commit()
                     operation["applied"].append(item.path)
                     operation["current"] = None
-                    self._receipt(operation)
+                    append_event({"applied": item.path})
+                if files:
+                    emit_progress(f"源码发布进度 · {operation['operationId']} · {len(files)}/{len(files)} 个文件")
                 if authoritative:
                     incoming = set(paths)
                     for path, text, rawmeta, ro in conn.execute(

@@ -19,25 +19,36 @@ function hasWorkspaceConfiguration(toolHome) {
   catch {return false;}
 }
 
-function existingWorkspaceConfig(toolHome) {
-  if(!hasWorkspaceConfiguration(toolHome)) throw new Error('所选目录缺少已有工作空间配置：需要 guthon.json 或完整旧 YAML。请选择包含配置的本地数据目录');
+function canonicalPath(value) {
+  try { return fs.realpathSync(value); }
+  catch { return path.resolve(value); }
+}
+
+function parentToolHome(folder) {
+  const directory = canonicalPath(folder);
+  const parent = path.dirname(folder);
+  const resolvedParent = path.dirname(directory);
+  const home = canonicalPath(parent) === resolvedParent ? parent : resolvedParent;
+  if (directory === resolvedParent || !hasWorkspaceConfigFiles(home)) return '';
+  try {
+    return canonicalPath(workspaceRoot(home)) === directory ? home : '';
+  } catch {
+    // A broken configuration still needs repair before its default var can be initialized again.
+    return path.basename(directory) === 'var' ? home : '';
+  }
 }
 
 function windowToolHome(config, folders = []) {
   const home = config.get('toolHome', '');
-  if (typeof home !== 'string' || !path.isAbsolute(home)) return '';
+  if (typeof home !== 'string' || !path.isAbsolute(home) || parentToolHome(home)) return '';
   const setting = config.inspect?.('toolHome');
   if (setting?.workspaceFolderValue !== undefined || setting?.workspaceValue !== undefined) return home;
-  const canonical = value => {
-    try { return fs.realpathSync(value); }
-    catch { return path.resolve(value); }
-  };
   if (!folders?.length) return '';
-  const root = canonical(home);
-  const directories = folders.map(canonical);
+  const root = canonicalPath(home);
+  const directories = folders.map(canonicalPath);
   if (directories.every(directory => path.relative(root, directory) === '')) return home;
   let space;
-  try { space = canonical(workspaceRoot(home)); }
+  try { space = canonicalPath(workspaceRoot(home)); }
   catch { return ''; }
   const belongs = directory => {
     const relative = path.relative(space, directory);
@@ -57,12 +68,7 @@ function workspaceSetupCard(folders, attachedHome) {
   }
   const folder = folders[0];
   const parent = path.dirname(folder);
-  let directory;
-  if (hasWorkspaceConfigFiles(folder)) directory = folder;
-  else if (hasWorkspaceConfigFiles(parent)) {
-    try { if (path.relative(workspaceRoot(parent), folder) === '') directory = parent; }
-    catch { if (path.basename(folder) === 'var') directory = parent; }
-  }
+  const directory = parentToolHome(folder) || (hasWorkspaceConfigFiles(folder) ? folder : '');
   if (directory) {
     return { title: '当前目录尚未连接', message: '连接后即可查看这个目录下的谷神项目。',
       directory, action: '连接此目录' };
@@ -74,6 +80,8 @@ function workspaceSetupCard(folders, attachedHome) {
 async function prepareWorkspaceSetup(config, window, { toolHome = config.get('toolHome', ''), directory, workspaceDirectory, browse = false } = {}) {
   const initialized = hasWorkspaceConfiguration(toolHome);
   if (directory && workspaceDirectory) {
+    const home = parentToolHome(directory);
+    if (home) throw new Error(`请打开已绑定的开发目录：${workspaceRoot(home)}`);
     if (hasWorkspaceConfigFiles(directory)) {
       throw new Error(`上一级已有谷神配置，请打开已绑定的开发目录：${workspaceRoot(directory)}`);
     }
@@ -105,14 +113,14 @@ async function prepareWorkspaceSetup(config, window, { toolHome = config.get('to
 }
 
 function workspaceSetupTarget(selectedHome) {
-  if (hasWorkspaceConfiguration(selectedHome)) {
-    existingWorkspaceConfig(selectedHome);
-    return { mode: 'switch', toolHome: selectedHome };
+  const toolHome = parentToolHome(selectedHome) || selectedHome;
+  if (hasWorkspaceConfiguration(toolHome)) {
+    return { mode: 'switch', toolHome };
   }
-  if (hasWorkspaceConfigFiles(selectedHome)) {
+  if (hasWorkspaceConfigFiles(toolHome)) {
     throw new Error('旧配置不完整，请核对 products/projects、sync、datasource 和 source-tables；不会创建或转换配置');
   }
-  return { mode: 'setup', toolHome: selectedHome };
+  return { mode: 'setup', toolHome };
 }
 
 function workspaceActions() {
@@ -278,9 +286,9 @@ class WindowWorkspaceSelection {
 module.exports = {
   hasWorkspaceConfiguration,
   hasWorkspaceConfigFiles,
-  existingWorkspaceConfig,
   prepareWorkspaceSetup,
   windowToolHome,
+  parentToolHome,
   workspaceSetupCard,
   promptWorkspaceCreation,
   pickWorkspaceSourceMode,

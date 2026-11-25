@@ -37,6 +37,7 @@ class ToolProcessClient {
     this.env = env;
     this.onError = onError;
     this.onProgress = onProgress;
+    this.backendVersion = undefined;
     this.child = null;
     this.key = '';
     this.starting = null;
@@ -62,6 +63,7 @@ class ToolProcessClient {
       require('./script-runtime').verifyScriptChecksum(tool.toolEntry);
     }
     this.key = key;
+    this.backendVersion = undefined;
     const args = [
       ...(tool.toolEntry ? [tool.toolEntry] : []),
       'serve', '--stdio', '--home', tool.toolHome,
@@ -112,6 +114,7 @@ class ToolProcessClient {
           child.kill('SIGKILL');
         } else {
           this.capabilities = new Set(Array.isArray(message.capabilities) ? message.capabilities : []);
+          if (typeof message.version === 'string' && /^\d+\.\d+\.\d+$/.test(message.version)) this.backendVersion = message.version;
           clearTimeout(this.startTimer);
           this.startTimer = null;
           this.startReject = null;
@@ -130,6 +133,7 @@ class ToolProcessClient {
         return;
       }
       if (message.type === 'progress') {
+        if (message.id !== undefined && message.id !== this.active?.id) return;
         this.active?.onOutput?.(`${message.message}\n`);
         this.onProgress(message);
         return;

@@ -15,14 +15,20 @@ class ApiAuthentication {
     if(result.authenticated || result.error)return result;
     const scope=await this.scopeFor(key);if(!scope.serverUrl)return result;
     const id=credentialScope(scope);
-    const failure=this.restoreFailures.get(id);if(failure)return {...result,error:failure};
+    if (this.restoreFailures.has(id)) {
+      const failure = this.restoreFailures.get(id);
+      return failure ? { ...result, error: failure } : result;
+    }
     try {
       const saved=this.store.read(scope);if(!saved)return result;
       // Passwords only cross the local process boundary over stdin, never logs or config.
       const logged=await this.invoke(key,'login',saved);
       return {...result,authenticated:true,session:logged.session};
-    } catch {
-      const failure={code:'API_LOGIN_RESTORE_FAILED',message:'本地登录信息不可用或自动登录未完成，请手动重新登录并保存密码'};
+    } catch (error) {
+      // The backend's TLS diagnostic identifies the failing service without including credentials.
+      const failure = error?.code === 'API_TLS_CERTIFICATE_ERROR'
+        ? { code: error.code, message: error.message }
+        : { code: 'API_LOGIN_RESTORE_FAILED', message: '本地登录信息不可用或自动登录未完成，请手动重新登录并保存密码' };
       this.restoreFailures.set(id,failure);return {...result,error:failure};
     }
   }
@@ -42,7 +48,8 @@ class ApiAuthentication {
       const {remember,...credentials}=input;
       if(remember!==undefined && typeof remember!=='boolean')throw new Error('保存密码选项必须为布尔值');
       const scope=await this.scopeFor(key),id=credentialScope(scope);
-      this.restoreFailures.set(id,{code:'API_LOGIN_RESTORE_FAILED',message:'请在当前项目手动完成登录'});
+      // Suppress saved-account restoration while the UI reports the result of this explicit login.
+      this.restoreFailures.set(id, null);
       const result=await this.invoke(key,'login',credentials);
       this.restoreFailures.delete(id);
       try {

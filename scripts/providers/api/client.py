@@ -6,7 +6,6 @@ import hashlib
 import http.cookiejar
 import json
 import ssl
-import sys
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPCookieProcessor, HTTPSHandler, Request, build_opener
@@ -61,9 +60,13 @@ class ApiClient:
         self.root_url = server_url(root_url)
         if opener is None:
             context = ssl.create_default_context()
-            if getattr(sys, "frozen", False):
+            try:
                 import certifi
-
+            except ModuleNotFoundError as error:
+                # A standalone checkout can use the interpreter's default trust store.
+                if error.name != "certifi":
+                    raise
+            else:
                 context.load_verify_locations(cafile=certifi.where())
             self.opener = build_opener(
                 HTTPCookieProcessor(http.cookiejar.CookieJar()),

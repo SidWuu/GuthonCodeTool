@@ -346,6 +346,8 @@ def _base_json_string_token(text: str, json_pointer: str) -> str | None:
 def line_changes(base_content: str, working_content: str) -> list[dict]:
     """Return zero-based working-document line ranges relative to SVN BASE."""
 
+    if base_content == working_content:
+        return []
     base_lines = str(base_content or "").splitlines()
     working_lines = str(working_content or "").splitlines()
     changes = []

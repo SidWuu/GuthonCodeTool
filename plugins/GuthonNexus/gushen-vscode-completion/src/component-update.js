@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { workspaceRoot } = require('./workspace-root');
+const { parentToolHome } = require('./tool-workspace');
 const crypto = require('node:crypto');
 const { ASSETS, NEXUS_ID } = require('./release-catalog');
 const { readArchive, archiveJson, extractArchive } = require('./update-archive');
@@ -10,6 +11,8 @@ const { prepareScriptRuntime } = require('./script-runtime');
 
 function updateRoot(home) {
   if (!home || !path.isAbsolute(home)) throw new Error('请先设置明确的本地数据目录');
+  const parent = parentToolHome(home);
+  if (parent) throw new Error(`当前设置指向开发目录，请重新连接本地数据目录：${parent}`);
   let directory = workspaceRoot(fs.existsSync(home) ? fs.realpathSync(home) : path.resolve(home));
   for (const part of ['nexus', 'updates']) {
     directory = path.join(directory, part);

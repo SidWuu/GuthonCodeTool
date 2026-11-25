@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from common.operation_control import checkpoint, publication_barrier, OperationCancelled
-from providers.svn.checkout import operation_lock, require_capability, svn_status, file_hash
+from providers.svn.checkout import operation_lock, require_capability, svn_scm_status_lightweight, file_hash
 from providers.svn.dedup import resolve_page_duplicates
 from . import catalog
 from .manifest import load_authorized_scope, logical_path_for_entry, resolve_authorized_path
@@ -20,7 +20,7 @@ def reindex_changed_files(conn, workspace, paths):
     scope = load_authorized_scope(workspace)
     entries = {resolve_authorized_path(scope, path)[0].id for path in paths}
     refreshed = {"updated": [
-        {"id": entry.id, "after": svn_status(entry.root)}
+        {"id": entry.id, "after": svn_scm_status_lightweight(entry.root)}
         for entry in scope.entries if entry.id in entries
     ]}
     return index_changes(conn, workspace, paths, refreshed, skip_current=True)

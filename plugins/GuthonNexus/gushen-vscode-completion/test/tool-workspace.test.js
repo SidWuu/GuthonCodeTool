@@ -51,6 +51,30 @@ test('the setup card seeds the exact current directory and recognizes an existin
   await assert.rejects(prepareWorkspaceSetup({get:()=>''},window,{directory:home,workspaceDirectory:'other'}),/已绑定的开发目录/);
 });
 
+test('reconnects a selected development root through its configured parent data directory', async t => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-reconnect-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(home, 'config'));
+  for (const [name, settings] of [['var', { schemaVersion: 2 }],
+    ['研发源码', { schemaVersion: 3, workspaceDirectory: '研发源码' }]]) {
+    const folder = path.join(home, name);
+    fs.mkdirSync(folder);
+    fs.writeFileSync(path.join(home, 'config', 'guthon.json'), JSON.stringify(settings));
+    const misconfigured = { get: () => folder, inspect: () => ({ workspaceValue: folder }) };
+    assert.equal(windowToolHome(misconfigured, [folder]), '', 'runtime must reject the mistaken home before writing');
+    assert.equal(windowToolHome({ get: () => folder }, [folder]), '');
+    const current = workspaceSetupCard([folder], '');
+    assert.deepEqual(await prepareWorkspaceSetup(misconfigured, {}, { directory: current.directory }),
+      { mode: 'switch', toolHome: home });
+    assert.deepEqual(await prepareWorkspaceSetup({ get: () => home }, {
+      showOpenDialog: async () => [{ fsPath: folder }],
+    }, { browse: true }), { mode: 'switch', toolHome: home });
+    await assert.rejects(prepareWorkspaceSetup(misconfigured, {}, { directory: folder, workspaceDirectory: 'var' }),
+      /请打开已绑定的开发目录/);
+    assert.equal(fs.existsSync(path.join(folder, 'var')), false);
+  }
+});
+
 test('attaches an existing data directory without creating or changing its files', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-existing-'));
   try {
@@ -77,7 +101,6 @@ test('incomplete legacy configuration is not initialized or converted', async ()
     fs.mkdirSync(path.join(home, 'config'));
     fs.writeFileSync(path.join(home, 'config', 'sync.yaml'), 'sync: {}');
     assert.equal(require('../src/tool-workspace').hasWorkspaceConfiguration(home),false);
-    assert.throws(()=>require('../src/tool-workspace').existingWorkspaceConfig(home),/缺少已有工作空间配置/);
     await assert.rejects(prepareWorkspaceSetup({get:()=>''},{showOpenDialog:async()=>[{fsPath:home}]}),/旧配置不完整/);
     assert.deepEqual(fs.readdirSync(path.join(home,'config')),['sync.yaml']);
   } finally {fs.rmSync(home,{recursive:true});}
@@ -237,11 +260,13 @@ test('late workspace picker cannot override a later switch',async()=>{
   assert.equal((await selection.current()).workspaceKey,'b');
 });
 
-test('a single-file initialized home can be selected before generated var data exists',()=>{
+test('a single-file initialized home can be selected before generated var data exists',async()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'nexus-one-config-'));
   try {
     fs.mkdirSync(path.join(root,'config'));fs.writeFileSync(path.join(root,'config','guthon.json'),'{}');
-    assert.doesNotThrow(()=>require('../src/tool-workspace').existingWorkspaceConfig(root));
+    assert.deepEqual(await prepareWorkspaceSetup({ get: () => '' }, {}, { directory: root }),
+      { mode: 'switch', toolHome: root });
+    assert.equal(fs.existsSync(path.join(root, 'var')), false);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 

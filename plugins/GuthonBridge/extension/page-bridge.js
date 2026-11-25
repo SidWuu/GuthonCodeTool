@@ -334,9 +334,10 @@
 
   async function openProcedureTarget(target) {
     let developVm = findProcedureDevelopVm();
-    const routed = !developVm;
-    if (!developVm) {
-      const router = findVueRouter();
+    const router = findVueRouter();
+    const currentRouteName = router?.currentRoute?.name;
+    const routed = !developVm || (currentRouteName && currentRouteName !== "gdpaas_dev_procedure_develop");
+    if (routed) {
       if (!router) {
         throw new Error("未找到谷神页面路由");
       }
@@ -368,8 +369,13 @@
     if (!procedure.dataSourceId) {
       throw new Error(`未解析到过程函数数据源: ${target.procedureKeyword}.${target.funId}`);
     }
-    minimizeScriptEditor(editorElement);
-    await openProcedureTarget({ ...procedure, funId: target.funId });
+    const source = minimizeScriptEditor(editorElement, { fromNavigation: true });
+    try {
+      await openProcedureTarget({ ...procedure, funId: target.funId });
+    } catch (error) {
+      if (source && location.hash === source.hash) source.finish();
+      throw error;
+    }
   }
 
   function requestProcedureCallers(target) {
@@ -476,7 +482,7 @@
   const navigationDisposables = [];
   const navigationDecorations = new Map();
   let navigationBusy = false;
-  let minimizedScriptEditor = null;
+  const minimizedScriptEditors = new Map();
   let suppressContextMenuUntil = 0;
   let lastCallersRequest = "";
   let procedureTitleLink = null;
@@ -508,68 +514,89 @@
       : event?.ctrlKey);
   }
 
-  function minimizeScriptEditor(element) {
-    const wrapper = element?.closest?.(".el-dialog__wrapper");
-    if (!wrapper || minimizedScriptEditor?.wrapper === wrapper) {
+  const scriptMaskObserver = typeof MutationObserver === "function" ? new MutationObserver(syncScriptMasks) : null;
+
+  function syncScriptMasks() {
+    scriptMaskObserver?.disconnect();
+    const maskLayers = new Set([...minimizedScriptEditors.values()]
+      .map(source => source.maskLayer).filter(Number.isFinite));
+    for (const mask of document.querySelectorAll(".v-modal")) {
+      // Element UI reuses its backdrop. Its z-index is one below the owning dialog.
+      mask.classList.toggle("guthon-minimized-script-mask", maskLayers.has(Number(mask.style.zIndex)));
+      if (minimizedScriptEditors.size) {
+        scriptMaskObserver?.observe(mask, { attributes: true, attributeFilter: ["style"] });
+      }
+    }
+  }
+
+  function minimizeScriptEditor(element, { fromNavigation = false } = {}) {
+    if (!element) return;
+    const wrapper = element.closest(".el-dialog__wrapper");
+    const hash = location.hash;
+    const router = findVueRouter();
+    const fromModule = router?.currentRoute?.name === "gdpaas_dev_modules"
+      || /^#\/gdpaas\/dev\/modules(?:[/?]|$)/.test(hash);
+    const sourceElement = wrapper || element;
+    if ((!wrapper && !(fromNavigation && fromModule)) || minimizedScriptEditors.has(sourceElement)) {
       return;
     }
+    const route = router?.currentRoute?.fullPath || (fromModule && hash.slice(1)) || { name: "gdpaas_dev_modules" };
+    const pageId = fromModule ? getActivePageTabCode() : "";
     const editorVm = getVueInstance(element);
-    const editor = editorVm?.editor || editorVm?.$refs?.editor?.editor;
-    let component = getVueInstance(wrapper);
+    const editor = wrapper && (editorVm?.editor || editorVm?.$refs?.editor?.editor);
+    const text = editor?.getValue?.();
+    const editorWasVisible = Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects?.().length);
     let owner;
     let buttonSetup;
-    while (component) {
-      if (!owner && typeof component.showScriptEditPage === "function") {
-        owner = component;
+    for (const start of [getVueInstance(wrapper), editorVm]) {
+      for (let component = start; component; component = component.$parent) {
+        if (!owner && typeof component.showScriptEditPage === "function") owner = component;
+        if (!buttonSetup && component.$options?.name === "gd-button-setup") buttonSetup = component;
       }
-      if (!buttonSetup && component.$options?.name === "gd-button-setup") {
-        buttonSetup = component;
-      }
-      component = component.$parent;
     }
-    const scriptKey = owner?.script
-      ? `${owner.script.id}:${owner.script.scriptItem?.name}`
-      : "";
-    if (!editor?.getValue || (!scriptKey && !buttonSetup)) {
-      return;
-    }
-    const mask = Array.from(document.querySelectorAll(".v-modal")).find(
-      (item) => item.offsetWidth || item.offsetHeight || item.getClientRects?.().length
-    );
+    const scriptKey = owner?.script && `${owner.script.id}:${owner.script.scriptItem?.name}`;
+    const sourceDialog = buttonSetup?.$refs?.editor || owner?.$refs?.scriptEditPage?.$refs?.editor;
+    const maskLayer = wrapper ? Number(wrapper.style.zIndex || "auto") - 1 : NaN;
     const bar = document.createElement("div");
     bar.className = "guthon-minimized-script-bar";
-    bar.textContent = "双击还原模块开发编辑器";
-    const closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.className = "guthon-minimized-script-close";
-    closeButton.title = "关闭编辑器";
-    closeButton.setAttribute("aria-label", "关闭编辑器");
-    closeButton.textContent = "×";
-    bar.appendChild(closeButton);
-    const sourceDialog = buttonSetup?.$refs?.editor || owner?.$refs?.scriptEditPage?.$refs?.editor;
+    const restoreButton = document.createElement("button");
+    restoreButton.type = "button";
+    restoreButton.className = "guthon-minimized-script-restore";
+    restoreButton.textContent = fromNavigation ? "返回页面" : "还原编辑器";
+    bar.appendChild(restoreButton);
     const finish = () => {
-      Array.from(document.querySelectorAll(".guthon-minimized-script-mask"))
-        .forEach((item) => item.classList.remove("guthon-minimized-script-mask"));
-      wrapper.classList.remove("guthon-minimized-script-editor");
+      wrapper?.classList.remove("guthon-minimized-script-editor");
       bar.remove();
-      minimizedScriptEditor = null;
+      minimizedScriptEditors.delete(sourceElement);
+      syncScriptMasks();
     };
-    const restore = async (event) => {
-      if (event?.target?.closest?.("button")) {
-        return;
-      }
-      event?.preventDefault?.();
-      event?.stopPropagation?.();
-      const router = findVueRouter();
-      if (!router) {
-        return;
-      }
+    const restore = async () => {
       try {
-        await router.push({ name: "gdpaas_dev_modules" });
+        if (location.hash !== hash) {
+          if (!router) throw new Error("未找到谷神页面路由");
+          await router.push(route);
+        }
       } catch (error) {
         if (!/redundant|duplicated/i.test(error?.message || "")) {
-          return;
+          throw error;
         }
+      }
+      if (pageId) {
+        const pageTab = document.getElementById(`tab-${pageId}`);
+        if (!pageTab) {
+          await openModuleCaller({ source_id: pageId, exact: true });
+        } else if (pageTab.getAttribute("aria-selected") === "false") {
+          pageTab.click();
+          await new Promise(resolve => setTimeout(resolve));
+        }
+      }
+      // If the source dialog survived the route change, leave its live editor
+      // and draft intact. Older editors can also be reopened through their owner.
+      wrapper?.classList.remove("guthon-minimized-script-editor");
+      if (!wrapper || (element.isConnected && isVisible(element)) || (!scriptKey && !buttonSetup)) {
+        finish();
+        editor?.layout?.();
+        return;
       }
       const deadline = Date.now() + 8000;
       let opener;
@@ -577,10 +604,11 @@
         while (!wrapper.isConnected && Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
-        wrapper.classList.remove("guthon-minimized-script-editor");
       } else {
         while (!opener && Date.now() < deadline) {
-          opener = Array.from(document.querySelectorAll("*")).map(getVueInstance).find((vm) =>
+          const pagePane = pageId && document.getElementById(`pane-${pageId}`);
+          const scope = pagePane || document;
+          opener = Array.from(scope.querySelectorAll("*")).map(getVueInstance).find((vm) =>
             typeof vm?.showScriptEditPage === "function"
             && vm.script
             && `${vm.script.id}:${vm.script.scriptItem?.name}` === scriptKey
@@ -590,10 +618,10 @@
           }
         }
         if (!opener) {
-          return;
+          throw new Error("原页面脚本编辑器未找到");
         }
       }
-      const inputDialog = buttonSetup?.$refs?.editor || opener.$refs?.scriptEditPage?.$refs?.editor;
+      const inputDialog = buttonSetup ? buttonSetup.$refs?.editor : opener.$refs?.scriptEditPage?.$refs?.editor;
       if (inputDialog?.isDialogShow) {
         inputDialog.isDialogShow = false;
         await new Promise((resolve) => {
@@ -610,15 +638,14 @@
       } else {
         opener.showScriptEditPage();
       }
-      if (buttonSetup && !minimizedScriptEditor.editorWasVisible) {
+      if (!editorWasVisible || text === undefined) {
         finish();
         return;
       }
       let restoredEditor;
       while (!restoredEditor && Date.now() < deadline) {
-        const restoredElements = buttonSetup
-          ? wrapper.querySelectorAll(".script-editor")
-          : document.querySelectorAll(".el-dialog__wrapper .script-editor");
+        const restoredElements = (inputDialog?.$el || (buttonSetup ? wrapper : opener.$el))
+          ?.querySelectorAll(".script-editor") || [];
         const restoredElement = Array.from(restoredElements).find(
           (item) => item.offsetWidth || item.offsetHeight || item.getClientRects?.().length
         );
@@ -629,20 +656,48 @@
         }
       }
       if (!restoredEditor) {
-        return;
+        throw new Error("原页面脚本编辑器未加载");
       }
-      if (restoredEditor.getValue() !== minimizedScriptEditor.text) {
-        restoredEditor.setValue(minimizedScriptEditor.text);
+      if (restoredEditor.getValue() !== text) {
+        restoredEditor.setValue(text);
       }
       restoredEditor.layout?.();
       finish();
     };
-    closeButton.addEventListener("click", (event) => {
+    const returnToSource = async (event) => {
       event.preventDefault();
       event.stopPropagation();
-      sourceDialog?.close?.();
-      finish();
+      if (restoreButton.disabled || navigationBusy) return;
+      restoreButton.disabled = true;
+      try {
+        await restore();
+      } catch (error) {
+        restoreButton.textContent = "重试返回页面";
+        restoreButton.title = error.message;
+      } finally {
+        restoreButton.disabled = false;
+      }
+    };
+    restoreButton.addEventListener("click", returnToSource);
+    bar.addEventListener("dblclick", event => {
+      if (!event.target?.closest?.("button")) return returnToSource(event);
     });
+    if (sourceDialog?.close) {
+      const closeButton = document.createElement("button");
+      closeButton.type = "button";
+      closeButton.className = "guthon-minimized-script-close";
+      closeButton.title = "关闭编辑器";
+      closeButton.setAttribute("aria-label", "关闭编辑器");
+      closeButton.textContent = "×";
+      closeButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (restoreButton.disabled) return;
+        sourceDialog.close();
+        finish();
+      });
+      bar.appendChild(closeButton);
+    }
     bar.addEventListener("mousedown", (event) => {
       if (event.button !== 0 || event.target.closest("button")) {
         return;
@@ -665,19 +720,12 @@
       document.addEventListener("mouseup", stop);
       event.preventDefault();
     });
-    wrapper.classList.add("guthon-minimized-script-editor");
-    mask?.classList.add("guthon-minimized-script-mask");
-    bar.addEventListener("dblclick", restore);
+    const source = { hash, maskLayer, finish };
+    minimizedScriptEditors.set(sourceElement, source);
+    wrapper?.classList.add("guthon-minimized-script-editor");
+    syncScriptMasks();
     document.body.appendChild(bar);
-    minimizedScriptEditor = {
-      wrapper,
-      mask,
-      bar,
-      restore,
-      scriptKey,
-      text: editor.getValue(),
-      editorWasVisible: Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects?.().length)
-    };
+    return source;
   }
 
   function installScriptEditorMinimizeButtons() {
@@ -2293,6 +2341,9 @@
   };
   // DOM mounts and tab changes are browser events; SSE observes Bridge events.
   const navigationObserver = typeof MutationObserver === 'function' ? new MutationObserver(mutations => {
+    if (minimizedScriptEditors.size && mutations.some(mutation =>
+      Array.from(mutation.addedNodes || []).some(node => node.nodeType === 1 && node.matches(".v-modal"))
+    )) syncScriptMasks();
     if (mutations.some(mutation => mutation.type === 'childList'
         && [...mutation.addedNodes, ...mutation.removedNodes].some(node => node.nodeType === 1))) scheduleNavigation();
   }) : null;
@@ -2309,6 +2360,8 @@
     document.removeEventListener("keyup", onNavigationKeyUp);
     clearTimeout(navigationTimer);
     navigationObserver?.disconnect();
+    for (const source of minimizedScriptEditors.values()) source.finish();
+    scriptMaskObserver?.disconnect();
     window.removeEventListener('hashchange', scheduleNavigation);
     window.removeEventListener('popstate', scheduleNavigation);
     document.removeEventListener('pointerdown', installProcedureNavigation, true);

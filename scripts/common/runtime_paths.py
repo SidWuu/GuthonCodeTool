@@ -8,6 +8,7 @@ from pathlib import Path
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import lru_cache
+from zipimport import zipimporter
 
 
 _RUNTIME_HOME = ContextVar("guthon_runtime_home", default=None)
@@ -24,9 +25,13 @@ def runtime_home_context(home):
 
 
 def tool_source_root() -> Path:
-    """Keep the source boundary inside the frozen app's resource directory."""
+    """Resolve the code boundary of the checkout, frozen app, or zipapp."""
     bundle = getattr(sys, "_MEIPASS", None)
-    return Path(bundle).resolve() if bundle else Path(__file__).resolve().parents[2]
+    if bundle:
+        return Path(bundle).resolve()
+    if isinstance(__loader__, zipimporter):
+        return Path(__loader__.archive).resolve()
+    return Path(__file__).resolve().parents[2]
 
 
 def tool_home() -> Path:

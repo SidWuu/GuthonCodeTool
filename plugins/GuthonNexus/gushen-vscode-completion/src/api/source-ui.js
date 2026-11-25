@@ -359,7 +359,9 @@ class ApiSourceUI {
       ? (item.object.pageSource==='native-editor'?(item.object.nativeState==='METADATA_ONLY'?'原生元数据 · 尚无源码版本，仅可查看':'原生编辑模型 · 原生 JSON 保存'):'原文来源待核验 · 上传前核对原生模型') : '';
     tree.tooltip=object ? [object.path,serviceComponent?'服务组件':'',pageOrigin,object.diagnostic].filter(Boolean).join(' · ') : item.label;
     const changes=this.sourceChanges.get(item.key),priority={CONFLICT:3,REMOTE_DELETED:2,MISSING:2,MODIFIED:1};
-    let state=changes?.get(item.object?.referenceFields?.snapshotPath || item.object?.path || item.sourcePrefix);
+    const sourcePath=object?.referenceFields?.snapshotPath || object?.path;
+    let state=changes?.get(sourcePath || item.sourcePrefix);
+    if(sourcePath && state==='CONFLICT')tree.contextValue+='.conflict';
     if(item.sourcePrefixes) for(const prefix of item.sourcePrefixes) {const value=changes?.get(prefix);if((priority[value]||0)>(priority[state]||0))state=value;}
     if(state) {
       tree.description=({CONFLICT:'冲突',REMOTE_DELETED:'远端已删除',MISSING:'本地缺失',MODIFIED:'有本地修改'})[state] || state;
@@ -533,7 +535,7 @@ class ApiSourceUI {
     const scope=this.scopeGeneration;
     const status=await this.ensureWorkspace(key); const file=filePath(status.checkoutPath,sourcePath);
     // The backend remains authoritative about object identity and readonly state.
-    const source=await this.run(key,'read',{path:sourcePath});
+    const source=await this.run(key,'read',{path:sourcePath,omitEditableContent:true});
     if(scope!==this.scopeGeneration || this.workspaces.get(key)?.checkoutPath!==status.checkoutPath) throw new Error('工作空间或工作区目录已切换，请重试');
     if(!raw && source.metadata?.sourceType==='module-parameter' && this.onOpenModule)return this.onOpenModule(key,sourcePath);
     if(!raw && source.contentState!=='SQL_ABSENT' && source.metadata?.sourceType==='view' && this.onOpenVirtual) return this.onOpenVirtual({workspaceKey:key,sourcePath,sourceType:'view',jsonPointer:'/viewSql',fragmentType:'sql'});
@@ -567,9 +569,9 @@ class ApiSourceUI {
     const stage=this.stagedChanges.get(key);
     return stage?.checkoutPath===checkoutPath ? stage.files : undefined;
   }
-  async updateScm(key) {
+  async updateScm(key, checkedState) {
     const generation=(this.scmGenerations.get(key)||0)+1;this.scmGenerations.set(key,generation);
-    const state=await this.status(key); const vscode=this.vscode;
+    const state=checkedState || await this.status(key); const vscode=this.vscode;
     if(!this.disposed && this.scmGenerations.get(key)===generation)this.onStatus?.(key,state);
     if(this.disposed || this.scmGenerations.get(key)!==generation || this.selectedWorkspaceKey!==undefined && this.selectedWorkspaceKey!==key) return state;
     await vscode.commands?.executeCommand?.('setContext','gushenCompletion.hasUnknownUpload',state.unverifiedUploadCount>0);
@@ -629,12 +631,14 @@ class ApiSourceUI {
     for(const change of changes) {
       const stagedHash=staged?.get(change.path);
       const uri=vscode.Uri.from({scheme:'guthon-api-change',authority:key,path:resourcePaths.get(change.path),query:new URLSearchParams({workspaceKey:key,path:change.path}).toString()});
-      const contextValue=change.state==='CONFLICT' ? 'guthonApi.conflict'
+      const conflict=change.state==='CONFLICT';
+      const contextValue=conflict ? 'guthonApi.conflict'
         : change.readonly ? 'guthonApi.readonlyChange'
         : canStage(change) ? 'guthonApi.change.stageable'
         : change.state==='MODIFIED' ? 'guthonApi.change' : 'guthonApi.unavailable';
       const row={resourceUri:uri,contextValue,
-        command:{command:'gushenCompletion.showApiDiff',title:'查看差异',arguments:[{workspaceKey:key,path:change.path}]},
+        command:{command:conflict ? 'gushenCompletion.resolveApiConflict' : 'gushenCompletion.showApiDiff',
+          title:conflict ? '处理 API 源码冲突' : '查看差异',arguments:[{workspaceKey:key,path:change.path}]},
         decorations:{tooltip:[change.state,stagedHash && stagedHash!==change.sourceHash ? '源码已变化，请重新暂存' : ''].filter(Boolean).join(' · ')}};
       (stagedHash ? stagedRows : localRows).push(row);
     }
@@ -680,6 +684,7 @@ class ApiSourceUI {
   }
   async applyScmChangeAction(key,action,sourcePaths) {
     const {selectionVersion,scopeGeneration}=this;
+    const scmGeneration=this.scmGenerations.get(key);
     const state=await this.status(key);
     const checkScope=()=>this.scmScope(key,state.checkoutPath,selectionVersion,scopeGeneration);
     checkScope();
@@ -703,7 +708,7 @@ class ApiSourceUI {
     if(!selected.length) return this.vscode.window.showInformationMessage(`本组没有可${title}的文件`);
     if(this.stagedUploads.has(key)) throw new Error('正在处理当前项目的暂存上传，请等本次操作完成');
     const paths=selected.map(change=>change.path);
-    if(action==='revert') return this.revert(key,paths,checkScope);
+    if(action==='revert') return this.revert(key,paths,checkScope,state.checkoutPath);
     const files=this.stagedFiles(key,state.checkoutPath) || new Map();
     if(action==='unstage') for(const p of paths) files.delete(p);
     else {
@@ -712,7 +717,9 @@ class ApiSourceUI {
       for(const change of selected) files.set(change.path,change.sourceHash);
     }
     this.stagedChanges.set(key,{checkoutPath:state.checkoutPath,files});
-    await this.updateScm(key);
+    // Staging changes only the session queue. Reuse the status that checked
+    // the selection, unless a refresh has already requested a newer snapshot.
+    await this.updateScm(key,this.scmGenerations.get(key)===scmGeneration ? state : undefined);
   }
   async uploadStaged(key) {
     if(this.stagedUploads.has(key)) throw new Error('正在处理当前项目的暂存上传，请等本次操作完成');
@@ -741,16 +748,17 @@ class ApiSourceUI {
     },'复制相对路径','复制绝对路径');
     if(answer) await this.vscode.env.clipboard.writeText(answer==='复制相对路径' ? sourcePath : absolute);
   }
-  async revert(key, sourcePaths, checkScope) {
+  async revert(key, sourcePaths, checkScope, checkoutPath) {
     const paths=[...new Set(Array.isArray(sourcePaths) ? sourcePaths : [sourcePaths])];
     if(!paths.length || paths.some(p=>!p)) throw new Error('请选择要还原的源码');
-    const state=await this.status(key);assertClean(this.vscode,state.checkoutPath,paths);
+    checkoutPath ??= (await this.status(key)).checkoutPath;
+    assertClean(this.vscode,checkoutPath,paths);
     const expectedHashes={};
-    for(const p of paths) {const current=await this.run(key,'read',{path:p});if(current.readonly) throw new Error(`只读源码不能还原：${p}`);expectedHashes[p]=current.sourceHash;}
+    for(const p of paths) {const current=await this.run(key,'read',{path:p,omitEditableContent:true});if(current.readonly) throw new Error(`只读源码不能还原：${p}`);expectedHashes[p]=current.sourceHash;}
     const answer=await this.vscode.window.showWarningMessage(`还原 ${paths.length} 个源码文件的本地修改？\n\n${paths.join('\n')}`,{modal:true},'还原');
     if(answer!=='还原') return;
-    assertClean(this.vscode,state.checkoutPath,paths);await this.editorState?.flush(key);
-    for(const p of paths) if((await this.run(key,'read',{path:p})).sourceHash!==expectedHashes[p]) throw new Error(`确认后源码已变化，请重新核对：${p}`);
+    assertClean(this.vscode,checkoutPath,paths);await this.editorState?.flush(key);
+    for(const p of paths) if((await this.run(key,'read',{path:p,omitEditableContent:true})).sourceHash!==expectedHashes[p]) throw new Error(`确认后源码已变化，请重新核对：${p}`);
     checkScope?.();
     const results=[];let failure;
     for(const p of paths) {
@@ -776,8 +784,9 @@ class ApiSourceUI {
       if(outdated) throw new Error(`暂存源码已变化或不可上传，请检查并重新暂存：${outdated}`);
     }
     if (!chosen.length) {await this.vscode.window.showInformationMessage('没有可上传的源码修改');return;}
-    const modules=[];
-    if(!staged) for(const path of chosen)if((await this.run(key,'read',{path})).metadata?.sourceType==='module-parameter')modules.push(path);
+    const sources=new Map();
+    for(const p of chosen) sources.set(p,await this.run(key,'read',{path:p,omitEditableContent:true}));
+    const modules=staged ? [] : chosen.filter(p=>sources.get(p).metadata?.sourceType==='module-parameter');
     if(modules.length) {
       if(modules.length<chosen.length) {
         const choice=await this.vscode.window.showQuickPick([{label:`模块参数 (${modules.length})`,module:true},{label:`其他源码 (${chosen.length-modules.length})`,module:false}],{title:'选择本次上传范围'});
@@ -789,7 +798,7 @@ class ApiSourceUI {
     }
     const snapshots=new Map(),entries=[];
     for (const p of chosen) {
-      const result=await this.run(key,'read',{path:p});
+      const result=sources.get(p);
       if(result.readonly) throw new Error(`只读源码不能上传：${p}`);
       if(staged && (result.sourceHash!==staged.get(p) || !Object.hasOwn(API_UPLOAD_TYPES,result.metadata?.sourceType))) {
         throw new Error(`暂存源码已变化或不可上传，请检查并重新暂存：${p}`);
@@ -813,7 +822,7 @@ class ApiSourceUI {
     if (answer !== '上传') return;
     assertClean(this.vscode,state.checkoutPath,chosen);
     await this.editorState?.flush(key);
-    for(const p of chosen) if((await this.run(key,'read',{path:p})).sourceHash!==expectedHashes[p]) throw new Error(`确认后源码已变化，请重新核对：${p}`);
+    for(const p of chosen) if((await this.run(key,'read',{path:p,omitEditableContent:true})).sourceHash!==expectedHashes[p]) throw new Error(`确认后源码已变化，请重新核对：${p}`);
     if(staged) {
       this.scmScope(key,state.checkoutPath,selectionVersion,scopeGeneration);
       const latest=this.stagedFiles(key,state.checkoutPath);
@@ -957,27 +966,57 @@ class ApiSourceUI {
     return result;
   }
   async resolveConflict(key,sourcePath) {
-    const state=await this.status(key);assertClean(this.vscode,state.checkoutPath,[sourcePath]);
+    const scope=this.scopeGeneration;
+    const {checkoutPath}=await this.ensureWorkspace(key);
+    const assertCurrentSource=()=>{
+      if(scope!==this.scopeGeneration || this.workspaces.get(key)?.checkoutPath!==checkoutPath) throw new Error('工作空间或工作区目录已切换，请重试');
+      if(this.editorState) {
+        this.editorState.assertNoConflictingDrafts(key,sourcePath);
+        this.editorState.assertNoDirtyDocumentsExcept(key,sourcePath);
+      } else assertClean(this.vscode,checkoutPath,[sourcePath]);
+    };
+    assertCurrentSource();
     const inspection=await this.run(key,'conflict',{path:sourcePath});
-    const current=await this.run(key,'read',{path:sourcePath});
-    if(current.sourceHash!==inspection.sourceHash) throw new Error('冲突源码已变化，请重新比较');
     if(inspection.path!==sourcePath || !inspection.sourceHash || !inspection.remoteHash || typeof inspection.local!=='string' || typeof inspection.remote!=='string') throw new Error('冲突检查未返回完整的来源和哈希，不能处理');
-    const local=await this.vscode.workspace.openTextDocument({content:inspection.local,language:'plaintext'});
-    const remote=await this.vscode.workspace.openTextDocument({content:inspection.remote,language:'plaintext'});
-    await this.vscode.commands.executeCommand('vscode.diff',local.uri,remote.uri,`${sourcePath} · 本地 ↔ 平台冲突`);
+    if(inspection.metadata?.pageSource==='batch-export') {
+      const action=await this.vscode.window.showWarningMessage('此页面的冲突来自批量下载 XML。请先更新此页面，取得平台原生源码后再处理。','更新此页面');
+      if(action==='更新此页面') {
+        assertCurrentSource();
+        return this.refreshScope({workspaceKey:key,path:sourcePath});
+      }
+      return;
+    }
+    const current=await this.run(key,'read',{path:sourcePath,omitEditableContent:true});
+    if(current.sourceHash!==inspection.sourceHash) throw new Error('冲突源码已变化，请重新比较');
+    const readonly=current.readonly || inspection.readonly;
+    const name=path.posix.basename(sourcePath);
+    await this.diffProvider.show(inspection.local,inspection.remote,{
+      beforeName:`本地-${name}`,afterName:`平台-${name}`,title:`${sourcePath} · 本地 ↔ 平台冲突`,
+    });
     const choices=[
-      ...(!current.readonly ? [{label:'保留本地内容',choice:'local',description:'以当前本地源码为解决结果，稍后自行上传'}] : []),
-      {label:current.readonly ? '恢复平台原文' : '采用平台内容',choice:'remote',description:'以平台源码替换当前文件'},
+      ...(!readonly ? [{label:'保留本地内容',choice:'local',description:'使用已保存的源码，可以是手工合并后的结果'}] : []),
+      {label:readonly ? '恢复平台原文' : '采用平台内容',choice:'remote',description:'以平台源码替换当前文件'},
+      ...(!readonly && current.metadata?.sourceType!=='module-parameter' ? [
+        {label:'打开原始源码手工合并',choice:'edit',description:'保存合并结果后，再次处理冲突并选择保留本地内容'},
+      ] : []),
     ];
     const choice=await this.vscode.window.showQuickPick(choices,{title:'选择冲突解决方式',
-      placeHolder:current.readonly ? '只读继承源码仅可恢复平台原文' : '如需手工合并，先保存原文件，再重新检查冲突'});
+      placeHolder:'左侧为本地已保存源码，右侧为本次同步记录的平台源码'});
     if(!choice) return;
     if(!choices.includes(choice)) throw new Error('冲突处理方式无效');
+    if(choice.choice==='edit') {
+      assertCurrentSource();
+      return this.openOriginalSources(key,sourcePath);
+    }
     if(await this.vscode.window.showWarningMessage(`确认对 ${sourcePath} 执行“${choice.label}”？`,{modal:true},'确认解决')!=='确认解决') return;
-    assertClean(this.vscode,state.checkoutPath,[sourcePath]);await this.editorState?.flush(key);
+    await this.editorState?.flush(key);
     const latest=await this.run(key,'conflict',{path:sourcePath});
+    assertCurrentSource();
     if(latest.sourceHash!==inspection.sourceHash || latest.remoteHash!==inspection.remoteHash) throw new Error('确认期间冲突内容已变化，请重新比较');
-    const result=await this.run(key,'resolve-conflict',{path:sourcePath,choice:choice.choice,expectedHash:inspection.sourceHash});
+    const result=await this.run(key,'resolve-conflict',{
+      path:sourcePath,choice:choice.choice,expectedHash:inspection.sourceHash,expectedRemoteHash:inspection.remoteHash,
+    });
+    this.setIndexResult(key,result.index);
     await showReport(this.vscode,'API 冲突处理结果',[`对象：${sourcePath}`,`本地源码 SHA-256：${result.sourceHash || '未返回'}`,`操作编号：${result.operationId || '未返回'}`,'','此操作未上传谷神。']);
     await this.updateScm(key);this.onUpdated?.();return result;
   }

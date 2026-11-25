@@ -712,7 +712,7 @@ tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
   position: fixed;
   top: 12px;
   left: 50%;
-  z-index: 3000;
+  z-index: 2147483646;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -730,6 +730,25 @@ tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
   cursor: move;
   white-space: nowrap;
   font-size: 14px;
+}
+
+.guthon-minimized-script-restore {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 3px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.guthon-minimized-script-restore:hover {
+  background: #ecf5ff;
+}
+
+.guthon-minimized-script-restore:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .guthon-minimized-script-close {

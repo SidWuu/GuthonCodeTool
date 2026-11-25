@@ -13,6 +13,18 @@ const { localDay, needsDailyCheck, supportsEditor } = require('../src/update-cen
 
 const { fixture, zip, rules } = require('./update-fixture');
 
+test('component checks reject a data directory setting that points at its development root', t => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'guthon-update-home-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const folder = path.join(home, 'var');
+  fs.mkdirSync(folder);
+  fs.mkdirSync(path.join(home, 'config'));
+  fs.writeFileSync(path.join(home, 'config/guthon.json'), '{"schemaVersion":3}');
+
+  assert.throws(() => updateRoot(folder), /请重新连接本地数据目录/);
+  assert.equal(updateRoot(home), path.join(folder, 'nexus', 'updates'));
+});
+
 test('three-component catalog is signed; versions and per-file hashes cannot be swapped', async t => {
   const f = fixture(t); const verified = await f.signed();
   assert.equal(verified.catalog.components.nexus.version, '2.5.0');

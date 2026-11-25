@@ -5,7 +5,7 @@ const {ToolProcessClient,requestKind}=require('../src/tool-process-client');
 function mockStateClient(t,record=()=>{},statusRequest,remoteRequest) {
   t.mock.method(ToolProcessClient.prototype,'request',async function(tool,command,args,key,input,options) {
     if(args[0]==='session' && input?.localOnly===true) return {ok:true,authenticated:true,session:{userName:'fixture'}};
-    if(args[0]==='status' && statusRequest) return statusRequest(tool,command,args,key,input);
+    if(args[0]==='status' && statusRequest) return statusRequest(tool,command,args,key,input,options);
     if(args[0]!=='editor-state' && remoteRequest) return remoteRequest.call(this,tool,command,args,key,input,options);
     assert.deepEqual(args,['editor-state','--stdin']);assert.equal(command,'api');
     record({client:this,tool,command,args,key,input});return {ok:true,editorToken:'token'};
@@ -56,6 +56,16 @@ test('SCM stage, restore and upload forward the entire file selection within one
   assert.equal(calls.length,4);
   assert.equal(f.errors.length,3);
   for(const error of f.errors) assert.match(error,/同一项目/);
+});
+test('the project source and SCM conflict commands resolve the same workspace file',async t=>{
+  const f=fixture(t),key='projects.demo',path='systems/S/pages/PG/PG.xml';
+  t.after(()=>f.api.dispose());
+  const resolve=f.handlers.get('gushenCompletion.resolveApiConflict');
+  const handler=t.mock.method(f.api.sourceTree,'resolveConflict',async(...args)=>assert.deepEqual(args,[key,path]));
+  await resolve({key,object:{path,sourceType:'page'}});
+  await resolve({resourceUri:{scheme:'guthon-api-change',query:new URLSearchParams({workspaceKey:key,path}).toString()}});
+  assert.equal(handler.mock.callCount(),2);
+  assert.deepEqual(f.errors,[]);
 });
 test('cancelled API address prompt does not change configuration',async t=>{
   const f=fixture(t);f.vscode.window.showInputBox=async()=>undefined;
@@ -117,7 +127,7 @@ test('new and initialized projects save scope without pulling or indexing',async
   } finally {await api.dispose();}
 });
 function scopeFixture(t,{cancelAt,scopeFailure,scopeResult,statusFailure=false,partial=false,dirty=false,noIndex=false,watchEvents=false,viewScm=false}={}) {
-  const events=[],errors=[],warnings=[],reports=[],handlers=new Map(),documents=dirty?[{uri:{scheme:'file',fsPath:'/checkout/systems/OLD/pages/main/P/p.xml'},isDirty:true,version:3}]:[];
+  const events=[],errors=[],warnings=[],reports=[],logs=[],handlers=new Map(),documents=dirty?[{uri:{scheme:'file',fsPath:'/checkout/systems/OLD/pages/main/P/p.xml'},isDirty:true,version:3}]:[];
   let picks=0,releaseScope,changeHandler;const settings={allSystems:false,systemIds:['OLD'],dataSourceIds:[],serverUrl:'https://fixture.invalid'};
   const pendingScope={allSystems:false,systemIds:['NEW'],dataSourceIds:[]};
   mockStateClient(t,({input})=>events.push({action:'editor-state',payload:input}),async(_tool,_command,_args,_key,input)=>{
@@ -141,9 +151,10 @@ function scopeFixture(t,{cancelAt,scopeFailure,scopeResult,statusFailure=false,p
       withProgress:async(_options,fn)=>{events.push({action:'progress'});return fn();},showTextDocument:async()=>{},showErrorMessage:async message=>errors.push(message),showWarningMessage:async(message,options)=>(warnings.push({message,options}),viewScm?'查看本地修改':undefined)}};
   if(watchEvents) {vscode.RelativePattern=class{};vscode.workspace.createFileSystemWatcher=()=>({onDidChange:fn=>{changeHandler=fn;},onDidCreate(){},onDidDelete(){},dispose(){}});}
   const primary={request:async(_tool,_command,args,_key,input)=>{events.push({action:args[0],input});if(watchEvents && args[0]==='index')return {ok:true,updatedPaths:input.paths.filter(p=>p.endsWith('changed.xml')),indexGeneration:'pulled',unchanged:false,complete:true};throw Error(args[0]);}};
-  const api=activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/fake',toolHome:'/data'}),processClient:primary,onUpdated:()=>events.push({action:'card'})});
+  const api=activateApi({vscode,context:{subscriptions:[]},getTool:async()=>({toolPath:'/fake',toolHome:'/data'}),processClient:primary,onUpdated:()=>events.push({action:'card'}),
+    getOutput:()=>({show(){},appendLine:line=>logs.push(line)})});
   api.sourceTree.syncWorkspaces([{workspaceKey:'projects.A',checkoutPath:'/checkout'}]);
-  return {api,events,errors,warnings,reports,handlers,pickCount:()=>picks,releaseScope:()=>releaseScope(),change:path=>changeHandler({fsPath:'/checkout/'+path})};
+  return {api,events,errors,warnings,reports,logs,handlers,pickCount:()=>picks,releaseScope:()=>releaseScope(),change:path=>changeHandler({fsPath:'/checkout/'+path})};
 }
 test('manual update applies the saved scope once and registers dirty buffers for backend protection',async t=>{
   const f=scopeFixture(t,{dirty:true});const result=await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');
@@ -213,6 +224,29 @@ test('a partial receipt after publication reports the actual applied changes and
     publicationState:'COMPLETE',publication:{operationId:'publish-1',updated:['a','b'],preserved:['c'],conflicts:[]},error:{code:'INDEX_FAILED',message:'索引不可用'}}});
   await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');assert.match(f.reports[0],/发布操作编号：publish-1/);
   assert.match(f.reports[0],/更新 2 个，保留 1 个，冲突 0 个/);assert.match(f.reports[0],/INDEX_FAILED.*索引不可用/);assert.match(f.reports[0],/总体结果：未完成/);await f.api.dispose();
+});
+
+test('partial pull output identifies the failed stage and bounds index diagnostics', async t => {
+  const diagnostics = Array.from({length: 12}, (_, index) => ({
+    path: index === 1 ? 'C:\\private\\subject.xml' : `systems/A/page-${index}.xml`,
+    code: 'API_PAGE_FORMAT_INVALID', message: 'private diagnostic text',
+  }));
+  const f = scopeFixture(t, {scopeResult: {
+    ok: true, operationId: 'scope-456', stage: 'PARTIAL', failedStage: 'CLEANUP',
+    complete: false, remoteDownloadComplete: true, downloadComplete: true,
+    error: {code: 'API_SCOPE_LOCAL_CHANGES', message: 'private cleanup error'},
+    index: {complete: false, diagnosticCount: 12, indexGeneration: 'index', diagnostics},
+  }});
+  await f.handlers.get('gushenCompletion.pullApiSource')('projects.A');
+  const log = f.logs.join('\n');
+  assert.match(log, /projects\.A.*操作编号 scope-456/);
+  assert.match(log, /阶段 PARTIAL.*失败阶段 CLEANUP.*API_SCOPE_LOCAL_CHANGES.*平台读取完成.*本地源码更新完成/);
+  assert.match(log, /诊断 12 项/);
+  assert.equal(f.logs.filter(line => line.includes(' · 索引诊断 · ')).length, 10);
+  assert.match(log, /API_PAGE_FORMAT_INVALID · "systems\/A\/page-0\.xml"/);
+  assert.match(log, /完整索引诊断见操作结果/);
+  assert.doesNotMatch(log, /private|page-10\.xml/);
+  await f.api.dispose();
 });
 test('scope report displays confirmed cleanup count and backup without fabricating paths',async t=>{
   const f=scopeFixture(t,{scopeResult:{ok:true,operationId:'scope-clean',stage:'COMPLETE',settingsSaved:true,complete:true,remoteDownloadComplete:true,downloadComplete:true,
@@ -460,6 +494,32 @@ test('simultaneous current-project status refreshes share one scan and later cal
   await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,1);
   finish({ok:true,summary:{sourceCount:16000}});assert.deepEqual(await one,await two);
   const three=api.run('projects.A','status');await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,2);finish({ok:true,summary:{sourceCount:16001}});assert.equal((await three).summary.sourceCount,16001);
+});
+
+test('one failed status scan logs safe context for all callers and successful retries stay quiet', async t => {
+  const lines = [];
+  let failed = true;
+  mockStateClient(t, undefined, async (_tool, _command, _args, _key, _input, {onOutput}) => {
+    if (!failed) return {ok: true};
+    onOutput('private process output\n');
+    onOutput('[谷神 API] 状态扫描文件信息不一致 · projects.A · "a.gss" · 字段 st_ctime_ns · Python 3.12.10\n');
+    return {ok: false, error: {code: 'API_SOURCE_STALE', message: 'private error detail'}};
+  });
+  const vscode = {workspace: {textDocuments: []}, commands: {registerCommand: () => ({dispose() {}})}, window: {}};
+  const api = activateApi({vscode, context: {subscriptions: []},
+    getTool: async () => ({toolPath: '/fake', toolHome: '/data', mode: 'packaged'}),
+    getOutput: () => ({appendLine: line => lines.push(line)}),
+  });
+  const results = await Promise.allSettled([api.run('projects.A', 'status'), api.run('projects.A', 'status')]);
+  for (const result of results) assert.equal(result.reason.code, 'API_SOURCE_STALE');
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /status · projects\.A · 本地源码状态扫描失败 · API_SOURCE_STALE.*packaged.*耗时/);
+  assert.match(lines[1], /"a\.gss" · 字段 st_ctime_ns/);
+  assert.doesNotMatch(lines.join('\n'), /private/);
+  failed = false;
+  await api.run('projects.A', 'status');
+  assert.equal(lines.length, 2);
+  await api.dispose();
 });
 
 test('default PAGE editing opens the Nexus local controller without requesting platform authentication',async t=>{
