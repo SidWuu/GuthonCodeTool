@@ -54,12 +54,10 @@ test('platform order follows menu order, page tab order and system order', () =>
   const pages = category(tree, '页面');
   assert.deepEqual(labels(pages), ['BSys', 'ASys'], '系统按平台清单顺序');
   const system = child(pages, 'ASys');
-  assert.deepEqual(labels(system), ['菜单B', '菜单A', '0E'], '菜单按平台顺序，未挂菜单的目录在后');
+  assert.deepEqual(labels(system), ['菜单B', '菜单A', '未归入菜单'], '菜单按平台顺序，未挂菜单的页面分组在后');
   const tabGroup = child(child(system, '菜单B'), '页签组B');
   assert.deepEqual(labels(tabGroup), ['PG-1 · Beta', 'PG-3 · Alpha'], '同一菜单内取平台 pages 数组顺序');
-  assert.deepEqual(labels(child(system, '0E')), ['PG-A', 'PG-B'], '未挂菜单的页面按 pageId 顺序');
-  assert.deepEqual(labels(child(child(system, '0E'), 'PG-A')), ['PG-A · Zulu']);
-  assert.deepEqual(labels(child(child(system, '0E'), 'PG-B')), ['PG-B · Alpha']);
+  assert.deepEqual(labels(child(system, '未归入菜单')), ['PG-A · Zulu', 'PG-B · Alpha'], '未挂菜单的页面按 pageId 顺序');
 });
 
 test('platform order follows fun id order for procedures', () => {
@@ -81,7 +79,7 @@ test('name order keeps the previous display-name sorting', () => {
   const pages = category(tree, '页面');
   assert.deepEqual(labels(pages), ['ASys', 'BSys'], '名称模式按显示名排序');
   const system = child(pages, 'ASys');
-  assert.deepEqual(labels(system), ['0E', '菜单A', '菜单B']);
+  assert.deepEqual(labels(system), ['未归入菜单', '菜单A', '菜单B']);
   const tabGroup = child(child(system, '菜单B'), '页签组B');
   assert.deepEqual(labels(tabGroup), ['PG-3 · Alpha', 'PG-1 · Beta']);
   const procedures = category(tree, '过程函数');

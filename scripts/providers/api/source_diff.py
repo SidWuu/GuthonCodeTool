@@ -8,11 +8,12 @@ import re
 from common.page_comparison import compare_pages
 from common.page_projection import extract_page_scripts
 from .client import ApiError
+from .content import source_name
 from .index import _page_data, page_format
 from .store import ApiStore, digest
 
 
-def _page_views(before, after, metadata):
+def _page_views(before, after, metadata, *, conflict=False):
     def check_float(token):
         value = float(token)
         try:
@@ -58,6 +59,10 @@ def _page_views(before, after, metadata):
     check_source(after)
     original = _page_data(before, metadata['pageId'])
     current = _page_data(after, metadata['pageId'])
+    if conflict:
+        from .page_source import normalize_saved_model
+        original = normalize_saved_model(original)
+        current = normalize_saved_model(current)
     changes = compare_pages(original, current, limit=10000)
     if changes['truncated']:
         raise ValueError('语义变化超过10000项，改用原始源码对比')
@@ -69,6 +74,8 @@ def _page_views(before, after, metadata):
     def append(kind, label, pointer, before_text, after_text, language):
         heading = ['', '## ' + labels[kind] + ' · ' + label, '@json-pointer ' + pointer]
         for output, text in ((left, before_text), (right, after_text)):
+            if language != 'json':
+                text = text.replace('\r\n', '\n').replace('\r', '\n')
             longest = max([2, *[len(part) for part in re.findall(r'`+', text)]])
             fence = '`' * (longest + 1)
             output.extend([*heading, fence + language, text, fence])
@@ -82,8 +89,10 @@ def _page_views(before, after, metadata):
         script = new_script or old_script
         before_text = old_script.original_value if old_script else row['beforeText']
         after_text = new_script.original_value if new_script else row['afterText']
-        append(row['kind'], row['label'], row['pointer'], before_text, after_text,
-               script_language(script) if script else 'json')
+        language = script_language(script) if script else (
+            'sql' if row['pointer'].rsplit('/', 1)[-1] == 'superSql' else 'json'
+        )
+        append(row['kind'], row['label'], row['pointer'], before_text, after_text, language)
         # Added/removed containers are one semantic row; expose their scripts as
         # separate readable fragments without guessing identities for arrays.
         if row['kind'] in {'added', 'removed'} and not script:
@@ -107,26 +116,37 @@ def _page_views(before, after, metadata):
                                fragment.original_value if side == '现侧' else '（未配对）',
                                script_language(fragment))
     if not changes['rows']:
-        note = '语义内容一致；原文格式或键顺序可能不同，可选择原始源码对比。'
+        note = ('可读内容一致。原文格式、键顺序或平台默认值写法可能不同，可选择原始源码对比。'
+                if conflict else '语义内容一致；原文格式或键顺序可能不同，可选择原始源码对比。')
         left.append(note)
         right.append(note)
     return '\n'.join(left) + '\n', '\n'.join(right) + '\n', changes['total']
 
 
-def read_diff(workspace, path, *, view='auto', offset=0, max_chars=50000):
+def read_diff(workspace, path, *, view='auto', offset=0, max_chars=50000, conflict=False):
     if view not in {'auto', 'raw', 'readable'} or type(offset) is not int or offset < 0 or type(max_chars) is not int or not 1 <= max_chars <= 50000:
         raise ApiError('API_INPUT_INVALID', '差异视图或分页参数无效')
     store = ApiStore(workspace)
-    item = store.read(path)
-    before, after = store.baseline(path), item['content']
-    if digest(before) != item['baseHash']:
-        raise ApiError('API_SOURCE_CHANGED', '差异读取期间基线已变化，请重新比较')
+    if conflict:
+        record = store.conflict(path)
+        before, after = record['local'], record['remote']
+        if digest(after) != record['remoteHash']:
+            raise ApiError('API_SOURCE_CHANGED', '冲突的平台原文与版本记录不一致，请重新同步')
+        metadata = record['metadata']
+        item = {'path': path, 'name': source_name(metadata), 'metadata': metadata, 'content': after}
+        versions = {'sourceHash': record['sourceHash'], 'remoteHash': record['remoteHash']}
+    else:
+        item = store.read(path)
+        before, after = store.baseline(path), item['content']
+        if digest(before) != item['baseHash']:
+            raise ApiError('API_SOURCE_CHANGED', '差异读取期间基线已变化，请重新比较')
+        versions = {'sourceHash': item['sourceHash'], 'baseHash': item['baseHash']}
     readable, message, total_changes = False, '', None
     if view != 'raw' and item['metadata'].get('sourceType') == 'page':
         try:
             page_kind = page_format(item)
             if page_kind in {'json', 'native-xml'}:
-                before, after, total_changes = _page_views(before, after, item['metadata'])
+                before, after, total_changes = _page_views(before, after, item['metadata'], conflict=conflict)
                 readable = True
             elif page_kind == 'unsupported-xml':
                 message = 'PAGE 格式不支持可读投影，显示原始源码'
@@ -136,8 +156,7 @@ def read_diff(workspace, path, *, view='auto', offset=0, max_chars=50000):
     language = 'markdown' if readable else {'.json': 'json', '.xml': 'xml', '.gss': 'guthon-gss', '.js': 'javascript', '.sql': 'sql'}.get(suffix, 'plaintext')
     total = max(len(before), len(after))
     end = offset + max_chars
-    return {'path': path, 'name': item['name'], 'sourceType': item['metadata'].get('sourceType'),
-            'sourceHash': item['sourceHash'], 'baseHash': item['baseHash'],
+    return {'path': path, 'name': item['name'], 'sourceType': item['metadata'].get('sourceType'), **versions,
             'before': before[offset:end], 'after': after[offset:end], 'offset': offset,
             'nextOffset': end if end < total else None, 'totalBeforeChars': len(before),
             'totalAfterChars': len(after), 'truncated': end < total,

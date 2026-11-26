@@ -14,7 +14,7 @@ from urllib.parse import quote
 from common.persistence import atomic_bytes, atomic_text, file_lock
 from .client import ApiError
 from . import page_source
-from .download import download, download_prefixes, fetch_object, files_from_item, records, BASE
+from .download import download, download_prefixes, fetch_object, fetch_system_menu, files_from_item, records, BASE
 from .editor_state import assert_writable, _live
 from .progress import phase
 from .store import ApiStore, digest
@@ -182,7 +182,76 @@ def _cleanup_excluded(workspace, store, operation, excluded):
                         parent = parent.parent
 
 
-def _publish_and_index(workspace, store, files, scope, *, authoritative, on_published=None,
+def _save_upload_result(store, operation):
+    verified = {"REMOTE_READBACK_VERIFIED", "UNCHANGED", "ALREADY_REMOTE"}
+    operation["stage"] = (
+        "REMOTE_READBACK_VERIFIED"
+        if len(operation["results"]) == len(operation["paths"])
+        and all(result["stage"] in verified for result in operation["results"])
+        else "PARTIAL"
+    )
+    store._receipt(operation)
+
+
+def _publish_downloaded(store, client, files, **options):
+    """Rebase a previously accepted PAGE using its submitted source as the ancestor."""
+    targets = {
+        (item.path, item.metadata.get("nativeVersion") or item.metadata.get("versionMac")): position
+        for position, item in enumerate(files)
+        if item.kind == "page" and page_source.structured(item.metadata, item.path)
+    }
+    if not targets or not store.path.is_file():
+        return store.publish(files, **options)
+    files = list(files)
+    submitted = {}
+    verified = []
+    recovery = []
+    for operation in store.history(100):
+        if operation.get("kind") != "upload":
+            continue
+        for result in operation["results"]:
+            version = result.get("nativeAcceptedVersion")
+            if (not version or result.get("pageProtocol") != "native-json"
+                    or result.get("stage") not in {"UNKNOWN", "REMOTE_ACKNOWLEDGED"}):
+                continue
+            path = result["path"]
+            position = targets.pop((path, version), None)
+            if position is None:
+                continue
+            try:
+                accepted, original, proof = page_source.recover_upload_file(
+                    store, client, files[position], result, operation,
+                )
+            except ApiError as error:
+                recovery.append({"path": path, "operationId": operation["operationId"], "code": error.code})
+                continue
+            files[position] = accepted
+            submitted[path] = original
+            verified.append((operation, result, proof))
+
+    publication = store.publish(files, uploaded_content=submitted, **options)
+    conflicts = {item["path"] for item in publication["conflicts"]}
+    updated_operations = {}
+    for operation, result, proof in verified:
+        path, operation_id = result["path"], operation["operationId"]
+        summary = {"path": path, "operationId": operation_id}
+        if path in conflicts:
+            summary["code"] = "API_LOCAL_AFTER_UPLOAD_CONFLICT"
+        else:
+            result.update(proof)
+            result.pop("code", None)
+            result.pop("message", None)
+            updated_operations[operation_id] = operation
+            summary["stage"] = "REMOTE_READBACK_VERIFIED"
+        recovery.append(summary)
+    for operation in updated_operations.values():
+        _save_upload_result(store, operation)
+    if recovery:
+        publication["uploadRecovery"] = recovery
+    return publication
+
+
+def _publish_and_index(workspace, store, client, files, scope, *, authoritative, on_published=None,
                        reuse_unchanged=False):
     from .module_parameters import DIRECTORY_PATH, SOURCE_TYPE
 
@@ -194,9 +263,9 @@ def _publish_and_index(workspace, store, files, scope, *, authoritative, on_publ
                 authoritative_types.update(row[0] for row in conn.execute("SELECT DISTINCT json_extract(metadata,'$.sourceType') FROM source"))
         # Detail snapshots are an on-demand editing cache, not absent downloads.
         authoritative_types.discard(SOURCE_TYPE)
-    with phase("源码发布"):
-        result = store.publish(files, scope=scope, authoritative=authoritative,
-                               authoritative_source_types=authoritative_types, skip_unchanged=reuse_unchanged)
+    with phase("本地源码更新"):
+        result = _publish_downloaded(store, client, files, scope=scope, authoritative=authoritative,
+                                     authoritative_source_types=authoritative_types, skip_unchanged=reuse_unchanged)
     if on_published is not None:
         on_published(result)
     from .index import rebuild, reconcile_pull
@@ -206,6 +275,18 @@ def _publish_and_index(workspace, store, files, scope, *, authoritative, on_publ
     result["downloadComplete"] = result["complete"]
     result["complete"] = result["complete"] and result["index"]["complete"]
     return {**result, "downloadedFiles": len(files), "checkoutPath": str(workspace["providerSourceRoot"])}
+
+
+def _fetch_page_menu(client, files):
+    if not any(item.kind == "page" for item in files):
+        return None, {}
+    try:
+        _, menu = fetch_system_menu(client)
+    except ApiError as error:
+        # A menu request can fail independently of the downloaded PAGE files.
+        # Keep the last usable menu and surface the failure alongside the sync.
+        return None, {"menuError": {"code": error.code, "message": str(error)}}
+    return menu, {}
 
 
 def pull(workspace, client):
@@ -225,10 +306,14 @@ def pull(workspace, client):
                 page_store=store,
             )
         assert_writable(workspace, sorted(set(store.paths()) | {item.path for item in files}))
+        menu, menu_result = _fetch_page_menu(client, files)
+        if menu is not None:
+            save_project(workspace, menu_tree=menu)
         reuse_unchanged = (previous_scope is not None and previous_scope == active_scope(workspace)
                            and config == settings(workspace) and pending_scope(workspace, config) is None)
-        return _publish_and_index(workspace, store, files, scope, authoritative=True,
-                                  reuse_unchanged=reuse_unchanged)
+        publication = _publish_and_index(workspace, store, client, files, scope, authoritative=True,
+                                         reuse_unchanged=reuse_unchanged)
+        return {**publication, **menu_result}
 
 
 def scope_apply(workspace, client, payload, *, apply_pending=False):
@@ -249,6 +334,7 @@ def scope_apply(workspace, client, payload, *, apply_pending=False):
     def capture(systems, sources):
         project.update(systems=systems, sources=sources)
     files, scope = download(client, proposed, on_project=capture, page_store=store)
+    menu, menu_result = _fetch_page_menu(client, files)
     directory, _ = api_paths(workspace)
     with configuration_lock(workspace), file_lock(directory / "sync.lock"), file_lock(directory / "source.lock"):
         if settings(workspace) != before:
@@ -277,7 +363,7 @@ def scope_apply(workspace, client, payload, *, apply_pending=False):
                      "remoteDownloadComplete": True, "downloadComplete": False,
                      "downloadedFiles": len(files), "complete": False, "index": None,
                      "cleanup": {"removedCount": 0, "removedPaths": [], "backupPath": None, "blocked": []},
-                     "checkoutPath": str(workspace["providerSourceRoot"])}
+                     "checkoutPath": str(workspace["providerSourceRoot"]), **menu_result}
         store._receipt(operation)
         try:
             operation["stage"] = "CONFIGURING"
@@ -285,7 +371,7 @@ def scope_apply(workspace, client, payload, *, apply_pending=False):
             configured = configure(workspace, selected)
             operation.update(settings=configured, settingsSaved=True, stage="SCOPE_SAVED")
             store._receipt(operation)
-            save_project(workspace, project["systems"], project["sources"])
+            save_project(workspace, project["systems"], project["sources"], menu_tree=menu)
             operation["stage"] = "PUBLISHING"
             store._receipt(operation)
             def published(result):
@@ -297,7 +383,7 @@ def scope_apply(workspace, client, payload, *, apply_pending=False):
                                  updated=result["updated"], preserved=result["preserved"],
                                  deleted=result["deleted"], conflicts=result["conflicts"])
                 store._receipt(operation)
-            publication = _publish_and_index(workspace, store, files, scope, authoritative=True, on_published=published)
+            publication = _publish_and_index(workspace, store, client, files, scope, authoritative=True, on_published=published)
             operation.update(publication=publication, index=publication["index"],
                              publicationOperationId=publication["operationId"],
                              complete=publication["complete"],
@@ -433,13 +519,16 @@ def refresh(workspace, client, payload):
                         identity = (kind, *(str(metadata.get(key, "")) for key in identity_keys[kind]))
                         if identity in incoming and incoming[identity] != previous_path:
                             raise ApiError("API_REMOTE_PATH_CHANGED", "远端对象路径已变化，请更新当前范围并核对迁移；未创建重复源码")
-            result = store.publish(files, scope={"prefixes": prefixes})
+            result = _publish_downloaded(store, client, files, scope={"prefixes": prefixes})
+            menu, menu_result = _fetch_page_menu(client, files)
+            if menu is not None:
+                save_project(workspace, menu_tree=menu)
             from .index import update
 
             result["index"] = update(workspace, [item.path for item in files])
             result["downloadComplete"] = result["complete"]
             result["complete"] = result["complete"] and result["index"]["complete"]
-            return {**result, "prefixes": prefixes, "downloadedFiles": len(files),
+            return {**result, **menu_result, "prefixes": prefixes, "downloadedFiles": len(files),
                     "checkoutPath": str(workspace["providerSourceRoot"])}
         source = target(workspace, payload)
         files = fetch_object(client, source["metadata"], page_store=ApiStore(workspace))
@@ -449,7 +538,7 @@ def refresh(workspace, client, payload):
                 "API_REMOTE_PATH_CHANGED",
                 "平台对象路径已变化，请更新当前范围后核对迁移；未创建重复源码",
             )
-        result = ApiStore(workspace).publish(files)
+        result = _publish_downloaded(ApiStore(workspace), client, files)
         from .index import update
 
         result["index"] = update(workspace, [x.path for x in files])
@@ -675,17 +764,7 @@ def upload(workspace, client, payload):
                 break
             finally:
                 store._receipt(operation)
-        operation["stage"] = (
-            "REMOTE_READBACK_VERIFIED"
-            if len(operation["results"]) == len(paths)
-            and all(
-                x["stage"]
-                in {"REMOTE_READBACK_VERIFIED", "UNCHANGED", "ALREADY_REMOTE"}
-                for x in operation["results"]
-            )
-            else "PARTIAL"
-        )
-        store._receipt(operation)
+        _save_upload_result(store, operation)
         from .index import update
 
         update(workspace, paths)
@@ -876,17 +955,7 @@ def verify_upload(workspace, client, operation_id):
                     message="当前平台内容不能证明先前上传结果；请人工核对，不自动重发",
                 )
             store._receipt(operation)
-        operation["stage"] = (
-            "REMOTE_READBACK_VERIFIED"
-            if len(operation["results"]) == len(operation["paths"])
-            and all(
-                x["stage"]
-                in {"REMOTE_READBACK_VERIFIED", "UNCHANGED", "ALREADY_REMOTE"}
-                for x in operation["results"]
-            )
-            else "PARTIAL"
-        )
-        store._receipt(operation)
+        _save_upload_result(store, operation)
         from .index import update
 
         update(workspace, [x["path"] for x in operation["results"]])

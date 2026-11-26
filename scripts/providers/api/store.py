@@ -627,7 +627,8 @@ class ApiStore:
         preserved = []
         deleted = []
         journal_path = self.directory / "operations" / operation["operationId"] / "publication.jsonl"
-        progress_interval = max(100, (len(files) + 99) // 100)
+        file_count = len(files)
+        progress_interval = max(100, (file_count + 99) // 100)
         with file_lock(self.directory / "source.lock"):
             with closing(sqlite3.connect(self.path)) as conn, journal_path.open("ab") as journal:
                 def append_event(event, *, durable=True):
@@ -641,7 +642,7 @@ class ApiStore:
                 )
                 for processed, item in enumerate(files):
                     if processed % progress_interval == 0:
-                        emit_progress(f"源码发布进度 · {operation['operationId']} · {processed}/{len(files)} 个文件")
+                        emit_progress(f"本地源码更新 · 已处理 {processed}/{file_count} 个文件")
                     target = self._path(item.path)
                     meta = {
                         **item.metadata,
@@ -792,7 +793,7 @@ class ApiStore:
                     operation["current"] = None
                     append_event({"applied": item.path})
                 if files:
-                    emit_progress(f"源码发布进度 · {operation['operationId']} · {len(files)}/{len(files)} 个文件")
+                    emit_progress(f"本地源码更新 · 已处理 {file_count}/{file_count} 个文件")
                 if authoritative:
                     incoming = set(paths)
                     for path, text, rawmeta, ro in conn.execute(

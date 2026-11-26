@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 import base64
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
 import http.cookiejar
 import json
@@ -54,9 +56,23 @@ _READ_ENDPOINTS = {
     "/develop/dev/pages/getPageBaseInfo.htm",
 }
 
+_DEFAULT_HTTP_TIMEOUT = 120
+_SOURCE_PULL_TIMEOUT = 300
+_UNSPECIFIED_TIMEOUT = object()
+_pulling_source = ContextVar("api_pulling_source", default=False)
+
+
+@contextmanager
+def source_pull_timeout():
+    token = _pulling_source.set(True)
+    try:
+        yield
+    finally:
+        _pulling_source.reset(token)
+
 
 class ApiClient:
-    def __init__(self, root_url, *, opener=None, timeout=120):
+    def __init__(self, root_url, *, opener=None, timeout=_UNSPECIFIED_TIMEOUT):
         self.root_url = server_url(root_url)
         if opener is None:
             context = ssl.create_default_context()
@@ -74,7 +90,11 @@ class ApiClient:
             )
         else:
             self.opener = opener
-        self.timeout = timeout
+        if timeout is _UNSPECIFIED_TIMEOUT:
+            self.timeout = _DEFAULT_HTTP_TIMEOUT
+            self._source_pull_timeout = _SOURCE_PULL_TIMEOUT
+        else:
+            self.timeout = self._source_pull_timeout = timeout
         self.session = None
         self.access_token = None
         self.user = None
@@ -154,8 +174,9 @@ class ApiClient:
                     ),
                 },
             )
+            timeout = self._source_pull_timeout if _pulling_source.get() else self.timeout
             try:
-                with self.opener.open(request, timeout=self.timeout) as response:
+                with self.opener.open(request, timeout=timeout) as response:
                     result = json.loads(response.read().decode("utf-8"))
             except HTTPError as error:
                 raise ApiError(

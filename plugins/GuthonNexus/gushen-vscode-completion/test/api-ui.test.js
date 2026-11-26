@@ -313,6 +313,8 @@ test('manifest exposes API source navigation, PAGE management and SCM actions',(
     assert.ok(apiActions.some(item=>item.command===`gushenCompletion.${command}` && item.group==='modification@1'));
   }
   const apiGroupActions=manifest.contributes.menus['scm/resourceGroup/context'].filter(item=>item.when.includes('guthon-api-'));
+  assert(apiGroupActions.some(item=>item.command==='gushenCompletion.uploadUnstagedApiSources'
+    && item.when.includes('scmResourceGroup == changes')));
   assert.deepEqual(commandsForGroup(apiGroupActions,'staged'),['openApiScmGroupSources','unstageApiScmChanges']);
   assert.deepEqual(commandsForGroup(apiGroupActions,'changes'),['openApiScmGroupSources','revertApiScmChanges','stageAllApiScmChanges']);
   for(const item of [...apiGroupActions,...apiActions.filter(item=>item.group.startsWith('inline'))]) {

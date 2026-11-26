@@ -4,7 +4,7 @@ const {ToolProcessClient} = require('../tool-process-client');
 const {operationTimer} = require('../output-logging');
 const {ApiLoginStore}=require('./login-store');
 const {ApiAuthentication}=require('./authentication');
-const {ApiSourceUI,READONLY_SCHEME,assertClean,identity,showReport,sourceSyncLines,filePath} = require('./source-ui');
+const {ApiSourceUI,READONLY_SCHEME,assertClean,identity,showReport,sourceSyncLines,uploadRecoveryLines,filePath} = require('./source-ui');
 const {openDesigner} = require('./designer');
 const {ApiEditorState} = require('./editor-state');
 const {openProjectWorkspace} = require('./project-workspace');
@@ -63,11 +63,13 @@ function scopeReportLines(key,result) {
     `本地发布与合并：${state(result.downloadComplete)}`];
   if(result.failedStage) lines.push(`失败阶段：${result.failedStage}`);
   if(result.error) lines.push(`错误：${result.error.code || '未返回错误码'} · ${result.error.message || '未返回详情'}`);
+  if(result.menuError) lines.push(`菜单更新未完成：${result.menuError.code} · ${result.menuError.message}`);
   lines.push(`源码发布：${result.publicationState || (publication ? state(publication.complete) : '未返回')}`);
   if(publication) {
     const count=name=>Array.isArray(publication[name]) ? String(publication[name].length) : '未返回';
     lines.push(`发布操作编号：${publication.operationId || result.publicationOperationId || '未返回'}`,
       `更新 ${count('updated')} 个，保留 ${count('preserved')} 个，冲突 ${count('conflicts')} 个。`);
+    lines.push(...uploadRecoveryLines(publication.uploadRecovery));
     if(publication.conflicts?.length) lines.push('','## 文件冲突',...publication.conflicts.map(item=>`- ${item.path}：${item.reason}`));
   }
   if(result.cleanup) {
@@ -182,7 +184,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
         logApiResult(output, label, result);
       }
       if(action==='login'){ui.menuAttempts.delete(key);ui.invalidate(key);ui.refresh();}
-      if(action==='scope-save' || action==='resolve-conflict')invalidateStatus(key);
+      if(action==='scope-save' || action==='refresh' || action==='resolve-conflict' || action==='upload')invalidateStatus(key);
       if(action==='configure'){invalidateStatus(key);if(result.index){ui.invalidate(key);ui.setIndexResult(key,result.index);}}
       return result;
     }
@@ -381,7 +383,8 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     unstageApiSource: async (key,p) => ui.applyScmChangeAction(key,'unstage',p),
     unstageApiScmChanges: async key => ui.applyScmChangeAction(key,'unstage'),
     revertApiScmChanges: async key => ui.applyScmChangeAction(key,'revert'),
-    uploadStagedApiSources: async key => ui.uploadStaged(key),
+    uploadStagedApiSources: async key => ui.uploadScm(key),
+    uploadUnstagedApiSources: async key => ui.uploadScm(key,'unstaged'),
     showApiOriginalPath: async (key,p) => ui.showOriginalPath(key,p),
     refreshApiObject: async (key,p,value) => ui.refreshScope(typeof value==='string' ? {workspaceKey:key,path:p} : value),
     showApiIndexDiagnostics: async key => ui.showIndexDiagnostics(key),
@@ -500,6 +503,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     vscode.commands.registerCommand('gushenCompletion.unstageApiScmChanges',execute('unstageApiScmChanges')),
     vscode.commands.registerCommand('gushenCompletion.revertApiScmChanges',execute('revertApiScmChanges')),
     vscode.commands.registerCommand('gushenCompletion.uploadStagedApiSources',execute('uploadStagedApiSources')),
+    vscode.commands.registerCommand('gushenCompletion.uploadUnstagedApiSources',execute('uploadUnstagedApiSources')),
     vscode.commands.registerCommand('gushenCompletion.showApiOriginalPath',execute('showApiOriginalPath')),
     vscode.commands.registerCommand('gushenCompletion.refreshApiObject',execute('refreshApiObject')),
     vscode.commands.registerCommand('gushenCompletion.showApiIndexDiagnostics',execute('showApiIndexDiagnostics')),

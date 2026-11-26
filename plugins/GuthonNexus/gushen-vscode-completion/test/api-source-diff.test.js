@@ -15,9 +15,9 @@ function fixture(run) {
 function backend(before,after,options={}) {
   const left=[...before],right=[...after];
   return async(key,action,input)=>{
-    assert.equal(key,'products.MixedCase');assert.equal(action,'diff');
+    assert.equal(key,'products.MixedCase');assert.equal(action,options.conflict?'conflict':'diff');
     const {offset,maxChars}=input,end=offset+maxChars,total=Math.max(left.length,right.length);
-    return {path:input.path,offset,sourceHash:'source',baseHash:'base',sourceType:'page',readonly:true,
+    return {path:input.path,offset,sourceHash:'source',...(options.conflict?{remoteHash:'remote'}:{baseHash:'base'}),sourceType:'page',readonly:true,
       view:input.view==='raw'?'raw':'readable',language:input.view==='raw'?'xml':'markdown',message:'',
       before:left.slice(offset,end).join(''),after:right.slice(offset,end).join(''),totalBeforeChars:left.length,totalAfterChars:right.length,
       truncated:end<total,nextOffset:end<total?end:null,...(options.change?.(input) || {})};
@@ -39,6 +39,16 @@ test('rejects mixed hashes, bad pagination, and mismatch with upload snapshot',a
     await assert.rejects(f.ui.diff('products.MixedCase','x.xml'),/变化|不完整/);assert.equal(f.commands.length,0);f.ui.dispose();
   }
   const f=fixture(backend('x','y'));await assert.rejects(f.ui.diff('products.MixedCase','x.xml','different'),/变化/);assert.equal(f.commands.length,0);f.ui.dispose();
+});
+test('conflict diff rejects a changed platform snapshot on a later page before opening the editor',async()=>{
+  const f=fixture(backend('x','汉'.repeat(50001),{
+    conflict:true,change:input=>input.offset?{remoteHash:'new-platform'}:{},
+  }));
+  await assert.rejects(f.ui.diffProvider.open('products.MixedCase','x.xml',{
+    expectedSourceHash:'source',expectedRemoteHash:'remote',
+  }),/平台冲突版本已变化/);
+  assert.equal(f.commands.length,0);
+  f.ui.dispose();
 });
 test('raw choice stays bound to the reviewed hashes and fallback explains itself',async()=>{
   const calls=[];let resolveChoice;

@@ -23,7 +23,8 @@ def compare_pages(before, after, *, limit=1000):
         total += 1
         paths.add(parent if kind == 'removed' else new_path)
         if len(rows) < limit:
-            code = old_path.rsplit('/', 1)[-1].endswith('Script') or new_path.rsplit('/', 1)[-1] == 'sql'
+            key = new_path.rsplit('/', 1)[-1]
+            code = key.endswith('Script') or key in {'sql', 'superSql'}
             display = lambda value: value if code and isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
             rows.append({'kind': kind, 'pointer': new_path, 'beforePointer': old_path,
                          'anchor': parent if kind == 'removed' else new_path, 'label': label,

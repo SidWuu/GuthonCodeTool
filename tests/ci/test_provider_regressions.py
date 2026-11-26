@@ -1,6 +1,7 @@
 """Offline regressions through the production workspace and source entry points."""
 
 from contextlib import closing, nullcontext, redirect_stderr, redirect_stdout
+from copy import deepcopy
 from io import StringIO
 import json
 from pathlib import Path
@@ -18,10 +19,10 @@ from common.database_exports import export_bill_type_sql as exporter
 from common.inheritance import SOURCE_CATALOG_VERSION
 from common.runtime_paths import runtime_home_context
 from common.workspace_selection import select_workspace
-from providers.api import native_page, sync as api_sync
+from providers.api import native_page, page_source, sync as api_sync
 from providers.api.client import ApiError
 from providers.api.download import SourceFile
-from providers.api.store import ApiStore
+from providers.api.store import ApiStore, digest
 from providers.svn.nexus import index_queries, scm
 
 
@@ -167,14 +168,39 @@ class ApiWorkspaceTest(WorkspaceCase):
         path = "systems/S1/pages/main/PG-test/PG-test.xml"
         metadata = {"systemId": "S1", "pageId": "PG-test", "pageType": 1, "pageSource": "native-editor"}
         store = ApiStore(workspace)
-        base = native_page.encode({"pageId": "PG-test", "title": "Original", "superScript": "original parent"})
-        local = base.replace("Original", "Locally edited")
-        remote = base.replace("Original", "Platform edit")
+        base = native_page.encode({
+            "pageId": "PG-test", "title": "Original", "superScript": "original parent",
+            "superSql": "SELECT ID\r\nFROM FIXTURE\r\nORDER BY ORIGINAL",
+            "pageEvents": {"onClickScript": "selectOriginal();\r\nreturn true;"},
+        })
+        local = base.replace("Original", "Locally edited").replace("ORDER BY ORIGINAL", "ORDER BY LOCAL")
+        remote = base.replace("Original", "Platform edit").replace("ORDER BY ORIGINAL", "ORDER BY PLATFORM")
         latest = remote.replace("Platform edit", "New platform edit").replace("original parent", "updated parent")
         store.publish([SourceFile(path, base, "page", metadata)])
         (store.root / path).write_text(local, encoding="utf-8")
         self.assertFalse(store.publish([SourceFile(path, remote, "page", metadata)])["complete"])
         review = self.tool("api", key=key, args=["conflict"], payload={"path": path})
+        summary = self.tool("api", key=key, args=["conflict"], payload={"path": path, "summaryOnly": True})
+        self.assertEqual(summary, {k: v for k, v in review.items() if k not in {"base", "local", "remote"}})
+        readable = self.tool("api", key=key, args=["conflict"], payload={"path": path, "view": "auto"})
+        self.assertEqual("readable", readable["view"])
+        self.assertEqual(review["sourceHash"], readable["sourceHash"])
+        self.assertEqual(review["remoteHash"], readable["remoteHash"])
+        self.assertIn("```sql\nSELECT ID\nFROM FIXTURE\nORDER BY LOCAL", readable["before"])
+        self.assertIn("ORDER BY PLATFORM", readable["after"])
+        self.assertNotIn("&#13;", readable["before"])
+        self.assertNotIn("</superSql>", readable["after"])
+        raw = self.tool("api", key=key, args=["conflict"], payload={"path": path, "view": "raw"})
+        self.assertIn("&#13;", raw["before"])
+        self.assertEqual((local, remote), (raw["before"], raw["after"]))
+
+        (store.root / path).write_text("<page>", encoding="utf-8")
+        fallback = self.tool("api", key=key, args=["conflict"], payload={"path": path, "view": "auto"})
+        self.assertEqual("raw", fallback["view"])
+        self.assertIn("可读投影不可用", fallback["message"])
+        self.assertEqual(("<page>", remote), (fallback["before"], fallback["after"]))
+        (store.root / path).write_text(local, encoding="utf-8")
+
         self.assertFalse(store.publish([SourceFile(path, latest, "page", metadata)])["complete"])
         resolution = {"path": path, "choice": "remote", "expectedHash": review["sourceHash"],
                       "expectedRemoteHash": review["remoteHash"]}
@@ -191,6 +217,79 @@ class ApiWorkspaceTest(WorkspaceCase):
         self.assertTrue(result["index"]["complete"])
         with self.assertRaisesRegex(ApiError, "没有待解决"):
             store.conflict(path)
+
+    def test_original_native_upload_recovers_normalized_main_table_text_column(self):
+        workspace = self.register("api")
+        key = workspace["workspaceKey"]
+        self.tool("api", key=key, args=["configure"], payload={
+            "serverUrl": "https://fixture.invalid/guthon/", "systemIds": ["S1"],
+            "dataSourceIds": [], "allSystems": False,
+        })
+        page_id = "PG-test"
+        path = f"systems/S1/pages/main/{page_id}/{page_id}.xml"
+        platform_field = {
+            "id": "FIELD-NATIVE-ID", "fieldId": "FIXTURE", "type": "text", "width": 120,
+            "isDisAdvSearch": 0, "isDisLabel": 0, "isImageUpload": 0, "isProduct": 0,
+            "isRichEdit": 0, "isRowSpanning": 0, "isTrimValue": 0, "isUseMaxEdit": 0, "pcAndH5": 0,
+        }
+        component = {"type": "table-main", "fields": [platform_field]}
+        platform_model = {"pageId": page_id, "pageType": 1,
+                          "views": {"rows": [{"cols": [{"component": component}]}]}}
+        local_field = {"id": "FIELD-NATIVE-ID", "fieldId": "FIXTURE", "type": "text", "width": 120,
+                       "autoHeight": 0, "editable": 0, "isMust": 0, "isSum": 0, "useTableFieldName": 0,
+                       "selectBox": {"forceSelection": 0}}
+        candidate = deepcopy(platform_model)
+        candidate_component = candidate["views"]["rows"][0]["cols"][0]["component"]
+        candidate_component["fields"] = [local_field]
+        self.assertTrue(page_source.saved_model_matches(candidate, platform_model))
+        for properties in ({"editable": 1}, {"width": 160}, {"id": "OTHER-ID"}, {"isProduct": 1},
+                           {"selectBox": {"forceSelection": 0, "codeType": "configured"}}):
+            with self.subTest(properties=properties):
+                candidate_component["fields"] = [{**local_field, **properties}]
+                self.assertFalse(page_source.saved_model_matches(candidate, platform_model))
+        candidate_component["fields"] = [local_field]
+        outside_table = {"pageId": page_id, "field": {"type": "text", "editable": 0}}
+        self.assertFalse(page_source.saved_model_matches(outside_table, {"pageId": page_id, "field": {"type": "text"}}))
+
+        store = ApiStore(workspace)
+        metadata = {"systemId": "S1", "pageId": page_id, "pageType": 1}
+        baseline = SourceFile(path, native_page.encode(platform_model), "page", metadata)
+        store.publish([page_source.as_file(page_source.Snapshot(platform_model, "before"), baseline)])
+        submitted = native_page.encode(candidate)
+        (store.root / path).write_text(submitted, encoding="utf-8")
+        original = {
+            "operationId": "0123456789abcdef0123456789abcdef", "kind": "upload", "stage": "PARTIAL",
+            "paths": [path, "other-unattempted.xml"],
+            "results": [{"path": path, "stage": "UNKNOWN", "code": "API_PAGE_NATIVE_READBACK_MISMATCH",
+                         "pageProtocol": "native-json", "nativeAcceptedVersion": "accepted",
+                         "submittedHash": digest(submitted), "submittedModelHash": page_source.fingerprint(candidate)}],
+        }
+        store._receipt(original)
+        folder = store.directory / "operations" / original["operationId"]
+        (folder / ("submitted-" + digest(path) + ".txt")).write_text(submitted, encoding="utf-8")
+        (folder / ("submitted-native-" + digest(path) + ".json")).write_text(json.dumps(candidate), encoding="utf-8")
+        requests = []
+
+        def request(endpoint, *, form):
+            requests.append(endpoint)
+            self.assertEqual(form, {"pageId": page_id})
+            if endpoint == page_source.INFO:
+                return {"page": {"pageId": page_id, "systemId": "S1"}}
+            if endpoint == page_source.READ:
+                return {"bean": platform_model, "version": "accepted"}
+            self.fail(f"Unexpected readback request {endpoint}")
+
+        with patch("providers.api.cli.client_for") as client:
+            client.return_value.request.side_effect = request
+            result = self.tool("api", key=key, args=["verify-upload"], payload={"operationId": original["operationId"]})
+        self.assertEqual(requests, [page_source.INFO, page_source.READ])
+        self.assertFalse(result["mutationRetried"])
+        self.assertEqual(result["stage"], "PARTIAL")
+        verified, = result["results"]
+        self.assertEqual(verified["stage"], "REMOTE_READBACK_VERIFIED")
+        self.assertEqual(verified["nativeRemoteVersion"], "accepted")
+        self.assertEqual(store.status()[0]["state"], "CLEAN")
+        self.assertEqual(page_source.model(store.read(path)["content"]), platform_model)
 
     def test_upload_remark_is_recorded_by_the_confirmed_operation(self):
         workspace = self.register("api")
