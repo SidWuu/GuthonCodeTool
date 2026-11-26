@@ -12,6 +12,7 @@ from providers.api.client import ApiError
 from providers.api.download import BASE, SourceFile
 from providers.api.progress import output_to
 from providers.api.store import ApiStore, digest
+from providers.source_helper import SourceHelperMcpServer
 from test_provider_regressions import WorkspaceCase
 
 
@@ -26,6 +27,7 @@ class PullPlatform:
         }
         self.requests = []
         self.pages = []
+        self.native_pages = {}
         self.menu = []
         self.menu_error = None
         self.repeat_page = False
@@ -58,6 +60,10 @@ class PullPlatform:
             return []
         if path == BASE + "getModulePages.htm":
             return self.pages
+        if path == BASE + "getModulePage.htm":
+            return {"item": next(page for page in self.pages if page["pageId"] == params["pageId"])}
+        if path == page_source.READ:
+            return self.native_pages[form["pageId"]]
         if path == BASE + "getModuleTree.htm":
             if self.menu_error is not None:
                 raise self.menu_error
@@ -82,6 +88,118 @@ class ApiFullPullTest(WorkspaceCase):
     def api(self, action, payload=None):
         with patch("providers.api.cli.client_for", return_value=self.platform):
             return self.tool("api", key=self.key, args=[action], payload=payload)
+
+    def mcp_tool(self, server, name, **arguments):
+        with patch("providers.api.cli.client_for", return_value=self.platform):
+            return server.handle({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": name, "arguments": {"workspaceKey": self.key, **arguments}},
+            })["result"]["structuredContent"]
+
+    def prepare_page_fixture(self):
+        path = "systems/S1/pages/main/PG-EDIT/PG-EDIT.xml"
+        model = {"pageId": "PG-EDIT", "pageType": 1, "title": "Native model"}
+        self.platform.pages.append({
+            "systemId": "S1", "pageSubId": "main", "pageId": "PG-EDIT",
+            "fileName": "PG-EDIT.xml", "versionMac": "v1", "pageType": 1,
+            "xml": native_page.encode({**model, "title": "Export"}),
+        })
+        self.platform.native_pages["PG-EDIT"] = {"bean": model, "version": "v1"}
+        self.assertTrue(self.api("pull")["complete"])
+        self.platform.requests.clear()
+        server = SourceHelperMcpServer(self.home, "test", enable_writes=True, enable_platform_tools=False)
+        server.handle({"jsonrpc": "2.0", "id": 0, "method": "initialize",
+                       "params": {"protocolVersion": "2025-11-25"}})
+        server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        return path, model, server
+
+    def test_mcp_opens_and_edits_native_page_in_local_write_mode(self):
+        path, model, server = self.prepare_page_fixture()
+        self.assertTrue(self.store.read(path)["readonly"])
+        original = self.mcp_tool(server, "api_open_document", path=path)
+        self.assertTrue(original["ok"], original)
+        lease = original["data"]
+        self.assertEqual(lease["metadata"]["pageSource"], page_source.ORIGIN)
+        self.assertEqual(page_source.model(lease["content"]), model)
+        self.assertEqual(lease["sourceHash"], digest(self.store.baseline(path)))
+        first_requests = [(BASE + "getModulePage.htm", {"pageId": "PG-EDIT"}), (page_source.READ, None)]
+        self.assertEqual(first_requests, self.platform.requests)
+        preview = self.mcp_tool(server, "api_preview_document", leaseId=lease["leaseId"],
+                                content=native_page.encode({**model, "title": "Local edit"}))
+        self.assertTrue(preview["ok"], preview)
+        saved = self.mcp_tool(server, "api_write_document", leaseId=lease["leaseId"],
+                              previewId=preview["data"]["previewId"], idempotencyKey="fixture-edit")
+        self.assertTrue(saved["ok"], saved)
+        self.assertEqual(page_source.model(self.store.read(path)["content"])["title"], "Local edit")
+        self.assertEqual(self.store.read(path)["sourceHash"], saved["data"]["afterHash"])
+        reopened = self.mcp_tool(server, "api_open_document", path=path)
+        self.assertTrue(reopened["ok"], reopened)
+        self.assertEqual(first_requests, self.platform.requests)
+
+    def test_mcp_page_preparation_preserves_conflicts_and_local_edits(self):
+        path, model, server = self.prepare_page_fixture()
+        original = self.store.read(path)
+        editor = editor_state.update(self.workspace, {
+            "pid": os.getpid(), "documents": [{"path": path, "dirty": True}],
+        })
+        response = self.mcp_tool(server, "api_open_document", path=path)
+        self.assertEqual("API_EDITOR_DIRTY", response["error"]["code"])
+        self.assertEqual([], self.platform.requests)
+        self.assertEqual(original, self.store.read(path))
+        editor_state.update(self.workspace, {"editorToken": editor["editorToken"], "close": True})
+
+        target = self.store.root / path
+        target.chmod(0o600)
+        local = native_page.encode({**model, "title": "Existing local edit"})
+        target.write_bytes(local.encode())
+        response = self.mcp_tool(server, "api_open_document", path=path)
+        self.assertEqual("API_PAGE_EDIT_CONFLICT", response["error"]["code"])
+        self.assertEqual([], self.platform.requests)
+        self.assertEqual(local, self.store.read(path)["content"])
+        self.assertEqual(original["baseHash"], self.store.read(path)["baseHash"])
+
+        self.api("refresh", {"path": path})
+        conflict = self.store.conflict(path)
+        target.write_bytes(original["content"].encode())
+        self.platform.requests.clear()
+        response = self.mcp_tool(server, "api_open_document", path=path)
+        self.assertEqual("API_PAGE_EDIT_CONFLICT", response["error"]["code"])
+        self.assertEqual([], self.platform.requests)
+        self.assertEqual(conflict["remoteHash"], self.store.conflict(path)["remoteHash"])
+        self.assertEqual(original, self.store.read(path))
+
+    def test_mcp_page_preparation_requires_editable_native_version_and_fresh_source(self):
+        path, model, server = self.prepare_page_fixture()
+        original = self.store.read(path)
+        self.platform.native_pages["PG-EDIT"] = {"bean": {"pageId": "PG-EDIT"}, "version": None}
+        response = self.mcp_tool(server, "api_open_document", path=path)
+        self.assertEqual("API_PAGE_NATIVE_VERSION_REQUIRED", response["error"]["code"])
+        self.assertEqual(original, self.store.read(path))
+
+        self.platform.native_pages["PG-EDIT"] = {"bean": model, "version": "v1"}
+        page = self.platform.pages[0]
+        page["fileName"] = "moved.xml"
+        response = self.mcp_tool(server, "api_open_document", path=path)
+        self.assertEqual("API_REMOTE_PATH_CHANGED", response["error"]["code"])
+        self.assertEqual(original, self.store.read(path))
+        page["fileName"] = "PG-EDIT.xml"
+
+        request = self.platform.request
+        target = self.store.root / path
+        local = native_page.encode({**model, "title": "Changed while loading"})
+
+        def change_during_read(endpoint, params=None, *, form=None):
+            if endpoint == page_source.READ:
+                target.chmod(0o600)
+                target.write_bytes(local.encode())
+            return request(endpoint, params, form=form)
+
+        with patch.object(self.platform, "request", side_effect=change_during_read):
+            response = self.mcp_tool(server, "api_open_document", path=path)
+        self.assertEqual("API_SOURCE_STALE", response["error"]["code"])
+        self.assertEqual(local, self.store.read(path)["content"])
+        self.assertEqual(original["baseHash"], self.store.read(path)["baseHash"])
+        self.assertFalse(self.store._conflict_path(path).exists())
 
     @staticmethod
     def path(name):

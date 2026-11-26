@@ -13,6 +13,7 @@ from common import page_editor
 from common.persistence import atomic_text, file_lock
 from .client import ApiError
 from .local_mutation import local_mutation
+from .page_source import BATCH_EXPORT
 from .store import ApiStore
 from .source_requests import CLOSED_BEFORE_WRITE
 
@@ -93,6 +94,11 @@ def open_document(workspace, path, ttl_seconds=1800):
     directory = _directory(workspace)
     with file_lock(directory / "documents.lock"):
         item = ApiStore(workspace).read(path)
+        if item["metadata"].get("pageSource") == BATCH_EXPORT:
+            raise ApiError(
+                "API_PAGE_NATIVE_BASE_REQUIRED",
+                "批量下载的 PAGE XML 仅可浏览；请先定向加载可编辑的原生 PAGE",
+            )
         if item["metadata"].get("sourceType") == "module-parameter" and item["readonly"]:
             from .module_parameter_editor import enable_editing
             item = enable_editing(workspace, path)

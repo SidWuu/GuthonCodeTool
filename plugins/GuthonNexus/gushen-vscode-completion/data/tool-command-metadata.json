@@ -365,6 +365,10 @@
       "kind": "write",
       "timeoutMs": 1800000
     },
+    "prepare-page-edit": {
+      "kind": "write",
+      "timeoutMs": 120000
+    },
     "status": {
       "kind": "read",
       "timeoutMs": 120000

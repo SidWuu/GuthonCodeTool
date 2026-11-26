@@ -15,8 +15,8 @@ const {PageEditorController} = require('../page-editor/controller');
 const {DIFF_SCHEME,ApiQuickDiff,revertQuickDiffChange}=require('../source/quick-diff');
 const {checkOfficialUpdate,rollbackOfficialUpdate} = require('../official-update');
 const {ViewTree}=require('../view-tree');
-const REMOTE_ACTIONS = new Set(['session','captcha','login','logout','systems','data-sources','designer-context','system-menu','pull','scope-apply','refresh','upload','verify-upload','sync-database','platform-request','create-function','reference-sync','module-parameters-sync','module-parameter-load','module-upload']);
-const LOGGED_ACTIONS = new Set(['pull','scope-apply','refresh','upload','verify-upload','create-function','module-parameters-sync','module-parameter-load','module-upload']);
+const REMOTE_ACTIONS = new Set(['session','captcha','login','logout','systems','data-sources','designer-context','system-menu','pull','scope-apply','refresh','prepare-page-edit','upload','verify-upload','sync-database','platform-request','create-function','reference-sync','module-parameters-sync','module-parameter-load','module-upload']);
+const LOGGED_ACTIONS = new Set(['pull','scope-apply','refresh','prepare-page-edit','upload','verify-upload','create-function','module-parameters-sync','module-parameter-load','module-upload']);
 const MAX_LOGGED_INDEX_DIAGNOSTICS = 10;
 
 function logCode(value) {
@@ -176,6 +176,12 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       else if(action==='session') result=await authentication.session(key,input);
       else {
         if(REMOTE_ACTIONS.has(action) && action!=='captcha') await authentication.ensure(key);
+        if(action==='prepare-page-edit') {
+          await ui.ensureWorkspace(key);
+          editorState.assertNoConflictingDrafts(key,input.path);
+          editorState.assertNoDirtyDocumentsExcept(key,input.path);
+          await editorState.flush(key);
+        }
         await assertRequestContext(current);result=await backendRun(current,key,action,input,{onOutput:text=>output?.append(text)});
       }
       if(action==='session')await assertRequestContext(current);
@@ -185,6 +191,10 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       }
       if(action==='login'){ui.menuAttempts.delete(key);ui.invalidate(key);ui.refresh();}
       if(action==='scope-save' || action==='refresh' || action==='resolve-conflict' || action==='upload')invalidateStatus(key);
+      if(action==='prepare-page-edit') {
+        invalidateStatus(key);ui.invalidate(key);ui.setIndexResult(key,result.index);
+        void ui.updateScm(key).then(()=>onUpdated?.()).catch(error=>vscode.window.showWarningMessage(`源码状态刷新失败：${error.message}`));
+      }
       if(action==='configure'){invalidateStatus(key);if(result.index){ui.invalidate(key);ui.setIndexResult(key,result.index);}}
       return result;
     }

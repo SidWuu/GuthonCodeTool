@@ -79,3 +79,39 @@ test('project deletion verifies confirmation and moves the directory before unre
     {workspaceKey,checkOnly:false,planId},'refresh','success']);
   assert.ok(fs.existsSync(trash));
 });
+
+test('a missing project directory can be unregistered and a restored directory requires a new preview',async t=>{
+  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'nexus-missing-delete-test-'));
+  t.after(()=>fs.rmSync(temp,{recursive:true,force:true}));
+  const root=path.join(temp,'project'),retained=path.join(temp,'external-docs');
+  const workspaceKey='fixture',planId='a'.repeat(64),calls=[];
+  let restoreOnConfirm=true;
+  const vscode={workspace:{fs:{delete:async()=>assert.fail('unexpected trash operation')}},window:{
+    showWarningMessage:async(_message,{detail},button)=>{
+      assert.match(detail,/目录已不存在.*移除项目登记/);
+      assert.ok(detail.includes(root));
+      assert.ok(detail.includes(retained));
+      if(restoreOnConfirm)fs.mkdirSync(root);
+      return button;
+    },
+    showErrorMessage:async message=>calls.push(message),
+    showInformationMessage:async message=>calls.push(message),
+  }};
+  const run=()=>deleteWorkspace({vscode,workspace:{workspaceKey,root},
+    request:async payload=>{
+      calls.push(payload);
+      return {workspaceKey,planId,paths:[root],retainedPaths:[retained],displayName:'fixture'};
+    },
+    assertSaved:()=>{},assertTool:()=>{},refresh:async()=>calls.push('refresh'),
+  });
+  await run();
+  assert.match(calls.pop(),/重新出现.*重新预览/);
+  assert.deepEqual(calls.splice(0),[{workspaceKey,checkOnly:true},{workspaceKey,checkOnly:true,planId}]);
+  assert.ok(fs.existsSync(root));
+  fs.rmdirSync(root);
+  restoreOnConfirm=false;
+  await run();
+  assert.equal(calls.pop(),'已移除 fixture 的项目登记。');
+  assert.deepEqual(calls,[{workspaceKey,checkOnly:true},{workspaceKey,checkOnly:true,planId},
+    {workspaceKey,checkOnly:false,planId},'refresh']);
+});

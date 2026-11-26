@@ -54,6 +54,12 @@ def update(workspace, payload):
     }:
         raise ApiError("API_INPUT_INVALID", "编辑会话字段无效")
     directory = workspace["contextDir"] / "api"
+    root = workspace["root"]
+    # An editor event can arrive after the project directory has been moved.
+    if directory.is_relative_to(root) and not root.is_dir():
+        if payload.get("close") and payload.get("editorToken"):
+            return {"editorToken": payload["editorToken"], "closed": True}
+        raise ApiError("API_WORKSPACE_ROOT_MISSING", "本地项目目录已不存在")
     path = directory / "editors.json"
     with file_lock(directory / "editors.lock"):
         try:

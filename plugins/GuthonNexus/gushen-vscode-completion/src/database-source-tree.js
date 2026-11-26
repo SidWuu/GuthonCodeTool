@@ -1,4 +1,3 @@
-const path=require('node:path');
 const {MODULE_STYLES,SOURCE_CATEGORIES,sourceTreeIcon,sourceTreeIdentity,datasourceTreeName,sourceGroupDatasourceId,compareDatasourceIds}=require('./source/tree-styles');
 const {filterChildren}=require('./api/tree-filter');
 const {showWorkspaceSearch}=require('./workspace-search');
@@ -8,7 +7,7 @@ function label(record) {
   return record.name || id;
 }
 
-function buildTree(records, category, byName) {
+function buildTree(records, category, byName, changedPaths) {
   const directories=new Map();
   category.children=[];
   for(const record of records) {
@@ -25,15 +24,16 @@ function buildTree(records, category, byName) {
           ? sourceGroupDatasourceId(category.navigationGroups,SOURCE_CATEGORIES[category.sourceType],code,display) : undefined;
         const folder={...category,id,kind:'legacy-database-folder',label:byDatasource?datasourceTreeName(display):display,
           groups:record.groups.slice(0,depth+1),
-          code,datasourceOrderId,sortKey:code || segment,children:[],parent};
+          code,datasourceOrderId,sortKey:code || segment,children:[],parent,modified:false};
         directories.set(id,folder);
         parent.children.push(folder);
       }
       parent=directories.get(id);
     }
     const node={kind:'legacy-database-object',label:label(record),record,parent,workspace:category.workspace,
-      sortKey:record.funId || record.sourceId,
+      sortKey:record.funId || record.sourceId,modified:changedPaths.has(record.sourcePath),
       object:{name:record.name,sourceId:record.sourceId,funId:record.funId,path:record.sourcePath}};
+    if(node.modified) for(let folder=parent;folder && folder!==category;folder=folder.parent) folder.modified=true;
     parent.children.push(node);
   }
   for(const node of [category,...directories.values()]) {
@@ -46,21 +46,30 @@ function buildTree(records, category, byName) {
   return category.children;
 }
 
-function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelected,getTool,edit}) {
+function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelected,getTool,edit,openCopy}) {
   const catalog=new Map();
+  const changes=new Map();
   const query=(workspace,...args)=>run(workspace,'legacy-source',args);
+  function loadChanges(workspace) {
+    const key=JSON.stringify([getTool()?.toolHome,workspace.workspaceKey,workspace.root]);
+    if(!changes.has(key)) changes.set(key,query(workspace,'local-changes').then(result=>({items:result.items || []}),
+      error=>({items:[],diagnostic:`DATABASE 本地改动读取失败：${error.message}`})));
+    return changes.get(key);
+  }
   const identityArgs=record=>record.exportKey ? ['--export-key',record.exportKey]
     : ['--record-id',String(record.recordId),'--source-id='+record.sourceId];
   async function children(workspace,item,filter='') {
     if (!workspace.index?.ready) return [{kind:'message',label:'本地索引尚未建立，请先更新源码'}];
     if(!item) {
-      const result=await query(workspace,'catalog');
+      const [result,local]=await Promise.all([query(workspace,'catalog'),loadChanges(workspace)]);
       const populated=new Set(result.categories);
+      const modifiedTypes=new Set(local.items.map(entry=>entry.sourceType));
       const categories=Object.keys(MODULE_STYLES).map(key=>Object.keys(SOURCE_CATEGORIES)
         .find(type=>SOURCE_CATEGORIES[type]===key && populated.has(type))).filter(Boolean).map(sourceType=>({sourceType,kind:'legacy-database-category',workspace,
-        label:MODULE_STYLES[SOURCE_CATEGORIES[sourceType]].label,navigationGroups:result.navigationGroups}));
+        label:MODULE_STYLES[SOURCE_CATEGORIES[sourceType]].label,navigationGroups:result.navigationGroups,
+        modified:modifiedTypes.has(sourceType)}));
       if(filter) await Promise.all(categories.map(category=>load(workspace,category)));
-      return [...filterChildren(categories,filter),...(result.exportIndexReady ? [] : [{
+      return [...filterChildren(categories,filter),...(local.diagnostic ? [{kind:'message',label:local.diagnostic}] : []),...(result.exportIndexReady ? [] : [{
         kind:'message',key:workspace.workspaceKey,label:'重建本地索引以显示表、视图、系统脚本和单据类型',
         command:'gushenCompletion.reindexCalls',
       }])];
@@ -69,8 +78,9 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
     if(item.children) return filterChildren(item.children,filter,item);
     if(item.kind!=='legacy-database-object' || item.record.sourceType!=='page') return [];
     const result=await query(workspace,'fragments',...identityArgs(item.record));
-    const raw={...item,kind:'legacy-database-preview',label:'查看原始 JSON',parent:item};
-    return [raw,...result.fragments.map(fragment=>({...raw,...fragment,kind:'legacy-database-fragment'})),
+    const modified=new Set(result.modifiedPointers);
+    const raw={...item,kind:'legacy-database-preview',label:'查看原始 JSON',parent:item,modified:false};
+    return [raw,...result.fragments.map(fragment=>({...raw,...fragment,kind:'legacy-database-fragment',modified:modified.has(fragment.pointer)})),
       ...(result.diagnostic ? [{kind:'message',label:result.diagnostic}] : [])];
   }
   async function load(workspace,item) {
@@ -89,8 +99,9 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
       catalog.set(cacheKey,pending);
       pending.catch(()=>{if(catalog.get(cacheKey)===pending)catalog.delete(cacheKey);});
     }
-    return buildTree(await catalog.get(cacheKey),item,
-      vscode.workspace.getConfiguration?.('gushenCompletion')?.get('sourceTreeOrder')==='name');
+    const [records,local]=await Promise.all([catalog.get(cacheKey),loadChanges(workspace)]);
+    const paths=new Set(local.items.filter(entry=>entry.sourceType===item.sourceType).map(entry=>entry.sourcePath));
+    return buildTree(records,item,vscode.workspace.getConfiguration?.('gushenCompletion')?.get('sourceTreeOrder')==='name',paths);
   }
   function treeItem(item) {
     const {sourceType}=item.record || item;
@@ -105,11 +116,15 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
       : item.kind==='legacy-database-preview'?'json'
       : item.kind==='legacy-database-fragment'?({json:'symbol-field',sql:'database'}[item.language] || 'code'):undefined;
     node.iconPath=sourceTreeIcon(vscode,category,icon);
+    if(item.modified) {
+      // The source Webview renders the icon and description fields.
+      node.iconPath=new vscode.ThemeIcon(node.iconPath.id,new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
+    }
+    node.description=[item.modified?'M · 本地修改':'',item.inherited?'继承 · 只读':''].filter(Boolean).join(' · ') || undefined;
     const record=item.record;
     node.id=JSON.stringify([item.kind,item.id,item.workspace.workspaceKey,sourceType,record?.sourcePath,item.pointer,record?.exportKey]);
     if(record) {
       node.tooltip=[record.sourcePath,item.pointer].filter(Boolean).join('\n');
-      if(item.inherited) node.description='继承 · 只读';
       if(!branch || item.kind==='legacy-database-object')node.command={command:'gushenCompletion.openLegacyDocument',title:'打开本地源码',arguments:[item]};
       if(item.kind==='legacy-database-object' && item.workspace.capabilities?.['workcopy.open']) {
         if(sourceType==='page')node.contextValue='guthonDatabaseWorkcopySource';
@@ -153,7 +168,11 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
         return {...result,items:result.items.map(record=>({kind:'source',label:label(record),
           description:record.pointer || record.sourcePath,detail:record.excerpt,record}))};
       }});
-    if(chosen) return open({...chosen.item.record,workspace,record:chosen.item.record});
+    if(chosen) {
+      const record=chosen.item.record;
+      const kind=record.pointer?'legacy-database-fragment':'legacy-database-object';
+      return open({...record,workspace,record,kind});
+    }
   }
   async function callers(item) {
     const workspace=await current(item);
@@ -174,10 +193,9 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
       if(result.output)return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(result.output)),{preview:true});
       return;
     }
-    const result=await run(workspace,'create-workcopy',['--type',record.sourceType,'--source-id='+record.sourceId,
+    await run(workspace,'create-workcopy',['--type',record.sourceType,'--source-id='+record.sourceId,
       ...(record.funId?['--fun='+record.funId]:[]),'--json']);
-    return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(
-      path.join(result.path,path.basename(record.sourcePath)))),{preview:false});
+    return openCopy(workspace,item);
   }
   function syncTarget(workspace,item) {
     if(item.workspace?.workspaceKey!==workspace.workspaceKey || item.workspace.root!==workspace.root)
@@ -185,7 +203,8 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
     return item.record ? {sourceType:item.record.sourceType,recordId:item.record.recordId,exportKey:item.record.exportKey}
       : {sourceType:item.sourceType,groups:item.groups || []};
   }
-  return {children,treeItem,open,search,callers,workcopy,syncTarget,refresh:()=>catalog.clear()};
+  return {children,treeItem,open,search,callers,workcopy,syncTarget,
+    refreshChanges:()=>changes.clear(),refresh(){catalog.clear();changes.clear();}};
 }
 
 module.exports={createDatabaseSourceTree};

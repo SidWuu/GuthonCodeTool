@@ -13,11 +13,16 @@ class ApiEditorState {
       }));
     }
   }
-  add(key,root) {
+  async add(key,root) {
     let state=this.workspaces.get(key);
     if(!state) {state={root:path.resolve(root),token:undefined,tail:Promise.resolve()};this.workspaces.set(key,state);}
     else state.root=path.resolve(root);
-    return this.flush(key);
+    try {return await this.flush(key);}
+    catch(error) {
+      if(error.code!=='API_WORKSPACE_ROOT_MISSING')throw error;
+      if(this.workspaces.get(key)===state)this.workspaces.delete(key);
+      return null;
+    }
   }
   documentPath(key,state,doc) {
     if(doc.uri.scheme===SCHEME) {
@@ -39,7 +44,9 @@ class ApiEditorState {
     return [...items.values()].sort((a,b)=>a.path.localeCompare(b.path));
   }
   changed(doc) {
-    for(const [key,state] of this.workspaces) if(this.documentPath(key,state,doc)) this.flush(key).catch(this.onError);
+    for(const [key,state] of this.workspaces) if(this.documentPath(key,state,doc)) this.flush(key).catch(error=>{
+      if(error.code!=='API_WORKSPACE_ROOT_MISSING')this.onError(error);
+    });
   }
   setDraft(id,key,sourcePath,dirty,version,kind='page') {
     if(dirty) this.drafts.set(id,{key,path:sourcePath,dirty:true,version,kind});else this.drafts.delete(id);

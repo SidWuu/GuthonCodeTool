@@ -76,8 +76,38 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     catalog.onDidChangeTreeData(() => sourceTree.refresh()),
   ];
   const run = (workspace, command, args, input) => client.run(workspace.workspaceKey, command, args, input);
-  let databaseEditor,databaseRegistration,svnCodeSaved;
+  let databaseEditor,databaseRegistration,databaseWatch,svnCodeSaved;
   const pageEditors=new Map();
+  async function databaseChangesChanged(key,paths) {
+    databaseTree.refreshChanges();
+    sourceTree.refresh();
+    await databaseEditor?.refresh(key,paths,error=>getOutput?.()?.appendLine(`DATABASE 差异刷新：${error.message}`));
+  }
+  function watchDatabase(workspace) {
+    const roots=workspace?.sourceMode==='database' ? [workspace.readonlyDir,workspace.workcopyDir].filter(Boolean) : [];
+    const watchKey=roots.length ? JSON.stringify([getTool()?.toolHome,workspace.workspaceKey,roots]) : null;
+    if(databaseWatch?.key===watchKey)return;
+    databaseWatch?.dispose();databaseWatch=undefined;
+    if(!watchKey || !vscode.workspace.createFileSystemWatcher || !vscode.RelativePattern)return;
+    const pending=new Set();
+    let timer;
+    const watchers=roots.map(root=>{
+      const watcher=vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root,'**/{raw.json,source.vm}'));
+      const changed=uri=>{
+        if(!within(root,uri.fsPath))return;
+        pending.add(path.relative(root,uri.fsPath).split(path.sep).join('/'));
+        clearTimeout(timer);
+        timer=setTimeout(()=>{
+          const paths=new Set(pending);pending.clear();
+          void databaseChangesChanged(workspace.workspaceKey,paths);
+          void pageEditors.get('database')?.statusChanged(workspace.workspaceKey);
+        },150);
+      };
+      watcher.onDidCreate(changed);watcher.onDidChange(changed);watcher.onDidDelete(changed);
+      return watcher;
+    });
+    databaseWatch={key:watchKey,dispose(){clearTimeout(timer);for(const watcher of watchers)watcher.dispose();}};
+  }
   async function databaseRequest(identity,action,payload) {
     const workspace=(await getWorkspaces()).find(value=>value.workspaceKey===identity.workspaceKey);
     if(workspace?.sourceMode!=='database' || workspace.root!==identity.root || identity.home!==getTool()?.toolHome)
@@ -91,8 +121,11 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     if(!databaseEditor) {
       databaseEditor=new DatabaseSourceEditor({vscode,getTool,request:databaseRequest,
         beforeSave:uri=>pageEditors.get('database')?.beforeCodeSave(uri),
-        onSave:async uri=>{
-          try {await pageEditors.get('database')?.codeSaved(uri);sourceTree.refresh();}
+        onSave:async (uri,identity)=>{
+          try {
+            await databaseChangesChanged(identity.workspaceKey,new Set([identity.sourcePath]));
+            await pageEditors.get('database')?.codeSaved(uri);
+          }
           catch(error){vscode.window.showErrorMessage(error.message);}
         }});
       databaseRegistration=vscode.workspace.registerFileSystemProvider(DATABASE_SCHEME,databaseEditor,{isCaseSensitive:true});
@@ -105,6 +138,12 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     const database=mode==='database';
     const editor=new PageEditorController({vscode,context,platformReference:false,
       baselineLabel:database?'DATABASE 只读源码':'SVN BASE',
+      copySavedFragment:database ? async (identity,pointer,sourceHash)=>{
+        const result=await databaseRequest(identity,'edit-read',{pointer});
+        if(result.sourceHash!==sourceHash || !result.editable || typeof result.content!=='string')
+          throw new Error('本地片段已变化或为继承只读内容，请重新比较');
+        await vscode.env.clipboard.writeText(result.content);
+      } : undefined,
       virtualFs:database?databaseCodeEditor():{open:(identity,options)=>virtualFs.open({...identity,sourceNamespace:undefined},options)},
       ownsDocument:(identity,document)=>{
         if(database) {
@@ -129,8 +168,9 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
           sourceId:identity.sourceId,...(sourceHash?{sourceHash}:{})} : {action,editToken,operations,...(idempotencyKey?{idempotencyKey}:{})};
         return backend.run(identity.workspaceKey,['page-editor'],payload);
       },
-      onSaved:async key=>{
-        if(!database) {catalog.refresh(key);virtualFs.invalidate(key,true);}
+      onSaved:async (key,sourcePath)=>{
+        if(database)return databaseChangesChanged(key,new Set([sourcePath]));
+        catalog.refresh(key);virtualFs.invalidate(key,true);
         sourceTree.refresh();
       }});
     pageEditors.set(mode,editor);
@@ -141,21 +181,21 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
   }
   async function editDatabase(workspace,item) {
     const identity=databaseEditIdentity(workspace,item,getTool()?.toolHome);
-    let fragment=item;
-    if (identity.sourceType==='page' && !item.pointer) {
+    let pointer=item.pointer;
+    if (identity.sourceType==='page' && !pointer) {
       const {defaultFragment}=await databaseRequest(identity,'edit-read',{resolveDefaultFragment:true});
       if (!defaultFragment) return pageEditorFor('database').open(identity);
-      fragment=defaultFragment;
+      pointer=defaultFragment.pointer;
     }
-    const fragmentType={json:'fields',sql:'sql',javascript:'js','guthon-gss':'gss'}[fragment.language];
-    return databaseCodeEditor().open({...identity,jsonPointer:fragment.pointer,fragmentType},{lineNumber:item.line});
+    return databaseCodeEditor().open({...identity,jsonPointer:pointer},{lineNumber:item.line});
   }
   function editSvnPage(workspace,object) {
     const identity={...object,workspaceKey:workspace.workspaceKey,checkoutPath:workspace.checkoutPath,
       home:getTool()?.toolHome,workingCopyId:object.workingCopyId || object.scopeEntryId};
     return pageEditorFor('svn').open(identity);
   }
-  const databaseTree=createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelected,getTool,edit:editDatabase});
+  const databaseTree=createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelected,getTool,edit:editDatabase,
+    openCopy:(workspace,item)=>databaseCodeEditor().open(databaseEditIdentity(workspace,item,getTool()?.toolHome))});
   function sourceSettingsRequest(workspace) {
     const home = getTool()?.toolHome;
     return payload => {
@@ -518,6 +558,7 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
   async function sync(workspace, workspaces) {
     selected = workspace;
     databaseTree.refresh();
+    watchDatabase(workspace);
     const svnWorkspaces = workspaces.filter(manifest);
     watcher.sync(svnWorkspaces);
     scopedScm.syncWorkspaces(manifest(workspace) && workspace.workingCopies?.length ? [workspace] : []);
@@ -613,7 +654,7 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
   context.subscriptions.push(...subscriptions.filter(Boolean), {dispose(){
     svnCodeSaved?.dispose();
     for(const editor of pageEditors.values())editor.dispose();
-    databaseRegistration?.dispose();databaseEditor?.dispose();
+    databaseWatch?.dispose();databaseRegistration?.dispose();databaseEditor?.dispose();
     watcher.dispose();scopedScm.dispose();catalog.dispose();virtualFs.dispose();inheritedSource.dispose();svnDiffEditor.dispose();
   }});
   return { action, login, sync, children, treeItem, openLocal, openWorkcopy:databaseTree.workcopy,

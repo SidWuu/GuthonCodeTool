@@ -71,6 +71,10 @@
       }
       const kind={added:'新增',removed:'删除',modified:'修改',order:'排序'}[row.kind] || '修改';
       section.append(el('h3',`${kind} · ${row.label || '页面配置'}`),el('code',row.pointer || '/'));
+      if (baseline && state.canCopySavedFragment && row.kind!=='removed'
+        && state.baseline.nodes.some(node=>node.editable && node.pointer===row.pointer)) {
+        section.append(button('复制修改后片段',()=>send('copySavedFragment',{pointer:row.pointer}),state.busy || state.comparison.sourceStale));
+      }
       const columns=el('div',undefined,'comparison-columns');
       for (const [name,content] of [[baseline?baselineLabel:'本地保存版本',row.beforeText],[baseline?'本地已保存源码':'当前窗口草稿',row.afterText]]) {
         const side=el('div');side.append(el('h4',name),el('pre',content));columns.append(side);

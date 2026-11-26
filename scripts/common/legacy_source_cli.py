@@ -265,7 +265,7 @@ def _run(command, args, config, workspace):
             return 0
         from common import legacy_source_read
         parser = argparse.ArgumentParser(prog="guthon_tool.py legacy-source")
-        parser.add_argument("action", choices=["catalog", "callers", "read", "locate", "fragments", "search"])
+        parser.add_argument("action", choices=["catalog", "callers", "read", "locate", "fragments", "search", "local-changes"])
         parser.add_argument("--type", default="")
         parser.add_argument("--after", type=int, default=0)
         parser.add_argument("--limit", type=int, default=100)
@@ -278,7 +278,11 @@ def _run(command, args, config, workspace):
         parser.add_argument("--keyword", default="")
         parser.add_argument("--locations", action="store_true")
         parsed = parser.parse_args(args)
-        if parsed.action == "catalog":
+        if parsed.action == "local-changes":
+            if mode != "database":
+                raise ValueError("本地改动查询需要 DATABASE 工作区")
+            result = legacy_source_read.local_changes(workspace)
+        elif parsed.action == "catalog":
             result = legacy_source_read.catalog(workspace, source_type=parsed.type, after=parsed.after, limit=parsed.limit, config=config)
         elif parsed.action == "locate":
             result = legacy_source_read.locate(workspace, source_type=parsed.type, source_id=parsed.source_id,

@@ -37,6 +37,7 @@ ACTIONS = (
     "scope-save",
     "scope-apply",
     "refresh",
+    "prepare-page-edit",
     "status",
     "catalog",
     "reference",
@@ -526,6 +527,8 @@ def _execute(workspace, action, payload):
         return sync.pull(workspace, client)
     if action == "refresh":
         return sync.refresh(workspace, client, payload)
+    if action == "prepare-page-edit":
+        return sync.prepare_page_edit(workspace, client, payload)
     if action == "upload":
         return sync.upload(workspace, client, payload)
     if action == "verify-upload":

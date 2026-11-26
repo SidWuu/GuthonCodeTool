@@ -1,9 +1,13 @@
 const assert=require('node:assert/strict');
 const test=require('node:test');
+const path=require('node:path');
 const {SvnVirtualFileSystem}=require('../src/svn/virtual-fs');
 const {SvnCatalogTreeProvider}=require('../src/svn/catalog-tree');
 const {createDatabaseSourceTree}=require('../src/database-source-tree');
+const {DatabaseSourceEditor}=require('../src/database-source-editor');
 const {registerLegacyProjects}=require('../src/legacy-project');
+const {ViewTree}=require('../src/view-tree');
+const {quickPickFixture,waitFor}=require('./quick-pick-fixture');
 
 const disposable={dispose(){}};
 const vscode={
@@ -72,33 +76,43 @@ test('legacy trees use the current project datasource ID and place unmapped subs
 
   const db={workspaceKey:'ws-db',index:{ready:true}};
   const dbTree=createDatabaseSourceTree({vscode,getTool:()=>({toolHome:'/test'}),run:async(_ws,_command,args)=>
-    args.length===1 ? {categories:['procedure'],exportIndexReady:true,navigationGroups} : {items:['0007','0001','0002'].map(id=>({
+    args[0]==='local-changes' ? {items:[]} : args.length===1 ? {categories:['procedure'],exportIndexReady:true,navigationGroups} : {items:['0007','0001','0002'].map(id=>({
       sourceType:'procedure',sourceId:`FUNC-${id}`,scopeCode:id,groups:[id],sourcePath:`${id}/source.vm`,
     }))}});
   const [procedures]=await dbTree.children(db);
   assert.deepEqual((await dbTree.children(db,procedures)).map(node=>node.code),['0001','0002','0007']);
 });
 
-test('DATABASE tree opens the service script in GSS and ordinary pages in the page editor',async t=>{
+test('DATABASE tree and search open pages and fragments in the corresponding Nexus editor',async t=>{
   const workspace={workspaceKey:'ws-db',sourceMode:'database',root:'/fixture/project',
     workcopyDir:'/fixture/project/source/workcopy',index:{ready:true},capabilities:{'workcopy.open':true}};
   const records=['PG-Service','PG-Form'].map((sourceId,index)=>({
     sourceId,sourceType:'page',sourcePath:`page/${sourceId}/raw.json`,recordId:index+1,
   }));
-  const subscriptions=[],requests=[],opened=[],documents=[];
-  let databaseFs;
+  const buttons='/views/rows/0/component/buttons';
+  const fragments=[
+    {pointer:buttons+'/0/serviceEvents/afterSaveScript',content:'#set($enabled = true)\n#return($enabled)',language:'guthon-gss',extension:'.gss',line:2},
+    {pointer:buttons+'/0/pageEvents/clickScript',content:'const enabled = true;\nreturn enabled;',language:'javascript',extension:'.js',line:2},
+    {pointer:'/views/rows/0/component/sql',content:'SELECT\n  1 AS enabled',language:'sql',extension:'.sql',line:2},
+    {pointer:buttons,content:'[{"name":"enabled"}]',language:'json',extension:'.json'},
+  ];
+  const subscriptions=[],requests=[],opened=[],documents=[],selections=[];
+  let databaseFs,picker;
   const host={...vscode,Uri:{...vscode.Uri,file:fsPath=>({fsPath})},ViewColumn:{Active:1},
+    Range:class {constructor(start){this.start=start;}},
     workspace:{textDocuments:documents,onDidChangeTextDocument:()=>disposable,
       registerFileSystemProvider(scheme,provider){
         if (scheme==='guthon-database-edit') databaseFs=provider;
         return disposable;
       },
       async openTextDocument(uri){
-        const doc={uri,lineCount:1,text:String(await databaseFs.readFile(uri))};
+        const text=String(await databaseFs.readFile(uri));
+        const doc={uri,lineCount:text.split('\n').length,text};
         documents.push(doc);
         return doc;
       }},
-    window:{async showTextDocument(doc){opened.push(doc);},
+    window:{createQuickPick:()=>picker.picker,showErrorMessage:assert.fail,
+      async showTextDocument(doc,options){opened.push(doc);selections.push(options.selection?.start);},
       createWebviewPanel(viewType){
         const panel={viewType,reveal(){},onDidDispose(){},dispose(){},webview:{
           onDidReceiveMessage(){},postMessage:async()=>true,asWebviewUri:uri=>uri.fsPath,
@@ -113,12 +127,17 @@ test('DATABASE tree opens the service script in GSS and ordinary pages in the pa
       assert.equal(command,'legacy-source');
       assert.equal(key,workspace.workspaceKey);
       const ok={ok:true};
+      if (args[0]==='local-changes') return {...ok,items:[]};
       if (args[0]==='catalog') return args.length===1
         ? {...ok,categories:['page'],exportIndexReady:true} : {...ok,items:records};
+      if (args[0]==='search') return {...ok,items:args[1]==='--keyword=PG-Service' ? [records[0]]
+        : fragments.map(({pointer,line})=>({...records[1],pointer,line,excerpt:'enabled'}))};
       requests.push({action:args[0],input});
       if (input.resolveDefaultFragment) return {...ok,defaultFragment:input.sourceId==='PG-Service'
         ? {pointer:'/compScript',language:'guthon-gss'} : null};
-      if (input.pointer==='/compScript') return {...ok,content:'#return(true)',editable:true};
+      if (input.pointer==='/compScript') return {...ok,content:'#return(true)',editable:true,language:'guthon-gss'};
+      const fragment=fragments.find(({pointer})=>pointer===input.pointer);
+      if (fragment) return {...ok,content:fragment.content,language:fragment.language,editable:true};
       assert.equal(input.sourceId,'PG-Form');
       assert.equal(input.design,true);
       const snapshot={...ok,sourcePath:input.sourcePath,sourceHash:'form'};
@@ -140,4 +159,89 @@ test('DATABASE tree opens the service script in GSS and ordinary pages in the pa
   assert.equal(opened.length,2);
   assert.equal(opened[1].viewType,'guthon.pageEditor');
   assert.match(opened[1].title,/PG-Form.*本地页面/);
+
+  async function chooseSearchResult(keyword,index,description) {
+    picker=quickPickFixture();
+    const pending=legacy.action(workspace,'search');
+    picker.input(keyword);
+    await waitFor(()=>!picker.picker.busy && picker.picker.items.length>index);
+    assert.equal(picker.picker.items[index].description,description);
+    picker.accept(index);
+    return pending;
+  }
+  await chooseSearchResult('PG-Service',0,records[0].sourcePath);
+  assert.equal(opened.at(-1).uri.toString(),opened[0].uri.toString());
+  const firstScriptRequest=requests.length;
+  for (const [index,fragment] of fragments.entries()) {
+    await chooseSearchResult('enabled',index,fragment.pointer);
+    const {uri,text}=opened.at(-1);
+    assert.equal(uri.scheme,'guthon-database-edit');
+    assert.equal(path.extname(uri.path),fragment.extension);
+    assert.equal(text,fragment.content);
+    assert.equal(selections.at(-1),fragment.line===2 ? 1 : undefined);
+  }
+  assert.deepEqual(requests.slice(firstScriptRequest).map(({action,input})=>[action,input.pointer]),
+    fragments.map(({pointer})=>['edit-read',pointer]));
+});
+
+test('DATABASE source Webview renders changed rows while clean siblings keep their normal presentation',async()=>{
+  const workspace={workspaceKey:'ws-db',index:{ready:true}};
+  const record={sourceType:'page',sourceId:'PG-A',sourcePath:'group/page/PG-A/raw.json',groups:['group']};
+  let changed=true;
+  const tree=createDatabaseSourceTree({vscode,getTool:()=>({toolHome:'/fixture'}),run:async(_ws,_cmd,args)=>{
+    if(args[0]==='local-changes')return {items:changed?[record]:[]};
+    if(args[0]==='fragments')return {fragments:[{label:'修改',pointer:'/a'},{label:'原文',pointer:'/b'}],modifiedPointers:changed?['/a']:[]};
+    return args.length===1?{categories:['page'],exportIndexReady:true}:{items:[record,{...record,sourceId:'PG-B',sourcePath:'group/page/PG-B/raw.json'}]};
+  }});
+  const [category]=await tree.children(workspace);
+  const [group]=await tree.children(workspace,category);
+  const [page]=await tree.children(workspace,group);
+  const [,fragment]=await tree.children(workspace,page);
+  let rows;
+  const view=new ViewTree({vscode:{...vscode,window:{registerWebviewViewProvider:()=>disposable}},
+    id:'gushenCompletion.sourceView',title:'项目源码',extensionPath:path.resolve(__dirname,'..'),provider:{
+      getChildren:item=>tree.children(workspace,item),getTreeItem:tree.treeItem,getParent:item=>item.parent,
+    }});
+  view.resolveWebviewView({show(){},onDidDispose(){},webview:{onDidReceiveMessage:()=>disposable,
+    postMessage:async message=>{rows=message.rows;}}});
+  await view.receive({type:'ready'});
+  await view.reveal(fragment);
+  assert.deepEqual(rows.filter(row=>row.description==='M · 本地修改').map(row=>row.label),['页面','group','PG-A','修改']);
+  assert.deepEqual(rows.filter(row=>row.color==='gitDecoration.modifiedResourceForeground').map(row=>row.label),['页面','group','PG-A','修改']);
+  for(const name of ['查看原始 JSON','PG-B','原文'])assert.equal(rows.find(row=>row.label===name)?.description,'');
+  changed=false;
+  tree.refreshChanges();
+  await view.render();
+  assert.ok(rows.every(row=>!row.description && row.color!=='gitDecoration.modifiedResourceForeground'));
+  view.dispose();
+});
+
+test('DATABASE virtual text editor highlights saved changes and preserves unsaved input on refresh',async t=>{
+  const contents='first\nchanged\nlast', ranges=new Map();
+  let content=contents,lineChanges=[{kind:'replace',start:1,end:2},{kind:'delete',start:3,end:3}];
+  let document;
+  const editor={get document(){return document;},setDecorations(style,value){ranges.set(style.borderColor.id,value);}};
+  const host={...vscode,Range:class {constructor(start,_a,end){Object.assign(this,{start,end});}},
+    FileChangeType:{Changed:1},workspace:{textDocuments:[],async openTextDocument(uri){
+      document={uri,lineCount:3,getText:()=>contents,isDirty:false};this.textDocuments=[document];return document;
+    }},window:{visibleTextEditors:[editor],createTextEditorDecorationType:style=>({...style,dispose(){}}),
+      async showTextDocument(){return editor;}}};
+  let reads=0;
+  const provider=new DatabaseSourceEditor({vscode:host,getTool:()=>({toolHome:'/fixture'}),
+    request:async()=>{reads++;return {content,lineChanges,editable:true,language:'guthon-gss'};},onSave(){}});
+  t.after(()=>provider.dispose());
+  const identity={workspaceKey:'ws',sourcePath:'group/source.vm',sourceType:'procedure'};
+  const [opened,linked]=await Promise.all([provider.open(identity),provider.uriFor(identity)]);
+  assert.equal(opened,linked);
+  assert.equal(reads,1);
+  assert.deepEqual(ranges.get('editorGutter.modifiedBackground').map(({start,end})=>[start,end]),[[1,1]]);
+  assert.deepEqual(ranges.get('editorGutter.deletedBackground').map(({start,end})=>[start,end]),[[2,2]]);
+  document.isDirty=true;
+  content='external';lineChanges=[];
+  await provider.refresh('ws',new Set([identity.sourcePath]),assert.fail);
+  assert.equal(String(await provider.readFile(document.uri)),contents);
+  document.isDirty=false;
+  await provider.refresh('ws',new Set([identity.sourcePath]),assert.fail);
+  assert.equal(String(await provider.readFile(document.uri)),content);
+  assert.deepEqual(ranges.get('editorGutter.modifiedBackground'),[]);
 });

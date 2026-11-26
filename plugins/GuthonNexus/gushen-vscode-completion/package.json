@@ -2,7 +2,7 @@
   "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon API workspace, source management, database diagnostics, completions, hover documentation, and source navigation.",
-  "version": "2.9.5",
+  "version": "2.9.6",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,

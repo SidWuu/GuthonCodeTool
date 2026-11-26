@@ -96,6 +96,50 @@ test('ToolHost previews each project directory and unregisters only after it is 
   } finally {await client.stop();client.dispose();}
 });
 
+test('ToolHost unregisters externally removed projects without recreating the API project directory', {skip:!fs.existsSync(python) && 'repository Python environment unavailable'},async t=>{
+  const home=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'nexus-missing-project-')));
+  t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+  const toolEntry=path.join(scripts,'guthon_tool.py');
+  const setup=spawnSync(python,[toolEntry,'setup','--home',home],{encoding:'utf8'});
+  assert.equal(setup.status,0,setup.stderr);
+  const tool={mode:'source-development',toolPath:python,toolEntry,toolHome:home};
+  const client=new ToolProcessClient();
+  try {
+    for(const sourceMode of ['api','svn','database']) {
+      const workspaceKey=sourceMode;
+      const {workspace}=await client.request(tool,'workspace-create',[],'',{id:workspaceKey,name:workspaceKey,sourceMode});
+      const request=payload=>client.request(tool,'workspace-delete',[],'',{workspaceKey,...payload});
+      const api=(action,input)=>client.request(tool,'api',[action,'--stdin'],workspaceKey,input);
+      const editor=documents=>({pid:process.pid,documents});
+      let editorToken;
+      if(sourceMode==='api') {
+        await api('configure',{serverUrl:'https://fixture.invalid'});
+        ({editorToken}=await api('editor-state',editor([])));
+      }
+      fs.renameSync(workspace.root,path.join(home,'moved-'+sourceMode));
+      const registry=await client.request(tool,'workspaces');
+      assert.ok(registry.workspaces.some(item=>item.workspaceKey===workspaceKey));
+      const plan=await request({checkOnly:true});
+      assert.deepEqual(plan.paths,[workspace.root]);
+      if(editorToken) {
+        // Another editor window can still refresh its session after the project was moved.
+        await assert.rejects(api('editor-state',{...editor([]),editorToken}),{code:'API_WORKSPACE_ROOT_MISSING'});
+        const {ApiEditorState}=require('../src/api/editor-state');
+        const editorState=new ApiEditorState({vscode:{workspace:{}},run:(_key,action,input)=>api(action,input)});
+        assert.equal(await editorState.add(workspaceKey,workspace.checkoutPath),null);
+        assert.equal(editorState.workspaces.has(workspaceKey),false);
+        assert.equal((await api('editor-state',{close:true,editorToken})).closed,true);
+      }
+      assert.equal(fs.existsSync(workspace.root),false);
+      await request({checkOnly:true,planId:plan.planId});
+      assert.equal((await request({checkOnly:false,planId:plan.planId})).removed,true);
+      const configuration=JSON.parse(fs.readFileSync(path.join(home,'config','guthon.json'),'utf8'));
+      assert.equal(Object.hasOwn(configuration.workspaces,workspaceKey),false);
+      assert.equal(Object.hasOwn(configuration.apiWorkspaces,workspaceKey),false);
+    }
+  } finally {await client.stop();client.dispose();}
+});
+
 test('ToolHost resets legacy SVN and DATABASE source while preserving project identity and docs', {skip:!fs.existsSync(python) && 'repository Python environment unavailable'},async t=>{
   const home=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'nexus-legacy-api-')));
   t.after(()=>fs.rmSync(home,{recursive:true,force:true}));

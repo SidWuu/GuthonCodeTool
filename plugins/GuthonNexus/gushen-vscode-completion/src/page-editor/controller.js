@@ -14,10 +14,10 @@ const RAW_SOURCE_STATES = new Set(['METADATA_ONLY','IDENTITY_MISMATCH','BATCH_EX
 
 class PageEditorController {
   constructor({vscode, context, backend, virtualFs, openReadonly, openOnline, preparePage, requestPage,
-    baselineLabel = 'API 基线', platformReference = true,
+    baselineLabel = 'API 基线', platformReference = true, copySavedFragment,
     recoveryStore = new PageRecoveryStore(context), maxClosedPages = 4, maxClosedBytes = 16 * 1024 * 1024,
     onSaved = async () => {}, ownsDocument = () => false, onDraftChanged = async () => {}, editorToken = async () => undefined, assertCanSave = () => {}}) {
-    Object.assign(this, {vscode, context, backend, virtualFs, openReadonly, openOnline, preparePage, onSaved, ownsDocument, onDraftChanged, editorToken, assertCanSave});
+    Object.assign(this, {vscode, context, backend, virtualFs, openReadonly, openOnline, preparePage, onSaved, ownsDocument, onDraftChanged, editorToken, assertCanSave, copySavedFragment});
     this.requestPage=requestPage || ((identity,payload)=>backend.run(identity.workspaceKey,'page',payload));
     this.baselineLabel=baselineLabel;
     this.platformReference=platformReference;
@@ -242,7 +242,7 @@ class PageEditorController {
       busy: session.busy, blocked: session.blocked, recovery: session.recovery ? {available: true} : null,
       codeDirty: this.vscode.workspace.textDocuments.some(doc=>doc.isDirty && this.owns(session.identity,doc)),
       status: session.status || '', sourceHash: session.snapshot.sourceHash,
-      baselineLabel:this.baselineLabel,apiVersion: session.baselineComparison?.apiVersion, pending: session.pending ? {operationId: session.pending.operationId || '', awaitingVerification: true} : null,
+      baselineLabel:this.baselineLabel,canCopySavedFragment:!!this.copySavedFragment,apiVersion: session.baselineComparison?.apiVersion, pending: session.pending ? {operationId: session.pending.operationId || '', awaitingVerification: true} : null,
       comparison: {...(full || previous.baseline !== session.baselineComparison ? {baseline:session.baselineComparison || {available:false,message:`正在读取${this.baselineLabel}…`}} : {}),
         ...(full || previous.signature !== signature ? {local:draftChanges(session.draft)} : {}),
         savedAt:session.snapshot.loadedAt, sourceStale:!!session.sourceStale}, onlineOpening: !!session.onlineOpening};
@@ -362,6 +362,15 @@ class PageEditorController {
     if (message.type === 'ready') { session.published = null; this.publish(session); return; }
     if(message.type==='platformReference') {await this.vscode.commands.executeCommand('gushenCompletion.showPlatformReference',session.identity.workspaceKey);return;}
     if (message.type === 'compare') { await this.refreshComparison(session); return; }
+    if (message.type === 'copySavedFragment') {
+      const comparison=session.baselineComparison;
+      const node=session.snapshot.model.nodes.find(item=>item.pointer===message.pointer);
+      if (!this.copySavedFragment || session.sourceStale || session.busy || !node?.editable || !comparison?.available
+        || !comparison.changes.rows.some(row=>row.pointer===node.pointer && row.kind!=='removed'))
+        throw new Error('页面片段或差异已变化，请重新比较');
+      await this.copySavedFragment(session.identity,node.pointer,session.snapshot.sourceHash);
+      session.status='已复制本地保存的片段';this.publish(session);return;
+    }
     if (message.type === 'export') {
       const recovery = await this.recoveryStore.expand(session.storageKey, session.recovery);
       const doc = await this.vscode.workspace.openTextDocument({language: 'json', content: JSON.stringify(

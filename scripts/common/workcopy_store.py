@@ -10,8 +10,10 @@ import argparse
 import datetime as dt
 import difflib
 import json
+import os
 import shutil
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 def _work_copy_change_key(row):
     return hub._str(hub._row_value(row, "change_key"))
@@ -262,12 +264,24 @@ def _write_work_copy_delivery(target: Path, status: dict):
     return path
 
 
-def _initialize_work_copy(source_path: Path, target: Path, row, change_key: str, mode: str):
-    shutil.copytree(source_path, target)
-    hub._write_work_copy_metadata(target, row, source_path, mode)
-    status = hub._work_copy_state(target, source_path, change_key)
-    status["action"] = "CREATED"
-    return status
+def _initialize_work_copy(source_path: Path, target: Path, row, change_key: str, mode: str, *, verify=None):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=target.parent, prefix=".workcopy-create-") as temporary:
+        staged = Path(temporary) / "source"
+        shutil.copytree(source_path, staged, symlinks=verify is not None)
+        metadata = staged / hub.WORK_COPY_META_FILE
+        if verify is not None and (metadata.exists() or metadata.is_symlink()):
+            raise ValueError("Readonly 镜像包含 Workcopy 专用元数据")
+        hub._write_work_copy_metadata(staged, row, source_path, mode)
+        if verify is not None:
+            verify(staged)
+        status = hub._work_copy_state(staged, source_path, change_key)
+        if verify is not None and status["state"] != "CLEAN":
+            raise ValueError("Readonly 镜像在创建期间发生变化，请重新核对")
+        if target.exists() or target.is_symlink():
+            raise FileExistsError(f"工作副本已存在: {target}")
+        os.rename(staged, target)
+    return {**status, "path": str(target), "action": "CREATED"}
 
 
 def _trash_work_copy(target: Path) -> Path:

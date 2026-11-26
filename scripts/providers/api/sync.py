@@ -554,6 +554,42 @@ def refresh(workspace, client, payload):
         }
 
 
+def prepare_page_edit(workspace, client, payload):
+    """Replace only an unchanged PAGE export with its editable native baseline."""
+    if set(payload) != {"path", "expectedSourceHash"}:
+        raise ApiError("API_INPUT_INVALID", "准备 PAGE 编辑需要精确路径和已读取的源码哈希")
+    path = payload["path"]
+    store = ApiStore(workspace)
+    with file_lock(store.directory / "sync.lock"):
+        current = store.read(path)
+        conflict = store._conflict_path(path)
+        metadata = current["metadata"]
+        if (current["sourceHash"] != payload["expectedSourceHash"]
+                or metadata.get("pageSource") != page_source.BATCH_EXPORT
+                or not current["readonly"] or not page_source.structured(metadata, path)):
+            raise ApiError("API_SOURCE_STALE", "目标已变化或不是只读 PAGE 导出，请重新读取")
+        if (current["sourceHash"] != current["baseHash"]
+                or metadata.get("untrackedConflict") or conflict.is_file()):
+            raise ApiError("API_PAGE_EDIT_CONFLICT", "PAGE 有本地差异或待处理冲突，请在 Nexus 中核对后再编辑")
+        assert_writable(workspace, [path])
+        files = fetch_object(client, metadata, page_store=store)
+        if len(files) != 1 or files[0].path != path or files[0].kind != "page":
+            raise ApiError("API_REMOTE_PATH_CHANGED", "平台 PAGE 与当前源码路径不一致，请先核对迁移")
+        native = files[0]
+        if native.readonly or native.metadata.get("nativeState") != "PRESENT":
+            raise ApiError("API_PAGE_NATIVE_VERSION_REQUIRED", "平台尚无可编辑的原生 PAGE，请在平台核对源码版本")
+        with file_lock(store.directory / "source.lock"):
+            if store.read(path) != current or conflict.is_file():
+                raise ApiError("API_SOURCE_STALE", "准备期间 PAGE 或冲突状态已变化，请重新核对")
+            result = store.publish(files)
+        if not result["complete"]:
+            raise ApiError("API_PAGE_EDIT_CONFLICT", "PAGE 更新产生冲突，已保留本地内容，请在 Nexus 中核对")
+        from .index import update
+
+        result["index"] = update(workspace, [path])
+        return {**result, "path": path, "complete": result["index"]["complete"]}
+
+
 UPLOADS = {
     "page": ("commitModulePage.htm", ("pageId", "pageType", "versionMac")),
     "procedure": ("commitProcFun.htm", ("procedureId", "funId", "versionMac")),

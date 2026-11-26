@@ -179,7 +179,7 @@ async function promptWorkspaceCreation(window, configuration) {
 
   const name = await window.showInputBox({
     title: '输入项目名称',
-    prompt: '该名称用于 Nexus 显示和本地工作区目录',
+    prompt: '该名称用于 Nexus 显示和本地工作区目录。已有项目文件夹时，输入相同的名称。',
     validateInput: value => String(value || '').trim() ? undefined : '名称不能为空',
   });
   if (name === undefined) return undefined;

@@ -25,9 +25,15 @@ function assertWorkspaceSaved(vscode,workspace,editorState,legacyProjects) {
   }
 }
 
+async function projectDirectoryExists(target) {
+  const info=await fs.lstat(target).catch(error=>{if(error.code!=='ENOENT')throw error;});
+  if(info && !info.isDirectory())throw new Error('项目目录已变化，请重新预览');
+  return Boolean(info);
+}
+
 async function deleteWorkspace({vscode,workspace,request,assertSaved,assertTool,refresh}) {
   const workspaceKey=workspace.workspaceKey;
-  let plan;
+  let plan,target,directoryExists;
   try {
     assertSaved();
     plan=await request({workspaceKey,checkOnly:true});
@@ -36,28 +42,38 @@ async function deleteWorkspace({vscode,workspace,request,assertSaved,assertTool,
         || path.relative(workspace.root,plan.paths[0])!=='' || !Array.isArray(plan.retainedPaths)) {
       throw new Error('删除预览身份或路径无效，请核对项目配置及后端版本');
     }
+    target=plan.paths[0];
+    directoryExists=await projectDirectoryExists(target);
   } catch(error) {return vscode.window.showErrorMessage(`无法读取删除范围：${error.message}`);}
-  const target=plan.paths[0];
   const retained=plan.retainedPaths.length ? `\n\n项目目录之外保留的路径\n${plan.retainedPaths.join('\n')}` : '';
+  const detail=directoryExists ? '以下项目目录及其中的本地改动将移入系统废纸篓' : '以下项目目录已不存在。确认后将移除项目登记。';
   const confirmed=await vscode.window.showWarningMessage(
     `确认删除 ${plan.displayName}（${workspaceKey}）？`,
-    {modal:true,detail:`以下项目目录及其中的本地改动将移入系统废纸篓\n${target}${retained}`},'确认删除');
+    {modal:true,detail:`${detail}\n${target}${retained}`},'确认删除');
   if(confirmed!=='确认删除')return false;
+  let movedToTrash=false;
   try {
     assertSaved();
     await request({workspaceKey,checkOnly:true,planId:plan.planId});
-    const info=await fs.lstat(target).catch(error=>{if(error.code!=='ENOENT')throw error;});
-    if(info && !info.isDirectory())throw new Error('项目目录已变化，请重新预览');
+    const stillExists=await projectDirectoryExists(target);
+    if(stillExists && !directoryExists)throw new Error('项目目录已重新出现，请重新预览');
     assertSaved();
     assertTool();
-    if(info)await vscode.workspace.fs.delete(vscode.Uri.file(target),{recursive:true,useTrash:true});
+    if(stillExists) {
+      await vscode.workspace.fs.delete(vscode.Uri.file(target),{recursive:true,useTrash:true});
+      movedToTrash=true;
+    }
   } catch(error) {
     return vscode.window.showErrorMessage(`删除已停止：${error.message}`);
   }
   try {await request({workspaceKey,checkOnly:false,planId:plan.planId});}
-  catch(error) {return vscode.window.showErrorMessage(`移除项目登记失败：${error.message}。可从系统废纸篓恢复已移走的目录。`);}
+  catch(error) {
+    const recovery=movedToTrash ? '。可从系统废纸篓恢复项目目录。' : '';
+    return vscode.window.showErrorMessage(`移除项目登记失败：${error.message}${recovery}`);
+  }
   await refresh();
-  return vscode.window.showInformationMessage(`已删除 ${plan.displayName}，本地项目目录可从系统废纸篓恢复。`);
+  const recovery=movedToTrash ? '，本地项目目录可从系统废纸篓恢复' : '';
+  return vscode.window.showInformationMessage(`已移除 ${plan.displayName} 的项目登记${recovery}。`);
 }
 
 module.exports={assertWorkspaceSaved,deleteWorkspace};

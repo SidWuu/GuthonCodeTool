@@ -52,6 +52,71 @@ class WorkspaceCase(unittest.TestCase):
         return gusen_hub.resolve_workspace(gusen_hub.load_config(), key)
 
 
+class WorkspaceRegistrationTest(WorkspaceCase):
+    def test_register_existing_project_with_docs_in_each_source_mode(self):
+        for mode, initialized in (("api", "checkout"), ("svn", "context"), ("database", "source/workcopy")):
+            with self.subTest(mode=mode):
+                name = "已有文档 " + mode
+                root = self.home / "var" / "workspace" / name
+                notes = root / "docs" / "需求" / "说明.md"
+                notes.parent.mkdir(parents=True)
+                content = "原有项目文档\r\n".encode("utf-8")
+                notes.write_bytes(content)
+                modified = notes.stat().st_mtime_ns
+                (root / "runtime" / "logs").mkdir(parents=True)
+
+                definition = {"name": name, "sourceMode": mode}
+                result = self.tool("workspace-create", payload=definition)
+                self.assertEqual(result["workspace"]["root"], str(root))
+                self.assertEqual(result["workspace"]["sourceMode"], mode)
+                self.assertTrue((root / initialized).is_dir())
+                self.assertEqual(notes.read_bytes(), content)
+                self.assertEqual(notes.stat().st_mtime_ns, modified)
+                with self.assertRaisesRegex(SystemExit, "工作区目录已经注册"):
+                    self.tool("workspace-create", payload=definition)
+
+        listed = self.tool("workspaces")
+        self.assertEqual({item["sourceMode"] for item in listed["workspaces"]}, {"api", "svn", "database"})
+        self.assertEqual(listed["configErrors"], [])
+
+    def test_registration_rejects_conflicts_before_initialization(self):
+        config_path = self.home / "config" / "guthon.json"
+        before = config_path.read_bytes()
+        conflicts = ("docs", "checkout/local.gss", "context/index.db", "runtime/logs",
+                     "source/readonly/local.gss", "database/local.sql")
+        for index, relative in enumerate(conflicts):
+            with self.subTest(relative=relative):
+                name = "路径冲突 " + str(index)
+                root = self.home / "var" / "workspace" / name
+                conflict = root / relative
+                conflict.parent.mkdir(parents=True)
+                conflict.write_bytes(b"existing content")
+                with self.assertRaises(SystemExit) as error:
+                    self.tool("workspace-create", payload={"name": name, "sourceMode": "api"})
+                self.assertEqual(error.exception.error_code, "WORKSPACE_CREATE_PATH_CONFLICT")
+                self.assertEqual(config_path.read_bytes(), before)
+                self.assertEqual(conflict.read_bytes(), b"existing content")
+                self.assertEqual(set(root.iterdir()), {root / Path(relative).parts[0]})
+
+    def test_registration_rejects_linked_project_and_managed_paths(self):
+        shared = self.home / "shared"
+        shared.mkdir()
+        for index, relative in enumerate((".", "docs", "checkout", "runtime/logs")):
+            with self.subTest(relative=relative):
+                name = "链接冲突 " + str(index)
+                link = self.home / "var" / "workspace" / name / relative
+                link.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    link.symlink_to(shared, target_is_directory=True)
+                except PermissionError:
+                    self.skipTest("directory symlink creation not permitted")
+                with self.assertRaisesRegex((SystemExit, ValueError), "实际目录|真实目录|路径冲突"):
+                    self.tool("workspace-create", payload={"name": name, "sourceMode": "api"})
+                self.assertTrue(link.is_symlink())
+        self.assertEqual(list(shared.iterdir()), [])
+        self.assertEqual(self.tool("workspaces")["workspaces"], [])
+
+
 class WorkspaceSelectionTest(WorkspaceCase):
     def test_prompt_requires_a_bounded_project_mention(self):
         current = self.register("database")

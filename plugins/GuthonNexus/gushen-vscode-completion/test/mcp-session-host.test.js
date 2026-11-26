@@ -171,3 +171,19 @@ test('independent MCP detail load preserves parameter identity and only exposes 
  assert.deepEqual(seen,[{key:'api-test',action:'module-parameter-load',input}]);
  assert.equal((await query(home,'api-test','module-parameter',{action:'save'})).error,'API_MCP_SESSION_FAILED');assert.equal(seen.length,1);
 });
+
+test('the Nexus session forwards exact PAGE edit preparation without exposing generic refresh',async t=>{
+  const home=fs.mkdtempSync(path.join(os.tmpdir(),'guthon-page-session-'));
+  const calls=[];
+  const host=new McpSessionHost({run:async(key,action,input)=>{
+    calls.push({key,action,input});
+    return {path:input.path,complete:true};
+  }});
+  t.after(async()=>{await host.close();fs.rmSync(home,{recursive:true,force:true});});
+  const key='api-test';
+  await host.sync(home,[key]);
+  const input={path:'systems/A/pages/main/PG-1/PG-1.xml',expectedSourceHash:'a'.repeat(64)};
+  assert.deepEqual(await query(home,key,'prepare-page-edit',input),{path:input.path,complete:true});
+  assert.equal((await query(home,key,'refresh',{prefix:'systems/A'})).error,'API_MCP_SESSION_FAILED');
+  assert.deepEqual(calls,[{key,action:'prepare-page-edit',input}]);
+});

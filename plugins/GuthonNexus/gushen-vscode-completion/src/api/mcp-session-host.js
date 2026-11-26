@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const { workspaceRoot } = require('../workspace-root');
 const crypto=require('node:crypto');
-const ACTIONS=new Set(['systems','data-sources','system-menu','create-function','sync-database','platform-request','module-parameter-load','module-upload']);
+const ACTIONS=new Set(['systems','data-sources','system-menu','create-function','sync-database','platform-request','module-parameter-load','module-upload','prepare-page-edit']);
 const descriptorName=key=>'session-'+crypto.createHash('sha256').update(key).digest('hex')+'.json';
 
 class McpSessionHost {
