@@ -70,7 +70,7 @@ test('DATABASE and SVN definition links use the source workspace and return open
       requests.push({command,args,key,input});
       if (command==='svn') return {ok:true,content:'return 1;'};
       if (args[0]==='locate') return {ok:true,items:[key===database.workspaceKey ? databaseRecord : svnRecord]};
-      return {ok:true,content:'return 2;',editable:true};
+      return {ok:true,content:'return 2;',editable:true,language:'guthon-gss'};
     }}});
   t.after(()=>f.context.subscriptions.forEach(subscription=>subscription.dispose()));
   for(const scheme of ['guthon-api-edit','guthon-api-readonly','guthon-svn-edit','guthon-database-edit'])

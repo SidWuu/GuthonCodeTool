@@ -1,18 +1,55 @@
 """Read-only semantic PAGE differences, with native identities across array moves."""
 import json
 
+from common.page_projection import json_pointer, pointer_parts
+
+
+def _identity(value):
+    if not isinstance(value, dict):
+        return None
+    for key in ('id', 'fieldId', 'guid', 'name'):
+        if isinstance(value.get(key), str) and value[key].strip():
+            return key + ':' + value[key]
+    return _identity(value.get('component'))
+
+
+def _array_keys(before, after):
+    left, right = [_identity(value) for value in before], [_identity(value) for value in after]
+    if all(left) and all(right) and len(set(left)) == len(left) and len(set(right)) == len(right):
+        return left, right
+    return None
+
+
+def baseline_pointer(before, after, pointer):
+    """Resolve a current PAGE pointer against the same native node in the baseline."""
+    parts = []
+    for part in pointer_parts(pointer):
+        if isinstance(before, list) and isinstance(after, list):
+            index = int(part)
+            keys = _array_keys(before, after)
+            if keys:
+                left, right = keys
+                if right[index] not in left:
+                    return None
+                old_index = left.index(right[index])
+            elif len(before) == len(after):
+                old_index = index
+            else:
+                return None
+            parts.append(old_index)
+            before, after = before[old_index], after[index]
+        elif isinstance(before, dict) and isinstance(after, dict) and part in before:
+            parts.append(part)
+            before, after = before[part], after[part]
+        else:
+            return None
+    return json_pointer(parts)
+
 
 def compare_pages(before, after, *, limit=1000):
     rows, paths, total = [], set(), 0
     def token(key):
         return str(key).replace('~', '~0').replace('/', '~1')
-    def identity(value):
-        if not isinstance(value, dict):
-            return None
-        for key in ('id', 'fieldId', 'guid', 'name'):
-            if isinstance(value.get(key), str) and value[key].strip():
-                return key + ':' + value[key]
-        return identity(value.get('component'))
     def caption(value):
         if not isinstance(value, dict):
             return ''
@@ -47,10 +84,9 @@ def compare_pages(before, after, *, limit=1000):
                 else:
                     walk(old[key], new[key], left, right, name, new_path)
         elif isinstance(old, list) and isinstance(new, list):
-            left_keys, right_keys = [identity(v) for v in old], [identity(v) for v in new]
-            stable = (all(left_keys) and all(right_keys) and len(set(left_keys)) == len(left_keys)
-                      and len(set(right_keys)) == len(right_keys))
-            if stable:
+            keys = _array_keys(old, new)
+            if keys:
+                left_keys, right_keys = keys
                 left_map = {key: i for i, key in enumerate(left_keys)}
                 right_map = {key: i for i, key in enumerate(right_keys)}
                 common = set(left_keys) & set(right_keys)

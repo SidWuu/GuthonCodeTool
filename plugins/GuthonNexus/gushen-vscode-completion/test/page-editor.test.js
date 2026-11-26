@@ -129,6 +129,23 @@ test('preview title derives the real PAGE name when an older backend model omits
   assert.equal((await new PageEditorController(other).open(other.identity)).draft.model.pageName,'来源页面名称');
 });
 
+test('DATABASE comparison copies only a reviewed, saved and editable code fragment',async()=>{
+  const f=hostFixture(), reads=[];
+  const pointer=f.snapshot.model.nodes[0].pointer;
+  const host=new PageEditorController({...f,copySavedFragment:async(...args)=>reads.push(args)});
+  const session=await host.open({...f.identity,sourceMode:'database'});
+  await assert.rejects(host.message(session,{type:'copySavedFragment',pointer}),/重新比较/);
+  session.baselineComparison={available:true,changes:{rows:[{kind:'modified',pointer}],paths:[pointer],total:1}};
+  await assert.rejects(host.message(session,{type:'copySavedFragment',pointer:'/other'}),/重新比较/);
+  await host.message(session,{type:'copySavedFragment',pointer});
+  assert.deepEqual(reads,[[session.identity,pointer,session.snapshot.sourceHash]]);
+  assert.equal(session.panel.latest.status,'已复制本地保存的片段');
+  session.sourceStale=true;
+  await assert.rejects(host.message(session,{type:'copySavedFragment',pointer}),/重新比较/);
+  assert.equal(reads.length,1);
+  host.dispose();
+});
+
 test('PAGE ID placeholders cannot hide the authoritative catalog name in preview and shared code titles',async()=>{
   const f=hostFixture();f.identity.sourceName=f.snapshot.sourceName=f.snapshot.model.pageName=f.identity.sourceId;
   f.identity.treeLabel='目录中的页面名称';

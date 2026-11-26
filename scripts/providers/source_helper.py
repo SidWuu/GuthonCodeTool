@@ -40,7 +40,9 @@ class SourceHelperMcpServer(ApiMcpServer):
         for mode, server in self.providers.items():
             for tool in server.tools:
                 annotations = tool["annotations"]
-                needs_platform = annotations.get("openWorldHint") or tool["name"] in PLATFORM_WORKFLOW_TOOLS
+                prepares_local_page = mode == "api" and tool["name"] == "open_document"
+                needs_platform = (annotations.get("openWorldHint") and not prepares_local_page
+                                  or tool["name"] in PLATFORM_WORKFLOW_TOOLS)
                 if (mode == "svn" and tool["name"] in GLOBAL_SVN_TOOLS
                         or needs_platform and not self.enable_platform_tools
                         or not enable_writes and not annotations["readOnlyHint"]):

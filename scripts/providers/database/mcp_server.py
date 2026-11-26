@@ -26,13 +26,18 @@ TOOLS = [
 WORKCOPY_TOOLS = [
     _tool("read_workcopy", "Read a bounded slice of the exact Workcopy or its readonly baseline. Check sourceHash between pages.",
           {**IDENTITY, **READ_BOUNDS}, IDENTITY_FIELDS),
+    _tool("create_workcopy", "Create a local PAGE Workcopy from the exact readonly baseline. Use read_workcopy sourceHash when workcopy is false. Returns independently verified creation artifacts, or EXISTS without changing a prior Workcopy.",
+          {**{key: IDENTITY[key] for key in IDENTITY_FIELDS},
+           "baselineSourceHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+          [*IDENTITY_FIELDS, "baselineSourceHash"], write=True),
     _tool("preview_workcopy", "Preview local Workcopy content or a PAGE fragment. Returns candidateSourceHash without writing.",
           CANDIDATE, CANDIDATE_FIELDS),
     _tool("save_workcopy", "Save the exact previewed candidate against its original sourceHash. Writes only source/workcopy and independently reads back its hash.",
           {**CANDIDATE, "candidateSourceHash": PATH}, [*CANDIDATE_FIELDS, "candidateSourceHash"],
           write=True, destructive=True),
 ]
-WORKCOPY_ACTIONS = {"read_workcopy": "edit-read", "preview_workcopy": "edit-preview", "save_workcopy": "edit-save"}
+WORKCOPY_ACTIONS = {"read_workcopy": "edit-read", "create_workcopy": "create",
+                    "preview_workcopy": "edit-preview", "save_workcopy": "edit-save"}
 
 
 class DatabaseMcpServer(ApiMcpServer):

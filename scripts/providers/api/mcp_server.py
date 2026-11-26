@@ -261,10 +261,11 @@ WRITE_TOOLS = [
 
     _tool(
         "open_document",
-        "为当前本地文件申请编辑租约；正文仅返回有界前缀，检查truncated并用read_source继续读取。",
+        "为当前本地文件申请编辑租约。干净的批量 PAGE 导出会通过当前 Nexus 登录按页加载原生基线；请依据返回的源码和哈希准备候选。正文仅返回有界前缀，检查truncated并用read_source继续读取。",
         {**P, "ttlSeconds": {"type": "integer", "minimum": 1, "maximum": 86400}},
         ["workspaceKey", "path"],
         write=True,
+        open_world=True,
     ),
     _tool(
         "preview_document",
@@ -779,9 +780,17 @@ class ApiMcpServer:
                     args.get("maxChars", 12000),
                 )
             if name == "open_document":
-                return documents.open_document(
-                    workspace, path, args.get("ttlSeconds", 1800)
-                )
+                ttl = args.get("ttlSeconds", 1800)
+                try:
+                    return documents.open_document(workspace, path, ttl)
+                except ApiError as error:
+                    if error.code != "API_PAGE_NATIVE_BASE_REQUIRED":
+                        raise
+                current = index.ApiStore(workspace).read(path)
+                self._online(workspace, "prepare-page-edit", {
+                    "path": path, "expectedSourceHash": current["sourceHash"],
+                })
+                return documents.open_document(workspace, path, ttl)
             if name == "renew_document":
                 return documents.renew_document(workspace, args["leaseId"], args.get("ttlSeconds", 1800))
             if name == "resume_document_operation":

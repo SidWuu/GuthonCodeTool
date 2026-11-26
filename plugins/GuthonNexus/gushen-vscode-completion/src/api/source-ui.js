@@ -512,7 +512,10 @@ class ApiSourceUI {
   }
   async registerWorkspace(key,checkoutPath) {
     const generation=this.scopeGeneration;
-    if(this.editorState && !this.editorState.workspaces.has(key)) await this.editorState.add(key,checkoutPath);
+    if(this.editorState && !this.editorState.workspaces.has(key)) {
+      const editorToken=await this.editorState.add(key,checkoutPath);
+      if(editorToken===null)return;
+    }
     if(generation!==this.scopeGeneration || this.workspaces.get(key)?.checkoutPath!==checkoutPath) throw new Error('工作空间或工作区目录已切换，请重试');
     this.onWorkspace?.(key,checkoutPath);
     if(this.editorState && !this.watchers.has(key) && this.vscode.workspace.createFileSystemWatcher && this.vscode.RelativePattern) {

@@ -71,7 +71,11 @@ test('the webview renders a distinct icon for each API source module separately 
   const icons=['layout','symbol-method','table','symbol-structure','code','settings-gear',
     'symbol-enum','list-selection','book','files'];
   vm.runInNewContext(source.slice(0,source.indexOf('function activate('))+'\nrender(message)',{...context,
-    message:{rows:icons.map(id=>({id,icon:id,capable:true,depth:0})),generation:1}});
+    message:{rows:icons.map(id=>({id,icon:id,capable:true,depth:0,
+      ...(id==='layout'?{description:'M · 本地修改',color:'gitDecoration.modifiedResourceForeground'}:{})})),generation:1}});
+  const changed=tree.children[0].children[0];
+  assert.equal(changed.children[1].style.color,'var(--vscode-gitDecoration-modifiedResourceForeground)');
+  assert.equal(changed.children.at(-1).textContent,'M · 本地修改');
   const rendered=tree.children[0].children.map(row=>{
     assert.equal(row.children[0].textContent,'›');
     assert.notEqual(row.children[1].textContent,'▸');

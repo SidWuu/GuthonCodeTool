@@ -3,6 +3,7 @@ import json
 
 from common import legacy_source as hub
 from common import database_source_exports as exports
+from common.page_comparison import baseline_pointer
 from common.page_projection import extract_page_fields, extract_page_scripts
 
 SOURCE_TYPES = ("page", "procedure", "system-script", "table", "view", "skill", "public")
@@ -113,6 +114,41 @@ def locate(workspace, *, source_type, source_id="", alias="", fun_id=""):
     return {"items": [item for row in rows if (item := _record(workspace, row))]}
 
 
+def local_changes(workspace):
+    """Report canonical DATABASE Workcopy changes independently of Git and projections."""
+    readonly = workspace["readonlyDir"].resolve()
+    workcopy = workspace["workcopyDir"].resolve()
+    if not workcopy.is_dir():
+        return {"items": []}
+    items = []
+    with hub.index_connection(workspace, action="workcopy-changes") as conn:
+        rows = conn.execute("""SELECT source_table, local_path FROM gusen_source_record
+            WHERE scope_id=? AND provider='database' AND source_table IN ('page','procedure') AND local_path<>''""",
+                            (workspace["scopeId"],))
+        for row in rows:
+            filename = "raw.json" if row["source_table"] == "page" else "source.vm"
+            source = hub.ROOT / row["local_path"] / filename
+            if not source.is_relative_to(readonly):
+                continue
+            relative = source.relative_to(readonly)
+            target = workcopy / relative
+            if not target.is_file() or target.resolve() != target or source.resolve() != source or not source.is_file():
+                continue
+            try:
+                with source.open("rb") as baseline, target.open("rb") as saved:
+                    for chunk in iter(lambda: saved.read(64 * 1024), b""):
+                        if chunk != baseline.read(len(chunk)):
+                            break
+                    else:
+                        if not baseline.read(1):
+                            continue
+            except FileNotFoundError:
+                # Resync can replace either file between the lookup and open.
+                continue
+            items.append({"sourceType": row["source_table"], "sourcePath": relative.as_posix()})
+    return {"items": items}
+
+
 def _indexed_file(workspace, row):
     paths = [entry["path"].resolve() for entry in workspace["sourceRoots"]
              if entry["role"] != "workcopy"]
@@ -127,6 +163,24 @@ def _indexed_file(workspace, row):
     ):
         return target
     return None
+
+
+def _page_data(text):
+    data = json.loads(text)
+    data = json.loads(data) if isinstance(data, str) else data
+    if not isinstance(data, dict):
+        raise ValueError("PAGE 根节点必须为对象")
+    return data
+
+
+def _page_fragments(data):
+    fragments = {field.json_pointer: (field.display_name,
+                 {"js": "javascript", "sql": "sql"}.get(field.script_type, "guthon-gss"),
+                 field.effective_value, any(segment["layer"] == "product" for segment in field.origin_segments))
+                 for field in extract_page_scripts(data)}
+    for field in extract_page_fields(data, include_buttons=True):
+        fragments[field["json_pointer"]] = (field["label"], "json", field["content"], False)
+    return fragments
 
 
 def read(workspace, record_id, *, limit=24000, pointer="", fragments=False, export_key="", source_id=""):
@@ -146,6 +200,7 @@ def read(workspace, record_id, *, limit=24000, pointer="", fragments=False, expo
         target = _indexed_file(workspace, row) if row and row["source_table"] in SOURCE_TYPES else None
         if not target or source_id and row["source_id"] != source_id:
             raise SystemExit("Indexed source is outside this workspace or unavailable")
+        baseline = target
         if (pointer or fragments) and row["source_table"] == "page" and workspace["sourceMode"] == "database":
             workcopy = workspace["workcopyDir"].resolve() / target.relative_to(workspace["readonlyDir"].resolve())
             if workcopy.is_file() and workcopy.resolve() == workcopy:
@@ -159,24 +214,33 @@ def read(workspace, record_id, *, limit=24000, pointer="", fragments=False, expo
     language = {"json": "json", "sql": "sql", "vm": "guthon-gss", "gss": "guthon-gss", "js": "javascript"}.get(target.suffix[1:], "plaintext")
     if (pointer or fragments) and source_type == "page" and workspace["sourceMode"] == "database":
         try:
-            data = json.loads(content)
-            if isinstance(data, str):
-                data = json.loads(data)
-            if not isinstance(data, dict):
-                raise ValueError("PAGE 根节点必须为对象")
+            data = _page_data(content)
         except ValueError as error:
             if fragments:
                 return {"fragments": [], "diagnostic": f"PAGE 无法解析：{error}"}
             raise SystemExit(f"PAGE 无法解析：{error}") from error
-        scripts = {field.json_pointer: (field.display_name,
-                    {"js": "javascript", "sql": "sql"}.get(field.script_type, "guthon-gss"),
-                    field.effective_value, any(segment["layer"] == "product" for segment in field.origin_segments))
-                   for field in extract_page_scripts(data)}
-        for field in extract_page_fields(data, include_buttons=True):
-            scripts[field["json_pointer"]] = (field["label"], "json", field["content"], False)
+        scripts = _page_fragments(data)
         if fragments:
+            modified = set()
+            diagnostic = ""
+            if baseline != target:
+                try:
+                    with baseline.open("rb") as source:
+                        original = source.read(2 * 1024 * 1024 + 1)
+                    if len(original) > 2 * 1024 * 1024:
+                        raise ValueError("超过本地源码预览上限")
+                    if raw != original:
+                        base_data = _page_data(decode_source(original)[0])
+                        original_scripts = _page_fragments(base_data)
+                        for key, value in scripts.items():
+                            prior = original_scripts.get(baseline_pointer(base_data, data, key))
+                            if prior is None or prior[2] != value[2]:
+                                modified.add(key)
+                except (OSError, ValueError) as error:
+                    diagnostic = f"无法读取 DATABASE 只读基线：{error}"
             return {"fragments": [{"pointer": key, "label": value[0], "language": value[1], "inherited": value[3]}
-                                  for key, value in scripts.items()]}
+                                  for key, value in scripts.items()], "modifiedPointers": sorted(modified),
+                    **({"diagnostic": diagnostic} if diagnostic else {})}
         if pointer not in scripts:
             raise SystemExit("PAGE 片段已变化或不属于当前对象")
         _label, language, content, _inherited = scripts[pointer]

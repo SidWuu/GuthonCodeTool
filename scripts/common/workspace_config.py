@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import stat
 import uuid
 from pathlib import Path
 
@@ -32,6 +33,15 @@ def _canonical_yaml(text):
     return _parse_tiny_yaml(text)
 
 
+def _contains_files_or_links(root, *, ignored_files=()):
+    try:
+        mode = root.lstat().st_mode
+    except FileNotFoundError:
+        return False
+    if stat.S_ISDIR(mode):
+        return any(_contains_files_or_links(child, ignored_files=ignored_files) for child in root.iterdir())
+    return stat.S_ISLNK(mode) or root not in ignored_files
+
 
 def create_workspace(home, payload, gusen_hub):
     if not isinstance(payload, dict) or set(payload) - {"id", "name", "directory", "aliases", "sourceMode"}:
@@ -61,8 +71,6 @@ def create_workspace(home, payload, gusen_hub):
             raise SystemExit("工作区目录已经注册")
         space = workspace_root(home)
         relative_directory = f"{PROJECTS_DIRECTORY}/{directory}"
-        if registered_project_directory(space, relative_directory).exists():
-            raise SystemExit("工作区目录已经存在，请使用新的目录名；不会覆盖原有内容")
         document = config_store.read(home)
         record = {"name": name, "directory": relative_directory, "aliases": list(dict.fromkeys(x.strip() for x in aliases))}
         if document["schemaVersion"] == 3:
@@ -70,7 +78,19 @@ def create_workspace(home, payload, gusen_hub):
         elif mode != "api":
             raise ValueError("请先升级统一配置，再添加 SVN 或 DATABASE 项目")
         document["workspaces"][identifier] = record
-        workspace = gusen_hub.resolve_workspace(config_store.resolve_document(home, document), identifier)
+        proposed = config_store.resolve_document(home, document)
+        root = registered_project_directory(space, proposed["workspaces"][identifier]["directory"])
+        docs = root / "docs"
+        if docs.is_symlink() or docs.exists() and not docs.is_dir():
+            raise CommandError("WORKSPACE_CREATE_PATH_CONFLICT", "项目的 docs 必须是实际目录")
+        # A new workspace key must not take ownership of existing provider state.
+        for managed_directory in ("checkout", "context", "runtime", "source", "database"):
+            if _contains_files_or_links(root / managed_directory):
+                raise CommandError(
+                    "WORKSPACE_CREATE_PATH_CONFLICT",
+                    f"项目的 {managed_directory}/ 已有文件或路径冲突，请核对现有数据归属",
+                )
+        workspace = gusen_hub.resolve_workspace(proposed, identifier)
         update_workspace_ignores(space)
         gusen_hub.ensure_workspace_structure(workspace)
         config_store.write(home, document)
@@ -89,11 +109,7 @@ def _has_source_state(workspace):
     paths = {context, workspace["runtimeDir"], *(entry["path"] for entry in workspace["sourceRoots"])}
     if workspace["sourceMode"] == "database":
         paths.add(workspace["databaseDir"])
-    return any(
-        root.is_symlink() or root.exists() and not root.is_dir()
-        or any(item.is_symlink() or (not item.is_dir() and item not in transient) for item in root.rglob("*"))
-        for root in paths
-    )
+    return any(_contains_files_or_links(root, ignored_files=transient) for root in paths)
 
 
 def change_source_mode(home, payload, gusen_hub):

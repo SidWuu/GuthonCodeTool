@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from difflib import SequenceMatcher
 import hashlib
 import json
 import os
@@ -12,7 +13,11 @@ from tempfile import TemporaryDirectory
 from common import legacy_source as hub
 from common import page_editor
 from common.inheritance import project as project_inheritance
-from common.page_projection import extract_page_fields, extract_page_scripts, replace_json_value
+from common.page_comparison import baseline_pointer, compare_pages
+from common.page_projection import (
+    extract_page_fields, extract_page_scripts, inherited_page_script, pointer_value,
+    replace_json_value, resolve_inherited_script,
+)
 from common.persistence import atomic_bytes
 from common.source_format import decode_source, encode_source_exact
 
@@ -39,6 +44,68 @@ def _page(text, source_id):
     return projected, data, double_encoded
 
 
+def _changed_lines(before, after):
+    # VS Code presents CRLF and LF as the same line contents.
+    before = before.replace("\r\n", "\n").replace("\r", "\n")
+    after = after.replace("\r\n", "\n").replace("\r", "\n")
+    if before == after:
+        return []
+    comparison = SequenceMatcher(None, before.split("\n") if before else [], after.split("\n") if after else [])
+    return [{"kind": kind, "start": start, "end": end}
+            for kind, _, _, start, end in comparison.get_opcodes() if kind != "equal"]
+
+
+def _create_page_workcopy(conn, workspace, config, row, source, target, expected_hash):
+    source_id = row["source_id"]
+    change_key = row["change_key"]
+    folder = target.parent
+    mirror = source.parent
+    identity = {"workspaceKey": workspace["workspaceKey"], "recordId": row["record_id"],
+                "sourceId": source_id, "sourcePath": source.relative_to(workspace["readonlyDir"]).as_posix(),
+                "workcopyPath": str(target), "baselineSourceHash": expected_hash, "baselineChangeKey": change_key}
+    with hub.file_lock(workspace["contextDir"] / ".workcopy.lock"):
+        if folder.resolve() != folder or (folder.exists() and not folder.is_dir()):
+            raise ValueError("Workcopy 目标不是登记目录下的普通目录")
+        raw = _bytes(source)
+        _page(decode_source(raw)[0], source_id)
+        if _digest(raw) != expected_hash:
+            raise ValueError("Readonly PAGE 已变化，请重新读取后创建")
+        if folder.exists():
+            return {**identity, "action": "EXISTS", "writeArtifacts": []}
+        metadata = mirror / "meta.json"
+        if metadata.resolve() != metadata:
+            raise ValueError("Readonly PAGE 元数据路径包含符号链接")
+        meta_bytes = metadata.read_bytes()
+        meta = json.loads(meta_bytes)
+        if (not isinstance(meta, dict) or meta.get("source_id") != source_id
+                or meta.get("source_table") != "page" or meta.get("change_key") != change_key):
+            raise ValueError("Readonly PAGE 元数据与当前索引的对象或版本不一致")
+        expected = {"raw.json": raw, "meta.json": meta_bytes}
+
+        def verify(staged):
+            if any(path.is_symlink() for path in staged.rglob("*")):
+                raise ValueError("Readonly PAGE 镜像包含符号链接")
+            indexed = conn.execute("SELECT * FROM gusen_source_record WHERE record_id=?", (row["record_id"],)).fetchone()
+            if indexed != row or any((mirror / name).resolve() != mirror / name
+                                     or (mirror / name).read_bytes() != content
+                                     or (staged / name).read_bytes() != content for name, content in expected.items()):
+                raise ValueError("Readonly PAGE 镜像或索引在创建期间发生变化，请重新核对")
+            expected[hub.WORK_COPY_META_FILE] = (staged / hub.WORK_COPY_META_FILE).read_bytes()
+
+        work_row = {**dict(row), "workspaceKey": workspace["workspaceKey"]}
+        result = hub._initialize_work_copy(mirror, folder, work_row, change_key, "mirror", verify=verify)
+        artifacts = []
+        for name, content in expected.items():
+            path = folder / name
+            if path.resolve() != path or path.read_bytes() != content:
+                raise ValueError("Workcopy 创建后的文件回读不匹配，请核对磁盘")
+            artifacts.append({"path": str(path), "sourceHash": _digest(content)})
+        outputs = {path for path in folder.rglob("*") if path.is_file()}
+        hub.record_generated_files(outputs)
+        result.update(hub._auto_add_work_copy(config, folder, outputs))
+        return {**result, **identity, "matchesAfter": True, "writeArtifacts": artifacts}
+
+
 def run(workspace, config, action, payload, *, include_write_artifacts=False):
     if not isinstance(payload, dict):
         raise ValueError("需要明确的 DATABASE 源码身份")
@@ -49,16 +116,22 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False):
         row = conn.execute("""SELECT * FROM gusen_source_record WHERE scope_id=? AND provider='database'
             AND record_id=? AND source_id=? AND source_table IN ('page','procedure')""",
                            (workspace["scopeId"], record_id, source_id)).fetchone()
-    if row is None or not row["local_path"]:
-        raise ValueError("源码已移出当前工作区索引")
-    is_page = row["source_table"] == "page"
-    filename = "raw.json" if is_page else "source.vm"
-    readonly_root = workspace["readonlyDir"].resolve()
-    source = (hub.ROOT / row["local_path"] / filename).resolve()
-    if not source.is_relative_to(readonly_root) or source.relative_to(readonly_root).as_posix() != source_path:
-        raise ValueError("源码路径与当前工作区索引不一致")
-    workcopy_root = workspace["workcopyDir"].resolve()
-    target = workcopy_root / source.relative_to(readonly_root)
+        if row is None or not row["local_path"]:
+            raise ValueError("源码已移出当前工作区索引")
+        is_page = row["source_table"] == "page"
+        filename = "raw.json" if is_page else "source.vm"
+        readonly_root = workspace["readonlyDir"].resolve()
+        indexed = hub.ROOT / row["local_path"] / filename
+        source = indexed.resolve()
+        if not source.is_relative_to(readonly_root) or source.relative_to(readonly_root).as_posix() != source_path:
+            raise ValueError("源码路径与当前工作区索引不一致")
+        workcopy_root = workspace["workcopyDir"].resolve()
+        target = workcopy_root / source.relative_to(readonly_root)
+        if action == "create":
+            if (not is_page or source != indexed or readonly_root != workspace["readonlyDir"]
+                    or workcopy_root != workspace["workcopyDir"]):
+                raise ValueError("仅支持从登记目录下的普通 Readonly PAGE 创建 Workcopy")
+            return _create_page_workcopy(conn, workspace, config, row, source, target, payload["baselineSourceHash"])
     pointer = payload.get("pointer", "")
     if not isinstance(pointer, str) or pointer and (not is_page or not pointer.startswith("/") or len(pointer) > 4096):
         raise ValueError("无效的源码分块路径")
@@ -89,8 +162,6 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False):
         if action == "edit-comparison":
             if not design or payload.get("sourceHash") != source_hash:
                 raise ValueError("PAGE 已变化，请重新打开后比较")
-            from common.page_comparison import compare_pages
-
             base = _bytes(source)
             _base_text, base_data, _wrapped = _page(decode_source(base)[0], source_id)
             changes = compare_pages(base_data, data)
@@ -113,13 +184,31 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False):
                 collections = extract_page_fields(data, include_buttons=True, include_content=False)
                 if not any(field["json_pointer"] == pointer for field in collections):
                     raise ValueError("当前 PAGE 中无法定位该分块")
-                from common.page_projection import pointer_value
-
                 fragment = pointer_value(data, pointer)
         if not editing:
             content = projected if is_page else text
             if pointer:
                 content = display_content if isinstance(fragment, str) else json.dumps(fragment, ensure_ascii=False, indent=2)
+            if payload.get("includeLineChanges") is True:
+                result["lineChanges"] = []
+                if existing:
+                    try:
+                        original = _bytes(source)
+                        if original != current:
+                            baseline = decode_source(original)[0]
+                            if is_page:
+                                baseline, base_data, _ = _page(baseline, source_id)
+                                if pointer:
+                                    old_pointer = baseline_pointer(base_data, data, pointer)
+                                    value = pointer_value(base_data, old_pointer) if old_pointer is not None else None
+                                    if isinstance(fragment, str):
+                                        baseline = (resolve_inherited_script(value, inherited_page_script(base_data, old_pointer)[1])
+                                                    if isinstance(value, str) else "")
+                                    else:
+                                        baseline = json.dumps(value, ensure_ascii=False, indent=2) if value is not None else ""
+                            result["lineChanges"] = _changed_lines(baseline, content)
+                    except (OSError, ValueError) as error:
+                        result["lineChangesDiagnostic"] = f"无法读取 DATABASE 只读基线：{error}"
             return {**result, "content": content}
 
         if not result["editable"]:
