@@ -51,14 +51,14 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(normalized(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
-def read(client, metadata, *, check_info=False):
+def read(client, metadata, *, check_info=False, require_checkout_owner=True):
     if check_info:
         response = client.request(INFO, form={"pageId": metadata["pageId"]})
         info = response.get("page") if isinstance(response, dict) else None
         if not isinstance(info, dict) or any(str(info.get(k)) != str(metadata[k]) for k in ("pageId", "systemId")):
             raise ApiError("API_IDENTITY_MISMATCH", "原生 PAGE 基本信息与当前项目/子系统不一致")
         owner = info.get("checkOutUserId")
-        if owner and owner != client.session.get("userId"):
+        if require_checkout_owner and owner and owner != client.session.get("userId"):
             raise ApiError("API_PAGE_CHECKED_OUT_OTHER", "PAGE 已由其他用户签出，未保存或强制覆盖")
     response = client.request(READ, form={"pageId": metadata["pageId"]})
     identity = f"子系统 {metadata['systemId']} / PAGE {metadata['pageId']}"
@@ -189,17 +189,53 @@ def check_before_upload(client, current, original):
 _DEFAULTS = {"ctName": "VARCHAR", "dataType": "VARCHAR", "colGroupType": 1, "forceSelection": 1,
              "sortable": 1, "isDefaultLike": 1, "length": 0, "isDisabled": 0, "isHide": 0,
              "isLike": 0, "areaRange": 0, "dqMust1": 0, "dqMust2": 0, "dqMust3": 0, "dqMust4": 0}
+_MAIN_TABLE_COLUMN_ZERO_DEFAULTS = {
+    "autoHeight", "editable", "isDisAdvSearch", "isDisExtraSearch", "isDisLabel", "isImageUpload", "isMust",
+    "isProduct", "isRichEdit", "isRowSpanning", "isSum", "isTrimValue", "isUseMaxEdit",
+    "pcAndH5", "useTableFieldName",
+}
+_SEARCH_TEXT_FIELD_ZERO_DEFAULTS = {
+    "isCanRemoveGroupField", "isDisExtraSearch", "isEndDate", "isMust", "isProduct",
+    "isRowSpanning", "isTrimValue", "isUseMaxEdit", "pcAndH5",
+}
+_MAIN_TABLE_CHILD_ZERO_DEFAULTS = {"datasource": {"isProduct"}, "params": {"isNeedSum"}}
 
 
-def saved_model_matches(candidate, received):
-    def clean(value, location=()):
-        if isinstance(value, list):return [clean(v, location + (str(index),)) for index, v in enumerate(value)]
+def normalize_saved_model(model):
+    """Compare native PAGE content without known server/editor default shapes."""
+    def clean(value, location=(), *, owner_component=None):
+        if isinstance(value, list):
+            return [
+                clean(v, location + (str(index),), owner_component=owner_component)
+                for index, v in enumerate(value)
+            ]
         if not isinstance(value, dict):return value
+        component = value.get("type") if location[:1] == ("views",) and location[-1:] == ("component",) else None
+        member_type = value.get("type") if len(location) >= 2 and location[-2] == "fields" else None
+        table_column = owner_component == "table-main" and member_type in ("text", "datetime")
+        search_text = owner_component == "search-box" and member_type == "text"
+        if table_column:
+            zero_defaults = _MAIN_TABLE_COLUMN_ZERO_DEFAULTS
+        elif search_text:
+            zero_defaults = _SEARCH_TEXT_FIELD_ZERO_DEFAULTS
+        elif owner_component == "table-main":
+            zero_defaults = _MAIN_TABLE_CHILD_ZERO_DEFAULTS.get(location[-1], ())
+        else:
+            zero_defaults = ()
         result = {}
         for key, item in value.items():
-            item = clean(item, location + (key,))
+            child_owner = component if key in {"fields", "datasource", "params"} else None
+            item = clean(item, location + (key,), owner_component=child_owner)
             if item is None or item == "" or item == {} or item == []:continue
+            if key in zero_defaults and type(item) in (int, float) and item == 0:
+                continue
+            if table_column or search_text:
+                if (key == "selectBox" and isinstance(item, dict) and item.keys() == {"forceSelection"}
+                        and type(item["forceSelection"]) is int and item["forceSelection"] == 0):
+                    continue
             default = _DEFAULTS.get(key)
+            if table_column and member_type == "datetime" and key == "dataType":
+                default = "DATETIME"
             # Native save omits zero decimal precision on datasource fields/PKs.
             # Report zoom also uses "scale", so it must retain its own semantics.
             if key == "scale" and len(location) >= 3 and location[-3] == "datasource" and location[-2] in {"fields", "pks"}:
@@ -207,7 +243,11 @@ def saved_model_matches(candidate, received):
             if default is not None and type(item) is not bool and type(item) in (str, int, float) and item == default:continue
             result[key] = item
         return result
-    return native_page._same(clean(candidate), clean(received))
+    return clean(model)
+
+
+def saved_model_matches(candidate, received):
+    return native_page._same(normalize_saved_model(candidate), normalize_saved_model(received))
 
 
 def save(client, snapshot, metadata, candidate):
@@ -221,6 +261,44 @@ def save(client, snapshot, metadata, candidate):
     if not isinstance(response, dict) or not isinstance(response.get("version"), str) or not response["version"]:
         raise ApiError("API_RESPONSE_INVALID", "原生保存应答缺少版本，请通过原生接口核对，勿重复上传")
     return response["version"]
+
+
+def _verified_upload_file(client, source, result, candidate):
+    from .store import digest
+
+    accepted_version = result.get("nativeAcceptedVersion")
+    # Acknowledged saves are checked by exact version and model. Checkout ownership
+    # still applies before any save and when no accepted version was recorded.
+    verified = read(client, source.metadata, check_info=True, require_checkout_owner=not accepted_version)
+    if ((accepted_version and verified.version != accepted_version)
+            or not saved_model_matches(candidate, verified.model)):
+        raise ApiError("API_PAGE_NATIVE_READBACK_MISMATCH", "原生 PAGE 回读与提交模型不一致，结果待核对；未重复上传")
+    accepted = as_file(verified, source, template=source.content)
+    proof = {
+        "stage": "REMOTE_READBACK_VERIFIED", "remoteHash": digest(accepted.content),
+        "nativeRemoteVersion": verified.version, "nativeReadbackHash": fingerprint(verified.model),
+        "sourceNormalized": not native_page._same(candidate, verified.model),
+    }
+    return accepted, proof
+
+
+def recover_upload_file(store, client, source, result, operation):
+    """Use the frozen submission and a fresh readback without sending a save."""
+    from .store import digest
+
+    folder = store.directory / "operations" / operation["operationId"]
+    path_hash = digest(source.path)
+    try:
+        submitted = (folder / ("submitted-" + path_hash + ".txt")).read_bytes().decode("utf-8")
+        candidate = json.loads((folder / ("submitted-native-" + path_hash + ".json")).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ApiError("API_OPERATION_INVALID", "无法读取原生 PAGE 提交记录") from error
+    if digest(submitted) != result["submittedHash"] or fingerprint(candidate) != result["submittedModelHash"]:
+        raise ApiError("API_OPERATION_INVALID", "原生 PAGE 提交记录与哈希不一致")
+    accepted, proof = _verified_upload_file(
+        client, SourceFile(source.path, submitted, "page", source.metadata), result, candidate,
+    )
+    return accepted, submitted, proof
 
 
 def finish_upload(store, client, current, result, operation, snapshot=None):
@@ -272,21 +350,13 @@ def finish_upload(store, client, current, result, operation, snapshot=None):
         else:
             result["stage"] = "REMOTE_ACKNOWLEDGED"
             store._receipt(operation)
+        submitted = current["content"]
+        accepted, proof = _verified_upload_file(client, SourceFile(path, submitted, "page", current["metadata"]), result, candidate)
     else:
-        folder = store.directory / "operations" / operation["operationId"]
-        submitted = (folder / ("submitted-" + digest(path) + ".txt")).read_text(encoding="utf-8")
-        candidate = json.loads((folder / ("submitted-native-" + digest(path) + ".json")).read_text(encoding="utf-8"))
-        if digest(submitted) != result["submittedHash"] or fingerprint(candidate) != result["submittedModelHash"]:
-            raise ApiError("API_OPERATION_INVALID", "原生 PAGE 提交记录与哈希不一致")
-        current = {**current, "content": submitted}
-    verified = read(client, current["metadata"], check_info=True)
-    if (result.get("nativeAcceptedVersion") and verified.version != result["nativeAcceptedVersion"]) or not saved_model_matches(candidate, verified.model):
-        raise ApiError("API_PAGE_NATIVE_READBACK_MISMATCH", "原生 PAGE 回读与提交模型不一致，结果待核对；未重复上传")
-    source = SourceFile(path, current["content"], "page", current["metadata"])
-    accepted = as_file(verified, source, template=current["content"])
-    publication = store.publish([accepted], uploaded_content={path: current["content"]})
+        source = SourceFile(path, current["content"], "page", current["metadata"])
+        accepted, submitted, proof = recover_upload_file(store, client, source, result, operation)
+    publication = store.publish([accepted], uploaded_content={path: submitted})
     if publication["conflicts"]:raise ApiError("API_LOCAL_AFTER_UPLOAD_CONFLICT", "原生保存已回读，本地合并存在冲突，保留本地修改")
-    result.update(stage="REMOTE_READBACK_VERIFIED", remoteHash=digest(accepted.content), nativeRemoteVersion=verified.version,
-                  nativeReadbackHash=fingerprint(verified.model), sourceNormalized=not native_page._same(candidate, verified.model))
+    result.update(proof)
     result.pop("code", None)
     result.pop("message", None)

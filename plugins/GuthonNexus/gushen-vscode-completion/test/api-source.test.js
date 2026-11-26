@@ -13,7 +13,9 @@ function fixture() {
   };
   let sourceContent='{"pageId":"PG-1"}', sourceHash='hash';
   const run=async(key,action,input)=>{calls.push({key,action,input});if(action==='status')return {checkoutPath:'/checkout',files:[{path:'page.gss',state:'MODIFIED'}]};if(action==='read') return {path:input.path,content:sourceContent,sourceHash,metadata:{sourceType:'page',pageId:'PG-1'},readonly:false};if(action==='designer-context')return {rootUrl:'https://example.invalid/project',accessToken:'secret',user:{id:'u'}};if(action==='upload')return {ok:true,complete:true,stage:'REMOTE_READBACK_VERIFIED',results:[{path:'page.gss',stage:'REMOTE_READBACK_VERIFIED'}]};if(action==='write'){sourceContent=input.content;sourceHash=require('node:crypto').createHash('sha256').update(sourceContent).digest('hex');return {sourceHash};}throw Error(action)};
-  const ui=new ApiSourceUI({vscode,run,reviewUpload:async(_v,entries)=>entries.map(x=>x.path)});return {ui,vscode,run,calls,document,events,changes,warnings};
+  const ui=new ApiSourceUI({vscode,run,reviewUpload:async(_v,entries)=>entries.map(x=>x.path)});
+  ui.diffProvider.run=(...args)=>ui.run(...args);
+  return {ui,vscode,run,calls,document,events,changes,warnings};
 }
 test('SCM upload binds paths and hashes, and blocks dirty documents',async()=>{
   const f=fixture();f.document.isDirty=true;
@@ -275,21 +277,36 @@ test('upload recovery selects a receipt and only calls verify-upload',async()=>{
   await f.ui.verifyUpload('projects.a');assert.deepEqual(calls.find(x=>x.action==='verify-upload').input,{operationId:'op'});
   assert.equal(calls.some(x=>x.action==='upload'),false);assert.match(reports[0],/重放上传：否/);
 });
-test('conflict resolution reviews read-only local and platform snapshots and binds both hashes',async()=>{
+function conflictResponse(input,local,remote,{remoteHash='rh',pageSource,readable}={}) {
+  const revision={path:input.path,sourceHash:'lh',remoteHash,metadata:{pageSource}};
+  if(!input.view) return revision;
+  const projected=readable && input.view!=='raw';
+  const [before,after]=projected?readable:[local,remote];
+  return {...revision,view:projected?'readable':'raw',language:projected?'markdown':'xml',
+    offset:input.offset,before,after,totalBeforeChars:[...before].length,totalAfterChars:[...after].length,
+    readonly:true,truncated:false,nextOffset:null};
+}
+test('PAGE conflict reviews readable and raw snapshots from the same local and platform versions',async()=>{
   const f=fixture(),calls=[],diffs=[];f.vscode.commands={executeCommand:async(...args)=>diffs.push(args)};
-  f.vscode.window.showQuickPick=async items=>items[0];f.vscode.window.showWarningMessage=async()=> '确认解决';
+  const sourcePath='systems/S/pages/PG/PG.xml';
+  f.vscode.window.showQuickPick=async items=>items.find(item=>item.choice==='raw-diff') || items[0];
+  f.vscode.window.showWarningMessage=async()=> '确认解决';
   f.ui.run=async(_key,action,input)=>{calls.push({action,input});if(action==='status')return {checkoutPath:'/checkout',files:[]};
-    if(action==='conflict')return {path:'a',local:'local',remote:'remote',sourceHash:'lh',remoteHash:'rh'};
+    if(action==='conflict')return conflictResponse(input,'<page>local</page>','<page>remote</page>',{readable:['local SQL','platform SQL']});
     if(action==='read')return {sourceHash:'lh',readonly:false};
     if(action==='resolve-conflict')return {sourceHash:'lh',operationId:'op'};throw Error(action);};
-  await f.ui.resolveConflict('projects.a','a');
+  await f.ui.resolveConflict('projects.a',sourcePath);
   const [command,left,right]=diffs[0];
   assert.equal(command,'vscode.diff');
   assert.equal(left.scheme,'guthon-api-review-diff');
   assert.equal(right.scheme,left.scheme);
-  assert.equal(f.ui.diffProvider.provideTextDocumentContent(left),'local');
-  assert.equal(f.ui.diffProvider.provideTextDocumentContent(right),'remote');
-  assert.deepEqual(calls.find(x=>x.action==='resolve-conflict').input,{path:'a',choice:'local',expectedHash:'lh',expectedRemoteHash:'rh'});
+  assert.match(left.path,/本地\.md$/);
+  assert.equal(f.ui.diffProvider.provideTextDocumentContent(left),'local SQL');
+  assert.equal(f.ui.diffProvider.provideTextDocumentContent(right),'platform SQL');
+  assert.equal(f.ui.diffProvider.provideTextDocumentContent(diffs[1][1]),'<page>local</page>');
+  assert.equal(f.ui.diffProvider.provideTextDocumentContent(diffs[1][2]),'<page>remote</page>');
+  assert.deepEqual(calls.filter(x=>x.action==='conflict' && x.input.view).map(x=>x.input.view),['auto','raw']);
+  assert.deepEqual(calls.find(x=>x.action==='resolve-conflict').input,{path:sourcePath,choice:'local',expectedHash:'lh',expectedRemoteHash:'rh'});
   assert.equal(calls.some(x=>x.action==='upload'),false);
 });
 test('manual PAGE conflict editing opens the original file and keeps the conflict pending',async t=>{
@@ -297,26 +314,62 @@ test('manual PAGE conflict editing opens the original file and keeps the conflic
   f.vscode.commands={executeCommand:async()=>{}};
   f.vscode.window.showQuickPick=async items=>items.find(item=>item.choice==='edit');
   t.mock.method(f.ui,'openOriginalSources',async(...args)=>assert.deepEqual(args,[key,sourcePath]));
-  f.ui.run=async(_key,action)=>{
+  f.ui.run=async(_key,action,input)=>{
     if(action==='status')return {checkoutPath:'/checkout'};
-    if(action==='conflict')return {path:sourcePath,local:'local',remote:'remote',sourceHash:'lh',remoteHash:'rh'};
+    if(action==='conflict')return conflictResponse(input,'local','remote');
     if(action==='read')return {sourceHash:'lh',readonly:false,metadata:{sourceType:'page'}};
     assert.fail(action);
   };
   await f.ui.resolveConflict(key,sourcePath);
   assert.equal(f.ui.openOriginalSources.mock.callCount(),1);
 });
-test('PAGE export conflict can refresh just the selected page before resolving',async t=>{
-  const f=fixture(),key='projects.a',sourcePath='systems/S/pages/PG/PG.xml';
-  t.mock.method(f.ui,'refreshScope',async target=>assert.deepEqual(target,{workspaceKey:key,path:sourcePath}));
-  f.vscode.window.showWarningMessage=async(_message,action)=>action;
-  f.ui.run=async(_key,action)=>{
-    if(action==='status')return {checkoutPath:'/checkout'};
-    if(action==='conflict')return {path:sourcePath,local:'local',remote:'export',sourceHash:'lh',remoteHash:'rh',metadata:{pageSource:'batch-export'}};
+test('PAGE export conflict refreshes only the selected page and opens the native conflict automatically',async t=>{
+  const f=fixture(),key='projects.a',sourcePath='systems/S/pages/PG/PG.xml',diffs=[];
+  let refreshed=false;
+  f.vscode.commands={executeCommand:async(...args)=>diffs.push(args)};
+  const choose=t.mock.fn(async items=>{
+    assert.equal(items[0].choice,'local');
+    return undefined;
+  });
+  f.vscode.window.showQuickPick=choose;
+  f.vscode.window.showWarningMessage=async()=>assert.fail('native refresh requires no second click');
+  f.ui.run=async(workspace,action,input)=>{
+    assert.equal(workspace,key);
+    if(action==='status')return {checkoutPath:'/checkout',files:[]};
+    if(action==='conflict')return conflictResponse(input,'local',refreshed?'native':'export',{
+      remoteHash:refreshed?'nh':'eh',pageSource:refreshed?'native-editor':'batch-export'});
+    if(action==='refresh') {
+      assert.deepEqual(input,{path:sourcePath});
+      assert.equal(refreshed,false);
+      refreshed=true;
+      return {path:sourcePath,downloadComplete:false,updated:[],preserved:[],conflicts:[{path:sourcePath}]};
+    }
+    if(action==='read')return {sourceHash:'lh',readonly:false,metadata:{sourceType:'page'}};
     assert.fail(action);
   };
   await f.ui.resolveConflict(key,sourcePath);
-  assert.equal(f.ui.refreshScope.mock.callCount(),1);
+  assert.equal(choose.mock.callCount(),1);
+  const [,,remote]=diffs.find(([command])=>command==='vscode.diff');
+  assert.equal(f.ui.diffProvider.provideTextDocumentContent(remote),'native');
+});
+test('auto refresh reports a resolved PAGE even when a companion still conflicts',async t=>{
+  const f=fixture(),sourcePath='systems/S/pages/PG/PG.xml';
+  let refreshed=false;
+  const notice=t.mock.method(f.vscode.window,'showInformationMessage',async message=>assert.match(message,/无需手工处理冲突/));
+  f.ui.run=async(_key,action)=>{
+    if(action==='status')return {checkoutPath:'/checkout',files:[]};
+    if(action==='conflict') {
+      assert.equal(refreshed,false);
+      return {path:sourcePath,local:'local',remote:'export',sourceHash:'lh',remoteHash:'rh',metadata:{pageSource:'batch-export'}};
+    }
+    if(action==='refresh') {
+      refreshed=true;
+      return {path:sourcePath,downloadComplete:false,updated:[sourcePath],preserved:[],conflicts:[{path:'companion.xml'}]};
+    }
+    assert.fail(action);
+  };
+  await f.ui.resolveConflict('projects.a',sourcePath);
+  assert.equal(notice.mock.callCount(),1);
 });
 test('database structure sync requires explicit confirmation and reports verification boundary',async()=>{
   const f=fixture(),calls=[],reports=[];f.vscode.workspace.openTextDocument=async data=>(reports.push(data.content),data);
@@ -405,7 +458,7 @@ test('readonly conflict offers only restoration of the remote original',async()=
   const f=fixture(),calls=[];let choices;f.vscode.workspace.openTextDocument=async data=>({uri:data});f.vscode.commands={executeCommand:async()=>{}};
   f.vscode.window.showQuickPick=async items=>(choices=items,items[0]);f.vscode.window.showWarningMessage=async()=> '确认解决';
   f.ui.run=async(_key,action,input)=>{calls.push({action,input});if(action==='status')return {checkoutPath:'/checkout',files:[]};
-    if(action==='conflict')return {path:'parent',local:'changed',remote:'original',sourceHash:'lh',remoteHash:'rh'};
+    if(action==='conflict')return conflictResponse(input,'changed','original');
     if(action==='read')return {sourceHash:'lh',readonly:true};if(action==='resolve-conflict')return {sourceHash:'rh',operationId:'op'};throw Error(action);};
   await f.ui.resolveConflict('projects.a','parent');assert.deepEqual(choices.map(x=>x.choice),['remote']);
   assert.deepEqual(calls.find(x=>x.action==='resolve-conflict').input,{path:'parent',choice:'remote',expectedHash:'lh',expectedRemoteHash:'rh'});
@@ -543,6 +596,24 @@ test('menu refresh includes physical directories of not-yet-indexed platform pag
   const tree=buildCatalogTree('projects.a',{},[{path:'systems/S/pages/A/P1/page.xml',sourceType:'page',sourceId:'P1',name:'页面'}],project);
   const menu=tree.find(x=>x.category==='pages').children[0].children[0];
   assert.deepEqual([...menu.refreshPrefixes].sort(),['systems/S/pages/A/P1','systems/S/pages/B/P2']);
+});
+test('unmatched PAGE objects share one menu folder under their system and keep their physical identity',()=>{
+  const objects=[
+    {path:'systems/S/pages/0F/PG-1/page.xml',sourceType:'page',sourceId:'PG-1',name:'主页面'},
+    {path:'systems/S/pages/5F/PG-2/page.xml',sourceType:'page',sourceId:'PG-2',name:'我的收藏'},
+  ];
+  const project={systems:[{systemId:'S',systemName:'系统'}]};
+  const system=menuTree=>buildCatalogTree('projects.a',{},objects,{...project,menuTree})
+    .find(node=>node.category==='pages').children[0];
+  assert.deepEqual(system(undefined).children.map(node=>node.label),['待匹配菜单']);
+  const [menu,unmatched]=system([{systemId:'S',menus:[
+    {id:'main',name:'协同工作台',isDir:0,pages:[{pageSubId:'0F',pageId:'PG-1'}]},
+  ]}]).children;
+  assert.equal(menu.label,'协同工作台');
+  assert.equal(menu.children[0].object.path,objects[0].path);
+  assert.equal(unmatched.label,'未归入菜单');
+  assert.equal(unmatched.children[0].object.path,objects[1].path);
+  assert.deepEqual([...unmatched.refreshPrefixes],['systems/S/pages/5F/PG-2']);
 });
 test('scoped refresh submits a physical prefix and blocks dirty buffers',async()=>{
   const f=fixture();const calls=[];f.ui.workspaces.set('projects.a',{checkoutPath:'/checkout'});f.ui.updateScm=async()=>{};

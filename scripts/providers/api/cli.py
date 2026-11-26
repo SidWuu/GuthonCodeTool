@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 import argparse
-from contextlib import closing
+from contextlib import closing, nullcontext
 import json
 import sys
-from .client import ApiError
+from .client import ApiError, source_pull_timeout
 from .workspace import (
     configuration_lock,
     settings,
@@ -20,8 +20,10 @@ from .workspace import (
     last_login,
     active_scope,
 )
-from .download import records
+from .download import fetch_system_menu, records
 from .store import ApiStore
+
+_SOURCE_PULL_ACTIONS = {"pull", "scope-apply", "refresh"}
 
 ACTIONS = (
     "configure",
@@ -91,6 +93,12 @@ def parser():
 
 
 def execute(workspace, action, payload):
+    timeout = source_pull_timeout() if action in _SOURCE_PULL_ACTIONS else nullcontext()
+    with timeout:
+        return _execute(workspace, action, payload)
+
+
+def _execute(workspace, action, payload):
     if workspace.get('sourceMode', 'api') != 'api':
         raise ApiError('API_SOURCE_MODE_REQUIRED', '当前项目不是 API 源码模式；旧模式执行接线尚未提供')
     if not isinstance(payload, dict):
@@ -285,7 +293,15 @@ def execute(workspace, action, payload):
         result["index"] = update(workspace, [path])
         return result
     if action == "conflict":
-        return store.conflict(payload.get("path"))
+        path = payload.get("path")
+        if "view" in payload:
+            from .source_diff import read_diff
+            return read_diff(workspace, path, view=payload["view"], offset=payload.get("offset", 0),
+                             max_chars=payload.get("maxChars", 50000), conflict=True)
+        record = store.conflict(path)
+        if payload.get("summaryOnly") is True:
+            return {key: value for key, value in record.items() if key not in {"base", "local", "remote"}}
+        return record
     if action == "resolve-conflict":
         result = store.resolve_conflict(
             payload.get("path"),
@@ -469,24 +485,7 @@ def execute(workspace, action, payload):
     if action == "designer-context":
         return client.designer_context()
     if action == "system-menu":
-        def menu_node(node):
-            if not isinstance(node, dict) or node.get("id") is None:
-                raise ApiError("API_RESPONSE_INVALID", "菜单缺少身份")
-            result = {k: node[k] for k in ("id", "name", "isDir") if k in node}
-            for field in ("childs", "pages"):
-                if field in node:
-                    if not isinstance(node[field], list):
-                        raise ApiError("API_RESPONSE_INVALID", "菜单层级无效")
-                    result[field] = ([menu_node(child) for child in node[field]] if field == "childs" else
-                                     [{k: page[k] for k in ("pageId", "pageSubId") if k in page} for page in node[field] if isinstance(page, dict)])
-            return result
-        response = client.request("/develop/vscode/source/download/getModuleTree.htm")
-        rows = records(response)
-        menu = []
-        for row in rows:
-            if row.get("systemId") is None or not isinstance(row.get("menus"), list):
-                raise ApiError("API_RESPONSE_INVALID", "系统菜单身份无效")
-            menu.append({"systemId": str(row["systemId"]), "menus": [menu_node(node) for node in row["menus"]]})
+        response, menu = fetch_system_menu(client)
         save_project(workspace, menu_tree=menu)
         return {"menu": response}
     if action in {"systems", "data-sources"}:
@@ -543,7 +542,7 @@ def execute(workspace, action, payload):
 def run(workspace, args):
     parsed = parser().parse_args(args)
     payload = json.load(sys.stdin) if parsed.stdin else {}
-    publishes_source = parsed.action in {"pull", "scope-apply", "refresh", "upload"} and not (
+    publishes_source = (parsed.action in _SOURCE_PULL_ACTIONS or parsed.action == "upload") and not (
         parsed.action == "pull" and isinstance(payload, dict) and payload.get("checkOnly") is True
     )
     try:

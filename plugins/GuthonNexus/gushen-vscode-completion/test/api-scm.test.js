@@ -1,7 +1,10 @@
 const test=require('node:test');const assert=require('node:assert/strict');const {ApiSourceUI,identity}=require('../src/api/source-ui');
 const {posix}=require('node:path');
 function fixture(run) {
- const controls=[],vscode={workspace:{textDocuments:[]},Uri:{from:x=>x},scm:{
+ const controls=[],vscode={workspace:{textDocuments:[]},Uri:{from:x=>x},
+  ThemeIcon:class {constructor(id,color){this.id=id;this.color=color;}},
+  ThemeColor:class {constructor(id){this.id=id;}},
+  scm:{
   createSourceControl(id,label) {
    const control={id,label,count:0,inputBox:{value:''},groups:{},createResourceGroup(groupId,groupLabel) {
     const group={id:groupId,label:groupLabel,resourceStates:[]};
@@ -16,17 +19,23 @@ function fixture(run) {
  return {ui:new ApiSourceUI({vscode,run}),controls};
 }
 test('API SCM exposes in-scope modifications, conflicts and noneditable states with exact paths',async()=>{
- const f=fixture(async()=>({checkoutPath:'/checkout',files:[{path:'pkg/a.gss',state:'MODIFIED'},{path:'b',state:'CONFLICT'},{path:'c',state:'MISSING'},{path:'readonly-conflict',state:'CONFLICT',readonly:true},{path:'d',state:'CLEAN'},{path:'e',state:'MODIFIED',inScope:false}]}));
+ const modifiedPath='systems/A/pages/main/PG-1/PG-1.xml', conflictPath='systems/A/pages/main/PG-2/PG-2.xml';
+ const page={sourceType:'page',metadata:{pageName:'主页面'}};
+ const f=fixture(async()=>({checkoutPath:'/checkout',files:[{...page,path:modifiedPath,state:'MODIFIED'},{...page,path:conflictPath,state:'CONFLICT'},{path:'c',state:'MISSING'},{path:'readonly-conflict',state:'CONFLICT',readonly:true},{path:'d',state:'CLEAN'},{path:'e',state:'MODIFIED',inScope:false}]}));
  f.ui.syncWorkspaces([{workspaceKey:'projects.demo',sourceMode:'api'}]);await f.ui.updateScm('projects.demo');
  const c=f.controls[0];assert.equal(c.count,4);assert.deepEqual(c.group.resourceStates.map(x=>x.contextValue),['guthonApi.change','guthonApi.conflict','guthonApi.unavailable','guthonApi.conflict']);
  const change=c.group.resourceStates[0];
- assert.equal(posix.basename(change.resourceUri.path),'a.gss');
- assert.deepEqual(identity(change),{key:'projects.demo',path:'pkg/a.gss'});
+ assert.equal(posix.basename(change.resourceUri.path),'主页面.xml');
+ assert.deepEqual(identity(change),{key:'projects.demo',path:modifiedPath});
  assert.equal(change.command.command,'gushenCompletion.showApiDiff');
- assert.deepEqual(change.command.arguments,[{workspaceKey:'projects.demo',path:'pkg/a.gss'}]);
+ assert.deepEqual(change.command.arguments,[{workspaceKey:'projects.demo',path:modifiedPath}]);
  const conflict=c.group.resourceStates[1];
  assert.equal(conflict.command.command,'gushenCompletion.resolveApiConflict');
- assert.deepEqual(conflict.command.arguments,[{workspaceKey:'projects.demo',path:'b'}]);
+ assert.deepEqual(conflict.command.arguments,[{workspaceKey:'projects.demo',path:conflictPath}]);
+ assert.deepEqual(identity(conflict),{key:'projects.demo',path:conflictPath});
+ assert.equal(posix.basename(conflict.resourceUri.path),'【冲突】主页面.xml');
+ assert.equal(conflict.decorations.iconPath.id,'warning');
+ assert.match(conflict.decorations.tooltip,/源码冲突/);
  f.ui.dispose();assert.equal(c.disposed,true);
 });
 test('API SCM labels pages in Chinese and uses English identities for services and procedures',async t=>{
@@ -60,7 +69,7 @@ test('API SCM labels pages in Chinese and uses English identities for services a
  ]);
  assert.notEqual(group.resourceStates[0].resourceUri.path,group.resourceStates[1].resourceUri.path);
  assert.match(group.resourceStates[0].resourceUri.path,/^\/页面\/采购系统\/采购审核\//);
- assert.equal(group.resourceStates[2].resourceUri.path,'/页面/采购系统/PG-3.xml');
+ assert.equal(group.resourceStates[2].resourceUri.path,'/页面/采购系统/未归入菜单/PG-3.xml');
  assert.equal(group.resourceStates[5].resourceUri.path,'/过程函数/公用数据/com/demo/processOrder.gss');
  assert.deepEqual(group.resourceStates.map(identity),files.map(file=>({key,path:file.path})));
 
@@ -117,7 +126,7 @@ test('API SCM stages exact files, confirms the entire queue and retains files wi
  await f.ui.applyScmChangeAction(key,'stage',['a.gss','b.gss']);
  const {inputBox,acceptInputCommand}=f.controls[0];
  assert.equal(inputBox.placeholder,'上传备注（可选）');
- assert.deepEqual(acceptInputCommand,{command:'gushenCompletion.uploadStagedApiSources',title:'上传暂存',arguments:[key]});
+ assert.deepEqual(acceptInputCommand,{command:'gushenCompletion.uploadStagedApiSources',title:'上传源码',arguments:[key]});
  inputBox.value='  修订后上传\n已审阅差异  ';
  const {changes,staged}=f.controls[0].groups;
  assert.deepEqual(changes.resourceStates.map(row=>identity(row).path),['c.gss','param.json']);
@@ -125,7 +134,7 @@ test('API SCM stages exact files, confirms the entire queue and retains files wi
  assert.deepEqual(staged.resourceStates.map(row=>identity(row).path),['a.gss','b.gss']);
  await assert.rejects(f.ui.applyScmChangeAction(key,'stage',['c.gss','param.json']),/暂存源码：param.json/);
  assert.deepEqual([...f.ui.stagedFiles(key,'/checkout').keys()],['a.gss','b.gss']);
- await f.ui.uploadStaged(key);
+ await f.ui.uploadScm(key);
  assert.equal(uploads.length,0);
  assert.equal(confirms[0].detail,'a.gss\nb.gss\n\n上传备注（本地操作记录）\n修订后上传\n已审阅差异');
  assert.equal(inputBox.value,'  修订后上传\n已审阅差异  ');
@@ -134,10 +143,10 @@ test('API SCM stages exact files, confirms the entire queue and retains files wi
 
  answer='上传';
  files[1].sourceHash='new-b';
- await assert.rejects(f.ui.uploadStaged(key),/重新暂存：b.gss/);
+ await assert.rejects(f.ui.uploadScm(key),/重新暂存：b.gss/);
  assert.equal(uploads.length,0);
  await f.ui.applyScmChangeAction(key,'stage','b.gss');
- await f.ui.uploadStaged(key);
+ await f.ui.uploadScm(key);
  assert.deepEqual(uploads,[{paths:['a.gss','b.gss'],confirm:true,remark:'修订后上传\n已审阅差异',
   expectedHashes:{'a.gss':'hash-a.gss','b.gss':'new-b'}}]);
  assert.equal(inputBox.value,'  修订后上传\n已审阅差异  ');
@@ -146,6 +155,99 @@ test('API SCM stages exact files, confirms the entire queue and retains files wi
  await f.ui.applyScmChangeAction(key,'unstage');
  assert.deepEqual(staged.resourceStates,[]);
  assert.deepEqual(changes.resourceStates.map(row=>identity(row).path),['b.gss','c.gss','param.json']);
+});
+test('SCM confirms all eligible unstaged files without changing the staged selection',async t=>{
+ const key='projects.demo',checkoutPath='/checkout',uploads=[],confirmations=[];
+ const files=[
+  {path:'a.gss',state:'MODIFIED',sourceType:'procedure',sourceHash:'a'},
+  {path:'b.xml',state:'MODIFIED',sourceType:'page',sourceHash:'b'},
+  {path:'conflict.gss',state:'CONFLICT',sourceType:'procedure',sourceHash:'c'},
+  {path:'parent.gss',state:'MODIFIED',readonly:true,sourceType:'procedure',sourceHash:'p'},
+  {path:'parameter.json',state:'MODIFIED',sourceType:'module-parameter',sourceHash:'m'},
+  {path:'other.gss',state:'MODIFIED',inScope:false,sourceType:'procedure',sourceHash:'o'},
+ ];
+ const f=fixture(async(_key,action,input)=>{
+  if(action==='status')return {checkoutPath,files};
+  if(action==='read') {
+   const file=files.find(item=>item.path===input.path);
+   return {...file,metadata:{sourceType:file.sourceType}};
+  }
+  if(action==='upload') {
+   uploads.push(input);
+   return {complete:true,results:input.paths.map(path=>({path,stage:'REMOTE_READBACK_VERIFIED'}))};
+  }
+  assert.fail(action);
+ });
+ t.after(()=>f.ui.dispose());
+ f.ui.syncWorkspaces([{workspaceKey:key,name:'项目甲'}]);
+ f.ui.vscode.workspace.openTextDocument=async options=>options;
+ let answer;
+ f.ui.vscode.window={
+  showTextDocument:async()=>{},
+  showWarningMessage:async(message,options)=>{confirmations.push({message,...options});return answer;},
+ };
+ f.ui.reviewUpload=async()=>assert.fail('SCM already has an exact file selection');
+ await f.ui.updateScm(key);
+ await f.ui.uploadScm(key);
+ assert.deepEqual(uploads,[]);
+ assert.equal(confirmations[0].detail,'a.gss\nb.xml');
+ assert.match(confirmations[0].message,/全部 2 个可上传的未暂存文件/);
+ assert.equal(confirmations[0].modal,true);
+
+ answer='上传';
+ await f.ui.uploadScm(key);
+ assert.deepEqual(uploads[0],{paths:['a.gss','b.xml'],confirm:true,expectedHashes:{'a.gss':'a','b.xml':'b'}});
+ assert.deepEqual(f.controls[0].groups.staged.resourceStates,[]);
+
+ await f.ui.applyScmChangeAction(key,'stage','b.xml');
+ await f.ui.uploadScm(key,'unstaged');
+ assert.deepEqual(uploads[1],{paths:['a.gss'],confirm:true,expectedHashes:{'a.gss':'a'}});
+ assert.deepEqual([...f.ui.stagedFiles(key,checkoutPath).keys()],['b.xml']);
+});
+test('SCM keeps confirmation separate from the upload write and releases the write on error',async t=>{
+ const key='projects.demo',checkoutPath='/checkout',files=['a.gss','b.gss'].map(path=>({
+  path,state:'MODIFIED',sourceType:'procedure',sourceHash:path,
+ }));
+ let beginConfirmation,finishConfirmation,beginWrite,failWrite,confirms=0;
+ const confirmationOpened=new Promise(resolve=>{beginConfirmation=resolve;});
+ const writeStarted=new Promise(resolve=>{beginWrite=resolve;});
+ const f=fixture(async(_key,action,input)=>{
+  if(action==='status')return {checkoutPath,files};
+  if(action==='read')return {sourceHash:input.path,metadata:{sourceType:'procedure'}};
+  if(action==='upload')return new Promise((_,reject)=>{
+   failWrite=reject;
+   beginWrite(input);
+  });
+  assert.fail(action);
+ });
+ t.after(()=>f.ui.dispose());
+ f.ui.syncWorkspaces([key]);
+ f.ui.vscode.workspace.openTextDocument=async options=>options;
+ f.ui.vscode.window={
+  showTextDocument:async()=>{},
+  showWarningMessage:async()=>new Promise(resolve=>{
+   confirms++;
+   finishConfirmation=resolve;
+   beginConfirmation();
+  }),
+ };
+ const first=f.ui.uploadScm(key);
+ await confirmationOpened;
+ await f.ui.uploadScm(key);
+ assert.equal(confirms,1);
+ await f.ui.applyScmChangeAction(key,'stage','b.gss');
+ finishConfirmation('上传');
+ await assert.rejects(first,/暂存区已变化/);
+ assert.equal(failWrite,undefined);
+
+ f.ui.vscode.window.showWarningMessage=async()=> '上传';
+ const writing=f.ui.uploadScm(key);
+ assert.deepEqual((await writeStarted).paths,['b.gss']);
+ await assert.rejects(f.ui.applyScmChangeAction(key,'unstage','b.gss'),/正在上传当前项目/);
+ failWrite(new Error('fixture incomplete upload receipt'));
+ await assert.rejects(writing,/fixture incomplete upload receipt/);
+ await f.ui.applyScmChangeAction(key,'unstage','b.gss');
+ assert.equal(f.ui.stagedFiles(key,checkoutPath).size,0);
 });
 test('API SCM restore confirms the exact selected files in the original project',async t=>{
  const key='ws_demo',files=['a','b','c'].map(name=>({path:name+'.gss',state:'MODIFIED',sourceHash:'hash-'+name,sourceType:'procedure'}));
@@ -259,18 +361,18 @@ test('SCM remarks follow their project and only the successfully uploaded draft 
  let editOnUpload=true,remarkRecorded=true;
  t.mock.method(f.ui,'upload',async(workspace,_paths,options)=>{
   assert.equal(workspace,key);
-  assert.deepEqual(options,{stagedOnly:true,remark:editOnUpload?'本项目备注':'下一批备注'});
+  assert.deepEqual(options,{scmMode:'auto',remark:editOnUpload?'本项目备注':'下一批备注'});
   if(editOnUpload) inputBox.value='下一批备注';
   return {complete:true,...(remarkRecorded ? {remark:options.remark} : {})};
  });
- await f.ui.uploadStaged(key);
+ await f.ui.uploadScm(key);
  assert.equal(inputBox.value,'下一批备注');
  editOnUpload=false;
  remarkRecorded=false;
- await f.ui.uploadStaged(key);
+ await f.ui.uploadScm(key);
  assert.equal(inputBox.value,'下一批备注');
  remarkRecorded=true;
- await f.ui.uploadStaged(key);
+ await f.ui.uploadScm(key);
  assert.equal(inputBox.value,'');
 });
 test('API SCM uses the registered project name and refreshes its label with a stable provider identity',async t=>{

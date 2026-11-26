@@ -2,7 +2,7 @@
   "name": "guthon-nexus-vscode",
   "displayName": "Guthon Nexus",
   "description": "Guthon API workspace, source management, database diagnostics, completions, hover documentation, and source navigation.",
-  "version": "2.9.4",
+  "version": "2.9.5",
   "publisher": "gushen-local",
   "icon": "resources/icon.png",
   "private": true,
@@ -235,7 +235,8 @@
       {"command":"gushenCompletion.unstageApiSource","title":"Guthon Nexus: 取消暂存 API 源码","shortTitle":"取消暂存","icon":"$(remove)"},
       {"command":"gushenCompletion.unstageApiScmChanges","title":"Guthon Nexus: 取消暂存区全部 API 源码","shortTitle":"全部取消暂存","icon":"$(remove)"},
       {"command":"gushenCompletion.revertApiScmChanges","title":"Guthon Nexus: 还原全部 API 本地变更","shortTitle":"全部还原","icon":"$(discard)"},
-      {"command":"gushenCompletion.uploadStagedApiSources","title":"Guthon Nexus: 上传暂存区全部源码","shortTitle":"上传暂存","icon":"$(cloud-upload)"},
+      {"command":"gushenCompletion.uploadStagedApiSources","title":"Guthon Nexus: 上传源代码管理中的 API 源码","shortTitle":"上传源码","icon":"$(cloud-upload)"},
+      {"command":"gushenCompletion.uploadUnstagedApiSources","title":"Guthon Nexus: 上传全部未暂存 API 源码","shortTitle":"上传全部未暂存","icon":"$(cloud-upload)"},
       {"command":"gushenCompletion.showApiOriginalPath","title":"Guthon Nexus: 查看原始路径","shortTitle":"查看原始路径"},
       {"command":"gushenCompletion.openApiOriginalSource","title":"Guthon Nexus: 打开原始源码","shortTitle":"打开原文件","icon":"$(go-to-file)"},
       {"command":"gushenCompletion.openApiSource","title":"Guthon Nexus: 打开 API 源码"},
@@ -511,7 +512,8 @@
         {"command":"gushenCompletion.openApiScmGroupSources","when":"scmProvider =~ /^guthon-api-/ && scmResourceGroup =~ /^(staged|changes)$/","group":"inline@1"},
         {"command":"gushenCompletion.unstageApiScmChanges","when":"scmProvider =~ /^guthon-api-/ && scmResourceGroup == staged","group":"inline@2"},
         {"command":"gushenCompletion.revertApiScmChanges","when":"scmProvider =~ /^guthon-api-/ && scmResourceGroup == changes","group":"inline@2"},
-        {"command":"gushenCompletion.stageAllApiScmChanges","when":"scmProvider =~ /^guthon-api-/ && scmResourceGroup == changes","group":"inline@3"}
+        {"command":"gushenCompletion.stageAllApiScmChanges","when":"scmProvider =~ /^guthon-api-/ && scmResourceGroup == changes","group":"inline@3"},
+        {"command":"gushenCompletion.uploadUnstagedApiSources","when":"scmProvider =~ /^guthon-api-/ && scmResourceGroup == changes","group":"modification@1"}
       ],
       "scm/resourceState/context": [
         {"command":"gushenCompletion.updateAllSvnChanges","when":"scmProvider =~ /^guthon-svn-/ && scmResourceState == guthonSvn.LOCKED","group":"inline@1"},

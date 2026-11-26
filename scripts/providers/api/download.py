@@ -33,6 +33,37 @@ def records(data):
     return result
 
 
+def fetch_system_menu(client):
+    def menu_node(node):
+        if not isinstance(node, dict) or node.get("id") is None:
+            raise ApiError("API_RESPONSE_INVALID", "菜单缺少身份")
+        result = {key: node[key] for key in ("id", "name", "isDir") if key in node}
+        for field in ("childs", "pages"):
+            if field not in node:
+                continue
+            if not isinstance(node[field], list):
+                raise ApiError("API_RESPONSE_INVALID", "菜单层级无效")
+            if field == "childs":
+                result[field] = [menu_node(child) for child in node[field]]
+            else:
+                result[field] = [
+                    {key: page[key] for key in ("pageId", "pageSubId") if key in page}
+                    for page in node[field] if isinstance(page, dict)
+                ]
+        return result
+
+    response = client.request(BASE + "getModuleTree.htm")
+    menu = []
+    for row in records(response):
+        if row.get("systemId") is None or not isinstance(row.get("menus"), list):
+            raise ApiError("API_RESPONSE_INVALID", "系统菜单身份无效")
+        menu.append({
+            "systemId": str(row["systemId"]),
+            "menus": [menu_node(node) for node in row["menus"]],
+        })
+    return response, menu
+
+
 def paged(client, path, params=None):
     data = client.request(path, params)
     result, seen = [], set()
