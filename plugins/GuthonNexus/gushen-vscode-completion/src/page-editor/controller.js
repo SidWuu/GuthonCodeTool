@@ -14,10 +14,10 @@ const RAW_SOURCE_STATES = new Set(['METADATA_ONLY','IDENTITY_MISMATCH','BATCH_EX
 
 class PageEditorController {
   constructor({vscode, context, backend, virtualFs, openReadonly, openOnline, preparePage, requestPage,
-    baselineLabel = 'API 基线', platformReference = true, copySavedFragment,
+    baselineLabel = 'API 基线', platformReference = true, copySavedFragment, copySavedFieldBatch,
     recoveryStore = new PageRecoveryStore(context), maxClosedPages = 4, maxClosedBytes = 16 * 1024 * 1024,
     onSaved = async () => {}, ownsDocument = () => false, onDraftChanged = async () => {}, editorToken = async () => undefined, assertCanSave = () => {}}) {
-    Object.assign(this, {vscode, context, backend, virtualFs, openReadonly, openOnline, preparePage, onSaved, ownsDocument, onDraftChanged, editorToken, assertCanSave, copySavedFragment});
+    Object.assign(this, {vscode, context, backend, virtualFs, openReadonly, openOnline, preparePage, onSaved, ownsDocument, onDraftChanged, editorToken, assertCanSave, copySavedFragment, copySavedFieldBatch});
     this.requestPage=requestPage || ((identity,payload)=>backend.run(identity.workspaceKey,'page',payload));
     this.baselineLabel=baselineLabel;
     this.platformReference=platformReference;
@@ -362,6 +362,16 @@ class PageEditorController {
     if (message.type === 'ready') { session.published = null; this.publish(session); return; }
     if(message.type==='platformReference') {await this.vscode.commands.executeCommand('gushenCompletion.showPlatformReference',session.identity.workspaceKey);return;}
     if (message.type === 'compare') { await this.refreshComparison(session); return; }
+    if (message.type === 'copySavedFieldBatch') {
+      const comparison=session.baselineComparison;
+      const batch=comparison?.fieldBatches?.find(item=>item.pointer===message.pointer);
+      if (!this.copySavedFieldBatch || session.sourceStale || session.busy || !comparison?.available
+        || !batch || !comparison.fieldBaseHash)
+        throw new Error('字段改动已变化，请重新比较');
+      await this.copySavedFieldBatch(session.identity,batch.pointer,session.snapshot.sourceHash,comparison.fieldBaseHash);
+      session.status='已复制字段改动 · 到 Bridge 选择“粘贴本地改动”';
+      this.publish(session);return;
+    }
     if (message.type === 'copySavedFragment') {
       const comparison=session.baselineComparison;
       const node=session.snapshot.model.nodes.find(item=>item.pointer===message.pointer);

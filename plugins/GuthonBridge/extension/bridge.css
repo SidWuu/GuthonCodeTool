@@ -380,6 +380,19 @@ tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
   padding: 8px 14px;
 }
 
+.guthon-bridge-local-fields-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 6px 0 10px;
+  resize: vertical;
+}
+
+.guthon-bridge-local-fields-preview {
+  padding-left: 20px;
+  overflow-wrap: anywhere;
+}
+
 #guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-item {
   display: flex;
   gap: 8px;

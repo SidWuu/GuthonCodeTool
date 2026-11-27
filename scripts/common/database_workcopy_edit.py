@@ -162,10 +162,24 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False):
         if action == "edit-comparison":
             if not design or payload.get("sourceHash") != source_hash:
                 raise ValueError("PAGE 已变化，请重新打开后比较")
+            from common.database_page_fields import field_batches
+
             base = _bytes(source)
             _base_text, base_data, _wrapped = _page(decode_source(base)[0], source_id)
+            base_hash = _digest(base)
+            if "fieldBatchPointer" in payload:
+                if payload.get("baseRevision") != base_hash:
+                    raise ValueError("DATABASE 只读基线已变化，请重新比较")
+                for item, batch in field_batches(base_data, data):
+                    if item["pointer"] == payload["fieldBatchPointer"]:
+                        clipboard = json.dumps(batch, ensure_ascii=False, allow_nan=False)
+                        if len(clipboard.encode("utf-8")) > page_editor.MAX_PAGE_BYTES:
+                            raise ValueError("字段改动超过剪贴板导入上限")
+                        return {**result, "clipboard": clipboard}
+                raise ValueError("没有可复制的字段改动，请重新比较")
             changes = compare_pages(base_data, data)
-            return {**result, "available": True, "baseRevision": _digest(base)[:12],
+            return {**result, "available": True, "baseRevision": base_hash[:12], "fieldBaseHash": base_hash,
+                    "fieldBatches": [item for item, _batch in field_batches(base_data, data)],
                     "changes": changes, "formatOnly": base != current and not changes["total"]}
         if design and not editing:
             return {**result, "sourceText": projected, "model": page_editor.describe(projected),

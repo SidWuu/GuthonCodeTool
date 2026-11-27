@@ -33,7 +33,7 @@ def records(data):
     return result
 
 
-def fetch_system_menu(client, *, system_ids=None):
+def fetch_system_menu(client, *, system_ids=None, systems=()):
     """Return the platform response and the validated menu tree for the supplied scope."""
     def menu_node(node):
         if not isinstance(node, dict) or node.get("id") is None:
@@ -55,18 +55,29 @@ def fetch_system_menu(client, *, system_ids=None):
 
     response = client.request(BASE + "getModuleTree.htm")
     selected = set(system_ids) if system_ids is not None else None
+    system_names = {
+        str(row["systemId"]): row["systemName"]
+        for row in systems if row.get("systemId") is not None and row.get("systemName")
+    }
     menu = []
     for row in records(response):
         system_id = row.get("systemId")
         system_id = str(system_id) if system_id is not None else None
         if selected is not None and system_id not in selected:
             continue
-        if system_id is None or not isinstance(row.get("menus"), list):
-            raise ApiError("API_RESPONSE_INVALID", "系统菜单身份无效")
-        menu.append({
-            "systemId": system_id,
-            "menus": [menu_node(node) for node in row["menus"]],
-        })
+        if system_id is None:
+            raise ApiError("API_RESPONSE_INVALID", "系统菜单身份无效：缺少子系统编码（systemId）")
+        try:
+            if "menus" not in row:
+                raise ApiError("API_RESPONSE_INVALID", "缺少菜单列表字段（menus）")
+            if not isinstance(row["menus"], list):
+                raise ApiError("API_RESPONSE_INVALID", "菜单列表字段（menus）应为数组")
+            nodes = [menu_node(node) for node in row["menus"]]
+        except ApiError as error:
+            name = system_names.get(system_id)
+            label = f"{name}（{system_id}）" if name else system_id
+            raise ApiError(error.code, f"系统菜单身份无效：{label}，{error}") from error
+        menu.append({"systemId": system_id, "menus": nodes})
     return response, menu
 
 

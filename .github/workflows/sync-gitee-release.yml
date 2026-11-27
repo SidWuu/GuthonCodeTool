@@ -50,7 +50,7 @@ jobs:
           test -n "$GITEE_REPO" || { echo "::error::缺少变量 GITEE_REPO"; exit 1; }
           python scripts/sync_release_to_gitee.py --tag "$RELEASE_TAG" \
             --github-repo "$GITHUB_REPOSITORY" --gitee-repo "$GITEE_OWNER/$GITEE_REPO" \
-            --expected-source-sha "$EXPECTED_SOURCE_SHA" --no-quota-cleanup
+            --expected-source-sha "$EXPECTED_SOURCE_SHA"
       - name: Read back and verify all Gitee assets
         run: |
           python scripts/sync_release_to_gitee.py --tag "$RELEASE_TAG" \

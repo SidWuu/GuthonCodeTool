@@ -287,7 +287,14 @@ function createApiNavigation({vscode,context,api,selectWorkspace,getWorkspaces,g
     expandApiSelectedSource:()=>sourceTreeAction(vscode,ui.treeView,'list.expand'),
     collapseApiSelectedSource:()=>sourceTreeAction(vscode,ui.treeView,'list.collapseAllToFocus'),
     collapseAllSourceNodes:()=>ui.treeView?.collapseAll?.(),
-    refreshAllApiSources:async()=>{const workspace=await selectWorkspace('');if(workspace) return ui.updateScm(workspace.workspaceKey);},
+    refreshAllApiSources:async()=>{
+      const workspace=await selectWorkspace('');
+      if(!workspace)return;
+      if(workspace.sourceMode && workspace.sourceMode!=='api')return legacyAction?.(workspace,'refresh-source-view');
+      const status=await ui.updateScm(workspace.workspaceKey);
+      ui.refresh();
+      return status;
+    },
     retryApiIndexFailures:async value=>{const workspace=await selectWorkspace(typeof value==='string'?value:value?.guthonWorkspaceKey || '');if(!workspace)return;const result=await api.retryIndex(workspace.workspaceKey);ui.refresh();return vscode.window.showInformationMessage(result.attempted ? `已更新 ${result.attempted} 个待处理源码文件` : '没有待更新的源码文件');},
     reindexCalls:async value=>{
       const key=typeof value==='string'?value:value?.guthonWorkspaceKey || value?.key || '';

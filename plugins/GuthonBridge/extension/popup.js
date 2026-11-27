@@ -8,6 +8,7 @@ const pullPageBtn = document.getElementById("pullPageBtn");
 const pullHubBtn = document.getElementById("pullHubBtn");
 const copyFieldsBtn = document.getElementById("copyFieldsBtn");
 const pasteFieldsBtn = document.getElementById("pasteFieldsBtn");
+const localFieldsBtn = document.getElementById("localFieldsBtn");
 const locateNexusBtn = document.getElementById("locateNexusBtn");
 const closeBtn = document.getElementById("closeBtn");
 
@@ -69,6 +70,7 @@ function setPopupMode(mode) {
   pullHubBtn.textContent = "刷新当前对象";
   copyFieldsBtn.hidden = !isModule;
   pasteFieldsBtn.hidden = !isModule;
+  localFieldsBtn.hidden = !isModule;
 }
 
 function isAbsolutePath(value) {
@@ -371,6 +373,15 @@ pasteFieldsBtn.addEventListener("click", async () => {
     setStatus(`已粘贴 ${result.pasted} 个，跳过重复 ${result.duplicate} 个，无效 ${result.invalid} 个`);
   } catch (error) {
     setStatus(`粘贴字段失败\n${error.message}`);
+  }
+});
+
+localFieldsBtn.addEventListener("click", async () => {
+  try {
+    await runFieldsMover("show-local-field-batch");
+    window.close();
+  } catch (error) {
+    setStatus(error.message);
   }
 });
 

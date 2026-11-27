@@ -66,7 +66,9 @@ test('all three headers use native title actions with global and project submenu
     ['gushenCompletion.startBridge','!gushenCompletion.bridgeRunning'],
     ['gushenCompletion.stopBridge','gushenCompletion.bridgeRunning'],
   ]);
-  assert.deepEqual(primary(source),['locateActiveApiSource','searchCurrentApiWorkspace','refreshAllApiSources','filterApiSources','clearApiSourceFilter','collapseAllSourceNodes']);
+  assert.deepEqual(primary(source),['locateActiveApiSource','refreshAllApiSources','searchCurrentApiWorkspace','filterApiSources','clearApiSourceFilter','collapseAllSourceNodes']);
+  assert.equal(source.find(item=>item.command==='gushenCompletion.refreshAllApiSources').when,
+    'view == gushenCompletion.sourceView && gushenCompletion.hasCurrentProject');
   const viewType=name=>contributes.views.guthon.find(view=>view.id==='gushenCompletion.'+name).type || 'tree';
   assert.equal(viewType('projectOverview'),'webview');
   assert.equal(viewType('sourceView'),'webview');
