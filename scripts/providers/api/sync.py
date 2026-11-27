@@ -277,11 +277,11 @@ def _publish_and_index(workspace, store, client, files, scope, *, authoritative,
     return {**result, "downloadedFiles": len(files), "checkoutPath": str(workspace["providerSourceRoot"])}
 
 
-def _fetch_page_menu(client, files):
+def _fetch_page_menu(client, files, system_ids):
     if not any(item.kind == "page" for item in files):
         return None, {}
     try:
-        _, menu = fetch_system_menu(client)
+        _, menu = fetch_system_menu(client, system_ids=system_ids)
     except ApiError as error:
         # A menu request can fail independently of the downloaded PAGE files.
         # Keep the last usable menu and surface the failure alongside the sync.
@@ -306,7 +306,7 @@ def pull(workspace, client):
                 page_store=store,
             )
         assert_writable(workspace, sorted(set(store.paths()) | {item.path for item in files}))
-        menu, menu_result = _fetch_page_menu(client, files)
+        menu, menu_result = _fetch_page_menu(client, files, scope["systemIds"])
         if menu is not None:
             save_project(workspace, menu_tree=menu)
         reuse_unchanged = (previous_scope is not None and previous_scope == active_scope(workspace)
@@ -334,7 +334,7 @@ def scope_apply(workspace, client, payload, *, apply_pending=False):
     def capture(systems, sources):
         project.update(systems=systems, sources=sources)
     files, scope = download(client, proposed, on_project=capture, page_store=store)
-    menu, menu_result = _fetch_page_menu(client, files)
+    menu, menu_result = _fetch_page_menu(client, files, scope["systemIds"])
     directory, _ = api_paths(workspace)
     with configuration_lock(workspace), file_lock(directory / "sync.lock"), file_lock(directory / "source.lock"):
         if settings(workspace) != before:
@@ -494,7 +494,8 @@ def refresh(workspace, client, payload):
             prefixes = [payload["prefix"]] if "prefix" in payload else payload["prefixes"]
             if not isinstance(prefixes, list) or not prefixes or len(prefixes) > 200:
                 raise ApiError("API_INPUT_INVALID", "需要1至200个源码目录前缀")
-            files = download_prefixes(client, prefixes, active_scope(workspace),
+            scope = active_scope(workspace)
+            files = download_prefixes(client, prefixes, scope,
                                       project_metadata(workspace).get("systems", []), page_store=ApiStore(workspace))
             store = ApiStore(workspace)
             identity_keys = {"page": ("systemId", "pageId"), "procedure": ("dataSourceId", "procedureId", "funId"),
@@ -520,7 +521,7 @@ def refresh(workspace, client, payload):
                         if identity in incoming and incoming[identity] != previous_path:
                             raise ApiError("API_REMOTE_PATH_CHANGED", "远端对象路径已变化，请更新当前范围并核对迁移；未创建重复源码")
             result = _publish_downloaded(store, client, files, scope={"prefixes": prefixes})
-            menu, menu_result = _fetch_page_menu(client, files)
+            menu, menu_result = _fetch_page_menu(client, files, scope["systemIds"])
             if menu is not None:
                 save_project(workspace, menu_tree=menu)
             from .index import update
