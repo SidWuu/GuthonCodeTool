@@ -7,6 +7,7 @@ const {createDatabaseSourceTree}=require('../src/database-source-tree');
 const {DatabaseSourceEditor}=require('../src/database-source-editor');
 const {registerLegacyProjects}=require('../src/legacy-project');
 const {ViewTree}=require('../src/view-tree');
+const {createApiNavigation}=require('../src/api/navigation');
 const {quickPickFixture,waitFor}=require('./quick-pick-fixture');
 
 const disposable={dispose(){}};
@@ -184,36 +185,87 @@ test('DATABASE tree and search open pages and fragments in the corresponding Nex
     fragments.map(({pointer})=>['edit-read',pointer]));
 });
 
-test('DATABASE source Webview renders changed rows while clean siblings keep their normal presentation',async()=>{
-  const workspace={workspaceKey:'ws-db',index:{ready:true}};
+test('project source refresh rereads DATABASE Workcopy changes without watcher events',async t=>{
+  const workspace={workspaceKey:'ws-db',sourceMode:'database',index:{ready:true}};
   const record={sourceType:'page',sourceId:'PG-A',sourcePath:'group/page/PG-A/raw.json',groups:['group']};
-  let changed=true;
-  const tree=createDatabaseSourceTree({vscode,getTool:()=>({toolHome:'/fixture'}),run:async(_ws,_cmd,args)=>{
-    if(args[0]==='local-changes')return {items:changed?[record]:[]};
-    if(args[0]==='fragments')return {fragments:[{label:'修改',pointer:'/a'},{label:'原文',pointer:'/b'}],modifiedPointers:changed?['/a']:[]};
-    return args.length===1?{categories:['page'],exportIndexReady:true}:{items:[record,{...record,sourceId:'PG-B',sourcePath:'group/page/PG-B/raw.json'}]};
-  }});
-  const [category]=await tree.children(workspace);
-  const [group]=await tree.children(workspace,category);
-  const [page]=await tree.children(workspace,group);
-  const [,fragment]=await tree.children(workspace,page);
-  let rows;
-  const view=new ViewTree({vscode:{...vscode,window:{registerWebviewViewProvider:()=>disposable}},
+  const context={subscriptions:[],workspaceState:{get(){}}};
+  const commands=new Map();
+  const host={...vscode,commands:{registerCommand:(id,handler)=>(commands.set(id,handler),disposable)},
+    window:{registerWebviewViewProvider:()=>disposable,showErrorMessage:assert.fail},
+    workspace:{...vscode.workspace,onDidOpenTextDocument:()=>disposable,onDidChangeTextDocument:()=>disposable,
+      onDidCloseTextDocument:()=>disposable},
+    languages:{createDiagnosticCollection:()=>disposable,registerCompletionItemProvider:()=>disposable}};
+  let changed=false,rows,render;
+  const sourceTree={refresh(){render=view.render();},updateScm(){assert.fail('DATABASE used API status');}};
+  const getSelected=async()=>workspace,getTool=()=>({toolHome:'/fixture'});
+  const legacy=registerLegacyProjects({vscode:host,context,getTool,getSelected,sourceTree,
+    processClient:{async request(_tool,command,args,key){
+      assert.equal(command,'legacy-source');
+      assert.equal(key,workspace.workspaceKey);
+      if(args[0]==='local-changes')return {ok:true,items:changed?[record]:[]};
+      if(args[0]==='fragments')return {ok:true,fragments:[{label:'修改',pointer:'/a'},{label:'原文',pointer:'/b'}],modifiedPointers:changed?['/a']:[]};
+      assert.equal(args[0],'catalog');
+      return args.length===1?{ok:true,categories:['page'],exportIndexReady:true}
+        :{ok:true,items:[record,{...record,sourceId:'PG-B',sourcePath:'group/page/PG-B/raw.json'}]};
+    }}});
+  createApiNavigation({vscode:host,context,api:{sourceTree},selectWorkspace:getSelected,getTool,legacyAction:legacy.action});
+  const refresh=commands.get('gushenCompletion.refreshAllApiSources');
+  const [category]=await legacy.children(workspace);
+  const [group]=await legacy.children(workspace,category);
+  const [page]=await legacy.children(workspace,group);
+  const [,fragment]=await legacy.children(workspace,page);
+  const view=new ViewTree({vscode:host,
     id:'gushenCompletion.sourceView',title:'项目源码',extensionPath:path.resolve(__dirname,'..'),provider:{
-      getChildren:item=>tree.children(workspace,item),getTreeItem:tree.treeItem,getParent:item=>item.parent,
+      getChildren:item=>legacy.children(workspace,item),getTreeItem:legacy.treeItem,getParent:item=>item.parent,
     }});
+  t.after(()=>[view,...context.subscriptions].forEach(subscription=>subscription.dispose()));
   view.resolveWebviewView({show(){},onDidDispose(){},webview:{onDidReceiveMessage:()=>disposable,
     postMessage:async message=>{rows=message.rows;}}});
   await view.receive({type:'ready'});
   await view.reveal(fragment);
+  assert.ok(rows.every(row=>!row.description));
+  changed=true;
+  await refresh();
+  await render;
   assert.deepEqual(rows.filter(row=>row.description==='M · 本地修改').map(row=>row.label),['页面','group','PG-A','修改']);
   assert.deepEqual(rows.filter(row=>row.color==='gitDecoration.modifiedResourceForeground').map(row=>row.label),['页面','group','PG-A','修改']);
   for(const name of ['查看原始 JSON','PG-B','原文'])assert.equal(rows.find(row=>row.label===name)?.description,'');
   changed=false;
-  tree.refreshChanges();
-  await view.render();
+  await refresh();
+  await render;
   assert.ok(rows.every(row=>!row.description && row.color!=='gitDecoration.modifiedResourceForeground'));
-  view.dispose();
+  assert.ok(rows.some(row=>row.label==='修改'));
+});
+
+test('SVN source refresh reads local status and projects its decoration into the source Webview rows',async t=>{
+  const workspace={workspaceKey:'ws-svn',sourceMode:'svn',checkoutLayout:'manifest-working-copies',
+    scopeManifestReady:true,workingCopies:[{id:'root'}],capabilities:{'svn.browse':true,'svn.status':true}};
+  const sourcePath='systems/S1/pages/page.json';
+  const context={subscriptions:[],workspaceState:{get(){}}};
+  let changes=[];
+  const host={...vscode,window:{showErrorMessage:assert.fail},
+    FileDecoration:class {constructor(badge,tooltip,color){Object.assign(this,{badge,tooltip,color});}},
+    scm:{createSourceControl:()=>({inputBox:{},createResourceGroup:()=>({dispose(){}}),dispose(){}})}};
+  const legacy=registerLegacyProjects({vscode:host,context,getTool:()=>({toolHome:'/fixture'}),
+    getSelected:async()=>workspace,sourceTree:{refresh(){}},
+    processClient:{async request(_tool,command,args,key){
+      assert.equal(command,'svn');
+      assert.equal(key,workspace.workspaceKey);
+      if(args[0]==='catalog')return {ok:true,objects:[
+        {sourceType:'page',sourceId:'PG-A',sourcePath,treeScopeId:'S1',treePath:['S1']},
+      ]};
+      assert.deepEqual(args,['scm-status']);
+      return {ok:true,changes,workingCopies:workspace.workingCopies};
+    }}});
+  t.after(()=>context.subscriptions.forEach(subscription=>subscription.dispose()));
+  const [clean]=await legacy.children(workspace);
+  assert.equal(legacy.treeItem(clean).description,'1');
+  changes=[{path:sourcePath,state:'EXTERNAL_MODIFIED'}];
+  await legacy.action(workspace,'refresh-source-view');
+  const [modified]=await legacy.children(workspace);
+  const node=legacy.treeItem(modified);
+  assert.equal(node.description,'M · SVN 本地修改 · 1');
+  assert.equal(node.iconPath.color.id,'gitDecoration.modifiedResourceForeground');
 });
 
 test('DATABASE virtual text editor highlights saved changes and preserves unsaved input on refresh',async t=>{

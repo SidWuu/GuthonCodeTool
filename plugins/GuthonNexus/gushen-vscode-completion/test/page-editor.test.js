@@ -146,6 +146,23 @@ test('DATABASE comparison copies only a reviewed, saved and editable code fragme
   host.dispose();
 });
 
+test('DATABASE field batch copy forwards both reviewed revisions and the reviewed collection',async()=>{
+  const f=hostFixture(), copies=[];
+  const host=new PageEditorController({...f,copySavedFieldBatch:async(...args)=>copies.push(args)});
+  const session=await host.open({...f.identity,sourceMode:'database'});
+  const message={type:'copySavedFieldBatch',pointer:'/views/component/fields'};
+  await assert.rejects(host.message(session,message),/重新比较/);
+  session.baselineComparison={available:true,fieldBatches:[{pointer:message.pointer,updated:2,added:1}],fieldBaseHash:'base-hash'};
+  await assert.rejects(host.message(session,{...message,pointer:'/other'}),/重新比较/);
+  await host.message(session,message);
+  assert.deepEqual(copies,[[session.identity,message.pointer,session.snapshot.sourceHash,'base-hash']]);
+  assert.match(session.panel.latest.status,/粘贴本地改动/);
+  session.sourceStale=true;
+  await assert.rejects(host.message(session,message),/重新比较/);
+  assert.equal(copies.length,1);
+  host.dispose();
+});
+
 test('PAGE ID placeholders cannot hide the authoritative catalog name in preview and shared code titles',async()=>{
   const f=hostFixture();f.identity.sourceName=f.snapshot.sourceName=f.snapshot.model.pageName=f.identity.sourceId;
   f.identity.treeLabel='目录中的页面名称';

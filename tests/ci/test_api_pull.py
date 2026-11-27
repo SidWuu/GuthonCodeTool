@@ -359,7 +359,8 @@ class ApiFullPullTest(WorkspaceCase):
         self.assertTrue(result["downloadComplete"])
         self.assertEqual(self.api("catalog")["project"]["menuTree"], selected_menu)
 
-        self.api("scope-save", {"systemIds": ["S1"], "dataSourceIds": [], "allSystems": False})
+        scope = {"systemIds": ["S1"], "dataSourceIds": [], "allSystems": False}
+        self.api("scope-save", scope)
         menu["name"] = "Menu after applying scope"
         result = self.api("pull")
         self.assertEqual(result["kind"], "scope-apply")
@@ -371,11 +372,25 @@ class ApiFullPullTest(WorkspaceCase):
         self.assertEqual(self.api("system-menu")["menu"], {"list": self.platform.menu})
         self.assertEqual(project_metadata(self.workspace, include_menu=True)["menuTree"], cached)
 
-        with patch.object(self.platform, "menu", [{"systemId": "S1"}]):
-            result = self.api("pull")
-            self.assertTrue(result["downloadComplete"])
-            self.assertEqual(result["menuError"]["code"], "API_RESPONSE_INVALID")
-            self.assertEqual(self.api("catalog")["project"]["menuTree"], cached)
+        with (
+            patch.object(self.platform, "menu", [{"systemId": "S1"}]),
+            patch("providers.api.sync.client_for", return_value=self.platform),
+        ):
+            message = "系统菜单身份无效：Fixture（S1），缺少菜单列表字段（menus）"
+            for action, payload in (
+                ("pull", None),
+                ("refresh", {"prefix": "systems/S1/pages"}),
+                ("scope-apply", {"settings": scope}),
+            ):
+                with self.subTest(action=action):
+                    result = self.api(action, payload)
+                    self.assertTrue(result["complete"])
+                    self.assertEqual(result["menuError"], {"code": "API_RESPONSE_INVALID", "message": message})
+                    self.assertEqual(self.api("catalog")["project"]["menuTree"], cached)
+            with self.assertRaises(ApiError) as failure:
+                self.api("system-menu")
+            self.assertEqual(failure.exception.code, "API_RESPONSE_INVALID")
+            self.assertEqual(str(failure.exception), message)
 
         self.platform.menu_error = ApiError("API_HTTP_ERROR", "fixture menu unavailable")
         result = self.api("pull")

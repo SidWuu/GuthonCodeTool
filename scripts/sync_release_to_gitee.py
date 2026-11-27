@@ -506,40 +506,45 @@ def mirror(client: GiteeClient, tag: str, directory: Path, hashes: dict[str, str
             raise MirrorError("Gitee 发行说明更新未通过核验")
     for name in sorted(hashes):
         file = directory / name
-        confirmed = False
-        for attempt in range(3):
+        uploads, upload_limit = 0, 2
+        quota_error = None
+        while True:
             release = client.release(tag)
             if release is None:
                 raise MirrorError("同步期间目标发行消失，停止操作")
-            existing = asset_map(release).get(name)
+            remote_assets = asset_map(release)
+            existing = remote_assets.get(name)
             if existing:
                 log(f"下载核验 {name}（{file.stat().st_size} 字节）")
                 if client.download_hash(existing, file) != hashes[name]:
                     raise MirrorError(f"远端附件哈希冲突，保留原文件并停止：{name}")
                 log(f"已验证 {name}，不重复上传")
-                confirmed = True
                 break
             if verify_only:
                 raise MirrorError(f"Gitee 缺少 {name}；只读验收不会补传")
-            if attempt == 2:
-                break
+            if quota_error is not None:
+                if quota_cleanup is None:
+                    raise quota_error
+                missing = hashes.keys() - remote_assets.keys()
+                quota_cleanup(sum((directory / asset).stat().st_size for asset in missing))
+                quota_cleanup = None
+                quota_error = None
+                upload_limit = max(upload_limit, uploads + 1)
+                continue
+            if uploads >= upload_limit:
+                raise MirrorError(f"未确认 {name} 已上传；已完成附件保留，重新运行可补齐")
             # Recheck local bytes before transmission: the verifier may use a caller-owned folder.
             if file.is_symlink() or file_hash(file) != hashes[name]:
                 raise MirrorError(f"上传前本地附件发生变化：{name}")
-            log(f"上传 {name}（{file.stat().st_size} 字节，第 {attempt + 1}/2 次）")
+            uploads += 1
+            log(f"上传 {name}（{file.stat().st_size} 字节，第 {uploads}/{upload_limit} 次）")
             try:
                 client.json_request(f"/releases/{release['id']}/attach_files", method="POST", upload=file)
-            except AttachmentQuotaError:
-                if quota_cleanup is None or attempt != 0:
-                    raise
-                missing = hashes.keys() - asset_map(release).keys()
-                quota_cleanup(sum((directory / asset).stat().st_size for asset in missing))
-                quota_cleanup = None
+            except AttachmentQuotaError as error:
+                quota_error = error
             except TransferError:
                 log("上传结果未确认；重新查询并下载核验后，才决定是否补传")
             time.sleep(2)
-        if not confirmed:
-            raise MirrorError(f"未确认 {name} 已上传；已完成附件保留，重新运行可补齐")
     final = client.release(tag)
     if final is None or set(asset_map(final)) != set(hashes):
         raise MirrorError("同步结束后附件集合发生变化")

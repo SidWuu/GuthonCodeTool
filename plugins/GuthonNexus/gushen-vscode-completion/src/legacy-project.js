@@ -144,6 +144,12 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
           throw new Error('本地片段已变化或为继承只读内容，请重新比较');
         await vscode.env.clipboard.writeText(result.content);
       } : undefined,
+      copySavedFieldBatch:database ? async (identity,fieldBatchPointer,sourceHash,baseRevision)=>{
+        const result=await databaseRequest(identity,'edit-comparison',{design:true,fieldBatchPointer,sourceHash,baseRevision});
+        if (result.sourceHash!==sourceHash || typeof result.clipboard!=='string')
+          throw new Error('字段改动已变化，请重新比较');
+        await vscode.env.clipboard.writeText(result.clipboard);
+      } : undefined,
       virtualFs:database?databaseCodeEditor():{open:(identity,options)=>virtualFs.open({...identity,sourceNamespace:undefined},options)},
       ownsDocument:(identity,document)=>{
         if(database) {
@@ -476,6 +482,16 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     const key = workspace.workspaceKey;
     try {
       if (name === 'pull') return await update(workspace);
+      if (name === 'refresh-source-view') {
+        if (manifest(workspace)) {
+          catalog.refresh(key);
+          if (workspace.workingCopies?.length && workspace.capabilities?.['svn.status']) await scopedScm.refresh(workspace);
+        } else {
+          if (workspace.sourceMode === 'database') databaseTree.refresh();
+          sourceTree.refresh();
+        }
+        return;
+      }
       if (name === 'upload' && manifest(workspace)) return await review(workspace, 'platform-save');
       if (name === 'changes' || name === 'upload') {
         if (workspace.sourceMode === 'svn') return await pickChange(workspace);
@@ -596,7 +612,13 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
   function treeItem(item) {
     if(item.kind?.startsWith('legacy-database-'))return databaseTree.treeItem(item);
     if (item.kind === 'legacy-svn') {
-      return catalog.getTreeItem(item.svnNode);
+      const node = catalog.getTreeItem(item.svnNode);
+      const change = catalog.provideFileDecoration(node.resourceUri);
+      if (change) {
+        node.iconPath = new vscode.ThemeIcon(node.iconPath.id, change.color);
+        node.description = [`${change.badge} · ${change.tooltip}`, node.description].filter(Boolean).join(' · ');
+      }
+      return node;
     }
     const node = new vscode.TreeItem(item.label,item.kind==='legacy-document'
       ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed);

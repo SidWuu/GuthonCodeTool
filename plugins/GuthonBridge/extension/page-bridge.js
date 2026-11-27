@@ -984,9 +984,12 @@
   }
 
   let copiedFields = null;
+  let fieldBatchPreview = null;
+  let nextFieldBatchPreview = 0;
 
-  function findFieldsMoverContext() {
-    const selected = Array.from(document.querySelectorAll(".base-control-box.row-box.selected"));
+  function findFieldsMoverContext(visibleOnly = false) {
+    const selected = Array.from(document.querySelectorAll(".base-control-box.row-box.selected"))
+      .filter(element => !visibleOnly || isVisible(element));
     if (selected.length !== 1) {
       throw new Error(selected.length ? "请只选中一个组件" : "请先选中组件");
     }
@@ -995,7 +998,7 @@
       const vue = host && [host, ...host.querySelectorAll("*")]
         .map(getVueInstance)
         .find((item) => Array.isArray(item?.[fieldsKey]));
-      if (vue) return { vue, fields: vue[fieldsKey], hiddenFields: Array.isArray(vue.hideFields) ? vue.hideFields : [] };
+      if (vue) return { vue, fieldsKey, fields: vue[fieldsKey], hiddenFields: Array.isArray(vue.hideFields) ? vue.hideFields : [] };
     }
     throw new Error("当前组件不支持字段平移");
   }
@@ -1039,14 +1042,56 @@
       [...context.fields, ...context.hiddenFields], entries.map((entry) => entry.field)
     );
     const accepted = new Set(result.toAppend);
-    if (entries.some((entry) => entry.hidden && accepted.has(entry.field)) && !Array.isArray(context.vue.hideFields)) {
+    appendFields(context, entries.filter(entry => accepted.has(entry.field)));
+    return { pasted: result.toAppend.length, duplicate: result.skippedDuplicate.length, invalid: result.skippedInvalid.length };
+  }
+
+  function appendFields(context, entries) {
+    if (entries.some(entry => entry.hidden) && !Array.isArray(context.vue.hideFields)) {
       if (context.vue.$set) context.vue.$set(context.vue, "hideFields", context.hiddenFields);
       else context.vue.hideFields = context.hiddenFields;
     }
     entries.forEach(({ field, hidden }) => {
-      if (accepted.has(field)) (hidden ? context.hiddenFields : context.fields).push(field);
+      (hidden ? context.hiddenFields : context.fields).push(field);
     });
-    return { pasted: result.toAppend.length, duplicate: result.skippedDuplicate.length, invalid: result.skippedInvalid.length };
+  }
+
+  function planLocalFieldBatch(batch) {
+    if (getCurrentPageCode() !== batch.pageId) throw new Error(`请打开对应的谷神页面 ${batch.pageId}`);
+    const context = findFieldsMoverContext(true);
+    if ((context.fieldsKey === "fields") !== (batch.componentType === "input-box"))
+      throw new Error("选中组件的类型与本地字段改动不匹配");
+    const plan = window.GuthonFieldsMoverCore.planFieldBatch([...context.fields, ...context.hiddenFields], batch);
+    return {context, plan};
+  }
+
+  function previewLocalFieldBatch(payload) {
+    fieldBatchPreview = null;
+    const batch = window.GuthonFieldsMoverCore.parseFieldBatch(payload?.text);
+    const {context, plan} = planLocalFieldBatch(batch);
+    const id = ++nextFieldBatchPreview;
+    fieldBatchPreview = {id, batch, vue: context.vue, fields: context.fields};
+    return {id, pageId: batch.pageId, component: batch.component, changes: plan.preview,
+      additions: plan.additions.map(entry => ({fieldId: entry.field.fieldId, hidden: entry.hidden})), already: plan.already};
+  }
+
+  function applyLocalFieldBatch(payload) {
+    const preview = fieldBatchPreview;
+    if (!preview || preview.id !== payload?.id) throw new Error("字段改动的预览已失效，请重新预览");
+    fieldBatchPreview = null;
+    const {context, plan} = planLocalFieldBatch(preview.batch);
+    const {vue} = context;
+    if (vue !== preview.vue || context.fields !== preview.fields)
+      throw new Error("预览后的目标组件已变化，请重新预览");
+    for (const {field, key, value, remove} of plan.writes) {
+      if (remove) {
+        if (vue.$delete) vue.$delete(field, key);
+        else delete field[key];
+      } else if (vue.$set) vue.$set(field, key, value);
+      else field[key] = value;
+    }
+    appendFields(context, plan.additions);
+    return {changed: plan.preview.length, added: plan.additions.length, already: plan.already};
   }
 
   function getAllVueInstances() {
@@ -2247,6 +2292,8 @@
     readFieldsMoverSource,
     copyFieldsMoverSource,
     pasteFieldsMoverSource,
+    previewLocalFieldBatch,
+    applyLocalFieldBatch,
     inspectCurrentPageSource,
     inspectTableSchemaTarget,
     inspectBillTypeTarget,
@@ -2377,5 +2424,5 @@
       delete window.GuthonProcedureNavigation;
     }
   };
-  window.__guthonPageBridgeReady = "20261003";
+  window.__guthonPageBridgeReady = "20261127";
 })();

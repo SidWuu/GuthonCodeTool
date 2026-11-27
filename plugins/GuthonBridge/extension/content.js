@@ -99,7 +99,7 @@ async function ensurePageBridge() {
       }
       clearTimeout(timer);
       window.removeEventListener("message", onMessage);
-      resolve({ ready: Boolean(data.ok), fieldsMover: Boolean(data.data?.fieldsMover) && data.data?.ready === "20261003" });
+      resolve({ ready: Boolean(data.ok), fieldsMover: Boolean(data.data?.fieldsMover) && data.data?.ready === "20261127" });
     }
 
     window.addEventListener("message", onMessage);
@@ -111,7 +111,7 @@ async function ensurePageBridge() {
   async function injectPageScript(name) {
     await new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `${runtime.getURL(name)}?v=20261003`;
+      script.src = `${runtime.getURL(name)}?v=20261127`;
       script.dataset.source = "guthon-bridge";
       script.onload = () => { script.remove(); resolve(); };
       script.onerror = () => { script.remove(); reject(new Error("页面桥接脚本加载失败")); };
@@ -399,7 +399,9 @@ function installSourcePullButton() {
         setMessage(root, error?.message || String(error), "error");
       }
     });
-    fieldsMover.append(copyFieldsButton, pasteFieldsButton);
+    const localFieldsButton = makeNativeButton("粘贴本地改动", "guthon-bridge-paste-local-fields-button");
+    localFieldsButton.addEventListener("click", () => showLocalFieldBatch(root));
+    fieldsMover.append(copyFieldsButton, pasteFieldsButton, localFieldsButton);
     root.appendChild(fieldsMover);
     const nexusButton = makeNativeButton("Nexus 定位", "guthon-bridge-nexus-button");
     nexusButton.title = "在 Nexus 中定位当前 PAGE 或过程函数";
@@ -567,6 +569,91 @@ async function pasteCopiedFields(root) {
   setMessage(root, `已粘贴 ${pasted.data.pasted} 个，跳过重复 ${pasted.data.duplicate} 个，无效 ${pasted.data.invalid} 个`, "success");
   return pasted.data;
 }
+
+function showLocalFieldBatch(root) {
+  removeNode(FIELDS_MOVER_OVERLAY_ID);
+  const overlay = document.createElement("div");
+  overlay.id = FIELDS_MOVER_OVERLAY_ID;
+  overlay.innerHTML = `
+    <div class="guthon-bridge-fields-mover-panel" role="dialog" aria-label="粘贴本地字段改动">
+      <div class="guthon-bridge-fields-mover-head"><strong>粘贴本地字段改动</strong></div>
+      <div class="guthon-bridge-fields-mover-list">
+        <label>粘贴从 Nexus 复制的字段改动
+          <textarea rows="4" spellcheck="false" class="guthon-bridge-local-fields-input"></textarea>
+        </label>
+        <div role="status"></div>
+        <ul class="guthon-bridge-local-fields-preview"></ul>
+      </div>
+      <div class="guthon-bridge-fields-mover-actions">
+        <button type="button" class="el-button el-button--default el-button--mini" data-action="preview">预览</button>
+        <button type="button" class="el-button el-button--primary el-button--mini" data-action="apply" disabled>应用到设计器</button>
+        <button type="button" class="el-button el-button--default el-button--mini" data-action="close">关闭</button>
+      </div>
+    </div>`;
+  const input = overlay.querySelector("textarea");
+  const status = overlay.querySelector('[role="status"]');
+  const list = overlay.querySelector("ul");
+  const preview = overlay.querySelector('[data-action="preview"]');
+  const apply = overlay.querySelector('[data-action="apply"]');
+  const close = () => overlay.remove();
+  let previewId;
+  const invalidate = () => {
+    apply.disabled = true;
+    previewId = undefined;
+    list.replaceChildren();
+    status.textContent = "";
+  };
+  input.addEventListener("input", invalidate);
+  overlay.querySelector('[data-action="close"]').addEventListener("click", close);
+  overlay.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
+  preview.addEventListener("click", async () => {
+    invalidate();
+    input.disabled = preview.disabled = true;
+    try {
+      const result = await runPageCommand("previewLocalFieldBatch", {text: input.value});
+      if (!result.ok) throw new Error(result.message);
+      const data = result.data;
+      const display = value => {
+        const formatted = JSON.stringify(value) ?? "（无）";
+        return formatted.length > 100 ? formatted.slice(0, 100) + "…" : formatted;
+      };
+      for (const text of [
+        ...data.changes.map(change => `${change.fieldId} · ${change.path.join(".")} · ${display(change.before)} → ${display(change.after)}`),
+        ...data.additions.map(field => `新增 ${field.fieldId}${field.hidden ? "（隐藏）" : ""}`)
+      ]) {
+        const item = document.createElement("li");
+        item.textContent = text;
+        list.append(item);
+      }
+      status.textContent = `${data.pageId} · ${data.component} · ${data.changes.length} 项属性或事件改动，${data.additions.length} 个新增字段，${data.already} 项已一致`;
+      previewId = data.id;
+      apply.disabled = !data.changes.length && !data.additions.length;
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      input.disabled = preview.disabled = false;
+    }
+  });
+  apply.addEventListener("click", async () => {
+    if (previewId === undefined) return;
+    input.disabled = preview.disabled = apply.disabled = true;
+    try {
+      const result = await runPageCommand("applyLocalFieldBatch", {id: previewId});
+      if (!result.ok) throw new Error(result.message);
+      const {changed, added} = result.data;
+      setMessage(root, `已应用 ${changed} 项改动、${added} 个新增字段，请核对并在谷神设计器中保存`, "success");
+      close();
+    } catch (error) {
+      invalidate();
+      status.textContent = error.message;
+    } finally {
+      input.disabled = preview.disabled = false;
+    }
+  });
+  document.body.appendChild(overlay);
+  input.focus();
+}
+
 function selectNodeText(node) {
   const range = document.createRange();
   range.selectNodeContents(node);
@@ -1051,6 +1138,12 @@ function onExtensionMessage(message, sender, sendResponse) {
       ? async () => ({ ok: true, data: await showFieldsMoverOverlay(root) })
       : message?.type === "paste-fields-mover"
         ? async () => ({ ok: true, data: await pasteCopiedFields(root) })
+        : message?.type === "show-local-field-batch"
+          ? async () => {
+            if (!isModuleRoute()) throw new Error("字段平移只支持模块开发页面");
+            showLocalFieldBatch(root);
+            return {ok: true};
+          }
         : null;
   if (!action) {
     return false;

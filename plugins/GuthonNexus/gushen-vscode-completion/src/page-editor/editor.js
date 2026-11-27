@@ -55,6 +55,13 @@
     root.append(heading);
     if (baseline && !state.comparison?.baseline?.available) {root.append(el('p',state.comparison?.baseline?.message || `正在读取${baselineLabel}…`,'notice'));return;}
     if (!info) return;
+    if (baseline) for (const batch of state.comparison.baseline.fieldBatches || []) {
+      const title = `${batch.label} · 修改 ${batch.updated} 个字段，新增 ${batch.added} 个`;
+      const actions=el('div',undefined,'actions');
+      actions.append(el('span',title),button('复制字段改动',()=>send('copySavedFieldBatch',{pointer:batch.pointer}),
+        state.busy || state.comparison.sourceStale));
+      root.append(actions);
+    }
     if (info.truncated) root.append(el('p',`共 ${info.total} 项差异，仅展示前 ${info.rows.length} 项；完整差异请从源代码管理查看。`,'notice'));
     if (baseline && state.comparison.baseline.formatOnly) root.append(el('p','仅 JSON 格式或键顺序发生变化，页面结构和值相同；原文差异请从源代码管理查看。','notice'));
     const collection=state.model.collections.find(item=>item.pointer===selection?.collection);

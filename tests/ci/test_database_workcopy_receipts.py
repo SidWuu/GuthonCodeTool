@@ -25,6 +25,12 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
                         {"id": name, "pageEvents": {"onClickScript": text}}
                         for name, text in (("a", "first();\nold();\nlast();"), ("b", "other();"))
                     ]
+                    source["views"] = {"rows": [{"cols": [{"component": {"type": "input-box",
+                        "name": "mainForm", "fields": [
+                            {"fieldId": "A", "id": "form-a", "type": "text", "width": 100,
+                             "pageEvents": {"onChangeScript": "old();"}},
+                            {"fieldId": "B", "id": "form-b", "type": "text", "label": "Old label"},
+                        ]}}]}]}
                 row = {"source_table": "page", "source_id": page, "source_alias_id": page, "fun_id": "",
                        "source_name": page, "source_content": json.dumps(source),
                        "system_id": "SYS-FIXTURE"}
@@ -182,3 +188,41 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
                            payload={**identity, "includeLineChanges": True})
         self.assertEqual([{"kind": "delete", "start": 1, "end": 1}, {"kind": "insert", "start": 2, "end": 3}],
                          result["lineChanges"])
+
+    def test_copy_field_batch_from_saved_comparison_requires_both_current_revisions(self):
+        identity = self.pages["PG-TWO"]
+        source = self.workspace["readonlyDir"] / identity["sourcePath"]
+        original = source.read_bytes()
+        current = json.loads(original)
+        component = current["views"]["rows"][0]["cols"][0]["component"]
+        field, other = component["fields"]
+        field.update(width=120, pageEvents={"onChangeScript": "changed();"})
+        other["label"] = "New label"
+        component["fields"].append({"fieldId": "C", "id": "form-c", "type": "text"})
+        component["fields"].reverse()
+        current["buttons"][0]["pageEvents"]["onClickScript"] = "unrelated();"
+        read = self.tool("legacy-source", key=self.key, args=["edit-read"], payload=identity)
+        saved = self.tool("legacy-source", key=self.key, args=["edit-save"],
+                          payload={**identity, "sourceHash": read["sourceHash"], "content": json.dumps(current)})
+        review = {**identity, "design": True, "sourceHash": saved["sourceHash"]}
+        comparison = self.tool("legacy-source", key=self.key, args=["edit-comparison"], payload=review)
+        summary, = comparison["fieldBatches"]
+        self.assertEqual(("mainForm", 2, 1), (summary["label"], summary["updated"], summary["added"]))
+        copy = {**review, "fieldBatchPointer": summary["pointer"], "baseRevision": comparison["fieldBaseHash"]}
+        result = self.tool("legacy-source", key=self.key, args=["edit-comparison"], payload=copy)
+        batch = json.loads(result["clipboard"])
+        self.assertEqual(("PG-TWO", "input-box"), (batch["pageId"], batch["componentType"]))
+        self.assertEqual("C", batch["additions"][0]["field"]["fieldId"])
+        self.assertEqual({"A": {("width",): (100, 120), ("pageEvents", "onChangeScript"): ("old();", "changed();")},
+                          "B": {("label",): ("Old label", "New label")}}, {
+            update["identity"]["fieldId"]: {tuple(item["path"]): (item["before"], item["after"])
+                                           for item in update["changes"]}
+            for update in batch["updates"]
+        })
+        self.assertNotIn("unrelated", result["clipboard"])
+        with self.assertRaisesRegex(ValueError, "PAGE 已变化"):
+            self.tool("legacy-source", key=self.key, args=["edit-comparison"],
+                      payload={**copy, "sourceHash": read["sourceHash"]})
+        source.write_bytes(original + b"\n")
+        with self.assertRaisesRegex(ValueError, "只读基线已变化"):
+            self.tool("legacy-source", key=self.key, args=["edit-comparison"], payload=copy)
