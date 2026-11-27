@@ -12,6 +12,7 @@ from providers.api.client import ApiError
 from providers.api.download import BASE, SourceFile
 from providers.api.progress import output_to
 from providers.api.store import ApiStore, digest
+from providers.api.workspace import project_metadata
 from providers.source_helper import SourceHelperMcpServer
 from test_provider_regressions import WorkspaceCase
 
@@ -321,14 +322,15 @@ class ApiFullPullTest(WorkspaceCase):
         self.assertNotEqual(updated["index"]["indexGeneration"], renamed["index"]["indexGeneration"])
         self.assertNotIn("updatedPaths", renamed["index"])
 
-    def test_page_pulls_refresh_a_cached_menu_and_keep_it_on_request_failure(self):
+    def test_page_menu_sync_validates_only_selected_systems_and_preserves_cache_on_failure(self):
         old_page = {"pageId": "PG-OLD", "pageSubId": "0F"}
         added_page = {"pageId": "PG-NEW", "pageSubId": "5F"}
         menu_pages = [old_page]
         menu = {"id": "group", "name": "Fixture group", "isDir": 1, "childs": [
             {"id": "entry", "name": "Fixture entry", "isDir": 0, "pages": menu_pages},
         ]}
-        self.platform.menu = [{"systemId": "S1", "menus": [menu]}]
+        selected_menu = [{"systemId": "S1", "menus": [menu]}]
+        self.platform.menu = [{"systemId": "S2"}, *selected_menu, {"systemId": "S3", "menus": []}]
 
         for page, action, selector in (
             (old_page, "pull", None),
@@ -344,24 +346,36 @@ class ApiFullPullTest(WorkspaceCase):
             self.platform.requests.clear()
             result = self.api(action, selector)
             self.assertTrue(result["downloadComplete"])
+            self.assertNotIn("menuError", result)
             self.assertEqual(self.platform.requests.count((BASE + "getModuleTree.htm", None)), 1)
             catalog = self.api("catalog")
             self.assertIn(f"systems/S1/pages/{page['pageSubId']}/{page_id}/{page_id}.xml",
                           [obj["path"] for obj in catalog["objects"]])
-            self.assertEqual(catalog["project"]["menuTree"], self.platform.menu)
+            self.assertEqual(catalog["project"]["menuTree"], selected_menu)
+            self.assertEqual(project_metadata(self.workspace, include_menu=True)["menuTree"], selected_menu)
 
         menu["name"] = "Renamed fixture group"
         result = self.api("pull")
         self.assertTrue(result["downloadComplete"])
-        self.assertEqual(self.api("catalog")["project"]["menuTree"], self.platform.menu)
+        self.assertEqual(self.api("catalog")["project"]["menuTree"], selected_menu)
 
         self.api("scope-save", {"systemIds": ["S1"], "dataSourceIds": [], "allSystems": False})
         menu["name"] = "Menu after applying scope"
         result = self.api("pull")
         self.assertEqual(result["kind"], "scope-apply")
         self.assertTrue(result["downloadComplete"])
+        self.assertNotIn("menuError", result)
         cached = self.api("catalog")["project"]["menuTree"]
-        self.assertEqual(cached, self.platform.menu)
+        self.assertEqual(cached, selected_menu)
+
+        self.assertEqual(self.api("system-menu")["menu"], {"list": self.platform.menu})
+        self.assertEqual(project_metadata(self.workspace, include_menu=True)["menuTree"], cached)
+
+        with patch.object(self.platform, "menu", [{"systemId": "S1"}]):
+            result = self.api("pull")
+            self.assertTrue(result["downloadComplete"])
+            self.assertEqual(result["menuError"]["code"], "API_RESPONSE_INVALID")
+            self.assertEqual(self.api("catalog")["project"]["menuTree"], cached)
 
         self.platform.menu_error = ApiError("API_HTTP_ERROR", "fixture menu unavailable")
         result = self.api("pull")

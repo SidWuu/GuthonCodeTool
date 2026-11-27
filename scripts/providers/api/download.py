@@ -33,7 +33,8 @@ def records(data):
     return result
 
 
-def fetch_system_menu(client):
+def fetch_system_menu(client, *, system_ids=None):
+    """Return the platform response and the validated menu tree for the supplied scope."""
     def menu_node(node):
         if not isinstance(node, dict) or node.get("id") is None:
             raise ApiError("API_RESPONSE_INVALID", "菜单缺少身份")
@@ -53,12 +54,17 @@ def fetch_system_menu(client):
         return result
 
     response = client.request(BASE + "getModuleTree.htm")
+    selected = set(system_ids) if system_ids is not None else None
     menu = []
     for row in records(response):
-        if row.get("systemId") is None or not isinstance(row.get("menus"), list):
+        system_id = row.get("systemId")
+        system_id = str(system_id) if system_id is not None else None
+        if selected is not None and system_id not in selected:
+            continue
+        if system_id is None or not isinstance(row.get("menus"), list):
             raise ApiError("API_RESPONSE_INVALID", "系统菜单身份无效")
         menu.append({
-            "systemId": str(row["systemId"]),
+            "systemId": system_id,
             "menus": [menu_node(node) for node in row["menus"]],
         })
     return response, menu

@@ -486,7 +486,8 @@ def _execute(workspace, action, payload):
     if action == "designer-context":
         return client.designer_context()
     if action == "system-menu":
-        response, menu = fetch_system_menu(client)
+        system_ids = settings(workspace)["systemIds"]
+        response, menu = fetch_system_menu(client, system_ids=system_ids or None)
         save_project(workspace, menu_tree=menu)
         return {"menu": response}
     if action in {"systems", "data-sources"}:
