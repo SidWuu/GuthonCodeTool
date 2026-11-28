@@ -117,6 +117,8 @@ def main() -> int:
         "--add-data",
         f"{ROOT / 'scripts' / 'common' / 'command_metadata.json'}{SEP}common",
         "--add-data",
+        f"{ROOT / 'scripts' / 'common' / 'database_page_defaults.json'}{SEP}common",
+        "--add-data",
         f"{build_info_path}{SEP}.",
         "--add-data",
         f"{ROOT / 'scripts' / 'vault_crypto.mjs'}{SEP}scripts",

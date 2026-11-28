@@ -195,18 +195,18 @@ test('project source refresh rereads DATABASE Workcopy changes without watcher e
     workspace:{...vscode.workspace,onDidOpenTextDocument:()=>disposable,onDidChangeTextDocument:()=>disposable,
       onDidCloseTextDocument:()=>disposable},
     languages:{createDiagnosticCollection:()=>disposable,registerCompletionItemProvider:()=>disposable}};
-  let changed=false,rows,render;
+  let changed=false,conflict=false,rows,render;
   const sourceTree={refresh(){render=view.render();},updateScm(){assert.fail('DATABASE used API status');}};
   const getSelected=async()=>workspace,getTool=()=>({toolHome:'/fixture'});
   const legacy=registerLegacyProjects({vscode:host,context,getTool,getSelected,sourceTree,
     processClient:{async request(_tool,command,args,key){
       assert.equal(command,'legacy-source');
       assert.equal(key,workspace.workspaceKey);
-      if(args[0]==='local-changes')return {ok:true,items:changed?[record]:[]};
+      if(args[0]==='local-changes')return {ok:true,items:changed?[{...record,needsMerge:conflict}]:[]};
       if(args[0]==='fragments')return {ok:true,fragments:[{label:'修改',pointer:'/a'},{label:'原文',pointer:'/b'}],modifiedPointers:changed?['/a']:[]};
       assert.equal(args[0],'catalog');
       return args.length===1?{ok:true,categories:['page'],exportIndexReady:true}
-        :{ok:true,items:[record,{...record,sourceId:'PG-B',sourcePath:'group/page/PG-B/raw.json'}]};
+        :{ok:true,items:[record,{...record,sourceId:'PG-B',pageType:'0',sourcePath:'group/page/PG-B/raw.json'}]};
     }}});
   createApiNavigation({vscode:host,context,api:{sourceTree},selectWorkspace:getSelected,getTool,legacyAction:legacy.action});
   const refresh=commands.get('gushenCompletion.refreshAllApiSources');
@@ -224,12 +224,19 @@ test('project source refresh rereads DATABASE Workcopy changes without watcher e
   await view.receive({type:'ready'});
   await view.reveal(fragment);
   assert.ok(rows.every(row=>!row.description));
+  assert.equal(rows.find(row=>row.label==='PG-A')?.icon,'layout');
+  assert.equal(rows.find(row=>row.label==='PG-B')?.icon,'symbol-event');
   changed=true;
   await refresh();
   await render;
   assert.deepEqual(rows.filter(row=>row.description==='M · 本地修改').map(row=>row.label),['页面','group','PG-A','修改']);
   assert.deepEqual(rows.filter(row=>row.color==='gitDecoration.modifiedResourceForeground').map(row=>row.label),['页面','group','PG-A','修改']);
   for(const name of ['查看原始 JSON','PG-B','原文'])assert.equal(rows.find(row=>row.label===name)?.description,'');
+  conflict=true;
+  await refresh();
+  await render;
+  assert.deepEqual(rows.filter(row=>row.color==='gitDecoration.conflictingResourceForeground').map(row=>row.label),['页面','group','PG-A']);
+  assert.equal(rows.find(row=>row.label==='PG-A')?.description,'C · 本地和谷神均有改动');
   changed=false;
   await refresh();
   await render;

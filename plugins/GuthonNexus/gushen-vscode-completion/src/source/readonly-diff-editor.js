@@ -17,18 +17,18 @@ class ReadonlyDiffEditor {
     return content;
   }
 
-  async show(before, after, { beforeName, afterName, title, editorOptions }) {
+  async show(before, after, { beforeName, afterName, title, editorOptions, rightUri }) {
     if (!this.registration) throw new Error('只读差异文档不可用');
     const id = randomUUID();
     const left = this.vscode.Uri.from({ scheme: this.scheme, path: `/${id}/${beforeName}` });
-    const right = this.vscode.Uri.from({ scheme: this.scheme, path: `/${id}/${afterName}` });
+    const right = rightUri || this.vscode.Uri.from({ scheme: this.scheme, path: `/${id}/${afterName}` });
     this.documents.set(left.path, before);
-    this.documents.set(right.path, after);
+    if (!rightUri) this.documents.set(right.path, after);
     try {
       await this.vscode.commands.executeCommand('vscode.diff', left, right, title, editorOptions);
     } catch (error) {
       this.documents.delete(left.path);
-      this.documents.delete(right.path);
+      if (!rightUri) this.documents.delete(right.path);
       throw error;
     }
   }

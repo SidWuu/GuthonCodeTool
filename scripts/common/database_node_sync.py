@@ -81,6 +81,105 @@ def _sync_sources(workspace,config,kind,groups,record_id,datasource_name,datasou
     return {"matched":matched,"changed":changed}
 
 
+def sync_verified_source(workspace, config, identity, *, base_version, database_version, content,
+                         advance_workcopy=False, reviewed_workcopy_hash=None, readback_datasource=None,
+                         merged_workcopy=False, platform_differs=False):
+    """Refresh one mirror using independently established database-version evidence.
+
+    An isolated verifier can supply a connection resolved by its trusted caller.
+    The local operation remains bound to its original workspace configuration.
+    """
+    kind = identity["source_table"]
+    if (workspace["sourceMode"] != "database" or identity["workspaceKey"] != workspace["workspaceKey"]
+            or kind not in {"page", "procedure"} or not database_version):
+        raise ValueError("源码回拉身份或源库回读版本无效")
+    if identity.get("workspaceBinding", workspace["workspaceBinding"]) != workspace["workspaceBinding"]:
+        raise ValueError("发布以后项目来源或数据源配置发生变化")
+    is_page = kind == "page"
+    scope_field = "system_id" if is_page else "data_source_id"
+    fields = ("source_id", "source_alias_id", "fun_id", scope_field)
+    source_id, alias, fun_id, scope_id = (identity[key] for key in fields)
+    query = {"sourceId": source_id, "alias": alias, "funId": fun_id,
+             "systemId" if is_page else "dataSourceId": scope_id}
+    rules = config["sync"].get("rules") or {}
+    sql, params = hub.single_source_sql(config["source_tables"], kind, query, rules, verified_version=database_version)
+    name, datasource = readback_datasource or hub.resolve_datasource(config, workspace=workspace)
+    index_sql = """SELECT * FROM gusen_source_record
+        WHERE provider='database' AND source_table=? AND source_layer=? AND scope_id=?
+          AND project_id=? AND source_id=? AND fun_id=?"""
+    index_params = (kind, workspace["layer"], workspace["scopeId"], workspace["projectId"], source_id, fun_id)
+    context = workspace["contextDir"]
+    with hub.file_lock(context / ".source-write.lock"), hub.index_connection(
+            workspace, action="database-publish-readback", readonly=False) as conn:
+        with hub.db_connect(datasource) as remote, hub.source_transaction(conn, workspace):
+            indexed = conn.execute(index_sql, index_params).fetchone()
+            if indexed is None or any(indexed[key] != identity[key] for key in fields):
+                raise ValueError("已核验的源码不再属于本地索引")
+            if indexed["version_mac"] not in {base_version, database_version}:
+                return {"verified": False, "reason": "MIRROR_VERSION_CHANGED"}
+            with remote.cursor() as cursor:
+                cursor.execute("SET TRANSACTION READ ONLY")
+            scope = hub.resolve_system_scope(remote, config, name, workspace)
+            if scope_id not in scope[f"{scope_field}s"]:
+                raise ValueError("已核验的源码不再属于授权同步范围")
+            with remote.cursor() as cursor:
+                cursor.execute(sql, params)
+                rows = cursor.fetchall()
+            if not rows:
+                return {"verified": False}
+            if len(rows) != 1:
+                raise ValueError("已核验的源码在源库中匹配多条记录")
+            row, = rows
+            remote_identity = (row["source_id"], hub._source_alias_id(row) if is_page else row["source_alias_id"],
+                               row["fun_id"], row[scope_field])
+            if (remote_identity != (source_id, alias, fun_id, scope_id)
+                    or (workspace["config"].get("include") and not hub._included(workspace["config"], row))
+                    or any(identity.get(key, workspace[name]) != workspace[name] for key, name in (
+                        ("source_layer", "layer"), ("scope_id", "scopeId"), ("project_id", "projectId")))):
+                raise ValueError("数据库回读身份或范围不一致")
+            source_content = row["source_content"] or ""
+            if row["version_mac"] != database_version:
+                return {"verified": False}
+            if is_page:
+                from common.database_source_publish import page_publication_model
+                from common.database_workcopy_edit import _page
+                from common.page_comparison import same_json_value
+
+                actual, expected = (page_publication_model(_page(value, source_id)[1], page_alias=alias)
+                                    for value in (source_content, content))
+                if not same_json_value(actual, expected):
+                    return {"verified": False}
+                row["model_path"] = hub.load_model_paths(remote, config["source_tables"]).get(hub._str(row.get("model_id")))
+            else:
+                from common.page_projection import comparable_script
+
+                if comparable_script(source_content) != comparable_script(content):
+                    return {"verified": False}
+                if hub._resolve_inherited_script(source_content, row.get("product_source_content") or "") != source_content:
+                    raise ValueError("不能以继承展开的内容作为发布回拉结果")
+                # The procedure query does not return its indexed system.
+                row = {**row, "system_id": indexed["system_id"]}
+            # This operation refreshes the indexed file. Layout changes and
+            # shared procedure directory links belong to the regular sync.
+            exact_scope = {**scope, "system_link_names_by_data_source_id": {}}
+            target = hub.source_base(row, workspace["layer"], workspace["scopeId"], workspace["projectId"],
+                                     workspace["config"], exact_scope, workspace)
+            if not indexed["local_path"] or (hub.ROOT / indexed["local_path"]).resolve() != target.resolve():
+                return {"verified": False, "reason": "MIRROR_PATH_CHANGED"}
+            hub.upsert_source(conn, row, workspace["layer"], workspace["scopeId"], workspace["projectId"],
+                              workspace["config"], exact_scope, force=True, workspace=workspace, preserve_record_id=True)
+        if advance_workcopy:
+            from common.database_source_publish import advance_workcopy_baseline
+
+            with hub.file_lock(context / ".workcopy.lock"):
+                indexed = conn.execute(index_sql, index_params).fetchone()
+                state = advance_workcopy_baseline(workspace, indexed, base_version=base_version,
+                                                  reviewed_workcopy_hash=reviewed_workcopy_hash,
+                                                  merged_workcopy=merged_workcopy, platform_differs=platform_differs)
+            return {"verified": True, "workcopyState": state}
+    return {"verified": True}
+
+
 def _sync_exports(workspace,config,kind,groups,export_key,datasource_name,datasource,progress):
     from providers.database import export_system_script_sql as scripts, export_table_schema_sql as tables, export_view_sql as views
     from common.database_exports import export_bill_type_sql as bills

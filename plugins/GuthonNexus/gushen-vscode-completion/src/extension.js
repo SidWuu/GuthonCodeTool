@@ -598,6 +598,13 @@ function activate(context) {
   const loadLegacyProjects = () => legacyProjects ||= require('./legacy-project').registerLegacyProjects({
     vscode, context, getTool: configuredToolFromSettings, processClient, sourceTree: apiServices.sourceTree,
     getWorkspaces: allWorkspaces, getSelected: () => selection.current(), runTool, getOutput: toolOutput,
+    databaseBridgeRequest: (home, route, payload) => bridge.request(home, route, payload),
+    databasePublicationRequest: (home, route, payload) => bridge.request(home, route, payload),
+    databasePublicationMode: async home => {
+      if (!home || !bridge.isRunning()) return 'bridge-stopped';
+      try { return (await bridge.request(home, '/databaseProcedureCapabilities')).mode === 'manual' ? 'manual' : 'closed'; }
+      catch { return 'bridge-unreachable'; }
+    },
     refreshProjects: async () => { workspaceRegistry.invalidate(); await refreshApiWorkspaces(); },
     onStatus: (key, status, workspace) => {
       projectOverview.provider.updateSummary(key, status);

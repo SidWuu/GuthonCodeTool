@@ -423,6 +423,8 @@ test("Nexus links carry only the current PAGE or procedure identity", () => {
   assert.equal(procedure.uri, "vscode://gushen-local.guthon-nexus-vscode/locate-procedure?alias=com.golden.demo.common&funId=saveForecast");
   assert.equal(procedure.uri.includes("PR-1"), false);
   assert.equal(procedure.uri.includes("products.demo"), false);
+  assert.equal(locator.build({mode:"page-source", pageId:"PG-1234-5678"}, "projects.database").uri,
+    "vscode://gushen-local.guthon-nexus-vscode/locate-page?pageId=PG-1234-5678&workspaceKey=projects.database");
   assert.equal(locator.isSupported({ mode: "procedure", procedureKeyword: "com.demo", funId: "" }), false);
   assert.throws(() => locator.build({ mode: "table-schema" }), /暂不支持/);
 });
@@ -454,20 +456,17 @@ test("late SPA tabs trigger the floating toolbar refresh without waiting for the
   let observer;
   let refreshes = 0;
   let activeTabs = [];
-  let root = null;
   const context = {
     location: { hash: "#/gdpaas/dev/modules" },
     FLOATING_ROOT_ID: "guthon-bridge-floating-root",
-    COPY_OVERLAY_ID: "guthon-bridge-copy-overlay",
-    FIELDS_MOVER_OVERLAY_ID: "guthon-bridge-fields-mover-overlay",
-    CALLERS_OVERLAY_ID: "guthon-bridge-callers-overlay",
     gToolbarObserver: null,
     gToolbarRefreshTimer: null,
     gObservedToolbarContext: "",
+    isActiveTab: () => true,
+    isVisible: () => true,
     document: {
       body: {},
       querySelectorAll: () => activeTabs,
-      getElementById: () => root,
     },
     MutationObserver: class {
       constructor(callback) { observer = callback; }
@@ -479,13 +478,14 @@ test("late SPA tabs trigger the floating toolbar refresh without waiting for the
   vm.runInNewContext(`${script.slice(start, end)}\nglobalThis.observeToolbarContext = observeToolbarContext;`, context);
   context.observeToolbarContext();
   activeTabs = [{ id: "tab-gdpaas_dev_modules" }, { id: "tab-PG-1234" }];
-  const childListChange = { type: "childList", target: { closest: () => null }, addedNodes: [], removedNodes: [] };
+  const childListChange = {
+    type: "childList", addedNodes: [{ nodeType: 1, matches: selector => selector.includes('[role="tab"]') }], removedNodes: [],
+  };
   observer([childListChange]);
   observer([childListChange]);
   assert.equal(scheduled.length, 1);
   scheduled.shift()();
   assert.equal(refreshes, 1);
-  root = {};
   observer([childListChange]);
   assert.equal(scheduled.length, 0);
 });
@@ -546,7 +546,6 @@ test("workspace selection reuses the same Guthon address and an available candid
   assert.equal(isWorkspaceCacheError({ ok: false, message: "Page identity does not match workspace: projects.demo" }), true);
   assert.equal(isWorkspaceCacheError({ ok: false, message: "源码表拉取失败" }), false);
   assert.equal(css.includes(".guthon-bridge-workspace-select"), true);
-  assert.equal(css.includes("background: #409eff"), true);
   assert.equal(css.includes("top: 50% !important"), true);
   assert.equal(css.includes("inset: 0 !important"), false);
 });
@@ -652,7 +651,6 @@ test("pull button floats over the current Guthon toolbar without changing toolba
   assert.equal(contentScript.includes(".tool-menu.tool-box button"), true);
   assert.equal(css.includes(".guthon-bridge-inline"), true);
   assert.equal(css.includes("position: fixed"), true);
-  assert.equal(contentScript.includes("guthon-bridge-inline-button"), true);
   assert.equal(contentScript.includes(".function.head"), true);
   assert.equal(contentScript.includes('document.querySelector(".procedure-script-editor")'), false);
 });
@@ -686,27 +684,17 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes('runPageCommand("readFieldsMoverSource")'), true);
   assert.equal(contentScript.includes('runPageCommand("copyFieldsMoverSource"'), true);
   assert.equal(contentScript.includes('runPageCommand("pasteFieldsMoverSource")'), true);
-  assert.equal(contentScript.indexOf("root.appendChild(sourceButton);") < contentScript.indexOf("root.appendChild(copyButton);"), true);
   assert.equal(contentScript.includes("root.dataset.mode = mode;"), true);
-  assert.equal(contentScript.includes('makeNativeButton("复制模式"'), true);
-  assert.equal(css.includes("flex-direction: column"), true);
   assert.equal(css.includes("display: inline-flex"), true);
-  assert.equal(css.includes("min-width: 108px"), true);
-  assert.equal(css.includes("background: #409eff"), true);
-  assert.equal(css.includes("bottom: calc(100% + 8px)"), true);
-  assert.equal(css.includes("user-select: text"), true);
-  assert.equal(css.includes("width: 140px"), true);
-  assert.equal(css.includes("word-break: break-all"), true);
   assert.equal(contentScript.includes("installFloatingDrag"), false);
-  assert.equal(contentScript.includes("refreshCurrentSource(root, sourceButton)"), true);
+  assert.equal(contentScript.includes("refreshCurrentSource(root, button)"), true);
   assert.equal(contentScript.includes('runPageCommand("inspect-hub-source")'), true);
   assert.equal(contentScript.includes('allowWorkspaceSelection = true'), true);
   assert.equal(contentScript.includes('allowWorkspaceSelection: false'), true);
-  assert.equal(contentScript.includes('location.pathname}${location.hash}#${root.dataset.mode'), true);
   assert.equal(contentScript.includes('window.addEventListener("hashchange", refreshToolbarButtonsSafely)'), true);
   assert.equal(contentScript.includes('window.addEventListener("popstate", refreshToolbarButtonsSafely)'), true);
   assert.equal(contentScript.includes('const PAGE_CONTEXT_HEARTBEAT_MS = 60000'), true);
-  assert.equal(contentScript.includes('setInterval(() => {void publishPageContext().catch(() => {});}, PAGE_CONTEXT_HEARTBEAT_MS)'), true);
+  assert.equal(contentScript.includes('setInterval(refreshToolbarButtonsSafely, PAGE_CONTEXT_HEARTBEAT_MS)'), true);
   assert.equal(css.includes('.guthon-bridge-inline [hidden]'), true);
   assert.equal(css.includes('display: none !important'), true);
   assert.equal(contentScript.includes('runPageCommand("collectModuleCopyText")'), true);
@@ -763,15 +751,12 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(contentScript.includes("textarea.select();"), true);
   assert.equal(contentScript.includes("window.__guthonBridgeLoaded"), false);
   assert.equal(contentScript.includes('message?.type === "show-copy-overlay"'), true);
-  assert.equal(contentScript.includes("function installSourcePullButton"), true);
-  assert.equal(contentScript.includes("guthon-bridge-module-only"), true);
+  assert.equal(contentScript.includes("function installFloatingToolbar"), true);
   assert.equal(contentScript.includes("SCHEMA_ROOT_ID"), false);
   assert.equal(contentScript.includes("BILLTYPE_ROOT_ID"), false);
   assert.equal(contentScript.includes('style.dataset.version = "20260723c"'), false);
-  assert.equal(css.includes('.guthon-bridge-inline:not([data-mode="module"]) .guthon-bridge-module-only {\n  display: none;'), true);
   assert.equal(contentScript.includes("root.dataset.positioned"), false);
-  assert.equal(contentScript.includes('root.dataset.sharedButtons = "true"'), true);
-  assert.equal(contentScript.includes("refreshCurrentSource(root, sourceButton)"), true);
+  assert.equal(contentScript.includes("refreshCurrentSource(root, button)"), true);
   assert.equal(contentScript.includes("stopExtensionLoops();"), true);
 
   assert.equal(pageBridge.includes("function inspectCurrentPageSource"), true);
@@ -842,15 +827,22 @@ test("floating controls mount before workspace checks while commands inject the 
   assert.equal(contentScript.includes('injectPageScript("page-bridge.js")'), true);
   const refresh = contentScript.slice(contentScript.indexOf("async function refreshToolbarButtons()"),
     contentScript.indexOf("function refreshToolbarButtonsSafely()"));
-  assert.ok(refresh.indexOf("installSourcePullButton();") < refresh.indexOf("await applyInlineWorkspaceMode();"));
+  assert.ok(refresh.indexOf("installFloatingToolbar();") < refresh.indexOf("await applyInlineWorkspaceMode(root);"));
   assert.equal(refresh.includes("await ensurePageBridge();"), false);
 });
 
 test("popup stores pairing settings and obtains the authorized export directory", () => {
   const popup = fs.readFileSync(POPUP_SCRIPT_PATH, "utf8");
+  const html = fs.readFileSync(POPUP_HTML_PATH, "utf8");
   assert.ok(popup.includes('chrome.storage.local.set({ guthonBridgeToken: token, guthonBridgePort: port })'));
   assert.ok(popup.includes('outputDirEl.value = status.exportRoot'));
-  assert.ok(fs.readFileSync(POPUP_HTML_PATH, "utf8").includes('readonly placeholder="连接 Bridge 后显示导出目录"'));
+  assert.match(html, /<input id="outputDir"[^>]*\breadonly\b/);
+  assert.match(html, /<details class="popup-section pairing-settings" open>/);
+  assert.match(html, /<input id="bridgeToken" type="text"/);
+  assert.match(html, /<details class="popup-section source-tools">/);
+  assert.match(html, /aria-labelledby="fieldTransferLabel" hidden>[\s\S]*?字段平移[\s\S]*?id="copyFieldsBtn"[\s\S]*?id="pasteFieldsBtn"/);
+  assert.match(html, /aria-labelledby="ideActionsLabel" hidden>[\s\S]*?IDE联动[\s\S]*?id="localFieldsBtn"[\s\S]*?id="locateNexusBtn"[^>]*>定位本地源码/);
+  assert.ok(popup.includes("fieldActions.hidden = !isModule"));
 });
 
 test("page bridge uses popup-compatible procedure search strategy", () => {

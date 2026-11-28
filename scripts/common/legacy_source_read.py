@@ -4,7 +4,8 @@ import json
 from common import legacy_source as hub
 from common import database_source_exports as exports
 from common.page_comparison import baseline_pointer, same_json_value
-from common.page_projection import extract_page_fields, extract_page_scripts
+from common.page_projection import comparable_script, extract_page_fields, extract_page_scripts
+from common.source_format import decode_source
 
 SOURCE_TYPES = ("page", "procedure", "system-script", "table", "view", "skill", "public")
 DATABASE_TYPES = ("page", "procedure", *exports.TYPES)
@@ -25,19 +26,38 @@ def _record(workspace, row, scope_codes=None):
         if len(groups) >= 2 and groups[1] in {"page", "procedure"}:
             del groups[1]
         result.update(sourcePath=relative, groups=groups)
+        page = row["source_table"] == "page"
+        needs_scope_code = scope_codes is not None and groups and groups[0] not in scope_codes
+        metadata = {}
+        if page or needs_scope_code:
+            path = target.with_name("meta.json")
+            if path.is_file() and path.resolve() == path:
+                try:
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(value, dict):
+                        metadata = value
+                except (OSError, ValueError):
+                    pass
+        if page:
+            page_type = metadata.get("page_type")
+            if page_type is None:
+                # Existing mirrors predate the cached type.
+                try:
+                    from common.page_editor import MAX_PAGE_BYTES
+
+                    with target.open("rb") as stream:
+                        raw = stream.read(MAX_PAGE_BYTES + 1)
+                    if len(raw) <= MAX_PAGE_BYTES:
+                        page_type = _page_data(decode_source(raw)[0]).get("pageType")
+                except (OSError, ValueError, RecursionError):
+                    pass
+            if type(page_type) in {str, int} and page_type != "":
+                result["pageType"] = str(page_type)
         if scope_codes is not None and groups:
-            group=groups[0]
-            if group not in scope_codes:
-                metadata=target.with_name("meta.json")
-                code=""
-                if metadata.is_file() and metadata.resolve()==metadata:
-                    try:
-                        value=json.loads(metadata.read_text(encoding="utf-8"))
-                        code=str(value.get("system_id" if row["source_table"]=="page" else "data_source_id") or "")
-                    except (OSError,ValueError,AttributeError):
-                        pass
-                scope_codes[group]=code
-            result["scopeCode"]=scope_codes[group]
+            group = groups[0]
+            if needs_scope_code:
+                scope_codes[group] = str(metadata.get("system_id" if page else "data_source_id") or "")
+            result["scopeCode"] = scope_codes[group]
     return result
 
 
@@ -114,10 +134,10 @@ def locate(workspace, *, source_type, source_id="", alias="", fun_id=""):
     return {"items": [item for row in rows if (item := _record(workspace, row))]}
 
 
-def local_changes(workspace):
+def local_changes(workspace, *, include_records=False):
     """Report canonical DATABASE Workcopy changes independently of Git and projections."""
-    from common.page_editor import MAX_PAGE_BYTES
-    from common.source_format import decode_source
+    from common.database_source_publish import same_workcopy_source, workcopy_baseline
+    from common.database_workcopy_edit import _bytes, _digest
 
     readonly = workspace["readonlyDir"].resolve()
     workcopy = workspace["workcopyDir"].resolve()
@@ -125,7 +145,7 @@ def local_changes(workspace):
         return {"items": []}
     items = []
     with hub.index_connection(workspace, action="workcopy-changes") as conn:
-        rows = conn.execute("""SELECT source_table, local_path FROM gusen_source_record
+        rows = conn.execute("""SELECT * FROM gusen_source_record
             WHERE scope_id=? AND provider='database' AND source_table IN ('page','procedure') AND local_path<>''""",
                             (workspace["scopeId"],))
         for row in rows:
@@ -133,36 +153,33 @@ def local_changes(workspace):
             source = hub.ROOT / row["local_path"] / filename
             if not source.is_relative_to(readonly):
                 continue
-            relative = source.relative_to(readonly)
+            relative = source.relative_to(readonly).as_posix()
             target = workcopy / relative
             if not target.is_file() or target.resolve() != target or source.resolve() != source or not source.is_file():
                 continue
             try:
-                with source.open("rb") as baseline, target.open("rb") as saved:
-                    for chunk in iter(lambda: saved.read(64 * 1024), b""):
-                        if chunk != baseline.read(len(chunk)):
-                            break
-                    else:
-                        if not baseline.read(1):
-                            continue
-                    if row["source_table"] == "page":
-                        baseline.seek(0)
-                        saved.seek(0)
-                        left = baseline.read(MAX_PAGE_BYTES + 1)
-                        right = saved.read(MAX_PAGE_BYTES + 1)
-                        if max(len(left), len(right)) <= MAX_PAGE_BYTES:
-                            try:
-                                base_page = _page_data(decode_source(left)[0])
-                                saved_page = _page_data(decode_source(right)[0])
-                                if same_json_value(base_page, saved_page):
-                                    continue
-                            except (ValueError, RecursionError):
-                                # Without a semantic comparison, retain the observed byte difference.
-                                pass
+                latest, current = _bytes(source), _bytes(target)
             except FileNotFoundError:
-                # Resync can replace either file between the lookup and open.
                 continue
-            items.append({"sourceType": row["source_table"], "sourcePath": relative.as_posix()})
+            except ValueError:
+                latest = current = None
+            base = None
+            trusted = False
+            if current is not None:
+                if same_workcopy_source(row, latest, current):
+                    continue
+                candidate_hash = _digest(current)
+                revision, base = workcopy_baseline(workspace, row, relative, candidate_hash, match_candidate=False)
+                trusted = revision is not None and revision["candidateHash"] == candidate_hash
+                if base is not None and same_workcopy_source(row, current, base):
+                    continue
+            needs_merge = base is not None and not same_workcopy_source(row, latest, base)
+            item = _record(workspace, row) if include_records else {"sourceType": row["source_table"], "sourcePath": relative}
+            if not item:
+                continue
+            if include_records or needs_merge or base is None:
+                item.update(trustedBaseline=trusted, needsMerge=needs_merge, needsReview=base is None)
+            items.append(item)
     return {"items": items}
 
 
@@ -201,8 +218,6 @@ def _page_fragments(data):
 
 
 def read(workspace, record_id, *, limit=24000, pointer="", fragments=False, export_key="", source_id=""):
-    from common.source_format import decode_source
-
     with hub.index_connection(workspace, action="read-indexed-source") as conn:
         if export_key and workspace["sourceMode"] == "database":
             result = exports.read(conn, workspace, export_key)
@@ -248,12 +263,15 @@ def read(workspace, record_id, *, limit=24000, pointer="", fragments=False, expo
                         raise ValueError("超过本地源码预览上限")
                     if raw != original:
                         base_data = _page_data(decode_source(original)[0])
+                        service = str(base_data.get("pageType")) == str(data.get("pageType")) == "0"
                         original_scripts = _page_fragments(base_data)
                         for key, value in scripts.items():
                             prior = original_scripts.get(baseline_pointer(base_data, data, key))
                             if prior is not None and (prior[2] == value[2] or (
                                     prior[1] == value[1] == "json"
-                                    and same_json_value(json.loads(prior[2]), json.loads(value[2])))):
+                                    and same_json_value(json.loads(prior[2]), json.loads(value[2]))) or (
+                                    service and key == "/compScript"
+                                    and comparable_script(prior[2]) == comparable_script(value[2]))):
                                 continue
                             modified.add(key)
                 except (OSError, ValueError) as error:
@@ -299,21 +317,62 @@ def search(workspace, keyword, *, limit=80, source_type=""):
             ORDER BY b.body_id LIMIT :limit)
             SELECT {RECORD_COLUMNS}, pointer, {excerpt} FROM hits""", params).fetchall() if conn.execute(
             "SELECT 1 FROM sqlite_master WHERE name='source_body_content'").fetchone() else []
+        workcopies = conn.execute(f"""WITH hits AS (
+            SELECT {columns}, w.json_pointer AS pointer, w.relative_path AS workcopy_path,
+                   w.content AS body, w.source_hash AS workcopy_hash,
+                   instr(lower(w.content),lower(:keyword)) AS position
+            FROM database_direct_edit_body w JOIN gusen_source_record s
+              ON s.local_path=w.local_path AND s.source_id=w.source_id AND s.fun_id=w.fun_id
+            WHERE s.scope_id=:scope AND s.project_id=:project AND s.provider='database'
+              AND s.source_table IN ('page','procedure') AND s.status='OK' AND position>0
+              AND (:source_type='' OR s.source_table=:source_type)
+            ORDER BY s.record_id LIMIT :limit)
+            SELECT {RECORD_COLUMNS}, pointer, workcopy_path, workcopy_hash, {excerpt} FROM hits""",
+            {**params, "project": workspace["projectId"]}).fetchall() if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='database_direct_edit_body'").fetchone() else []
         derived = conn.execute(f"""WITH hits AS (
             SELECT {exports.OBJECT_COLUMNS}, body, instr(lower(body),lower(:keyword)) AS position
             FROM database_source_export WHERE (:source_type='' OR source_type=:source_type)
             AND (position>0 OR instr(lower(source_id || ' ' || source_name || ' ' || folder),lower(:keyword))>0)
             ORDER BY folder,source_name,export_key LIMIT :limit)
             SELECT {exports.OBJECT_COLUMNS}, {excerpt} FROM hits""", params).fetchall() if exports.available(conn) else []
-        for row in (*bodies, *rows, *derived):
+        export_columns = ", ".join(f"e.{column.strip()}" for column in exports.OBJECT_COLUMNS.split(","))
+        export_workcopies = conn.execute(f"""WITH hits AS (
+            SELECT {export_columns}, '' AS pointer, w.relative_path AS workcopy_path,
+                   w.source_hash AS workcopy_hash, w.content AS body,
+                   instr(lower(w.content),lower(:keyword)) AS position
+            FROM database_direct_edit_export_body w JOIN database_source_export e
+              ON e.export_key=w.export_key AND e.local_path=w.relative_path
+            WHERE e.source_type='system-script' AND position>0
+              AND (:source_type='' OR e.source_type=:source_type)
+            ORDER BY e.export_key LIMIT :limit)
+            SELECT {exports.OBJECT_COLUMNS}, pointer, workcopy_path, workcopy_hash, {excerpt} FROM hits""",
+            params).fetchall() if exports.available(conn) and conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='database_direct_edit_export_body'").fetchone() else []
+        results = [(row, True) for row in workcopies]
+        results.extend((row, True) for row in export_workcopies)
+        results.extend((row, False) for row in (*bodies, *rows, *derived))
+        for row, workcopy in results:
             item = exports.payload(row) if "export_key" in row.keys() else _record(workspace, row)
             if not item:
                 continue
+            if workcopy:
+                from providers.database.direct_edit import inspect_file
+
+                target = workspace["workcopyDir"] / row["workcopy_path"]
+                try:
+                    if inspect_file(workspace, target, refresh=False)["sourceHash"] != row["workcopy_hash"]:
+                        continue
+                except (OSError, ValueError):
+                    continue
             item["pointer"] = row["pointer"] or "" if "pointer" in row.keys() else ""
-            identity = (item.get("recordId"), item.get("exportKey"), item["pointer"])
+            identity = (item.get("recordId"), item.get("exportKey"), item["pointer"], workcopy)
             if identity in visited:
                 continue
             visited.add(identity)
+            if workcopy:
+                item["sourceLayer"] = "workcopy"
+                item["workcopyPath"] = row["workcopy_path"]
             item["excerpt"] = row["excerpt"]
             if not item["pointer"].endswith(("/fields", "/buttons")):
                 item["line"] = row["line"]

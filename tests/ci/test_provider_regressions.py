@@ -529,7 +529,232 @@ class SvnWorkspaceTest(WorkspaceCase):
         self.assertEqual([], scm.status(workspace)["changes"])
 
 
+class DatabaseProcedureRouteTest(WorkspaceCase):
+    def test_procedure_context_requires_registered_platform_and_retains_shared_datasource_ambiguity(self):
+        from common import config_store
+
+        workspace = self.register("database")
+        key = workspace["workspaceKey"]
+        origin = "https://platform.fixture"
+        document = config_store.read(self.home)
+        project = document["workspaces"][key]
+        project["page_origins"] = [origin]
+        mappings = {"first": {"system_id": "SYS-1", "data_source_id": "DS-1"}}
+        project["systems"] = {"include": {"mappings": mappings}}
+        config_store.write(self.home, document)
+        cache = {"datasources": {workspace["datasourceName"]: {"systems": [
+            {"SYSTEM_ID": "SYS-1", "SYSTEM_NAME": "第一系统", "SYSTEM_ALIAS_ID": "first", "DATA_SOURCE_ID": "DS-1"},
+            {"SYSTEM_ID": "SYS-2", "SYSTEM_NAME": "第二系统", "SYSTEM_ALIAS_ID": "second", "DATA_SOURCE_ID": "DS-1"},
+        ]}}}
+        (self.home / "config" / "system-data.json").write_text(json.dumps(cache), encoding="utf-8")
+        request = {"workspaceKey": key, "mode": "procedure", "pageOrigin": origin, "dataSourceId": "DS-1"}
+        evidence = "databaseProcedureSystemIds"
+        self.assertEqual(["SYS-1"], self.tool("route", key=key, payload=request)[evidence])
+        for change in (
+                {"workspaceKey": ""},
+                {"mode": "page-source"},
+                {"systemId": "SYS-1"},
+                {"systemIds": ["SYS-1"]},
+                {"dataSourceId": ""},
+                {"pageOrigin": "https://other.fixture"}):
+            with self.subTest(change=change):
+                self.assertNotIn(evidence, self.tool("route", payload={**request, **change}))
+
+        mappings["second"] = {"system_id": "SYS-2", "data_source_id": "DS-1"}
+        config_store.write(self.home, document)
+        self.assertEqual(["SYS-1", "SYS-2"], self.tool("route", key=key, payload=request)[evidence])
+
+        project.pop("page_origins")
+        config_store.write(self.home, document)
+        self.assertNotIn(evidence, self.tool("route", key=key, payload=request))
+
+
+class DatabaseWorkcopyBaselineTest(WorkspaceCase):
+    def test_controlled_saves_keep_original_baseline_and_untracked_changes_do_not_gain_one(self):
+        workspace = self.register("database")
+        key = workspace["workspaceKey"]
+        row = {"source_table": "procedure", "source_id": "FN-ROW", "fun_id": "sample",
+               "source_alias_id": "com.golden.sample", "source_name": "sample",
+               "source_content": "#return('original')", "version_mac": "db-v1",
+               "system_id": "SYS-FIXTURE", "data_source_id": "DS-1"}
+
+        def sync():
+            with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+                legacy_source.upsert_source(conn, row, "project", workspace["scopeId"],
+                                            workspace["projectId"], {}, {}, workspace=workspace)
+            item, = self.tool("legacy-source", key=key, args=["catalog", "--type", "procedure"])["items"]
+            return {field: item[field] for field in ("recordId", "sourceId", "sourcePath")}
+
+        def edit(action, **payload):
+            return self.tool("legacy-source", key=key, args=[action], payload={**identity, **payload})
+
+        identity = sync()
+        readonly = workspace["readonlyDir"] / identity["sourcePath"]
+        copy = workspace["workcopyDir"] / identity["sourcePath"]
+        opened = edit("edit-read")
+        saved = edit("edit-save", sourceHash=opened["sourceHash"], content="#return('first')")
+        row.update(source_content="#return('remote')", version_mac="db-v2")
+        identity = sync()
+        edit("edit-save", sourceHash=saved["sourceHash"], content="#return('second')")
+        diff = edit("edit-comparison")
+        self.assertTrue(diff["trustedBaseline"])
+        self.assertEqual("#return('original')", diff["baseContent"])
+        self.assertEqual("#return('second')", diff["content"])
+        item, = self.tool("legacy-source", key=key, args=["review-workcopies"])["items"]
+        self.assertEqual(identity["sourcePath"], item["sourcePath"])
+        self.assertTrue(item["trustedBaseline"])
+        preview = edit("publish-preview")
+        self.assertEqual("db-v1", preview["databaseBaseVersion"])
+        confirmed = edit("publish-confirm", sourceHash=preview["sourceHash"], reviewId=preview["reviewId"])
+        self.assertEqual(preview["content"], confirmed["content"])
+        from common.database_workcopy_edit import run as edit_workcopy
+        config = gusen_hub.load_config()
+        self.assertEqual("SYS-FIXTURE", preview["databaseIdentity"]["system_id"])
+        remapped = {**workspace, "systemMappings": {"other": {"system_id": "SYS-OTHER", "data_source_id": "DS-1"}}}
+        with self.assertRaisesRegex(ValueError, "基线或候选已变化"):
+            edit_workcopy(remapped, config, "publish-confirm", {
+                **identity, "sourceHash": preview["sourceHash"], "reviewId": preview["reviewId"],
+            })
+        edit("edit-save", sourceHash=confirmed["sourceHash"], content="#return('third')")
+        with self.assertRaisesRegex(ValueError, "源码已发生变化"):
+            edit_workcopy(workspace, gusen_hub.load_config(), "publish-confirm", {
+                **identity, "sourceHash": preview["sourceHash"], "reviewId": preview["reviewId"],
+            })
+        self.assertEqual("#return('remote')", readonly.read_text(encoding="utf-8"))
+        copy.write_text("#return('legacy')", encoding="utf-8")
+        opened = edit("edit-read")
+        edit("edit-save", sourceHash=opened["sourceHash"], content="#return('still unknown')")
+        diff = edit("edit-comparison")
+        self.assertFalse(diff["trustedBaseline"])
+        self.assertEqual("#return('remote')", diff["baseContent"])
+        self.assertEqual("#return('still unknown')", diff["content"])
+        untracked, = self.tool("legacy-source", key=key, args=["review-workcopies"])["items"]
+        self.assertTrue(untracked["needsMerge"])
+        self.assertFalse(untracked["trustedBaseline"])
+        approved = edit("publish-preview", compareMirror=True)
+        self.assertEqual("db-v2", approved["databaseBaseVersion"])
+        self.assertEqual("#return('remote')", approved["baseContent"])
+        approval = {"compareMirror": True, "sourceHash": approved["sourceHash"], "reviewId": approved["reviewId"]}
+        self.assertEqual(approved["content"], edit("publish-confirm", **approval)["content"])
+        row.update(source_content="#return('remote again')", version_mac="db-v3")
+        identity = sync()
+        with self.assertRaisesRegex(ValueError, "基线或候选已变化"):
+            edit_workcopy(workspace, gusen_hub.load_config(), "publish-confirm", {**identity, **approval})
+        from common.command_errors import CommandError
+        from common.workspace_config import change_source_mode, delete_workspace_config
+        for operation, payload in ((change_source_mode, {"expectedMode": "database", "sourceMode": "api"}),
+                                   (delete_workspace_config, {})):
+            with self.assertRaises(CommandError) as blocked:
+                operation(self.home, {"workspaceKey": key, "checkOnly": True, **payload}, gusen_hub)
+            self.assertEqual("DATABASE_WORKCOPY_DRAFTS_PENDING", blocked.exception.error_code)
+        copy.write_bytes(readonly.read_bytes())
+        self.assertTrue(delete_workspace_config(self.home, {"workspaceKey": key, "checkOnly": True}, gusen_hub)["ok"])
+        copy.write_text("#return('orphaned draft')", encoding="utf-8")
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+            conn.execute("DELETE FROM gusen_source_record WHERE source_id=?", (identity["sourceId"],))
+        self.assertEqual([], self.tool("legacy-source", key=key, args=["review-workcopies"])["items"])
+        with self.assertRaises(CommandError) as blocked:
+            delete_workspace_config(self.home, {"workspaceKey": key, "checkOnly": True}, gusen_hub)
+        self.assertEqual("DATABASE_WORKCOPY_DRAFTS_PENDING", blocked.exception.error_code)
+
+    def test_verified_refresh_waits_for_database_without_replacing_workcopy(self):
+        from unittest.mock import MagicMock
+        from common.database_node_sync import sync_verified_source
+
+        workspace = self.register("database")
+        row = {"source_table": "procedure", "source_id": "FN-ROW", "fun_id": "sample",
+               "source_alias_id": "com.golden.sample", "source_name": "sample", "data_source_id": "DS-1",
+               "source_content": "#return('old')", "version_mac": "v1"}
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+            legacy_source.upsert_source(conn, row, workspace["layer"], workspace["scopeId"],
+                                        workspace["projectId"], {}, {}, workspace=workspace)
+            conn.execute("INSERT OR REPLACE INTO gusen_sync_state(state_key,state_value) VALUES('last_success_time','unchanged')")
+        item, = self.tool("legacy-source", key=workspace["workspaceKey"], args=["catalog", "--type", "procedure"])["items"]
+        mirror = workspace["readonlyDir"] / item["sourcePath"]
+        draft = workspace["workcopyDir"] / item["sourcePath"]
+        draft.parent.mkdir(parents=True)
+        draft.write_text("#return('newer local draft')", encoding="utf-8")
+        identity = {"workspaceKey": workspace["workspaceKey"], **{name: row[name] for name in
+                    ("source_table", "source_id", "fun_id", "source_alias_id", "data_source_id")}}
+        config = gusen_hub.load_config()
+        remote = MagicMock()
+        cursor = remote.cursor.return_value.__enter__.return_value
+        saved = "#return('published')"
+        with (patch.object(legacy_source, "resolve_datasource", return_value=("fixture", {})),
+              patch.object(legacy_source, "db_connect", return_value=nullcontext(remote)),
+              patch.object(legacy_source, "resolve_system_scope", return_value={"data_source_ids": ["DS-1"]}),
+              patch.object(legacy_source, "_included", return_value=True)):
+            cursor.fetchall.return_value = [row]
+            self.assertEqual({"verified": False}, sync_verified_source(workspace, config, identity,
+                                                                         base_version="v1", database_version="v2", content=saved))
+            self.assertEqual("#return('old')", mirror.read_text(encoding="utf-8"))
+            cursor.fetchall.return_value = [{**row, "version_mac": "v2", "source_content": saved}]
+            self.assertEqual({"verified": False, "reason": "MIRROR_VERSION_CHANGED"},
+                             sync_verified_source(workspace, config, identity,
+                                                     base_version="different", database_version="v2", content=saved))
+            with patch.object(legacy_source, "resolve_system_scope", return_value={
+                    "data_source_ids": ["DS-1"], "system_name_by_data_source_id": {"DS-1": "Renamed"}}):
+                self.assertEqual({"verified": False, "reason": "MIRROR_PATH_CHANGED"},
+                                 sync_verified_source(workspace, config, identity,
+                                                         base_version="v1", database_version="v2", content=saved))
+            self.assertEqual({"verified": True, "workcopyState": "CONFLICT"},
+                             sync_verified_source(workspace, config, identity, base_version="v1",
+                                                     database_version="v2", content=saved, advance_workcopy=True))
+            sql, params = cursor.execute.call_args.args
+            self.assertIn("LIMIT 2", sql)
+            self.assertIn("VERSION_MAC", sql.split("WHERE", 1)[1].split("ORDER BY", 1)[0])
+            self.assertNotIn("CHECK_IN_DATE", sql.split("WHERE", 1)[1].split("ORDER BY", 1)[0])
+            self.assertEqual(["v2", "FN-ROW", "sample", "com.golden.sample", "DS-1"], params)
+            cursor.execute.assert_any_call("SET TRANSACTION READ ONLY")
+            ordinary_sql, ordinary_params = legacy_source.single_source_sql(
+                config["source_tables"], "procedure", {"sourceId": "FN-ROW", "funId": "sample"})
+            self.assertIn("CHECK_IN_DATE", ordinary_sql.split("WHERE", 1)[1].split("ORDER BY", 1)[0])
+            self.assertEqual(["FN-ROW", "sample"], ordinary_params)
+        self.assertEqual(saved, mirror.read_text(encoding="utf-8"))
+        self.assertEqual("#return('newer local draft')", draft.read_text(encoding="utf-8"))
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn:
+            self.assertEqual("unchanged", conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='last_success_time'").fetchone()[0])
+
+
 class DatabasePageEditorTest(WorkspaceCase):
+    def test_refresh_tracks_semantically_clean_workcopy_and_marks_only_both_sides_changed(self):
+        workspace = self.register("database")
+        key = workspace["workspaceKey"]
+        model = {"pageId": "PG-DIFF", "pageType": 1, "views": [{"label": "before", "width": 2}]}
+        row = {"source_table": "page", "source_id": model["pageId"], "fun_id": "", "system_id": "SYS-FIXTURE",
+               "source_alias_id": model["pageId"], "source_name": "Comparison", "version_mac": "v1"}
+
+        def refresh():
+            row["source_content"] = json.dumps(model, indent=4)
+            with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+                legacy_source.upsert_source(conn, row, "project", workspace["scopeId"], workspace["projectId"],
+                                            {}, {}, workspace=workspace)
+            item, = self.tool("legacy-source", key=key, args=["catalog", "--type", "page"])["items"]
+            return {field: item[field] for field in ("recordId", "sourceId", "sourcePath")}
+
+        identity = refresh()
+        copy = workspace["workcopyDir"] / identity["sourcePath"]
+        copy.parent.mkdir(parents=True)
+        copy.write_text(json.dumps(model, separators=(",", ":")), encoding="utf-8")
+        model["views"][0]["label"] = "server update"
+        row["version_mac"] = "v2"
+        identity = refresh()
+        self.assertEqual([], self.tool("legacy-source", key=key, args=["review-workcopies"])["items"])
+        self.assertEqual([], self.tool("legacy-source", key=key, args=["local-changes"])["items"])
+        opened = self.tool("legacy-source", key=key, args=["edit-read"], payload={**identity, "formatPage": True})
+        self.assertEqual(json.dumps(model, sort_keys=True, indent=4) + "\n", opened["content"])
+
+        local = {**model, "views": [{"label": "local edit", "width": 2}]}
+        self.tool("legacy-source", key=key, args=["edit-save"], payload={
+            **identity, "sourceHash": opened["sourceHash"], "content": json.dumps(local),
+        })
+        model["views"][0]["label"] = "second server update"
+        row["version_mac"] = "v3"
+        identity = refresh()
+        conflict, = self.tool("legacy-source", key=key, args=["local-changes"])["items"]
+        self.assertTrue(conflict["needsMerge"])
+        self.assertEqual(local, json.loads(copy.read_text()))
+
     def test_default_editor_uses_page_type_and_saves_service_script_to_workcopy(self):
         workspace = self.register("database")
         key = workspace["workspaceKey"]
@@ -547,6 +772,8 @@ class DatabasePageEditorTest(WorkspaceCase):
                 legacy_source.upsert_source(conn, row, "project", workspace["scopeId"],
                                             workspace["projectId"], {}, {}, workspace=workspace)
         catalog = self.tool("legacy-source", key=key, args=["catalog", "--type", "page"])
+        self.assertEqual({"PG-SERVICE": "0", "PG-FORM": "1", "PG-LEGACY": None},
+                         {item["sourceId"]: item.get("pageType") for item in catalog["items"]})
         identities = {item["sourceId"]: {field: item[field] for field in ("recordId", "sourceId", "sourcePath")}
                       for item in catalog["items"]}
         for source in (service, page, legacy_page):
@@ -573,6 +800,33 @@ class DatabasePageEditorTest(WorkspaceCase):
         saved = workspace["workcopyDir"] / identity["sourcePath"]
         self.assertEqual({**service, "compScript": changed}, json.loads(json.loads(saved.read_text(encoding="utf-8"))))
         self.assertEqual(original, readonly.read_bytes())
+        self.assertEqual([{"sourceType": "page", "sourcePath": identity["sourcePath"]}],
+                         [{key: item[key] for key in ("sourceType", "sourcePath")}
+                          for item in self.tool("legacy-source", key=key, args=["local-changes"])["items"]])
+        # A platform save may rewrite its PAGE wrapper and terminate the script with CRLF.
+        synced = {**service, "pageType": 0, "compScript": changed + "\r\n", "platformProperty": True}
+        row = {"source_table": "page", "source_id": service["pageId"], "fun_id": "",
+               "source_alias_id": service["pageId"], "source_name": service["pageId"], "system_id": "SYS-FIXTURE",
+               "source_content": json.dumps(synced), "version_mac": "synced"}
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+            legacy_source.upsert_source(conn, row, "project", workspace["scopeId"],
+                                        workspace["projectId"], {}, {}, workspace=workspace)
+        self.assertEqual([], self.tool("legacy-source", key=key, args=["local-changes"])["items"])
+        compared = self.tool("legacy-source", key=key, args=["edit-comparison"],
+                             payload={**identity, "publicationDiff": True, "compareMirror": True})
+        self.assertFalse(compared["changed"])
+        located, = self.tool("legacy-source", key=key, args=["locate", "--type", "page",
+                                                          "--source-id", service["pageId"]])["items"]
+        meta_file = readonly.with_name("meta.json")
+        metadata = json.loads(meta_file.read_text())
+        self.assertEqual("0", metadata.pop("page_type"))
+        meta_file.write_text(json.dumps(metadata))
+        old_index, = self.tool("legacy-source", key=key, args=["locate", "--type", "page",
+                                                            "--source-id", service["pageId"]])["items"]
+        self.assertEqual("0", old_index["pageType"])
+        fragments = self.tool("legacy-source", key=key, args=["fragments", "--record-id", str(located["recordId"])])
+        self.assertEqual([], fragments["modifiedPointers"])
+        self.assertEqual({**service, "compScript": changed}, json.loads(json.loads(saved.read_text(encoding="utf-8"))))
 
 
 class BillExportTests(WorkspaceCase):

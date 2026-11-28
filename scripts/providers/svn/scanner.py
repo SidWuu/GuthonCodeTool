@@ -181,6 +181,32 @@ def _scan_system_script(path, checkout_path, system_id, data_source_id, revision
     return result
 
 
+def _scan_procedure(path, checkout_path, data_source_id, resolved_data_sources, revision_map, status_map):
+    root = checkout_path / "procedures" / data_source_id
+    relative = path.relative_to(root).with_suffix("")
+    text = decode_source(path.read_bytes())[0]
+    header = _header_fields(text)
+    package = header.get("packageId") or ".".join(relative.parts[:-1])
+    function_id = header.get("functionId") or relative.name
+    result = _base_object(path, checkout_path, "procedure", revision_map, status_map)
+    result.update(
+        {
+            "source_id": f"{package}#{function_id}",
+            "source_alias_id": package,
+            "fun_id": function_id,
+            "source_name": header.get("description") or function_id,
+            "system_id": "",
+            "data_source_id": data_source_id,
+            "scripts": [{"script_type": "procedure_script", "json_path": "", "content": text}],
+        }
+    )
+    if function_id != relative.name:
+        result["status"] = "IDENTITY_MISMATCH"
+    elif data_source_id not in resolved_data_sources:
+        result["status"] = "UNRESOLVED_DATA_SOURCE"
+    return result
+
+
 def _scan_metadata(path, checkout_path, kind, data_source_id, revision_map, status_map):
     result = _base_object(path, checkout_path, kind, revision_map, status_map)
     try:
@@ -257,28 +283,8 @@ def scan(checkout_path: Path, scope: dict) -> dict:
                 errors.append({"path": f"procedures/{data_source_id}", "error": "missing scoped directory"})
                 continue
             for path in sorted(root.rglob("*.gss")):
-                relative = path.relative_to(root).with_suffix("")
-                text = decode_source(path.read_bytes())[0]
-                header = _header_fields(text)
-                package = header.get("packageId") or ".".join(relative.parts[:-1])
-                function_id = header.get("functionId") or relative.name
-                result = _base_object(path, checkout_path, "procedure", revision_map, changes)
-                result.update(
-                    {
-                        "source_id": f"{package}#{function_id}",
-                        "source_alias_id": package,
-                        "fun_id": function_id,
-                        "source_name": header.get("description") or function_id,
-                        "system_id": "",
-                        "data_source_id": data_source_id,
-                        "scripts": [{"script_type": "procedure_script", "json_path": "", "content": text}],
-                    }
-                )
-                if function_id != relative.name:
-                    result["status"] = "IDENTITY_MISMATCH"
-                elif data_source_id not in resolved_data_sources:
-                    result["status"] = "UNRESOLVED_DATA_SOURCE"
-                objects.append(result)
+                objects.append(_scan_procedure(path, checkout_path, data_source_id,
+                                               resolved_data_sources, revision_map, changes))
 
     if "system-script" in scope.get("includes", []):
         for system_id in scope.get("systemIds") or []:

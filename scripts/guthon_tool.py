@@ -133,6 +133,7 @@ CLI_COMMANDS = tuple(
             "workspace-source-settings",
             "workspaces",
             "workspace-resolve",
+            "source-direct-edit",
             "workspace-summary",
             "route",
             "search",
@@ -183,6 +184,13 @@ STDIN_JSON_COMMANDS = {
     "parser-feedback",
     "route",
 }
+
+
+def build_direct_edit_parser():
+    parser = argparse.ArgumentParser(prog="guthon_tool.py source-direct-edit",
+                                     description="按已登记工作区核验本地纯源码直改，从 stdin 读取 JSON")
+    parser.add_argument("action", choices=("inspect", "refresh", "snapshot"))
+    return parser
 
 
 def build_workspace_resolve_parser() -> argparse.ArgumentParser:
@@ -375,6 +383,7 @@ COMMAND_PARSER_BUILDERS = {
     "svn-api-migration": build_svn_api_migration_parser,
     "svn": build_svn_parser,
     "workspace-resolve": build_workspace_resolve_parser,
+    "source-direct-edit": build_direct_edit_parser,
     "database-target-resolve": lambda: build_database_parser("database-target-resolve"),
     "database-probe": lambda: build_database_parser("database-probe"),
     "database-describe": lambda: build_database_parser("database-describe"),
@@ -664,6 +673,13 @@ def run(
 
 
 def _run_workspace_command(command, extra_args, gusen_hub, config, workspace):
+    if command == "source-direct-edit":
+        from common.direct_source_edit import run
+
+        action = build_direct_edit_parser().parse_args(extra_args).action
+        result = run(workspace, action, json.load(sys.stdin))
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
     if workspace and workspace["sourceMode"] != "api" and command not in {
         "workspace-resolve", "workspace-summary", "pull-log", "index-doctor", *DATABASE_COMMANDS
     }:

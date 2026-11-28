@@ -3,6 +3,16 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 function metadataTarget(value) {
+  if (value?.action === 'inspect-database-procedure') {
+    const keys = ['action','systemId','dataSourceId','procedureAlias','funId','includeSourceHash','type'];
+    if (Object.keys(value).some(key=>!keys.includes(key)) || (value.type !== undefined && value.type !== 'native-metadata')
+        || (value.includeSourceHash !== undefined && value.includeSourceHash !== true)
+        || !/^SYS-[A-Za-z0-9-]{1,96}$/.test(value.systemId || '') || !/^[A-Za-z0-9_-]{1,128}$/.test(value.dataSourceId || '')
+        || !/^[A-Za-z_$][A-Za-z0-9_.$]{0,255}$/.test(value.procedureAlias || '') || !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(value.funId || '')) {
+      throw new Error('DATABASE 平台预检需要精确系统、数据源和过程函数');
+    }
+    return {...value,type:'native-metadata'};
+  }
   if(['inspect-native-source','apply-native-source'].includes(value?.action))return require('./native-source-plan').resolveNativeSource(value);
   if(['inspect-declared-step','run-declared-step'].includes(value?.action))return require('./native-step-registry').resolveNativeStep(value);
   if (['apply-page-script','inspect-page-script'].includes(value?.action)) {

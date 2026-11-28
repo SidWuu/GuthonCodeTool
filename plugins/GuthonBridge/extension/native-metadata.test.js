@@ -288,6 +288,37 @@ function sourceFixture(){
  return {...f,read:()=>fun,run:(changes,context={})=>f.run({action:'apply-native-source',systemIds:['SYS-EXAMPLE'],...context,definition:{...definition,...changes}})};
 }
 
+test('DATABASE preflight resolves the native parent and exposes no source, without allowing writes', async()=>{
+ const f=fixture();
+ const payload={action:'inspect-database-procedure',systemIds:['SYS-EXAMPLE'],systemId:'SYS-EXAMPLE',
+  procedureAlias:'com.golden.example',funId:'sample'};
+ let parents=[{procedureId:'PR-EXAMPLE',procedureAliasId:payload.procedureAlias}], script='private source';
+ f.box.fetch=async(url, options)=>{
+  const body=Object.fromEntries(options.body);f.calls.push({url,body});
+  let data;
+  if(url.endsWith('getProcTree.htm'))data={list:parents};
+  else if(url.endsWith('getFunList.htm'))data={list:[{funId:'sample'}]};
+  else if(url.endsWith('getFunInfo.htm'))data={bean:{procedureId:'PR-EXAMPLE',funId:'sample',versionMac:'v1',funScript:script}};
+  else assert.fail(`unexpected endpoint: ${url}`);
+  return {ok:true,text:async()=>JSON.stringify({code:0,data})};
+ };
+ const result=await f.run(payload);
+ assert.equal(result.state,'SUCCEEDED');assert.equal(result.platformApplied,false);
+ assert.equal(result.after.procedureId,'PR-EXAMPLE');assert.equal(result.after.version,'v1');
+ assert.equal(JSON.stringify(result).includes('private source'),false);
+ assert.deepEqual(f.calls.map(call=>call.body),[{dataSourceId:'DS_1'},{procedureId:'PR-EXAMPLE'},
+  {procedureId:'PR-EXAMPLE',funId:'sample'}]);
+ const sourceEvidence=await f.run({...payload,includeSourceHash:true});
+ assert.equal(sourceEvidence.sourceContent,script);
+ assert.equal(sourceEvidence.platformApplied,false);
+ script=undefined;
+ assert.match((await f.run({...payload,includeSourceHash:true})).message,/无法核对编辑基线/);
+ parents=[...parents,{...parents[0],procedureId:'PR-AMBIGUOUS'}];
+ f.calls.length=0;
+ assert.equal((await f.run(payload)).state,'REJECTED');assert.equal(f.calls.length,1);
+ assert.equal((await f.run({...payload,systemId:'SYS-OTHER'})).state,'REJECTED');assert.equal(f.calls.length,1);
+});
+
 test('frozen source maintenance creates a nontransactional handler and independently verifies parameters and source',async()=>{
  const f=sourceFixture();assert.equal((await f.run({})).state,'SUCCEEDED');
  const parameters=[{id:'toolsId',remark:''},{id:'form',remark:''}];

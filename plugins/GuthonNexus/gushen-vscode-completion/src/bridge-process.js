@@ -114,11 +114,12 @@ function createBridgeProcess(options) {
 
   async function request(toolHome, route, payload) {
     if (!isRunning()) throw new Error('Bridge 未运行，请先启动 Guthon Bridge');
-    if (!/^\/(pageContext|navigate|navigationResult|components|updateGuard)(\?|$)/.test(route)) throw new Error('不支持的 Bridge 接口');
+    if (!/^\/(pageContext|navigate|navigationResult|database(?:Page|Source|Procedure)Preflight|databaseProcedureCapabilities|databaseProcedurePublish|databaseProcedureVerify|databaseProcedureOperations|components|updateGuard)(\?|$)/.test(route)) throw new Error('不支持的 Bridge 接口');
+    const timeout = /^\/database(?:Procedure(?:Publish|Verify)|(?:Page|Source)Preflight)$/.test(route) ? 90000 : 12000;
     const response = await fetch(`http://127.0.0.1:${currentPort}${route}`, {
       method: payload === undefined ? 'GET' : 'POST',
       headers: {Authorization: `Bearer ${pairingToken(toolHome)}`, 'Content-Type': 'application/json'},
-      ...(payload === undefined ? {} : {body: JSON.stringify(payload)}), signal: AbortSignal.timeout(12000),
+      ...(payload === undefined ? {} : {body: JSON.stringify(payload)}), signal: AbortSignal.timeout(timeout),
     });
     const result = await response.json();
     if (!response.ok || result.ok !== true) throw new Error(result.message || '浏览器定位请求失败');

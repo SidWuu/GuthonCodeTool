@@ -12,13 +12,14 @@ from tempfile import TemporaryDirectory
 
 from common import legacy_source as hub
 from common import page_editor
+from common.database_source_publish import page_publication_model, same_page_workcopy, same_workcopy_source, source_identity, workcopy_baseline
 from common.inheritance import project as project_inheritance
-from common.page_comparison import baseline_pointer, compare_pages
+from common.page_comparison import baseline_pointer, compare_pages, same_json_value
 from common.page_projection import (
-    extract_page_fields, extract_page_scripts, inherited_page_script, pointer_value,
+    comparable_script, extract_page_fields, extract_page_scripts, inherited_page_script, pointer_value,
     replace_json_value, resolve_inherited_script,
 )
-from common.persistence import atomic_bytes
+from common.persistence import atomic_bytes, atomic_text
 from common.source_format import decode_source, encode_source_exact
 
 
@@ -45,9 +46,7 @@ def _page(text, source_id):
 
 
 def _changed_lines(before, after):
-    # Normalize line endings and disregard one final line terminator.
-    before = before.replace("\r\n", "\n").replace("\r", "\n").removesuffix("\n")
-    after = after.replace("\r\n", "\n").replace("\r", "\n").removesuffix("\n")
+    before, after = comparable_script(before), comparable_script(after)
     if before == after:
         return []
     comparison = SequenceMatcher(None, before.split("\n") if before else [], after.split("\n") if after else [])
@@ -106,7 +105,44 @@ def _create_page_workcopy(conn, workspace, config, row, source, target, expected
         return {**result, **identity, "matchesAfter": True, "writeArtifacts": artifacts}
 
 
-def run(workspace, config, action, payload, *, include_write_artifacts=False, rebind_index_record=False):
+def record_cli_file_versions(workspace, source_id, target, expected):
+    """Attest only bytes produced by this save, while its Workcopy lock is held."""
+    records = {}
+    for path, digest in expected.items():
+        if path.name not in {"raw.json", "meta.json", hub.WORK_COPY_META_FILE} or path.parent != target.parent:
+            continue
+        key = _digest(path.as_posix().encode("utf-8"))
+        if path.resolve() != path:
+            raise ValueError("Workcopy 已写入，但回读路径包含符号链接")
+        with path.open("rb") as saved:
+            stamp = os.fstat(saved.fileno())
+            if _digest(saved.read()) != digest:
+                raise ValueError("Workcopy 已写入，但文件回读与保存结果不一致，请核对差异")
+        record = {"workspaceKey": workspace["workspaceKey"], "sourceId": source_id,
+                  "sourcePath": target.relative_to(workspace["workcopyDir"]).as_posix(),
+                  "path": str(path), "sourceHash": digest, "mtimeNs": stamp.st_mtime_ns, "inode": stamp.st_ino}
+        records[f"{key}.json"] = json.dumps(record, ensure_ascii=False)
+    if not records:
+        return None
+    errors = []
+    for directory in workspace["workcopySaveReceiptDirs"]:
+        try:
+            if directory.resolve() != directory or workspace["root"] in directory.parents:
+                raise OSError("保存回执须位于工作区外的本地普通目录")
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            stamp = directory.stat()
+            if hasattr(os, "getuid") and (stamp.st_uid != os.getuid() or stamp.st_mode & 0o077):
+                raise PermissionError("保存回执目录须由当前用户独占")
+            for name, record in records.items():
+                atomic_text(directory / name, record)
+            return None
+        except OSError as error:
+            errors.append(str(error))
+    return "Workcopy 已写入，保存回执未完成，请回读原文件并核对回执目录权限：" + " / ".join(errors)
+
+
+def run(workspace, config, action, payload, *, include_write_artifacts=False, rebind_index_record=False,
+        record_cli_save=False):
     if not isinstance(payload, dict):
         raise ValueError("需要明确的 DATABASE 源码身份")
     record_id, source_id, source_path = (payload.get(key) for key in ("recordId", "sourceId", "sourcePath"))
@@ -155,20 +191,129 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False, re
         raise ValueError("无效的源码分块路径")
     design = is_page and payload.get("design") is True
     editing = action in {"edit-preview", "edit-save"}
-    with (hub.file_lock(workspace["contextDir"] / ".workcopy.lock") if action=="edit-save" else nullcontext()):
+    saving = action == "edit-save"
+    materialize = payload.get("materializeInheritedEvent") is True
+    if materialize and (not is_page or design or not pointer or action not in {"edit-read", "edit-preview", "edit-save"}):
+        raise ValueError("请选择一个 DATABASE PAGE 项目层继承事件")
+    reviewing_publish = action in {"publish-preview", "publish-confirm"}
+    source_lock = hub.file_lock(workspace["contextDir"] / ".source-write.lock") if saving or reviewing_publish else nullcontext()
+    copy_lock = hub.file_lock(workspace["contextDir"] / ".workcopy.lock") if saving or reviewing_publish else nullcontext()
+    with source_lock, copy_lock:
         if target.resolve() != target:
             raise ValueError("工作副本路径包含符号链接")
         existing = target.is_file()
         if target.exists() and not existing:
             raise ValueError("工作副本目标不是文件")
-        current = _bytes(target if existing else source)
+        disk_content = _bytes(target if existing else source)
+        current = disk_content
+        if existing and source.is_file():
+            _revision, original = workcopy_baseline(workspace, row, source_path, _digest(current), match_candidate=False)
+            if original is not None and same_workcopy_source(row, current, original):
+                current = _bytes(source)
         source_hash = _digest(current)
         text, file_format = decode_source(current)
         result = {"workspaceKey": workspace["workspaceKey"], "sourcePath": source_path,
                   "sourceId": source_id, "sourceHash": source_hash, "editable": True,
                   "workcopy": existing, "workcopyPath": str(target), "language": "json" if is_page else "guthon-gss"}
-        if editing and payload.get("sourceHash") != source_hash:
+        if (editing or action == "publish-confirm") and payload.get("sourceHash") != source_hash:
             raise ValueError("源码已发生变化，请保留修改并重新打开后比较")
+        if reviewing_publish:
+            if (not existing or not row["source_alias_id"]
+                    or (is_page and not row["system_id"])
+                    or (not is_page and (not row["data_source_id"] or not row["fun_id"]))):
+                raise ValueError("上传需要有精确身份的既有源码工作副本")
+            compare_mirror = payload.get("compareMirror") is True
+            if compare_mirror:
+                if not row["version_mac"] or not source.is_file():
+                    raise ValueError("当前同步镜像缺少源码或版本，请先同步该节点")
+                with hub.index_connection(workspace, action="workcopy-publish-target") as conn:
+                    latest = conn.execute("SELECT * FROM gusen_source_record WHERE record_id=?", (row["record_id"],)).fetchone()
+                if latest is None or dict(latest) != dict(row):
+                    raise ValueError("同步镜像已发生变化，请重新审阅")
+                original = _bytes(source)
+                baseline = {
+                    "identity": source_identity(workspace, row),
+                    "sourceVersion": row["version_mac"], "sourceHash": _digest(original),
+                }
+            else:
+                baseline, original = workcopy_baseline(workspace, row, source_path, source_hash)
+            if baseline is None:
+                raise ValueError("工作副本没有可信基线；请导出旧改动并按当前同步镜像重新应用")
+            baseline_text = decode_source(original)[0]
+            identity = dict(baseline["identity"])
+            page_type = None
+            if is_page:
+                models = [_page(value, source_id)[1] for value in (baseline_text, text)]
+                before, after = (page_publication_model(model) for model in models)
+                identity_fields = ("pageId", "pageType", "pageAliasId", "systemId", "mkId", "superPageId", "isProduct")
+                if any(before.get(key) != after.get(key) for key in identity_fields):
+                    raise ValueError("PAGE 工作副本修改了平台身份")
+                page_type = str(before.get("pageType", ""))
+                if not page_type:
+                    raise ValueError("PAGE 工作副本缺少页面类型")
+                if page_type == "0":
+                    scripts = [model.get("compScript") for model in (before, after)]
+                    if (any(not isinstance(script, str) or project_inheritance(script, None)["status"] != "INACTIVE"
+                            for script in scripts)
+                            or not same_json_value({**before, "compScript": scripts[1]}, after)):
+                        raise ValueError("服务组件上传只支持非继承 compScript 正文")
+                if same_json_value(before, after):
+                    raise ValueError("没有 PAGE 内容变更可供上传审阅")
+                baseline_text, text = (json.dumps(page_publication_model(model, comparable=False), ensure_ascii=False,
+                                                  allow_nan=False, separators=(",", ":")) for model in models)
+                if max(len(value.encode("utf-8")) for value in (baseline_text, text)) > page_editor.MAX_PAGE_BYTES:
+                    raise ValueError("PAGE 超出上传大小限制")
+            else:
+                if comparable_script(baseline_text) == comparable_script(text):
+                    raise ValueError("没有正文变更可供上传审阅")
+                if (project_inheritance(baseline_text, None)["status"] != "INACTIVE"
+                        or project_inheritance(text, None)["status"] != "INACTIVE"):
+                    raise ValueError("继承过程不在本期发布范围")
+                if max(len(baseline_text.encode("utf-8")), len(text.encode("utf-8"))) > 196608:
+                    raise ValueError("过程函数正文超过平台发布上限")
+                systems = {mapping["system_id"] for mapping in workspace["systemMappings"].values()
+                           if mapping.get("data_source_id") == row["data_source_id"] and mapping.get("system_id")}
+                if systems:
+                    indexed_system = identity["system_id"]
+                    identity["system_id"] = (indexed_system if indexed_system in systems
+                                             else next(iter(systems)) if len(systems) == 1 and not indexed_system else "")
+            binding = workspace["workspaceBinding"]
+            origins = workspace["pageOrigins"]
+            review_id = _digest(json.dumps([identity, source_path, baseline["sourceVersion"],
+                                            baseline["sourceHash"], source_hash, binding, origins, compare_mirror],
+                                           sort_keys=True).encode())
+            if action == "publish-confirm" and payload.get("reviewId") != review_id:
+                raise ValueError("编辑基线或候选已变化，请重新审阅")
+            merge = {}
+            if "mergeSource" in payload:
+                from common.database_source_merge import merge_database_source
+
+                remote = payload["mergeSource"]
+                limit = page_editor.MAX_PAGE_BYTES if is_page else 196608
+                if action != "publish-confirm" or not compare_mirror or not isinstance(remote, str) or len(remote.encode("utf-8")) > limit:
+                    raise ValueError("三方合并需要经审阅的 Workcopy 和有效的谷神回读")
+                ancestor, base = workcopy_baseline(workspace, row, source_path, source_hash)
+                if ancestor is None:
+                    merge = {"state": "NO_BASELINE"}
+                else:
+                    base_text = decode_source(base)[0]
+                    if is_page:
+                        base_text, _, _ = _page(base_text, source_id)
+                        remote, _, _ = _page(remote, source_id)
+                    merged, conflicts = merge_database_source(base_text, text, remote, page_type=page_type,
+                                                               page_alias=identity["source_alias_id"])
+                    merge = {"baseHash": ancestor["sourceHash"], "baseVersion": ancestor["sourceVersion"]}
+                    if conflicts:
+                        merge.update(state="CONFLICT", conflicts=conflicts[:100], conflictCount=len(conflicts))
+                    elif len(merged.encode("utf-8")) > limit:
+                        raise ValueError("合并候选超过源码上传大小限制")
+                    else:
+                        merge.update(state="READY", content=merged)
+            return {**result, "reviewId": review_id, "databaseIdentity": identity,
+                    "workspaceBinding": binding, "pageOrigins": origins, "databaseBaseVersion": baseline["sourceVersion"],
+                    "baseContent": baseline_text, "content": text, "compareMirror": compare_mirror,
+                    **({"merge": merge} if merge else {}),
+                    **({"pageType": page_type} if is_page else {})}
         if is_page:
             projected, data, wrapped = _page(text, source_id)
             if action == "edit-read" and payload.get("resolveDefaultFragment") is True:
@@ -178,6 +323,21 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False, re
                 )
                 return {**result, "defaultFragment": default_fragment}
         if action == "edit-comparison":
+            if not is_page or payload.get("publicationDiff") is True:
+                use_edit_baseline = existing and payload.get("compareMirror") is not True
+                baseline, original = workcopy_baseline(workspace, row, source_path, source_hash) if use_edit_baseline else (None, None)
+                before = original if baseline else (_bytes(source) if source.is_file() else None)
+                original = decode_source(before)[0] if before is not None else None
+                changed = before is not None and before != current
+                if is_page:
+                    previous = _page(original, source_id)[1] if original is not None else None
+                    if previous is not None:
+                        changed = not same_page_workcopy(previous, data)
+                        original = json.dumps(previous, ensure_ascii=False, sort_keys=True, indent=4) + "\n"
+                    text = json.dumps(data, ensure_ascii=False, sort_keys=True, indent=4) + "\n"
+                return {**result, "available": before is not None, "trustedBaseline": baseline is not None,
+                        "changed": changed,
+                        "baseContent": original, "content": text, "formattedPage": is_page}
             if not design or payload.get("sourceHash") != source_hash:
                 raise ValueError("PAGE 已变化，请重新打开后比较")
             from common.database_page_fields import field_batches
@@ -205,7 +365,7 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False, re
         fragment = None
         display_content = None
         if pointer:
-            for field in extract_page_scripts(data):
+            for field in extract_page_scripts(data, include_empty_inherited=materialize):
                 if field.json_pointer == pointer:
                     fragment = field.original_value
                     display_content = field.effective_value
@@ -217,8 +377,33 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False, re
                 if not any(field["json_pointer"] == pointer for field in collections):
                     raise ValueError("当前 PAGE 中无法定位该分块")
                 fragment = pointer_value(data, pointer)
+        if materialize:
+            # An explicit override creates project source. The ordinary inherited fragment stays read-only.
+            if not existing or not isinstance(fragment, str) or pointer.rsplit("/", 2)[-2] not in {"pageEvents", "serviceEvents"}:
+                raise ValueError("展开继承仅适用于已有 Workcopy 的项目事件")
+            product_pointer, product = inherited_page_script(data, pointer)
+            projection = project_inheritance(fragment, product)
+            if not projection["materializable"] or project_inheritance(product, None)["status"] != "INACTIVE":
+                raise ValueError("产品来源或继承控制流不能安全展开")
+            _, mirror, _ = _page(decode_source(_bytes(source))[0], source_id)
+            original_pointer = baseline_pointer(mirror, data, pointer)
+            if original_pointer is None or inherited_page_script(mirror, original_pointer)[1] != product:
+                raise ValueError("同步基线的产品层与 Workcopy 不一致，请先比较来源")
+            product_hash = _digest(product.encode("utf-8"))
+            result.update(editable=True, projectContent=fragment, productPointer=product_pointer,
+                          productContent=product, productHash=product_hash)
+            if editing:
+                if payload.get("expectedProductHash") != product_hash:
+                    raise ValueError("继承事件产品来源校验失败，请重新读取")
+                candidate_event = payload.get("content")
+                if not isinstance(candidate_event, str) or project_inheritance(candidate_event, None)["status"] != "INACTIVE":
+                    raise ValueError("项目覆盖需要明确的事件源码")
+                if saving and not payload.get("candidateSourceHash"):
+                    raise ValueError("请先预览继承事件再保存")
         if not editing:
             content = projected if is_page else text
+            if is_page and not pointer and payload.get("formatPage") is True:
+                content = json.dumps(data, ensure_ascii=False, sort_keys=True, indent=4) + "\n"
             if pointer:
                 content = display_content if isinstance(fragment, str) else json.dumps(fragment, ensure_ascii=False, indent=2)
             if payload.get("includeLineChanges") is True:
@@ -278,13 +463,21 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False, re
             previous = hub._work_copy_metadata(folder)
             if previous.get("workspaceKey") != workspace["workspaceKey"] or previous.get("source_id") != source_id:
                 raise ValueError("工作副本元数据与打开的对象不一致")
-        protected_artifacts = set()
+        capture = None
+        if row["version_mac"] and source.is_file() and current == _bytes(source):
+            with hub.index_connection(workspace, action="workcopy-editor-baseline") as conn:
+                latest = conn.execute("SELECT * FROM gusen_source_record WHERE record_id=?", (row["record_id"],)).fetchone()
+            if latest is None or dict(latest) != dict(row):
+                raise ValueError("同步镜像已发生变化，请重新打开后保存")
+            capture = current
+        workcopy_baseline(workspace, row, source_path, source_hash, capture=capture, candidate_hash=candidate_hash)
+        artifact_hashes = {}
         if folder.exists():
-            if _digest(_bytes(target if existing else source)) != source_hash:
+            if _bytes(target if existing else source) != disk_content:
                 raise ValueError("保存前源码发生变化，请重新核对")
             if not archive.exists():
                 hub._write_work_copy_metadata(folder, metadata, source.parent, "mirror")
-                protected_artifacts.add(archive)
+                artifact_hashes[archive] = _digest(archive.read_bytes())
             atomic_bytes(target, encoded)
             new_paths = {target} if not existing else set()
         else:
@@ -294,16 +487,21 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False, re
                 shutil.copytree(source.parent, staged, ignore=shutil.ignore_patterns(".svn"))
                 hub._write_work_copy_metadata(staged, metadata, source.parent, "mirror")
                 atomic_bytes(staged / filename, encoded)
+                for file in staged.rglob("*"):
+                    if (file != staged / filename and file.name in {hub.WORK_COPY_META_FILE, "meta.json", "raw.json"}
+                            and file.is_file()):
+                        artifact_hashes[folder / file.relative_to(staged)] = _digest(file.read_bytes())
                 if folder.exists() or _digest(_bytes(source)) != source_hash:
                     raise ValueError("保存前源码或工作副本发生变化，请重新核对")
                 os.rename(staged, folder)
             new_paths = {file for file in folder.rglob("*") if file.is_file()}
-            protected_artifacts = {file for file in new_paths - {target}
-                                   if file.name in {hub.WORK_COPY_META_FILE, "meta.json", "raw.json"}}
         if include_write_artifacts:
             result["writeArtifacts"] = [
-                {"path": str(file), "sourceHash": _digest(file.read_bytes())}
-                for file in sorted(protected_artifacts)
+                {"path": str(file), "sourceHash": _digest(file.read_bytes())} for file in sorted(artifact_hashes)
             ]
+        if record_cli_save:
+            warning = record_cli_file_versions(workspace, source_id, target, {**artifact_hashes, target: candidate_hash})
+            if warning:
+                result["receiptWarning"] = warning
     hub._auto_add_work_copy(config, folder, new_paths)
     return {**result, "sourceHash": candidate_hash, "workcopy": True, "path": str(target)}

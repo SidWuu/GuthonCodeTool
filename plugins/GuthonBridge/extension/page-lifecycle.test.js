@@ -11,7 +11,7 @@ function fixture() {
       if(url.endsWith('getPageBaseInfo.htm'))result={code:0,page:body.pageId==='PG-NEW'?{pageId:'PG-NEW',systemId:'SYS-1',mkId:'MK-1'}:page};
       else if(url.endsWith('getPageModuleXml.htm'))result={code:0,version:'v1'};
       else result={code:0,bean:{pageId:'PG-NEW',systemId:'SYS-1',mkId:'MK-1'}};
-      return {ok:true,json:async()=>({code:0,data:result})};}};
+      return {ok:true,text:async()=>JSON.stringify({code:0,data:result})};}};
   const code=fs.readFileSync(require.resolve('./page-lifecycle.js'),'utf8');
   vm.runInNewContext(code,box);
   return {box,calls,page,tree,run:payload=>box.runPageLifecycle({...payload,expectedOrigin:'https://platform.example',systemIds:['SYS-1']})};
@@ -53,13 +53,41 @@ test('lost mutation response is UNKNOWN and the page handler never retries',asyn
   assert.equal(result.state,'UNKNOWN');assert.equal(writes,1);assert.equal(result.platformApplied,null);
 });
 
+test('DATABASE PAGE sends the designer JSON form and preserves an explicit save rejection', async () => {
+    const f = fixture();
+    const candidate = {...f.page, title:'修改 & + 保留'};
+    const operationId = 'a'.repeat(64);
+    f.box.TextEncoder = TextEncoder;
+    f.box.fetch = async (url, options) => {
+        const body = Object.fromEntries(options.body);
+        f.calls.push({url, body});
+        let reply;
+        if (url.endsWith('/models/list.htm')) {
+            reply = {code:0, data:{list:[f.page]}};
+        } else if (url.endsWith('/getPageModuleXml.htm')) {
+            reply = {code:0, data:{bean:f.page, version:'v1'}};
+        } else {
+            assert.equal(url, '/develop/dev/models/savePageModuleXml.htm');
+            assert.deepEqual(body, {pageId:'PG-1', pageVersion:'v1', json:JSON.stringify(candidate), flag:'0', isAutoCompile:'1'});
+            reply = {code:17, message:'Native rejection'};
+        }
+        return {ok:true, text:async () => JSON.stringify(reply)};
+    };
+    const result = await f.run({action:'database-save', systemId:'SYS-1', pageId:'PG-1', pageAlias:'demo.source',
+        pageType:'2', evidence:{operationId, expectedVersion:'v1', content:JSON.stringify(candidate)}});
+    assert.equal(result.operationId, operationId);
+    assert.equal(result.rejected, 'PLATFORM_SAVE_REJECTED');
+    assert.equal(result.platformCode, 17);
+    assert.equal(f.calls.length, 3);
+});
+
 
 test('delete reads back explicit absence and sends the mutation only once', async () => {
   const f=fixture();const inspected=await f.run({action:'inspect',pageId:'PG-1'});f.calls.length=0;
   const original=f.box.fetch;let removed=false;
   f.box.fetch=async (url,options)=>{
-    if(url.endsWith('/pages/remove.htm')) {removed=true;f.calls.push({url,body:Object.fromEntries(options.body)});return {ok:true,json:async()=>({code:0,data:{}})};}
-    if(removed && url.endsWith('/pages/getPageBaseInfo.htm')) {f.calls.push({url,body:Object.fromEntries(options.body)});return {ok:true,json:async()=>({code:0,data:{page:null}})};}
+    if(url.endsWith('/pages/remove.htm')) {removed=true;f.calls.push({url,body:Object.fromEntries(options.body)});return {ok:true,text:async()=>JSON.stringify({code:0,data:{}})};}
+    if(removed && url.endsWith('/pages/getPageBaseInfo.htm')) {f.calls.push({url,body:Object.fromEntries(options.body)});return {ok:true,text:async()=>JSON.stringify({code:0,data:{page:null}})};}
     return original(url,options);
   };
   const result=await f.run({action:'delete',pageId:'PG-1',expectedVersion:'v1',expectedPage:inspected.page});
@@ -70,8 +98,8 @@ test('delete reads back explicit absence and sends the mutation only once', asyn
 test('an acknowledged write with failed or mismatching readback remains unverified without a retry', async () => {
   const f=fixture();let writes=0, reads=0;
   f.box.fetch=async url=>{
-    if(url.endsWith('/pages/savePages.htm')) {writes++;return {ok:true,json:async()=>({code:0,data:{bean:{pageId:'PG-NEW'}}})};}
-    reads++;return {ok:true,json:async()=>({code:0,data:{page:{pageId:'PG-NEW',systemId:'OTHER',mkId:'MK-1'}}})};
+    if(url.endsWith('/pages/savePages.htm')) {writes++;return {ok:true,text:async()=>JSON.stringify({code:0,data:{bean:{pageId:'PG-NEW'}}})};}
+    reads++;return {ok:true,text:async()=>JSON.stringify({code:0,data:{page:{pageId:'PG-NEW',systemId:'OTHER',mkId:'MK-1'}}})};
   };
   const result=await f.run({action:'create',properties:{systemId:'SYS-1',mkId:'MK-1',pageType:1,pageName:'主页面',title:'Example'}});
   assert.equal(result.state,'APPLIED_UNVERIFIED');assert.equal(result.platformApplied,true);
@@ -82,11 +110,52 @@ test('delete lookup failure does not prove absence or repeat the delete', async 
   const f=fixture();const inspected=await f.run({action:'inspect',pageId:'PG-1'});f.calls.length=0;
   const original=f.box.fetch;let removed=false;
   f.box.fetch=async (url,options)=>{
-    if(url.endsWith('/pages/remove.htm')) {removed=true;f.calls.push({url,body:Object.fromEntries(options.body)});return {ok:true,json:async()=>({code:0,data:{}})};}
+    if(url.endsWith('/pages/remove.htm')) {removed=true;f.calls.push({url,body:Object.fromEntries(options.body)});return {ok:true,text:async()=>JSON.stringify({code:0,data:{}})};}
     if(removed && url.endsWith('/pages/getPageBaseInfo.htm')) throw Error('lookup unavailable');
     return original(url,options);
   };
   const result=await f.run({action:'delete',pageId:'PG-1',expectedVersion:'v1',expectedPage:inspected.page});
   assert.equal(result.state,'APPLIED_UNVERIFIED');assert.equal(result.platformApplied,true);
   assert.equal(f.calls.filter(call=>call.url.endsWith('/pages/remove.htm')).length,1);
+});
+
+test('empty base info uses the exact module tree and reads an explicit service PAGE script with its version', async () => {
+  const f=fixture();
+  const page={...f.page,pageType:0};
+  const source={version:'v2',bean:{pageId:'PG-1',pageType:0,compScript:'// candidate'}};
+  f.tree.modules=[{children:[page]}];
+  f.box.fetch=async (url,options)=>{
+    f.calls.push({url,body:Object.fromEntries(options.body)});
+    if (url.endsWith('/getPageBaseInfo.htm')) return {ok:true,text:async()=>''};
+    if (url.endsWith('/getPageModuleXml.htm')) return {ok:true,text:async()=>JSON.stringify({code:0,data:source})};
+    assert.fail('unexpected dispatch');
+  };
+  const request={action:'inspect',pageId:'PG-1',sourcePointer:'/compScript'};
+  const result=await f.run(request);
+  assert.equal(result.state,'SUCCEEDED',result.message);
+  assert.equal(result.pageInfoSource,'module-tree');
+  assert.equal(result.sourceContent,'// candidate');
+  assert.equal(result.sourceVersion,'v2');
+  assert.equal(result.platformApplied,false);
+  assert.deepEqual(f.calls.map(call=>call.body.pageId),['PG-1','PG-1']);
+  assert.equal('sourceContent' in (await f.run({action:'inspect',pageId:'PG-1'})),false);
+  source.bean.pageId='PG-OTHER';
+  assert.equal((await f.run(request)).state,'REJECTED');
+  f.tree.modules.push({...page});
+  assert.match((await f.run(request)).message,/唯一/);
+  assert.match((await f.run({action:'copy',pageId:'PG-1'})).message,/getPageBaseInfo.htm 返回空响应/);
+});
+
+test('a nonempty invalid base response reports its endpoint without switching to the module tree', async () => {
+  const f=fixture();
+  f.tree.modules=[f.page];
+  f.box.fetch=async url=>{
+    f.calls.push(url);
+    return {ok:true,text:async()=>'<html>Bad response</html>'};
+  };
+  const failure=await f.run({action:'inspect',pageId:'PG-1'});
+  assert.equal(failure.state,'REJECTED');
+  assert.equal(failure.platformApplied,false);
+  assert.match(failure.message,/getPageBaseInfo.htm 未返回有效 JSON/);
+  assert.equal(f.calls.length,1);
 });

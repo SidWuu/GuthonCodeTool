@@ -47,7 +47,7 @@ function page(snapshot, nonce) {
     ] : [
       [null, '手动放入部门规则（可选）', '可以先完成基础安装。按部门说明，将规则文件放入开发目录，例如 AGENTS.md 和 rules/。', [['workspace', '打开开发目录']]],
     ]),
-    ['bridge', '浏览器增强：GuthonBridge（可选）', '日常源码同步、编辑和静态检查可以直接在 Nexus 完成。需要网页增强时首次加载：打开扩展管理页，启用开发者模式，点击“加载已解压的扩展”，选择向导提供的目录。然后在 GuthonBridge 的“本机 Bridge 配对”粘贴令牌，点击“保存并连接”。', [['hosts', '平台地址规则（按需）'], ['chrome', '打开 Chrome 扩展管理'], ['folder', '定位并复制扩展目录'], ['token', '复制配对令牌'], ['refresh', '检查浏览器连接']]],
+    ['bridge', '浏览器增强：GuthonBridge（可选）', '日常源码同步、编辑和静态检查可以直接在 Nexus 完成。需要网页增强时首次加载：打开扩展管理页，启用开发者模式，点击“加载已解压的扩展”，选择向导提供的目录。然后在 GuthonBridge 的“Bridge 配对设置”粘贴令牌，点击“保存并连接”。', [['hosts', '平台地址规则（按需）'], ['chrome', '打开 Chrome 扩展管理'], ['folder', '定位并复制扩展目录'], ['token', '复制配对令牌'], ['refresh', '检查浏览器连接']]],
   ];
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';"><style nonce="${nonce}">
 body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);max-width:900px;margin:30px auto;padding:0 24px;line-height:1.7}section{border:1px solid var(--vscode-panel-border);border-radius:10px;padding:18px;margin:16px 0}button{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:0;padding:9px 14px;margin:5px;border-radius:5px;cursor:pointer}h2{font-size:19px;margin:0}p{margin:12px 0}.error{color:var(--vscode-errorForeground)}.hint{opacity:.8}select{max-width:100%;padding:8px}</style></head><body>

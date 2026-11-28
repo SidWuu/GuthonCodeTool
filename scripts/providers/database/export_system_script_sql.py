@@ -262,6 +262,9 @@ def export_system_scripts(
         source_file = f"source.{extension}"
         new_paths = [path for path in (script_dir / source_file, script_dir / "meta.json") if not path.exists()]
         write_source(script_dir / source_file, source)
+        source_composition = source_origin
+        if source_origin == "CURRENT" and extension == "js" and row.get("source") and row.get("product_source"):
+            source_composition = "MIXED"
         metadata = {
             "sourceTable": mapping["source_table_name"],
             "systemId": system_id,
@@ -273,6 +276,8 @@ def export_system_scripts(
             "scriptDescription": description,
             "isProduct": row.get("is_product"),
             "sourceOrigin": source_origin,
+            "sourceComposition": source_composition,
+            "sourceContentHash": hashlib.sha256((script_dir / source_file).read_bytes()).hexdigest(),
             "sourceFile": source_file,
             "lastUpdate": str(row.get("last_update") or ""),
             "checkOutUserId": row.get("check_out_user_id"),

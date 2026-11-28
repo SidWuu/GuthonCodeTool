@@ -12,6 +12,7 @@ import stat
 import sys
 import uuid
 from common.persistence import atomic_bytes, atomic_text, file_lock
+from common.source_merge import merge_text as merge
 from .client import ApiError
 from .content import source_name
 from .workspace import in_scope, settings, active_scope
@@ -22,37 +23,6 @@ from .progress import emit as emit_progress
 
 def digest(content):
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
-
-
-def merge(base, local, remote):
-    if local == base or local == remote:
-        return remote
-    if remote == base:
-        return local
-    original = base.splitlines(keepends=True)
-    edits = []
-    for text in (local, remote):
-        lines = text.splitlines(keepends=True)
-        for tag, a, b, c, d in difflib.SequenceMatcher(
-            None, original, lines, autojunk=False
-        ).get_opcodes():
-            candidate = (a, b, lines[c:d])
-            if tag != "equal" and candidate not in edits:
-                edits.append(candidate)
-    edits.sort(key=lambda x: (x[0], x[1]))
-    if any(
-        right[0] < left[1] or right[0] == left[0]
-        for left, right in zip(edits, edits[1:])
-    ):
-        return None
-    result = []
-    cursor = 0
-    for start, end, lines in edits:
-        result.extend(original[cursor:start])
-        result.extend(lines)
-        cursor = end
-    result.extend(original[cursor:])
-    return "".join(result)
 
 
 class ApiStore:

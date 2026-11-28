@@ -97,9 +97,12 @@ class BridgePageSession:
         while True:
             result = self._request("/navigationResult?" + params)
             if result["state"] != "PENDING":
-                if result["state"] != "SUCCEEDED" or not isinstance(result.get("data"), dict):
-                    return {"state": "UNKNOWN", "message": result.get("message") or "Platform receipt unavailable; do not replay"}
-                return result["data"]
+                data = result.get("data")
+                if isinstance(data, dict) and (result["state"] == "SUCCEEDED" or (
+                    result["state"] == "FAILED" and data.get("state") == "REJECTED" and data.get("platformApplied") is False
+                )):
+                    return data
+                return {"state": "UNKNOWN", "message": result.get("message") or "Platform receipt unavailable; do not replay"}
             if time.monotonic() >= deadline:
                 return {"state": "PENDING", "message": "Wait for the original receipt; do not replay"}
             time.sleep(0.2)
