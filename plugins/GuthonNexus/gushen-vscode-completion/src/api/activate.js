@@ -101,6 +101,8 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
   const authentications=new Map();
   const credentialStore=loginStore || new ApiLoginStore(context.globalStorageUri?.fsPath);
   const toolIdentity=tool=>JSON.stringify([tool.toolHome,tool.toolPath,tool.toolEntry || '',tool.mode || '']);
+  const authenticationIdentity=current=>JSON.stringify([current.lifecycle,current.identity]);
+  const loginScope=(current,workspaceKey,serverUrl)=>({toolHome:current.tool.toolHome,workspaceKey,serverUrl});
   const switched=()=>Object.assign(new Error('本地数据目录已切换，请重新执行操作'),{code:'API_WORKSPACE_SWITCHED'});
   const resolveRequestContext=async()=>{
     const lifecycle=requestLifecycle,tool=await getTool();
@@ -117,7 +119,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
   const backendRun=(current,key,action,input,options)=>boundClient(current,REMOTE_ACTIONS.has(action)?remoteProcessClient:processClient,'谷神 API')
     .run(key,'api',[action,...(input === undefined ? []:['--stdin'])],input,options);
   const authenticationFor=current=>{
-    const identity=JSON.stringify([current.lifecycle,current.identity]);
+    const identity=authenticationIdentity(current);
     let authentication=authentications.get(identity);
     if(!authentication) {
       authentication=new ApiAuthentication({invoke:async(key,action,input,options)=>{
@@ -125,7 +127,7 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
       },store:credentialStore,scopeFor:async key=>{
         await assertRequestContext(current);
         const summary=await readProjectSummary(key,current);
-        return {toolHome:current.tool.toolHome,workspaceKey:key,serverUrl:summary.settings.serverUrl};
+        return loginScope(current,key,summary.settings.serverUrl);
       },onWarning:message=>vscode.window.showWarningMessage?.(message)});
       authentications.set(identity,authentication);
     }
@@ -218,8 +220,10 @@ function activateApi({vscode, context, getTool, processClient, onUpdated, onStat
     const value=await boundClient(current,stateProcessClient,'谷神 API 编辑状态').run(key,'api',['status','--stdin'],{summaryOnly:true,changesOnly:true});
     await assertRequestContext(current);
     const cached=lastStatus.get(key),scanned=cached?.identity===current.identity ? cached.result : undefined;
-    return scanned?.checkoutPath===value.checkoutPath && require('node:util').isDeepStrictEqual(scanned.settings,value.settings)
+    const summary=scanned?.checkoutPath===value.checkoutPath && require('node:util').isDeepStrictEqual(scanned.settings,value.settings)
       ? {...value,summary:scanned.summary,summaryComplete:true,statusKind:'last-scan'} : value;
+    const loginId=authentications.get(authenticationIdentity(current))?.loginIdFor(loginScope(current,key,value.settings?.serverUrl));
+    return loginId ? {...summary,loginId} : summary;
   }
   let closingEditorState;
   const closeEditorState=()=>closingEditorState ||= editorState.close().finally(()=>stateProcessClient.dispose());

@@ -3,6 +3,10 @@ const {credentialScope}=require('./login-store');
 class ApiAuthentication {
   constructor({invoke,scopeFor,store,onWarning=()=>{}}) {
     Object.assign(this,{invoke,scopeFor,store,onWarning});this.pending=new Map();this.restoreFailures=new Map();
+    this.lastLoginIds=new Map();
+  }
+  loginIdFor(scope) {
+    return scope.serverUrl && this.lastLoginIds.size ? this.lastLoginIds.get(credentialScope(scope)) : undefined;
   }
   serial(key,action) {
     const previous=this.pending.get(key) || Promise.resolve();
@@ -23,6 +27,7 @@ class ApiAuthentication {
       const saved=this.store.read(scope);if(!saved)return result;
       // Passwords only cross the local process boundary over stdin, never logs or config.
       const logged=await this.invoke(key,'login',saved);
+      this.lastLoginIds.set(id,saved.userId);
       return {...result,authenticated:true,session:logged.session};
     } catch (error) {
       // The backend's TLS diagnostic identifies the failing service without including credentials.
@@ -51,6 +56,7 @@ class ApiAuthentication {
       // Suppress saved-account restoration while the UI reports the result of this explicit login.
       this.restoreFailures.set(id, null);
       const result=await this.invoke(key,'login',credentials);
+      this.lastLoginIds.set(id,credentials.userId);
       this.restoreFailures.delete(id);
       try {
         if(remember===true)this.store.save(scope,credentials);

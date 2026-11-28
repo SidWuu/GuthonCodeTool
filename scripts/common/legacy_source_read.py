@@ -3,7 +3,7 @@ import json
 
 from common import legacy_source as hub
 from common import database_source_exports as exports
-from common.page_comparison import baseline_pointer
+from common.page_comparison import baseline_pointer, same_json_value
 from common.page_projection import extract_page_fields, extract_page_scripts
 
 SOURCE_TYPES = ("page", "procedure", "system-script", "table", "view", "skill", "public")
@@ -116,6 +116,9 @@ def locate(workspace, *, source_type, source_id="", alias="", fun_id=""):
 
 def local_changes(workspace):
     """Report canonical DATABASE Workcopy changes independently of Git and projections."""
+    from common.page_editor import MAX_PAGE_BYTES
+    from common.source_format import decode_source
+
     readonly = workspace["readonlyDir"].resolve()
     workcopy = workspace["workcopyDir"].resolve()
     if not workcopy.is_dir():
@@ -142,6 +145,20 @@ def local_changes(workspace):
                     else:
                         if not baseline.read(1):
                             continue
+                    if row["source_table"] == "page":
+                        baseline.seek(0)
+                        saved.seek(0)
+                        left = baseline.read(MAX_PAGE_BYTES + 1)
+                        right = saved.read(MAX_PAGE_BYTES + 1)
+                        if max(len(left), len(right)) <= MAX_PAGE_BYTES:
+                            try:
+                                base_page = _page_data(decode_source(left)[0])
+                                saved_page = _page_data(decode_source(right)[0])
+                                if same_json_value(base_page, saved_page):
+                                    continue
+                            except (ValueError, RecursionError):
+                                # Without a semantic comparison, retain the observed byte difference.
+                                pass
             except FileNotFoundError:
                 # Resync can replace either file between the lookup and open.
                 continue
@@ -234,8 +251,11 @@ def read(workspace, record_id, *, limit=24000, pointer="", fragments=False, expo
                         original_scripts = _page_fragments(base_data)
                         for key, value in scripts.items():
                             prior = original_scripts.get(baseline_pointer(base_data, data, key))
-                            if prior is None or prior[2] != value[2]:
-                                modified.add(key)
+                            if prior is not None and (prior[2] == value[2] or (
+                                    prior[1] == value[1] == "json"
+                                    and same_json_value(json.loads(prior[2]), json.loads(value[2])))):
+                                continue
+                            modified.add(key)
                 except (OSError, ValueError) as error:
                     diagnostic = f"无法读取 DATABASE 只读基线：{error}"
             return {"fragments": [{"pointer": key, "label": value[0], "language": value[1], "inherited": value[3]}

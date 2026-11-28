@@ -98,10 +98,13 @@
       if (error instanceof SyntaxError) throw invalid();
       throw error;
     }
+    const componentIdentity = batch?.componentIdentity;
     if (batch?.format !== "guthon-database-page-fields-v1" || !fieldCode(batch.pageId) || !fieldCode(batch.component)
-      || !["input-box", "table-main", "table-item"].includes(batch.componentType)
-      || !Array.isArray(batch.anchors) || !batch.anchors.length
+      || !["input-box", "search-box", "table-main", "table-item"].includes(batch.componentType)
+      || !Array.isArray(batch.anchors) || (!batch.anchors.length || batch.componentType === "search-box") && !componentIdentity
       || !batch.anchors.every(identity => validIdentity(identity) && !!(identity.id || identity.guid))
+      || (componentIdentity !== undefined && (!record(componentIdentity) || !Object.keys(componentIdentity).length
+        || !Object.entries(componentIdentity).every(([key, value]) => ["id", "guid"].includes(key) && fieldCode(value))))
       || !Array.isArray(batch.updates) || !Array.isArray(batch.additions) || !batch.updates.length && !batch.additions.length)
       throw invalid();
     const fieldIds = new Set();

@@ -23,7 +23,7 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
                 if page == "PG-TWO":
                     source["buttons"] = [
                         {"id": name, "pageEvents": {"onClickScript": text}}
-                        for name, text in (("a", "first();\nold();\nlast();"), ("b", "other();"))
+                        for name, text in (("a", "first();\r\nold();\r\nlast();\r\n"), ("b", "other();"))
                     ]
                     source["views"] = {"rows": [{"cols": [{"component": {"type": "input-box",
                         "name": "mainForm", "fields": [
@@ -189,6 +189,94 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
         self.assertEqual([{"kind": "delete", "start": 1, "end": 1}, {"kind": "insert", "start": 2, "end": 3}],
                          result["lineChanges"])
 
+    def test_line_changes_ignore_a_final_line_ending_and_keep_actual_line_changes(self):
+        identity = self.pages["PG-TWO"]
+        source_hash = self.request("PG-TWO")["baselineSourceHash"]
+        script = "/buttons/0/pageEvents/onClickScript"
+        other = "/buttons/1/pageEvents/onClickScript"
+        cases = (
+            (script, "first();\nold();\nlast();", []),
+            (other, "other();\n", []),
+            (script, "first();\nlast();", [{"kind": "delete", "start": 1, "end": 1}]),
+            (script, "first();\nold();\n", [{"kind": "delete", "start": 2, "end": 2}]),
+            (script, "first();\nold();\nlast();\n\n", [{"kind": "insert", "start": 3, "end": 4}]),
+        )
+        for pointer, content, expected in cases:
+            with self.subTest(pointer=pointer, content=content):
+                fragment = {**identity, "pointer": pointer}
+                saved = self.tool("legacy-source", key=self.key, args=["edit-save"], payload={
+                    **fragment, "sourceHash": source_hash, "content": content})
+                source_hash = saved["sourceHash"]
+                result = self.tool("legacy-source", key=self.key, args=["edit-read"], payload={
+                    **fragment, "includeLineChanges": True})
+                self.assertEqual(content, result["content"])
+                self.assertEqual(expected, result["lineChanges"])
+
+    def test_saved_page_session_follows_replaced_index_record_at_the_same_path(self):
+        identity = self.pages["PG-ONE"]
+        read = self.tool("legacy-source", key=self.key, args=["edit-read"], payload=identity)
+        candidate = {"pageId": identity["sourceId"], "compScript": "#return(2)"}
+        saved = self.tool("legacy-source", key=self.key, args=["edit-save"], payload={
+            **identity, "sourceHash": read["sourceHash"], "content": json.dumps(candidate)})
+        row = {"source_table": "page", "source_id": identity["sourceId"], "source_alias_id": identity["sourceId"],
+               "fun_id": "", "source_name": identity["sourceId"], "system_id": "SYS-FIXTURE",
+               "version_mac": "synced-version",
+               "source_content": json.dumps({**candidate, "compScript": "#return(3)"})}
+        with closing(legacy_source.connect_index_for_workspace(self.workspace)) as conn, conn:
+            self.assertTrue(legacy_source.upsert_source(conn, row, "PRODUCT", self.workspace["scopeId"],
+                                                        self.workspace["projectId"], {}, {}, workspace=self.workspace))
+        fresh, = self.tool("legacy-source", key=self.key, args=[
+            "locate", "--type", "page", "--source-id", identity["sourceId"]])["items"]
+        self.assertNotEqual(identity["recordId"], fresh["recordId"])
+        self.assertEqual(identity["sourcePath"], fresh["sourcePath"])
+        reread = self.tool("legacy-source", key=self.key, args=["edit-read"], payload=identity)
+        self.assertEqual(saved["sourceHash"], reread["sourceHash"])
+        comparison = self.tool("legacy-source", key=self.key, args=["edit-comparison"], payload={
+            **identity, "design": True, "sourceHash": saved["sourceHash"]})
+        change, = comparison["changes"]["rows"]
+        self.assertEqual(("/compScript", "#return(3)", "#return(2)"),
+                         (change["pointer"], change["beforeText"], change["afterText"]))
+        with self.assertRaisesRegex(ValueError, "已移出"):
+            self.tool("legacy-source", key=self.key, args=["edit-read"], payload={
+                **identity, "sourcePath": self.pages["PG-TWO"]["sourcePath"]})
+        self.assertFalse(self.call(self.server, "read_workcopy", {**identity, "workspaceKey": self.key})["ok"])
+
+        # A rebuilt index can reuse the old number for the same source ID at another path.
+        with closing(legacy_source.connect_index_for_workspace(self.workspace)) as conn, conn:
+            conn.execute("""UPDATE gusen_source_record
+                SET record_id=?, source_id=?, source_namespace=?
+                WHERE record_id=?""", (identity["recordId"], identity["sourceId"], "other-namespace",
+                                        self.pages["PG-TWO"]["recordId"]))
+        reopened = self.tool("legacy-source", key=self.key, args=["edit-read"], payload={**identity, "design": True})
+        self.assertEqual(saved["sourceHash"], reopened["sourceHash"])
+        self.assertEqual(candidate, json.loads(reopened["sourceText"]))
+        with self.assertRaisesRegex(ValueError, "路径与当前工作区索引不一致"):
+            self.tool("legacy-source", key=self.key, args=["edit-read"], payload={
+                **identity, "sourcePath": "other/PG-ONE/raw.json", "design": True})
+
+    def test_page_highlights_ignore_formatting_but_keep_saved_value_changes(self):
+        identity = self.pages["PG-TWO"]
+        source = self.workspace["readonlyDir"] / identity["sourcePath"]
+        model = json.loads(source.read_bytes())
+        initial = self.tool("legacy-source", key=self.key, args=["edit-read"], payload=identity)
+        formatted = self.tool("legacy-source", key=self.key, args=["edit-save"], payload={
+            **identity, "sourceHash": initial["sourceHash"], "content": json.dumps(model, indent=2, sort_keys=True)})
+        self.assertNotEqual(initial["sourceHash"], formatted["sourceHash"])
+        args = ["fragments", "--record-id", str(identity["recordId"]), "--source-id", identity["sourceId"]]
+        self.assertEqual([], self.tool("legacy-source", key=self.key, args=["local-changes"])["items"])
+        self.assertEqual([], self.tool("legacy-source", key=self.key, args=args)["modifiedPointers"])
+        comparison = self.tool("legacy-source", key=self.key, args=["edit-comparison"], payload={
+            **identity, "sourceHash": formatted["sourceHash"], "design": True})
+        self.assertTrue(comparison["formatOnly"])
+
+        model["views"]["rows"][0]["cols"][0]["component"]["fields"][0]["width"] = 100.0
+        self.tool("legacy-source", key=self.key, args=["edit-save"], payload={
+            **identity, "sourceHash": formatted["sourceHash"], "content": json.dumps(model, sort_keys=True)})
+        self.assertEqual([{"sourceType": "page", "sourcePath": identity["sourcePath"]}],
+                         self.tool("legacy-source", key=self.key, args=["local-changes"])["items"])
+        self.assertEqual(["/views/rows/0/cols/0/component/fields"],
+                         self.tool("legacy-source", key=self.key, args=args)["modifiedPointers"])
+
     def test_copy_field_batch_from_saved_comparison_requires_both_current_revisions(self):
         identity = self.pages["PG-TWO"]
         source = self.workspace["readonlyDir"] / identity["sourcePath"]
@@ -226,3 +314,30 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
         source.write_bytes(original + b"\n")
         with self.assertRaisesRegex(ValueError, "只读基线已变化"):
             self.tool("legacy-source", key=self.key, args=["edit-comparison"], payload=copy)
+
+    def test_first_fields_of_existing_search_and_table_use_native_component_identity(self):
+        identity = self.pages["PG-TWO"]
+        source = self.workspace["readonlyDir"] / identity["sourcePath"]
+        original = json.loads(source.read_bytes())
+        original["views"]["rows"] = [
+            {"component": {"type": kind, "id": key, "guid": f"guid-{key}", "name": key, "fields": []}}
+            for kind, key in (("search-box", "searchForm"), ("table-main", "mainTable"))
+        ]
+        source.write_text(json.dumps(original), encoding="utf-8")
+        read = self.tool("legacy-source", key=self.key, args=["edit-read"], payload=identity)
+        for i, row in enumerate(original["views"]["rows"]):
+            row["component"]["fields"].append({"fieldId": f"F{i}", "id": f"field-{i}", "type": "select"})
+        saved = self.tool("legacy-source", key=self.key, args=["edit-save"],
+                          payload={**identity, "sourceHash": read["sourceHash"], "content": json.dumps(original)})
+        review = {**identity, "design": True, "sourceHash": saved["sourceHash"]}
+        comparison = self.tool("legacy-source", key=self.key, args=["edit-comparison"], payload=review)
+        batches = comparison["fieldBatches"]
+        self.assertEqual([("searchForm", 0, 1), ("mainTable", 0, 1)],
+                         [(item["label"], item["updated"], item["added"]) for item in batches])
+        for i, item in enumerate(batches):
+            copy = self.tool("legacy-source", key=self.key, args=["edit-comparison"],
+                             payload={**review, "fieldBatchPointer": item["pointer"], "baseRevision": comparison["fieldBaseHash"]})
+            batch = json.loads(copy["clipboard"])
+            self.assertEqual({"id": item["label"], "guid": f"guid-{item['label']}"}, batch["componentIdentity"])
+            self.assertEqual([], batch["anchors"])
+            self.assertEqual(f"F{i}", batch["additions"][0]["field"]["fieldId"])

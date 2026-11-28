@@ -371,6 +371,13 @@ tr[data-guthon-bridge-system-script-selected="true"] > td.el-table__cell {
   padding: 10px 14px;
 }
 
+#guthon-bridge-fields-mover-overlay [data-action="apply"]:disabled {
+  background: #f5f7fa;
+  border-color: #dcdfe6;
+  color: #73777f;
+  cursor: not-allowed;
+}
+
 #guthon-bridge-fields-mover-overlay .guthon-bridge-fields-mover-head {
   border-bottom: 1px solid #ebeef5;
 }

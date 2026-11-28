@@ -987,20 +987,45 @@
   let fieldBatchPreview = null;
   let nextFieldBatchPreview = 0;
 
-  function findFieldsMoverContext(visibleOnly = false) {
-    const selected = Array.from(document.querySelectorAll(".base-control-box.row-box.selected"))
+  const fieldsMoverSelector = ".base-control-box.row-box";
+
+  function selectedFieldsMoverComponent(visibleOnly) {
+    const selected = Array.from(document.querySelectorAll(fieldsMoverSelector + ".selected"))
       .filter(element => !visibleOnly || isVisible(element));
     if (selected.length !== 1) {
       throw new Error(selected.length ? "请只选中一个组件" : "请先选中组件");
     }
+    return selected[0];
+  }
+
+  function findFieldsMoverContext(visibleOnly = false) {
+    const selected = selectedFieldsMoverComponent(visibleOnly);
     for (const [selector, fieldsKey] of [[".input-box", "fields"], [".coust-table", "columns"]]) {
-      const host = selected[0].querySelector(selector);
+      const host = selected.querySelector(selector);
       const vue = host && [host, ...host.querySelectorAll("*")]
         .map(getVueInstance)
         .find((item) => Array.isArray(item?.[fieldsKey]));
-      if (vue) return { vue, fieldsKey, fields: vue[fieldsKey], hiddenFields: Array.isArray(vue.hideFields) ? vue.hideFields : [] };
+      if (vue) return { vue, owner: vue, fieldsKey, fields: vue[fieldsKey],
+        hiddenFields: Array.isArray(vue.hideFields) ? vue.hideFields : [] };
     }
     throw new Error("当前组件不支持字段平移");
+  }
+
+  function findNativeFieldComponent(batch) {
+    const selected = selectedFieldsMoverComponent(true);
+    const hosts = Array.from(selected.children).filter(element => element.classList.contains(batch.componentType));
+    const component = hosts.length === 1 ? getVueInstance(hosts[0]) : null;
+    const table = batch.componentType === "table-main" || batch.componentType === "table-item";
+    // The designer retains the wrapper GUID and gives the editable lists to
+    // the child controls that the native PAGE serializer reads on save.
+    const tableBase = table ? component?.$refs?.gdTableBase : null;
+    const owner = table ? tableBase?.$refs?.table : component?.$refs?.gdInputBox;
+    const fields = table ? owner?.columns : owner?.fields;
+    const identity = {guid: component?.info?.guid, id: table ? tableBase?.form?.id : owner?.param?.id};
+    const identities = Object.entries(batch.componentIdentity);
+    if (!Array.isArray(fields) || !identities.every(([key, value]) => identity[key] === value))
+      throw new Error(`选中组件的原生身份无法与本地字段改动匹配，请选中 ${batch.component}`);
+    return {vue: owner, owner, fields, hiddenFields: Array.isArray(owner.hideFields) ? owner.hideFields : []};
   }
 
   function getFieldsMoverLabel(field, index) {
@@ -1047,9 +1072,9 @@
   }
 
   function appendFields(context, entries) {
-    if (entries.some(entry => entry.hidden) && !Array.isArray(context.vue.hideFields)) {
-      if (context.vue.$set) context.vue.$set(context.vue, "hideFields", context.hiddenFields);
-      else context.vue.hideFields = context.hiddenFields;
+    if (entries.some(entry => entry.hidden) && !Array.isArray(context.owner.hideFields)) {
+      if (context.vue.$set) context.vue.$set(context.owner, "hideFields", context.hiddenFields);
+      else context.owner.hideFields = context.hiddenFields;
     }
     entries.forEach(({ field, hidden }) => {
       (hidden ? context.hiddenFields : context.fields).push(field);
@@ -1058,8 +1083,8 @@
 
   function planLocalFieldBatch(batch) {
     if (getCurrentPageCode() !== batch.pageId) throw new Error(`请打开对应的谷神页面 ${batch.pageId}`);
-    const context = findFieldsMoverContext(true);
-    if ((context.fieldsKey === "fields") !== (batch.componentType === "input-box"))
+    const context = batch.componentIdentity ? findNativeFieldComponent(batch) : findFieldsMoverContext(true);
+    if (!batch.componentIdentity && (context.fieldsKey === "fields") !== (batch.componentType === "input-box"))
       throw new Error("选中组件的类型与本地字段改动不匹配");
     const plan = window.GuthonFieldsMoverCore.planFieldBatch([...context.fields, ...context.hiddenFields], batch);
     return {context, plan};
@@ -2424,5 +2449,5 @@
       delete window.GuthonProcedureNavigation;
     }
   };
-  window.__guthonPageBridgeReady = "20261127";
+  window.__guthonPageBridgeReady = "20261127.3";
 })();

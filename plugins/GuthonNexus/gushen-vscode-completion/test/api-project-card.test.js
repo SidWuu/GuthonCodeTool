@@ -189,6 +189,29 @@ test('an explicit expired session removes the authenticated card instead of trus
   let expired=false;const state={settings:{serverUrl:'https://project.invalid',systemIds:['A'],allSystems:false},lastLogin:{userName:'old'}};
   const provider=new ProjectCardProvider({context:{extensionPath:require('node:path').resolve(__dirname,'..')},vscode:{},getWorkspaces:async()=>[{workspaceKey:'projects.A',name:'A'}],api:{readProjectSummary:async()=>state,run:async()=>expired?{authenticated:false}:{authenticated:true,session:{userName:'old'}}}});
   provider.view={webview:{html:''}};await provider.refresh();expired=true;await provider.refresh();assert(provider.view.webview.html.includes('id="login-form"'));assert(!provider.view.webview.html.includes('data-action="pull"'));
+  assert.match(provider.view.webview.html,/id="account"[^>]*value=""/);
+  assert.doesNotMatch(provider.view.webview.html,/value="old"/);
+});
+
+test('the API login form fills the submitted account after logout and refreshes a changed account',async()=>{
+  const workspace={workspaceKey:'projects.A',name:'A'};
+  const state={settings:{serverUrl:'https://project.invalid',systemIds:['A'],allSystems:false},lastLogin:{userName:'测试用户'}};
+  let authentication={authenticated:true,session:{userName:'测试用户'}};
+  const provider=new ProjectCardProvider({context:{extensionPath:path.resolve(__dirname,'..')},vscode:{},
+    getWorkspaces:async()=>[workspace],api:{readProjectSummary:async()=>state,run:async()=>authentication}});
+  provider.view={webview:{html:''}};
+  await provider.refresh();
+  assert.match(provider.view.webview.html,/<dt>用户<\/dt><dd title="测试用户">测试用户<\/dd>/);
+
+  authentication={authenticated:false};
+  state.loginId='00100000000';
+  await provider.refresh();
+  assert.match(provider.view.webview.html,/id="account"[^>]*value="00100000000"/);
+  assert.doesNotMatch(provider.view.webview.html,/value="测试用户"/);
+  state.loginId='00200000000';
+  await provider.refresh();
+  assert.match(provider.view.webview.html,/id="account"[^>]*value="00200000000"/);
+  provider.dispose();
 });
 
 

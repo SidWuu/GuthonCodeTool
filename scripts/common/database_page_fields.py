@@ -8,7 +8,7 @@ from common.page_comparison import baseline_pointer
 from common.page_projection import pointer_value
 
 
-_KINDS = {"input-box": "FIELD", "table-main": "COLUMN", "table-item": "COLUMN"}
+_KINDS = {"input-box": "FIELD", "search-box": "FIELD", "table-main": "COLUMN", "table-item": "COLUMN"}
 _STRUCTURAL_PROPERTIES = {"fieldId", "type", "tbId", "fdId", "parentFieldId", "childFieldId", "colGroupType"}
 _ABSENT = object()
 
@@ -74,8 +74,12 @@ def field_batches(before, after):
         stable = {code: _identity(field) for code, (field, _) in old_fields.items()
                   if code in new_fields and _identity(field) == _identity(new_fields[code][0])}
         anchors = [identity for identity in stable.values() if len(identity) > 1]
-        if not anchors:
-            continue
+        component_identity = {}
+        if not anchors or component_type == "search-box":
+            component_identity = {key: previous[key] for key in ("id", "guid")
+                                  if isinstance(previous.get(key), str) and previous[key].strip()}
+            if not component_identity or any(component.get(key) != value for key, value in component_identity.items()):
+                continue
         old_ids = {value for field, _ in old_fields.values() for key, value in _identity(field).items()
                    if key != "fieldId"}
         updates, additions = [], []
@@ -99,4 +103,5 @@ def field_batches(before, after):
             yield ({"pointer": pointer, "label": label, "updated": len(updates), "added": len(additions)},
                    {"format": "guthon-database-page-fields-v1", "pageId": after["pageId"],
                     "component": label, "componentType": component_type, "anchors": anchors,
+                    **({"componentIdentity": component_identity} if component_identity else {}),
                     "updates": updates, "additions": additions})

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from common import index_schema_comments, source_facts, identity_search, source_changes
 from common.command_errors import CommandError
+from common.directory_links import create_directory_link, is_directory_link
 from common.persistence import file_lock
 from common.operation_control import OperationCancelled, checkpoint, publication_barrier
 from common.source_store import source_transaction, prepare_path
@@ -2112,23 +2113,21 @@ def _sync_layer(conn, cfg, layer_cfg, layer, scope_id, project_id, sync_from, st
             "SELECT state_value FROM gusen_sync_state WHERE state_key='database_source_scope'"
         ).fetchone()
         scope_changed = not previous_scope or previous_scope[0] != scope_state
-        write_scope = system_scope
+        readonly = workspace["readonlyDir"].resolve()
+        aliases = _procedure_aliases(readonly, system_scope)
         if scope_changed:
             sync_from = stats["sync_from"] = "1970-01-01 00:00:00"
             if on_progress is not None:
                 on_progress("同步范围变化，按新范围读取全量源码并清理退出范围的只读副本")
-            aliases = _procedure_aliases(workspace["readonlyDir"], system_scope)
-            for link in workspace["readonlyDir"].glob("*/procedure"):
-                if not link.is_symlink() or link.parent.is_symlink() or link.resolve() == aliases.get(link):
+            for link in readonly.glob("*/procedure"):
+                if is_directory_link(link.parent) or not is_directory_link(link):
                     continue
-                relative = Path(os.readlink(link))
-                if len(relative.parts) == 3 and relative.parts[0] == ".." and relative.name == "procedure":
+                target = _procedure_alias_target(link)
+                if target is not None and target != aliases.get(link):
                     prepare_path(link, allow_link=True)
-            for name in system_scope.get("system_name_by_data_source_id", {}).values():
-                primary = workspace["readonlyDir"] / path_part(name) / "procedure"
-                if primary.is_symlink() or primary.parent.is_symlink():
-                    raise CommandError("DATABASE_SCOPE_PATH_OCCUPIED", f"过程函数目录含未登记的链接：{primary}")
-            write_scope = {**system_scope, "system_link_names_by_data_source_id": {}}
+        for name in system_scope.get("system_name_by_data_source_id", {}).values():
+            _require_physical_procedure_directory(readonly / path_part(name) / "procedure")
+        write_scope = {**system_scope, "system_link_names_by_data_source_id": {}}
         if on_progress is not None:
             window = "全量" if sync_from == "1970-01-01 00:00:00" else f"增量起点 {sync_from}"
             on_progress(f"本次同步窗口 · {window}")
@@ -2166,14 +2165,10 @@ def _sync_layer(conn, cfg, layer_cfg, layer, scope_id, project_id, sync_from, st
         stats["deleted"] = stats.get("deleted", 0) + reconcile_deleted_pages(conn, layer, scope_id, project_id, current_page_ids, workspace)
         if scope_changed:
             stats["deleted"] += _prune_procedures(conn, workspace, system_scope["data_source_ids"])
-            for link, target in aliases.items():
-                if not target.is_dir() or (link.is_symlink() and link.resolve() == target):
-                    continue
-                if link.exists() and (not link.is_dir() or any(link.iterdir())):
-                    raise CommandError("DATABASE_SCOPE_PATH_OCCUPIED", f"共享过程函数目录含未登记的本地文件：{link}")
-                prepare_path(link, allow_link=True)
-                link.parent.mkdir(parents=True, exist_ok=True)
-                link.symlink_to(os.path.relpath(target, link.parent), target_is_directory=True)
+        for link, target in aliases.items():
+            if target.is_dir():
+                _ensure_procedure_alias(link, target)
+        if scope_changed:
             conn.execute("INSERT OR REPLACE INTO gusen_sync_state(state_key,state_value) VALUES(?,?)",
                          ("database_source_scope", scope_state))
         if on_progress is not None:
@@ -2218,13 +2213,20 @@ def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scop
         (layer, scope_id, project_id, row["source_table"], row["source_id"], row["fun_id"] or ""),
     ).fetchone()
     desired_path = source_base(row, layer, scope_id, project_id, layer_cfg, system_scope, workspace)
+    procedure = row["source_table"] != PAGE_SOURCE_TYPE
+    if procedure:
+        _require_physical_procedure_directory(desired_path.parent.parent)
     if existing and existing["change_key"] == change_key and not force:
         indexed_path = ROOT / existing["local_path"] if existing["local_path"] else None
         if indexed_path.resolve() == desired_path.resolve() and desired_path.exists() and all(
             path.is_file() for path in _source_output_paths(row, desired_path)
         ):
+            if procedure:
+                _ensure_shared_procedure_aliases(desired_path.parent.parent, row, system_scope)
             return False
     local_path, status, scripts = write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, change_key, workspace)
+    if procedure:
+        _ensure_shared_procedure_aliases(local_path.parent.parent, row, system_scope)
     if existing and existing["local_path"]:
         old_path = ROOT / existing["local_path"]
         if old_path.resolve() != local_path.resolve():
@@ -2313,9 +2315,13 @@ def remove_source_path(path: Path, workspace=None):
     prepare_path(target)
     if target.exists():
         shutil.rmtree(target)
-    page_root = next((parent for parent in target.parents if parent.name == "page"), None)
+    procedure_root = target.parent.parent
+    if procedure_root.name == "procedure" and procedure_root.parent.parent == root:
+        category_root = procedure_root
+    else:
+        category_root = next((parent for parent in target.parents if parent.name == "page"), None)
     parent = target.parent
-    while page_root and parent != page_root:
+    while category_root and parent != category_root:
         try:
             parent.rmdir()
         except OSError:
@@ -2399,10 +2405,6 @@ def source_base(row, layer, scope_id, project_id, layer_cfg, system_scope, works
 
 def write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, change_key, workspace=None):
     base = source_base(row, layer, scope_id, project_id, layer_cfg, system_scope, workspace)
-    if row["source_table"] != PAGE_SOURCE_TYPE:
-        system_name = _system_name(row, system_scope)
-        layer_root = readonly_layer_root(layer, scope_id, project_id, layer_cfg, workspace)
-        _link_shared_procedure_dirs(layer_root, system_name, row, system_scope)
     prepare_path(base)
     if base.exists():
         shutil.rmtree(base)
@@ -3227,29 +3229,61 @@ def _source_alias_id(row):
 
 
 def _procedure_aliases(root, scope):
-    return {
-        root / path_part(name) / "procedure": root / path_part(primary) / "procedure"
-        for identifier, primary in scope.get("system_name_by_data_source_id", {}).items()
-        for name in scope.get("system_link_names_by_data_source_id", {}).get(identifier, [])
-        if path_part(name) != path_part(primary)
-    }
+    aliases = {}
+    names_by_datasource = scope.get("system_link_names_by_data_source_id", {})
+    for identifier, primary in scope.get("system_name_by_data_source_id", {}).items():
+        target = root / path_part(primary) / "procedure"
+        for name in names_by_datasource.get(identifier, []):
+            link = root / path_part(name) / "procedure"
+            if link != target:
+                aliases[link] = target
+    return aliases
 
 
-def _link_shared_procedure_dirs(layer_root, system_name, row, scope):
-    link_names = scope.get("system_link_names_by_data_source_id", {}).get(_str(row.get("data_source_id")), [])
-    target = layer_root / path_part(system_name) / "procedure"
-    for link_name in link_names:
-        link = layer_root / path_part(link_name) / "procedure"
-        if link == target:
-            continue
-        if link.is_symlink() and link.resolve() == target:
-            continue
+def _procedure_alias_target(link):
+    raw_target = os.readlink(link)
+    if os.name == "nt":
+        if raw_target.startswith("\\\\?\\UNC\\"):
+            raw_target = "\\\\" + raw_target[8:]
+        elif raw_target.startswith("\\\\?\\") and Path(raw_target).drive.endswith(":"):
+            raw_target = raw_target[4:]
+    target = Path(os.path.abspath(link.parent / raw_target))
+    if target.parent.parent == link.parent.parent and target == target.parent / "procedure" and target != link:
+        return target
+    return None
+
+
+def _require_physical_procedure_directory(path):
+    if is_directory_link(path) or is_directory_link(path.parent):
+        raise CommandError("DATABASE_SCOPE_PATH_OCCUPIED", f"过程函数目录含未登记的链接：{path}")
+
+
+def _ensure_shared_procedure_aliases(target, row, scope):
+    names = scope.get("system_link_names_by_data_source_id", {}).get(_str(row.get("data_source_id")), [])
+    for name in names:
+        link = target.parent.parent / path_part(name) / "procedure"
+        if link != target:
+            _ensure_procedure_alias(link, target)
+
+
+def _ensure_procedure_alias(link, target):
+    if is_directory_link(link.parent):
+        raise CommandError("DATABASE_SCOPE_PATH_OCCUPIED", f"共享过程函数的子系统目录是链接：{link.parent}")
+    if is_directory_link(link):
+        existing_target = _procedure_alias_target(link)
+        if existing_target == target and link.is_dir():
+            return
+        occupied = existing_target is None
+    else:
+        occupied = link.exists() and (not link.is_dir() or any(link.iterdir()))
+    if occupied:
+        raise CommandError("DATABASE_SCOPE_PATH_OCCUPIED", f"共享过程函数目录含未登记的本地文件或链接：{link}")
+    prepare_path(link, allow_link=True)
+    try:
         link.parent.mkdir(parents=True, exist_ok=True)
-        if link.is_symlink():
-            link.unlink()
-        elif link.exists():
-            shutil.rmtree(link)
-        os.symlink(os.path.relpath(target, link.parent), link, target_is_directory=True)
+        create_directory_link(link, target)
+    except OSError as error:
+        raise CommandError("DATABASE_PROCEDURE_LINK_FAILED", f"创建共享过程函数目录链接失败：{link} → {target}：{error}") from error
 
 
 def _system_name(row, scope):

@@ -260,7 +260,7 @@ def _run(command, args, config, workspace):
 
             if len(args) != 1 or mode != "database" or not workspace["capabilities"].get("workcopy.open"):
                 raise ValueError("DATABASE Workcopy source editing is unavailable")
-            result = workcopy_edit(workspace, config, args[0], json.load(sys.stdin))
+            result = workcopy_edit(workspace, config, args[0], json.load(sys.stdin), rebind_index_record=True)
             print(json.dumps({"ok": True, **result}, ensure_ascii=False))
             return 0
         from common import legacy_source_read

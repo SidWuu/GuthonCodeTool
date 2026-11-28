@@ -521,6 +521,57 @@ test('closed pages defer status comparisons until reopened while preserving thei
   assert.equal(session.draft.operations()[0].content,'unsaved');
 });
 
+test('reopening a DATABASE PAGE compares the current Workcopy and keeps independent draft changes', async () => {
+    const f = hostFixture();
+    const identity = {...f.identity, sourceMode: 'database'};
+    const host = new PageEditorController(f);
+    const session = await host.open(identity);
+    session.draft.property('/views/0/fields', 'fieldId:A', 'label', '窗口草稿');
+    session.panel.dispose();
+    await session.persistence;
+
+    const file = clone(source);
+    file.views[0].datasource.sql = 'select 2';
+    f.snapshot.sourceText = JSON.stringify(file);
+    f.snapshot.model.nodes[1].content = 'select 2';
+    f.snapshot.sourceHash = 'c'.repeat(64);
+    f.calls.length = 0;
+
+    assert.equal(await host.open(identity), session);
+    assert.deepEqual(f.calls.map(({payload}) => payload.action), ['open', 'comparison']);
+    assert.equal(f.calls[1].payload.sourceHash, f.snapshot.sourceHash);
+    assert.equal(session.baselineComparison.sourceHash, f.snapshot.sourceHash);
+    assert.equal(session.draft.model.nodes[1].content, 'select 2');
+    assert.equal(session.draft.operations()[0].value, '窗口草稿');
+    assert.equal([...f.store.values()][0].operations[0].value, '窗口草稿');
+    host.dispose();
+});
+
+test('opening an existing DATABASE PAGE reports conflicts without overwriting the draft', async () => {
+    const f = hostFixture();
+    const identity = {...f.identity, sourceMode: 'database'};
+    const host = new PageEditorController(f);
+    const session = await host.open(identity);
+    session.draft.text('sql', 'select draft');
+    const file = clone(source);
+    file.views[0].datasource.sql = 'select saved';
+    f.snapshot.sourceText = JSON.stringify(file);
+    f.snapshot.model.nodes[1].content = 'select saved';
+    f.snapshot.sourceHash = 'c'.repeat(64);
+    f.calls.length = 0;
+
+    assert.equal(await host.open(identity), session);
+    assert.equal(f.panels.length, 1);
+    assert.equal(session.sourceStale, true);
+    assert.equal(session.panel.latest.editable, false);
+    assert.equal(session.sourceMerge.evidence.conflicts[0].file, 'select saved');
+    assert.equal(session.draft.operations()[0].content, 'select draft');
+    await host.message(session, {type: 'compare'});
+    assert.deepEqual(f.calls.map(({payload}) => payload.action), ['open']);
+    assert.match(session.baselineComparison.message, /外部修改冲突/);
+    host.dispose();
+});
+
 test('disposing the controller settles a pending status refresh without reading a disposed page',async()=>{
   const f=hostFixture(),host=new PageEditorController(f);
   await host.open(f.identity);f.calls.length=0;
