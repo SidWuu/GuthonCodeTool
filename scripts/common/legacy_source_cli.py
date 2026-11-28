@@ -255,13 +255,35 @@ def _run(command, args, config, workspace):
             result=sync(workspace,config,json.load(sys.stdin),_database_progress)
             print(json.dumps({"ok":True,"workspaceKey":workspace["workspaceKey"],**result},ensure_ascii=False))
             return 0
-        if args and args[0] in {"edit-read","edit-preview","edit-save","edit-comparison"}:
+        if args and args[0] in {"edit-read", "edit-preview", "edit-save", "edit-comparison",
+                                 "publish-preview", "publish-confirm"}:
             from common.database_workcopy_edit import run as workcopy_edit
 
             if len(args) != 1 or mode != "database" or not workspace["capabilities"].get("workcopy.open"):
                 raise ValueError("DATABASE Workcopy source editing is unavailable")
             result = workcopy_edit(workspace, config, args[0], json.load(sys.stdin), rebind_index_record=True)
             print(json.dumps({"ok": True, **result}, ensure_ascii=False))
+            return 0
+        if args == ["publish-refresh"]:
+            from common.database_node_sync import sync_verified_procedure
+
+            if mode != "database" or not workspace["capabilities"].get("database.sourceSync"):
+                raise ValueError("当前工作区不支持 DATABASE 发布回拉")
+            evidence = json.load(sys.stdin)
+            if evidence.get("workspaceKey") != workspace["workspaceKey"]:
+                raise ValueError("发布回拉工作区不一致")
+            result = sync_verified_procedure(workspace, config, evidence["databaseIdentity"],
+                                             base_version=evidence["baseVersion"], database_version=evidence["version"],
+                                             content=evidence["content"], advance_workcopy=True)
+            print(json.dumps({"ok": True, "workspaceKey": workspace["workspaceKey"], **result}, ensure_ascii=False))
+            return 0
+        if args == ["review-workcopies"]:
+            from common.database_source_publish import reviewable_workcopies
+
+            if mode != "database" or not workspace["capabilities"].get("workcopy.open"):
+                raise ValueError("当前工作区不支持 DATABASE 副本审阅")
+            print(json.dumps({"ok": True, "workspaceKey": workspace["workspaceKey"],
+                              "items": reviewable_workcopies(workspace)}, ensure_ascii=False))
             return 0
         from common import legacy_source_read
         parser = argparse.ArgumentParser(prog="guthon_tool.py legacy-source")

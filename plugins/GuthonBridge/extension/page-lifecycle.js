@@ -3,19 +3,50 @@ async function runPageLifecycle(payload) {
     let dispatched = false;
     const clean = value => Object.fromEntries(['pageId', 'pageType', 'pageName', 'pageAliasId', 'title', 'systemId', 'mkId', 'version', 'isProduct', 'accessTag', 'bntAuth', 'runInTran', 'isCanInter', 'isTextResponse']
       .filter(key => ['string', 'number', 'boolean'].includes(typeof value?.[key])).map(key => [key, value[key]]));
-    const checked = async (url, body) => {
+    const checked = async (url, body, {allowEmpty = false} = {}) => {
       const response = await fetch(url, {method:'POST', credentials:'include',
         headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
         body:new URLSearchParams(Object.entries(body).filter(([,value])=>value !== undefined && value !== null).map(([key,value])=>[key,String(value)])),
         signal:AbortSignal.timeout(30000)});
-      if (!response.ok) throw new Error('平台请求失败');
-      const result = await response.json();
-      if (result.code && result.code !== 0) throw new Error(String(result.message || '平台拒绝 PAGE 操作').slice(0, 512));
-      if (!result.data || typeof result.data !== 'object') throw new Error('平台没有返回有效数据回执');
+      const endpoint = url.split('/').at(-1);
+      if (!response.ok) throw new Error(`${endpoint} 返回 HTTP ${response.status}`);
+      const raw = await response.text();
+      if (!raw.trim()) {
+        if (allowEmpty) return null;
+        throw new Error(`${endpoint} 返回空响应`);
+      }
+      let result;
+      try { result = JSON.parse(raw); }
+      catch { throw new Error(`${endpoint} 未返回有效 JSON`); }
+      if (result?.code && result.code !== 0) throw new Error(String(result.message || '平台拒绝 PAGE 操作').slice(0, 512));
+      if (!result?.data || typeof result.data !== 'object') throw new Error(`${endpoint} 未返回有效数据回执`);
       return result.data;
     };
+    function locatePageInModules(instances, pageId) {
+      const pending = instances.flatMap(vm => Array.isArray(vm.modules) ? vm.modules : []);
+      const seen = new Set(), matches = [];
+      while (pending.length) {
+        const item = pending.pop();
+        if (!item || typeof item !== 'object' || seen.has(item)) continue;
+        if (seen.size >= 10000) throw new Error('已加载的模块树超出 PAGE 身份核对范围');
+        seen.add(item);
+        if (item.pageId === pageId && item.systemId) {
+          matches.push(item);
+          continue;
+        }
+        for (const value of Object.values(item)) {
+          if (value && typeof value === 'object') pending.push(value);
+        }
+      }
+      if (matches.length !== 1) throw new Error('PAGE 基本信息为空，模块树未提供唯一的 PAGE 身份');
+      return matches[0];
+    }
     try {
       if (!['inspect', 'create', 'copy', 'delete'].includes(payload?.action)) throw new Error('无效 PAGE 生命周期操作');
+      const pointer = payload.sourcePointer;
+      if (pointer !== undefined && (payload.action !== 'inspect' || pointer !== '/compScript' || !payload.pageId)) {
+        throw new Error('只读服务 PAGE 正文需要精确 PAGE ID 和 /compScript');
+      }
       if (location.origin !== payload.expectedOrigin || !/\/guthon\//.test(location.pathname)) throw new Error('平台来源或路径已变化');
       const instances = [...new Set(Array.from(document.querySelectorAll('*')).map(element => element.__vue__ || element.__vueParentComponent?.proxy).filter(Boolean))];
       const currentSystems = new Set(instances.map(instance => instance.$store?.state?.modeDev?.systemId).filter(Boolean));
@@ -36,16 +67,34 @@ async function runPageLifecycle(payload) {
           if (Array.isArray(node.children)) pending.push(...node.children);
         }
       }
-      let page, sourceVersion;
+      let page, sourceVersion, recoveredPageInfo = false, sourceContent;
       if (payload.pageId) {
         if (!/^PG-[A-Za-z0-9-]{1,96}$/.test(payload.pageId)) throw new Error('PAGE 身份无效');
-        page = (await checked('/develop/dev/pages/getPageBaseInfo.htm', {pageId:payload.pageId})).page;
+        const info = await checked('/develop/dev/pages/getPageBaseInfo.htm', {pageId:payload.pageId},
+          {allowEmpty:payload.action === 'inspect'});
+        recoveredPageInfo = info === null;
+        page = recoveredPageInfo ? locatePageInModules(instances, payload.pageId) : info.page;
         if (page?.pageId !== payload.pageId || !systems.has(page.systemId)) throw new Error('PAGE 不属于当前平台系统上下文');
         const source = await checked('/develop/dev/pages/getPageModuleXml.htm', {pageId:payload.pageId});
         if (source.version === undefined || source.version === null) throw new Error('平台未返回 PAGE 源码版本，不能取得生命周期租约');
         sourceVersion = String(source.version);
+        if (recoveredPageInfo || pointer) {
+          const bean = source.bean;
+          if (bean?.pageId !== page.pageId || (bean.systemId && bean.systemId !== page.systemId)
+              || (bean.pageType != null && page.pageType != null && String(bean.pageType) !== String(page.pageType))
+              || (bean.pageAliasId && page.pageAliasId && bean.pageAliasId !== page.pageAliasId)) {
+            throw new Error('PAGE 原生源码与已核对的页面身份不一致');
+          }
+          if (pointer) {
+            if (String(bean.pageType) !== '0' || typeof bean.compScript !== 'string') throw new Error('平台未返回服务 PAGE 正文');
+            sourceContent = bean.compScript;
+            if (JSON.stringify(sourceContent).length > 20000) throw new Error('服务 PAGE 正文超出 Bridge 单次回读上限');
+          }
+        }
       }
-      if (payload.action === 'inspect') return {state:'SUCCEEDED', page:clean(page), sourceVersion, modules:[...modules.values()], systemIds:[...systems]};
+      if (payload.action === 'inspect') return {state:'SUCCEEDED', platformApplied:false, page:clean(page), sourceVersion,
+        ...(recoveredPageInfo ? {pageInfoSource:'module-tree'} : {}),
+        ...(pointer ? {sourcePointer:pointer, sourceContent} : {modules:[...modules.values()], systemIds:[...systems]})};
       if (['copy', 'delete'].includes(payload.action)) {
         if (!page || sourceVersion !== payload.expectedVersion) throw new Error('PAGE 源码版本已变化，请重新预览');
         const metadata = clean(page), expected = payload.expectedPage;

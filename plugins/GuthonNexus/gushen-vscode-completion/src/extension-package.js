@@ -76,7 +76,7 @@ function bridgeBundle(sourceRoot) {
   const files = new Map([
     ['bridge/server.js', Buffer.from('// GENERATED FILE - do not edit. Regenerate with: npm run build:bridge\n// Source: plugins/GuthonBridge/bridge/server.js\n' + original.replace(sourceImport, '../src/tool-process-client'))],
   ]);
-  for (const name of ['page-context.js', 'browser-updates.js', 'native-metadata.js', 'native-step-registry.js', 'native-source-plan.js']) files.set('bridge/' + name, fs.readFileSync(path.join(directory, name)));
+  for (const name of ['page-context.js', 'browser-updates.js', 'native-metadata.js', 'native-step-registry.js', 'native-source-plan.js', 'database-publication.js', 'database-source-publish.js']) files.set('bridge/' + name, fs.readFileSync(path.join(directory, name)));
   const bytes = fs.readFileSync(path.join(sourceRoot, 'scripts', 'common', 'command_metadata.json'));
   const metadata = JSON.parse(bytes.toString('utf8'));
   if (metadata.schemaVersion !== 1 || !Number.isInteger(metadata.defaultTimeoutMs) || metadata.defaultTimeoutMs <= 0) throw new Error('Invalid ToolHost command metadata');

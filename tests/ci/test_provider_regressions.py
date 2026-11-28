@@ -529,6 +529,141 @@ class SvnWorkspaceTest(WorkspaceCase):
         self.assertEqual([], scm.status(workspace)["changes"])
 
 
+class DatabaseWorkcopyBaselineTest(WorkspaceCase):
+    def test_controlled_saves_keep_original_baseline_and_untracked_changes_do_not_gain_one(self):
+        workspace = self.register("database")
+        key = workspace["workspaceKey"]
+        row = {"source_table": "procedure", "source_id": "FN-ROW", "fun_id": "sample",
+               "source_alias_id": "com.golden.sample", "source_name": "sample",
+               "source_content": "#return('original')", "version_mac": "db-v1",
+               "system_id": "SYS-FIXTURE", "data_source_id": "DS-1"}
+
+        def sync():
+            with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+                legacy_source.upsert_source(conn, row, "project", workspace["scopeId"],
+                                            workspace["projectId"], {}, {}, workspace=workspace)
+            item, = self.tool("legacy-source", key=key, args=["catalog", "--type", "procedure"])["items"]
+            return {field: item[field] for field in ("recordId", "sourceId", "sourcePath")}
+
+        def edit(action, **payload):
+            return self.tool("legacy-source", key=key, args=[action], payload={**identity, **payload})
+
+        identity = sync()
+        readonly = workspace["readonlyDir"] / identity["sourcePath"]
+        copy = workspace["workcopyDir"] / identity["sourcePath"]
+        opened = edit("edit-read")
+        saved = edit("edit-save", sourceHash=opened["sourceHash"], content="#return('first')")
+        row.update(source_content="#return('remote')", version_mac="db-v2")
+        identity = sync()
+        edit("edit-save", sourceHash=saved["sourceHash"], content="#return('second')")
+        diff = edit("edit-comparison")
+        self.assertTrue(diff["trustedBaseline"])
+        self.assertEqual("#return('original')", diff["baseContent"])
+        self.assertEqual("#return('second')", diff["content"])
+        item, = self.tool("legacy-source", key=key, args=["review-workcopies"])["items"]
+        self.assertEqual(identity["sourcePath"], item["sourcePath"])
+        self.assertTrue(item["trustedBaseline"])
+        preview = edit("publish-preview")
+        self.assertEqual("db-v1", preview["databaseBaseVersion"])
+        confirmed = edit("publish-confirm", sourceHash=preview["sourceHash"], reviewId=preview["reviewId"])
+        self.assertEqual(preview["content"], confirmed["content"])
+        from common.database_workcopy_edit import run as edit_workcopy
+        config = gusen_hub.load_config()
+        self.assertEqual("SYS-FIXTURE", preview["databaseIdentity"]["system_id"])
+        remapped = {**workspace, "systemMappings": {"other": {"system_id": "SYS-OTHER", "data_source_id": "DS-1"}}}
+        with self.assertRaisesRegex(ValueError, "基线或候选已变化"):
+            edit_workcopy(remapped, config, "publish-confirm", {
+                **identity, "sourceHash": preview["sourceHash"], "reviewId": preview["reviewId"],
+            })
+        edit("edit-save", sourceHash=confirmed["sourceHash"], content="#return('third')")
+        with self.assertRaisesRegex(ValueError, "源码已发生变化"):
+            edit_workcopy(workspace, gusen_hub.load_config(), "publish-confirm", {
+                **identity, "sourceHash": preview["sourceHash"], "reviewId": preview["reviewId"],
+            })
+        self.assertEqual("#return('remote')", readonly.read_text(encoding="utf-8"))
+        copy.write_text("#return('legacy')", encoding="utf-8")
+        opened = edit("edit-read")
+        edit("edit-save", sourceHash=opened["sourceHash"], content="#return('still unknown')")
+        diff = edit("edit-comparison")
+        self.assertFalse(diff["trustedBaseline"])
+        self.assertEqual("#return('remote')", diff["baseContent"])
+        self.assertEqual("#return('still unknown')", diff["content"])
+        from common.command_errors import CommandError
+        from common.workspace_config import change_source_mode, delete_workspace_config
+        for operation, payload in ((change_source_mode, {"expectedMode": "database", "sourceMode": "api"}),
+                                   (delete_workspace_config, {})):
+            with self.assertRaises(CommandError) as blocked:
+                operation(self.home, {"workspaceKey": key, "checkOnly": True, **payload}, gusen_hub)
+            self.assertEqual("DATABASE_WORKCOPY_DRAFTS_PENDING", blocked.exception.error_code)
+        copy.write_bytes(readonly.read_bytes())
+        self.assertTrue(delete_workspace_config(self.home, {"workspaceKey": key, "checkOnly": True}, gusen_hub)["ok"])
+        copy.write_text("#return('orphaned draft')", encoding="utf-8")
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+            conn.execute("DELETE FROM gusen_source_record WHERE source_id=?", (identity["sourceId"],))
+        self.assertEqual([], self.tool("legacy-source", key=key, args=["review-workcopies"])["items"])
+        with self.assertRaises(CommandError) as blocked:
+            delete_workspace_config(self.home, {"workspaceKey": key, "checkOnly": True}, gusen_hub)
+        self.assertEqual("DATABASE_WORKCOPY_DRAFTS_PENDING", blocked.exception.error_code)
+
+    def test_verified_refresh_waits_for_database_without_replacing_workcopy(self):
+        from unittest.mock import MagicMock
+        from common.database_node_sync import sync_verified_procedure
+
+        workspace = self.register("database")
+        row = {"source_table": "procedure", "source_id": "FN-ROW", "fun_id": "sample",
+               "source_alias_id": "com.golden.sample", "source_name": "sample", "data_source_id": "DS-1",
+               "source_content": "#return('old')", "version_mac": "v1"}
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn, conn:
+            legacy_source.upsert_source(conn, row, workspace["layer"], workspace["scopeId"],
+                                        workspace["projectId"], {}, {}, workspace=workspace)
+            conn.execute("INSERT OR REPLACE INTO gusen_sync_state(state_key,state_value) VALUES('last_success_time','unchanged')")
+        item, = self.tool("legacy-source", key=workspace["workspaceKey"], args=["catalog", "--type", "procedure"])["items"]
+        mirror = workspace["readonlyDir"] / item["sourcePath"]
+        draft = workspace["workcopyDir"] / item["sourcePath"]
+        draft.parent.mkdir(parents=True)
+        draft.write_text("#return('newer local draft')", encoding="utf-8")
+        identity = {"workspaceKey": workspace["workspaceKey"], **{name: row[name] for name in
+                    ("source_table", "source_id", "fun_id", "source_alias_id", "data_source_id")}}
+        config = gusen_hub.load_config()
+        remote = MagicMock()
+        cursor = remote.cursor.return_value.__enter__.return_value
+        saved = "#return('published')"
+        with (patch.object(legacy_source, "resolve_datasource", return_value=("fixture", {})),
+              patch.object(legacy_source, "db_connect", return_value=nullcontext(remote)),
+              patch.object(legacy_source, "resolve_system_scope", return_value={"data_source_ids": ["DS-1"]}),
+              patch.object(legacy_source, "_included", return_value=True)):
+            cursor.fetchall.return_value = [row]
+            self.assertEqual({"verified": False}, sync_verified_procedure(workspace, config, identity,
+                                                                         base_version="v1", database_version="v2", content=saved))
+            self.assertEqual("#return('old')", mirror.read_text(encoding="utf-8"))
+            cursor.fetchall.return_value = [{**row, "version_mac": "v2", "source_content": saved}]
+            self.assertEqual({"verified": False, "reason": "MIRROR_VERSION_CHANGED"},
+                             sync_verified_procedure(workspace, config, identity,
+                                                     base_version="different", database_version="v2", content=saved))
+            with patch.object(legacy_source, "resolve_system_scope", return_value={
+                    "data_source_ids": ["DS-1"], "system_name_by_data_source_id": {"DS-1": "Renamed"}}):
+                self.assertEqual({"verified": False, "reason": "MIRROR_PATH_CHANGED"},
+                                 sync_verified_procedure(workspace, config, identity,
+                                                         base_version="v1", database_version="v2", content=saved))
+            self.assertEqual({"verified": True, "workcopyState": "CONFLICT"},
+                             sync_verified_procedure(workspace, config, identity, base_version="v1",
+                                                     database_version="v2", content=saved, advance_workcopy=True))
+            sql, params = cursor.execute.call_args.args
+            self.assertIn("LIMIT 2", sql)
+            self.assertIn("VERSION_MAC", sql.split("WHERE", 1)[1].split("ORDER BY", 1)[0])
+            self.assertNotIn("CHECK_IN_DATE", sql.split("WHERE", 1)[1].split("ORDER BY", 1)[0])
+            self.assertEqual(["v2", "FN-ROW", "sample", "com.golden.sample", "DS-1"], params)
+            cursor.execute.assert_any_call("SET TRANSACTION READ ONLY")
+            ordinary_sql, ordinary_params = legacy_source.single_source_sql(
+                config["source_tables"], "procedure", {"sourceId": "FN-ROW", "funId": "sample"})
+            self.assertIn("CHECK_IN_DATE", ordinary_sql.split("WHERE", 1)[1].split("ORDER BY", 1)[0])
+            self.assertEqual(["FN-ROW", "sample"], ordinary_params)
+        self.assertEqual(saved, mirror.read_text(encoding="utf-8"))
+        self.assertEqual("#return('newer local draft')", draft.read_text(encoding="utf-8"))
+        with closing(legacy_source.connect_index_for_workspace(workspace)) as conn:
+            self.assertEqual("unchanged", conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='last_success_time'").fetchone()[0])
+
+
 class DatabasePageEditorTest(WorkspaceCase):
     def test_default_editor_uses_page_type_and_saves_service_script_to_workcopy(self):
         workspace = self.register("database")

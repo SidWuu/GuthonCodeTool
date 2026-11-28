@@ -13,8 +13,8 @@ test('pageContext and SSE require Bearer, reject web Origin and recheck workspac
 require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
  const r=JSON.parse(line), p=r.input;
  if(r.command!=='route' || JSON.stringify(p).includes('PRIVATE'))process.exit(3);
- const valid=p.workspaceKey==='products.demo' && p.pageOrigin==='https://platform.test' && ['DS-1','DS-2','DS-3'].includes(p.dataSourceId);
- process.stdout.write(JSON.stringify({type:'result',id:r.id,ok:valid,...(valid?{result:{ok:true,workspaceKey:p.workspaceKey,workspace:{capabilities:{'source.read':p.dataSourceId!=='DS-3','api.edit':p.dataSourceId==='DS-1','svn.edit':p.dataSourceId==='DS-1'}}}}:{error:{message:'Page identity does not match workspace'}})})+'\\n');
+ const valid=p.workspaceKey==='products.demo' && p.pageOrigin==='https://platform.test' && ['DS-1','DS-2','DS-3','DS-DB'].includes(p.dataSourceId);
+ process.stdout.write(JSON.stringify({type:'result',id:r.id,ok:valid,...(valid?{result:{ok:true,workspaceKey:p.workspaceKey,workspace:{sourceMode:p.dataSourceId==='DS-DB'?'database':'svn',capabilities:{'database.sourceSync':p.dataSourceId==='DS-DB','source.read':p.dataSourceId!=='DS-3','api.edit':p.dataSourceId==='DS-1','svn.edit':p.dataSourceId==='DS-1'}}}}:{error:{message:'Page identity does not match workspace'}})})+'\\n');
 });`);
   const port = 17548;
   const child = spawn(process.execPath, ['server.js'], {cwd: __dirname,
@@ -82,6 +82,36 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
     const noRead = await (await post('/pageContext',{...payload,tabId:3,metadata:{dataSourceId:'DS-3'}})).json();
     assert.equal((await post('/pageLifecycle',{contextId:noRead.context.contextId,workspaceKey:payload.workspaceKey,target:{action:'inspect',pageId:''}})).status,400);
     assert.equal((await post('/pageLifecycle',{contextId:published.context.contextId,workspaceKey:'projects.other',target:{action:'inspect',pageId:''}})).status,400);
+    const db = {...payload,tabId:4,metadata:{mode:'procedure',systemId:'SYS-DB',dataSourceId:'DS-DB'}};
+    const {context:dbContext} = await (await post('/pageContext',db)).json();
+    const dbTarget = {action:'inspect-database-procedure',systemId:'SYS-DB',dataSourceId:'DS-DB',
+      procedureAlias:'com.golden.example',funId:'sample'};
+    const request = {workspaceKey:db.workspaceKey,contextId:dbContext.contextId,target:dbTarget};
+    assert.equal((await post('/databaseProcedurePreflight',{...request,target:{...dbTarget,dataSourceId:'DS-1'}})).status,400);
+    assert.equal((await post('/databaseProcedurePreflight',{...request,target:{...dbTarget,content:'no writes'}})).status,400);
+    assert.equal((await post('/nativeMetadata',{...metadataPayload,target:dbTarget})).status,400);
+    assert.equal((await post('/databaseProcedurePreflight',{...request,target:{...dbTarget,includeSourceHash:'true'}})).status,400);
+    const dbAccepted = await (await post('/databaseProcedurePreflight',request)).json();
+    assert.equal(dbAccepted.state,'PENDING',JSON.stringify(dbAccepted));
+    assert.match(new TextDecoder().decode((await reader.read()).value),/inspect-database-procedure/);
+    await post('/navigationResult',{...db,requestId:dbAccepted.requestId,ok:true,data:{state:'SUCCEEDED',platformApplied:false,
+      after:{...dbTarget,origin:db.pageOrigin,procedureId:'PR-1',version:'v1',funScript:'must not leak'}}});
+    const result = await (await fetch(base+`/navigationResult?workspaceKey=${db.workspaceKey}&requestId=${dbAccepted.requestId}`,{headers})).json();
+    assert.equal(result.data.after.procedureId,'PR-1');
+    assert.equal(result.data.after.funScript,undefined);
+    const withSource = {...request,target:{...dbTarget,includeSourceHash:true}};
+    for (const contentHash of ['a'.repeat(64), undefined]) {
+      const accepted = await (await post('/databaseProcedurePreflight',withSource)).json();
+      assert.equal(accepted.state,'PENDING');
+      assert.match(new TextDecoder().decode((await reader.read()).value),/includeSourceHash/);
+      const readback = await (await post('/navigationResult',{...db,requestId:accepted.requestId,ok:true,
+        data:{state:'SUCCEEDED',platformApplied:false,sourceContent:'must not leak',
+          after:{...dbTarget,origin:db.pageOrigin,procedureId:'PR-1',version:'v1',contentHash}}})).json();
+      assert.equal(readback.state,contentHash ? 'SUCCEEDED' : 'FAILED');
+      assert.equal(readback.data.after?.contentHash,contentHash);
+      assert.equal(JSON.stringify(readback).includes('must not leak'),false);
+    }
+    await post('/removePageContext',{clientId:db.clientId,tabId:4});
     await post('/removePageContext',{clientId:payload.clientId,tabId:3});
     await post('/removePageContext',{clientId:payload.clientId,tabId:2});
     await post('/removePageContext', {clientId: payload.clientId, tabId: 1});

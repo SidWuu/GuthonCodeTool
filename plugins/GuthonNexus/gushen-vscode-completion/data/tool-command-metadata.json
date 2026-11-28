@@ -308,7 +308,7 @@
     },
     "legacy-source": {
       "kind": "read",
-      "writeArguments": ["edit-save","sync-node"],
+      "writeArguments": ["edit-save","sync-node","publish-refresh"],
       "timeoutMs": 120000
     }
   },
