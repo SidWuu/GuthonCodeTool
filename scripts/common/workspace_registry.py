@@ -328,6 +328,7 @@ def update_workspace_state(
 def workspace_agent_context(config, workspace):
     result = {
         "ok": True,
+        "directSourceEdit": True,
         "workspaceKey": workspace["workspaceKey"],
         "root": str(workspace["root"]),
         "checkoutPath": str(workspace["checkoutPath"]) if workspace['checkoutPath'] else '',
@@ -365,6 +366,8 @@ def workspace_agent_context(config, workspace):
             ],
         },
     }
+    if workspace['sourceMode'] == 'database':
+        result['workcopySaveReceiptDirs'] = [str(path) for path in workspace['workcopySaveReceiptDirs']]
     if workspace['sourceMode'] != 'api':
         command = 'svn' if workspace['sourceMode'] == 'svn' else 'query'
         args = ['find', '--keyword', '<关键词>'] if command == 'svn' else ['find', '<关键词>']
@@ -511,9 +514,29 @@ def route_workspace_request(config, request):
             "candidates": [workspace_summary(config, x) for x in matches],
         }
     selected = matches[0]
+    summary = workspace_summary(config, selected)
+    procedure_context = {}
+    if (selected["sourceMode"] == "database" and request.get("workspaceKey") == selected["workspaceKey"]
+            and request.get("mode") == "procedure" and request.get("pageOrigin") in selected["pageOrigins"]
+            and not request.get("systemId") and not request.get("systemIds")):
+        data_source = request.get("dataSourceId")
+        if isinstance(data_source, str) and data_source and all(
+                value == data_source for value in request.get("dataSourceIds") or []):
+            from common import legacy_source
+
+            scope = legacy_source.resolve_system_scope(None, config, selected["datasourceName"],
+                                                       selected, allow_remote=False) or {}
+            known_systems = set(scope.get("system_ids_by_data_source_id", {}).get(data_source, ()))
+            configured_systems = {
+                mapping["system_id"] for mapping in selected["systemMappings"].values()
+                if isinstance(mapping, dict) and mapping.get("data_source_id") == data_source
+                and isinstance(mapping.get("system_id"), str) and mapping["system_id"]
+            }
+            procedure_context["databaseProcedureSystemIds"] = sorted(known_systems | configured_systems) if known_systems else []
     return {
         "ok": True,
         "workspaceKey": selected["workspaceKey"],
-        "workspace": workspace_summary(config, selected),
-        **workspace_summary(config, selected),
+        "workspace": summary,
+        **summary,
+        **procedure_context,
     }

@@ -1,4 +1,4 @@
-function selectUploadFiles(vscode, entries, openDiff) {
+function selectUploadFiles(vscode, entries, openDiff, {selectAll = true} = {}) {
   const picker = vscode.window.createQuickPick();
   picker.title = '审阅并选择要上传的源码';
   picker.placeholder = '勾选本次文件；点击右侧差异按钮核对内容，回车后确认上传';
@@ -12,7 +12,7 @@ function selectUploadFiles(vscode, entries, openDiff) {
     path: entry.path,
     buttons: [{iconPath: new vscode.ThemeIcon('diff'), tooltip: '查看本地差异'}],
   }));
-  picker.selectedItems = picker.items;
+  picker.selectedItems = selectAll ? picker.items : [];
   return new Promise(resolve => {
     let finished = false;
     const subscriptions = [];

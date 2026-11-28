@@ -29,7 +29,8 @@ def build(destination: Path) -> Path:
             shutil.copy2(source, target)
         (stage / "scripts").mkdir(exist_ok=True)
         shutil.copy2(ROOT / "scripts" / "vault_crypto.mjs", stage / "scripts" / "vault_crypto.mjs")
-        shutil.copy2(ROOT / "scripts" / "common" / "command_metadata.json", stage / "common" / "command_metadata.json")
+        for name in ("command_metadata.json", "database_page_defaults.json"):
+            shutil.copy2(ROOT / "scripts" / "common" / name, stage / "common" / name)
         (stage / "BUILD_INFO.json").write_text(json.dumps(source_build_info(ROOT)),encoding="utf-8")
         shutil.copy2(ROOT / "VERSION", stage / "VERSION")
         shutil.copytree(ROOT / "config" / "example", stage / "config" / "example")

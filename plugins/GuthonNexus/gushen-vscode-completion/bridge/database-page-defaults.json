@@ -1,0 +1,22 @@
+{
+    "": {"isProduct": 0},
+    "component/buttons[]": {
+        "isDisDbClick": 0, "isDisabled": 0, "isHide": 0, "isMoreBnt": 0, "isProduct": 0, "pcAndH5": 0
+    },
+    "component/datasource": {"dsType": 0, "isDisableDataAuth": 0, "isProduct": 0, "isSubSelect": 0},
+    "component/fields[]": {
+        "isCanRemoveGroupField": 0, "isDefaultLike": 1, "isDisAdvSearch": 0, "isDisExtraSearch": 0,
+        "isDisLabel": 0, "isProduct": 0, "isRichEdit": 0, "isRowSpanning": 0, "isTrimValue": 0,
+        "pcAndH5": 0, "sortable": 1
+    },
+    "datasource/fields[]": {"isJoinTable": 0, "isPick": 0, "isPk": 0, "isUserAdd": 0},
+    "datasource/pks[]": {"isJoinTable": 0, "isPk": 0, "isUserAdd": 0},
+    "fields[]/bnts[]": {
+        "isDisDbClick": 0, "isDisabled": 0, "isHide": 0, "isMoreBnt": 0, "isProduct": 0, "pcAndH5": 0
+    },
+    "rows[]/component": {"isProduct": 0},
+    "rows[]/style": {"canDrag": 0, "flexGrow": 0, "showBorder": 0},
+    "tabPages[]/rows[]": {"isProduct": 0},
+    "tabs/tabPages[]": {"isHide": 0},
+    "views/rows[]": {"isProduct": 0}
+}

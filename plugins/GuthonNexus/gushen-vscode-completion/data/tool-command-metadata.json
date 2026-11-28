@@ -72,6 +72,11 @@
       "kind": "read",
       "timeoutMs": 120000
     },
+    "source-direct-edit": {
+      "kind": "read",
+      "writeArguments": ["refresh"],
+      "timeoutMs": 120000
+    },
     "database-query-readonly": {
       "kind": "read",
       "timeoutMs": 120000,

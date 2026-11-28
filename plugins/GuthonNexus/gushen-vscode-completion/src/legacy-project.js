@@ -1,5 +1,5 @@
 const path = require('node:path');
-const {createHash} = require('node:crypto');
+const {randomUUID} = require('node:crypto');
 const { ToolJsonClient } = require('./tool-json-client');
 const { SvnBackendClient } = require('./svn/backend-client');
 const { SvnCatalogTreeProvider, fragmentLabel } = require('./svn/catalog-tree');
@@ -14,12 +14,13 @@ const { createDatabaseSourceTree } = require('./database-source-tree');
 const {DatabaseSourceEditor,SCHEME:DATABASE_SCHEME,databaseEditIdentity,ownsWorkcopyDocument}=require('./database-source-editor');
 const { showWorkspaceSearch } = require('./workspace-search');
 const { filterChildren } = require('./api/tree-filter');
+const { selectUploadFiles } = require('./api/upload-review');
 const { configureSourceConnection, configureSourceScope, parseSourceDatabaseUrl, validateRepositoryUrl } = require('./project-source-settings');
 
 const categoryLabels = {page:'页面', procedure:'过程函数', 'system-script':'系统脚本', table:'表', view:'视图', skill:'Skill', public:'公共源码'};
 const manifest = workspace => workspace?.sourceMode === 'svn' && workspace.checkoutLayout === 'manifest-working-copies';
 
-function registerLegacyProjects({ vscode, context, getTool, processClient, sourceTree, getWorkspaces, getSelected, refreshProjects, runTool, getOutput, onStatus, databaseBridgeRequest, databasePublicationRequest, databasePublicationMode }) {
+function registerLegacyProjects({ vscode, context, getTool, processClient, sourceTree, getWorkspaces, getSelected, refreshProjects, runTool, getOutput, onStatus, databaseBridgeRequest, databasePublicationRequest, databasePublicationMode, reviewDatabaseUpload = selectUploadFiles }) {
   const client = new ToolJsonClient({ getTool, processClient });
   const backend = new SvnBackendClient({ getTool, processClient });
   const catalog = new SvnCatalogTreeProvider({ vscode, backend, listSvnWorkspaces: async () => {
@@ -92,20 +93,50 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
     databaseWatch?.dispose();databaseWatch=undefined;
     if(!watchKey || !vscode.workspace.createFileSystemWatcher || !vscode.RelativePattern)return;
     const pending=new Set();
-    let timer;
+    const pendingIndex=new Map();
+    const home=getTool()?.toolHome;
+    let timer,refreshTail=Promise.resolve();
     const watchers=roots.map(root=>{
-      const watcher=vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root,'**/{raw.json,source.vm}'));
-      const changed=uri=>{
+      const watcher=vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root,'**/{raw.json,source.vm,source.css,*.js,*.sql,*.vm}'));
+      const changed=(uri,event)=>{
         if(!within(root,uri.fsPath))return;
         pending.add(path.relative(root,uri.fsPath).split(path.sep).join('/'));
+        if(root===workspace.workcopyDir && (['source.vm','source.css','source.js'].includes(path.basename(uri.fsPath))
+          || path.basename(path.dirname(uri.fsPath))==='scripts' && /\.(js|sql|vm)$/i.test(uri.fsPath))) {
+            if(event==='delete') pendingIndex.delete(uri.fsPath);
+            else pendingIndex.set(uri.fsPath, pendingIndex.get(uri.fsPath)==='change' ? 'change' : event);
+        }
         clearTimeout(timer);
         timer=setTimeout(()=>{
           const paths=new Set(pending);pending.clear();
+          const events = new Map(pendingIndex);pendingIndex.clear();
+          const files = [...events.keys()];
           void databaseChangesChanged(workspace.workspaceKey,paths);
           void pageEditors.get('database')?.statusChanged(workspace.workspaceKey);
+          if(files.length) refreshTail=refreshTail.then(async()=>{
+            try {
+              if(home!==getTool()?.toolHome || databaseWatch?.key!==watchKey)return;
+              const inspected = await run(workspace, 'source-direct-edit', ['inspect'], {files:files.map(path=>({path}))});
+              if(home!==getTool()?.toolHome || databaseWatch?.key!==watchKey)return;
+              const versions = [];
+              for(const item of inspected.files) {
+                  if(item.ok) versions.push({path:item.path,sourceHash:item.sourceHash});
+                  else if(events.get(item.path)==='change') getOutput?.()?.appendLine(`DATABASE 工作副本索引：${item.path} · ${item.error}`);
+              }
+              if(!versions.length)return;
+              const result = await run(workspace, 'source-direct-edit', ['refresh'], {files:versions});
+              for(const item of result.files) {
+                  if(!item.ok) getOutput?.()?.appendLine(`DATABASE 工作副本索引：${item.path} · ${item.error}`);
+              }
+            } catch(error) {
+              if(error.code!=='ENOENT')getOutput?.()?.appendLine(`DATABASE 工作副本索引刷新：${error.message}`);
+            }
+          });
         },150);
       };
-      watcher.onDidCreate(changed);watcher.onDidChange(changed);watcher.onDidDelete(changed);
+      watcher.onDidCreate(uri=>changed(uri,'create'));
+      watcher.onDidChange(uri=>changed(uri,'change'));
+      watcher.onDidDelete(uri=>changed(uri,'delete'));
       return watcher;
     });
     databaseWatch={key:watchKey,dispose(){clearTimeout(timer);for(const watcher of watchers)watcher.dispose();}};
@@ -120,7 +151,9 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
       throw new Error('工作副本中有未保存的修改，请先保存并核对');
     }
     const {recordId,sourceId,sourcePath}=identity;
-    return run(workspace,'legacy-source',[action],{recordId,sourceId,sourcePath,...payload});
+    const result = await run(workspace,'legacy-source',[action],{recordId,sourceId,sourcePath,...payload});
+    if (result.receiptWarning) vscode.window.showWarningMessage(result.receiptWarning);
+    return result;
   }
   function databaseCodeEditor() {
     if(!databaseEditor) {
@@ -205,18 +238,32 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
       home:getTool()?.toolHome,workingCopyId:object.workingCopyId || object.scopeEntryId};
     return pageEditorFor('svn').open(identity);
   }
-  async function compareProcedure(workspace,item) {
-    const identity=databaseEditIdentity(workspace,item,getTool()?.toolHome);
-    const result=await databaseRequest(identity,'edit-comparison',{});
-    if (!result.available) return vscode.window.showWarningMessage('同步镜像不可用，无法比较工作副本');
-    if (!result.changed) return vscode.window.showInformationMessage('没有本地源码差异');
-    const base=result.trustedBaseline?'编辑基线':'当前同步镜像（历史基线未知）';
-    return databaseDiffEditor.show(result.baseContent,result.content,{
-      beforeName:'baseline.gss',afterName:'workcopy.gss',title:`${identity.documentName} · ${base} ↔ Workcopy`,
+  async function showDatabaseDiff(identity, result, title, editable = false) {
+    const isPage = identity.sourceType === 'page';
+    const models = isPage ? [result.baseContent, result.content].map(content => JSON.parse(content)) : [];
+    const isService = isPage && models.every(model => String(model.pageType) === '0');
+    const [before, after] = isService ? models.map(model => model.compScript ?? '')
+        : isPage && !result.formattedPage ? models.map(model => JSON.stringify(model, null, 4) + '\n')
+          : [result.baseContent, result.content];
+    const extension = isPage && !isService ? 'json' : 'gss';
+    const rightUri = editable ? await databaseCodeEditor().uriFor({
+        ...identity, ...(isService ? {jsonPointer:'/compScript'} : isPage ? {formatPage:true} : {}),
+    }) : undefined;
+    return databaseDiffEditor.show(before, after, {
+        beforeName:`baseline.${extension}`, afterName:`workcopy.${extension}`, title, rightUri,
     });
   }
+  async function compareDatabaseSource(workspace,item, compareMirror = false, editable = false) {
+    const identity=databaseEditIdentity(workspace,item,getTool()?.toolHome);
+    const result=await databaseRequest(identity,'edit-comparison',
+      {publicationDiff:identity.sourceType === 'page', compareMirror});
+    if (!result.available) return vscode.window.showWarningMessage('同步镜像不可用，无法比较工作副本');
+    if (!result.changed) return vscode.window.showInformationMessage('没有本地源码差异');
+    const base=compareMirror?'当前同步镜像':result.trustedBaseline?'编辑基线':'当前同步镜像（历史基线未知）';
+    return showDatabaseDiff(identity, result, `${identity.documentName} · ${base} ↔ Workcopy`, editable);
+  }
   const databaseTree=createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelected,getTool,
-    edit:editDatabase,compareProcedure,
+    edit:editDatabase,compareSource:compareDatabaseSource,
     openCopy:(workspace,item)=>databaseCodeEditor().open(databaseEditIdentity(workspace,item,getTool()?.toolHome))});
   function sourceSettingsRequest(workspace) {
     const home = getTool()?.toolHome;
@@ -359,7 +406,10 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
        doc.uri.scheme === 'file' && workspace.sourceRoots?.some(root => within(root.path,doc.uri.fsPath))));
     if (dirty) throw new Error('请先保存当前项目相关草稿，再更新源码');
     if (workspace.sourceMode === 'database') {
-      await runTool('sync-all', [], true, key);
+      const synchronized = await runTool('sync-all', [], true, key);
+      await refreshProjects();
+      if (synchronized) await reviewDatabaseMerge(workspace);
+      return;
     } else {
       const args = nodePaths ? ['refresh-node'] : sourcePath ? ['refresh','--path',sourcePath] : [manifest(workspace) && !workspace.scopeManifestReady ? 'sync-from-config'
         : manifest(workspace) && !workspace.workingCopies?.length ? 'init'
@@ -393,6 +443,7 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
       } catch(error) {output.appendLine(error.message);throw error;}
       databaseTree.refresh();
       await refreshProjects();
+      if (await reviewDatabaseMerge(workspace, item)) return;
       return vscode.window.showInformationMessage(`${workspace.displayName}：源码节点已同步`);
     }
     if(!manifest(workspace))throw new Error('当前 SVN 项目没有按源码节点更新的能力');
@@ -495,26 +546,315 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
   }
 
   const databasePublicationLabels = {
-    NOT_WRITTEN:'未写入平台', PLATFORM_UNKNOWN:'保存结果未知', MIRROR_PENDING:'平台已核验，等待镜像回拉',
-    VERIFIED:'平台与镜像均已核验',
+    NOT_WRITTEN:'未保存到谷神', PLATFORM_UNKNOWN:'尚未确认谷神是否保存成功',
+    MIRROR_PENDING:'谷神已保存，本地只读源码待更新', VERIFIED:'谷神与本地只读源码均已更新',
+    SAVED_WITH_DIFFERENCES:'谷神已保存，本地镜像已更新，保存结果与上传候选不同',
+    CLOSED_UNCHANGED:'上传记录已关闭，谷神源码仍是上传前的版本',
   };
+  const mirroredDatabasePublication = result => ['VERIFIED', 'SAVED_WITH_DIFFERENCES'].includes(result?.state);
+  const databasePublicationLabel = result => {
+      if (result.state === 'PLATFORM_UNKNOWN' && result.platformVersion) return '谷神已返回保存版本，等待回读核对';
+      if (result.state === 'MIRROR_PENDING' && result.platformDiffers) return '谷神已保存有差异的版本，本地只读源码待更新';
+      return databasePublicationLabels[result.state];
+  };
+  const databaseUploadAvailability = {
+      'bridge-stopped':'Nexus 中的 Guthon Bridge 还没启动。请在命令面板运行「Guthon Nexus: 启动 Guthon Bridge」。',
+      'bridge-unreachable':'Nexus 无法通过 Guthon Bridge 检查上传。请重启桥接服务，并确认 Chrome 扩展使用同一端口和配对令牌。',
+      closed:'当前 Bridge 没有启用 DATABASE 上传。使用开发模式时，请在 Nexus 中从本地源码检查更新，再重启 Guthon Bridge。',
+  };
+  const databaseTargetLabel = target => target.pageId
+    ? target.pageAlias === target.pageId ? target.pageId : `${target.pageAlias} (${target.pageId})`
+    : `${target.procedureAlias}/${target.funId}`;
+
+  function databasePublicationMessage(result) {
+    const reasons = {
+      VERSION_RESERVED:'此版本已有上传记录。请在「本地修改 → 继续检查上传结果」查看原来的结果',
+      DISPATCH_NOT_RECORDED:'上传在发送保存请求前中断。请重新查看差异，再确认上传',
+      PLATFORM_BASE_CHANGED_OR_READONLY:'谷神源码或保存权限与确认上传时不同。请核对平台上的最新源码和签出状态',
+      CHECKOUT_REQUIRED:'谷神要求当前账号签出该函数。请核对 Chrome 中登录的账号和签出状态',
+      CHECKED_OUT_BY_OTHER:'这个函数已被其他账号签出。请与签出人核对，待其释放后再同步并上传',
+      CHECKOUT_UNVERIFIED:'工具未能确认签出成功。请在谷神「过程函数」检查签出人和当前账号权限',
+      PLATFORM_LOGIN_REQUIRED:'Chrome 已连接，但当前页签没有有效的谷神登录。请重新登录并刷新页签',
+      PLATFORM_VERSION_CHANGED:'谷神上的源码版本与审阅时不同。请在源码树右键「同步此节点源码」，再查看差异',
+      PLATFORM_CONTENT_CHANGED:'谷神上的源码正文与审阅时不同。请同步此节点并重新比较',
+      PLATFORM_SAVE_REJECTED:`谷神拒绝保存${result.platformCode === undefined ? '' : `（返回码 ${result.platformCode}）`}，且回读确认源码未变。请核对${result.target.pageId ? '页面保存权限和页面配置' : '谷神中的签出和保存权限'}后再上传`,
+      PLATFORM_BASE_UNCHANGED:result.state === 'CLOSED_UNCHANGED'
+          ? '可从「上传源码」重新审阅' : '已回读谷神，当前版本和正文仍与上传前一致',
+      PAGE_DRAFT_PENDING:'谷神页面设计器里还有未保存的编辑。请先处理设计器中的草稿，再同步并审阅',
+      MIRROR_VERSION_CHANGED:'本地已同步到其他版本。请比较当前只读源码和本地工作副本',
+      MIRROR_PATH_CHANGED:'该对象的本地源码路径已变化。请在当前项目重新查找该对象并核对同步范围',
+    };
+    const pending = ['PLATFORM_UNKNOWN', 'MIRROR_PENDING'].includes(result.state)
+      ? '请在「本地修改 → 继续检查上传结果」选择这次上传' : '';
+    const detail = [result.saveBaseVersion ? `保存前正文一致，采用谷神版本 ${result.saveBaseVersion}` : '', reasons[result.reason], pending,
+      result.state === 'SAVED_WITH_DIFFERENCES' && result.workcopyState !== 'ABSENT'
+        ? '请在「本地修改」比较实际保存源码和保留的 Workcopy，再处理剩余差异' : '',
+      result.workcopyState === 'CONFLICT' && !result.platformDiffers ? '请比较本地工作副本和更新后的只读源码' : '',
+      result.workcopyState === 'EDITED' && !result.platformDiffers ? '上传后新增的本地修改已保留' : ''].filter(Boolean).join('。');
+    return [databaseTargetLabel(result.target), databasePublicationLabel(result), detail].filter(Boolean).join(' · ');
+  }
 
   async function showDatabasePublication(result) {
-    if (result.state === 'VERIFIED') {
-        databaseTree.refreshChanges();
-        sourceTree.refresh();
-    }
-    const reasons = {
-      VERSION_RESERVED:'该平台版本已有发布操作', DISPATCH_NOT_RECORDED:'未登记派发，未执行保存',
-      PLATFORM_BASE_CHANGED_OR_READONLY:'平台版本或保存权限已变化',
-      CHECKOUT_REQUIRED:'请先在平台签出目标函数', PLATFORM_VERSION_CHANGED:'平台版本已变化，请重新审阅',
-      MIRROR_VERSION_CHANGED:'本地镜像已有其他版本', MIRROR_PATH_CHANGED:'镜像路径已变化',
-    };
-    const detail = [reasons[result.reason], result.workcopyState === 'CONFLICT' ? 'Workcopy 需要人工核对' : '',
-      result.workcopyState === 'EDITED' ? '已保留后续 Workcopy 编辑' : ''].filter(Boolean).join(' · ');
-    return vscode.window.showInformationMessage(
-      [`${result.target.procedureAlias}/${result.target.funId}`, databasePublicationLabels[result.state], detail]
-        .filter(Boolean).join(' · '));
+      if (mirroredDatabasePublication(result)) {
+          databaseTree.refreshChanges();
+          sourceTree.refresh();
+      }
+      return vscode.window.showInformationMessage(databasePublicationMessage(result));
+  }
+
+  async function verifyDatabaseUploads(workspace) {
+      const {workspaceKey} = workspace;
+      const home = getTool()?.toolHome;
+      const request = (route, input) => {
+          if (home !== getTool()?.toolHome) throw new Error('本地数据目录已切换，请重新核对上传结果');
+          return databasePublicationRequest(home, route, input);
+      };
+      const {operations} = await request('/databaseProcedureOperations', {workspaceKey});
+      const pending = operations.filter(item => ['PLATFORM_UNKNOWN', 'MIRROR_PENDING'].includes(item.state));
+      if (!pending.length) return vscode.window.showInformationMessage('这个项目没有等待检查的上传记录。');
+      const selected = await vscode.window.showQuickPick(pending.map(item => ({
+          label:databaseTargetLabel(item.target), description:databasePublicationLabel(item),
+          detail:item.operationId, item,
+      })), {title:'选择要继续检查的上传记录', canPickMany:true});
+      if (!selected?.length) return;
+
+      const results = [];
+      for (const {item} of selected) {
+          const {target, operationId, state} = item;
+          const input = {workspaceKey, operationId};
+          const outcome = {item, input};
+          results.push(outcome);
+          try {
+              if (state === 'PLATFORM_UNKNOWN') {
+                  const tab = await selectDatabaseTab(workspace, route => databaseBridgeRequest(home, route),
+                      {origins:[target.origin], systemId:target.systemId, dataSourceId:target.pageId ? undefined : target.dataSourceId});
+                  input.contextId = tab.contextId;
+              }
+              outcome.result = await request('/databaseProcedureVerify', input);
+          } catch (error) {
+              outcome.error = error.message;
+          }
+      }
+
+      const unchanged = results.filter(({result}) => result?.state === 'PLATFORM_UNKNOWN'
+          && result.reason === 'PLATFORM_BASE_UNCHANGED');
+      if (unchanged.length) {
+          const close = unchanged.length === 1 ? '关闭这次上传记录' : '关闭这些上传记录';
+          const targets = unchanged.map(({item}) => databaseTargetLabel(item.target));
+          const choice = await vscode.window.showWarningMessage(
+              `谷神上有 ${targets.length} 项仍是上传前的版本和正文。是否关闭对应记录？`,
+              {modal:true, detail:[...targets, '', '关闭记录只更新本地状态。之后可在「上传源码」重新审阅。'].join('\n')},
+              close);
+          if (choice === close) {
+              for (const outcome of unchanged) {
+                  try {
+                      outcome.result = await request('/databaseProcedureVerify', {...outcome.input, closeUnchanged:true});
+                  } catch (error) {
+                      outcome.error = `未关闭上传记录 · ${error.message}`;
+                  }
+              }
+          }
+      }
+
+      if (results.length === 1 && !results[0].error) return showDatabasePublication(results[0].result);
+      if (results.some(({result}) => mirroredDatabasePublication(result))) {
+          databaseTree.refreshChanges();
+          sourceTree.refresh();
+      }
+      return report([`${workspace.displayName} · DATABASE 上传核查结果`, '',
+          ...results.map(({item, result, error}) => [
+              result ? databasePublicationMessage(result) : `${databaseTargetLabel(item.target)} · 未能检查`,
+              error,
+          ].filter(Boolean).join(' · ')),
+      ].join('\n'), 'plaintext');
+  }
+
+  async function selectDatabaseTab(workspace, request, {origins, systemId, dataSourceId}) {
+      const {contexts} = await request(`/pageContext?${new URLSearchParams({workspaceKey:workspace.workspaceKey})}`);
+      const tabs = contexts.filter(tab => origins.includes(tab.pageOrigin));
+      if (tabs.length === 1) return tabs[0];
+      const preferred = tabs.filter(tab => dataSourceId === undefined
+          ? tab.mode === 'page-source' && tab.systemId === systemId
+          : tab.mode === 'procedure' && tab.dataSourceId === dataSourceId);
+      if (preferred.length === 1) return preferred[0];
+      if (tabs.length) {
+          throw new Error(`Chrome 有 ${tabs.length} 个与项目平台地址匹配的页签。请保留一个已登录的谷神页签再重试。`);
+      }
+      if (contexts.length) {
+          const connected = [...new Set(contexts.map(tab => tab.pageOrigin))].join('、');
+          throw new Error(`Chrome 当前连接的是 ${connected}，这个项目使用 ${origins.join('、')}。请打开项目对应的谷神地址后重试。`);
+      }
+      throw new Error(`Nexus 没有收到这个项目的谷神页签。请在 Chrome 打开 ${origins.join('、')}，登录后刷新页面，并确认 Guthon Bridge 已配对。`);
+  }
+
+  async function reviewDatabaseMerge(workspace, node) {
+      if (getSelected && (await getSelected())?.workspaceKey !== workspace.workspaceKey) return false;
+      const {items} = await run(workspace, 'legacy-source', ['review-workcopies']);
+      const candidates = items.filter(record => record.needsMerge && (!node || (node.record
+          ? node.record.sourcePath === record.sourcePath
+          : node.sourceType === record.sourceType && (node.groups || []).every((part, index) => record.groups?.[index] === part))));
+      if (!candidates.length) return false;
+      const picked = candidates.length === 1 ? {record:candidates[0]} : await vscode.window.showQuickPick(
+          candidates.map(record => ({label:record.name || record.funId, detail:record.sourcePath, record})),
+          {title:'与同步后的源码比较并合并'}
+      );
+      if (picked) await compareDatabaseSource(workspace, picked, true, true);
+      return true;
+  }
+
+  async function prepareDatabaseUpload(workspace, {identity, preview}, threeWay) {
+      const {system_id:systemId, data_source_id:dataSourceId} = preview.databaseIdentity;
+      const key = workspace.workspaceKey;
+      const isPage = identity.sourceType === 'page';
+      if (!systemId) throw new Error(dataSourceId
+          ? `项目同步范围无法确定数据源 ${dataSourceId} 的这个函数属于哪个子系统。请在「当前项目 → 同步范围」核对映射后重新同步。`
+          : '本地配置无法确定这段源码属于哪个子系统。请在「当前项目 → 同步范围」核对子系统和数据源，然后重新同步。');
+      const request = (route, payload) => {
+          if (identity.home !== getTool()?.toolHome) throw new Error('本地数据目录已切换，请重新审阅');
+          return databaseBridgeRequest(identity.home, route, payload);
+      };
+      const origins = preview.pageOrigins ?? [];
+      if (!origins.length) throw new Error('这个项目还没有登记上传用的谷神地址。请在项目设置中核对项目配置，为此项目登记实际登录的地址（含协议和端口）。');
+      const tab = await selectDatabaseTab(workspace, request, {origins, systemId, dataSourceId:isPage ? undefined : dataSourceId});
+      const approval = {reviewId:preview.reviewId, sourceHash:preview.sourceHash, compareMirror:true};
+      const input = {workspaceKey:key, contextId:tab.contextId, recordId:identity.recordId,
+          sourceId:identity.sourceId, sourcePath:identity.sourcePath, ...approval};
+      const {native: {latestContent, merge, ...native}} = await request('/databaseSourcePreflight', {
+          ...input, includeLatest:true, threeWay,
+      });
+      return {identity, approval, input, native, latestContent, merge};
+  }
+
+  async function uploadDatabaseSources(workspace, records, mode) {
+      if (!records.length) return vscode.window.showInformationMessage('当前项目没有已保存的本地源码修改。');
+      const byPath = new Map(records.map(record => [record.sourcePath, record]));
+      const platformReview = async (sourcePath, threeWay = true) => {
+          if (databaseUploadAvailability[mode]) throw new Error(databaseUploadAvailability[mode]);
+          const record = byPath.get(sourcePath);
+          if (!record) throw new Error('上传选择不属于当前项目的修改清单');
+          const identity = databaseEditIdentity(workspace, {record}, getTool()?.toolHome);
+          const preview = await databaseRequest(identity, 'publish-preview', {compareMirror:true});
+          return {record, preview, ...await prepareDatabaseUpload(workspace, {identity, preview}, threeWay)};
+      };
+      const describeConflicts = merge => {
+          const labels = {collection:'集合成员或顺序', inheritance:'继承脚本', identity:'对象身份', value:'双方修改同一属性', script:'脚本修改重叠'};
+          const rows = merge.conflicts.map(conflict => {
+              const lines = conflict.lines?.length ? ` · 基线行 ${conflict.lines.join('、')}` : '';
+              return `${conflict.path || '正文'} · ${labels[conflict.kind] || '内容冲突'}${lines}`;
+          });
+          const omitted = merge.conflictCount - rows.length;
+          return [`发现 ${merge.conflictCount} 处三方合并冲突`, ...rows, ...(omitted > 0 ? [`另有 ${omitted} 处，打开差异继续核对`] : [])].join('\n');
+      };
+      const showReview = ({identity, preview, latestContent, merge}) => {
+          const merged = merge?.state === 'READY';
+          const compare = {
+              baseContent:latestContent ?? preview.baseContent,
+              content:merged ? merge.content : preview.content,
+          };
+          const title = `${identity.documentName} · 谷神最新源码 ↔ ${merged ? '三方合并候选' : 'Workcopy'}`;
+          return showDatabaseDiff(identity, compare, title, !merged && (latestContent !== undefined || merge?.state === 'CONFLICT'));
+      };
+      const entries = records.map(record => ({path:record.sourcePath, name:record.name || record.funId,
+          type:categoryLabels[record.sourceType], state:record.needsMerge ? '本地和谷神均有改动'
+              : record.needsReview ? '历史基线未知，待核对' : '本地修改'}));
+      const chosen = await reviewDatabaseUpload(vscode, entries,
+          async sourcePath => {
+              const review = await platformReview(sourcePath);
+              await showReview(review);
+              if (review.merge?.state === 'CONFLICT') await report(describeConflicts(review.merge), 'plaintext');
+          }, {selectAll:records.length === 1});
+      if (!chosen?.length) return;
+
+      const ready = [];
+      const outcomes = new Map();
+      const paths = [...new Set(chosen)];
+      for (const sourcePath of paths) {
+          try {
+              // Re-read the local candidate and the platform after any earlier diff was opened.
+              let review = await platformReview(sourcePath);
+              if (review.merge?.state === 'ALREADY_CURRENT') {
+                  outcomes.set(sourcePath, '谷神已包含本地改动，无需保存');
+                  continue;
+              }
+              if (paths.length === 1 || review.latestContent !== undefined || review.merge) await showReview(review);
+              if (review.merge?.state === 'CONFLICT') {
+                  const detail = describeConflicts(review.merge);
+                  if (paths.length !== 1 || review.latestContent !== undefined) {
+                      outcomes.set(sourcePath, `未进入本次上传 · ${detail}`);
+                      continue;
+                  }
+                  const manual = '审阅已手动合并的 Workcopy';
+                  const choice = await vscode.window.showWarningMessage('此项存在三方合并冲突',
+                      {modal:true, detail:`${detail}\n\n如已在 Workcopy 中处理冲突，可单独审阅当前内容并确认上传。`}, manual);
+                  if (choice !== manual) {
+                      outcomes.set(sourcePath, `未进入本次上传 · ${detail}`);
+                      continue;
+                  }
+                  review = await platformReview(sourcePath, false);
+                  await showReview(review);
+              }
+              if (review.latestContent !== undefined && review.merge?.state !== 'READY') {
+                  const reason = review.merge?.state === 'NO_BASELINE' ? '缺少可核验的共同基线。' : '';
+                  throw new Error(`${reason}已打开与谷神最新源码的比较。请保留所需本地改动，合并后同步此节点并重新上传`);
+              }
+              ready.push(review);
+          } catch (error) {
+              if (paths.length === 1) throw error;
+              outcomes.set(sourcePath, `未进入本次上传 · ${error.message}`);
+          }
+      }
+      const showResults = () => report([
+          `${workspace.displayName} · DATABASE 上传结果`, '',
+          ...paths.flatMap(sourcePath => [sourcePath, outcomes.get(sourcePath), '']),
+      ].join('\n'), 'plaintext');
+      if (!ready.length) return showResults();
+
+      const confirm = mode === 'manual' ? '保存到谷神平台' : '确认模拟上传';
+      const edit = '比较并合并';
+      const canEdit = paths.length === 1 && !ready[0].merge && (ready[0].record.needsMerge || ready[0].record.needsReview);
+      const details = ready.flatMap(({identity, record, native, merge}) => [
+          `${identity.documentName} · ${native.origin} · ${databaseTargetLabel(native)} · 谷神源码版本 ${native.version}`,
+          ...(identity.sourceType === 'procedure' ? ['未签出的函数会先由当前配对账号签出。'] : []),
+          ...(merge?.state === 'READY' ? [`使用共同基线 ${merge.baseVersion} 生成的三方合并候选。`]
+              : record.needsMerge ? ['本地工作副本与当前同步版本有差异。请确认右侧已经合并所需改动。']
+                  : record.needsReview ? ['历史基线未知。请确认要上传的改动已与当前谷神源码核对。'] : []),
+      ]);
+      if (outcomes.size) details.push('', ...[...outcomes].map(([sourcePath, reason]) => `${sourcePath} · ${reason}`));
+      const choice = await vscode.window.showWarningMessage(
+          paths.length === 1 ? `将已审阅的${ready[0].merge ? '三方合并候选' : '本地工作副本'}保存到 ${workspace.displayName}？`
+              : `将 ${ready.length} 项源码保存到 ${workspace.displayName}？`,
+          {modal:true, detail:details.join('\n')}, confirm, ...(canEdit ? [edit] : [])
+      );
+      if (choice === edit) return compareDatabaseSource(workspace, {record:ready[0].record}, true, true);
+      if (choice !== confirm) return;
+
+      let verified = false;
+      for (const {identity, approval, input, native, merge} of ready) {
+          try {
+              await databaseRequest(identity, 'publish-confirm', approval);
+          } catch (error) {
+              if (paths.length === 1) throw error;
+              outcomes.set(identity.sourcePath, `未发送保存请求 · ${error.message}`);
+              continue;
+          }
+          try {
+              const result = await databasePublicationRequest(identity.home, '/databaseProcedurePublish', {
+                  ...input, native, confirmationId:randomUUID(),
+                  ...(merge?.state === 'READY' ? {mergeReviewId:merge.reviewId} : {}),
+              });
+              if (paths.length === 1) return showDatabasePublication(result);
+              verified ||= mirroredDatabasePublication(result);
+              outcomes.set(identity.sourcePath, databasePublicationMessage(result));
+          } catch (error) {
+              outcomes.set(identity.sourcePath,
+                  `未收到保存结果 · ${error.message}。请在「本地修改 → 继续检查上传结果」核对本次记录`);
+          }
+      }
+      if (verified) {
+          databaseTree.refreshChanges();
+          sourceTree.refresh();
+      }
+      return showResults();
   }
 
   async function action(workspace, name) {
@@ -537,103 +877,19 @@ function registerLegacyProjects({ vscode, context, getTool, processClient, sourc
         const publicationMode = workspace.sourceMode === 'database' && databasePublicationRequest
           ? databasePublicationMode ? await databasePublicationMode(getTool()?.toolHome) : 'simulation'
           : 'closed';
-        if (workspace.sourceMode === 'database' && (name === 'changes' || publicationMode === 'manual')) {
+        if (workspace.sourceMode === 'database') {
           const {items} = await run(workspace,'legacy-source',['review-workcopies']);
+          if (name === 'upload') return await uploadDatabaseSources(workspace, items, publicationMode);
           const picked = await vscode.window.showQuickPick([
             ...items.map(record => ({label:record.name || record.funId,detail:record.sourcePath,
-              description:record.trustedBaseline?'有编辑基线':'历史基线未知',record})),
-            ...(publicationMode !== 'closed' ? [{label:'核验原发布操作', verify:true}] : []),
+              description:record.needsMerge?'本地和谷神均有改动':record.needsReview?'历史基线未知，待核对':'可审阅上传',record})),
+            ...(!databaseUploadAvailability[publicationMode] ? [{label:'继续检查上传结果', verify:true}] : []),
             {label:'按目录打开已有 Workcopy',description:'查看、比较或导出其他副本'},
-          ], {title:`${workspace.displayName} · 本地过程函数变更`});
+          ], {title:`${workspace.displayName} · DATABASE 本地源码变更`});
           if (!picked) return;
-          if (picked.verify) {
-            const home = getTool()?.toolHome;
-            const {operations} = await databasePublicationRequest(home, '/databaseProcedureOperations', {workspaceKey:key});
-            const pending = operations.filter(item => ['PLATFORM_UNKNOWN','MIRROR_PENDING'].includes(item.state));
-            const selected = await vscode.window.showQuickPick(pending.map(item => ({
-              label:`${item.target.procedureAlias}/${item.target.funId}`,
-              description:databasePublicationLabels[item.state], detail:item.operationId, item,
-            })), {title:'选择原发布操作进行核验'});
-            if (!selected) return;
-            const {target, operationId, state} = selected.item;
-            const input = {workspaceKey:key, operationId};
-            if (state === 'PLATFORM_UNKNOWN') {
-              const {contexts} = await databaseBridgeRequest(home, `/pageContext?${new URLSearchParams({workspaceKey:key})}`);
-              const tabs = contexts.filter(tab => tab.pageOrigin === target.origin && tab.systemId === target.systemId
-                && tab.dataSourceId === target.dataSourceId);
-              if (tabs.length !== 1) throw new Error('请为原发布操作保留一个已配对的目标页签');
-              input.contextId = tabs[0].contextId;
-            }
-            if (home !== getTool()?.toolHome) throw new Error('本地数据目录已切换，请重新核验');
-            return await showDatabasePublication(await databasePublicationRequest(home, '/databaseProcedureVerify', input));
-          }
+          if (picked.verify) return await verifyDatabaseUploads(workspace);
           if (picked.record) {
-            if (!picked.record.trustedBaseline) return await compareProcedure(workspace, picked);
-            const next = await vscode.window.showQuickPick(['查看本地差异', '检查上传候选（仅本地）'],
-              {title:picked.label});
-            if (next === '查看本地差异') return await compareProcedure(workspace, picked);
-            if (next !== '检查上传候选（仅本地）') return;
-            const identity = databaseEditIdentity(workspace, picked, getTool()?.toolHome);
-            const preview = await databaseRequest(identity, 'publish-preview', {});
-            await databaseDiffEditor.show(preview.baseContent, preview.content, {
-              beforeName:'baseline.gss', afterName:'workcopy.gss', title:`${picked.label} · 上传候选`,
-            });
-            if (await vscode.window.showInformationMessage('核对当前编辑基线和候选。此检查不会向平台发请求。',
-              {modal:true, detail:`${workspace.displayName}\n${identity.sourcePath}`}, '确认当前候选') !== '确认当前候选') return;
-            const approval = {reviewId:preview.reviewId, sourceHash:preview.sourceHash};
-            await databaseRequest(identity, 'publish-confirm', approval);
-            const preflight = '只读核对平台基线';
-            if (await vscode.window.showInformationMessage('本地候选检查通过，未上传到谷神平台。',
-              ...(databaseBridgeRequest ? [preflight] : [])) !== preflight) return;
-            const {system_id:systemId, data_source_id:dataSourceId, source_alias_id:procedureAlias, fun_id:funId} = preview.databaseIdentity;
-            if (!systemId) throw new Error('该数据源没有唯一的登记系统，请先核对项目的源码范围');
-            const request = (route, payload) => {
-              if (identity.home !== getTool()?.toolHome) throw new Error('本地数据目录已切换，请重新审阅');
-              return databaseBridgeRequest(identity.home, route, payload);
-            };
-            const {contexts} = await request(`/pageContext?${new URLSearchParams({workspaceKey:key})}`);
-            const origins = preview.pageOrigins ?? [];
-            const tabs = contexts.filter(item => item.systemId === systemId && item.dataSourceId === dataSourceId
-              && (!origins.length || origins.includes(item.pageOrigin)));
-            if (tabs.length !== 1) throw new Error('请为已登记的平台、目标系统和数据源保留一个已配对页签');
-            const [tab] = tabs;
-            const {requestId} = await request('/databaseProcedurePreflight', {workspaceKey:key, contextId:tab.contextId,
-              target:{action:'inspect-database-procedure',systemId,dataSourceId,procedureAlias,funId,includeSourceHash:true}});
-            const query = new URLSearchParams({workspaceKey:key,requestId});
-            for (let attempt=0; attempt<30; attempt++) {
-              const receipt = await request(`/navigationResult?${query}`);
-              if (receipt.state === 'PENDING') {
-                await new Promise(resolve=>setTimeout(resolve,750));
-                continue;
-              }
-              const after = receipt.data?.after;
-              if (receipt.state !== 'SUCCEEDED' || receipt.data?.state !== 'SUCCEEDED' || receipt.data.platformApplied !== false
-                  || after?.origin !== tab.pageOrigin || after.systemId !== systemId || after.dataSourceId !== dataSourceId
-                  || after.procedureAlias !== procedureAlias || after.funId !== funId) {
-                throw new Error(receipt.data?.message || receipt.message || '平台对象身份预检未通过');
-              }
-              const baseHash = createHash('sha256').update(preview.baseContent.replaceAll('\r\n', '\n')).digest('hex');
-              if (after.contentHash !== baseHash) throw new Error('平台正文与 Workcopy 编辑基线不一致，已保留 Workcopy，请重新对照');
-              if (publicationMode === 'closed') {
-                await databaseRequest(identity, 'publish-confirm', approval);
-                const originStatus = origins.includes(tab.pageOrigin) ? '' : '；该平台地址还未登记';
-                return vscode.window.showInformationMessage(
-                  `平台正文与编辑基线一致，${after.procedureId}/${funId}，原生版本 ${after.version}${originStatus}；未上传。`);
-              }
-              if (publicationMode === 'manual' && !origins.includes(tab.pageOrigin)) {
-                throw new Error('该平台地址还未登记，不能手动上传');
-              }
-              const confirm = publicationMode === 'manual' ? '确认手动上传' : '确认模拟上传';
-              const prompt = publicationMode === 'manual' ? '将审阅过的 Workcopy 正文保存到谷神平台' : '将审阅过的候选发送到模拟平台';
-              if (await vscode.window.showWarningMessage(prompt,
-                {modal:true, detail:`${after.origin} · ${after.procedureId}/${funId} · 原生版本 ${after.version}`}, confirm) !== confirm) return;
-              await databaseRequest(identity, 'publish-confirm', approval);
-              return await showDatabasePublication(await databasePublicationRequest(identity.home, '/databaseProcedurePublish', {
-                workspaceKey:key, contextId:tab.contextId, recordId:identity.recordId, sourceId:identity.sourceId,
-                sourcePath:identity.sourcePath, ...approval, native:after,
-              }));
-            }
-            throw new Error('平台身份预检未及时返回，未发送保存请求');
+            return await compareDatabaseSource(workspace, picked, true, true);
           }
         }
         const picked = await vscode.window.showOpenDialog({ canSelectFiles:false,canSelectFolders:true,

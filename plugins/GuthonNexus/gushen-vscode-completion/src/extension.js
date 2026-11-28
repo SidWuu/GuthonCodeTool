@@ -601,9 +601,9 @@ function activate(context) {
     databaseBridgeRequest: (home, route, payload) => bridge.request(home, route, payload),
     databasePublicationRequest: (home, route, payload) => bridge.request(home, route, payload),
     databasePublicationMode: async home => {
-      if (!home || !bridge.isRunning()) return 'closed';
-      try { return (await bridge.request(home, '/databaseProcedureCapabilities')).mode; }
-      catch { return 'closed'; }
+      if (!home || !bridge.isRunning()) return 'bridge-stopped';
+      try { return (await bridge.request(home, '/databaseProcedureCapabilities')).mode === 'manual' ? 'manual' : 'closed'; }
+      catch { return 'bridge-unreachable'; }
     },
     refreshProjects: async () => { workspaceRegistry.invalidate(); await refreshApiWorkspaces(); },
     onStatus: (key, status, workspace) => {

@@ -54,7 +54,8 @@ class DatabaseSourceEditor {
     }
   }
   read(identity) {
-    return this.request(identity,'edit-read',{pointer:identity.jsonPointer || '',includeLineChanges:true});
+    return this.request(identity,'edit-read',{pointer:identity.jsonPointer || '',includeLineChanges:true,
+      ...(identity.formatPage ? {formatPage:true} : {})});
   }
   async refresh(workspaceKey,paths,onError) {
     const dirty=key=>(this.vscode.workspace.textDocuments || []).some(doc=>doc.isDirty && doc.uri.toString()===key);
@@ -102,7 +103,8 @@ class DatabaseSourceEditor {
     const home=this.getTool()?.toolHome;
     const {workspaceKey,sourcePath,jsonPointer}=identity;
     const query=new URLSearchParams({home,sourcePath,pointer:jsonPointer || ''}).toString();
-    const key=documentKey(workspaceKey,query);
+    const documentQuery=identity.formatPage ? query + '&formatPage=1' : query;
+    const key=documentKey(workspaceKey,documentQuery);
     const existing=this.documents.get(key);
     if(existing)return existing.loading;
     const record={identity,home};
@@ -110,7 +112,7 @@ class DatabaseSourceEditor {
       const fragmentType=fragmentTypesByLanguage.get(value.language);
       if(!fragmentType)throw new Error('无法识别 DATABASE 源码语言');
       const filename=documentFilename({...identity,fragmentType});
-      record.uri=this.vscode.Uri.from({scheme:SCHEME,authority:workspaceKey,path:`/${filename}`,query});
+      record.uri=this.vscode.Uri.from({scheme:SCHEME,authority:workspaceKey,path:`/${filename}`,query:documentQuery});
       record.value=value;
       return record.uri;
     }).catch(error=>{

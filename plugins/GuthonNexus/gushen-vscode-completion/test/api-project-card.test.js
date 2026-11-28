@@ -238,7 +238,7 @@ test('wired legacy card sends project-bound actions without API login or source 
   const view={webview:{onDidReceiveMessage(callback){send=callback;return {dispose(){}};}}};
   provider.resolveWebviewView(view);
   await provider.refresh();
-  assert.match(view.webview.html,/查看工作副本/);
+  assert.match(view.webview.html,/上传源码/);
   assert.doesNotMatch(view.webview.html,/id="login-form"/);
   await send({action:'pull',workspaceKey:'ws-other'});
   await send({action:'pull',workspaceKey:'products.db'});

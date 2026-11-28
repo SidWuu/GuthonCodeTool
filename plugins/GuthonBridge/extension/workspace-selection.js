@@ -107,7 +107,7 @@
     return pendingSelections.get(key);
   }
 
-  const api = { cachedWorkspaceKey, guthonAddress, isWorkspaceCacheError, select, storedWorkspaceKey };
+  const api = { STORAGE_KEY, cachedWorkspaceKey, guthonAddress, isWorkspaceCacheError, select, storedWorkspaceKey };
   root.GuthonBridgeWorkspace = api;
   if (typeof module === "object" && module.exports) {
     module.exports = api;

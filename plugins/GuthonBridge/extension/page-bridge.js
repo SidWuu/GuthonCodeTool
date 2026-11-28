@@ -1210,6 +1210,19 @@
   }
 
   function getDataSourceId() {
+    const procedureSelects = Array.from(document.querySelectorAll(".procedure-develop .tree-tool-bar .data-source-select"))
+        .filter(isVisible);
+    if (procedureSelects.length) {
+        if (procedureSelects.length !== 1) return "";
+        const [select] = procedureSelects;
+        const page = getVueInstance(select.closest(".procedure-develop"));
+        const values = new Set([
+            pickFirst(getVueInstance(select), ["value", "modelValue"]),
+            page?.dataSourceId,
+        ].filter(value => typeof value === "string" || typeof value === "number")
+            .map(String).filter(value => /^[A-Za-z0-9_-]{1,128}$/.test(value)));
+        return values.size === 1 ? [...values][0] : "";
+    }
     const selectedValue = getLabeledSelectValue("数据源");
     if (/^\d{4}$/.test(selectedValue)) {
       return selectedValue;
@@ -1457,10 +1470,13 @@
     };
   }
 
-  function inspectCurrentHubSource({ allowMissingPage = false } = {}) {
+  function inspectCurrentHubSource({ allowMissingPage = false, allowMissingProcedure = false } = {}) {
     const activeProcedureTab = document.querySelector('[role="tab"][aria-selected="true"][id^="tab-PR-"]');
     if (activeProcedureTab && isVisible(activeProcedureTab)) {
       return { dataSourceId: getDataSourceId(), ...inspectCurrentProcedure() };
+    }
+    if (allowMissingProcedure && location.hash.includes("/gdpaas/dev/procedure_develop")) {
+        return {mode:"procedure", dataSourceId:getDataSourceId()};
     }
     const activePageCode = getActivePageTabCode();
     if (activePageCode || location.href.includes("/gdpaas/dev/modules")) {
@@ -1501,7 +1517,12 @@
   }
 
   function inspectPageContext() {
-    const current = inspectCurrentHubSource({ allowMissingPage: true });
+    let current;
+    try {
+        current = inspectCurrentHubSource({ allowMissingPage: true, allowMissingProcedure: true });
+    } catch {
+        current = {mode:'platform'};
+    }
     const result = {mode: current.mode || 'procedure', hash: location.hash.split('?')[0].slice(0, 512)};
     for (const key of ['pageId', 'procedureKeyword', 'funId', 'dataSourceId', 'systemId']) {
       result[key] = typeof current[key] === 'string' ? current[key].slice(0, 256) : '';

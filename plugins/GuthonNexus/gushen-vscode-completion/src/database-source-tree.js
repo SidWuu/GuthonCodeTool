@@ -1,4 +1,4 @@
-const path = require('node:path');
+const path=require('node:path');
 const {MODULE_STYLES,SOURCE_CATEGORIES,sourceTreeIcon,sourceTreeIdentity,datasourceTreeName,sourceGroupDatasourceId,compareDatasourceIds}=require('./source/tree-styles');
 const {filterChildren}=require('./api/tree-filter');
 const {showWorkspaceSearch}=require('./workspace-search');
@@ -8,7 +8,11 @@ function label(record) {
   return record.name || id;
 }
 
-function buildTree(records, category, byName, changedPaths) {
+function isServiceComponent(record) {
+    return record?.sourceType === 'page' && String(record.pageType) === '0';
+}
+
+function buildTree(records, category, byName, changes) {
   const directories=new Map();
   category.children=[];
   for(const record of records) {
@@ -25,21 +29,28 @@ function buildTree(records, category, byName, changedPaths) {
           ? sourceGroupDatasourceId(category.navigationGroups,SOURCE_CATEGORIES[category.sourceType],code,display) : undefined;
         const folder={...category,id,kind:'legacy-database-folder',label:byDatasource?datasourceTreeName(display):display,
           groups:record.groups.slice(0,depth+1),
-          code,datasourceOrderId,sortKey:code || segment,children:[],parent,modified:false};
+          code,datasourceOrderId,sortKey:code || segment,children:[],parent,modified:false,conflict:false};
         directories.set(id,folder);
         parent.children.push(folder);
       }
       parent=directories.get(id);
     }
+    const change = changes.get(record.sourcePath);
     const node={kind:'legacy-database-object',label:label(record),record,parent,workspace:category.workspace,
-      sortKey:record.funId || record.sourceId,modified:changedPaths.has(record.sourcePath),
+      sortKey:record.funId || record.sourceId,modified:!!change,conflict:change?.needsMerge,needsReview:change?.needsReview,
       object:{name:record.name,sourceId:record.sourceId,funId:record.funId,path:record.sourcePath}};
-    if(node.modified) for(let folder=parent;folder && folder!==category;folder=folder.parent) folder.modified=true;
+    if(node.modified) {
+        for(let folder=parent;folder && folder!==category;folder=folder.parent) {
+            folder.modified=true;
+            folder.conflict ||= node.conflict;
+        }
+    }
     parent.children.push(node);
   }
   for(const node of [category,...directories.values()]) {
     node.children.sort((a,b)=>Number(!!b.children)-Number(!!a.children)
       || compareDatasourceIds(a.datasourceOrderId,b.datasourceOrderId)
+      || Number(isServiceComponent(a.record))-Number(isServiceComponent(b.record))
       || (byName ? a.label.localeCompare(b.label,'zh-CN') : 0)
       || a.sortKey.localeCompare(b.sortKey,'zh-CN',{numeric:true})
       || a.label.localeCompare(b.label,'zh-CN',{numeric:true}));
@@ -47,7 +58,7 @@ function buildTree(records, category, byName, changedPaths) {
   return category.children;
 }
 
-function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelected,getTool,edit,openCopy,compareProcedure}) {
+function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelected,getTool,edit,openCopy,compareSource}) {
   const catalog=new Map();
   const changes=new Map();
   const query=(workspace,...args)=>run(workspace,'legacy-source',args);
@@ -65,10 +76,11 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
       const [result,local]=await Promise.all([query(workspace,'catalog'),loadChanges(workspace)]);
       const populated=new Set(result.categories);
       const modifiedTypes=new Set(local.items.map(entry=>entry.sourceType));
+      const conflictTypes=new Set(local.items.filter(entry=>entry.needsMerge).map(entry=>entry.sourceType));
       const categories=Object.keys(MODULE_STYLES).map(key=>Object.keys(SOURCE_CATEGORIES)
         .find(type=>SOURCE_CATEGORIES[type]===key && populated.has(type))).filter(Boolean).map(sourceType=>({sourceType,kind:'legacy-database-category',workspace,
         label:MODULE_STYLES[SOURCE_CATEGORIES[sourceType]].label,navigationGroups:result.navigationGroups,
-        modified:modifiedTypes.has(sourceType)}));
+        modified:modifiedTypes.has(sourceType),conflict:conflictTypes.has(sourceType)}));
       if(filter) await Promise.all(categories.map(category=>load(workspace,category)));
       return [...filterChildren(categories,filter),...(local.diagnostic ? [{kind:'message',label:local.diagnostic}] : []),...(result.exportIndexReady ? [] : [{
         kind:'message',key:workspace.workspaceKey,label:'重建本地索引以显示表、视图、系统脚本和单据类型',
@@ -80,7 +92,7 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
     if(item.kind!=='legacy-database-object' || item.record.sourceType!=='page') return [];
     const result=await query(workspace,'fragments',...identityArgs(item.record));
     const modified=new Set(result.modifiedPointers);
-    const raw={...item,kind:'legacy-database-preview',label:'查看原始 JSON',parent:item,modified:false};
+    const raw={...item,kind:'legacy-database-preview',label:'查看原始 JSON',parent:item,modified:false,conflict:false,needsReview:false};
     return [raw,...result.fragments.map(fragment=>({...raw,...fragment,kind:'legacy-database-fragment',modified:modified.has(fragment.pointer)})),
       ...(result.diagnostic ? [{kind:'message',label:result.diagnostic}] : [])];
   }
@@ -101,8 +113,8 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
       pending.catch(()=>{if(catalog.get(cacheKey)===pending)catalog.delete(cacheKey);});
     }
     const [records,local]=await Promise.all([catalog.get(cacheKey),loadChanges(workspace)]);
-    const paths=new Set(local.items.filter(entry=>entry.sourceType===item.sourceType).map(entry=>entry.sourcePath));
-    return buildTree(records,item,vscode.workspace.getConfiguration?.('gushenCompletion')?.get('sourceTreeOrder')==='name',paths);
+    const modified=new Map(local.items.filter(entry=>entry.sourceType===item.sourceType).map(entry=>[entry.sourcePath,entry]));
+    return buildTree(records,item,vscode.workspace.getConfiguration?.('gushenCompletion')?.get('sourceTreeOrder')==='name',modified);
   }
   function treeItem(item) {
     const {sourceType}=item.record || item;
@@ -113,15 +125,19 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
     const node=new vscode.TreeItem(display.label,branch?vscode.TreeItemCollapsibleState.Collapsed:vscode.TreeItemCollapsibleState.None);
     if(display.code)node.guthonCode=display.code;
     node.contextValue='guthonDatabaseSource';
-    const icon=item.kind==='legacy-database-folder'?'folder'
+    const serviceComponent=item.kind==='legacy-database-object' && isServiceComponent(item.record);
+    const icon=serviceComponent?'symbol-event'
+      : item.kind==='legacy-database-folder'?'folder'
       : item.kind==='legacy-database-preview'?'json'
       : item.kind==='legacy-database-fragment'?({json:'symbol-field',sql:'database'}[item.language] || 'code'):undefined;
     node.iconPath=sourceTreeIcon(vscode,category,icon);
     if(item.modified) {
       // The source Webview renders the icon and description fields.
-      node.iconPath=new vscode.ThemeIcon(node.iconPath.id,new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
+      const color = item.conflict ? 'gitDecoration.conflictingResourceForeground' : 'gitDecoration.modifiedResourceForeground';
+      node.iconPath=new vscode.ThemeIcon(node.iconPath.id,new vscode.ThemeColor(color));
     }
-    node.description=[item.modified?'M · 本地修改':'',item.inherited?'继承 · 只读':''].filter(Boolean).join(' · ') || undefined;
+    node.description=[item.conflict?'C · 本地和谷神均有改动':item.needsReview?'待核对 · 基线未知':item.modified?'M · 本地修改':'',
+      item.inherited?'继承 · 只读':''].filter(Boolean).join(' · ') || undefined;
     const record=item.record;
     node.id=JSON.stringify([item.kind,item.id,item.workspace.workspaceKey,sourceType,record?.sourcePath,item.pointer,record?.exportKey]);
     if(record) {
@@ -167,10 +183,19 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
         if(sourceType) args.push('--type',sourceType);
         const result=await query(workspace,...args);
         return {...result,items:result.items.map(record=>({kind:'source',label:label(record),
-          description:record.pointer || record.sourcePath,detail:record.excerpt,record}))};
+          description:[record.sourceLayer==='workcopy'?'Workcopy':'',record.pointer || record.sourcePath].filter(Boolean).join(' · '),detail:record.excerpt,record}))};
       }});
     if(chosen) {
       const record=chosen.item.record;
+      if(record.sourceLayer==='workcopy' && record.workcopyPath) {
+        await current({workspace});
+        const file=path.resolve(workspace.workcopyDir,record.workcopyPath);
+        const relative=path.relative(workspace.workcopyDir,file);
+        if(!relative || relative==='..' || relative.startsWith('..'+path.sep) || path.isAbsolute(relative))
+          throw new Error('工作副本路径不属于当前项目');
+        const document=await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+        return vscode.window.showTextDocument(document);
+      }
       const kind=record.pointer?'legacy-database-fragment':'legacy-database-object';
       return open({...record,workspace,record,kind});
     }
@@ -188,13 +213,7 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
     const workspace=await current(item);
     if(!workspace.capabilities?.['workcopy.open'])throw new Error('当前项目没有 DATABASE Workcopy 能力');
     const record=item.record;
-    if(diff) {
-      if(record.sourceType==='procedure')return compareProcedure(workspace,item);
-      const target=path.join(workspace.workcopyDir,path.dirname(record.sourcePath));
-      const result=await run(workspace,'workcopy',['diff',target,'--json']);
-      if(result.output)return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(result.output)),{preview:true});
-      return;
-    }
+    if(diff) return compareSource(workspace,item,true);
     await run(workspace,'create-workcopy',['--type',record.sourceType,'--source-id='+record.sourceId,
       ...(record.funId?['--fun='+record.funId]:[]),'--json']);
     return openCopy(workspace,item);

@@ -62,7 +62,7 @@ function projectCardHtml(model,{nonce=crypto.randomBytes(18).toString('base64'),
     const details=legacy ? (model.address ? row('地址',model.address) : '')+(model.user ? row('用户',model.user) : '')+row('目录',model.root)
       : row('版本',model.version)+row('地址',model.address)+row('用户',model.user);
     const sourceLabel=model.sourceCount==null ? (model.index?.ready?'源码待检查':'索引待建立') : model.sourceCount+' 源码';
-    const uploadLabel=mode==='SVN'?'提交 SVN':mode==='DATABASE'?'查看工作副本':'上传代码';
+    const uploadLabel=mode==='SVN'?'提交 SVN':mode==='DATABASE'?'上传源码':'上传代码';
     const pullHint=model.pending?'正在核验登录状态':model.canPull?'拉取当前范围源码':'请检查项目连接和同步范围';
     content=`<section aria-label="当前项目详情" class="project-card"><dl>${row('项目',model.project)}${row('同步',mode)}${details}</dl></section>
 <div class="primary-actions"><button data-action="pull" ${ready&&model.canPull&&!model.pending?'':'disabled'} title="${pullHint}">更新源码</button><button class="secondary" data-action="upload" ${ready&&model.canUpload&&!model.pending?'':'disabled'}>${uploadLabel}</button></div>

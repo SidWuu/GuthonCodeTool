@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { buildCatalogTree } = require('../src/api/source-ui');
+const { createDatabaseSourceTree } = require('../src/database-source-tree');
 
 // 标签统一使用 ASCII 前缀，避免不同系统 locale 下中文排序结果的差异影响断言。
 const project = {
@@ -85,4 +86,42 @@ test('name order keeps the previous display-name sorting', () => {
   const procedures = category(tree, '过程函数');
   const leafDir = child(child(child(child(procedures, 'DS0'), 'com'), 'golden'), 'x');
   assert.deepEqual(labels(leafDir), ['bFun(无) Alpha', 'AFun(无) Zeta']);
+});
+
+test('DATABASE sorts service components after pages in each menu in either order mode', async () => {
+    const workspace = {workspaceKey: 'ws-db', sourceMode: 'database', index: {ready: true}};
+    const source = (id, name, pageType, menu = '001_Menu A') => ({
+        sourceType: 'page', pageType, sourceId: id, name, groups: ['System', menu],
+        sourcePath: `System/page/${menu}/${id}/raw.json`,
+    });
+    const records = [
+        source('PG-2', 'Alpha service', '0'),
+        source('PG-11', 'Alpha page', '1'),
+        source('PG-1', 'Beta service', 0),
+        source('PG-10', 'Zulu page', 2),
+        source('PG-3', 'Only service', '0', '002_Menu B'),
+    ];
+    let order = 'platform';
+    const tree = createDatabaseSourceTree({
+        vscode: {workspace: {getConfiguration: () => ({get: () => order})}},
+        getTool: () => ({toolHome: '/fixture'}),
+        async run(_workspace, command, args) {
+            assert.equal(command, 'legacy-source');
+            if (args[0] === 'local-changes') return {items: []};
+            assert.equal(args[0], 'catalog');
+            return args.length === 1 ? {categories: ['page'], exportIndexReady: true} : {items: records};
+        },
+    });
+    for (const [mode, expected] of [
+        ['platform', ['Zulu page', 'Alpha page', 'Beta service', 'Alpha service']],
+        ['name', ['Alpha page', 'Zulu page', 'Alpha service', 'Beta service']],
+    ]) {
+        order = mode;
+        const [pages] = await tree.children(workspace);
+        const [system] = await tree.children(workspace, pages);
+        const menus = await tree.children(workspace, system);
+        assert.deepEqual(labels(menus), ['Menu A', 'Menu B']);
+        assert.deepEqual(labels(await tree.children(workspace, menus[0])), expected);
+        assert.deepEqual(labels(await tree.children(workspace, menus[1])), ['Only service']);
+    }
 });

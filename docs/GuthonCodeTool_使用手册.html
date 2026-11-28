@@ -137,7 +137,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
     <span class="eyebrow"><span class="eyebrow-dot"></span>macOS M1 及后续型号 &amp; Windows</span>
     <h1>GuthonCodeTool<br>使用手册</h1>
     <p>按步骤完成安装、接入工作区、编辑和提交源码。需要了解完整能力与技术限制时查全功能说明；遇到疑问或故障时查问题解决中心。</p>
-    <div class="hero-meta"><span>安装</span><span>Nexus API 项目</span><span>Bridge 网页辅助</span><span>源码 MCP</span><span>团队治理</span></div>
+    <div class="hero-meta"><span>安装</span><span>Nexus 项目</span><span>Bridge 网页辅助</span><span>源码 MCP</span><span>团队治理</span></div>
     <div class="hero-actions">
       <a class="btn btn-primary" href="#1-安装">开始安装</a>
       <a class="btn btn-ghost" href="GuthonCodeTool_QA.html">问题解决中心</a>
@@ -191,7 +191,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
   <main class="main">
 <div class="overview">
 <article class="overview-card"><div class="overview-number">01</div><h3>安装</h3><p>下载应用和扩展，设置长期使用的本地数据目录。</p></article>
-<article class="overview-card"><div class="overview-number">02</div><h3>Nexus</h3><p>创建项目后配置 API 地址与拉取范围。</p></article>
+<article class="overview-card"><div class="overview-number">02</div><h3>Nexus</h3><p>创建项目后配置源码连接和同步范围。</p></article>
 <article class="overview-card"><div class="overview-number">03</div><h3>guthon-team</h3><p>安装规范、Linter、Hook，并检查治理状态。</p></article>
 <article class="overview-card"><div class="overview-number">04</div><h3>Bridge</h3><p>连接 Chrome 与 Nexus，按需使用网页辅助能力。</p></article>
 <article class="overview-card"><div class="overview-number">05</div><h3>源码 MCP</h3><p>让 AI 客户端按项目查询源码并受控修改本地文件。</p></article>
@@ -199,7 +199,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <article class="overview-card"><div class="overview-number">07</div><h3>迁移与检查</h3><p>迁移或删除工作区，检查首次使用结果。</p></article>
 </div>
 <aside class="notice"><div class="notice-icon">i</div><div>
-<p><strong>先选项目：</strong>确认 API 地址、登录身份、子系统和数据源范围；本地保存、上传回读和平台验收分别确认。</p>
+<p><strong>先选项目：</strong>核对同步方式、连接身份和同步范围。分别核对本地保存、上传或提交结果，以及平台验收。</p>
 <p>macOS M1 及后续型号与 Windows 的 Nexus 操作相同。GuthonCodeTool 本身不要求克隆源码、安装 Python、安装 Node.js 或创建虚拟环境。</p>
 </div></aside>
 
@@ -336,6 +336,7 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 <figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：当前项目更多菜单及源码工具，显示同步模块参数和官方参考资料"><img src="nexus-manual-images/project-source-tools.png" width="1370" height="512" alt="当前项目更多菜单及源码工具，显示同步模块参数和官方参考资料" loading="lazy"></button><figcaption>API 项目展开「源码工具」可同步模块参数与官方参考资料。</figcaption></figure>
 </div>
 <h5>项目源码</h5>
+<p id="direct-source-edit">要用常用编辑器或 AI 修改已登记的纯源码，先在“项目源码”核对对象及其物理路径。API、SVN 编辑现有可写的 checkout 文件，DATABASE 编辑对应 Workcopy 的可写源码。保存后在当前项目查看本地差异。已启用 guthon-guard 0.5.5 或更新版本时，任务结束后查看 Stop 核验结果。直接编辑通过核验后即可继续。若提示文件只读、被占用或存在冲突，先核对具体对象和当前编辑状态。页面结构、视图定义等继续从原编辑入口修改。<a href="GuthonCodeTool_全功能说明.html#direct-source-edit-reference">支持范围与核验方式</a></p>
 <p id="refresh-project-source">智能体或外部编辑器保存源码后，如果变更标记没有更新，点击“项目源码”标题栏的刷新按钮（悬停显示“刷新当前源码视图”），然后在树中核对本地修改标记。</p>
 <figure class="manual-shot"><button type="button" class="manual-shot-button" aria-haspopup="dialog" aria-label="放大：项目源码更多菜单，包含导出源码说明及展开或收起所选节点"><img src="nexus-manual-images/source-more.png" width="1270" height="226" alt="项目源码更多菜单，包含导出源码说明及展开或收起所选节点" loading="lazy"></button><figcaption>从源码视图标题栏可导出源码说明。选中节点后，也可从此菜单展开或收起该节点。</figcaption></figure>
 <h4 id="agent-workspace-selection">选择 AI 任务目标</h4>
@@ -437,8 +438,8 @@ p code,li code,h3 code,h4 code{overflow-wrap:anywhere;word-break:break-word}
 
 <section class="wiki-section">
 <h2 id="4-bridge">4. Bridge 网页辅助</h2>
-<h3 id="4-1-安装-chrome-扩展">4.1 安装 Chrome 扩展</h3><p>需要网页辅助时加载 GuthonBridge 扩展；Windows 首次加载见<a href="GuthonCodeTool_Windows安装步骤.html#one-click-bridge">安装步骤</a>。日常源码同步、编辑和检查可以直接在 Nexus 完成。需要已登录页签的操作会指明当前动作；按下节完成配对后继续。</p><h3 id="4-2-启动与验证">4.2 启动与配对</h3><ol><li>更换本地数据目录前，在持有旧 Bridge 服务的 Nexus 窗口点击“项目总览 → … → 停止浏览器增强”，等待停止；同一端口不能同时监听两套数据目录。端口仍被占用时，按<a href="GuthonCodeTool_QA.html?q=EADDRINUSE">端口占用问答</a>核对原窗口和进程。</li><li>在目标数据目录对应的 Nexus 窗口点击“项目总览 → … → 启动浏览器增强”（命令面板名称为“Guthon Nexus: 启动 Guthon Bridge”），等待启动成功，再点击“复制配对令牌”。</li><li>在 Chrome 扩展弹窗的配对设置中填写与 Nexus 相同的端口、粘贴配对令牌，点击“保存并连接”。确认显示“Bridge 配对成功”；默认导出目录应属于当前本地数据目录，若使用自定义导出目录则核对已配置的位置。</li><li>更新或重新加载 Chrome 扩展后，先保存平台编辑再刷新平台页面；执行一次所需的只读定位，核对返回工作区与对象。</li></ol><h3 id="4-3-使用网页辅助">4.3 使用网页辅助</h3>
-<p>在受支持的谷神页面，可以复制字段、滚动列表和<span id="bridge-tab-sort">拖动标签排序</span>。与 Nexus 配对后，可定位当前 PAGE 或过程函数，并按需定向刷新 API 源码。适用范围见<a href="GuthonCodeTool_全功能说明.html#8-1-页面能力">Bridge 功能说明</a>。</p>
+<h3 id="4-1-安装-chrome-扩展">4.1 安装 Chrome 扩展</h3><p>需要网页辅助时加载 GuthonBridge 扩展；Windows 首次加载见<a href="GuthonCodeTool_Windows安装步骤.html#one-click-bridge">安装步骤</a>。日常源码同步、编辑和检查可以直接在 Nexus 完成。需要已登录页签的操作会指明当前动作；按下节完成配对后继续。</p><h3 id="4-2-启动与验证">4.2 启动与配对</h3><ol><li>更换本地数据目录前，在持有旧 Bridge 服务的 Nexus 窗口点击“项目总览 → … → 停止浏览器增强”，等待停止；同一端口不能同时监听两套数据目录。端口仍被占用时，按<a href="GuthonCodeTool_QA.html?q=EADDRINUSE">端口占用问答</a>核对原窗口和进程。</li><li>在目标数据目录对应的 Nexus 窗口点击“项目总览 → … → 启动浏览器增强”（命令面板名称为“Guthon Nexus: 启动 Guthon Bridge”），等待启动成功，再点击“复制配对令牌”。</li><li>打开 Chrome 扩展弹窗后，“Bridge 配对设置”默认展开。填写与 Nexus 相同的端口，粘贴配对令牌，再点击“保存并连接”。确认显示“Bridge 配对成功”后，可点击标题收起配对设置。</li><li>更新或重新加载 Chrome 扩展后，先保存平台编辑再刷新平台页面；执行一次所需的只读定位，核对返回工作区与对象。</li></ol><h3 id="4-3-使用网页辅助">4.3 使用网页辅助</h3>
+<p>在受支持的谷神页面，可以复制字段、滚动列表和<span id="bridge-tab-sort">拖动标签排序</span>。点击谷神页面左下角的“Bridge”标题可收起或展开工具栏。与 Nexus 配对并匹配项目后，工具栏显示该同步方式和页签支持的操作。模块开发中的“字段平移”包含“复制字段”和“粘贴字段”。在“IDE联动”中，点击“定位本地源码”在 Nexus 打开当前 PAGE 或过程函数。DATABASE 项目在模块开发打开目标 PAGE 并选中组件后，可点击“粘贴本地改动”。弹窗中的“源码刷新与导出”默认收起。打开过程函数后可导出已保存的正文，并查看导出目录。适用范围见<a href="GuthonCodeTool_全功能说明.html#8-1-页面能力">Bridge 功能说明</a>。</p>
 <p id="bridge-procedure-navigation">在模块开发的页面后台脚本中，按住 Ctrl（macOS 为 Cmd）点击可识别的过程函数调用。过程函数打开后，点击页面顶部浮条的“返回页面”，回到发起跳转的 PAGE。</p>
 </section>
 
@@ -486,22 +487,24 @@ codex mcp get guthon-source-helper</code></pre></div>
 </ol>
 <p>两组的文件行都可打开原文件。暂存区的“−”会取消所选文件的暂存，本地变更的“还原”会列出所选文件并等待确认。组标题右侧可打开该组全部原文件、取消全部暂存或还原全部本地变更。也可右键审阅并上传所选修改，或从项目卡片的“上传代码”选择文件。模块参数使用独立的预览上传入口。支持的文件类型和暂存限制见<a href="GuthonCodeTool_全功能说明.html#api-scm-staging">API 源代码管理参考</a>。</p></li>
 <li><strong>SVN</strong>在“源代码管理”中选择当前项目的“谷神 SVN 源码变更”，点击文件，在左右两栏核对修改。PAGE 脚本按行展开，核对原文时右键选“查看 SVN 原始差异”。文件右侧的撤回或提交图标用于操作当前文件。子系统右侧的图标用于操作该组，“更改”标题栏的图标用于当前 SVN 项目。点击更新后确认远端变更范围，批量撤回或提交前勾选文件。提交时填写说明并核对确认框中的文件清单。完成后从操作记录查看回执，并按项目流程核对谷神平台生效。已同步公共源码时可浏览单据类型和下拉组件，继承过程函数可从右键查看父层源码。<a href="GuthonCodeTool_全功能说明.html#svn-source-diff">SVN 差异与操作范围</a></li>
-<li id="database-local-changes"><strong>DATABASE</strong>在源码树点击服务组件，直接在 GSS 编辑器中查看或编辑 <code>compScript</code>。点击普通页面打开本地页面编辑器，也可展开页面并打开事件脚本、SQL 或过程函数。首次保存会建立对应工作副本。重新打开普通页面时，Nexus 会读取磁盘上的工作副本并保留窗口草稿。若提示“外部修改冲突”，先核对磁盘内容和草稿再保存。保存后，“项目源码”中的 <code>M</code> 标出本地修改，打开代码可查看相对只读基线的行标记。普通页面可在“比较改动”中<a href="#database-paste-field-changes">按组件复制字段改动</a>，也可在脚本或 SQL 的差异条目中点击“复制修改后片段”，到谷神平台对应节点粘贴。点击项目卡片的“查看工作副本”可另行生成交付材料。执行“导出单据类型”后，在项目的 <code>database/billtype/</code> 查看 JSON，也可在源码树浏览已索引的单据类型。<a href="GuthonCodeTool_全功能说明.html#database-local-changes-reference">本地改动标记的范围</a></li>
+<li id="database-local-changes"><strong>DATABASE</strong>在源码树点击服务组件，直接在 GSS 编辑器中查看或编辑 <code>compScript</code>。点击普通页面打开本地页面编辑器，也可展开页面并打开事件脚本、SQL 或过程函数。首次保存会建立对应工作副本。重新打开普通页面时，Nexus 会读取磁盘上的工作副本并保留窗口草稿。若提示“外部修改冲突”，先核对磁盘内容和草稿再保存。保存后，“项目源码”中的 <code>M</code> 标出本地修改，打开代码可查看相对只读基线的行标记。普通页面可在“比较改动”中<a href="#database-paste-field-changes">按组件复制字段改动</a>，也可在脚本或 SQL 的差异条目中点击“复制修改后片段”，到谷神平台对应节点粘贴。同步后可比较并合并 Workcopy，再从项目卡片上传。需要生成交付材料时，在“本地修改”中选择“按目录打开已有 Workcopy”。执行“导出单据类型”后，在项目的 <code>database/billtype/</code> 查看 JSON，也可在源码树浏览已索引的单据类型。<a href="GuthonCodeTool_全功能说明.html#database-local-changes-reference">本地改动标记的范围</a></li>
 </ul>
 <p>平台表或视图的结构同步会执行 DDL，按提示确认并单独核验结果。</p>
 <p>API 项目的“页面”分类用布局图标标记普通页面，用闪电图标标记服务组件。通过普通页面左侧的箭头展开脚本、SQL、字段或按钮。API 结构化 PAGE 的悬停说明如果显示“批量下载 XML · 只读”，点击该页的“编辑页面”会为它加载原生模型；可右键“打开原始源码”查看批量下载的 XML。顶层“过程函数”分类右键可切换“列表平铺”和“树形结构”；数据源、过程包和函数节点没有此切换。函数节点左侧显示业务名称，右侧较小字号显示函数编码及可解析的签名，确认启用返回值时显示返回表达式，例如 <code>[return $result]</code>；无法可靠确定表达式时显示 <code>[return 无]</code>；<code>()</code> 表示确认无参数，<code>(无)</code> 表示无法可靠确定参数。格式及来源见<a href="GuthonCodeTool_全功能说明.html#project-details">过程函数展示说明</a>。页面或过程函数右键选择“查看使用位置”可打开已索引的引用。新建函数从目标过程包右键进入，核对名称和选项后确认创建。</p><p>更新或上传期间打开“输出”，选择“GuthonCodeTool”，查看实际执行步骤和耗时；结果未知时从操作记录核对原编号。</p>
-<h4 id="database-manual-procedure-upload">审阅与手动上传 DATABASE 过程函数</h4>
+<h4 id="database-manual-procedure-upload">合并并上传 DATABASE 源码</h4>
+<p>确认项目已登记谷神平台地址，并在该地址保留任意一个已登录、已配对的谷神页签。开发模式使用本地构建的 Nexus 和 Chrome Bridge。发行模式须为已验收的平台启用手动上传。<a href="GuthonCodeTool_全功能说明.html#bridge-database-manual-upload">配置条件</a>。</p>
 <ol>
-<li>在 Nexus 保存过程函数的工作副本。从“当前项目 → 本地修改”选择目标函数，点击“查看本地差异”或“检查上传候选（仅本地）”。没有可信编辑基线的历史副本可以比较或导出。</li>
-<li>选择检查候选后，核对差异并点击“确认当前候选”。连接 Bridge 后，可选择“只读核对平台基线”。在已配对的浏览器中保留一个对应项目、系统和数据源的已登录谷神页签。</li>
-<li>平台已启用手动上传时，先在谷神签出该函数。核对 Nexus 显示的平台、过程函数和版本，再点击“确认手动上传”。出现“平台与镜像均已核验”后，刷新源码树查看本地修改状态。按项目流程在谷神确认签入及运行结果。</li>
-<li>显示“保存结果未知”或“平台已核验，等待镜像回拉”时，从“本地修改 → 核验原发布操作”继续核验该次操作。</li>
+<li>在 Nexus 保存本地改动。先同步了源码时，可从“本地修改”打开同步镜像与 Workcopy 的比较，核对并保存需要保留的改动。</li>
+<li>点击“当前项目 → 上传源码”，勾选本次要保存的普通页面、服务组件或过程函数。点击条目右侧的差异按钮。左侧是谷神最新源码，右侧是本地待上传候选。进入确认前 Nexus 会重新读取两侧。</li>
+<li>有共同基线时，检查右侧自动合并的结果。若某项有冲突，按字段或脚本位置核对，同批其他项可以继续。缺少共同基线时，先同步目标节点再核对 Workcopy。手动合并并保存后，可单独选择该项，待镜像与谷神正文一致后点击“审阅已手动合并的 Workcopy”。</li>
+<li>核对确认框中的对象和版本，点击“保存到谷神平台”。过程函数尚未签出时，由当前配对账号签出。若提示其他账号已签出或签出未核验，先在谷神核对签出状态。</li>
+<li>逐项查看上传结果。显示“谷神与本地只读源码均已更新”后，可按项目流程核对签入和运行。显示“保存结果与上传候选不同”时，在“本地修改”对比实际保存的源码与保留的 Workcopy。</li>
 </ol>
-<p>手动上传适用于已有的非继承过程函数正文。平台配置和回拉条件见<a href="GuthonCodeTool_全功能说明.html#bridge-database-manual-upload">DATABASE 手动上传参考</a>。</p>
+<p>遇到保存结果未知或镜像待更新，从“本地修改 → 继续检查上传结果”勾选原记录核查。若核查确认谷神仍是上传前的版本和正文，可以关闭这些记录，再重新审阅上传。<a href="GuthonCodeTool_QA.html?q=DATABASE">上传排查问答</a>。</p>
 <h4 id="database-paste-field-changes">批量粘贴 DATABASE 页面字段改动</h4>
 <ol>
 <li>在 Nexus 保存 PAGE 工作副本，点击“比较改动 → 与 DATABASE 只读源码比较”。在比较标题下、第一条差异上方找到目标组件，点击“复制字段改动”。</li>
-<li>在谷神模块开发中打开同一页面，选中对应查询表单、输入表单或表格组件。点击 Bridge 的“粘贴本地改动”，将剪贴板内容粘贴进输入框后点击“预览”。</li>
+<li>在谷神模块开发中打开同一页面，选中对应查询表单、输入表单或表格组件。在 Bridge 的“IDE联动”中点击“粘贴本地改动”，将剪贴板内容粘贴进输入框后点击“预览”。</li>
 <li>核对页面、组件和预计改动，点击“应用到设计器”。检查平台编辑器中的字段和配置，再使用谷神设计器的“保存”。如预览报告冲突，按字段和属性核对平台与本地值后重新预览。</li>
 </ol>
 <p><a href="GuthonCodeTool_全功能说明.html#database-field-batch-reference">可批量应用的字段及限制</a></p>

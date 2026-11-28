@@ -1,8 +1,11 @@
 """Resolve provider source locations without loading or executing a provider."""
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from pathlib import Path
+import tempfile
 from common.svn_workspace_config import svn_settings
 from common.svn_scope import load_authorized_scope
 from common.runtime_paths import workspace_root
@@ -44,9 +47,12 @@ def resolve_sources(home, root, key, config_id, item, mode, config, *, project_c
                     'source.read', 'source.index', 'source.reindex', 'source.edit', 'database.diagnose')}}
     if mode == 'database':
         readonly, workcopy = root / 'source/readonly', root / 'source/workcopy'
+        namespace = json.dumps([str(home), key, os.getuid() if hasattr(os, "getuid") else None])
+        temporary = Path(tempfile.gettempdir()).resolve() / ("guthon-workcopy-" + hashlib.sha256(namespace.encode()).hexdigest())
         return {'providerSourceRoot': readonly, 'checkoutPath': None,
                 'sourceDir': root / 'source', 'readonlyDir': readonly,
                 'workcopyDir': workcopy, 'databaseDir': root / 'database',
+                'workcopySaveReceiptDirs': [home / 'config' / 'workcopy-save-receipts' / key, temporary],
                 'sourceRoots': [{'role': 'readonly', 'path': readonly},
                                 {'role': 'workcopy', 'path': workcopy}],
                 'providerCapabilities': dict(DATABASE_CAPABILITIES)}

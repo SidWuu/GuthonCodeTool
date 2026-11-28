@@ -77,8 +77,9 @@ chrome.alarms?.onAlarm.addListener(alarm => { if (alarm.name === 'guthon-compone
 chrome.runtime.onStartup?.addListener(() => { void reportComponent(); });
 void reportComponent();
 async function handleBridgeEvent(event, command, simulateDatabaseProcedure) {
-  const databaseProcedure = event === 'database-procedure';
-  if (!databaseProcedure && !['navigate', 'page-lifecycle','native-metadata'].includes(event)) return;
+  const databasePage = event === 'database-page';
+  const databaseSource = databasePage || event === 'database-procedure';
+  if (!databaseSource && !['navigate', 'page-lifecycle','native-metadata'].includes(event)) return;
   const identity = await clientId();
   if (command.clientId !== identity || !Number.isInteger(command.tabId)
       || command.contextId !== `${identity}:${command.tabId}` || !publishedTabs.has(command.tabId)) return;
@@ -86,28 +87,36 @@ async function handleBridgeEvent(event, command, simulateDatabaseProcedure) {
   try {
     const tab = await chrome.tabs.get(command.tabId);
     if (!GuthonBridgeHost.isAllowed(tab.url) || new URL(tab.url).origin !== command.pageOrigin) throw new Error('平台页签来源已改变');
-    const inspected = await chrome.tabs.sendMessage(tab.id, {type: 'run-page-command', command: 'inspect-page-context'});
-    if (!inspected?.ok) throw new Error('无法读取当前平台身份，请刷新页签');
+    const inspected = databaseSource ? {data:{}} : await chrome.tabs.sendMessage(tab.id, {type: 'run-page-command', command: 'inspect-page-context'});
+    if (!databaseSource && !inspected?.ok) throw new Error('无法读取当前平台身份，请刷新页签');
     const route = await bridgeRequest('/routeWorkspace', {...inspected.data, pageOrigin: command.pageOrigin, workspaceKey: command.workspaceKey});
     if (!route.ok || route.workspaceKey !== command.workspaceKey) throw new Error('当前平台身份不属于目标工作区');
-    if (databaseProcedure) {
+    const procedureSystems = route.databaseProcedureSystemIds;
+    const procedureSystemId = inspected.data.systemId || (procedureSystems?.length === 1 ? procedureSystems[0] : '');
+    if (databaseSource) {
       const {type, action, target} = command.target;
-      if (type !== 'database-procedure' || !['read','save'].includes(action)
+      if (type !== event || !['read','save'].includes(action)
           || route.workspace?.sourceMode !== 'database' || route.workspace.capabilities?.['database.sourceSync'] !== true
-          || target.origin !== command.pageOrigin || target.systemId !== inspected.data.systemId
-          || target.dataSourceId !== inspected.data.dataSourceId) throw new Error('DATABASE 过程函数发布页签不匹配');
+          || target.origin !== command.pageOrigin) throw new Error('DATABASE 源码发布页签不匹配');
       const binding = {requestId:command.requestId, clientId:identity, tabId:tab.id, workspaceKey:command.workspaceKey};
       const {evidence} = await bridgeRequest('/databaseProcedurePayload', binding);
       if (simulateDatabaseProcedure) data = await simulateDatabaseProcedure(action, target, evidence);
+      else if (databasePage) {
+        const results = await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',func:runPageLifecycle,
+          args:[{...target, action:`database-${action}`, evidence, expectedOrigin:command.pageOrigin,
+            systemIds:[target.systemId]}]});
+        data = results?.[0]?.result;
+        if (!data || data.state) throw new Error(data?.message || 'DATABASE PAGE 原生回执不可用');
+      }
       else {
         await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',files:['database-procedure.js']});
         const results = await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',
           func:input=>runDatabaseProcedure(input),args:[{action,target,evidence:evidence ?? null,
-            systemId:inspected.data.systemId,dataSourceId:inspected.data.dataSourceId}]});
+            systemId:target.systemId,dataSourceId:target.dataSourceId}]});
         data = results?.[0]?.result;
         if (!data) throw new Error('DATABASE 原生回执不可用');
       }
-      await bridgeRequest('/navigationResult', {...binding, ok:true, data});
+      await bridgeRequest(databasePage ? '/databasePageResult' : '/navigationResult', {...binding, ok:true, data});
       return;
     }
     if (event === 'native-metadata') {
@@ -115,14 +124,14 @@ async function handleBridgeEvent(event, command, simulateDatabaseProcedure) {
       const databasePreflight = target?.action === 'inspect-database-procedure';
       const allowed = databasePreflight
         ? route.workspace?.sourceMode === 'database' && route.workspace.capabilities?.['database.sourceSync'] === true
-          && inspected.data.systemId === target.systemId && inspected.data.dataSourceId === target.dataSourceId
+          && procedureSystemId === target.systemId && inspected.data.dataSourceId === target.dataSourceId
         : route.workspace?.capabilities?.['svn.edit'] === true;
       if (target?.type !== 'native-metadata' || !allowed) throw new Error('原生元数据命令未获工作区授权');
       await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',files:['native-metadata.js']});
       const results=await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',func:payload => runNativeMetadata(payload),
         args:[{...command.target,expectedOrigin:command.pageOrigin,
           dataSourceIds:[inspected.data.dataSourceId,...(inspected.data.dataSourceIds || [])].filter(Boolean),
-          systemIds:[inspected.data.systemId,...(inspected.data.systemIds || [])].filter(Boolean)}]});
+          systemIds:[databasePreflight ? procedureSystemId : inspected.data.systemId,...(inspected.data.systemIds || [])].filter(Boolean)}]});
       const result = results?.[0]?.result;
       if (!result) throw new Error('Native metadata receipt unavailable');
       if (databasePreflight) {
@@ -165,7 +174,7 @@ async function handleBridgeEvent(event, command, simulateDatabaseProcedure) {
     ok = true;
     void chrome.tabs.sendMessage(tab.id, {type: 'refresh-page-context'}).catch(() => {});
   } catch (error) {message = error.message;}
-  await bridgeRequest('/navigationResult', {requestId: command.requestId, clientId: identity,
+  await bridgeRequest(databasePage ? '/databasePageResult' : '/navigationResult', {requestId: command.requestId, clientId: identity,
     tabId: command.tabId, workspaceKey: command.workspaceKey, ok, message});
 }
 function removePublishedTab(tabId) {
@@ -275,7 +284,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message?.type === "bridge-health") { await reportComponent(); return bridgeRequest("/status"); }
     if (message?.type === "open-nexus") {
-      const locator = GuthonBridgeNexusLocator.build(message.target);
+      const locator = GuthonBridgeNexusLocator.build(message.target, message.workspaceKey);
       await chrome.tabs.create({ url: locator.uri });
       return { ok: true, description: locator.description };
     }

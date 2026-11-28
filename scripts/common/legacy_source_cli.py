@@ -261,20 +261,24 @@ def _run(command, args, config, workspace):
 
             if len(args) != 1 or mode != "database" or not workspace["capabilities"].get("workcopy.open"):
                 raise ValueError("DATABASE Workcopy source editing is unavailable")
-            result = workcopy_edit(workspace, config, args[0], json.load(sys.stdin), rebind_index_record=True)
+            result = workcopy_edit(workspace, config, args[0], json.load(sys.stdin), rebind_index_record=True,
+                                   record_cli_save=args[0] == "edit-save")
             print(json.dumps({"ok": True, **result}, ensure_ascii=False))
             return 0
         if args == ["publish-refresh"]:
-            from common.database_node_sync import sync_verified_procedure
+            from common.database_node_sync import sync_verified_source
 
             if mode != "database" or not workspace["capabilities"].get("database.sourceSync"):
                 raise ValueError("当前工作区不支持 DATABASE 发布回拉")
             evidence = json.load(sys.stdin)
             if evidence.get("workspaceKey") != workspace["workspaceKey"]:
                 raise ValueError("发布回拉工作区不一致")
-            result = sync_verified_procedure(workspace, config, evidence["databaseIdentity"],
+            result = sync_verified_source(workspace, config, evidence["databaseIdentity"],
                                              base_version=evidence["baseVersion"], database_version=evidence["version"],
-                                             content=evidence["content"], advance_workcopy=True)
+                                             content=evidence["content"], advance_workcopy=True,
+                                             reviewed_workcopy_hash=evidence.get("reviewedWorkcopyHash"),
+                                             merged_workcopy=evidence.get("mergedWorkcopy") is True,
+                                             platform_differs=evidence.get("platformDiffers") is True)
             print(json.dumps({"ok": True, "workspaceKey": workspace["workspaceKey"], **result}, ensure_ascii=False))
             return 0
         if args == ["review-workcopies"]:

@@ -4,13 +4,14 @@
   const FUNCTION_ID = /^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/;
   const EXTENSION_URI = 'vscode://gushen-local.guthon-nexus-vscode';
 
-  function build(target) {
+  function build(target, workspaceKey) {
+    const workspace = workspaceKey ? `&workspaceKey=${encodeURIComponent(workspaceKey)}` : '';
     if (target?.mode === 'page-source') {
       const pageId = String(target.pageId || '').trim();
       if (!PAGE_ID.test(pageId)) throw new Error('当前页面没有有效的 PAGE ID');
       return {
         type: 'page',
-        uri: `${EXTENSION_URI}/locate-page?pageId=${encodeURIComponent(pageId)}`,
+        uri: `${EXTENSION_URI}/locate-page?pageId=${encodeURIComponent(pageId)}${workspace}`,
         description: `PAGE ${pageId}`,
       };
     }
@@ -22,7 +23,7 @@
       }
       return {
         type: 'procedure',
-        uri: `${EXTENSION_URI}/locate-procedure?alias=${encodeURIComponent(alias)}&funId=${encodeURIComponent(funId)}`,
+        uri: `${EXTENSION_URI}/locate-procedure?alias=${encodeURIComponent(alias)}&funId=${encodeURIComponent(funId)}${workspace}`,
         description: `${alias}.${funId}`,
       };
     }

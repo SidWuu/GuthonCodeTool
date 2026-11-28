@@ -88,6 +88,29 @@ def _check_parent(workspace, lease):
             )
 
 
+def assert_no_active_lease(workspace, path, *, source_hash=None):
+    """Check leases while the caller holds documents.lock."""
+    leases = _directory(workspace) / "leases"
+    if not leases.is_dir():
+        return
+    for file in leases.glob("*.json"):
+        existing = _load(file)
+        if (
+            existing.get("path") == path
+            and not existing.get("closed")
+            and existing.get("expiresAt", 0) > time.time()
+        ):
+            if source_hash is not None and existing.get("sourceHash") != source_hash:
+                existing.update(
+                    closed=True,
+                    closedAt=time.time(),
+                    invalidatedReason="SOURCE_CHANGED",
+                )
+                _save(file, existing)
+                continue
+            raise ApiError("API_DOCUMENT_LEASE_BUSY", "该文件已有活动编辑租约")
+
+
 def open_document(workspace, path, ttl_seconds=1800):
     if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= 86400:
         raise ValueError("ttl_seconds must be 1–86400")
@@ -112,24 +135,8 @@ def open_document(workspace, path, ttl_seconds=1800):
             raise ApiError(
                 "API_PAGE_XML_UNSUPPORTED", "未知 PAGE XML 格式仅可读取原文，不能编辑"
             )
+        assert_no_active_lease(workspace, path, source_hash=item["sourceHash"])
         leases = directory / "leases"
-        if leases.is_dir():
-            for file in leases.glob("*.json"):
-                existing = _load(file)
-                if (
-                    existing.get("path") == path
-                    and not existing.get("closed")
-                    and existing.get("expiresAt", 0) > time.time()
-                ):
-                    if existing.get("sourceHash") != item["sourceHash"]:
-                        existing.update(
-                            closed=True,
-                            closedAt=time.time(),
-                            invalidatedReason="SOURCE_CHANGED",
-                        )
-                        _save(file, existing)
-                        continue
-                    raise ApiError("API_DOCUMENT_LEASE_BUSY", "该文件已有活动编辑租约")
         lease_id = uuid.uuid4().hex
         record = {
             "workspaceKey": workspace["workspaceKey"],

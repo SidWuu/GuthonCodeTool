@@ -101,6 +101,11 @@ class PageFieldRelation:
     evidence_pointer: str
 
 
+def comparable_script(value: str) -> str:
+    """Normalize line endings and disregard one final line terminator."""
+    return value.replace("\r\n", "\n").replace("\r", "\n").removesuffix("\n")
+
+
 def text_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 

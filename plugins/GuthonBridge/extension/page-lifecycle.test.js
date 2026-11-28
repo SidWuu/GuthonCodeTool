@@ -53,6 +53,34 @@ test('lost mutation response is UNKNOWN and the page handler never retries',asyn
   assert.equal(result.state,'UNKNOWN');assert.equal(writes,1);assert.equal(result.platformApplied,null);
 });
 
+test('DATABASE PAGE sends the designer JSON form and preserves an explicit save rejection', async () => {
+    const f = fixture();
+    const candidate = {...f.page, title:'修改 & + 保留'};
+    const operationId = 'a'.repeat(64);
+    f.box.TextEncoder = TextEncoder;
+    f.box.fetch = async (url, options) => {
+        const body = Object.fromEntries(options.body);
+        f.calls.push({url, body});
+        let reply;
+        if (url.endsWith('/models/list.htm')) {
+            reply = {code:0, data:{list:[f.page]}};
+        } else if (url.endsWith('/getPageModuleXml.htm')) {
+            reply = {code:0, data:{bean:f.page, version:'v1'}};
+        } else {
+            assert.equal(url, '/develop/dev/models/savePageModuleXml.htm');
+            assert.deepEqual(body, {pageId:'PG-1', pageVersion:'v1', json:JSON.stringify(candidate), flag:'0', isAutoCompile:'1'});
+            reply = {code:17, message:'Native rejection'};
+        }
+        return {ok:true, text:async () => JSON.stringify(reply)};
+    };
+    const result = await f.run({action:'database-save', systemId:'SYS-1', pageId:'PG-1', pageAlias:'demo.source',
+        pageType:'2', evidence:{operationId, expectedVersion:'v1', content:JSON.stringify(candidate)}});
+    assert.equal(result.operationId, operationId);
+    assert.equal(result.rejected, 'PLATFORM_SAVE_REJECTED');
+    assert.equal(result.platformCode, 17);
+    assert.equal(f.calls.length, 3);
+});
+
 
 test('delete reads back explicit absence and sends the mutation only once', async () => {
   const f=fixture();const inspected=await f.run({action:'inspect',pageId:'PG-1'});f.calls.length=0;

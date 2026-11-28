@@ -235,6 +235,7 @@ def _build_system_scope(records, selected):
     system_ids = set()
     data_source_ids = set()
     system_name_by_id = {}
+    system_ids_by_data_source_id = {}
     data_source_names = {}
     for record in records:
         alias_values = _values(record, "SYSTEM_ALIAS_ID", "systemAliasId")
@@ -251,6 +252,7 @@ def _build_system_scope(records, selected):
             system_name_by_id[system_id] = name
         for data_source_id in data_ids:
             data_source_names.setdefault(data_source_id, []).append((order, name))
+            system_ids_by_data_source_id.setdefault(data_source_id, set()).update(ids)
     system_name_by_data_source_id = {}
     system_link_names_by_data_source_id = {}
     for data_source_id, names in data_source_names.items():
@@ -264,6 +266,7 @@ def _build_system_scope(records, selected):
         "system_ids": sorted(system_ids),
         "data_source_ids": sorted(data_source_ids),
         "system_name_by_id": system_name_by_id,
+        "system_ids_by_data_source_id": {key: sorted(ids) for key, ids in system_ids_by_data_source_id.items()},
         "system_name_by_data_source_id": system_name_by_data_source_id,
         "system_link_names_by_data_source_id": system_link_names_by_data_source_id,
     }
@@ -1156,11 +1159,10 @@ ORDER BY {_field('p', cfg['update_time_field'])} DESC, {_field('p', cfg['id_fiel
 
 
 def single_source_sql(table_cfg: dict, source_type: str, payload: dict, rules: dict | None = None, *,
-                      verified_procedure_version: str | None = None):
-    verified = verified_procedure_version is not None
-    if verified and (source_type != PROCEDURE_SOURCE_TYPE or not isinstance(verified_procedure_version, str)
-                     or not verified_procedure_version):
-        raise ValueError("核验回拉需要精确过程函数和有效版本")
+                      verified_version: str | None = None):
+    verified = verified_version is not None
+    if verified and (not isinstance(verified_version, str) or not verified_version):
+        raise ValueError("核验回拉需要有效版本")
     if source_type == PAGE_SOURCE_TYPE:
         cfg, select = _page_select(table_cfg)
         filters = []
@@ -1173,14 +1175,24 @@ def single_source_sql(table_cfg: dict, source_type: str, payload: dict, rules: d
             params.append(payload["alias"])
         else:
             raise SystemExit("page sourceId or alias is required")
+        available = _source_available_sql("p", cfg, rules)
+        if verified:
+            if not all(payload.get(key) for key in ("sourceId", "alias", "systemId")) or not cfg.get("version_mac_field"):
+                raise ValueError("发布回拉需要完整的 DATABASE PAGE 身份和版本字段")
+            available = f"{_field('p', cfg['version_mac_field'])} = %s"
+            alias_field = _field("p", cfg["alias_field"])
+            id_field = _field("p", cfg["id_field"])
+            filters.extend((f"COALESCE(NULLIF({alias_field}, ''), {id_field}) = %s",
+                            f"{_field('p', cfg['system_id_field'])} = %s"))
+            params = [verified_version, payload["sourceId"], payload["alias"], payload["systemId"]]
         return (
             f"""
 {select}
-WHERE {_source_available_sql('p', cfg, rules)}
+WHERE {available}
   AND ({_field('p', cfg.get('error_field'))} IS NULL OR {_field('p', cfg.get('error_field'))} <> '1')
   AND {' AND '.join(filters)}
 ORDER BY {_field('p', cfg['update_time_field'])} DESC, {_field('p', cfg['id_field'])} DESC
-LIMIT 1
+LIMIT {2 if verified else 1}
 """,
             params,
         )
@@ -1209,7 +1221,7 @@ LIMIT 1
             # A previously verified save may still be checked out. Only that
             # specific version can bypass the regular pull's check-in filter.
             available = f"{_field('s', cfg.get('version_mac_field'))} = %s"
-            params.insert(0, verified_procedure_version)
+            params.insert(0, verified_version)
         return (
             f"""
 SELECT
@@ -2222,7 +2234,7 @@ def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scop
     source_alias_id = _source_alias_id(row)
     existing = conn.execute(
         """
-        SELECT record_id, change_key, local_path FROM gusen_source_record
+        SELECT * FROM gusen_source_record
         WHERE source_layer=? AND scope_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
         """,
         (layer, scope_id, project_id, row["source_table"], row["source_id"], row["fun_id"] or ""),
@@ -2239,6 +2251,10 @@ def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scop
             if procedure:
                 _ensure_shared_procedure_aliases(desired_path.parent.parent, row, system_scope)
             return False
+    if workspace and workspace["sourceMode"] == "database" and existing and existing["local_path"]:
+        from common.database_source_publish import capture_clean_workcopy
+
+        capture_clean_workcopy(workspace, existing, ROOT / existing["local_path"])
     local_path, status, scripts = write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, change_key, workspace)
     if procedure:
         _ensure_shared_procedure_aliases(local_path.parent.parent, row, system_scope)
@@ -2433,21 +2449,27 @@ def write_source(row, layer, scope_id, project_id, layer_cfg, system_scope, chan
         if key not in ("source_content", "product_source_content", "model_path")
     }
     meta.update({"change_key": change_key, "status": status})
-    (base / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    if row["source_table"] == PROCEDURE_SOURCE_TYPE:
+        from common.inheritance import project as project_inheritance
+
+        meta["source_inheritance"] = project_inheritance(row.get("source_content") or "", None)["status"]
     scripts = []
     if row["source_table"] == PAGE_SOURCE_TYPE:
         if not content:
             script_path = base / "scripts" / "compScript.vm"
             script_path.parent.mkdir(exist_ok=True)
             script_path.write_text("", encoding="utf-8")
+            (base / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
             record_generated_files([base / "meta.json", script_path])
             return base, status, [("compScript", script_path, "")]
         (base / "raw.json").write_text(content, encoding="utf-8")
-        scripts = parse_page_scripts(base, content)
+        scripts = parse_page_scripts(base, content, metadata=meta)
     else:
         script_path = base / "source.vm"
         script_path.write_text(content, encoding="utf-8")
+        meta["source_content_hash"] = hashlib.sha256(script_path.read_bytes()).hexdigest()
         scripts = [("procedure_script", script_path, content)]
+    (base / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     record_generated_files([base / "meta.json", *_source_output_paths(row, base)])
     return base, status, scripts
 
@@ -2518,13 +2540,16 @@ def _resolve_inherited_script(script, inherited):
     return script
 
 
-def parse_page_scripts(base: Path, raw: str):
+def parse_page_scripts(base: Path, raw: str, *, metadata=None):
     try:
         data = json.loads(raw)
         if isinstance(data, str):
             data = json.loads(data)
     except Exception:
         return []
+    if metadata is not None and isinstance(data, dict):
+        page_type = data.get("pageType")
+        metadata["page_type"] = str(page_type) if type(page_type) in {str, int} else ""
     out_dir = base / "scripts"
     out_dir.mkdir(exist_ok=True)
     scripts = []

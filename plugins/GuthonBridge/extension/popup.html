@@ -12,46 +12,55 @@
         <button id="closeBtn" title="关闭" type="button">×</button>
       </div>
 
-      <details>
+      <details class="popup-section pairing-settings" open>
         <summary>Bridge 配对设置</summary>
-        <p>先在 Nexus 启动 Bridge，点击“复制配对令牌”，在此粘贴。</p>
-        <label>配对令牌<input id="bridgeToken" type="password" autocomplete="off" /></label>
-        <label>本机端口<input id="bridgePort" type="number" value="17361" min="1" max="65535" /></label>
-        <button id="pairBridgeBtn" type="button">保存并连接</button>
-        <button id="resumeBridgeJobsBtn" type="button">查询待恢复任务</button>
-      </details>
-      <label>
-        <span id="procedureLabel">包名</span>
-        <input id="procedureKeyword" value="" readonly />
-      </label>
-
-      <details>
-        <summary class="recent-pulls-heading"><span>最近拉取对象</span><button id="refreshRecentPullsBtn" type="button" title="刷新历史" aria-label="刷新历史"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9"/></svg></button></summary>
-        <div id="recentPulls"></div>
-      </details>
-
-      <label>
-        <span id="funIdLabel">函数名</span>
-        <input id="funId" value="" readonly />
-      </label>
-
-      <label>
-        页面导出目录
-        <input id="outputDir" value="" readonly placeholder="连接 Bridge 后显示导出目录" />
-      </label>
-
-      <div class="actions">
-        <div class="source-actions">
-          <button id="pullHubBtn">刷新当前对象</button>
+        <div class="section-content">
+            <p>在 Nexus 启动 Bridge，复制配对令牌后粘贴到这里。</p>
+            <label>配对令牌<input id="bridgeToken" type="text" autocomplete="off" spellcheck="false" /></label>
+            <div class="pairing-actions">
+                <label>本机端口<input id="bridgePort" type="number" value="17361" min="1" max="65535" /></label>
+                <button id="pairBridgeBtn" type="button">保存并连接</button>
+                <button id="resumeBridgeJobsBtn" class="action-secondary" type="button">查询待恢复任务</button>
+            </div>
         </div>
-        <button id="copyFieldsBtn">复制字段</button>
-        <button id="pasteFieldsBtn">粘贴字段</button>
-        <button id="localFieldsBtn">粘贴本地改动</button>
-        <button id="locateNexusBtn" class="action-nexus" type="button" hidden><span class="action-nexus-icon" aria-hidden="true">↗</span><span class="action-nexus-label">在 Nexus 中定位</span></button>
-      </div>
+      </details>
 
-      <div id="status">准备就绪</div>
-      <button id="pullPageBtn" class="action-secondary" type="button">拉取页面当前源码</button>
+      <div class="field-actions">
+        <div id="fieldActions" class="field-action-row" role="group" aria-labelledby="fieldTransferLabel" hidden>
+            <span id="fieldTransferLabel">字段平移</span>
+            <div class="field-action-buttons">
+                <button id="copyFieldsBtn" type="button">复制字段</button>
+                <button id="pasteFieldsBtn" type="button">粘贴字段</button>
+            </div>
+        </div>
+        <div id="ideActions" class="field-action-row" role="group" aria-labelledby="ideActionsLabel" hidden>
+            <span id="ideActionsLabel">IDE联动</span>
+            <div class="field-action-buttons">
+                <button id="localFieldsBtn" type="button" hidden>粘贴本地改动</button>
+                <button id="locateNexusBtn" type="button" hidden>定位本地源码</button>
+            </div>
+        </div>
+      </div>
+      <details class="popup-section source-tools">
+        <summary>源码刷新与导出</summary>
+        <div class="section-content">
+            <div class="source-actions">
+                <button id="pullHubBtn" class="action-secondary" type="button" hidden>刷新当前对象</button>
+                <button id="pullPageBtn" class="action-secondary" type="button" hidden>导出当前源码</button>
+            </div>
+            <div class="source-identity" hidden>
+                <label><span id="procedureLabel">包名</span><input id="procedureKeyword" readonly /></label>
+                <label><span id="funIdLabel">函数名</span><input id="funId" readonly /></label>
+            </div>
+            <label hidden>导出目录<input id="outputDir" readonly placeholder="连接后显示导出目录" /></label>
+            <details class="recent-pulls">
+                <summary>最近拉取对象</summary>
+                <button id="refreshRecentPullsBtn" type="button">刷新历史</button>
+                <div id="recentPulls"></div>
+            </details>
+        </div>
+      </details>
+      <div id="status" role="status">准备就绪</div>
     </div>
 
     <script src="host-settings.js"></script>

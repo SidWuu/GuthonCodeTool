@@ -4,17 +4,17 @@ import json
 from common.page_projection import json_pointer, pointer_parts
 
 
-def _identity(value):
+def member_identity(value):
     if not isinstance(value, dict):
         return None
     for key in ('id', 'fieldId', 'guid', 'name'):
         if isinstance(value.get(key), str) and value[key].strip():
             return key + ':' + value[key]
-    return _identity(value.get('component'))
+    return member_identity(value.get('component'))
 
 
 def _array_keys(before, after):
-    left, right = [_identity(value) for value in before], [_identity(value) for value in after]
+    left, right = [member_identity(value) for value in before], [member_identity(value) for value in after]
     if all(left) and all(right) and len(set(left)) == len(left) and len(set(right)) == len(right):
         return left, right
     return None

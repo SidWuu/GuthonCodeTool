@@ -55,6 +55,10 @@ function snapshot(payload) {
     hash: text(metadata.hash, 512).split('?')[0], mode, ...data};
 }
 
+function databaseProcedureSystem(context, systemIds = context.databaseProcedureSystemIds) {
+    return context.systemId || (systemIds?.length === 1 ? systemIds[0] : '');
+}
+
 function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, commandTtlMs = 30000} = {}) {
   const contexts = new Map();
   const commands = new Map();
@@ -74,9 +78,10 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     }
     for (const [id, item] of commands) if (item.expiresAt <= now()) commands.delete(id);
   }
-  function publish(payload) {
+  function publish(payload, databaseProcedureSystemIds) {
     expire();
     const item = snapshot(payload);
+    if (databaseProcedureSystemIds) item.databaseProcedureSystemIds = databaseProcedureSystemIds;
     if (!contexts.has(item.contextId) && contexts.size >= limit) throw new Error('页面快照容量已满，请关闭闲置平台页签');
     const previous = contexts.get(item.contextId);
     const changed = !previous || JSON.stringify({...previous, updatedAt: 0, expiresAt: 0}) !== JSON.stringify({...item, updatedAt: 0, expiresAt: 0});
@@ -113,7 +118,7 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
       tabId: context.tabId, workspaceKey: context.workspaceKey, pageOrigin: context.pageOrigin,
       target, state: 'PENDING', expiresAt: now() + (lifecycle ? 120000 : commandTtlMs)};
     commands.set(item.requestId, {...item, completePrivate});
-    const event = completePrivate ? 'database-procedure' : metadata ? 'native-metadata' : lifecycle ? 'page-lifecycle' : 'navigate';
+    const event = completePrivate ? target.type : metadata ? 'native-metadata' : lifecycle ? 'page-lifecycle' : 'navigate';
     const notice = completePrivate ? {...item, target:{...target, evidence:undefined}} : item;
     emit(event, notice, s => s.clientId === context.clientId);
     return {ok: true, requestId: item.requestId, state: item.state};
@@ -132,10 +137,11 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
         || item.workspaceKey !== payload.workspaceKey) throw new Error('浏览器 DATABASE 请求身份不匹配');
     return {ok:true, evidence:item.target.evidence};
   }
-  function complete(payload) {
+  function complete(payload, pagePublication = false) {
     expire();
     const item = commands.get(payload.requestId);
     if (!item || item.clientId !== payload.clientId || item.tabId !== payload.tabId || item.workspaceKey !== payload.workspaceKey) throw new Error('定位回执身份不匹配');
+    if ((item.target.type === 'database-page') !== pagePublication) throw new Error('DATABASE PAGE 回执类型不匹配');
     if (item.completePrivate) {
       commands.delete(item.requestId);
       item.completePrivate(payload);
@@ -207,27 +213,28 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     const heartbeat = setInterval(() => { expire(); if (!res.destroyed) res.write(': heartbeat\n\n'); }, 20000);
     res.on('close', () => {clearInterval(heartbeat); subscribers.delete(subscriber);});
   }
-  function databaseProcedure(context, action, target, evidence) {
+  function databaseSource(context, action, target, evidence) {
     const current = get(context.contextId, context.workspaceKey);
-    if (['pageOrigin','systemId','dataSourceId'].some(key => current[key] !== context[key])) {
+    const fields = ['pageOrigin','clientId','tabId'];
+    if (fields.some(key => current[key] !== context[key])) {
       throw new Error('已配对的发布页签身份发生变化');
     }
     return new Promise((resolve, reject) => {
       const {requestId} = dispatch({contextId:context.contextId, workspaceKey:context.workspaceKey,
-        target:{type:'database-procedure',action, target, evidence}}, false, payload => {
+        target:{type:target.pageId ? 'database-page' : 'database-procedure',action, target, evidence}}, false, payload => {
         clearTimeout(timeout);
         if (payload.ok === true && payload.data) resolve(payload.data);
-        else reject(new Error('浏览器未能完成 DATABASE 过程操作'));
+        else reject(new Error(text(payload.message, 512) || '浏览器未能完成 DATABASE 源码操作'));
       });
       const timeout = setTimeout(() => {
         commands.delete(requestId);
-        reject(new Error('浏览器 DATABASE 过程操作未及时返回'));
+        reject(new Error('浏览器 DATABASE 源码操作未及时返回'));
       }, commandTtlMs);
       timeout.unref();
     });
   }
   function dispose() {for (const s of subscribers) s.res.end(); subscribers.clear();}
-  return {publish, list, remove, get, databaseProcedure, privatePayload, navigate: payload => dispatch(payload), lifecycle: payload => dispatch(payload, true), metadata: payload => dispatch(payload,'metadata'), result, complete, subscribe, expire, dispose};
+  return {publish, list, remove, get, databaseSource, privatePayload, navigate: payload => dispatch(payload), lifecycle: payload => dispatch(payload, true), metadata: payload => dispatch(payload,'metadata'), result, complete, subscribe, expire, dispose};
 }
 
-module.exports = {createPageContexts, snapshot, navigationTarget, isWorkspaceKey};
+module.exports = {createPageContexts, snapshot, navigationTarget, isWorkspaceKey, databaseProcedureSystem};

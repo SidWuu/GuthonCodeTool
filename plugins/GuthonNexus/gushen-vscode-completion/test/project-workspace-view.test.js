@@ -345,13 +345,14 @@ test('DATABASE Workcopy delivery opens the checklist and opens the difference on
   const workspace = { workspaceKey: 'projects.db', displayName: 'Fixture', sourceMode: 'database', workcopyDir: '/fixture/workcopy' };
   const target = workspace.workcopyDir + '/service';
   const subscriptions = [], calls = [], opened = [];
-  const selections = ['package', undefined, 'diff'];
+  const selections = ['package', 'diff'];
   const legacy = registerLegacyProjects({
     vscode: { EventEmitter, Uri: { file: fsPath => ({ fsPath }) },
       workspace: { textDocuments: [], openTextDocument: async uri => uri },
       window: {
         showOpenDialog: async () => [{ fsPath: target }],
         showQuickPick: async items => {
+          if (!items.some(item => item.action)) return items[0];
           const action = selections.shift();
           return items.find(item => item.action === action);
         },
@@ -366,91 +367,344 @@ test('DATABASE Workcopy delivery opens the checklist and opens the difference on
     } },
   });
   t.after(() => subscriptions.forEach(subscription => subscription.dispose()));
-  await legacy.action(workspace, 'upload');
+  await legacy.action(workspace, 'changes');
   assert.deepEqual(opened, [target + '/delivery.md']);
   await legacy.action(workspace, 'changes');
   assert.deepEqual(opened, [target + '/delivery.md', target + '/diff.md']);
   assert.deepEqual(calls.map(({ command, args, key }) => [command, args[0], key]), [
-    ['workcopy', 'package', workspace.workspaceKey], ['legacy-source', 'review-workcopies', workspace.workspaceKey],
+    ['legacy-source', 'review-workcopies', workspace.workspaceKey], ['workcopy', 'package', workspace.workspaceKey],
+    ['legacy-source', 'review-workcopies', workspace.workspaceKey],
     ['workcopy', 'diff', workspace.workspaceKey],
   ]);
 });
 
-test('DATABASE upload candidate confirmation stays local unless the user chooses read-only preflight', async t => {
-  const {registerLegacyProjects}=require('../src/legacy-project');
-  const {createHash}=require('node:crypto');
-  const workspace={workspaceKey:'projects.db',sourceMode:'database',root:'/fixture/project',
-    workcopyDir:'/fixture/project/source/workcopy',displayName:'Fixture'};
-  const record={recordId:4,sourceId:'FN-1',sourceType:'procedure',sourcePath:'proc/source.vm',name:'Example',trustedBaseline:true};
-  const subscriptions=[], calls=[], messages=[], errors=[];
-  let confirmed=false, preflight=false, provider, stale=false, changeDuringRead=false, origins=[];
-  const bridgeCalls=[];
-  const legacy=registerLegacyProjects({
-    async databaseBridgeRequest(home,route,payload){
-      assert.equal(home,'/fixture');bridgeCalls.push({route,payload});
-      const after={origin:'https://platform.test',systemId:'SYS-1',dataSourceId:'DS-1',procedureAlias:'pkg.proc',funId:'sample',
-        procedureId:'PR-1',version:'native-v1',contentHash:createHash('sha256').update('before').digest('hex')};
-      if(route.startsWith('/pageContext?'))return {contexts:[{...after,pageOrigin:after.origin,contextId:'ctx'}]};
-      if(route==='/databaseProcedurePreflight')return {requestId:'preflight-1'};
-      if(route.startsWith('/navigationResult?')){
-        if(changeDuringRead)stale=true;
-        return {state:'SUCCEEDED',data:{state:'SUCCEEDED',platformApplied:false,after}};
-      }
-      assert.fail('unexpected Bridge route');
-    },
-    context:{subscriptions},getTool:()=>({toolHome:'/fixture'}),getWorkspaces:async()=>[workspace],
-    sourceTree:{refresh(){}},
-    vscode:{EventEmitter:class {event=()=>({dispose(){}});fire(){} dispose(){}},
-      Uri:{from:value=>value}, workspace:{textDocuments:[], registerTextDocumentContentProvider(scheme,value){
-      if(scheme==='guthon-database-review-diff')provider=value;
-      return {dispose(){}};
-    }}, commands:{async executeCommand(command,left,right){
-      assert.equal(command,'vscode.diff');
-      assert.equal(provider.provideTextDocumentContent(left),'before');
-      assert.equal(provider.provideTextDocumentContent(right),'after');
-    }}, window:{showQuickPick:async items=>typeof items[0]==='string'?items[1]:items[0],
-      async showInformationMessage(message,options,button){
-        messages.push(message);
-        return options?.modal ? (confirmed?button:undefined) : (preflight && typeof options==='string'?options:undefined);
-      },
-      showErrorMessage:message=>errors.push(message)}},
-    processClient:{async request(_tool,command,[action],key,stdin){
-      assert.equal(command,'legacy-source');assert.equal(key,workspace.workspaceKey);
-      calls.push({action,stdin});
-      if (action==='review-workcopies')return {ok:true,items:[record]};
-      if (action==='publish-confirm' && stale)throw new Error('编辑基线或候选已变化，请重新审阅');
-      return {ok:true,baseContent:'before',content:'after',reviewId:'review-1',sourceHash:'hash-1',pageOrigins:origins,
-        databaseIdentity:{system_id:'SYS-1',data_source_id:'DS-1',source_alias_id:'pkg.proc',fun_id:'sample'}};
-    }},
-  });
-  t.after(()=>subscriptions.forEach(subscription=>subscription.dispose()));
-  await legacy.action(workspace,'changes');
-  assert.deepEqual(calls.map(({action})=>action),['review-workcopies','publish-preview']);
-  confirmed=true;
-  await legacy.action(workspace,'changes');
-  assert.equal(calls.at(-1).action,'publish-confirm');
-  assert.deepEqual(calls.at(-1).stdin,{recordId:4,sourceId:'FN-1',sourcePath:record.sourcePath,reviewId:'review-1',sourceHash:'hash-1'});
-  assert.match(messages.at(-1),/未上传到谷神平台/);
-  assert.deepEqual(bridgeCalls,[]);
-  preflight=true;
-  await legacy.action(workspace,'changes');
-  assert.deepEqual(bridgeCalls.map(call=>call.route.split('?')[0]),['/pageContext','/databaseProcedurePreflight','/navigationResult']);
-  assert.deepEqual(bridgeCalls[1].payload,{workspaceKey:workspace.workspaceKey,contextId:'ctx',
-    target:{action:'inspect-database-procedure',systemId:'SYS-1',dataSourceId:'DS-1',procedureAlias:'pkg.proc',funId:'sample',includeSourceHash:true}});
-  assert.match(messages.at(-1),/平台正文与编辑基线一致.*PR-1\/sample.*native-v1.*平台地址还未登记.*未上传/);
-  assert.deepEqual(errors,[]);
-  assert.equal(calls.at(-1).action,'publish-confirm');
+test('DATABASE upload shows one approval and rechecks the reviewed mirror before sending', async t => {
+    const {registerLegacyProjects} = require('../src/legacy-project');
+    const {createHash} = require('node:crypto');
+    const workspace = {workspaceKey:'projects.db', sourceMode:'database', root:'/fixture/project',
+        workcopyDir:'/fixture/project/source/workcopy', displayName:'Fixture'};
+    const record = {recordId:4, sourceId:'FN-1', sourceType:'procedure', sourcePath:'proc/source.vm',
+        name:'Example', trustedBaseline:false, needsMerge:true};
+    const target = {origin:'https://platform.test', systemId:'SYS-1', dataSourceId:'DS-1',
+        procedureAlias:'pkg.proc', funId:'sample', procedureId:'PR-1', version:'native-v1',
+        contentHash:createHash('sha256').update('before').digest('hex')};
+    const subscriptions = [], calls = [], errors = [], confirmations = [], uploads = [];
+    let confirmed = false, stale = false, provider, mode = 'manual', preflights = 0;
+    const matchingTab = {...target, pageOrigin:target.origin, contextId:'ctx'};
+    let contexts = [matchingTab];
+    const legacy = registerLegacyProjects({
+        reviewDatabaseUpload:async (_vscode, entries) => entries.map(({path}) => path),
+        databasePublicationMode:async () => mode,
+        async databaseBridgeRequest(_home, route) {
+            if (route.startsWith('/pageContext?')) return {contexts};
+            if (route === '/databaseSourcePreflight') {preflights++; return {native:target};}
+            assert.fail('unexpected Bridge route');
+        },
+        async databasePublicationRequest(_home, route, input) {
+            assert.equal(route, '/databaseProcedurePublish');
+            uploads.push(input);
+            return {target, state:'VERIFIED'};
+        },
+        context:{subscriptions}, getTool:() => ({toolHome:'/fixture'}), getWorkspaces:async () => [workspace],
+        sourceTree:{refresh() {}},
+        vscode:{EventEmitter:class {event = () => ({dispose() {}}); fire() {} dispose() {}},
+            Uri:{from:value => value}, workspace:{textDocuments:[], registerTextDocumentContentProvider(scheme,value) {
+                if (scheme === 'guthon-database-review-diff') provider = value;
+                return {dispose() {}};
+            }}, commands:{async executeCommand(command, left, right) {
+                assert.equal(command, 'vscode.diff');
+                assert.equal(provider.provideTextDocumentContent(left), 'before');
+                assert.equal(provider.provideTextDocumentContent(right), 'after');
+            }}, window:{
+                showQuickPick:async items => items[0],
+                async showWarningMessage(_message, options, action) {
+                    confirmations.push(action);
+                    assert.match(options.detail, /右侧已经合并/);
+                    return confirmed ? action : undefined;
+                },
+                showInformationMessage(_message, options) {assert.equal(options, undefined);},
+                showErrorMessage:message => errors.push(message),
+            }},
+        processClient:{async request(_tool, command, [action], key, input) {
+            assert.equal(command, 'legacy-source');
+            assert.equal(key, workspace.workspaceKey);
+            calls.push({action,input});
+            if (action === 'review-workcopies') return {ok:true, items:[record]};
+            if (action === 'catalog') return {ok:true, navigationGroups:{
+                systemIdsByName:{'主数据':'SYS-1','交易':'SYS-2'},
+                dataSourceIdsByName:{'业务库':'DS-1','其他库':'DS-2'},
+            }};
+            if (action === 'publish-confirm' && stale) throw new Error('同步镜像已发生变化，请重新审阅');
+            return {ok:true, baseContent:'before', content:'after', reviewId:'review-1', sourceHash:'hash-1',
+                pageOrigins:[target.origin], databaseIdentity:{system_id:'SYS-1', data_source_id:'DS-1',
+                    source_alias_id:'pkg.proc', fun_id:'sample'}};
+        }},
+    });
+    t.after(() => subscriptions.forEach(subscription => subscription.dispose()));
+    await legacy.action(workspace, 'upload');
+    assert.deepEqual(calls.map(({action}) => action), ['review-workcopies', 'publish-preview']);
+    assert.deepEqual(confirmations, ['保存到谷神平台']);
+    assert.deepEqual(uploads, []);
+    confirmed = true;
+    stale = true;
+    await legacy.action(workspace, 'upload');
+    assert.match(errors.pop(), /同步镜像已发生变化/);
+    assert.deepEqual(uploads, []);
+    stale = false;
+    contexts = [{...matchingTab, systemId:'', dataSourceId:'', mode:'platform'}];
+    await legacy.action(workspace, 'upload');
+    assert.deepEqual(errors, []);
+    assert.equal(confirmations.length, 3);
+    assert.equal(uploads.length, 1);
+    assert.equal(uploads[0].compareMirror, true);
+    assert.equal(uploads[0].reviewId, 'review-1');
 
-  changeDuringRead=true;
-  await legacy.action(workspace,'changes');
-  assert.match(errors.pop(),/编辑基线或候选已变化/);
-  stale=false;
-  changeDuringRead=false;
-  origins=['https://other.test'];
-  const requests = bridgeCalls.length;
-  await legacy.action(workspace,'changes');
-  assert.match(errors.pop(),/已登记的平台/);
-  assert.equal(bridgeCalls.length,requests+1);
+    const priorPreflights = preflights;
+    for (const [tabs, message] of [
+        [[], /没有收到.*打开 https:\/\/platform\.test.*登录/],
+        [[{...matchingTab, pageOrigin:'https://other.test'}], /https:\/\/other\.test.*使用 https:\/\/platform\.test/],
+        [[matchingTab, {...matchingTab, contextId:'another'}], /2 个与项目平台地址匹配的页签.*保留一个/],
+    ]) {
+        contexts = tabs;
+        await legacy.action(workspace, 'upload');
+        assert.match(errors.pop(), message);
+    }
+    for (const [availability, message] of [
+        ['bridge-stopped', /还没启动.*命令面板/],
+        ['bridge-unreachable', /无法通过 Guthon Bridge.*同一端口和配对令牌/],
+        ['closed', /没有启用 DATABASE 上传.*检查更新/],
+    ]) {
+        mode = availability;
+        await legacy.action(workspace, 'upload');
+        assert.match(errors.pop(), message);
+    }
+    assert.equal(preflights, priorPreflights);
+    assert.equal(uploads.length, 1);
+});
+
+test('DATABASE batches PAGE and procedure uploads with one confirmation and no object open in Chrome', async t => {
+    const {registerLegacyProjects} = require('../src/legacy-project');
+    const {createHash} = require('node:crypto');
+    const workspace = {workspaceKey:'projects.db', sourceMode:'database', root:'/fixture/db', displayName:'Fixture'};
+    const origin = 'https://platform.test';
+    const page = {recordId:1, sourceType:'page', sourceId:'PG-FORM', sourcePath:'form/raw.json', name:'Form'};
+    const procedure = {recordId:2, sourceType:'procedure', sourceId:'PR-FN', sourcePath:'proc/source.vm', name:'Function'};
+    const blocked = {...page, recordId:3, sourceId:'PG-BLOCKED', sourcePath:'blocked/raw.json', name:'Blocked'};
+    const conflicted = {...page, recordId:4, sourceId:'PG-CONFLICT', sourcePath:'conflict/raw.json', name:'Conflict'};
+    const nativePage = {pageId:'PG-FORM', pageAlias:'Form', systemId:'SYS-1', origin, version:'page-v1'};
+    const nativeProcedure = {procedureId:'PR-1', procedureAlias:'pkg.proc', funId:'fn', systemId:'SYS-1',
+        dataSourceId:'DS-1', origin, version:'proc-v1', contentHash:createHash('sha256').update('before').digest('hex')};
+    const subscriptions = [], confirmations = [], sends = [], errors = [], reports = [];
+    const legacy = registerLegacyProjects({
+        context:{subscriptions}, getTool:() => ({toolHome:'/fixture'}), getWorkspaces:async () => [workspace],
+        sourceTree:{refresh() {}}, databasePublicationMode:async () => 'manual',
+        async reviewDatabaseUpload(_vscode, entries, _openDiff, options) {
+            assert.equal(options.selectAll, false);
+            return entries.map(item => item.path);
+        },
+        async databaseBridgeRequest(_home, route, input) {
+            if (route.startsWith('/pageContext?')) return {contexts:[
+                {contextId:'platform', mode:'platform', pageOrigin:origin, systemId:'', dataSourceId:''},
+            ]};
+            if (route === '/databaseSourcePreflight') {
+                assert.equal(input.contextId, 'platform');
+                assert.equal(input.threeWay, true);
+                if (input.sourceId === blocked.sourceId) throw new Error('目标页面不在项目同步范围');
+                if (input.sourceId === conflicted.sourceId) return {native:{
+                    ...nativePage, pageId:'PG-CONFLICT', latestContent:'{"pageType":1}',
+                    merge:{state:'CONFLICT', conflicts:[{kind:'value', path:'/views/rows/0/component/fields/1/width'}], conflictCount:1},
+                }};
+                return {native:input.sourceId === page.sourceId ? nativePage : nativeProcedure};
+            }
+            assert.fail(route);
+        },
+        async databasePublicationRequest(_home, route, input) {
+            assert.equal(route, '/databaseProcedurePublish');
+            sends.push(input.sourceId);
+            return input.sourceId === page.sourceId ? {target:nativePage, state:'VERIFIED'}
+                : {target:nativeProcedure, state:'NOT_WRITTEN', reason:'CHECKED_OUT_BY_OTHER'};
+        },
+        vscode:{EventEmitter:class {event = () => ({dispose() {}}); fire() {} dispose() {}},
+            Uri:{from:value => value},
+            commands:{async executeCommand(command, _left, right) {
+                assert.equal(command,'vscode.diff');
+                assert.equal(right.scheme,'guthon-database-edit');
+            }},
+            workspace:{textDocuments:[], async openTextDocument(doc) {return doc;},
+                registerTextDocumentContentProvider() {return {dispose() {}};},
+                registerFileSystemProvider() {return {dispose() {}};},
+            },
+            window:{
+                async showWarningMessage(message, options, action) {
+                    confirmations.push({message, detail:options.detail});
+                    return action;
+                },
+                async showTextDocument(doc) {reports.push(doc.content);},
+                showErrorMessage:message => errors.push(message),
+            }},
+        processClient:{async request(_tool, command, [action], key, input) {
+            assert.equal(command, 'legacy-source');
+            assert.equal(key, workspace.workspaceKey);
+            if (action === 'review-workcopies') return {ok:true, items:[page, procedure, blocked, conflicted]};
+            if (action === 'catalog') return {ok:true, navigationGroups:{systemIdsByName:{'Other':'SYS-3'}}};
+            if (action === 'edit-read') return {ok:true, language:'json', content:'{"pageType":1}'};
+            assert.ok(['publish-preview', 'publish-confirm'].includes(action));
+            const isPage = input.sourceId !== procedure.sourceId;
+            return {ok:true, sourceHash:'source', reviewId:'review', pageOrigins:[origin],
+                baseContent:isPage ? '{"pageType":1}' : 'before', content:isPage ? '{"pageType":1}' : 'after',
+                databaseIdentity:{system_id:input.sourceId === blocked.sourceId ? 'SYS-3' : 'SYS-1',
+                    data_source_id:isPage ? '' : 'DS-1', source_alias_id:'pkg.proc', fun_id:'fn'}};
+        }},
+    });
+    t.after(() => subscriptions.forEach(subscription => subscription.dispose()));
+    await legacy.action(workspace, 'upload');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(sends, ['PG-FORM', 'PR-FN']);
+    assert.equal(confirmations.length, 1);
+    assert.match(confirmations[0].message, /2 项/);
+    assert.match(confirmations[0].detail, /blocked\/raw\.json · 未进入本次上传/);
+    assert.match(confirmations[0].detail, /conflict\/raw\.json · 未进入本次上传/);
+    assert.match(reports[0], /\/views\/rows\/0\/component\/fields\/1\/width/);
+    assert.match(reports[0], /谷神与本地只读源码均已更新/);
+    assert.match(reports[0], /这个函数已被其他账号签出/);
+});
+
+test('DATABASE can close an unchanged upload only after the user confirms the verified original version', async t => {
+    const {registerLegacyProjects} = require('../src/legacy-project');
+    const workspace = {workspaceKey:'projects.db', sourceMode:'database', root:'/fixture/db', displayName:'Fixture'};
+    const target = {origin:'https://platform.test', systemId:'SYS-1', dataSourceId:'DS-1',
+        procedureAlias:'pkg.proc', funId:'example'};
+    const operation = {operationId:'a'.repeat(64), state:'PLATFORM_UNKNOWN', target};
+    const subscriptions = [], checks = [], notices = [];
+    let confirm = false;
+    const legacy = registerLegacyProjects({
+        context:{subscriptions}, getTool:() => ({toolHome:'/fixture'}), sourceTree:{refresh() {}},
+        databasePublicationMode:async () => 'manual',
+        async databaseBridgeRequest() {
+            return {contexts:[{contextId:'ctx', pageOrigin:target.origin, systemId:'SYS-1', dataSourceId:'DS-1'}]};
+        },
+        async databasePublicationRequest(_home, route, input) {
+            if (route === '/databaseProcedureOperations') return {operations:[operation]};
+            assert.equal(route, '/databaseProcedureVerify');
+            checks.push(input.closeUnchanged);
+            return {...operation, state:input.closeUnchanged ? 'CLOSED_UNCHANGED' : 'PLATFORM_UNKNOWN',
+                reason:'PLATFORM_BASE_UNCHANGED'};
+        },
+        processClient:{async request(_tool, command, args) {
+            assert.equal(command, 'legacy-source');
+            assert.deepEqual(args, ['review-workcopies']);
+            return {ok:true,items:[]};
+        }},
+        vscode:{EventEmitter:class {event = () => ({dispose() {}}); fire() {} dispose() {}},
+            workspace:{textDocuments:[]}, window:{
+                showQuickPick:async (items, options) => options.canPickMany ? [items[0]] : items[0],
+                showWarningMessage:async (_message, _options, action) => confirm ? action : undefined,
+                showInformationMessage:async message => notices.push(message),
+                showErrorMessage:assert.fail,
+            }},
+    });
+    t.after(() => subscriptions.forEach(subscription => subscription.dispose()));
+    await legacy.action(workspace, 'changes');
+    assert.deepEqual(checks, [undefined]);
+    assert.match(notices.at(-1), /与上传前一致/);
+    confirm = true;
+    await legacy.action(workspace, 'changes');
+    assert.deepEqual(checks, [undefined, undefined, true]);
+    assert.match(notices.at(-1), /上传记录已关闭/);
+});
+
+test('DATABASE verifies selected upload records and confirms closure only for unchanged source', async t => {
+    const {registerLegacyProjects} = require('../src/legacy-project');
+    const workspace = {workspaceKey:'projects.db', sourceMode:'database', root:'/fixture/db', displayName:'Fixture'};
+    const origin = 'https://platform.test';
+    const operations = ['PG-FIRST', 'PG-SECOND', 'PG-MIRROR', 'PG-ERROR', 'PG-UNSELECTED'].map((pageId, index) => ({
+        operationId:String(index + 1).repeat(64),
+        state:index === 2 ? 'MIRROR_PENDING' : 'PLATFORM_UNKNOWN',
+        target:{origin, systemId:'SYS-1', pageId, pageAlias:pageId},
+    }));
+    const subscriptions = [], checks = [], reports = [], confirmations = [];
+    const legacy = registerLegacyProjects({
+        context:{subscriptions}, getTool:() => ({toolHome:'/fixture'}), sourceTree:{refresh() {}},
+        databasePublicationMode:async () => 'manual',
+        async databaseBridgeRequest() {
+            return {contexts:[{contextId:'ctx', pageOrigin:origin, systemId:'SYS-1'}]};
+        },
+        async databasePublicationRequest(_home, route, input) {
+            if (route === '/databaseProcedureOperations') return {operations};
+            assert.equal(route, '/databaseProcedureVerify');
+            const item = operations.find(item => item.operationId === input.operationId);
+            checks.push([item.target.pageId, input.closeUnchanged === true, input.contextId]);
+            if (item.target.pageId === 'PG-ERROR') throw new Error('谷神页签已关闭');
+            if (item.state === 'MIRROR_PENDING') return {...item, state:'VERIFIED'};
+            return {...item, state:input.closeUnchanged ? 'CLOSED_UNCHANGED' : item.state, reason:'PLATFORM_BASE_UNCHANGED'};
+        },
+        processClient:{async request() {return {ok:true,items:[]};}},
+        vscode:{EventEmitter:class {event = () => ({dispose() {}}); fire() {} dispose() {}},
+            workspace:{textDocuments:[], openTextDocument:async doc => doc}, window:{
+                showQuickPick:async (items, options) => options.canPickMany ? items.slice(0, 4) : items[0],
+                showWarningMessage:async (_message, {detail}, action) => { confirmations.push(detail); return action; },
+                showTextDocument:async doc => reports.push(doc.content),
+                showErrorMessage:assert.fail,
+            }},
+    });
+    t.after(() => subscriptions.forEach(subscription => subscription.dispose()));
+    await legacy.action(workspace, 'changes');
+    assert.deepEqual(checks, [
+        ['PG-FIRST', false, 'ctx'], ['PG-SECOND', false, 'ctx'], ['PG-MIRROR', false, undefined], ['PG-ERROR', false, 'ctx'],
+        ['PG-FIRST', true, 'ctx'], ['PG-SECOND', true, 'ctx'],
+    ]);
+    assert.equal(confirmations.length, 1);
+    assert.match(confirmations[0], /PG-FIRST\nPG-SECOND/);
+    assert.match(reports[0], /PG-MIRROR · 谷神与本地只读源码均已更新/);
+    assert.match(reports[0], /PG-ERROR · 未能检查 · 谷神页签已关闭/);
+    assert.doesNotMatch(reports[0], /PG-UNSELECTED/);
+});
+
+test('successful DATABASE sync opens comparison against the new mirror and keeps Workcopy editable', async t => {
+    const {registerLegacyProjects} = require('../src/legacy-project');
+    const workspace = {workspaceKey:'projects.db', sourceMode:'database', root:'/fixture/project',
+        workcopyDir:'/fixture/project/source/workcopy', displayName:'Fixture'};
+    const record = {recordId:4, sourceId:'FN-1', sourceType:'procedure', sourcePath:'proc/source.vm',
+        name:'Example', trustedBaseline:false, needsMerge:true};
+    const subscriptions = [], calls = [];
+    let leftProvider, editor, synced = false, merged;
+    const legacy = registerLegacyProjects({
+        context:{subscriptions}, getTool:() => ({toolHome:'/fixture'}), getWorkspaces:async () => [workspace],
+        getSelected:async () => workspace, sourceTree:{refresh() {}}, refreshProjects:async () => {},
+        async runTool() {synced = true; return true;},
+        vscode:{EventEmitter:class {event = () => ({dispose() {}}); fire() {} dispose() {}},
+            Uri:{from:value => ({...value, toString:() => JSON.stringify(value)})}, FileChangeType:{Changed:1},
+            workspace:{textDocuments:[], registerTextDocumentContentProvider(scheme, value) {
+                if (scheme === 'guthon-database-review-diff') leftProvider = value;
+                return {dispose() {}};
+            }, registerFileSystemProvider(_scheme, value) {editor = value; return {dispose() {}};}},
+            commands:{async executeCommand(command, left, right) {
+                assert.equal(command, 'vscode.diff');
+                assert.equal(leftProvider.provideTextDocumentContent(left), 'new mirror');
+                assert.equal((await editor.readFile(right)).toString(), 'old local');
+                await editor.writeFile(right, Buffer.from('merged result'));
+            }}, window:{showErrorMessage:assert.fail}},
+        processClient:{async request(_tool, _command, [action], _key, input) {
+            assert.equal(synced, true);
+            calls.push(action);
+            if (action === 'review-workcopies') return {ok:true, items:[record]};
+            if (action === 'edit-comparison') {
+                assert.equal(input.compareMirror, true);
+                return {ok:true, changed:true, available:true, baseContent:'new mirror', content:'old local'};
+            }
+            if (action === 'edit-read') return {ok:true, editable:true, content:'old local', language:'guthon-gss', sourceHash:'old'};
+            if (action === 'edit-save') {
+                assert.equal(input.sourceHash, 'old');
+                merged = input.content;
+                return {ok:true, sourceHash:'merged'};
+            }
+            assert.fail(action);
+        }},
+    });
+    t.after(() => subscriptions.forEach(subscription => subscription.dispose()));
+    await legacy.action(workspace, 'pull');
+    assert.deepEqual(calls, ['review-workcopies', 'edit-comparison', 'edit-read', 'edit-save']);
+    assert.equal(merged, 'merged result');
 });
 
 test('project settings route DATABASE and SVN credentials to the selected source provider', async () => {

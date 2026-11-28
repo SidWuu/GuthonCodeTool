@@ -6,11 +6,16 @@ const funIdLabelEl = document.getElementById("funIdLabel");
 const outputDirEl = document.getElementById("outputDir");
 const pullPageBtn = document.getElementById("pullPageBtn");
 const pullHubBtn = document.getElementById("pullHubBtn");
+const fieldActions = document.getElementById("fieldActions");
+const ideActions = document.getElementById("ideActions");
 const copyFieldsBtn = document.getElementById("copyFieldsBtn");
 const pasteFieldsBtn = document.getElementById("pasteFieldsBtn");
 const localFieldsBtn = document.getElementById("localFieldsBtn");
 const locateNexusBtn = document.getElementById("locateNexusBtn");
 const closeBtn = document.getElementById("closeBtn");
+let popupWorkspaceKey = "";
+let inspection = 0;
+let bridgeConnected = false;
 
 function setStatus(message) {
   statusEl.textContent = message;
@@ -56,21 +61,25 @@ function isProcedureUrl(url) {
   return String(url || "").includes("/gdpaas/dev/procedure_develop");
 }
 
-function setPopupMode(mode) {
+function setPopupMode(mode, target, workspace) {
   const isModule = mode === "module";
   const isOther = ["table-schema", "billtype", "views", "system-scripts"].includes(mode);
+  const hasIdentity = isOther || mode === "procedure";
   document.querySelector(".title").textContent = "Guthon Bridge";
-  procedureEl.closest("label").hidden = isModule;
-  funIdEl.closest("label").hidden = isModule;
-  outputDirEl.closest("label").hidden = isModule || isOther;
+  document.querySelector(".source-identity").hidden = !hasIdentity;
+  outputDirEl.closest("label").hidden = mode !== "procedure";
   procedureLabelEl.textContent = mode === "system-scripts" ? "应用系统" : isOther ? "数据源" : "包名";
   funIdLabelEl.textContent = mode === "system-scripts" ? "脚本类型" : mode === "table-schema" ? "数据表" : mode === "billtype" ? "单据类型" : mode === "views" ? "视图" : "函数名";
-  pullPageBtn.textContent = isModule ? "打开复制模式" : "导出页面当前源码";
-  pullPageBtn.hidden = isOther;
+  pullPageBtn.textContent = isModule ? "打开复制模式" : "导出当前过程函数";
+  pullPageBtn.hidden = (!isModule && mode !== "procedure") || !target;
+  pullHubBtn.hidden = mode === "platform" || mode === "billtype";
   pullHubBtn.textContent = "刷新当前对象";
-  copyFieldsBtn.hidden = !isModule;
-  pasteFieldsBtn.hidden = !isModule;
-  localFieldsBtn.hidden = !isModule;
+  fieldActions.hidden = !isModule;
+  localFieldsBtn.hidden = !isModule || (!!workspace && (workspace.sourceMode !== "database"
+      || workspace.capabilities?.["workcopy.open"] !== true));
+  localFieldsBtn.disabled = !target;
+  locateNexusBtn.hidden = !GuthonBridgeNexusLocator.isSupported(target);
+  ideActions.hidden = localFieldsBtn.hidden && locateNexusBtn.hidden;
 }
 
 function isAbsolutePath(value) {
@@ -102,7 +111,7 @@ async function getActiveTab() {
   return tab;
 }
 
-async function sendWorkspaceRequest(type, payload) {
+async function sendWorkspaceRequest(type, payload, { allowWorkspaceSelection = true } = {}) {
   const dispatch = (message) => GuthonBridgeTasks.run(message.type,message.payload);
   const tab = await getActiveTab();
   const pageOrigin = tab.url ? new URL(tab.url).origin : "";
@@ -113,12 +122,13 @@ async function sendWorkspaceRequest(type, payload) {
       type,
       payload: { ...request, workspaceKey: cachedWorkspaceKey }
     });
-    if (!GuthonBridgeWorkspace.isWorkspaceCacheError(cachedResult)) {
+    if (!GuthonBridgeWorkspace.isWorkspaceCacheError(cachedResult)
+        && !(type === "route-workspace" && cachedResult?.ok === false)) {
       return cachedResult;
     }
   }
   const result = await dispatch({ type, payload: request });
-  if (!result?.workspaceSelectionRequired) {
+  if (!allowWorkspaceSelection || !result?.workspaceSelectionRequired) {
     return result;
   }
   if (!result.candidates?.length) {
@@ -170,8 +180,8 @@ async function resolveCurrentTarget() {
   return target;
 }
 
-async function resolveHubSourceTarget() {
-  const tab = await getActiveTab();
+async function resolveHubSourceTarget(tab) {
+  tab ||= await getActiveTab();
   if (!tab.url || !isSupportedGuthonUrl(tab.url)) {
     throw new Error("请先打开谷神开发平台页面");
   }
@@ -313,12 +323,14 @@ pullPageBtn.addEventListener("click", async () => {
   try {
     const tab = await getActiveTab();
     pageUrl = tab.url || "";
-    if ((await resolveHubSourceTarget()).mode === "page-source") {
+    const { mode } = await resolveHubSourceTarget(tab);
+    if (mode === "page-source") {
       setStatus(`正在打开复制模式...\n${tab.url}`);
       await openCopyMode();
       setStatus("复制模式已打开");
       return;
     }
+    if (mode !== "procedure") throw new Error("请打开要导出的过程函数");
     setStatus(`正在拉取远端脚本并写入本地...\n${tab.url}`);
     const result = await runCommand("pull");
     setStatus(
@@ -388,9 +400,10 @@ localFieldsBtn.addEventListener("click", async () => {
 locateNexusBtn.addEventListener("click", async () => {
   try {
     const target = await resolveHubSourceTarget();
-    const locator = GuthonBridgeNexusLocator.build(target);
+    const locator = GuthonBridgeNexusLocator.build(target, popupWorkspaceKey);
     await chrome.tabs.create({ url: locator.uri });
-    setStatus(`已向 Nexus 发送 ${locator.description}\n请在 Nexus 中选择工作区和源码`);
+    setStatus(popupWorkspaceKey ? `已发送到 Nexus：${locator.description}`
+      : `已向 Nexus 发送 ${locator.description}\n请在 Nexus 中选择项目`);
   } catch (error) {
     setStatus(`定位失败\n${error.message}\n可在 Nexus 命令面板手动定位 PAGE 或过程函数`);
   }
@@ -463,77 +476,90 @@ document.getElementById("pairBridgeBtn").addEventListener("click", async () => {
     await chrome.storage.local.set({ guthonBridgeToken: token, guthonBridgePort: port });
     const result = await chrome.runtime.sendMessage({ type: "bridge-health" });
     if (!result?.ok) throw new Error(result?.message || "连接失败");
+    bridgeConnected = true;
     outputDirEl.value = result.exportRoot;
+    await refreshPopupTarget();
     setStatus("Bridge 配对成功");
   } catch (error) { setStatus(error.message); }
 });
 closeBtn.addEventListener("click", () => window.close());
 
-async function initializePopup() {
-  pullPageBtn.disabled = true;
-  pullHubBtn.disabled = true;
-  copyFieldsBtn.disabled = true;
-  pasteFieldsBtn.disabled = true;
-  locateNexusBtn.hidden = true;
-  const settings = await chrome.storage.local.get(["guthonBridgeToken", "guthonBridgePort"]);
-  document.getElementById("bridgeToken").value = settings.guthonBridgeToken || "";
-  document.getElementById("bridgePort").value = settings.guthonBridgePort || 17361;
-  const bridgeStatus = await chrome.runtime.sendMessage({ type: "bridge-health" });
-  if (bridgeStatus?.ok) outputDirEl.value = bridgeStatus.exportRoot;
-  const tab = await getActiveTab();
-  setPopupMode("procedure");
-  setStatus(isProcedureUrl(tab.url) ? "正在识别当前过程函数..." : "正在识别当前谷神对象...");
-  try {
-    const target = await resolveHubSourceTarget();
-    setPopupMode(target.mode === "table-schema" ? "table-schema" : target.mode === "billtype" ? "billtype" : target.mode === "views" ? "views" : target.mode === "system-scripts" ? "system-scripts" : target.mode === "page-source" ? "module" : "procedure");
-    locateNexusBtn.hidden = !GuthonBridgeNexusLocator.isSupported(target);
-    locateNexusBtn.querySelector(".action-nexus-label").textContent = target.mode === "page-source"
-      ? "在 Nexus 中打开 PAGE" : "在 Nexus 中打开过程函数";
-    setStatus(
-      [
-        target.mode === "system-scripts"
-          ? "已识别当前系统脚本页面"
-          : target.mode === "views"
-          ? "已识别当前视图管理页面"
-          : target.mode === "billtype"
-          ? "已识别当前单据类型页签"
-          : target.mode === "table-schema"
-          ? "已识别当前数据表管理页面"
-          : target.mode === "page-source"
-            ? "已识别当前模块源码片段"
-            : "已识别当前过程函数",
-        target.mode === "system-scripts"
-          ? `应用系统：${[target.systemName, target.systemId].filter(Boolean).join(" ")}`
-          : target.mode === "views"
-          ? `数据源：${[target.dataSourceId, target.dataSourceName].filter(Boolean).join(" ")}`
-          : target.mode === "billtype"
-          ? `数据源：${[target.dataSourceId, target.dataSourceName].filter(Boolean).join(" ")}`
-          : target.mode === "table-schema"
-          ? `数据源：${[target.dataSourceId, target.dataSourceName].filter(Boolean).join(" ")}`
-          : target.mode === "page-source"
-            ? `页面：${target.procedureKeyword}`
-            : `包名：${target.procedureKeyword}`,
-        target.mode === "system-scripts"
-          ? `脚本类型：${target.scriptTypes.length > 0 ? target.scriptTypes.join(", ") : "未选中"}`
-          : target.mode === "views"
-          ? `视图：${target.viewIds.length > 0 ? target.viewIds.join(", ") : "未选中视图"}`
-          : target.mode === "billtype"
-          ? `单据类型：${target.billTypeCodes.length > 0 ? target.billTypeCodes.join(", ") : "未选中单据类型"}`
-          : target.mode === "table-schema"
-          ? `数据表：${target.tableIds.length > 0 ? target.tableIds.join(", ") : "未选中表"}`
-          : target.mode === "page-source"
-            ? `片段：${target.funId}`
-            : `函数名：${target.funId}`
-      ].join("\n")
-    );
-    pullPageBtn.disabled = target.mode === "table-schema" || target.mode === "billtype" || target.mode === "views" || target.mode === "system-scripts";
-    pullHubBtn.disabled = false;
-    copyFieldsBtn.disabled = target.mode !== "page-source";
-    pasteFieldsBtn.disabled = target.mode !== "page-source";
-  } catch (error) {
+async function refreshPopupTarget() {
+    const current = ++inspection;
+    popupWorkspaceKey = "";
+    setPopupMode("platform");
     setResolvedTarget(null);
-    setStatus(`识别失败\n${error.message}`);
-  }
+    pullPageBtn.disabled = pullHubBtn.disabled = copyFieldsBtn.disabled = pasteFieldsBtn.disabled = true;
+    setStatus("正在识别当前谷神对象…");
+    const tab = await getActiveTab();
+    if (current !== inspection) return;
+    if (!isSupportedGuthonUrl(tab.url)) {
+        setStatus("请先打开谷神开发平台页面");
+        return;
+    }
+
+    const context = await runInMainWorld(tab.id, "inspect-page-context", {});
+    if (current !== inspection) return;
+    const pageMode = context.data?.mode;
+    const fallbackMode = tab.url.includes("/gdpaas/dev/modules") ? "module"
+        : isProcedureUrl(tab.url) ? "procedure" : "platform";
+    const mode = pageMode === "page-source" ? "module"
+        : !pageMode || pageMode === "platform" ? fallbackMode : pageMode;
+    setPopupMode(mode);
+    if (mode === "platform") {
+        setStatus("请切换到要操作的谷神开发页签");
+        return;
+    }
+
+    let target;
+    try {
+        target = await resolveHubSourceTarget(tab);
+    } catch (error) {
+        if (current === inspection) {
+            setStatus(mode === "module" ? "已进入模块开发。请先打开要操作的页面。" : error.message);
+        }
+        return;
+    }
+    if (current !== inspection) return;
+    const targetMode = target.mode === "page-source" ? "module" : target.mode;
+    if (mode !== targetMode) {
+        setStatus("谷神页签正在切换，请在目标页签打开要操作的对象");
+        return;
+    }
+    setPopupMode(mode, target);
+    const targetLabel = {
+      "table-schema": "数据表管理页面",
+      billtype: "单据类型页签",
+      views: "视图管理页面",
+      "system-scripts": "系统脚本页面",
+      "page-source": "模块源码片段",
+    }[target.mode] || "过程函数";
+    setStatus(`${bridgeConnected ? "Bridge 已连接，" : ""}已识别当前${targetLabel}`);
+    pullPageBtn.disabled = pullPageBtn.hidden;
+    pullHubBtn.disabled = false;
+    copyFieldsBtn.disabled = pasteFieldsBtn.disabled = mode !== "module";
+    if (bridgeConnected) {
+        const route = await sendWorkspaceRequest("route-workspace", context.data || target,
+            { allowWorkspaceSelection: false }).catch(() => null);
+        if (current !== inspection || !route?.ok || !route.workspaceKey) return;
+        popupWorkspaceKey = route.workspaceKey;
+        setPopupMode(mode, target, route.workspace);
+    }
 }
 
-initializePopup();
+async function initializePopup() {
+    setPopupMode("platform");
+    const settings = await chrome.storage.local.get(["guthonBridgeToken", "guthonBridgePort"]);
+    document.getElementById("bridgeToken").value = settings.guthonBridgeToken || "";
+    document.getElementById("bridgePort").value = settings.guthonBridgePort || 17361;
+    const bridgeStatus = await chrome.runtime.sendMessage({ type: "bridge-health" }).catch(() => null);
+    bridgeConnected = bridgeStatus?.ok === true;
+    if (bridgeConnected) outputDirEl.value = bridgeStatus.exportRoot;
+    await refreshPopupTarget();
+    chrome.tabs.onUpdated?.addListener((_id, change, tab) => {
+        if (change.url && tab.active) refreshPopupTarget().catch(error => setStatus(error.message));
+    });
+    chrome.tabs.onActivated?.addListener(() => refreshPopupTarget().catch(error => setStatus(error.message)));
+}
+
+initializePopup().catch(error => setStatus(error.message));

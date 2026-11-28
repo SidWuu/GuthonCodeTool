@@ -28,6 +28,7 @@ let gToolbarRefreshTimer = null;
 let gObservedToolbarContext = "";
 let gTreeScrollListenerInstalled = false;
 let gSystemScriptSelectionInstalled = false;
+let toolbarWorkspaceKey = "";
 
 function getRuntime() {
   try {
@@ -65,6 +66,8 @@ function stopExtensionLoops() {
   gToolbarObserver = null;
   window.removeEventListener("hashchange", refreshToolbarButtonsSafely);
   window.removeEventListener("popstate", refreshToolbarButtonsSafely);
+    window.removeEventListener("focus", refreshToolbarButtonsSafely);
+    globalThis.chrome?.storage?.onChanged?.removeListener(onToolbarSettingsChanged);
   window.removeEventListener("message", onPageCallersMessage);
   getRuntime()?.onMessage?.removeListener(onExtensionMessage);
   for (const [type, listener, options] of documentListeners) document.removeEventListener(type, listener, options);
@@ -215,10 +218,6 @@ async function sendWorkspaceRequest(type, payload, { allowWorkspaceSelection = t
   });
 }
 
-function setButtonTitle(root, message) {
-  root.querySelector("button").title = message;
-}
-
 function setMessage(root, message, tone = "idle") {
   const messageEl = root.querySelector(".guthon-bridge-message");
   if (!messageEl) {
@@ -285,11 +284,6 @@ function isActiveTab(item) {
   return item.getAttribute("aria-selected") === "true" || /\b(active|is-active|selected|is-selected)\b/i.test(className);
 }
 
-function isBillTypeRoute() {
-  return Array.from(document.querySelectorAll(".el-tabs__item, .tabs-item, [role='tab']"))
-    .some((item) => isVisible(item) && isActiveTab(item) && /^单据类型/.test(String(item.innerText || item.textContent || "").trim()));
-}
-
 function isViewRoute() {
   return location.hash.includes("/gdpaas/sys/views") || Array.from(document.querySelectorAll(".el-tabs__item, .tabs-item, [role='tab']"))
     .some((item) => isVisible(item) && isActiveTab(item) && /^视图管理/.test(String(item.innerText || item.textContent || "").trim()));
@@ -303,14 +297,6 @@ function isSystemScriptRoute() {
 function findNativeToolbar(scope = document) {
   return Array.from(scope.querySelectorAll(".tool-menu.tool-box, .gd-function-head, .function.head"))
     .find(isVisible);
-}
-
-function makeNativeButton(text, className) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = `el-button el-button--default el-button--mini is-plain ${className}`;
-  button.innerHTML = `<span>${text}</span>`;
-  return button;
 }
 
 async function refreshCurrentSource(root, button) {
@@ -339,9 +325,11 @@ async function locateCurrentInNexus(root, button) {
   try {
     const inspected = await runPageCommand("inspect-hub-source");
     if (!inspected?.ok) throw new Error(inspected?.message || "未识别到当前谷神对象");
-    const result = await sendRuntimeMessage({ type: "open-nexus", target: inspected.data });
+    const workspaceKey = root.dataset.workspaceContext === toolbarContextMarker() ? toolbarWorkspaceKey : "";
+    const result = await sendRuntimeMessage({ type: "open-nexus", target: inspected.data, workspaceKey });
     if (!result?.ok) throw new Error(result?.message || "未能打开 Nexus");
-    setMessage(root, `已发送 ${result.description}，请在 Nexus 选择工作区`, "success");
+    setMessage(root, workspaceKey ? `已发送到 Nexus：${result.description}`
+        : `已发送 ${result.description}，请在 Nexus 选择项目`, "success");
   } catch (error) {
     setMessage(root, `Nexus 定位失败：${error?.message || String(error)}`, "error");
   } finally {
@@ -349,117 +337,143 @@ async function locateCurrentInNexus(root, button) {
   }
 }
 
-function installSourcePullButton() {
-  if (!isSupportedGuthonPage() || (!isProcedureRoute() && !isModuleRoute() && !isDataTableRoute() && !isBillTypeRoute() && !isViewRoute() && !isSystemScriptRoute())) {
-    return;
-  }
+function installFloatingToolbar() {
+    const mode = isModuleRoute() ? "module"
+        : isProcedureRoute() ? "procedure"
+        : isDataTableRoute() ? "table"
+        : isSystemScriptRoute() ? "system-scripts"
+        : isViewRoute() ? "views" : "";
+    if (!mode) {
+        removeNode(FLOATING_ROOT_ID);
+        return;
+    }
 
-  let root = document.getElementById(FLOATING_ROOT_ID);
-  if (root && (root.dataset.sharedButtons !== "true" || !root.querySelector(".guthon-bridge-nexus-button"))) {
-    root.remove();
-    root = null;
-  }
-  document.getElementById("guthon-bridge-schema-root")?.remove();
-  document.getElementById("guthon-bridge-billtype-root")?.remove();
-  const mode = isModuleRoute() ? "module" : isProcedureRoute() ? "procedure" : isDataTableRoute() ? "table" : isBillTypeRoute() ? "billtype" : isSystemScriptRoute() ? "system-scripts" : "views";
-  if (!root) {
-    root = document.createElement("div");
-    root.id = FLOATING_ROOT_ID;
-    root.className = "guthon-bridge-inline";
+    let root = document.getElementById(FLOATING_ROOT_ID);
+    if (!root) {
+        root = document.createElement("div");
+        root.id = FLOATING_ROOT_ID;
+        root.className = "guthon-bridge-inline";
+        root.innerHTML = `
+            <details class="guthon-bridge-tools" open>
+                <summary>Bridge <span data-mode-label></span></summary>
+                <div class="guthon-bridge-tools-body">
+                    <button type="button" data-action="workspace" hidden>选择项目</button>
+                    <div class="field-action-row" data-group="sync" role="group" aria-label="源码同步" hidden>
+                        <span>源码同步</span>
+                        <div class="field-action-buttons">
+                            <button type="button" data-action="refresh">刷新当前对象</button>
+                        </div>
+                    </div>
+                    <div class="field-action-row" data-group="fields" role="group" aria-label="字段平移" hidden>
+                        <span>字段平移</span>
+                        <div class="field-action-buttons">
+                            <button type="button" data-action="copy-fields">复制字段</button>
+                            <button type="button" data-action="paste-fields">粘贴字段</button>
+                            <button type="button" data-action="copy-mode">复制模式</button>
+                        </div>
+                    </div>
+                    <div class="field-action-row" data-group="ide" role="group" aria-label="IDE联动" hidden>
+                        <span>IDE联动</span>
+                        <div class="field-action-buttons">
+                            <button type="button" data-action="local-fields" hidden>粘贴本地改动</button>
+                            <button type="button" data-action="locate" hidden>定位本地源码</button>
+                        </div>
+                    </div>
+                </div>
+            </details>
+            <div class="guthon-bridge-message" role="status" data-tone="idle"></div>`;
+        const actions = {
+            refresh: button => refreshCurrentSource(root, button),
+            "copy-fields": () => showFieldsMoverOverlay(root),
+            "paste-fields": () => pasteCopiedFields(root),
+            "copy-mode": () => showCopyOverlay(),
+            "local-fields": () => showLocalFieldBatch(root),
+            locate: button => locateCurrentInNexus(root, button),
+        };
+        for (const [name, action] of Object.entries(actions)) {
+            root.querySelector(`[data-action="${name}"]`).addEventListener("click", async event => {
+                try {
+                    await action(event.currentTarget);
+                } catch (error) {
+                    setMessage(root, error?.message || String(error), "error");
+                }
+            });
+        }
+        root.hidden = true;
+        document.body.appendChild(root);
+    }
     root.dataset.mode = mode;
-    root.dataset.sharedButtons = "true";
-    const sourceButton = makeNativeButton("源码拉取", "guthon-bridge-inline-button guthon-bridge-source-button");
-    root.appendChild(sourceButton);
-    const copyButton = makeNativeButton("复制模式", "guthon-bridge-copy-button guthon-bridge-module-only");
-    copyButton.addEventListener("click", async () => {
-      try {
-        await showCopyOverlay();
-      } catch (error) {
-        setButtonTitle(root, error?.message || String(error));
-        setMessage(root, error?.message || String(error), "error");
-      }
-    });
-    root.appendChild(copyButton);
-    const fieldsMover = document.createElement("div");
-    fieldsMover.className = "guthon-bridge-fields-mover-group guthon-bridge-module-only";
-    fieldsMover.innerHTML = "<span>字段平移</span>";
-    const copyFieldsButton = makeNativeButton("复制字段", "guthon-bridge-copy-fields-button");
-    const pasteFieldsButton = makeNativeButton("粘贴字段", "guthon-bridge-paste-fields-button");
-    copyFieldsButton.addEventListener("click", async () => {
-      try {
-        await showFieldsMoverOverlay(root);
-      } catch (error) {
-        setMessage(root, error?.message || String(error), "error");
-      }
-    });
-    pasteFieldsButton.addEventListener("click", async () => {
-      try {
-        await pasteCopiedFields(root);
-      } catch (error) {
-        setMessage(root, error?.message || String(error), "error");
-      }
-    });
-    const localFieldsButton = makeNativeButton("粘贴本地改动", "guthon-bridge-paste-local-fields-button");
-    localFieldsButton.addEventListener("click", () => showLocalFieldBatch(root));
-    fieldsMover.append(copyFieldsButton, pasteFieldsButton, localFieldsButton);
-    root.appendChild(fieldsMover);
-    const nexusButton = makeNativeButton("Nexus 定位", "guthon-bridge-nexus-button");
-    nexusButton.title = "在 Nexus 中定位当前 PAGE 或过程函数";
-    nexusButton.addEventListener("click", () => locateCurrentInNexus(root, nexusButton));
-    root.appendChild(nexusButton);
-    const message = document.createElement("div");
-    message.className = "guthon-bridge-message";
-    message.dataset.tone = "idle";
-    root.appendChild(message);
-
-    sourceButton.addEventListener("click", () => refreshCurrentSource(root, sourceButton));
-    document.body.appendChild(root);
-  }
-  if (root.dataset.mode !== mode) {
-    delete root.dataset.workspaceMode;
-    delete root.dataset.workspaceModeKey;
-    delete root.dataset.workspaceModeCheckedAt;
-  }
-  root.dataset.mode = mode;
-  root.querySelector(".guthon-bridge-source-button").textContent = "刷新当前对象";
+    return root;
 }
 
-async function applyInlineWorkspaceMode() {
-  const root = document.getElementById(FLOATING_ROOT_ID);
-  if (!root) return;
-  const cacheKey = `${location.origin}${location.pathname}${location.hash}#${root.dataset.mode}`;
-  const checkedAt = Number(root.dataset.workspaceModeCheckedAt || 0);
-  if (root.dataset.workspaceModeKey === cacheKey && Date.now() - checkedAt < 10000) return;
-  if (root.dataset.workspaceModeChecking === "true") return;
-  root.dataset.workspaceModeChecking = "true";
-  try {
+function renderFloatingToolbar(root, route) {
+    const mode = root.dataset.mode;
+    const isModule = mode === "module";
+    const isSourceEditor = isModule || mode === "procedure";
+    const workspace = route?.ok && route.workspaceKey ? route.workspace : null;
+    const sourceMode = workspace?.sourceMode;
+    const capabilities = workspace?.capabilities;
+    const canRefresh = (sourceMode === "api" && capabilities?.["api.pull"] === true)
+        || (isSourceEditor && sourceMode === "database" && capabilities?.["database.sourceSync"] === true);
+    const canLocate = isSourceEditor && (!workspace || capabilities?.["source.read"] === true);
+    toolbarWorkspaceKey = canLocate && workspace ? route.workspaceKey : "";
+    const canPasteLocal = isModule && sourceMode === "database" && capabilities?.["workcopy.open"] === true;
+    const choices = route?.candidates;
+    const choose = root.querySelector('[data-action="workspace"]');
+    choose.hidden = !(choices?.length > 1);
+    choose.onclick = choose.hidden ? null : async () => {
+        try {
+            await GuthonBridgeWorkspace.select(choices, location.href);
+            await refreshToolbarButtonsSafely();
+        } catch (error) {
+            setMessage(root, error?.message || String(error), "error");
+        }
+    };
+
+    const modeLabel = root.querySelector("[data-mode-label]");
+    modeLabel.textContent = sourceMode?.toUpperCase() || "";
+    modeLabel.title = workspace?.displayName || "";
+    root.querySelector('[data-group="sync"]').hidden = !canRefresh;
+    root.querySelector('[data-group="fields"]').hidden = !isModule;
+    root.querySelector('[data-action="local-fields"]').hidden = !canPasteLocal;
+    root.querySelector('[data-action="locate"]').hidden = !canLocate;
+    root.querySelector('[data-group="ide"]').hidden = !canPasteLocal && !canLocate;
+    root.hidden = !(isModule || canRefresh || canLocate || !choose.hidden);
+}
+
+async function applyInlineWorkspaceMode(root) {
+    const context = toolbarContextMarker();
+    if (root.dataset.workspaceContext !== context) {
+        root.dataset.workspaceContext = context;
+        renderFloatingToolbar(root);
+    }
+
     const inspected = await runPageCommand("inspect-page-context");
-    // Keep discovery quiet until the platform identity is available.
-    if (!inspected?.ok) return;
+    if (!root.isConnected || toolbarContextMarker() !== context || gRefreshRequested) return;
+    if (!inspected?.ok) {
+        renderFloatingToolbar(root);
+        return;
+    }
     const route = await sendWorkspaceRequest(
-      "route-workspace",
-      inspected.data || {},
-      { allowWorkspaceSelection: false }
-    );
-    if (!route?.ok || !route.workspaceKey) return;
-    root.dataset.workspaceModeKey = cacheKey;
-    root.dataset.workspaceModeCheckedAt = String(Date.now());
-    await publishPageContext(route.workspaceKey).catch(() => {});
-  } finally {
-    delete root.dataset.workspaceModeChecking;
-  }
+        "route-workspace", inspected.data || {}, { allowWorkspaceSelection: false }
+    ).catch(() => null);
+    if (!root.isConnected || toolbarContextMarker() !== context || gRefreshRequested) return;
+    renderFloatingToolbar(root, route);
+    await publishPageContext(inspected, route).catch(() => {});
 }
 
-async function publishPageContext(workspaceKey) {
-  const inspected = await runPageCommand('inspect-page-context');
-  if (!inspected?.ok) return;
-  let key = workspaceKey;
-  if (!key) {
-    const route = await sendWorkspaceRequest('route-workspace', inspected.data || {}, {allowWorkspaceSelection: false});
-    if (!route?.ok || !route.workspaceKey) return;
-    key = route.workspaceKey;
-  }
-  return sendRuntimeMessage({type: 'publish-page-context', payload: {workspaceKey: key, metadata: inspected.data}});
+async function publishPageContext(inspected, route) {
+    inspected ||= await runPageCommand("inspect-page-context");
+    if (!inspected?.ok) return;
+    if (route === undefined) {
+        route = await sendWorkspaceRequest("route-workspace", inspected.data || {}, { allowWorkspaceSelection: false });
+    }
+    if (!route?.ok || !route.workspaceKey) {
+        if (!["WORKSPACE_NOT_FOUND", "WORKSPACE_AMBIGUOUS"].includes(route?.code) && !route?.workspaceSelectionRequired) return;
+        route = await sendWorkspaceRequest("route-workspace", {}, { allowWorkspaceSelection: false });
+        if (!route?.ok || route.workspace?.sourceMode !== "database" || !route.workspaceKey) return;
+    }
+    return sendRuntimeMessage({ type: "publish-page-context", payload: { workspaceKey: route.workspaceKey, metadata: inspected.data } });
 }
 
 function installSystemScriptSelection() {
@@ -1048,12 +1062,9 @@ async function refreshToolbarButtons() {
     installTreeAutoScroll();
     installSystemScriptSelection();
 
-    if (isModuleRoute() || isProcedureRoute() || isDataTableRoute() || isBillTypeRoute() || isViewRoute() || isSystemScriptRoute()) {
-      installSourcePullButton();
-      await applyInlineWorkspaceMode();
-    } else {
-      removeNode(FLOATING_ROOT_ID);
-    }
+    const root = installFloatingToolbar();
+    if (root) await applyInlineWorkspaceMode(root);
+    else await publishPageContext();
   } catch (error) {
     console.warn("谷神桥接：刷新工具栏失败", error);
     if (!isExtensionAlive()) {
@@ -1081,33 +1092,31 @@ function refreshToolbarButtonsSafely() {
 }
 
 function toolbarContextMarker() {
-  const activeTabs = Array.from(document.querySelectorAll('[role="tab"][aria-selected="true"]'))
-    .map((tab) => tab.id || tab.textContent?.trim() || "");
-  return `${location.hash}\n${activeTabs.join("|")}`;
+    const activeTabs = Array.from(document.querySelectorAll('[role="tab"], .el-tabs__item, .tabs-item'))
+        .filter(tab => isActiveTab(tab) && isVisible(tab))
+        .map(tab => tab.id || tab.textContent?.trim() || "");
+    return `${location.hash}\n${activeTabs.join("|")}`;
 }
 
 function observeToolbarContext() {
   if (!document.body || gToolbarObserver) return;
   gObservedToolbarContext = toolbarContextMarker();
   gToolbarObserver = new MutationObserver((mutations) => {
-    const rootMissingAfterPageChange = location.hash.includes("/gdpaas/")
-      && !document.getElementById(FLOATING_ROOT_ID)
-      && mutations.some((mutation) => mutation.type === "childList"
-        && !mutation.target.closest?.(`#${COPY_OVERLAY_ID}, #${FIELDS_MOVER_OVERLAY_ID}, #${CALLERS_OVERLAY_ID}`));
+    const rootRemoved = mutations.some(mutation => [...mutation.removedNodes].some(node => node.id === FLOATING_ROOT_ID));
+    const tabSelector = '[role="tab"], [role="tabpanel"], [role="tablist"], .el-tabs__item, .tabs-item';
     const tabsChanged = mutations.some((mutation) => {
       if (mutation.type === "attributes") {
-        return mutation.target.matches?.('[role="tab"], [role="tabpanel"]')
+        return mutation.target.matches?.(tabSelector)
           || mutation.target.closest?.('[role="tablist"]');
       }
       return [...mutation.addedNodes, ...mutation.removedNodes].some((node) => node.nodeType === 1
-        && (node.matches?.('[role="tab"], [role="tabpanel"], [role="tablist"]')
-          || node.querySelector?.('[role="tab"], [role="tabpanel"], [role="tablist"]')));
+        && (node.matches?.(tabSelector) || node.querySelector?.(tabSelector)));
     });
-    if (!tabsChanged && !rootMissingAfterPageChange) return;
+    if (!tabsChanged && !rootRemoved) return;
     const context = toolbarContextMarker();
     const contextChanged = context !== gObservedToolbarContext;
     gObservedToolbarContext = context;
-    if (!contextChanged && !rootMissingAfterPageChange) return;
+    if (!contextChanged && !rootRemoved) return;
     if (gToolbarRefreshTimer !== null) return;
     gToolbarRefreshTimer = setTimeout(() => {
       gToolbarRefreshTimer = null;
@@ -1124,6 +1133,16 @@ function observeToolbarContext() {
 
 window.addEventListener("hashchange", refreshToolbarButtonsSafely);
 window.addEventListener("popstate", refreshToolbarButtonsSafely);
+window.addEventListener("focus", refreshToolbarButtonsSafely);
+
+function onToolbarSettingsChanged(changes, area) {
+    if (area !== "local" || !(changes.guthonBridgeToken || changes.guthonBridgePort
+        || changes[GuthonBridgeWorkspace.STORAGE_KEY])) return;
+    const root = document.getElementById(FLOATING_ROOT_ID);
+    if (root) renderFloatingToolbar(root);
+    refreshToolbarButtonsSafely();
+}
+globalThis.chrome?.storage?.onChanged?.addListener(onToolbarSettingsChanged);
 
 function onExtensionMessage(message, sender, sendResponse) {
   if (sender.id !== getRuntime()?.id || !isSupportedGuthonPage()) return false;
@@ -1131,7 +1150,7 @@ function onExtensionMessage(message, sender, sendResponse) {
   const action = message?.type === "run-page-command"
     ? () => runPageCommand(message.command, message.payload)
     : message?.type === 'refresh-page-context'
-    ? async () => {await refreshToolbarButtonsSafely(); await publishPageContext(); return {ok: true};}
+    ? async () => {await refreshToolbarButtonsSafely(); return {ok: true};}
     : message?.type === "show-copy-overlay"
     ? async () => ({ ok: true, data: await showCopyOverlay() })
     : message?.type === "show-fields-mover"
@@ -1176,8 +1195,7 @@ window.addEventListener("message", onPageCallersMessage);
 
 observeToolbarContext();
 refreshToolbarButtonsSafely();
-// A bounded metadata lease heartbeat restores a suspended MV3 worker or restarted
-// Bridge. Route/tab UI changes are observed above instead of repeatedly rescanning.
-gIntervalId = setInterval(() => {void publishPageContext().catch(() => {});}, PAGE_CONTEXT_HEARTBEAT_MS);
+// Renew the page lease and refresh provider capabilities after a Bridge restart.
+gIntervalId = setInterval(refreshToolbarButtonsSafely, PAGE_CONTEXT_HEARTBEAT_MS);
 
 })();

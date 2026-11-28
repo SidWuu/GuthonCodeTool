@@ -25,6 +25,10 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
                         {"id": name, "pageEvents": {"onClickScript": text}}
                         for name, text in (("a", "first();\r\nold();\r\nlast();\r\n"), ("b", "other();"))
                     ]
+                    source["pageSetup"] = {
+                        "pageEvents": {"onShowScript": "inherit();", "onOpenScript": "inherit();"},
+                        "superPageEvents": {"onShowScript": "", "onOpenScript": "openForm();"},
+                    }
                     source["views"] = {"rows": [{"cols": [{"component": {"type": "input-box",
                         "name": "mainForm", "fields": [
                             {"fieldId": "A", "id": "form-a", "type": "text", "width": 100,
@@ -57,6 +61,40 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
         initial = self.call(self.server, "read_workcopy", identity)["data"]
         self.assertFalse(initial["workcopy"])
         return {**identity, "baselineSourceHash": initial["sourceHash"]}
+
+    def test_local_project_event_override_binds_product_and_preview(self):
+        request = self.request("PG-TWO")
+        self.call(self.server, "create_workcopy", request)
+        identity = self.pages["PG-TWO"]
+        target = self.workspace["readonlyDir"] / identity["sourcePath"]
+        before = target.read_bytes()
+        for event in ("onOpenScript", "onShowScript"):
+            options = {**identity, "pointer": "/pageSetup/pageEvents/" + event, "materializeInheritedEvent": True}
+            read = self.tool("legacy-source", key=self.key, args=["edit-read"], payload=options)
+            self.assertEqual(read["content"].strip(), read["productContent"])
+            self.assertEqual(read["projectContent"], "inherit();")
+            draft = {**options, "sourceHash": read["sourceHash"], "expectedProductHash": read["productHash"],
+                     "content": read["content"] + "\nrefresh();"}
+            with self.assertRaises(ValueError):
+                self.tool("legacy-source", key=self.key, args=["edit-preview"],
+                          payload={**draft, "materializeInheritedEvent": False})
+            with self.assertRaises(ValueError):
+                self.tool("legacy-source", key=self.key, args=["edit-preview"],
+                          payload={**draft, "pointer": options["pointer"].replace("/pageEvents/", "/superPageEvents/")})
+            with self.assertRaisesRegex(ValueError, "明确的事件源码"):
+                self.tool("legacy-source", key=self.key, args=["edit-preview"], payload={**draft, "content": "inherit();"})
+            with self.assertRaisesRegex(ValueError, "来源校验"):
+                self.tool("legacy-source", key=self.key, args=["edit-preview"],
+                          payload={**draft, "expectedProductHash": "0" * 64})
+            with self.assertRaisesRegex(ValueError, "预览"):
+                self.tool("legacy-source", key=self.key, args=["edit-save"], payload=draft)
+            preview = self.tool("legacy-source", key=self.key, args=["edit-preview"], payload=draft)
+            saved = self.tool("legacy-source", key=self.key, args=["edit-save"],
+                              payload={**draft, "candidateSourceHash": preview["candidateSourceHash"]})
+            checked = self.tool("legacy-source", key=self.key, args=["edit-read"],
+                                payload={**identity, "pointer": options["pointer"]})
+            self.assertEqual((saved["sourceHash"], draft["content"]), (checked["sourceHash"], checked["content"]))
+        self.assertEqual(before, target.read_bytes())
 
     def test_create_receipts_bind_exact_files_and_retry_preserves_user_content(self):
         for page in self.pages:
@@ -129,6 +167,29 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
         self.assertEqual(original, readonly.read_bytes())
         self.assertFalse((target.parent / "scripts").exists())
 
+    def test_cli_reports_receipt_storage_failure_and_noop_does_not_certify_existing_files(self):
+        request = self.request("PG-ONE")
+        identity = self.pages["PG-ONE"]
+        draft = {**identity, "pointer": "/compScript", "content": "#return(2)",
+                 "sourceHash": request["baselineSourceHash"]}
+        directory = self.workspace["workcopySaveReceiptDirs"][0]
+        with patch("tempfile.tempdir", str(self.home)), patch(
+                "common.database_workcopy_edit.atomic_text", side_effect=PermissionError("fixture")):
+            saved = self.tool("legacy-source", key=self.key, args=["edit-save"], payload=draft)
+        self.assertIn("回执未完成", saved["receiptWarning"])
+        target = Path(saved["workcopyPath"])
+        self.assertEqual("#return(2)", json.loads(target.read_bytes())["compScript"])
+        retry = self.tool("legacy-source", key=self.key, args=["edit-save"], payload={
+            **draft, "sourceHash": saved["sourceHash"]})
+        self.assertEqual(saved["sourceHash"], retry["sourceHash"])
+        self.assertFalse(list(directory.glob("*.json")))
+        self.tool("legacy-source", key=self.key, args=["edit-save"], payload={
+            **draft, "content": "#return(3)", "sourceHash": retry["sourceHash"]})
+        receipt, = directory.glob("*.json")
+        record = json.loads(receipt.read_bytes())
+        self.assertEqual(str(target), record["path"])
+        self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), record["sourceHash"])
+
     def test_cli_create_keeps_its_contract_and_cannot_gain_a_receipt_on_retry(self):
         request = self.request("PG-ONE")
         result = self.tool("create-workcopy", key=self.key, args=["--type", "page", "--source-id", "PG-ONE", "--json"])
@@ -156,7 +217,8 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
         current["buttons"][1]["pageEvents"]["onClickScript"] = "first();\nchanged();\nlast();"
         saved = self.tool("legacy-source", key=self.key, args=["edit-save"], payload={**draft, "content": json.dumps(current)})
         self.assertEqual([{"sourceType": "page", "sourcePath": identity["sourcePath"]}],
-                         self.tool("legacy-source", key=self.key, args=["local-changes"])["items"])
+                         [{key: item[key] for key in ("sourceType", "sourcePath")}
+                          for item in self.tool("legacy-source", key=self.key, args=["local-changes"])["items"]])
         changed = "/buttons/1/pageEvents/onClickScript"
         unchanged = "/buttons/0/pageEvents/onClickScript"
         fragments = self.tool("legacy-source", key=self.key, args=tree_args)["modifiedPointers"]
@@ -183,7 +245,8 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
         self.tool("legacy-source", key=self.key, args=["edit-save"],
                   payload={**identity, "sourceHash": initial["sourceHash"], "content": "first\nlast\nadded"})
         self.assertEqual([{"sourceType": "procedure", "sourcePath": identity["sourcePath"]}],
-                         self.tool("legacy-source", key=self.key, args=["local-changes"])["items"])
+                         [{key: item[key] for key in ("sourceType", "sourcePath")}
+                          for item in self.tool("legacy-source", key=self.key, args=["local-changes"])["items"]])
         result = self.tool("legacy-source", key=self.key, args=["edit-read"],
                            payload={**identity, "includeLineChanges": True})
         self.assertEqual([{"kind": "delete", "start": 1, "end": 1}, {"kind": "insert", "start": 2, "end": 3}],
@@ -273,7 +336,8 @@ class DatabaseWorkcopyReceiptTest(WorkspaceCase):
         self.tool("legacy-source", key=self.key, args=["edit-save"], payload={
             **identity, "sourceHash": formatted["sourceHash"], "content": json.dumps(model, sort_keys=True)})
         self.assertEqual([{"sourceType": "page", "sourcePath": identity["sourcePath"]}],
-                         self.tool("legacy-source", key=self.key, args=["local-changes"])["items"])
+                         [{key: item[key] for key in ("sourceType", "sourcePath")}
+                          for item in self.tool("legacy-source", key=self.key, args=["local-changes"])["items"]])
         self.assertEqual(["/views/rows/0/cols/0/component/fields"],
                          self.tool("legacy-source", key=self.key, args=args)["modifiedPointers"])
 

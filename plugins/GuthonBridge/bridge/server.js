@@ -6,10 +6,11 @@ const path = require("path");
 const rootModule = path.join(path.dirname(require.resolve(TOOL_CLIENT_MODULE)), "workspace-root.js");
 const {workspaceRoot} = require(rootModule);
 const crypto = require("node:crypto");
-const {createPageContexts, snapshot, isWorkspaceKey} = require('./page-context');
+const {createPageContexts, snapshot, isWorkspaceKey, databaseProcedureSystem} = require('./page-context');
 const pageContexts = createPageContexts();
 const {createMetadataJournal,metadataTarget} = require('./native-metadata');
 const {createDatabasePublication, publicationStatus} = require('./database-publication');
+const {MAX_PAGE_BYTES, pageDefaultsFile} = require('./database-source-publish');
 const { createBrowserUpdates } = require('./browser-updates');
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -49,7 +50,7 @@ const bridgeCode = fs.readFileSync(__filename,"utf8")
   .replace(/^const TOOL_CLIENT_MODULE = .*;$/m, 'const TOOL_CLIENT_MODULE = "tool-process-client";');
 const toolClientFile = require.resolve(TOOL_CLIENT_MODULE);
 const libraryHashes = [require.resolve('./page-context'), require.resolve('./browser-updates'), require.resolve('./native-metadata'), require.resolve('./native-step-registry'), require.resolve('./native-source-plan'),
-  require.resolve('./database-publication'), require.resolve('./database-source-publish'), rootModule, toolClientFile, path.join(path.dirname(toolClientFile), 'workspace-scheduler.js'),
+  require.resolve('./database-publication'), require.resolve('./database-source-publish'), pageDefaultsFile, rootModule, toolClientFile, path.join(path.dirname(toolClientFile), 'workspace-scheduler.js'),
   path.join(path.dirname(toolClientFile), '../data/tool-command-metadata.json')]
   .map(file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'));
 const configuredManualOrigin = process.env.GUTHON_DATABASE_MANUAL_UPLOAD_ORIGIN || '';
@@ -97,6 +98,7 @@ const HUB_PYTHON = process.env.GUTHON_HUB_PYTHON || (fs.existsSync(DEFAULT_HUB_P
 const HUB_TOOL = process.env.GUTHON_TOOL_PATH || "";
 const HUB_TOOL_ENTRY = process.env.GUTHON_TOOL_ENTRY || "";
 const HUB_TOOL_MODE = process.env.GUTHON_TOOL_MODE || "packaged";
+const databaseUploadAvailable = HUB_TOOL_MODE === 'source-development' || Boolean(manualOrigin);
 const DEFAULT_TOOL_ENTRY = path.join(ROOT, "scripts", "guthon_tool.py");
 const PULL_LOG_PATH = process.env.GUTHON_PULL_LOG_PATH || path.join(BRIDGE_STATE_DIR, "pull-log.ndjson");
 const workspaceQueue = new WorkspaceQueue({limit:32,concurrency:4});
@@ -155,7 +157,7 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -169,7 +171,7 @@ function readBody(req) {
     req.on("data", (chunk) => {
       if (settled) return;
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         settled = true;
         clearTimeout(timeout);
         reject(new Error("请求体过大"));
@@ -459,6 +461,7 @@ function submitJob(body) {
 }
 
 let databasePublication;
+let databasePublicationEnabled = false;
 const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && req.url === "/health") {
     return sendJson(res, 200, { ok: true, instanceId: INSTANCE_ID });
@@ -506,7 +509,7 @@ const server = http.createServer(async (req, res) => {
       throw new Error('无效的更新维护锁操作');
     } catch (error) { return sendJson(res, 409, { ok: false, message: error.message }); }
   }
-  if (req.method === 'POST' && !['/pageContext', '/removePageContext', '/navigationResult'].includes(req.url)) {
+  if (req.method === 'POST' && !['/pageContext', '/removePageContext', '/navigationResult', '/databasePageResult'].includes(req.url)) {
     if (browserUpdates.maintenance()) return sendJson(res, 409, { ok: false, message: '组件更新维护中，请稍后重试' });
     activeBusinessRequests++;
     let finished = false;
@@ -515,17 +518,35 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/databaseProcedureCapabilities' && !origin) {
-    return sendJson(res, 200, {ok:true, mode:manualOrigin && databasePublication ? 'manual' : 'closed'});
+    return sendJson(res, 200, {ok:true, mode:databaseUploadAvailable && databasePublication ? 'manual' : 'closed'});
   }
 
   if (req.method === 'POST' && req.url === '/databaseProcedurePayload') {
-    if (!databasePublication) return sendJson(res, 403, {ok:false, message:'DATABASE 过程函数上传当前关闭'});
     try { return sendJson(res, 200, pageContexts.privatePayload(await readBody(req))); }
-    catch (error) { return sendJson(res, 400, {ok:false, message:error.message}); }
+    catch (error) {
+      return sendJson(res, databasePublicationEnabled ? 400 : 403,
+        {ok:false, message:databasePublicationEnabled ? error.message : 'DATABASE 源码上传当前关闭'});
+    }
+  }
+
+  if (req.method === 'POST' && req.url === '/databasePageResult') {
+    try {
+      const payload = await readBody(req, 2 * MAX_PAGE_BYTES + 4096);
+      return sendJson(res, 200, pageContexts.complete(payload, true));
+    } catch (error) { return sendJson(res, 400, {ok:false, message:error.message}); }
+  }
+
+  if (req.method === 'POST' && ['/databasePagePreflight', '/databaseSourcePreflight'].includes(req.url) && !origin) {
+    try {
+      const payload = await readBody(req);
+      if (!isWorkspaceKey(payload.workspaceKey)) throw new Error('预检必须指定有效工作区');
+      const native = await enqueue(() => databasePublication.inspectSource(payload), payload.workspaceKey);
+      return sendJson(res, 200, {ok:true, native});
+    } catch (error) { return sendJson(res, 400, {ok:false, message:error.message}); }
   }
 
   if (req.method === 'POST' && ['/databaseProcedurePublish', '/databaseProcedureVerify', '/databaseProcedureOperations'].includes(req.url)) {
-    if (!databasePublication || origin) return sendJson(res, 403, {ok:false, message:'DATABASE 过程函数上传当前关闭'});
+    if (!databasePublicationEnabled || origin) return sendJson(res, 403, {ok:false, message:'DATABASE 源码上传当前关闭'});
     try {
       const payload = await readBody(req);
       const {workspaceKey, contextId, operationId} = payload;
@@ -534,7 +555,7 @@ const server = http.createServer(async (req, res) => {
         if (req.url === '/databaseProcedureOperations') return {operations:databasePublication.list(workspaceKey).map(publicationStatus)};
         const record = req.url === '/databaseProcedurePublish'
           ? await databasePublication.submit(payload)
-          : await databasePublication.verify(workspaceKey, contextId, operationId);
+          : await databasePublication.verify(workspaceKey, contextId, operationId, payload.closeUnchanged === true);
         return publicationStatus(record);
       }, workspaceKey);
       return sendJson(res, 200, {ok:true, ...result});
@@ -546,10 +567,15 @@ const server = http.createServer(async (req, res) => {
       const payload = await readBody(req);
       if (req.url === '/pageContext') {
         const item = snapshot(payload);
-        const route = await resolveRequestWorkspace(item);
+        let route = await resolveRequestWorkspace(item);
+        if (!route.ok) {
+          const binding = await resolveRequestWorkspace({workspaceKey:item.workspaceKey, pageOrigin:item.pageOrigin});
+          if (binding.ok && binding.workspace?.sourceMode === 'database'
+              && binding.workspace.capabilities?.['database.sourceSync'] === true) route = binding;
+        }
         if (!route.ok) return sendJson(res, 200, publicRoute(route));
         if (route.workspaceKey !== item.workspaceKey) throw new Error('页面快照工作区身份不匹配');
-        return sendJson(res, 200, {ok: true, context: pageContexts.publish(payload)});
+        return sendJson(res, 200, {ok: true, context: pageContexts.publish(payload, route.databaseProcedureSystemIds)});
       }
       if (req.url === '/removePageContext') {pageContexts.remove(payload.clientId, payload.tabId); return sendJson(res, 200, {ok: true});}
       if (req.url === '/navigationResult') return sendJson(res, 200, pageContexts.complete(payload));
@@ -560,8 +586,9 @@ const server = http.createServer(async (req, res) => {
         if (origin || route.workspace?.sourceMode !== 'database' || route.workspace.capabilities?.['database.sourceSync'] !== true
             || payload.target?.action !== 'inspect-database-procedure') throw new Error('仅限 Nexus 的 DATABASE 只读预检');
         const target = metadataTarget(payload.target);
-        if (context.systemId !== target.systemId || context.dataSourceId !== target.dataSourceId) {
-          throw new Error('请在已配对页签中选定目标系统和数据源');
+        if (databaseProcedureSystem(context, route.databaseProcedureSystemIds ?? []) !== target.systemId
+            || context.dataSourceId !== target.dataSourceId) {
+          throw new Error('当前过程函数页签的数据源无法唯一对应目标子系统。请核对项目同步范围或重新选择谷神页签。');
         }
         return sendJson(res, 202, pageContexts.metadata({...payload, target}));
       }
@@ -709,31 +736,35 @@ server.on("error", (error) => {
 });
 
 function startBridge({refreshDatabaseMirror} = {}) {
-  if (refreshDatabaseMirror || manualOrigin) {
-    async function assertDatabaseWorkspace(workspaceKey, context, expectedBinding) {
-      const route = await resolveRequestWorkspace(context || {workspaceKey});
-      if (!route.ok || route.workspace?.sourceMode !== 'database'
-          || route.workspace.capabilities?.['database.sourceSync'] !== true) {
-        throw new Error('目标项目已切换同步方式或失去 DATABASE 源码权限');
-      }
-      if (expectedBinding && route.workspace.workspaceBinding?.digest !== expectedBinding.digest) {
-        throw new Error('项目来源或数据源配置已变化，请按原发布操作的绑定核对');
-      }
+  databasePublicationEnabled = Boolean(refreshDatabaseMirror || databaseUploadAvailable);
+  async function assertDatabaseWorkspace(workspaceKey, context, expectedBinding) {
+    const route = await resolveRequestWorkspace(context || {workspaceKey});
+    if (!route.ok && context?.pageOrigin) throw new Error('谷神地址或源码范围与项目登记不一致，请核对项目设置');
+    if (!route.ok || route.workspace?.sourceMode !== 'database'
+        || route.workspace.capabilities?.['database.sourceSync'] !== true) {
+      throw new Error('目标项目已切换同步方式或失去 DATABASE 源码权限');
     }
-    databasePublication = createDatabasePublication(path.join(BRIDGE_STATE_DIR, 'database-publication'), {
-      assertDatabaseWorkspace,
-      async resolveContext(workspaceKey, contextId, expectedBinding) {
-        const context = pageContexts.get(contextId, workspaceKey);
-        if (manualOrigin && context.pageOrigin !== manualOrigin.origin) throw new Error('该平台未获 DATABASE 手动上传授权');
-        await assertDatabaseWorkspace(workspaceKey, context, expectedBinding);
-        return context;
-      },
-      confirmCandidate: (key, candidate) => runToolCommand('legacy-source', ['publish-confirm'], '确认 DATABASE 候选', candidate, key),
-      browserRequest: pageContexts.databaseProcedure,
-      refreshMirror: refreshDatabaseMirror || ((target, evidence) => runToolCommand('legacy-source', ['publish-refresh'],
-        '核验并精确回拉 DATABASE 过程函数', evidence, evidence.workspaceKey)),
-    });
+    if (expectedBinding && route.workspace.workspaceBinding?.digest !== expectedBinding.digest) {
+      throw new Error('项目来源或数据源配置已变化，请按原发布操作的绑定核对');
+    }
+    return route;
   }
+  databasePublication = createDatabasePublication(path.join(BRIDGE_STATE_DIR, 'database-publication'), {
+    assertDatabaseWorkspace,
+    authorizeTarget: (workspaceKey, target, binding) => assertDatabaseWorkspace(workspaceKey, {
+      workspaceKey, pageOrigin:target.origin, systemId:target.systemId, dataSourceId:target.dataSourceId,
+    }, binding),
+    async resolveContext(workspaceKey, contextId, expectedBinding, readOnly) {
+      const context = pageContexts.get(contextId, workspaceKey);
+      if (!readOnly && manualOrigin && context.pageOrigin !== manualOrigin.origin) throw new Error('该平台未获 DATABASE 手动上传授权');
+      await assertDatabaseWorkspace(workspaceKey, {workspaceKey, pageOrigin:context.pageOrigin}, expectedBinding);
+      return context;
+    },
+    confirmCandidate: (key, candidate) => runToolCommand('legacy-source', ['publish-confirm'], '确认 DATABASE 候选', candidate, key),
+    browserRequest: pageContexts.databaseSource,
+    refreshMirror: refreshDatabaseMirror || ((target, evidence) => runToolCommand('legacy-source', ['publish-refresh'],
+      '核验并精确回拉 DATABASE 源码', evidence, evidence.workspaceKey)),
+  });
   server.listen(PORT, "127.0.0.1", () => {
     console.log(`谷神桥接服务已启动：http://127.0.0.1:${PORT}`);
     console.log(`配对令牌文件：${TOKEN_PATH}`);
