@@ -109,6 +109,12 @@ jobs:
       - name: Install build dependencies
         run: python -m pip install pyinstaller -r scripts/python-requirements.txt
 
+      - name: Verify DATABASE shared directory links on Windows
+        if: runner.os == 'Windows'
+        env:
+          PYTHONPATH: scripts
+        run: python -m unittest discover -s tests/ci -p test_database_procedure_links.py -v
+
       - uses: actions/download-artifact@v7
         with:
           name: release-script

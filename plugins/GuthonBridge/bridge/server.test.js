@@ -796,7 +796,7 @@ test("copy mode button and overlay are available on module page editors", () => 
   assert.equal(pageBridge.includes("getPageCodeFromVue() || getPageCodeFromUrl()"), true);
   assert.equal(pageBridge.includes('resolvedBy: "module-page-code"'), true);
   assert.equal(pageBridge.includes('location.hash.includes("?")'), true);
-  assert.equal(contentScript.includes('?v=20261127'), true);
+  assert.equal(contentScript.includes('?v=20261127.3'), true);
   assert.equal(pageBridge.includes("/(Form|Table)$/"), true);
   assert.equal(pageBridge.includes("getControlTitle"), true);
   assert.equal(pageBridge.includes('return controlName ? `${prefix}.${controlName}` : prefix;'), true);

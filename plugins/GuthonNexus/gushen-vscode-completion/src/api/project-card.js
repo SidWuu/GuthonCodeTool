@@ -41,7 +41,7 @@ function cardModel(workspace,status={},authentication={authenticated:true,sessio
   const scopeLabel=scope.allSystems?'全部子系统':`${scope.systemIds.length} 个子系统`;
   return {sourceMode,authenticated:authentication.authenticated,pending:authentication.pending===true,key:workspace.workspaceKey,project:workspace.name||workspace.displayName||workspace.workspaceKey,
     version:session?.mainVersion?`${session.mainVersion}@${session.dateVersion}`:'登录后显示',
-    address:status.settings.serverUrl||'',user:session?.userName||'',
+    address:status.settings.serverUrl||'',user:session?.userName||'',loginId:status.loginId,
     scope:status.pendingScope?`${scopeLabel}（待更新）`:scopeLabel,
     sourceCount:status.summary?.sourceCount ?? files.length,changed:status.summaryComplete===false ? null : status.summary?.changedCount ?? files.filter(file=>file.state!=='CLEAN').length,
     canPull:!!status.settings.serverUrl&&(scope.allSystems||scope.systemIds.length>0),
@@ -83,7 +83,7 @@ ${tool('doctor','环境检查','<path d="M1 8h3l2-5 4 10 2-5h3"/>')}
     const captcha=api&&typeof form.captcha==='string'&&/^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(form.captcha)?form.captcha:'';
     content=`<section class="project-card login-card"><h2>登录到项目 [${e(model.project)}]</h2><form id="login-form">
 <label class="field-label" for="server-url">${addressLabel}</label><input id="server-url" name="serverUrl" type="url" placeholder="${addressHint}" value="${e(form.serverUrl??model.address)}" autocomplete="url" required>
-<label class="field-label" for="account">${userLabel}</label><input id="account" name="userId" placeholder="${userLabel}" value="${e(form.userId??model.user??'')}" autocomplete="username" required>
+<label class="field-label" for="account">${userLabel}</label><input id="account" name="userId" placeholder="${userLabel}" value="${e(form.userId??(api?model.loginId:model.user)??'')}" autocomplete="username" required>
 <div class="password-row"><label class="field-label" for="password">密码</label><input id="password" name="password" type="password" placeholder="密码" autocomplete="current-password" required>${api?`<label class="remember"><input id="remember" type="checkbox" ${form.remember?'checked':''}>保存密码</label>`:''}</div>
 ${captcha?`<div class="captcha-row"><input id="captcha" placeholder="验证码" aria-label="验证码" required><img alt="登录验证码" src="${e(captcha)}"></div>`:''}
 <button class="login-submit" type="submit"${api?'':' title="验证连接并将密码保存到系统凭据库"'}>登录</button></form></section>`;
@@ -220,7 +220,7 @@ class ProjectCardProvider {
       if(current && current.binding===(workspace.workspaceBinding?.digest || workspace.root)) state={changedCount:current.changedCount};
     }
     const model=this.setup?{kind:'setup',...this.setup}:this.diagnostic?{kind:'diagnostic',key:this.diagnostic.workspaceKey || '',project:this.diagnostic.name || this.diagnostic.workspaceKey || '配置异常',message:this.diagnostic.message,directory:this.diagnostic.directory,code:this.diagnostic.code}:workspace?cardModel(workspace,state,authentication):undefined;
-    const signature=JSON.stringify({model:model?.kind==='diagnostic'||model?.sourceMode!=='api'||model?.authenticated||model?.pending?model:model?{authenticated:false,key:model.key,project:model.project,address:model.address}:null,form:this.form});
+    const signature=JSON.stringify({model:model?.kind==='diagnostic'||model?.sourceMode!=='api'||model?.authenticated||model?.pending?model:model?{authenticated:false,key:model.key,project:model.project,address:model.address,loginId:model.loginId}:null,form:this.form});
     if(signature===this.lastSignature)return;
     this.lastSignature=signature;
     this.view.webview.html=projectCardHtml(model,{css:this.css,form:this.form});

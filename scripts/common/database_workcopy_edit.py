@@ -45,9 +45,9 @@ def _page(text, source_id):
 
 
 def _changed_lines(before, after):
-    # VS Code presents CRLF and LF as the same line contents.
-    before = before.replace("\r\n", "\n").replace("\r", "\n")
-    after = after.replace("\r\n", "\n").replace("\r", "\n")
+    # Normalize line endings and disregard one final line terminator.
+    before = before.replace("\r\n", "\n").replace("\r", "\n").removesuffix("\n")
+    after = after.replace("\r\n", "\n").replace("\r", "\n").removesuffix("\n")
     if before == after:
         return []
     comparison = SequenceMatcher(None, before.split("\n") if before else [], after.split("\n") if after else [])
@@ -106,25 +106,43 @@ def _create_page_workcopy(conn, workspace, config, row, source, target, expected
         return {**result, **identity, "matchesAfter": True, "writeArtifacts": artifacts}
 
 
-def run(workspace, config, action, payload, *, include_write_artifacts=False):
+def run(workspace, config, action, payload, *, include_write_artifacts=False, rebind_index_record=False):
     if not isinstance(payload, dict):
         raise ValueError("需要明确的 DATABASE 源码身份")
     record_id, source_id, source_path = (payload.get(key) for key in ("recordId", "sourceId", "sourcePath"))
-    if type(record_id) is not int or record_id <= 0 or not isinstance(source_id, str) or not source_id:
+    if (type(record_id) is not int or record_id <= 0 or not isinstance(source_id, str) or not source_id
+            or not isinstance(source_path, str) or not source_path):
         raise ValueError("需要明确的 DATABASE 源码身份")
+    readonly_root = workspace["readonlyDir"].resolve()
     with hub.index_connection(workspace, action="workcopy-editor-target") as conn:
         row = conn.execute("""SELECT * FROM gusen_source_record WHERE scope_id=? AND provider='database'
             AND record_id=? AND source_id=? AND source_table IN ('page','procedure')""",
                            (workspace["scopeId"], record_id, source_id)).fetchone()
-        if row is None or not row["local_path"]:
+        indexed = None
+        if row is not None and row["local_path"]:
+            filename = "raw.json" if row["source_table"] == "page" else "source.vm"
+            indexed = hub.ROOT / row["local_path"] / filename
+        source = indexed.resolve() if indexed is not None else None
+        expected = readonly_root / source_path
+        if rebind_index_record and source != expected:
+            # Synchronization may replace the row or reuse its number for another path.
+            expected = expected.resolve()
+            source_type = {"raw.json": "page", "source.vm": "procedure"}.get(expected.name)
+            if (source_type and expected.is_relative_to(readonly_root)
+                    and expected.relative_to(readonly_root).as_posix() == source_path):
+                matches = conn.execute("""SELECT * FROM gusen_source_record
+                    WHERE scope_id=? AND provider='database' AND source_id=? AND source_table=? AND local_path=?
+                    LIMIT 2""", (workspace["scopeId"], source_id, source_type, hub._indexed_path(expected.parent))).fetchall()
+                if len(matches) == 1:
+                    row = matches[0]
+                    indexed = hub.ROOT / row["local_path"] / expected.name
+                    source = expected
+        if source is None:
             raise ValueError("源码已移出当前工作区索引")
-        is_page = row["source_table"] == "page"
-        filename = "raw.json" if is_page else "source.vm"
-        readonly_root = workspace["readonlyDir"].resolve()
-        indexed = hub.ROOT / row["local_path"] / filename
-        source = indexed.resolve()
         if not source.is_relative_to(readonly_root) or source.relative_to(readonly_root).as_posix() != source_path:
             raise ValueError("源码路径与当前工作区索引不一致")
+        is_page = row["source_table"] == "page"
+        filename = indexed.name
         workcopy_root = workspace["workcopyDir"].resolve()
         target = workcopy_root / source.relative_to(readonly_root)
         if action == "create":

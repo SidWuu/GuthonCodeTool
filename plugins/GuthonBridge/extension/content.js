@@ -99,7 +99,7 @@ async function ensurePageBridge() {
       }
       clearTimeout(timer);
       window.removeEventListener("message", onMessage);
-      resolve({ ready: Boolean(data.ok), fieldsMover: Boolean(data.data?.fieldsMover) && data.data?.ready === "20261127" });
+      resolve({ ready: Boolean(data.ok), fieldsMover: Boolean(data.data?.fieldsMover) && data.data?.ready === "20261127.3" });
     }
 
     window.addEventListener("message", onMessage);
@@ -111,7 +111,7 @@ async function ensurePageBridge() {
   async function injectPageScript(name) {
     await new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `${runtime.getURL(name)}?v=20261127`;
+      script.src = `${runtime.getURL(name)}?v=20261127.3`;
       script.dataset.source = "guthon-bridge";
       script.onload = () => { script.remove(); resolve(); };
       script.onerror = () => { script.remove(); reject(new Error("页面桥接脚本加载失败")); };

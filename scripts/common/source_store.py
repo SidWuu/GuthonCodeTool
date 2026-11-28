@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import uuid
@@ -9,6 +10,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
+from common.directory_links import is_directory_link
 from common.persistence import atomic_text, file_lock
 
 _ACTIVE = ContextVar("guthon_source_transaction", default=None)
@@ -25,14 +27,17 @@ def _restore(workspace, directory, journal):
         safe_target = target.parent.resolve() / target.name
         if target != safe_target or target == root or not target.is_relative_to(root) or backup.parent.resolve() != directory.resolve():
             raise ValueError("Invalid source recovery path; manual recovery required")
-        if backup.is_symlink() and not entry.get("allowLink"):
+        if is_directory_link(backup) and not entry.get("allowLink"):
             raise ValueError("Invalid source recovery link; manual recovery required")
-        if backup.exists() or backup.is_symlink() or not entry["existed"]:
+        has_backup = os.path.lexists(backup)
+        if has_backup or not entry["existed"]:
             if target.is_symlink():
                 target.unlink()
+            elif os.name == "nt" and os.path.isjunction(target):
+                target.rmdir()
             elif target.exists():
                 shutil.rmtree(target)
-        if backup.exists() or backup.is_symlink():
+        if has_backup:
             target.parent.mkdir(parents=True, exist_ok=True)
             backup.replace(target)
 
@@ -43,7 +48,7 @@ def recover(conn, workspace):
         return
     committed = conn.execute("SELECT state_value FROM gusen_sync_state WHERE state_key='source_transaction_id'").fetchone()
     for directory in parent.iterdir():
-        if not directory.is_dir() or directory.is_symlink():
+        if not directory.is_dir() or is_directory_link(directory):
             raise ValueError("Invalid source transaction journal; manual recovery required")
         journal = json.loads((directory / "journal.json").read_text(encoding="utf-8"))
         if journal["workspaceKey"] != workspace["workspaceKey"] or journal["id"] != directory.name:
@@ -65,14 +70,16 @@ def prepare_path(path, *, allow_link=False):
     if any(entry["target"] == str(path) for entry in active["journal"]["paths"]):
         return
     name = f"backup-{len(active['journal']['paths'])}"
-    entry = {"target": str(path), "backup": name, "existed": path.exists() or path.is_symlink()}
+    entry = {"target": str(path), "backup": name, "existed": os.path.lexists(path)}
+    if entry["existed"]:
+        linked = is_directory_link(path)
+        if (linked and not allow_link) or (not linked and not path.is_dir()):
+            raise ValueError("Source mirror path must be a physical directory")
     if allow_link:
         entry["allowLink"] = True
     active["journal"]["paths"].append(entry)
     atomic_text(active["directory"] / "journal.json", json.dumps(active["journal"]))
     if entry["existed"]:
-        if not (allow_link and path.is_symlink()) and (path.is_symlink() or not path.is_dir()):
-            raise ValueError("Source mirror path must be a physical directory")
         path.replace(active["directory"] / name)
 
 
@@ -98,6 +105,5 @@ def source_transaction(conn, workspace):
             raise
         finally:
             _ACTIVE.reset(token)
-            if committed or not any((directory / entry["backup"]).exists() or (directory / entry["backup"]).is_symlink()
-                                    for entry in journal["paths"]):
+            if committed or not any(os.path.lexists(directory / entry["backup"]) for entry in journal["paths"]):
                 shutil.rmtree(directory)

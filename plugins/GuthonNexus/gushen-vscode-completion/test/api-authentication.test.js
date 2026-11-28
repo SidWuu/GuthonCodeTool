@@ -50,6 +50,20 @@ test('logout queues behind an in-flight restore then prevents future automatic l
 test('session-only login removes a previously remembered password',async()=>{
   const f=fixture();await f.auth.login('projects.demo',{userId:'current',password:'new-secret',remember:false});assert.equal(f.saved(),undefined);f.restart();assert.equal((await f.auth.session('projects.demo')).authenticated,false);
 });
+test('logout keeps the submitted account in memory for the same project and platform',async()=>{
+  const f=fixture();
+  f.store.canRestore=false;
+  f.store.read=()=>assert.fail('login storage is unavailable');
+  const userId='00100000000';
+  await f.auth.login('projects.demo',{userId,password:'new-secret',remember:false});
+  await f.auth.logout('projects.demo');
+  assert.deepEqual(await f.auth.session('projects.demo'),{authenticated:false,session:null});
+  assert.equal(f.auth.loginIdFor(scope),userId);
+  assert.equal(f.auth.loginIdFor({...scope,workspaceKey:'projects.other'}),undefined);
+  assert.equal(f.auth.loginIdFor({...scope,serverUrl:'https://other.invalid'}),undefined);
+  assert.equal(f.auth.loginIdFor({...scope,toolHome:require('node:path').resolve(scope.toolHome,'other')}),undefined);
+  assert.equal(f.saved(),undefined);
+});
 test('failed manual account change never silently restores the earlier saved account',async()=>{
   const f=fixture();f.setFail(true);
   await assert.rejects(f.auth.login('projects.demo',{userId:'other-account',password:'wrong',remember:true}));

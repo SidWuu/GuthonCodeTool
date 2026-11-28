@@ -46,6 +46,12 @@ def baseline_pointer(before, after, pointer):
     return json_pointer(parts)
 
 
+def same_json_value(before, after):
+    """Ignore object key order while keeping JSON types and exact integers."""
+    return (type(before) is type(after) and before == after
+            and json.dumps(before, sort_keys=True) == json.dumps(after, sort_keys=True))
+
+
 def compare_pages(before, after, *, limit=1000):
     rows, paths, total = [], set(), 0
     def token(key):
@@ -68,9 +74,7 @@ def compare_pages(before, after, *, limit=1000):
                          'beforeText': '（不存在）' if kind == 'added' else display(old),
                          'afterText': '（已删除）' if kind == 'removed' else display(new)})
     def walk(old, new, old_path, new_path, label='', parent=''):
-        # Python compares large integers exactly; never round native IDs or opaque numbers through JS.
-        if (type(old) is type(new) and old == new
-                and json.dumps(old, sort_keys=True) == json.dumps(new, sort_keys=True)):
+        if same_json_value(old, new):
             return
         label = caption(new) or caption(old) or label
         if isinstance(old, dict) and isinstance(new, dict):

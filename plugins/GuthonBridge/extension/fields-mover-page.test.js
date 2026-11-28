@@ -8,10 +8,11 @@ function mover(source) {
   let current = source;
   let currentPage = "PG-FIXTURE";
   const code = fs.readFileSync(require.resolve("./page-bridge.js"), "utf8");
-  const context = { window: { GuthonFieldsMoverCore: core }, getVueInstance: () => current,
+  const selected = {get children() {return current.children || [];}, querySelector: selector =>
+    current.columns && selector === ".input-box" ? null : {querySelectorAll: () => []}};
+  const context = { window: { GuthonFieldsMoverCore: core }, getVueInstance: element => element?.vue || current,
     getCurrentPageCode: () => currentPage, isVisible: () => true,
-    document: { querySelectorAll: () => [{ querySelector: selector =>
-      current.columns && selector === ".input-box" ? null : { querySelectorAll: () => [] } }] } };
+    document: { querySelectorAll: () => [selected] } };
   vm.runInNewContext(code.slice(code.indexOf("  let copiedFields = null;"), code.indexOf("  function getAllVueInstances()")), context);
   return { context, select: (value) => { current = value; }, openPage: id => { currentPage = id; } };
 }
@@ -104,6 +105,37 @@ test("local field batch refuses mismatched pages, changed selections and conflic
   table.columns[0].id = "different-field";
   assert.throws(() => context.previewLocalFieldBatch({text}), /来源组件不匹配/);
   assert.throws(() => context.previewLocalFieldBatch({text: text.replace('"width"', '"__proto__"')}), /请粘贴 Nexus/);
+});
+
+test("first fields reach the native lists read by search, input and table serializers", () => {
+  for (const componentType of ["search-box", "input-box", "table-main", "table-item"]) {
+    const table = componentType.startsWith("table-");
+    const actualFields = [];
+    const owner = table ? {columns: actualFields} : {param: {id: "target"}, fields: actualFields};
+    const refs = table ? {gdTableBase: {form: {id: "target"}, $refs: {table: owner}}} : {gdInputBox: owner};
+    const component = {info: {guid: "other-guid"}, $refs: refs};
+    const host = {classList: {contains: type => type === componentType}, vue: component};
+    const {context} = mover({children: [host]});
+    const input = {...batch, component: "query", componentType, updates: [], anchors: [],
+      additions: [{...batch.additions[0], hidden: false}],
+      componentIdentity: {id: "target", guid: "native-guid"}};
+    const text = JSON.stringify(input);
+    assert.throws(() => context.previewLocalFieldBatch({text}), /原生身份/);
+    assert.throws(() => context.previewLocalFieldBatch({text: JSON.stringify({...input, componentIdentity: undefined})}),
+      /请粘贴 Nexus/);
+    component.info.guid = "native-guid";
+    const preview = context.previewLocalFieldBatch({text});
+    assert.equal(preview.additions.length, 1);
+    assert.equal(actualFields.length, 0);
+    const params = table ? refs.gdTableBase.form : owner.param;
+    params.id = "different-id";
+    assert.throws(() => context.applyLocalFieldBatch({id: preview.id}), /原生身份/);
+    assert.equal(actualFields.length, 0);
+    params.id = "target";
+    const confirmed = context.previewLocalFieldBatch({text});
+    assert.equal(context.applyLocalFieldBatch({id: confirmed.id}).added, 1);
+    assert.equal(actualFields[0].fieldId, "C");
+  }
 });
 
 test("table columns and missing target hidden array use the same copy flow", () => {

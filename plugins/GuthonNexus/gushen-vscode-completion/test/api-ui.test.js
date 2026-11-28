@@ -604,7 +604,9 @@ test('stored Nexus login restores via stdin and tool-settings logout clears it w
   assert.equal((await api.run('projects.A','session')).authenticated,true);
   const drafts=api.editorState.drafts;drafts.set('existing',{key:'projects.A',path:'page.xml',dirty:true});
   await handlers.get('gushenCompletion.logoutApiSource')('projects.A');
-  assert.equal(store.read(scope),undefined);assert.equal((await api.run('projects.A','session')).authenticated,false);assert.equal(drafts.has('existing'),true);
+  assert.equal(store.read(scope),undefined);
+  assert.equal((await api.run('projects.A','session')).authenticated,false);
+  assert.equal((await api.readProjectSummary('projects.A')).loginId,'fixture');assert.equal(drafts.has('existing'),true);
   assert.equal(calls.filter(call=>call.action==='login').length,1);assert.equal(calls.filter(call=>call.action==='logout').length,1);assert.match(messages[0],/已退出当前项目/);
   const menu=require('../package.json').contributes.menus['gushenCompletion.projectSettings'];assert(menu.some(item=>item.command==='gushenCompletion.projectMenuLogout'));
   await api.dispose();

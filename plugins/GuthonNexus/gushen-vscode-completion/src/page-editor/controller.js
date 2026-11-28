@@ -46,6 +46,9 @@ class PageEditorController {
   }
   async refreshComparison(session) {
     const snapshot=session.snapshot;
+    const isCurrent = () => !this.disposed && session.snapshot === snapshot
+        && (session.identity.sourceMode !== 'database' || !session.sourceStale);
+    if (!isCurrent()) return;
     if (session.comparisonRequest?.snapshot === snapshot) return session.comparisonRequest.promise;
     const request = {snapshot};
     session.comparisonRequest = request;
@@ -53,12 +56,12 @@ class PageEditorController {
       try {
         const result = await this.requestPage(session.identity, {action:'comparison',
           path:session.snapshot.sourcePath, sourceHash:snapshot.sourceHash});
-        if (this.disposed || session.snapshot!==snapshot) return;
+        if (!isCurrent()) return;
         if (result.sourceHash !== snapshot.sourceHash) throw new Error('比较基线与当前页面不一致，请重新载入');
         const {baseRevision, ...comparison}=result;
         session.baselineComparison = {...comparison,apiVersion:baseRevision};
       } catch (error) {
-        if (this.disposed || session.snapshot!==snapshot) return;
+        if (!isCurrent()) return;
         session.baselineComparison = {available:false,message:error.message};
       }
       this.publish(session);
@@ -500,7 +503,11 @@ class PageEditorController {
       else if (reopening) this.mount(existing);
       existing.panel.reveal();
       this.publish(existing);
-      if (reopening) await this.refreshComparison(existing);
+      if (existing.identity.sourceMode === 'database') {
+          if (!existing.busy && !existing.pending && !existing.sourceMerge?.applying) {
+              await this.refreshSource(existing);
+          }
+      } else if (reopening) await this.refreshComparison(existing);
       return existing;
     }
     if (this.vscode.workspace.textDocuments.some(doc => doc.isDirty && this.owns(identity, doc)))
