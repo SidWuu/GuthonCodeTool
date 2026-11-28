@@ -37,7 +37,7 @@ async function runNativeMetadata(payload) {
     return result.data;
   };
   try {
-    if (!['inspect-guid','set-guid','inspect-page-guid','sync-page-guid','inspect-runtime','save-native-record','prepare-native-record','apply-page-script','inspect-page-script','inspect-declared-step','run-declared-step','inspect-native-source','apply-native-source'].includes(payload?.action)) throw new Error('Unsupported native metadata action');
+    if (!['inspect-guid','set-guid','inspect-page-guid','sync-page-guid','inspect-runtime','save-native-record','prepare-native-record','apply-page-script','inspect-page-script','inspect-declared-step','run-declared-step','inspect-native-source','apply-native-source','inspect-database-procedure'].includes(payload?.action)) throw new Error('Unsupported native metadata action');
     if (location.origin !== payload.expectedOrigin || !/\/guthon\//.test(location.pathname)) throw new Error('Platform origin changed');
     if (!payload.dataSourceIds?.includes(payload.dataSourceId)) throw new Error('Datasource is not selected in the paired context');
     if(!/^[A-Za-z0-9_-]{1,128}$/.test(payload.dataSourceId || ''))throw new Error('Invalid datasource identity');
@@ -45,6 +45,31 @@ async function runNativeMetadata(payload) {
     if (['apply-page-script','inspect-page-script'].includes(payload.action)) return runNativePageScript(payload,checked);
     if (['inspect-declared-step','run-declared-step'].includes(payload.action)) return runDeclaredNativeStep(payload,checked);
     if (['inspect-native-source','apply-native-source'].includes(payload.action)) return runFrozenNativeSource(payload,checked);
+    if (payload.action === 'inspect-database-procedure') {
+      const {systemId, dataSourceId, procedureAlias, funId} = payload;
+      if (!payload.systemIds?.includes(systemId)
+          || !/^[A-Za-z_$][A-Za-z0-9_.$]{0,255}$/.test(procedureAlias || '')
+          || !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(funId || '')) throw new Error('DATABASE preflight target changed');
+      const tree = await checked('/develop/procedure/admin/getProcTree.htm', {dataSourceId});
+      const matches = tree.list?.filter(row => row.procedureAliasId === procedureAlias);
+      if (matches?.length !== 1 || !/^PR-[A-Za-z0-9-]{1,96}$/.test(matches[0].procedureId || '')) throw new Error('Native procedure alias is absent or ambiguous');
+      const {procedureId} = matches[0];
+      const catalog = await checked('/develop/procedure/admin/getFunList.htm', {procedureId});
+      if (catalog.list?.filter(row=>row.funId === funId).length !== 1) throw new Error('Native function is absent or ambiguous');
+      const {bean} = await checked('/develop/procedure/admin/getFunInfo.htm', {procedureId,funId});
+      if (bean?.funId !== funId || (bean.procedureId !== undefined && bean.procedureId !== procedureId)
+          || typeof bean.versionMac !== 'string' || !bean.versionMac || bean.versionMac.length > 128) throw new Error('Native function/version does not match');
+      let sourceContent;
+      if (payload.includeSourceHash === true) {
+        if (typeof bean.funScript !== 'string' || bean.funScript.length > 196608) {
+          throw new Error('平台未返回有界的过程函数正文，无法核对编辑基线');
+        }
+        sourceContent = bean.funScript;
+      }
+      return {state:'SUCCEEDED',action:payload.action,platformApplied:false,
+        after:{origin:location.origin,systemId,dataSourceId,procedureId,procedureAlias,funId,version:bean.versionMac},
+        ...(payload.includeSourceHash === true ? {sourceContent} : {})};
+    }
     for (const key of ['tableId','fieldId']) if (!/^[A-Za-z0-9_]{1,128}$/.test(payload[key] || '')) throw new Error('Invalid metadata identity');
     if (payload.action === 'inspect-runtime') {
       const response = await fetch('/develop/systems/apps/view.htm', {credentials:'include',signal:AbortSignal.timeout(30000)});

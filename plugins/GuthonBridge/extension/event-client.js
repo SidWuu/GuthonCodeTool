@@ -1,6 +1,6 @@
 (function(root) {
   // Fetch is used instead of EventSource so the pairing token stays in a header.
-  async function consume(response, onEvent) {
+  async function consume(response, onEvent, onHeartbeat) {
     if (!response.ok || !response.headers?.get('content-type')?.startsWith('text/event-stream')) throw new Error('Bridge 事件连接失败');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -14,6 +14,10 @@
         let end;
         while ((end = buffer.indexOf('\n\n')) !== -1) {
           const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+          if (frame === ': heartbeat') {
+            await onHeartbeat?.();
+            continue;
+          }
           let event = ''; const data = [];
           for (const line of frame.split('\n')) {
             if (line.startsWith('event: ')) event = line.slice(7);

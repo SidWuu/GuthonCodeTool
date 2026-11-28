@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 
 from common import legacy_source as hub
 from common import page_editor
+from common.database_source_publish import workcopy_baseline
 from common.inheritance import project as project_inheritance
 from common.page_projection import extract_page_fields, extract_page_scripts, replace_json_value
 from common.persistence import atomic_bytes
@@ -64,7 +65,11 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False):
         raise ValueError("无效的源码分块路径")
     design = is_page and payload.get("design") is True
     editing = action in {"edit-preview", "edit-save"}
-    with (hub.file_lock(workspace["contextDir"] / ".workcopy.lock") if action=="edit-save" else nullcontext()):
+    saving = action == "edit-save"
+    reviewing_publish = action in {"publish-preview", "publish-confirm"}
+    source_lock = hub.file_lock(workspace["contextDir"] / ".source-write.lock") if (saving or reviewing_publish) and not is_page else nullcontext()
+    copy_lock = hub.file_lock(workspace["contextDir"] / ".workcopy.lock") if saving or reviewing_publish else nullcontext()
+    with source_lock, copy_lock:
         if target.resolve() != target:
             raise ValueError("工作副本路径包含符号链接")
         existing = target.is_file()
@@ -76,8 +81,39 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False):
         result = {"workspaceKey": workspace["workspaceKey"], "sourcePath": source_path,
                   "sourceId": source_id, "sourceHash": source_hash, "editable": True,
                   "workcopy": existing, "workcopyPath": str(target), "language": "json" if is_page else "guthon-gss"}
-        if editing and payload.get("sourceHash") != source_hash:
+        if (editing or action == "publish-confirm") and payload.get("sourceHash") != source_hash:
             raise ValueError("源码已发生变化，请保留修改并重新打开后比较")
+        if reviewing_publish:
+            if is_page or not existing or not row["data_source_id"] or not row["source_alias_id"] or not row["fun_id"]:
+                raise ValueError("本期只支持有精确身份的既有过程函数工作副本")
+            baseline, original = workcopy_baseline(workspace, row, source_path, source_hash)
+            if baseline is None:
+                raise ValueError("工作副本没有可信基线；请导出旧改动并按当前同步镜像重新应用")
+            baseline_text = decode_source(original)[0]
+            if baseline_text.replace("\r\n", "\n") == text.replace("\r\n", "\n"):
+                raise ValueError("没有正文变更可供上传审阅")
+            if (project_inheritance(baseline_text, None)["status"] != "INACTIVE"
+                    or project_inheritance(text, None)["status"] != "INACTIVE"):
+                raise ValueError("继承过程不在本期发布范围")
+            if max(len(baseline_text.encode("utf-8")), len(text.encode("utf-8"))) > 196608:
+                raise ValueError("过程函数正文超过平台发布上限")
+            systems = {mapping["system_id"] for mapping in workspace["systemMappings"].values()
+                       if mapping.get("data_source_id") == row["data_source_id"] and mapping.get("system_id")}
+            identity = dict(baseline["identity"])
+            if systems:
+                indexed_system = identity["system_id"]
+                identity["system_id"] = (indexed_system if indexed_system in systems
+                                         else next(iter(systems)) if len(systems) == 1 and not indexed_system else "")
+            binding = workspace["workspaceBinding"]
+            origins = workspace["pageOrigins"]
+            review_id = _digest(json.dumps([identity, source_path, baseline["sourceVersion"],
+                                            baseline["sourceHash"], source_hash, binding, origins],
+                                           sort_keys=True).encode())
+            if action == "publish-confirm" and payload.get("reviewId") != review_id:
+                raise ValueError("编辑基线或候选已变化，请重新审阅")
+            return {**result, "reviewId": review_id, "databaseIdentity": identity,
+                    "workspaceBinding": binding, "pageOrigins": origins, "databaseBaseVersion": baseline["sourceVersion"],
+                    "baseContent": baseline_text, "content": text}
         if is_page:
             projected, data, wrapped = _page(text, source_id)
             if action == "edit-read" and payload.get("resolveDefaultFragment") is True:
@@ -87,6 +123,13 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False):
                 )
                 return {**result, "defaultFragment": default_fragment}
         if action == "edit-comparison":
+            if not is_page:
+                baseline, original = workcopy_baseline(workspace, row, source_path, source_hash) if existing else (None, None)
+                before = original if baseline else (_bytes(source) if source.is_file() else None)
+                return {**result, "available": before is not None, "trustedBaseline": baseline is not None,
+                        "changed": before is not None and before != current,
+                        "baseContent": decode_source(before)[0] if before is not None else None,
+                        "content": text}
             if not design or payload.get("sourceHash") != source_hash:
                 raise ValueError("PAGE 已变化，请重新打开后比较")
             from common.page_comparison import compare_pages
@@ -157,6 +200,15 @@ def run(workspace, config, action, payload, *, include_write_artifacts=False):
             previous = hub._work_copy_metadata(folder)
             if previous.get("workspaceKey") != workspace["workspaceKey"] or previous.get("source_id") != source_id:
                 raise ValueError("工作副本元数据与打开的对象不一致")
+        if not is_page:
+            capture = None
+            if row["version_mac"] and source.is_file() and current == _bytes(source):
+                with hub.index_connection(workspace, action="workcopy-editor-baseline") as conn:
+                    latest = conn.execute("SELECT * FROM gusen_source_record WHERE record_id=?", (record_id,)).fetchone()
+                if latest is None or dict(latest) != dict(row):
+                    raise ValueError("同步镜像已发生变化，请重新打开后保存")
+                capture = current
+            workcopy_baseline(workspace, row, source_path, source_hash, capture=capture, candidate_hash=candidate_hash)
         protected_artifacts = set()
         if folder.exists():
             if _digest(_bytes(target if existing else source)) != source_hash:

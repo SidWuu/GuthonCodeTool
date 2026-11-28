@@ -24,8 +24,11 @@ function lifecycleTarget(value) {
   if (!value || !['inspect', 'create', 'copy', 'delete'].includes(value.action)) throw new Error('无效的 PAGE 生命周期操作');
   if (value.pageId && !PAGE.test(value.pageId)) throw new Error('PAGE 身份无效');
   if (['copy', 'delete'].includes(value.action) && !PAGE.test(value.pageId || '')) throw new Error('必须指定来源 PAGE');
+  if (value.sourcePointer !== undefined && (value.action !== 'inspect' || value.sourcePointer !== '/compScript' || !PAGE.test(value.pageId || ''))) {
+    throw new Error('只读服务 PAGE 正文需要精确 PAGE ID 和 /compScript');
+  }
   if (JSON.stringify(value).length > 12000) throw new Error('PAGE 生命周期参数过大');
-  return Object.fromEntries(['action','pageId','properties','expectedVersion','expectedPage']
+  return Object.fromEntries(['action','pageId','properties','expectedVersion','expectedPage','sourcePointer']
     .filter(key => value[key] !== undefined).map(key => [key,value[key]]).concat([['type','page-lifecycle']]));
 }
 
@@ -99,43 +102,98 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     if (!item) throw new Error('平台页签快照已过期或不属于目标工作区，请在平台刷新定位上下文');
     return item;
   }
-  function dispatch(payload, lifecycle = false) {
+  function dispatch(payload, lifecycle = false, completePrivate) {
     const context = get(payload.contextId, payload.workspaceKey);
     const metadata = lifecycle === 'metadata';
-    const target = metadata ? metadataTarget(payload.target) : lifecycle ? lifecycleTarget(payload.target) : navigationTarget(payload.target);
+    const target = completePrivate ? payload.target
+      : metadata ? metadataTarget(payload.target) : lifecycle ? lifecycleTarget(payload.target) : navigationTarget(payload.target);
     if (![...subscribers].some(s => s.clientId === context.clientId && !s.res.destroyed)) throw new Error('浏览器事件连接未就绪，请刷新平台页签');
     if (commands.size >= 64) throw new Error('浏览器定位请求过多，请等待完成');
     const item = {requestId: crypto.randomUUID(), contextId: context.contextId, clientId: context.clientId,
       tabId: context.tabId, workspaceKey: context.workspaceKey, pageOrigin: context.pageOrigin,
       target, state: 'PENDING', expiresAt: now() + (lifecycle ? 120000 : commandTtlMs)};
-    commands.set(item.requestId, item);
-    emit(metadata ? 'native-metadata' : lifecycle ? 'page-lifecycle' : 'navigate', item, s => s.clientId === context.clientId);
+    commands.set(item.requestId, {...item, completePrivate});
+    const event = completePrivate ? 'database-procedure' : metadata ? 'native-metadata' : lifecycle ? 'page-lifecycle' : 'navigate';
+    const notice = completePrivate ? {...item, target:{...target, evidence:undefined}} : item;
+    emit(event, notice, s => s.clientId === context.clientId);
     return {ok: true, requestId: item.requestId, state: item.state};
   }
   function result(payload) {
     expire();
     const item = commands.get(payload.requestId);
-    if (!item || item.workspaceKey !== payload.workspaceKey) throw new Error('定位请求已过期或不属于目标工作区；禁止自动重放');
+    if (!item || item.completePrivate || item.workspaceKey !== payload.workspaceKey) throw new Error('定位请求已过期或不属于目标工作区；禁止自动重放');
     return {ok: true, requestId: item.requestId, state: item.state, message: item.message || '',
       ...(['page-lifecycle','native-metadata'].includes(item.target.type) ? {data: item.data || null} : {})};
+  }
+  function privatePayload(payload) {
+    expire();
+    const item = commands.get(payload.requestId);
+    if (!item?.completePrivate || item.clientId !== payload.clientId || item.tabId !== payload.tabId
+        || item.workspaceKey !== payload.workspaceKey) throw new Error('浏览器 DATABASE 请求身份不匹配');
+    return {ok:true, evidence:item.target.evidence};
   }
   function complete(payload) {
     expire();
     const item = commands.get(payload.requestId);
     if (!item || item.clientId !== payload.clientId || item.tabId !== payload.tabId || item.workspaceKey !== payload.workspaceKey) throw new Error('定位回执身份不匹配');
+    if (item.completePrivate) {
+      commands.delete(item.requestId);
+      item.completePrivate(payload);
+      return {ok:true};
+    }
     if (item.state !== 'PENDING') return result(item);
     item.state = payload.ok === true ? 'SUCCEEDED' : 'FAILED';
     item.message = text(payload.message, 512);
-    if (item.target.type === 'page-lifecycle' && payload.data && JSON.stringify(payload.data).length <= 32000) {
-      item.data = Object.fromEntries(['state','action','page','sourceVersion','modules','systemIds','message','platformApplied']
-        .filter(key => payload.data[key] !== undefined).map(key => [key,payload.data[key]]));
+    if (item.target.type === 'page-lifecycle') {
+      const {data} = payload;
+      const readPage = item.target.action === 'inspect';
+      const pointer = item.target.sourcePointer;
+      const validData = data && JSON.stringify(data).length <= 32000;
+      if (validData) {
+        item.data = Object.fromEntries(['state','action','page','sourceVersion','modules','systemIds','message','platformApplied','pageInfoSource']
+          .filter(key => data[key] !== undefined).map(key => [key,data[key]]));
+      }
+      if (readPage) {
+        const validSource = !pointer || (data?.platformApplied === false && data.sourcePointer === pointer
+          && typeof data.sourceContent === 'string'
+          && JSON.stringify(data.sourceContent).length <= 20000
+          && data.page?.pageId === item.target.pageId && typeof data.sourceVersion === 'string'
+          && data.sourceVersion.length > 0 && data.sourceVersion.length <= 128);
+        if (!validData || data.state !== 'SUCCEEDED' || !validSource) {
+          item.state = 'FAILED';
+          item.message = text(data?.message, 512) || item.message || 'PAGE 只读回执不完整或身份不一致';
+          item.data = {state:'REJECTED',platformApplied:false,message:item.message};
+        } else if (pointer) {
+          Object.assign(item.data, {sourcePointer:pointer,sourceContent:data.sourceContent});
+        }
+      }
     }
-    if (item.target.type === 'native-metadata' && payload.data && JSON.stringify(payload.data).length <= 32000) {
+    if (item.target.action === 'inspect-database-procedure' && item.target.type === 'native-metadata') {
+      const {data} = payload;
+      const after = data?.after;
+      const valid = data?.state === 'SUCCEEDED' && data.platformApplied === false && after?.origin === item.pageOrigin
+        && ['systemId','dataSourceId','procedureAlias','funId'].every(key=>after[key] === item.target[key])
+        && typeof after.procedureId === 'string' && /^PR-[A-Za-z0-9-]{1,96}$/.test(after.procedureId)
+        && typeof after.version === 'string' && after.version.length > 0 && after.version.length <= 128
+        && (!item.target.includeSourceHash || (typeof after.contentHash === 'string' && /^[0-9a-f]{64}$/.test(after.contentHash)));
+      if (valid) {
+        const fields = ['origin','systemId','dataSourceId','procedureAlias','funId','procedureId','version'];
+        if (item.target.includeSourceHash) fields.push('contentHash');
+        item.data = {state:'SUCCEEDED',platformApplied:false,after:Object.fromEntries(fields.map(key=>[key,after[key]]))};
+      } else {
+        item.state = 'FAILED';
+        item.message = text(data?.message, 512) || item.message || '平台对象身份或正文摘要未通过预检';
+        item.data = {state:'REJECTED',platformApplied:false,message:item.message};
+      }
+    } else if (item.target.type === 'native-metadata' && payload.data && JSON.stringify(payload.data).length <= 32000) {
       item.data = Object.fromEntries(['state','action','field','snapshot','before','after','changed','message','platformApplied','pageId','sourceVersion','projectionCount','guidFlags','autoCompileRequested','savedVersion','runtimePath','scripts']
         .filter(key => payload.data[key] !== undefined).map(key => [key,payload.data[key]]));
     }
-    emit('navigation-result', result(item), s => s.workspaceKey === item.workspaceKey);
-    return result(item);
+    const receipt = result(item);
+    const notification = item.target.sourcePointer && receipt.data
+      ? {...receipt,data:{...receipt.data,sourceContent:undefined}} : receipt;
+    emit('navigation-result', notification, s => s.workspaceKey === item.workspaceKey);
+    return receipt;
   }
   function subscribe(res, filter) {
     if (!(CLIENT.test(filter.clientId || '') || isWorkspaceKey(filter.workspaceKey))
@@ -149,8 +207,27 @@ function createPageContexts({now = Date.now, ttlMs = 150000, limit = 64, command
     const heartbeat = setInterval(() => { expire(); if (!res.destroyed) res.write(': heartbeat\n\n'); }, 20000);
     res.on('close', () => {clearInterval(heartbeat); subscribers.delete(subscriber);});
   }
+  function databaseProcedure(context, action, target, evidence) {
+    const current = get(context.contextId, context.workspaceKey);
+    if (['pageOrigin','systemId','dataSourceId'].some(key => current[key] !== context[key])) {
+      throw new Error('已配对的发布页签身份发生变化');
+    }
+    return new Promise((resolve, reject) => {
+      const {requestId} = dispatch({contextId:context.contextId, workspaceKey:context.workspaceKey,
+        target:{type:'database-procedure',action, target, evidence}}, false, payload => {
+        clearTimeout(timeout);
+        if (payload.ok === true && payload.data) resolve(payload.data);
+        else reject(new Error('浏览器未能完成 DATABASE 过程操作'));
+      });
+      const timeout = setTimeout(() => {
+        commands.delete(requestId);
+        reject(new Error('浏览器 DATABASE 过程操作未及时返回'));
+      }, commandTtlMs);
+      timeout.unref();
+    });
+  }
   function dispose() {for (const s of subscribers) s.res.end(); subscribers.clear();}
-  return {publish, list, remove, get, navigate: payload => dispatch(payload), lifecycle: payload => dispatch(payload, true), metadata: payload => dispatch(payload,'metadata'), result, complete, subscribe, expire, dispose};
+  return {publish, list, remove, get, databaseProcedure, privatePayload, navigate: payload => dispatch(payload), lifecycle: payload => dispatch(payload, true), metadata: payload => dispatch(payload,'metadata'), result, complete, subscribe, expire, dispose};
 }
 
 module.exports = {createPageContexts, snapshot, navigationTarget, isWorkspaceKey};

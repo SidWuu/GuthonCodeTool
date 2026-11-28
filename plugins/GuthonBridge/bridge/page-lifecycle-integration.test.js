@@ -48,9 +48,9 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
     const connected = new Promise(resolve => {streamReady = resolve;});
     const native = {location: {origin: 'https://platform.test', pathname: '/guthon/'}, document: {querySelectorAll: () => [{__vue__: tree}]},
       URLSearchParams, AbortSignal, async fetch(url) {
-        if (url.endsWith('/getPageBaseInfo.htm')) return {ok: true, json: async () => ({code: 0, data: {page: {pageId: 'PG-NEW', systemId: 'SYS-1', mkId: 'MK-1'}}})};
+        if (url.endsWith('/getPageBaseInfo.htm')) return {ok: true, text: async () => JSON.stringify({code: 0, data: {page: {pageId: 'PG-NEW', systemId: 'SYS-1', mkId: 'MK-1'}}})};
         writes++; if (loseResponse) throw new Error('connection lost');
-        return {ok: true, json: async () => ({code: 0, data: {bean: {pageId: 'PG-NEW', systemId: 'SYS-1', mkId: 'MK-1'}}})};}};
+        return {ok: true, text: async () => JSON.stringify({code: 0, data: {bean: {pageId: 'PG-NEW', systemId: 'SYS-1', mkId: 'MK-1'}}})};}};
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../extension/page-lifecycle.js'), 'utf8'), native);
     worker = {importScripts() {}, URL, AbortController, setTimeout, clearTimeout, fetch,
       GuthonBridgeHost: {isAllowed: url => url === tab.url},

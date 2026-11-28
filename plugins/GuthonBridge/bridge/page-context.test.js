@@ -80,6 +80,29 @@ test('PAGE lifecycle uses exact paired context, bounded metadata receipts and no
 });
 
 
+test('explicit PAGE source is version-bound, returned only by polling, and mismatches fail the receipt', () => {
+  const registry=createPageContexts(), browser=response(), observer=response();
+  const context=registry.publish(payload);
+  registry.subscribe(browser,{clientId:payload.clientId});
+  registry.subscribe(observer,{workspaceKey:context.workspaceKey});
+  const input={contextId:context.contextId,workspaceKey:context.workspaceKey};
+  const target={action:'inspect',pageId:'PG-1',sourcePointer:'/compScript'};
+  const data={state:'SUCCEEDED',platformApplied:false,page:{pageId:'PG-1'},sourceVersion:'v2',
+    sourcePointer:'/compScript',sourceContent:'PRIVATE SCRIPT'};
+  try {
+    assert.throws(()=>registry.lifecycle({...input,target:{...target,action:'copy'}}),/只读/);
+    const request=registry.lifecycle({...input,target});
+    registry.complete({...payload,requestId:request.requestId,ok:true,data});
+    assert.equal(registry.result({...input,requestId:request.requestId}).data.sourceContent,data.sourceContent);
+    assert.equal(observer.frames.join('').includes(data.sourceContent),false);
+    const next=registry.lifecycle({...input,target});
+    const wrong=registry.complete({...payload,requestId:next.requestId,ok:true,data:{...data,page:{pageId:'PG-2'}}});
+    assert.equal(wrong.state,'FAILED');
+    assert.equal(wrong.data.state,'REJECTED');
+    assert.equal(wrong.data.sourceContent,undefined);
+  } finally {registry.dispose();}
+});
+
 test('neutral workspace contexts and event subscriptions remain isolated', () => {
   const registry = createPageContexts(), first = response(), second = response();
   registry.subscribe(first, {workspaceKey: 'ws_1'});

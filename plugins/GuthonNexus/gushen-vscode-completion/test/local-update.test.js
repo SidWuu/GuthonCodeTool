@@ -24,7 +24,7 @@ function fixture(t) {
   write('plugins/GuthonBridge/bridge/server.js', 'const CLIENT="../../GuthonNexus/gushen-vscode-completion/src/tool-process-client";');
   write('plugins/GuthonBridge/bridge/page-context.js', 'local contexts');
   write('plugins/GuthonBridge/bridge/browser-updates.js', 'local updates');
-  for (const name of ['native-metadata.js', 'native-step-registry.js', 'native-source-plan.js']) {
+  for (const name of ['native-metadata.js', 'native-step-registry.js', 'native-source-plan.js', 'database-publication.js', 'database-source-publish.js']) {
     write('plugins/GuthonBridge/bridge/' + name, 'local ' + name);
   }
   write('scripts/common/command_metadata.json', '{"schemaVersion":1,"defaultTimeoutMs":1000,"commands":{},"apiActions":{}}');
@@ -51,6 +51,8 @@ test('local versions come from the explicit source tree; generated Bridge source
   const info = localRelease(f.source);
   assert.equal(info.release.source, 'local'); assert.equal(info.catalog.components.nexus.version, '2.5.0');
   assert.ok(info.nexusFiles.get('bridge/server.js').toString().includes('../src/tool-process-client'));
+  assert.ok(info.nexusFiles.has('bridge/database-publication.js'));
+  assert.ok(info.nexusFiles.has('bridge/database-source-publish.js'));
   assert.equal(fs.existsSync(path.join(f.nexus, 'bridge/server.js')), false);
   assert.deepEqual(fs.readFileSync(path.join(f.nexus, 'src/main.js')), before);
   assert.throws(() => localRelease(''), /developmentRoot/);

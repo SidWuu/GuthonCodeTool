@@ -345,7 +345,7 @@ test('DATABASE Workcopy delivery opens the checklist and opens the difference on
   const workspace = { workspaceKey: 'projects.db', displayName: 'Fixture', sourceMode: 'database', workcopyDir: '/fixture/workcopy' };
   const target = workspace.workcopyDir + '/service';
   const subscriptions = [], calls = [], opened = [];
-  const selections = ['package', 'diff'];
+  const selections = ['package', undefined, 'diff'];
   const legacy = registerLegacyProjects({
     vscode: { EventEmitter, Uri: { file: fsPath => ({ fsPath }) },
       workspace: { textDocuments: [], openTextDocument: async uri => uri },
@@ -361,6 +361,7 @@ test('DATABASE Workcopy delivery opens the checklist and opens the difference on
     context: { subscriptions }, getTool: () => ({ toolHome: '/fixture' }), sourceTree: { refresh() {} },
     processClient: { async request(_tool, command, args, key) {
       calls.push({ command, args, key });
+      if (command === 'legacy-source') return {ok:true,items:[]};
       return { ok: true, output: target + (args[0] === 'package' ? '/delivery.md' : '/diff.md') };
     } },
   });
@@ -370,8 +371,86 @@ test('DATABASE Workcopy delivery opens the checklist and opens the difference on
   await legacy.action(workspace, 'changes');
   assert.deepEqual(opened, [target + '/delivery.md', target + '/diff.md']);
   assert.deepEqual(calls.map(({ command, args, key }) => [command, args[0], key]), [
-    ['workcopy', 'package', workspace.workspaceKey], ['workcopy', 'diff', workspace.workspaceKey],
+    ['workcopy', 'package', workspace.workspaceKey], ['legacy-source', 'review-workcopies', workspace.workspaceKey],
+    ['workcopy', 'diff', workspace.workspaceKey],
   ]);
+});
+
+test('DATABASE upload candidate confirmation stays local unless the user chooses read-only preflight', async t => {
+  const {registerLegacyProjects}=require('../src/legacy-project');
+  const {createHash}=require('node:crypto');
+  const workspace={workspaceKey:'projects.db',sourceMode:'database',root:'/fixture/project',
+    workcopyDir:'/fixture/project/source/workcopy',displayName:'Fixture'};
+  const record={recordId:4,sourceId:'FN-1',sourceType:'procedure',sourcePath:'proc/source.vm',name:'Example',trustedBaseline:true};
+  const subscriptions=[], calls=[], messages=[], errors=[];
+  let confirmed=false, preflight=false, provider, stale=false, changeDuringRead=false, origins=[];
+  const bridgeCalls=[];
+  const legacy=registerLegacyProjects({
+    async databaseBridgeRequest(home,route,payload){
+      assert.equal(home,'/fixture');bridgeCalls.push({route,payload});
+      const after={origin:'https://platform.test',systemId:'SYS-1',dataSourceId:'DS-1',procedureAlias:'pkg.proc',funId:'sample',
+        procedureId:'PR-1',version:'native-v1',contentHash:createHash('sha256').update('before').digest('hex')};
+      if(route.startsWith('/pageContext?'))return {contexts:[{...after,pageOrigin:after.origin,contextId:'ctx'}]};
+      if(route==='/databaseProcedurePreflight')return {requestId:'preflight-1'};
+      if(route.startsWith('/navigationResult?')){
+        if(changeDuringRead)stale=true;
+        return {state:'SUCCEEDED',data:{state:'SUCCEEDED',platformApplied:false,after}};
+      }
+      assert.fail('unexpected Bridge route');
+    },
+    context:{subscriptions},getTool:()=>({toolHome:'/fixture'}),getWorkspaces:async()=>[workspace],
+    sourceTree:{refresh(){}},
+    vscode:{EventEmitter:class {event=()=>({dispose(){}});fire(){} dispose(){}},
+      Uri:{from:value=>value}, workspace:{textDocuments:[], registerTextDocumentContentProvider(scheme,value){
+      if(scheme==='guthon-database-review-diff')provider=value;
+      return {dispose(){}};
+    }}, commands:{async executeCommand(command,left,right){
+      assert.equal(command,'vscode.diff');
+      assert.equal(provider.provideTextDocumentContent(left),'before');
+      assert.equal(provider.provideTextDocumentContent(right),'after');
+    }}, window:{showQuickPick:async items=>typeof items[0]==='string'?items[1]:items[0],
+      async showInformationMessage(message,options,button){
+        messages.push(message);
+        return options?.modal ? (confirmed?button:undefined) : (preflight && typeof options==='string'?options:undefined);
+      },
+      showErrorMessage:message=>errors.push(message)}},
+    processClient:{async request(_tool,command,[action],key,stdin){
+      assert.equal(command,'legacy-source');assert.equal(key,workspace.workspaceKey);
+      calls.push({action,stdin});
+      if (action==='review-workcopies')return {ok:true,items:[record]};
+      if (action==='publish-confirm' && stale)throw new Error('编辑基线或候选已变化，请重新审阅');
+      return {ok:true,baseContent:'before',content:'after',reviewId:'review-1',sourceHash:'hash-1',pageOrigins:origins,
+        databaseIdentity:{system_id:'SYS-1',data_source_id:'DS-1',source_alias_id:'pkg.proc',fun_id:'sample'}};
+    }},
+  });
+  t.after(()=>subscriptions.forEach(subscription=>subscription.dispose()));
+  await legacy.action(workspace,'changes');
+  assert.deepEqual(calls.map(({action})=>action),['review-workcopies','publish-preview']);
+  confirmed=true;
+  await legacy.action(workspace,'changes');
+  assert.equal(calls.at(-1).action,'publish-confirm');
+  assert.deepEqual(calls.at(-1).stdin,{recordId:4,sourceId:'FN-1',sourcePath:record.sourcePath,reviewId:'review-1',sourceHash:'hash-1'});
+  assert.match(messages.at(-1),/未上传到谷神平台/);
+  assert.deepEqual(bridgeCalls,[]);
+  preflight=true;
+  await legacy.action(workspace,'changes');
+  assert.deepEqual(bridgeCalls.map(call=>call.route.split('?')[0]),['/pageContext','/databaseProcedurePreflight','/navigationResult']);
+  assert.deepEqual(bridgeCalls[1].payload,{workspaceKey:workspace.workspaceKey,contextId:'ctx',
+    target:{action:'inspect-database-procedure',systemId:'SYS-1',dataSourceId:'DS-1',procedureAlias:'pkg.proc',funId:'sample',includeSourceHash:true}});
+  assert.match(messages.at(-1),/平台正文与编辑基线一致.*PR-1\/sample.*native-v1.*平台地址还未登记.*未上传/);
+  assert.deepEqual(errors,[]);
+  assert.equal(calls.at(-1).action,'publish-confirm');
+
+  changeDuringRead=true;
+  await legacy.action(workspace,'changes');
+  assert.match(errors.pop(),/编辑基线或候选已变化/);
+  stale=false;
+  changeDuringRead=false;
+  origins=['https://other.test'];
+  const requests = bridgeCalls.length;
+  await legacy.action(workspace,'changes');
+  assert.match(errors.pop(),/已登记的平台/);
+  assert.equal(bridgeCalls.length,requests+1);
 });
 
 test('project settings route DATABASE and SVN credentials to the selected source provider', async () => {

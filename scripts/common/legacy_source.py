@@ -1154,7 +1154,12 @@ ORDER BY {_field('p', cfg['update_time_field'])} DESC, {_field('p', cfg['id_fiel
     )
 
 
-def single_source_sql(table_cfg: dict, source_type: str, payload: dict, rules: dict | None = None):
+def single_source_sql(table_cfg: dict, source_type: str, payload: dict, rules: dict | None = None, *,
+                      verified_procedure_version: str | None = None):
+    verified = verified_procedure_version is not None
+    if verified and (source_type != PROCEDURE_SOURCE_TYPE or not isinstance(verified_procedure_version, str)
+                     or not verified_procedure_version):
+        raise ValueError("核验回拉需要精确过程函数和有效版本")
     if source_type == PAGE_SOURCE_TYPE:
         cfg, select = _page_select(table_cfg)
         filters = []
@@ -1194,6 +1199,16 @@ LIMIT 1
             raise SystemExit("procedure funId is required")
         filters.append(f"{_field('s', cfg['fun_id_field'])} = %s")
         params.append(payload["funId"])
+        available = _source_available_sql("s", cfg, rules)
+        if verified:
+            if not all(payload.get(key) for key in ("sourceId", "alias", "dataSourceId")):
+                raise ValueError("发布回拉需要完整的数据库过程函数身份")
+            filters.extend((f"{_field('p', cfg['alias_field'])} = %s", f"{_field('p', cfg['data_source_id_field'])} = %s"))
+            params.extend((payload["alias"], payload["dataSourceId"]))
+            # A previously verified save may still be checked out. Only that
+            # specific version can bypass the regular pull's check-in filter.
+            available = f"{_field('s', cfg.get('version_mac_field'))} = %s"
+            params.insert(0, verified_procedure_version)
         return (
             f"""
 SELECT
@@ -1216,11 +1231,11 @@ SELECT
     {_field('p', cfg['data_source_id_field'])} AS data_source_id
 FROM {_name(cfg['procedure_table_name'])} p
 JOIN {_name(cfg['source_table_name'])} s ON {_field('p', cfg['join_field'])} = {_field('s', cfg['join_field'])}
-WHERE {_source_available_sql('s', cfg, rules)}
+WHERE {available}
   AND ({_field('s', cfg.get('error_field'))} IS NULL OR {_field('s', cfg.get('error_field'))} <> '1')
   AND {' AND '.join(filters)}
 ORDER BY {_field('s', cfg['update_time_field'])} DESC, {_field('s', cfg['id_field'])} DESC
-LIMIT 1
+LIMIT {2 if verified else 1}
 """,
             params,
         )
@@ -2207,12 +2222,12 @@ def _included(layer_cfg, row):
     return any((row["source_alias_id"] or "").startswith(prefix) for prefix in prefixes)
 
 
-def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scope, force=False, workspace=None):
+def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scope, force=False, workspace=None, *, preserve_record_id=False):
     change_key = _change_key(row)
     source_alias_id = _source_alias_id(row)
     existing = conn.execute(
         """
-        SELECT change_key, local_path FROM gusen_source_record
+        SELECT record_id, change_key, local_path FROM gusen_source_record
         WHERE source_layer=? AND scope_id=? AND project_id=? AND source_table=? AND source_id=? AND fun_id=?
         """,
         (layer, scope_id, project_id, row["source_table"], row["source_id"], row["fun_id"] or ""),
@@ -2242,12 +2257,13 @@ def upsert_source(conn, row, layer, scope_id, project_id, layer_cfg, system_scop
     conn.execute(
         """
         INSERT OR REPLACE INTO gusen_source_record(
-            source_layer, scope_id, project_id, source_table, source_id, source_alias_id, fun_id,
+            record_id, source_layer, scope_id, project_id, source_table, source_id, source_alias_id, fun_id,
             source_name, version_mac, update_time, check_out_user_id, check_out_date, check_in_date,
             change_key, local_path, status, indexed_time, system_id, data_source_id
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
+            existing["record_id"] if preserve_record_id and existing else None,
             layer,
             scope_id,
             project_id,

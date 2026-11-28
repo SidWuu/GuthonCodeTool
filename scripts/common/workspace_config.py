@@ -120,6 +120,11 @@ def change_source_mode(home, payload, gusen_hub):
         if not config_store.unified(home) or config["_configuration"]["schemaVersion"] != 3:
             raise CommandError("WORKSPACE_MODE_UPGRADE_REQUIRED", "请先完成统一配置升级，再修改同步方式")
 
+        if expected_mode == "database":
+            from common.database_source_publish import assert_no_pending_publications, assert_no_registered_drafts
+
+            assert_no_pending_publications(workspace)
+            assert_no_registered_drafts(workspace)
         document = config_store.read(home)
         record = document["workspaces"][key]
         migrate_error = CommandError(
@@ -193,6 +198,12 @@ def delete_workspace_config(home, payload, gusen_hub):
         plan_id = hashlib.sha256(json.dumps(binding, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         if payload.get("planId", plan_id) != plan_id:
             raise CommandError("WORKSPACE_DELETE_PLAN_STALE", "项目路径或登记已变化，请重新预览删除范围")
+        if workspace["sourceMode"] == "database":
+            from common.database_source_publish import assert_no_pending_publications, assert_no_registered_drafts
+
+            assert_no_pending_publications(workspace)
+            if check_only:
+                assert_no_registered_drafts(workspace)
         if check_only:
             if workspace["sourceMode"] == "api" and (workspace["contextDir"] / "api/editors.json").is_file():
                 from providers.api.editor_state import assert_writable

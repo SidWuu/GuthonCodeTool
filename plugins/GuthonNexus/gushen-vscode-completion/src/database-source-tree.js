@@ -46,7 +46,7 @@ function buildTree(records, category, byName) {
   return category.children;
 }
 
-function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelected,getTool,edit}) {
+function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelected,getTool,edit,compareProcedure}) {
   const catalog=new Map();
   const query=(workspace,...args)=>run(workspace,'legacy-source',args);
   const identityArgs=record=>record.exportKey ? ['--export-key',record.exportKey]
@@ -169,6 +169,7 @@ function createDatabaseSourceTree({vscode,run,sourceTree,getWorkspaces,getSelect
     if(!workspace.capabilities?.['workcopy.open'])throw new Error('当前项目没有 DATABASE Workcopy 能力');
     const record=item.record;
     if(diff) {
+      if(record.sourceType==='procedure')return compareProcedure(workspace,item);
       const target=path.join(workspace.workcopyDir,path.dirname(record.sourcePath));
       const result=await run(workspace,'workcopy',['diff',target,'--json']);
       if(result.output)return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(result.output)),{preview:true});
